@@ -27,9 +27,18 @@
 //! [`run_reaction`] is that reaction, and it is also what a person's
 //! `effect.retry` of a failed one runs (P9.D4): the next **attempt**, the
 //! same steps from 3 on, with what started it (`ReactionOrigin`) recorded.
-//! Nothing here re-sends a step outside oxplow by itself: no provider
-//! promises a write is safe to repeat (`.context/providers.md`
-//! "Idempotency"), so a retry is a person's, asked first.
+//!
+//! **Sent again by itself** (P10, [`auto_retry_due`]): an attempt that
+//! failed while every step it composed was a write to a provider keeping
+//! `idempotent_writes` ([`safe_to_resend`]) — each step's key is the same
+//! on every attempt, so a write that landed lands once — is retried at
+//! most twice, 10 s then 60 s after the failure before
+//! ([`RETRY_DELAYS`]); waiting, it doesn't count against the effect's
+//! health, and the attempt that exhausts the retries counts once.
+//! Anything else — a step inside oxplow, another provider, an attempt
+//! cut off by oxplow stopping (what it composed isn't kept) — waits for
+//! a person's retry, asked first (`.context/providers.md`
+//! "Idempotency").
 
 use std::sync::{Arc, Weak};
 
@@ -37,6 +46,7 @@ use async_trait::async_trait;
 use oxplow_db::effect_run_store::{EffectRunKey, Finished, ReactionOrigin, RunState};
 use oxplow_domain::{CommandCall, CommandError, DomainError, StoredEvent};
 use serde_json::json;
+use std::time::Duration;
 
 use crate::effects::{self, EffectDecl, Gate, Reaction};
 use crate::event_pump::AsyncEventConsumer;
@@ -262,6 +272,8 @@ pub(crate) enum Reacted {
     Skipped(String),
     /// A command it composed asks a person: recorded with its proposal.
     Proposed,
+    /// It failed, and will be sent again by itself: not counted yet.
+    Retrying(String),
     /// Nothing was attempted: not its to run (unapproved, before its
     /// approval, its own event) or already recorded by another delivery.
     Nothing,
@@ -279,7 +291,7 @@ pub(crate) async fn count(
     let counted = match reacted {
         Reacted::Ran => health.succeeded(&key, Some(took)).await,
         Reacted::Failed(reason) => health.failed(&key, reason).await.map(|_| ()),
-        Reacted::Skipped(_) | Reacted::Proposed | Reacted::Nothing => Ok(()),
+        Reacted::Skipped(_) | Reacted::Proposed | Reacted::Retrying(_) | Reacted::Nothing => Ok(()),
     };
     if let Err(error) = counted {
         tracing::warn!(effect = %decl.name(), %error, "recording the effect's health failed");
@@ -371,6 +383,7 @@ pub(crate) async fn run_reaction(
             .read(move |tx| oxplow_db::effect_run_store::latest_tx(tx, &effect, &event_id))
             .await?
     };
+    let scheduled = latest.as_ref().is_some_and(|l| l.retry_at.is_some());
     let attempt = match (origin, latest.map(|l| (l.attempt, l.state, l.origin))) {
         (ReactionOrigin::Live | ReactionOrigin::Backfill, None) => 1,
         // A live attempt left `started`: the run that claimed it was cut
@@ -394,6 +407,10 @@ pub(crate) async fn run_reaction(
         }
         (ReactionOrigin::Live | ReactionOrigin::Backfill, Some(_)) => return Ok(Reacted::Nothing),
         (ReactionOrigin::Retry, Some((attempt, RunState::Failed, _))) => attempt + 1,
+        // Sent again by itself: only the failed attempt it was scheduled
+        // for (a person's retry since is the latest, and isn't).
+        (ReactionOrigin::Auto, Some((attempt, RunState::Failed, _))) if scheduled => attempt + 1,
+        (ReactionOrigin::Auto, _) => return Ok(Reacted::Nothing),
         (ReactionOrigin::Retry, Some((_, state, _))) => {
             return Err(DomainError::Invalid(format!(
                 "effect `{effect}`'s reaction to event {event_id} {NOT_FAILED} (it is `{}`): \
@@ -421,7 +438,7 @@ pub(crate) async fn run_reaction(
             let start = effects::start_after(&svc.db, &key.effect).await?;
             effects::gate(approved, start, event.seq) == Gate::Runs
         }
-        ReactionOrigin::Retry | ReactionOrigin::Backfill => approved,
+        ReactionOrigin::Retry | ReactionOrigin::Backfill | ReactionOrigin::Auto => approved,
     };
     if !runs {
         return Ok(Reacted::Nothing);
@@ -468,6 +485,7 @@ pub(crate) async fn run_reaction(
         Err(e) => return failed(e.to_string()).await,
     };
     let input = json!({ "calls": calls });
+    let resend = safe_to_resend(svc, &calls);
     let command = effect_command(&svc.commands, calls, events)
         .map_err(|e| DomainError::Invariant(e.to_string()))?;
     match svc.commands.run_effect(key.clone(), command, input).await {
@@ -482,13 +500,126 @@ pub(crate) async fn run_reaction(
             Ok(Reacted::Nothing)
         }
         // Recorded here, or already by the bus (a step failed partway):
-        // a failure either way.
+        // a failure either way — sent again by itself when that is safe
+        // and it has retries left.
         Err(e) => {
             let reason = e.to_string();
             finish(svc, &key, ended(RunState::Failed, reason.clone())).await?;
+            if resend
+                && matches!(e, CommandError::Failed { .. })
+                && schedule_retry(svc, &key).await?
+            {
+                return Ok(Reacted::Retrying(reason));
+            }
             Ok(Reacted::Failed(reason))
         }
     }
+}
+
+/// How long after a failed attempt each automatic retry waits: at most
+/// two in a row (P10).
+pub(crate) const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(10), Duration::from_secs(60)];
+
+/// Whether sending a reaction's `calls` again by itself is safe (P10):
+/// every one is a write to a provider outside oxplow that keeps
+/// `idempotent_writes`, so — its key the same on every attempt — a write
+/// that landed lands once. A step inside oxplow, or toward any other
+/// provider, waits for a person.
+fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
+    !calls.is_empty()
+        && calls.iter().all(|call| {
+            crate::commands::work_item::provider_for(&svc.work_items, &call.name, &call.input)
+                .is_some_and(|p| p.external.is_some() && p.features.idempotent_writes)
+        })
+}
+
+/// Schedule `key`'s failed attempt to be sent again, unless the reaction
+/// already had its automatic retries: whether it was.
+async fn schedule_retry(svc: &Services, key: &EffectRunKey) -> Result<bool, DomainError> {
+    let key = key.clone();
+    svc.db
+        .transaction(move |tx| {
+            let made =
+                oxplow_db::effect_run_store::automatic_in_a_row_tx(tx, &key.effect, &key.event_id)?;
+            let Some(delay) = RETRY_DELAYS.get(made as usize) else {
+                return Ok(false);
+            };
+            let at = oxplow_domain::Timestamp::from_unix_ms(
+                oxplow_domain::Timestamp::now().unix_ms() + delay.as_millis() as i64,
+            );
+            oxplow_db::effect_run_store::schedule_retry_tx(tx, &key, &at.to_string())?;
+            Ok(true)
+        })
+        .await
+}
+
+/// Send again every failed attempt whose automatic retry is due by `now`
+/// (P10): the next attempt, `auto`, made when the effect is still there,
+/// enabled and approved as it is now — otherwise the retry is dropped and
+/// the failure counted, a person's to retry. Its health is counted as a
+/// live attempt's. How many were sent.
+pub async fn auto_retry_due(
+    svc: &Arc<Services>,
+    now: oxplow_domain::Timestamp,
+) -> Result<usize, DomainError> {
+    let now = now.to_string();
+    let due = svc
+        .db
+        .read(move |tx| oxplow_db::effect_run_store::due_retries_tx(tx, &now))
+        .await?;
+    let health = crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
+    let mut sent = 0;
+    for key in due {
+        let event = svc
+            .event_log_store
+            .get(oxplow_domain::EventId(key.event_id.clone()))
+            .await?;
+        let effect = find_effect(svc, &key.effect);
+        let runnable = match (&effect, &event) {
+            (Some((ext, decl)), Some(_)) => {
+                matches!(health.disabled_reason(&plugin_key(decl)).await, Ok(None))
+                    && approved_now(svc, &effects::effect_program(ext, decl))
+            }
+            _ => false,
+        };
+        let (Some((ext, decl)), Some(event), true) = (effect, event, runnable) else {
+            drop_retry(svc, &key).await?;
+            continue;
+        };
+        let started = std::time::Instant::now();
+        let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto).await?;
+        if reacted != Reacted::Nothing {
+            sent += 1;
+        }
+        count(&health, &decl, &reacted, started.elapsed()).await;
+    }
+    Ok(sent)
+}
+
+/// A scheduled retry that can't run (the effect gone, disabled or no
+/// longer approved as it is): dropped, so the failure is a person's.
+async fn drop_retry(svc: &Services, key: &EffectRunKey) -> Result<(), DomainError> {
+    let key = key.clone();
+    svc.db
+        .transaction(move |tx| oxplow_db::effect_run_store::drop_retry_tx(tx, &key))
+        .await
+}
+
+/// Check for due automatic retries every few seconds, for as long as the
+/// services live.
+pub fn spawn_auto_retry(state: &Arc<Services>) {
+    let services = Arc::downgrade(state);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            let Some(svc) = services.upgrade() else {
+                return;
+            };
+            if let Err(error) = auto_retry_due(&svc, oxplow_domain::Timestamp::now()).await {
+                tracing::warn!(%error, "sending effect attempts again failed");
+            }
+        }
+    });
 }
 
 /// The approval hash of `program`'s folder as it is now.
@@ -1004,7 +1135,7 @@ mod tests {
                 "SELECT v, json_extract(payload, '$.attempt'), json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' ORDER BY seq"
             )
             .await,
-            json!([[3, 1, "live", "failed"], [3, 2, "retry", "ok"]])
+            json!([[4, 1, "live", "failed"], [4, 2, "retry", "ok"]])
         );
         // It succeeded: nothing left to retry, and a redelivery of the
         // event still runs nothing.

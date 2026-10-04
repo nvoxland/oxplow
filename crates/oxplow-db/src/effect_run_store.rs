@@ -20,6 +20,9 @@ pub enum ReactionOrigin {
     Retry,
     /// A person's `effect.backfill` over events the effect never saw.
     Backfill,
+    /// Sent again by itself (P10): a failed attempt whose every step went
+    /// to a provider that keeps `idempotent_writes`.
+    Auto,
 }
 
 impl ReactionOrigin {
@@ -28,6 +31,7 @@ impl ReactionOrigin {
             ReactionOrigin::Live => "live",
             ReactionOrigin::Retry => "retry",
             ReactionOrigin::Backfill => "backfill",
+            ReactionOrigin::Auto => "auto",
         }
     }
 
@@ -36,6 +40,7 @@ impl ReactionOrigin {
             "live" => Ok(ReactionOrigin::Live),
             "retry" => Ok(ReactionOrigin::Retry),
             "backfill" => Ok(ReactionOrigin::Backfill),
+            "auto" => Ok(ReactionOrigin::Auto),
             other => Err(DomainError::Invariant(format!(
                 "an effect_run origin `{other}` isn't one oxplow writes"
             ))),
@@ -116,12 +121,14 @@ pub struct Finished {
 }
 
 /// A reaction's latest attempt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Latest {
     pub attempt: u32,
     pub state: RunState,
     /// What started it.
     pub origin: ReactionOrigin,
+    /// A failed one sent again by itself at this time (RFC 3339).
+    pub retry_at: Option<String>,
 }
 
 /// The reaction of `effect` to `event_id` as it stands: its latest
@@ -131,24 +138,102 @@ pub fn latest_tx(
     effect: &str,
     event_id: &str,
 ) -> Result<Option<Latest>, DomainError> {
-    let latest: Option<(u32, String, String)> = conn
+    let latest: Option<(u32, String, String, Option<String>)> = conn
         .query_row(
-            "SELECT attempt, state, origin FROM effect_run WHERE effect = ?1 AND event_id = ?2
-              ORDER BY attempt DESC LIMIT 1",
+            "SELECT attempt, state, origin, retry_at FROM effect_run
+              WHERE effect = ?1 AND event_id = ?2 ORDER BY attempt DESC LIMIT 1",
             params![effect, event_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional()
         .map_err(map_sql_err)?;
     latest
-        .map(|(attempt, state, origin)| {
+        .map(|(attempt, state, origin, retry_at)| {
             Ok(Latest {
                 attempt,
                 state: RunState::parse(&state)?,
                 origin: ReactionOrigin::parse(&origin)?,
+                retry_at,
             })
         })
         .transpose()
+}
+
+/// How many of the reaction's latest attempts in a row were automatic
+/// (P10: at most two are made).
+pub fn automatic_in_a_row_tx(
+    conn: &Connection,
+    effect: &str,
+    event_id: &str,
+) -> Result<u32, DomainError> {
+    let mut st = conn
+        .prepare(
+            "SELECT origin FROM effect_run WHERE effect = ?1 AND event_id = ?2
+              ORDER BY attempt DESC",
+        )
+        .map_err(map_sql_err)?;
+    let origins: Vec<String> = st
+        .query_map(params![effect, event_id], |r| r.get(0))
+        .and_then(|rows| rows.collect::<rusqlite::Result<_>>())
+        .map_err(map_sql_err)?;
+    Ok(origins.iter().take_while(|o| o.as_str() == "auto").count() as u32)
+}
+
+/// Send `key`'s failed attempt again by itself at `at` (RFC 3339).
+pub fn schedule_retry_tx(
+    conn: &Connection,
+    key: &EffectRunKey,
+    at: &str,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE effect_run SET retry_at = ?4
+          WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3 AND state = 'failed'",
+        params![key.effect, key.event_id, key.attempt, at],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// Drop `key`'s scheduled retry: it won't be sent again by itself.
+pub fn drop_retry_tx(conn: &Connection, key: &EffectRunKey) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE effect_run SET retry_at = NULL
+          WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3",
+        params![key.effect, key.event_id, key.attempt],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// The failed latest attempts due to be sent again by `now` (RFC 3339),
+/// oldest due first.
+pub fn due_retries_tx(conn: &Connection, now: &str) -> Result<Vec<EffectRunKey>, DomainError> {
+    let mut st = conn
+        .prepare(
+            "SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.origin FROM effect_run r
+              WHERE r.state = 'failed' AND r.retry_at IS NOT NULL AND r.retry_at <= ?1
+                AND r.attempt = (SELECT max(l.attempt) FROM effect_run l
+                                  WHERE l.effect = r.effect AND l.event_id = r.event_id)
+              ORDER BY r.retry_at",
+        )
+        .map_err(map_sql_err)?;
+    let rows: Vec<(String, String, i64, u32, String)> = st
+        .query_map([now], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .and_then(|rows| rows.collect::<rusqlite::Result<_>>())
+        .map_err(map_sql_err)?;
+    rows.into_iter()
+        .map(|(effect, event_id, event_seq, attempt, origin)| {
+            Ok(EffectRunKey {
+                effect,
+                event_id,
+                event_seq,
+                attempt,
+                origin: ReactionOrigin::parse(&origin)?,
+            })
+        })
+        .collect()
 }
 
 /// The attempts a person started — a retry, a backfill — that are still
@@ -339,7 +424,8 @@ mod tests {
                 Some(Latest {
                     attempt: 1,
                     state: RunState::Failed,
-                    origin: ReactionOrigin::Live
+                    origin: ReactionOrigin::Live,
+                    retry_at: None,
                 })
             );
             let retry = EffectRunKey {
@@ -353,7 +439,8 @@ mod tests {
                 Some(Latest {
                     attempt: 2,
                     state: RunState::Started,
-                    origin: ReactionOrigin::Retry
+                    origin: ReactionOrigin::Retry,
+                    retry_at: None,
                 })
             );
             assert!(

@@ -1,0 +1,8 @@
+{
+  "effect": "acme/file-on-tracker",
+  "event": "event:0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+  "outcome": "ok",
+  "detail": null,
+  "attempt": 2,
+  "origin": "auto"
+}

@@ -4050,3 +4050,216 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
         assert_eq!(cut_off.is_ok(), resent, "{hooks:?}: {cut_off:?}");
     }
 }
+
+/// The tracker extension with the fake (running with `hooks`) and an
+/// effect `file` that reacts to an oxplow task moved to done with the
+/// calls `script` composes; both approved, the provider enabled.
+async fn with_effect(hooks: &str, script: &str) -> EffortFixture {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, hooks);
+    let dir = project.join("oxplow/extensions").join(EXT);
+    let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
+    std::fs::write(
+        dir.join("extension.yaml"),
+        manifest
+            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.transitioned]\n    where: { to: done }\n    entry: file.star\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("file.star"), script).unwrap();
+    let ext = extension(&project);
+    approve(&fx, &ext);
+    let decl = ext.effects[0].clone();
+    let program = crate::effects::effect_program(&ext, &decl);
+    let config = fx.svc.config.read().unwrap().clone();
+    exec_consent::approve_program(
+        &fx.svc.approvals,
+        &project,
+        &config,
+        std::slice::from_ref(&ext),
+        ProgramKind::Effect,
+        &program.name,
+        &program.hash(&project).unwrap(),
+    )
+    .unwrap();
+    crate::effects::approved(&fx.svc.db, &decl.name())
+        .await
+        .unwrap();
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    first_read(&fx).await;
+    fx
+}
+
+/// The effect's script: one write to the fake.
+const FILE_ON_FAKE: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"provider\": \"fake\", \"title\": \"from effect\"}}]}\n";
+
+/// Move the fixture's task to done (what the effect reacts to) and let
+/// the effect react.
+async fn react(fx: &EffortFixture) -> oxplow_domain::StoredEvent {
+    use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
+    let env = oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
+        "human",
+        &WorkItemTransitionedV1 {
+            work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
+            from: oxplow_domain::TaskStatus::InProgress,
+            to: oxplow_domain::TaskStatus::Done,
+            effort: None,
+        },
+    );
+    let id = env.id.clone();
+    fx.svc.event_log_store.append(env).await.unwrap();
+    let ev = fx.svc.event_log_store.get(id).await.unwrap().unwrap();
+    use crate::event_pump::AsyncEventConsumer as _;
+    crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&fx.svc))
+        .handle(&ev)
+        .await
+        .unwrap();
+    ev
+}
+
+async fn effect_runs(fx: &EffortFixture) -> serde_json::Value {
+    let rows = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT attempt, origin, state, retry_at IS NOT NULL FROM v_effect_run ORDER BY attempt",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap()
+        .rows;
+    serde_json::to_value(rows).unwrap()
+}
+
+/// The effect's consecutive failures, as its health counts them.
+async fn effect_failures(fx: &EffortFixture) -> i64 {
+    let health =
+        crate::plugin_health::PluginHealth::new(fx.svc.db.clone(), fx.svc.vocabulary.clone());
+    let key = oxplow_db::PluginKey {
+        plugin: EXT.into(),
+        contribution: "file".into(),
+        kind: "effect",
+    };
+    health
+        .get(&key)
+        .await
+        .unwrap()
+        .map_or(0, |h| h.consecutive_failures)
+}
+
+/// `secs` from now.
+fn in_secs(secs: i64) -> oxplow_domain::Timestamp {
+    oxplow_domain::Timestamp::from_unix_ms(oxplow_domain::Timestamp::now().unix_ms() + secs * 1000)
+}
+
+/// P10: a step whose reply was lost (it landed; the call timed out) is
+/// sent again by itself — the reaction's every step goes to a provider
+/// that keeps `idempotent_writes` — under the same key, so it lands once.
+/// The attempt awaiting its retry isn't counted against the effect.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lost_reply_is_sent_again_and_lands_once() {
+    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    assert_eq!(effect_failures(&fx).await, 0, "awaiting its retry");
+    // Not due yet; then due.
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(1))
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "live", "failed", 1], [2, "auto", "ok", 0]])
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
+    assert_eq!(effect_failures(&fx).await, 0);
+}
+
+/// P10: only a reaction whose every step is a write to a provider
+/// keeping `idempotent_writes` is sent again by itself: toward a provider
+/// that doesn't declare it, or with a step inside oxplow beside it, the
+/// failure waits for a person's retry, and counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
+    let with_a_task_step = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": ref, \"title\": \"filed\"}}, {\"name\": \"work_item.create\", \"input\": {\"provider\": \"fake\", \"title\": \"from effect\"}}]}\n";
+    for (hooks, script) in [
+        ("lose-reply,plain-writes", FILE_ON_FAKE),
+        ("lose-reply", with_a_task_step),
+    ] {
+        let fx = with_effect(hooks, script).await;
+        react(&fx).await;
+        assert_eq!(
+            effect_runs(&fx).await,
+            json!([[1, "live", "failed", 0]]),
+            "{hooks}"
+        );
+        assert_eq!(effect_failures(&fx).await, 1, "{hooks}");
+        assert_eq!(
+            crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(3600))
+                .await
+                .unwrap(),
+            0,
+            "{hooks}"
+        );
+    }
+}
+
+/// P10: at most two automatic attempts, 10 s then 60 s after the failure
+/// before; the attempt that exhausts them counts as the one failure.
+#[tokio::test(flavor = "multi_thread")]
+async fn auto_retry_stops_after_two_and_counts_one_failure() {
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    set_hooks(&fx, "fail-next:3").await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    // The second waits 60 s from the first retry's failure.
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(30))
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(75))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([
+            [1, "live", "failed", 1],
+            [2, "auto", "failed", 1],
+            [3, "auto", "failed", 0]
+        ])
+    );
+    assert_eq!(effect_failures(&fx).await, 1);
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(3600))
+            .await
+            .unwrap(),
+        0
+    );
+}

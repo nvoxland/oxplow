@@ -405,7 +405,7 @@ pub fn ran(audit_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store
 }
 
 /// An attempt at an effect's reaction to one event ended: its
-/// `effect_run` row (its `started` claim finished) and `effect.result@3`
+/// `effect_run` row (its `started` claim finished) and `effect.result@4`
 /// (which attempt, started by what), from the effect,
 /// about the event and the extension, caused by `cause` (its run's
 /// `command.executed`, its proposal's `command.proposed`; none when no
@@ -420,7 +420,7 @@ pub fn finished_tx(
     use oxplow_db::effect_run_store::ReactionOrigin;
     use oxplow_db::effect_run_store::RunState;
     use oxplow_domain::events::schema::{
-        EffectOrigin, EffectOutcome, EffectResult, EffectResultV3,
+        EffectOrigin, EffectOutcome, EffectResult, EffectResultV4,
     };
     let now = oxplow_domain::Timestamp::now().to_string();
     oxplow_db::effect_run_store::finish_tx(tx, key, done, &now)?;
@@ -434,7 +434,7 @@ pub fn finished_tx(
     let event_ref = format!("event:{}", key.event_id);
     let mut result = oxplow_domain::Envelope::typed::<EffectResult>(
         format!("effect:{}", key.effect),
-        &EffectResultV3 {
+        &EffectResultV4 {
             effect: key.effect.clone(),
             event: Some(event_ref.clone()),
             outcome,
@@ -446,6 +446,7 @@ pub fn finished_tx(
                 ReactionOrigin::Live => EffectOrigin::Live,
                 ReactionOrigin::Retry => EffectOrigin::Retry,
                 ReactionOrigin::Backfill => EffectOrigin::Backfill,
+                ReactionOrigin::Auto => EffectOrigin::Auto,
             },
         },
     )

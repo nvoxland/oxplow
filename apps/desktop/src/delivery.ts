@@ -5,9 +5,10 @@
  * Data lists them under Delivery; Alerts shows one row while any wait.
  *
  * Beside them, the reactions of extensions' effects that failed (P9.D4,
- * `v_effect_run`'s latest attempts): never attempted again by themselves —
- * a step outside oxplow may already have run — so a person retries one
- * (`effect.retry`, asked first).
+ * `v_effect_run`'s latest attempts). One whose every step went to a
+ * provider keeping `idempotent_writes` is sent again by itself (P10,
+ * `retry_at`); any other — a step outside oxplow may already have run —
+ * waits for a person's retry (`effect.retry`, asked first).
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -93,6 +94,8 @@ export interface FailedReaction {
   attempt: number;
   reason: string;
   eventType: string;
+  /** When it is sent again by itself (P10); null when it waits for a person. */
+  retryAt: string | null;
 }
 
 export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
@@ -105,20 +108,22 @@ export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
       attempt: Number(at("attempt") ?? 1),
       reason: String(at("reason") ?? ""),
       eventType: String(at("event_type") ?? "an event"),
+      retryAt: at("retry_at") === null ? null : String(at("retry_at")),
     };
   });
 }
 
 /** What a failed reaction's row says. */
 export function reactionLine(r: FailedReaction): string {
-  const line = `${r.effect} failed on ${r.eventType} (event ${r.eventSeq})`;
-  return r.attempt > 1 ? `${line}, attempt ${r.attempt}` : line;
+  const failed = `${r.effect} failed on ${r.eventType} (event ${r.eventSeq})`;
+  const line = r.attempt > 1 ? `${failed}, attempt ${r.attempt}` : failed;
+  return r.retryAt === null ? line : `${line}; sent again by itself shortly`;
 }
 
 /** The reactions whose latest attempt failed, newest first, and what was read. */
 export async function readFailedReactions(): Promise<{ reactions: FailedReaction[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.reason, e.type AS event_type
+    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.reason, e.type AS event_type, r.retry_at
        FROM v_effect_run r LEFT JOIN v_event e ON e.id = r.event_id
       WHERE r.latest = 1 AND r.state = 'failed' ORDER BY r.id DESC`,
     [],

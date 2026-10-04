@@ -594,9 +594,9 @@
     - { not_null: id }
     - { unique: id }
 - name: effect_run
-  version: 2
+  version: 3
   key: [effect, event_id, attempt]
-  description: "Each attempt at an extension effect's reaction to an event (P8.D10; attempts P9.D4): the live consumer makes one — ran (`ok`), `skipped`, left a `proposal` for a person, or `failed` (an interrupted run included, never sent again by itself) — and a person's `effect.retry` of a failed one makes the next. A reaction's state is its latest attempt's (`latest = 1`)."
+  description: "Each attempt at an extension effect's reaction to an event (P8.D10; attempts P9.D4): the live consumer makes one — ran (`ok`), `skipped`, left a `proposal` for a person, or `failed` — and a person's `effect.retry` of a failed one makes the next. A failed attempt whose every step was a write to a provider keeping `idempotent_writes` is sent again by itself, at most twice (`auto`, P10; `retry_at` says when); any other waits for a person. A reaction's state is its latest attempt's (`latest = 1`)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Attempt id." }
     - { name: "effect", type: "TEXT", doc: "The effect: `<extension>/<id>`." }
@@ -604,7 +604,7 @@
     - { name: "event_id", type: "TEXT", doc: "The event it reacted to (`v_event.id`)." }
     - { name: "event_seq", type: "INTEGER", doc: "That event's log position." }
     - { name: "attempt", type: "INTEGER", doc: "Which attempt at the reaction, from 1." }
-    - { name: "origin", type: "TEXT", doc: "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`) or `backfill` (a person's `effect.backfill`)." }
+    - { name: "origin", type: "TEXT", doc: "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself, P10)." }
     - { name: "latest", type: "", doc: "1 when it is the reaction's latest attempt: its state is where the reaction stands." }
     - { name: "state", type: "TEXT", doc: "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`." }
     - { name: "reason", type: "TEXT", doc: "Why it skipped or failed." }
@@ -612,6 +612,7 @@
     - { name: "proposal_id", type: "INTEGER", doc: "The proposal it left, when a command asked a person." }
     - { name: "started_at", type: "TEXT", doc: "When it started (RFC 3339)." }
     - { name: "finished_at", type: "TEXT", doc: "When it ended; NULL while `started`." }
+    - { name: "retry_at", type: "TEXT", doc: "A failed attempt sent again by itself at this time (RFC 3339); NULL when it waits for a person, or wasn't failed." }
   tests:
     - { not_null: effect }
 - name: event_type

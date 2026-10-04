@@ -133,6 +133,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<EffectResultAtV2>()
             .expect("core type registers");
+        r.register::<EffectResultAtV3>()
+            .expect("core type registers");
         r.register::<EffectResult>().expect("core type registers");
         r.register::<SnapshotTaken>().expect("core type registers");
         r.register::<VcsHeadMoved>().expect("core type registers");
@@ -729,6 +731,21 @@ impl EventType for EffectResultAtV2 {
     type Payload = EffectResultV2;
 }
 
+// `effect.result@3`'s origin: its published schema (docs included) is
+// a contract, so it keeps `EffectOrigin`'s name and words as they were.
+/// What started an attempt at a reaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "EffectOrigin")]
+pub enum EffectOriginV3 {
+    /// The pump delivering the event.
+    Live,
+    /// A person's `effect.retry` of a reaction that failed.
+    Retry,
+    /// A person's `effect.backfill` over events the effect never saw.
+    Backfill,
+}
+
 /// What started an attempt at a reaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -739,6 +756,9 @@ pub enum EffectOrigin {
     Retry,
     /// A person's `effect.backfill` over events the effect never saw.
     Backfill,
+    /// Sent again by itself (P10): a failed attempt whose every step went
+    /// to a provider that keeps `idempotent_writes`.
+    Auto,
 }
 
 /// `effect.result@3` (P9.D4): v2, plus which attempt at the reaction it
@@ -747,6 +767,39 @@ pub enum EffectOrigin {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffectResultV3 {
+    /// The effect: `<extension>/<id>`.
+    pub effect: String,
+    /// The event it reacted to (`event:<id>`); absent on a v1 result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
+    pub outcome: EffectOutcome,
+    /// Why it skipped or failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The proposal it left for a person (`proposal:<id>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<String>,
+    /// Effect-specific detail, opaque to the log.
+    #[serde(default)]
+    pub detail: Value,
+    /// Which attempt at the reaction, from 1.
+    pub attempt: u32,
+    pub origin: EffectOriginV3,
+}
+
+/// The v3 shape of `effect.result`, as a registry entry.
+pub struct EffectResultAtV3;
+impl EventType for EffectResultAtV3 {
+    const TYPE: &'static str = "effect.result";
+    const V: u32 = 3;
+    type Payload = EffectResultV3;
+}
+
+/// `effect.result@4` (P10): v3, its origin able to say `auto` — an
+/// attempt sent again by itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffectResultV4 {
     /// The effect: `<extension>/<id>`.
     pub effect: String,
     /// The event it reacted to (`event:<id>`); absent on a v1 result.
@@ -798,30 +851,51 @@ fn effect_result_v1_to_v2(payload: Value) -> Result<EffectResultV2, DomainError>
 pub struct EffectResult;
 impl EventType for EffectResult {
     const TYPE: &'static str = "effect.result";
-    const V: u32 = 3;
-    type Payload = EffectResultV3;
-    /// A result from before attempts was the live consumer's first (v2);
-    /// a v1 result takes v2's shape on the way.
+    const V: u32 = 4;
+    type Payload = EffectResultV4;
+    /// A v3 result keeps its origin; one from before attempts (v2) was the
+    /// live consumer's first; a v1 result takes v2's shape on the way.
     fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        let v2: EffectResultV2 = match from_v {
-            1 => effect_result_v1_to_v2(payload)?,
-            2 => serde_json::from_value(payload)
-                .map_err(|e| DomainError::Invalid(format!("effect.result@2: {e}")))?,
+        let v3 = match from_v {
+            1 | 2 => {
+                let v2: EffectResultV2 = if from_v == 1 {
+                    effect_result_v1_to_v2(payload)?
+                } else {
+                    serde_json::from_value(payload)
+                        .map_err(|e| DomainError::Invalid(format!("effect.result@2: {e}")))?
+                };
+                EffectResultV3 {
+                    effect: v2.effect,
+                    event: v2.event,
+                    outcome: v2.outcome,
+                    reason: v2.reason,
+                    proposal: v2.proposal,
+                    detail: v2.detail,
+                    attempt: 1,
+                    origin: EffectOriginV3::Live,
+                }
+            }
+            3 => serde_json::from_value(payload)
+                .map_err(|e| DomainError::Invalid(format!("effect.result@3: {e}")))?,
             _ => {
                 return Err(DomainError::Invalid(format!(
                     "no upcast of effect.result from v{from_v}"
                 )))
             }
         };
-        serde_json::to_value(EffectResultV3 {
-            effect: v2.effect,
-            event: v2.event,
-            outcome: v2.outcome,
-            reason: v2.reason,
-            proposal: v2.proposal,
-            detail: v2.detail,
-            attempt: 1,
-            origin: EffectOrigin::Live,
+        serde_json::to_value(EffectResultV4 {
+            effect: v3.effect,
+            event: v3.event,
+            outcome: v3.outcome,
+            reason: v3.reason,
+            proposal: v3.proposal,
+            detail: v3.detail,
+            attempt: v3.attempt,
+            origin: match v3.origin {
+                EffectOriginV3::Live => EffectOrigin::Live,
+                EffectOriginV3::Retry => EffectOrigin::Retry,
+                EffectOriginV3::Backfill => EffectOrigin::Backfill,
+            },
         })
         .map_err(|e| DomainError::Invariant(e.to_string()))
     }
@@ -1825,6 +1899,7 @@ mod tests {
                 ("effect.result", 1),
                 ("effect.result", 2),
                 ("effect.result", 3),
+                ("effect.result", 4),
                 ("effort.claim_verified", 1),
                 ("effort.closed", 1),
                 ("effort.decision_reviewed", 1),
@@ -1859,19 +1934,20 @@ mod tests {
     }
 
     /// P9.D4: `effect.result@3` says which attempt it was and what
-    /// started it. A v2 result reads as the live consumer's first attempt;
-    /// a v1 result goes through v2's shape on the way.
+    /// started it; @4 (P10) can say `auto`. A v2 result reads as the live
+    /// consumer's first attempt; a v1 result goes through v2's shape on
+    /// the way; a v3 result keeps its attempt and origin.
     #[test]
-    fn effect_result_v2_and_v1_upcast_to_v3_as_a_live_first_attempt() {
+    fn effect_result_v2_and_v1_upcast_to_v4_as_a_live_first_attempt() {
         let r = crate::vocabulary::Vocabulary::core();
-        assert_eq!(r.latest("effect.result"), Some(3));
+        assert_eq!(r.latest("effect.result"), Some(4));
         let v2 = json!({
             "effect": "acme/note", "event": "event:e1", "outcome": "failed",
             "reason": "interrupted", "detail": null
         });
         let (v, up) = r.upcast_to_latest("effect.result", 2, v2).unwrap();
-        assert_eq!(v, 3);
-        let typed: EffectResultV3 = serde_json::from_value(up).unwrap();
+        assert_eq!(v, 4);
+        let typed: EffectResultV4 = serde_json::from_value(up).unwrap();
         assert_eq!(
             (
                 typed.attempt,
@@ -1888,14 +1964,23 @@ mod tests {
         );
         let v1 = json!({ "effect": "git.push", "target": "branch:main", "ok": true, "detail": {} });
         let (v, up) = r.upcast_to_latest("effect.result", 1, v1).unwrap();
-        assert_eq!(v, 3);
-        let typed: EffectResultV3 = serde_json::from_value(up).unwrap();
+        assert_eq!(v, 4);
+        let typed: EffectResultV4 = serde_json::from_value(up).unwrap();
         assert_eq!(
             (typed.attempt, typed.origin, typed.outcome),
             (1, EffectOrigin::Live, EffectOutcome::Ok)
         );
         assert_eq!(typed.detail, json!({ "target": "branch:main" }));
-        assert!(r.upcast_to_latest("effect.result", 4, json!({})).is_err());
+        // A v3 result keeps its attempt and origin.
+        let v3 = json!({
+            "effect": "acme/note", "event": "event:e1", "outcome": "ok",
+            "detail": null, "attempt": 2, "origin": "retry"
+        });
+        let (v, up) = r.upcast_to_latest("effect.result", 3, v3).unwrap();
+        assert_eq!(v, 4);
+        let typed: EffectResultV4 = serde_json::from_value(up).unwrap();
+        assert_eq!((typed.attempt, typed.origin), (2, EffectOrigin::Retry));
+        assert!(r.upcast_to_latest("effect.result", 5, json!({})).is_err());
     }
 
     /// P3.1 (tsk471): the first versioned type. A `turn.ended` written at

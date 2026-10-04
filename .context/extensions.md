@@ -1669,10 +1669,11 @@ ask.
 
 **Attempts and a person's retry** (P9.D4). A reaction is `(effect,
 event)`; `effect_run` holds its **attempts** (`attempt` from 1, `origin`
-`live | retry | backfill`, V156), and the reaction's state is its latest
-attempt's (`v_effect_run.latest`). The live consumer makes one attempt
-and never another. A failed reaction is attempted again only by a
-person: `effect.retry { effect, event }` (`commands/effect.rs` —
+`live | retry | backfill | auto`, V156/V160), and the reaction's state is
+its latest attempt's (`v_effect_run.latest`). The live consumer makes one
+attempt and never another; a failed one is sent again **by itself** only
+when that is safe (below). Otherwise a failed reaction is attempted
+again only by a person: `effect.retry { effect, event }` (`commands/effect.rs` —
 human-only, `Confirm::Always`, `External`, registered with the consumer
 at boot) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
 the same steps as a live reaction from the loop guard on, as the next
@@ -1686,17 +1687,34 @@ attempt:
 - when the event was logged doesn't matter (`start_after_seq` is the live
   consumer's rule; the person named the event);
 - it counts toward the effect's health like any attempt, and is recorded
-  `effect.result@3 { …, attempt, origin: retry }` (v2 upcasts as `attempt:
-  1, origin: live`).
+  `effect.result@4 { …, attempt, origin: retry }` (v3 upcasts keeping its
+  attempt and origin; v2 as `attempt: 1, origin: live`).
 
 It asks every time because of what a failure can hide: an attempt
 interrupted with a step outside oxplow under way may have landed that
 step, and a retry sends it again. The confirmation's text says so.
 Settings → Data → Delivery lists the reactions whose latest attempt
 failed (`useFailedReactions`), each with its reason and **Retry**
-(`InlineConfirm`). **Nothing retries by itself**: that needs an
-idempotency contract no provider has ([providers.md](./providers.md)
-"Idempotency").
+(`InlineConfirm`).
+
+**Sent again by itself** (P10, `effect_triggers::auto_retry_due`). An
+attempt that failed (`CommandError::Failed`: a step's provider failed,
+timed out, lost its reply) while **every** step it composed was a write
+to a provider keeping `idempotent_writes` (`safe_to_resend`, through
+`work_item::provider_for`) is scheduled again — `effect_run.retry_at`, at
+most two in a row (`RETRY_DELAYS`: 10 s, then 60 s after the failure
+before). Each step carries its idempotency key, the same on every attempt
+([commands.md](./commands.md) `effect_step_key`), so a write that landed
+lands once. A loop every 5 s (`spawn_auto_retry`, at boot) runs what is
+due as the next attempt, `origin: auto` (`effect.result@4`), when the
+effect is still there, enabled and approved as it is now — otherwise the
+retry is dropped and the failure is a person's. An attempt awaiting its
+retry isn't counted against the effect's health (`Reacted::Retrying`);
+the attempt that exhausts the retries counts once. A step inside oxplow,
+a provider that doesn't declare the promise, or an attempt cut off by
+oxplow stopping (what it composed isn't kept) waits for a person. Delivery
+says "sent again by itself shortly" on a reaction awaiting its retry; a
+person may still retry it first.
 
 **Backfill** (P9.D5). The live consumer never reacts to what was logged
 before an effect's approval. A person has it react to that past with

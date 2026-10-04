@@ -161,6 +161,8 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         Ok(n) => tracing::info!(n, "recorded effect attempts cut off by the last stop"),
         Err(e) => tracing::warn!(error = %e, "recovering cut-off effect attempts failed"),
     }
+    // Failed attempts safe to send again by themselves (P10).
+    crate::effect_triggers::spawn_auto_retry(state);
     // Config changes reach the extension catalog, the provider registry and
     // the metric catalog (P7.B6).
     crate::config_reactors::register(state);

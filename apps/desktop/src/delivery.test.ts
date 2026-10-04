@@ -39,11 +39,11 @@ test("the Alerts row counts the undelivered events, or isn't there", () => {
 });
 
 // P9.D4: an effect's reaction that failed (its latest attempt) waits for a
-// person: it is never attempted again by itself.
+// person — unless (P10) it is sent again by itself, which it says.
 test("failed reactions read from v_effect_run, and say what failed on what", () => {
   const rows = {
-    columns: ["effect", "event_id", "event_seq", "attempt", "reason", "event_type"],
-    rows: [["acme/mark-done", "e1", 41, 1, "interrupted: a step outside oxplow may have run", "work_item.transitioned"]],
+    columns: ["effect", "event_id", "event_seq", "attempt", "reason", "event_type", "retry_at"],
+    rows: [["acme/mark-done", "e1", 41, 1, "interrupted: a step outside oxplow may have run", "work_item.transitioned", null]],
     truncated: false,
     reads: { models: ["v_effect_run", "v_event"], tables: [], measures: [] },
     freshness: {},
@@ -56,7 +56,11 @@ test("failed reactions read from v_effect_run, and say what failed on what", () 
     attempt: 1,
     reason: "interrupted: a step outside oxplow may have run",
     eventType: "work_item.transitioned",
+    retryAt: null,
   });
   expect(reactionLine(r)).toBe("acme/mark-done failed on work_item.transitioned (event 41)");
   expect(reactionLine({ ...r, attempt: 3 })).toBe("acme/mark-done failed on work_item.transitioned (event 41), attempt 3");
+  expect(reactionLine({ ...r, retryAt: "2026-10-03T12:00:10.000Z" })).toBe(
+    "acme/mark-done failed on work_item.transitioned (event 41); sent again by itself shortly",
+  );
 });

@@ -365,6 +365,26 @@ fn delete_target(
     Ok(provider)
 }
 
+/// The provider a `work_item.<verb>` call goes to, as its command routes
+/// it — what an effect's automatic retry asks of each step (P10). `None`
+/// for a name that isn't a work-items verb, or an input no provider takes.
+pub(crate) fn provider_for(
+    registry: &WorkItemsRegistry,
+    name: &str,
+    input: &Value,
+) -> Option<WorkItemsProvider> {
+    let target: Target = match name.strip_prefix("work_item.")? {
+        "create" => create_target,
+        "update" => update_target,
+        "transition" => ref_target,
+        "link" => link_target,
+        "comment" => comment_target,
+        "delete" => delete_target,
+        _ => return None,
+    };
+    target(registry, input).ok()
+}
+
 /// A `work_item.<verb>` command: routed by `target` to oxplow's `tx` core
 /// or to the provider's process. The external run hands the provider the
 /// input less `provider`, and renames its inverse (a verb) back to

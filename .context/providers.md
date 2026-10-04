@@ -982,49 +982,37 @@ config change.
 
 ## Idempotency
 
-**Status (P10):** the wire contract and the fake are built —
-`InvokeParams.idempotency_key`, `WorkItemsFeatures.idempotent_writes`,
-`PROTOCOL_VERSION` `"2"`, and the fake declaring and keeping the promise
-(see the fake) — and **the host sends keys**: every `Instance::invoke`
-sends one, the caller's (an effect's step: `effect_step_key`, the same
-on every attempt — [commands.md](./commands.md)) or one it mints, and
-the same key goes with each of its re-sends. A call refused (`Auth`,
-`RateLimited`) never landed and is sent again as before; one cut off
-under way because a renewal ended its process may have landed, so it is
-sent again **only to a provider declaring `idempotent_writes`** — to any
-other the cut-off is the call's failure. **The kit checks the promise**
-(the work-items suite, [work-items.md](./work-items.md) "Conformance"):
-a provider that declares it and doesn't keep it fails. Automatic retry
-is the rest of P10; until it lands the rules below stand.
-
 A write to a provider may land without oxplow learning it did (a crash, a
-timeout, a dropped pipe after the service accepted it). Sending it again
-is safe only if the provider can tell it is the same write. **No real
-provider can today**, so oxplow never re-sends an External step by
-itself: an effect's interrupted reaction is recorded `failed` and waits
-for a person's `effect.retry`, asked first
-([extensions.md](./extensions.md) "Effects"); a failed command is
-reported, not retried.
+timeout, a lost reply). Sending it again is safe only if the provider can
+tell it is the same write. The contract (P10, built):
 
-Automatic retry needs this contract, recorded here as its condition (P9
-decided against building it without a provider to hold to it):
+- **`features.idempotent_writes: true`** in a provider's work-items
+  declaration promises that two `invoke`s carrying the same key perform
+  the write once and answer alike (a key sent with another write is
+  `InvalidInput` at `/idempotency_key`). `PROTOCOL_VERSION` is `"2"`.
+- **`InvokeParams.idempotency_key`** goes with every write: the caller's
+  (a step of an effect's reaction: `effect_step_key`,
+  `effect:<effect>:<event id>:<index>:<hash of the call>`, the same on
+  every attempt — [commands.md](./commands.md)) or one
+  `Instance::invoke` mints, the same key on each of its re-sends.
+- **The host re-sends** a call refused (`Auth`, `RateLimited`: it never
+  landed) as before; one cut off under way because a renewal ended its
+  process may have landed, so it is sent again **only to a provider
+  declaring `idempotent_writes`** — to any other the cut-off is the
+  call's failure.
+- **An effect's failed attempt is sent again by itself** only when every
+  step it composed was a write to such a provider, at most twice
+  ([extensions.md](./extensions.md) "Attempts"); anything else waits for
+  a person's `effect.retry`, asked first. A failed command a person ran
+  is reported, not retried.
+- **The kit checks the promise** (the work-items suite,
+  [work-items.md](./work-items.md) "Conformance"): a provider that
+  declares it and doesn't keep it fails.
 
-- `features.idempotent_writes: true` in a provider's capability
-  declaration: it promises that two `invoke`s carrying the same key
-  perform the write once and answer alike;
-- `InvokeParams.idempotency_key`, sent on every write to such a provider.
-  For an effect's step: derived from `effect:<effect>:<event id>` and the
-  step's position — stable across attempts, so a retry is the same key;
-- the host retries an interrupted External step automatically **only**
-  toward a provider declaring the feature, and still at most a bounded
-  number of times; toward any other, a person's retry stays the rule;
-- the conformance kit checks the promise (the same key twice: one item,
-  the same result) before a provider may declare it.
-
-Linear takes a client-chosen `id` on its creates, so the reference
+The fake declares and keeps it, which proves the host and nothing about a
+service. Linear takes a client-chosen `id` on its creates, so the reference
 provider sends one derived from the key (see "The Linear provider"), but
-declares nothing until a live run confirms a repeated id is refused: the
-fake proves the host, not a service.
+declares nothing until a live run confirms a repeated id is refused.
 
 ## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
 
