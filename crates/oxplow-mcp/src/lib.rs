@@ -3395,7 +3395,7 @@ fn command_error(err: oxplow_domain::CommandError) -> McpError {
             proposed_message(&preview.command, proposal, supersedes),
             None,
         ),
-        E::Failed { .. } | E::Busy { .. } => internal(err.to_string()),
+        E::Failed { .. } | E::Unavailable { .. } | E::Busy { .. } => internal(err.to_string()),
     }
 }
 

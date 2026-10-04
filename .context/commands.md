@@ -354,7 +354,11 @@ must stay pure: `Database::transaction` retries it on SQLITE_BUSY — and
 a handler that hits one itself returns `CommandError::Busy` (the
 `From<DomainError::Busy>`; map SQLite errors with `oxplow_db::map_sql_err`),
 which the bus turns back into a retry; only a busy that outlasts the
-retries reaches the caller, as `Busy` (RPC `BUSY`). An **`External`**
+retries reaches the caller, as `Busy` (RPC `BUSY`). A system outside
+oxplow that couldn't answer just now (a provider's `Internal`, a timeout,
+a rate limit, with its wait) is `Unavailable { message, retry_after_ms }`
+(RPC `UNAVAILABLE`) — the one failure an effect sends again by itself
+(tsk914); everything else that fails is `Failed`. An **`External`**
 handler (P5.A1) is an async call against a system the bus doesn't own —
 a VCS, a provider process, a collector script, the lens files on disk —
 whose state can't join the bus's transaction; the bus audits it after it returns (a failure to

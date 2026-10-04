@@ -802,7 +802,7 @@ impl Instance {
                 tokio::time::sleep(wait).await;
                 None
             }
-            _ => Some(CommandError::Failed {
+            _ => Some(CommandError::Unavailable {
                 message: format!(
                     "provider `{}` is rate limited ({message}){}",
                     self.name,
@@ -811,6 +811,7 @@ impl Instance {
                         None => String::new(),
                     }
                 ),
+                retry_after_ms,
             }),
         }
     }
@@ -843,11 +844,20 @@ impl Instance {
         }
     }
 
+    /// A provider's error as the bus's: a refused input is the caller's;
+    /// one its service may get past (it erred, the call timed out or its
+    /// process died — `Internal`) is `Unavailable`, worth sending again;
+    /// anything else — refused credentials renewal didn't fix, a method or
+    /// configuration it lacks, a cancel — is `Failed`, a person's (tsk914).
     pub(super) fn command_error(&self, e: ProtocolError) -> CommandError {
         match e {
             ProtocolError::InvalidInput { field, message } => CommandError::Invalid {
                 field: Some(field),
                 message: format!("{}: {message}", self.id),
+            },
+            ProtocolError::Internal(message) => CommandError::Unavailable {
+                message: format!("provider `{}`: {message}", self.name),
+                retry_after_ms: None,
             },
             other => CommandError::Failed {
                 message: format!("provider `{}`: {other}", self.name),

@@ -534,16 +534,16 @@ pub(crate) async fn run_reaction(
             Ok(Reacted::Nothing)
         }
         // Recorded here, or already by the bus (a step failed partway):
-        // a failure either way — sent again by itself when that is safe
-        // and it has retries left.
+        // a failure either way — sent again by itself when it may have
+        // been passing (`Unavailable`, tsk914), that is safe, and it has
+        // retries left.
         Err(e) => {
             let reason = e.to_string();
             finish(svc, &key, ended(RunState::Failed, reason.clone())).await?;
-            if safe
-                && matches!(e, CommandError::Failed { .. })
-                && schedule_retry(svc, &key, resend).await?
-            {
-                return Ok(Reacted::Retrying(reason));
+            if let CommandError::Unavailable { retry_after_ms, .. } = e {
+                if safe && schedule_retry(svc, &key, resend, retry_after_ms).await? {
+                    return Ok(Reacted::Retrying(reason));
+                }
             }
             Ok(Reacted::Failed(reason))
         }
@@ -580,13 +580,24 @@ fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
         })
 }
 
-/// Schedule `key`'s failed attempt to be sent again, unless the reaction
-/// already had its automatic retries: whether it was.
+/// The longest a service's own "try again in" is waited for by itself: a
+/// longer wait is a person's to retry after (tsk914).
+pub(crate) const MAX_ASKED_WAIT: Duration = Duration::from_secs(15 * 60);
+
+/// Schedule `key`'s failed attempt to be sent again — no sooner than its
+/// service asked (`retry_after_ms`) — unless the reaction already had its
+/// automatic retries, or the service asked for longer than
+/// [`MAX_ASKED_WAIT`]: whether it was.
 async fn schedule_retry(
     svc: &Services,
     key: &EffectRunKey,
     resend: String,
+    retry_after_ms: Option<u64>,
 ) -> Result<bool, DomainError> {
+    let asked = retry_after_ms.map(Duration::from_millis);
+    if asked.is_some_and(|a| a > MAX_ASKED_WAIT) {
+        return Ok(false);
+    }
     let key = key.clone();
     svc.db
         .transaction(move |tx| {
@@ -595,6 +606,7 @@ async fn schedule_retry(
             let Some(delay) = RETRY_DELAYS.get(made as usize) else {
                 return Ok(false);
             };
+            let delay = asked.map_or(*delay, |a| a.max(*delay));
             let at = oxplow_domain::Timestamp::from_unix_ms(
                 oxplow_domain::Timestamp::now().unix_ms() + delay.as_millis() as i64,
             );

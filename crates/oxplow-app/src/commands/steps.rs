@@ -183,14 +183,21 @@ fn same_events_once(mut out: HandlerOutput, key: Option<&str>) -> HandlerOutput 
 }
 
 /// A step's failure as the run reports it: the step that failed and the
-/// ones that landed before it, which stand.
+/// ones that landed before it, which stand — of the failing step's kind
+/// (tsk914): `Unavailable` (worth sending again) stays so, with its wait,
+/// and anything else is `Failed`.
 fn stopped(failed: &str, landed: &[NestedChild], err: &CommandError) -> CommandError {
     let landed: Vec<String> = landed.iter().map(|c| format!("`{}`", c.name)).collect();
-    CommandError::Failed {
-        message: format!(
-            "`{failed}` failed after {} ran — they stand, and the run can't be undone: {err}",
-            landed.join(", ")
-        ),
+    let message = format!(
+        "`{failed}` failed after {} ran — they stand, and the run can't be undone: {err}",
+        landed.join(", ")
+    );
+    match err {
+        CommandError::Unavailable { retry_after_ms, .. } => CommandError::Unavailable {
+            message,
+            retry_after_ms: *retry_after_ms,
+        },
+        _ => CommandError::Failed { message },
     }
 }
 

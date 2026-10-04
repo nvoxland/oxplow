@@ -4577,6 +4577,51 @@ async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
     }
 }
 
+/// tsk914: only a failure that may have been passing is sent again by
+/// itself. A later step's refused input (after an earlier one landed) and
+/// a refusal of credentials renewal can't fix wait for a person.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_that_wont_pass_isnt_retried() {
+    let bad_second = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"provider\": \"fake\", \"title\": \"from effect\"}}, {\"name\": \"work_item.create\", \"input\": {\"provider\": \"fake\", \"title\": \"second\", \"native_state\": \"Nonsense\"}}]}\n";
+    for (hooks, script) in [("", bad_second), ("refuse-auth", FILE_ON_FAKE)] {
+        let fx = with_effect(hooks, script).await;
+        react(&fx).await;
+        assert_eq!(
+            effect_runs(&fx).await,
+            json!([[1, "live", "failed", 0]]),
+            "{hooks}: no retry scheduled"
+        );
+    }
+}
+
+/// tsk914: a rate limit's own wait decides when the retry goes — no
+/// sooner — and one asking for longer than the most oxplow waits by
+/// itself is a person's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rate_limited_reaction_waits_as_asked() {
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    set_hooks(&fx, "rate-limit:120000").await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(30))
+            .await
+            .unwrap(),
+        0,
+        "not before the service said"
+    );
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(125))
+            .await
+            .unwrap(),
+        1
+    );
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    set_hooks(&fx, "rate-limit:3600000").await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
+}
+
 /// P10: at most two automatic attempts, 10 s then 60 s after the failure
 /// before; the attempt that exhausts them counts as the one failure.
 #[tokio::test(flavor = "multi_thread")]

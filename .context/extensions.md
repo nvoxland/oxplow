@@ -1753,12 +1753,17 @@ failed (`useFailedReactions`), each with its reason and **Retry**
 (`InlineConfirm`).
 
 **Sent again by itself** (P10, `effect_triggers::auto_retry_due`). An
-attempt that failed (`CommandError::Failed`: a step's provider failed,
-timed out, lost its reply) while **every** step it composed was a write
+attempt that failed in a way that may pass (`CommandError::Unavailable`,
+tsk914: a step's provider erred, timed out, lost its reply, or asked to
+wait — a composite keeps its failing step's kind) while **every** step it
+composed was a write
 to a provider keeping `idempotent_writes` (`safe_to_resend`, through
 `work_item::provider_for`) is scheduled again — `effect_run.retry_at`, at
 most two in a row (`RETRY_DELAYS`: 10 s, then 60 s after the failure
-before). The failed attempt keeps what it composed (`effect_run.
+before — or later when the service asked for longer; one asking for more
+than `MAX_ASKED_WAIT`, 15 minutes, is a person's). A refused input, a
+refusal of credentials renewal can't fix, a method or configuration the
+provider lacks — `Failed` — is never retried by itself. The failed attempt keeps what it composed (`effect_run.
 resend_json`, V162), and the automatic attempt **sends exactly that**
 instead of running the script again (tsk887): composing afresh could read
 changed rows, change a step's input and so its key, and make a write that

@@ -339,6 +339,14 @@ pub enum CommandError {
     },
     /// The handler failed.
     Failed { message: String },
+    /// The system outside oxplow it reached couldn't answer just now — it
+    /// erred, timed out, or asked to wait (`retry_after_ms`): the one
+    /// failure worth sending again by itself (tsk914). Whatever else fails
+    /// is `Failed` and waits for a person.
+    Unavailable {
+        message: String,
+        retry_after_ms: Option<u64>,
+    },
     /// The database stayed busy through the run's retries; nothing was
     /// written. Worth retrying.
     Busy { message: String },
@@ -376,6 +384,9 @@ impl std::fmt::Display for CommandError {
                 Ok(())
             }
             CommandError::Failed { message } => write!(f, "command failed: {message}"),
+            CommandError::Unavailable { message, .. } => {
+                write!(f, "command failed: {message}")
+            }
             CommandError::Busy { message } => {
                 write!(f, "database busy, nothing written: {message}")
             }
