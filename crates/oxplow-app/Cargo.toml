@@ -68,6 +68,7 @@ prost = "0.14"
 # ancestor-of and commit-time — directly via git2; oxplow-git wraps neither.
 git2 = { workspace = true }
 agent-client-protocol = { version = "=2.2.0", features = ["unstable_end_turn_token_usage"] }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 # `#[tokio::test(start_paused = true)]` in wiki_pages.rs needs the paused
@@ -76,7 +77,8 @@ agent-client-protocol = { version = "=2.2.0", features = ["unstable_end_turn_tok
 # enable the feature and cargo unified it in; a routine `cargo update`
 # removed that leak and the tests stopped building. Declare it explicitly.
 tokio = { workspace = true, features = ["test-util"] }
-oxplow-ai = { workspace = true, features = ["test-support"] }
+# A fake AI provider API for the tests that call a model.
+oxplow-ai-fake = { workspace = true }
 oxplow-acp-fake = { workspace = true }
 oxplow-provider-fake = { workspace = true }
 # The stand-in OAuth server the sign-in tests run against.

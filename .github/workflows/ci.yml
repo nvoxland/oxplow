@@ -93,6 +93,21 @@ jobs:
       - name: Cargo fmt
         run: cargo fmt --all --check
 
+      # One feature set per third-party crate for every build (the
+      # `oxplow-workspace-hack` crate, managed by cargo-hakari): without it a
+      # `-p` build, a test build and the app build each resolved different
+      # features, rebuilt the graph and kept every copy (tsk881). A changed
+      # dependency must regenerate it.
+      - name: Install cargo-hakari
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hakari
+
+      - name: The workspace-hack is current
+        run: |
+          cargo hakari generate --diff
+          cargo hakari manage-deps --dry-run
+
       - name: Cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 

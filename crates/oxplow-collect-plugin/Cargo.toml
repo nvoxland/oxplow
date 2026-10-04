@@ -30,6 +30,7 @@ jaq-core = { workspace = true }
 jaq-json = { workspace = true }
 jaq-std = { workspace = true }
 starlark = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [lints]
 workspace = true

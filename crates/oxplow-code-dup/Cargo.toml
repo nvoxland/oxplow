@@ -10,6 +10,7 @@ license.workspace = true
 # duplicate the per-language tree-sitter mapping table.
 oxplow-code-metrics = { workspace = true }
 tree-sitter = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [lints]
 workspace = true

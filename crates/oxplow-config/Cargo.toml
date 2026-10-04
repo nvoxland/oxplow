@@ -18,6 +18,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 dirs = "7"
 fs2 = "0.4"
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

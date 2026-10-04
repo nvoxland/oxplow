@@ -444,7 +444,7 @@ mod tests {
         );
 
         let reply = serde_json::json!({"decisions": [{"question": "Which CSV library?", "choice": "csv crate", "confidence": "medium"}]});
-        let (base, seen) = oxplow_ai::testing::mock(
+        let (base, seen) = oxplow_ai_fake::mock(
             "/chat/completions",
             200,
             serde_json::json!({"choices": [{"message": {"content": reply.to_string()}}], "usage": {"prompt_tokens": 5, "completion_tokens": 5}}),
@@ -560,7 +560,7 @@ mod tests {
         use crate::ai_service::{ProviderConfig, ProviderKind, RoleBinding};
         let f = crate::test_fixtures::services_with_effort().await;
         let reply = serde_json::json!({"decisions": [{"question": "Q", "choice": "C"}]});
-        let (base, _) = oxplow_ai::testing::mock(
+        let (base, _) = oxplow_ai_fake::mock(
             "/chat/completions",
             200,
             serde_json::json!({"choices": [{"message": {"content": reply.to_string()}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),

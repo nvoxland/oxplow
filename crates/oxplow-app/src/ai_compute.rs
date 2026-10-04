@@ -443,7 +443,7 @@ mod tests {
 
     /// Bind `role` to model `x` served by provider `provider`.
     async fn with_provider(svc: &crate::Services, role: Role, provider: &str, reply: Value) {
-        let (base, _) = oxplow_ai::testing::mock("/chat/completions", 200, reply).await;
+        let (base, _) = oxplow_ai_fake::mock("/chat/completions", 200, reply).await;
         svc.ai
             .save_provider(
                 ProviderConfig {

@@ -245,6 +245,43 @@ commits. The durable fix is a PostToolUse hook on `Edit`/`Write` that
 runs `rustfmt` + `cargo clippy --fix` against the touched crate.
 Until that's installed, run both manually each turn.
 
+## Builds and `target/` (tsk881)
+
+**One feature set per third-party crate, for every build.** Cargo's
+resolver picks a dependency's features from what the packages being
+built ask for, so `cargo nextest -p oxplow-app`, `cargo build -p
+oxplow-desktop` (`tauri dev`), clippy and a workspace build each
+resolved different sets (tokio with or without `test-util`, seven
+serde_json variants…). Every switch rebuilt the graph under new hashes
+and kept every copy — 85 GB of `target/debug` was about five builds of
+duplicates, and rebuilds were slow for the same reason. The
+**`oxplow-workspace-hack`** crate (managed by
+[cargo-hakari](https://docs.rs/cargo-hakari), config
+`.config/hakari.toml`) pins the union: every workspace crate depends on
+it, so any subset builds the same artifacts, and an alternating build
+is a no-op. Build-script (host) dependencies keep their own features
+(`unify-target-host = "none"`), so the app never ships what only a build
+script asked for. It does carry tokio's `test-util` (test APIs only;
+keeping it out would bring the churn back).
+
+- **After changing a dependency** (adding one, its version or
+  features), run `cargo hakari generate` (and `cargo hakari manage-deps`
+  for a new crate). CI fails when the hack is stale (`cargo hakari
+  generate --diff`). Install with `cargo install cargo-hakari --locked`.
+- **A workspace crate never takes a feature only tests turn on**: hakari
+  covers third-party crates only, so a `test-support`-style feature on
+  one of ours splits every crate above it. A test double is its own
+  dev-only crate (`oxplow-ai-fake`, `oxplow-provider-fake`,
+  `oxplow-oauth-sim`).
+- **What still accumulates** (a new hash per real dependency change, old
+  incremental sessions): `bun run clean:target` (cargo-sweep, `cargo
+  install cargo-sweep --locked`) drops artifacts of toolchains no longer
+  installed, then the oldest artifacts until `target/` is under 60 GB.
+  Coverage builds live apart in `target/llvm-cov-target` (`cargo cov`).
+- Debug info isn't the lever: a fresh workspace build is ~17 GB, its
+  object files 1.8 GB (`debug = "line-tables-only"`, none for
+  dependencies), so `split-debuginfo` isn't set.
+
 ## Installing the Linear provider (`scripts/install-linear.sh`)
 
 `scripts/install-linear.sh <project>` builds `oxplow-provider-linear`

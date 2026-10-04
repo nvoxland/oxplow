@@ -2724,7 +2724,7 @@ pub(crate) mod tests {
         );
         let db = task_db().await;
         let reply = json!({ "answers": { "label": { "type": "choice", "choice": "bug", "probabilities": { "bug": 0.9, "feature": 0.1 } } } });
-        let (base, _) = oxplow_ai::testing::mock(
+        let (base, _) = oxplow_ai_fake::mock(
             "/chat/completions",
             200,
             json!({ "choices": [{ "message": { "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),

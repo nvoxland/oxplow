@@ -34,6 +34,7 @@ oxplow-code-metrics = { workspace = true }
 oxplow-code-deps = { workspace = true }
 # Line-diff for per-function churn attribution.
 similar = "3"
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }

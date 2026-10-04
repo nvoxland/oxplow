@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 specta = { workspace = true }
 uuid = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

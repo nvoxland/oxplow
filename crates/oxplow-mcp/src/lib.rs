@@ -4945,7 +4945,7 @@ mod tests {
         assert!(err.message.contains("summarize"), "{}", err.message);
 
         let answer = serde_json::json!({"answers": {"risky": {"type": "choice", "choice": "yes", "probabilities": {"yes": 0.7, "no": 0.3}}}});
-        let (base, seen) = oxplow_ai::testing::mock(
+        let (base, seen) = oxplow_ai_fake::mock(
             "/chat/completions",
             200,
             serde_json::json!({"choices": [{"message": {"content": answer.to_string()}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
@@ -4994,7 +4994,7 @@ mod tests {
             .unwrap_err();
         assert!(err.message.contains("maybe"), "{}", err.message);
 
-        let (base, seen) = oxplow_ai::testing::mock(
+        let (base, seen) = oxplow_ai_fake::mock(
             "/chat/completions",
             200,
             serde_json::json!({"choices": [{"message": {"content": " short "}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),

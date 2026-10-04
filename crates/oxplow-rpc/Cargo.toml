@@ -40,6 +40,7 @@ similar = "3"
 # Worktree walk for the diff-view working-tree endpoint (honours the
 # generated-file filter, same as the snapshot capture sweep).
 walkdir = "2"
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 tokio = { workspace = true }

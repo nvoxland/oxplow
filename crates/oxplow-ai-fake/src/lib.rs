@@ -1,5 +1,7 @@
-//! A local stand-in for a provider's HTTP API, for tests here and in
-//! crates that use this one (enable the `test-support` feature).
+//! A local stand-in for an AI provider's HTTP API, for the tests of
+//! `oxplow-ai` and the crates that use it (a dev-dependency only).
+
+#![allow(clippy::expect_used)]
 
 use std::sync::{Arc, Mutex};
 

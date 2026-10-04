@@ -25,10 +25,11 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-oxplow-ai = { workspace = true, features = ["test-support"] }
+oxplow-ai-fake = { workspace = true }
 git2 = { workspace = true }
 
 [lints]

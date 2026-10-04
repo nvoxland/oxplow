@@ -4339,6 +4339,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 name = "oxplow-acp-fake"
 version = "0.7.0"
 dependencies = [
+ "oxplow-workspace-hack",
  "serde_json",
  "tokio",
 ]
@@ -4347,8 +4348,9 @@ dependencies = [
 name = "oxplow-ai"
 version = "0.7.0"
 dependencies = [
- "axum",
  "keyring",
+ "oxplow-ai-fake",
+ "oxplow-workspace-hack",
  "reqwest",
  "serde",
  "serde_json",
@@ -4358,6 +4360,16 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "oxplow-ai-fake"
+version = "0.7.0"
+dependencies = [
+ "axum",
+ "oxplow-workspace-hack",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4378,6 +4390,7 @@ dependencies = [
  "opentelemetry-proto",
  "oxplow-acp-fake",
  "oxplow-ai",
+ "oxplow-ai-fake",
  "oxplow-code-deps",
  "oxplow-code-dup",
  "oxplow-code-metrics",
@@ -4398,6 +4411,7 @@ dependencies = [
  "oxplow-runtime",
  "oxplow-session",
  "oxplow-tmux",
+ "oxplow-workspace-hack",
  "parking_lot",
  "proptest",
  "prost",
@@ -4433,6 +4447,7 @@ dependencies = [
  "globset",
  "oxplow-code-metrics",
  "oxplow-config",
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "specta",
@@ -4444,6 +4459,7 @@ name = "oxplow-code-dup"
 version = "0.7.0"
 dependencies = [
  "oxplow-code-metrics",
+ "oxplow-workspace-hack",
  "tree-sitter",
 ]
 
@@ -4451,6 +4467,7 @@ dependencies = [
 name = "oxplow-code-metrics"
 version = "0.7.0"
 dependencies = [
+ "oxplow-workspace-hack",
  "streaming-iterator",
  "tree-sitter",
  "tree-sitter-c",
@@ -4477,6 +4494,7 @@ dependencies = [
  "oxplow-code-dup",
  "oxplow-code-metrics",
  "oxplow-coverage",
+ "oxplow-workspace-hack",
  "quick-xml 0.42.0",
  "regex",
  "serde",
@@ -4495,6 +4513,7 @@ dependencies = [
  "fs2",
  "globset",
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -4522,6 +4541,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-mcp",
  "oxplow-runtime",
+ "oxplow-workspace-hack",
  "parking_lot",
  "prost",
  "rand 0.10.3",
@@ -4542,6 +4562,7 @@ dependencies = [
 name = "oxplow-coverage"
 version = "0.7.0"
 dependencies = [
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
 ]
@@ -4556,6 +4577,7 @@ dependencies = [
  "oxplow-control-plane",
  "oxplow-domain",
  "oxplow-rpc",
+ "oxplow-workspace-hack",
  "reqwest",
  "serde",
  "serde_json",
@@ -4574,6 +4596,7 @@ version = "0.7.0"
 dependencies = [
  "async-trait",
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "r2d2",
  "r2d2_sqlite",
  "refinery",
@@ -4609,6 +4632,7 @@ dependencies = [
  "oxplow-provider-fake",
  "oxplow-sdk",
  "oxplow-tauri-ipc",
+ "oxplow-workspace-hack",
  "reqwest",
  "serde",
  "serde_json",
@@ -4631,6 +4655,7 @@ version = "0.7.0"
 dependencies = [
  "async-trait",
  "jsonschema",
+ "oxplow-workspace-hack",
  "regex",
  "schemars 1.2.2",
  "serde",
@@ -4649,6 +4674,7 @@ dependencies = [
  "ignore",
  "notify",
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -4664,6 +4690,7 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-fs-watch",
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "similar",
@@ -4692,6 +4719,7 @@ dependencies = [
  "bytes",
  "lsp-types",
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -4705,6 +4733,7 @@ name = "oxplow-lsp-installer"
 version = "0.7.0"
 dependencies = [
  "flate2",
+ "oxplow-workspace-hack",
  "reqwest",
  "serde",
  "serde_yaml",
@@ -4723,7 +4752,7 @@ dependencies = [
  "async-trait",
  "git2",
  "http",
- "oxplow-ai",
+ "oxplow-ai-fake",
  "oxplow-app",
  "oxplow-code-metrics",
  "oxplow-config",
@@ -4732,6 +4761,7 @@ dependencies = [
  "oxplow-git",
  "oxplow-plugin",
  "oxplow-sdk",
+ "oxplow-workspace-hack",
  "rmcp",
  "schemars 1.2.2",
  "serde",
@@ -4749,6 +4779,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "oxplow-provider-mcp",
+ "oxplow-workspace-hack",
  "parking_lot",
  "reqwest",
  "serde_json",
@@ -4762,6 +4793,7 @@ name = "oxplow-plugin"
 version = "0.7.0"
 dependencies = [
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4776,6 +4808,7 @@ version = "0.7.0"
 dependencies = [
  "oxplow-domain",
  "oxplow-provider-protocol",
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "tokio",
@@ -4789,6 +4822,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-provider-protocol",
  "oxplow-sdk",
+ "oxplow-workspace-hack",
  "reqwest",
  "serde",
  "serde_json",
@@ -4811,6 +4845,7 @@ dependencies = [
  "oxplow-oauth-sim",
  "oxplow-provider-protocol",
  "oxplow-sdk",
+ "oxplow-workspace-hack",
  "reqwest",
  "rmcp",
  "schemars 1.2.2",
@@ -4827,6 +4862,7 @@ name = "oxplow-provider-protocol"
 version = "0.7.0"
 dependencies = [
  "jsonschema",
+ "oxplow-workspace-hack",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -4841,6 +4877,7 @@ dependencies = [
  "bytes",
  "libc",
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "portable-pty",
  "serde",
  "specta",
@@ -4867,6 +4904,7 @@ dependencies = [
  "oxplow-plugin",
  "oxplow-sdk",
  "oxplow-session",
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "similar",
@@ -4886,6 +4924,7 @@ dependencies = [
  "async-trait",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "specta",
@@ -4909,6 +4948,7 @@ dependencies = [
  "oxplow-plugin",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
+ "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4925,6 +4965,7 @@ dependencies = [
  "async-trait",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "serde",
  "specta",
  "thiserror 2.0.21",
@@ -4940,6 +4981,7 @@ dependencies = [
  "oxplow-mcp",
  "oxplow-rpc",
  "oxplow-tauri-ipc",
+ "oxplow-workspace-hack",
  "tauri-specta",
 ]
 
@@ -4960,6 +5002,7 @@ dependencies = [
  "oxplow-rpc",
  "oxplow-sdk",
  "oxplow-session",
+ "oxplow-workspace-hack",
  "parking_lot",
  "serde",
  "serde_json",
@@ -4982,12 +5025,127 @@ version = "0.7.0"
 dependencies = [
  "async-trait",
  "oxplow-domain",
+ "oxplow-workspace-hack",
  "serde",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "oxplow-workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "Inflector",
+ "aho-corasick",
+ "axum",
+ "bit-set",
+ "bit-vec",
+ "bitflags 2.13.2",
+ "bstr",
+ "bytemuck",
+ "bytes",
+ "cc",
+ "crc32fast",
+ "crossbeam-utils",
+ "crypto-common 0.1.7",
+ "ctor",
+ "deranged",
+ "derive_more 2.1.1",
+ "derive_more-impl 2.1.1",
+ "digest 0.10.7",
+ "digest 0.11.3",
+ "either",
+ "erased-serde 0.4.10",
+ "errno",
+ "fastrand",
+ "flate2",
+ "foldhash 0.2.0",
+ "form_urlencoded",
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-task",
+ "futures-util",
+ "getrandom 0.3.4",
+ "getrandom 0.4.3",
+ "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
+ "hyper",
+ "hyper-util",
+ "icu_properties",
+ "indexmap 2.14.2",
+ "libc",
+ "libsqlite3-sys",
+ "linux-raw-sys",
+ "log",
+ "memchr",
+ "mio",
+ "nix 0.28.0",
+ "num",
+ "num-bigint",
+ "num-traits",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "once_cell",
+ "parking_lot",
+ "percent-encoding",
+ "phf_shared",
+ "ppv-lite86",
+ "proc-macro2",
+ "quote",
+ "rand 0.10.3",
+ "rand 0.9.5",
+ "rand_chacha",
+ "refinery-core",
+ "regex",
+ "regex-automata",
+ "regex-syntax",
+ "reqwest",
+ "rmcp",
+ "rusqlite",
+ "rustix",
+ "rustls",
+ "rustls-webpki",
+ "schemars 1.2.2",
+ "semver",
+ "serde",
+ "serde_core",
+ "serde_json",
+ "serde_with",
+ "serde_with_macros",
+ "simd-adler32",
+ "slab",
+ "smallvec",
+ "specta",
+ "specta-macros",
+ "stable_deref_trait",
+ "syn 1.0.109",
+ "syn 2.0.119",
+ "syn 3.0.6",
+ "sync_wrapper",
+ "tauri",
+ "tauri-build",
+ "tauri-utils",
+ "time",
+ "tokio",
+ "tokio-util",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "tower",
+ "tracing",
+ "tracing-core",
+ "typenum",
+ "url",
+ "uuid",
+ "winnow 1.0.4",
+ "zerocopy",
 ]
 
 [[package]]

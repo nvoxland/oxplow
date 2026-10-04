@@ -455,7 +455,7 @@ fn strip_fences(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::mock;
+    use oxplow_ai_fake::mock;
     use serde_json::{json, Value};
 
     fn provider(kind: ProviderKind, base: &str) -> ProviderConfig {

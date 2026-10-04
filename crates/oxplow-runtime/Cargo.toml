@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 specta = { workspace = true }
 async-trait = { workspace = true }
 time = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

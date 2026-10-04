@@ -24,6 +24,7 @@ tokio = { workspace = true }
 specta = { workspace = true }
 schemars = { workspace = true }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

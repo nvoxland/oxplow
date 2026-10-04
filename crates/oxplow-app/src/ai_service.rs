@@ -549,7 +549,7 @@ pub fn role_name(role: Role) -> String {
 mod tests {
     use super::*;
     use oxplow_ai::secrets::MemorySecrets;
-    use oxplow_ai::testing::mock;
+    use oxplow_ai_fake::mock;
     use oxplow_db::Database;
     use serde_json::json;
 

@@ -18,6 +18,7 @@ regex = { workspace = true }
 uuid = { workspace = true }
 schemars = { workspace = true }
 jsonschema = { version = "0.58", default-features = false }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [lints]
 workspace = true

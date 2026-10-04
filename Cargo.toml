@@ -34,6 +34,8 @@ members = [
     "crates/oxplow-provider-linear",
     "crates/oxplow-provider-mcp",
     "crates/oxplow-oauth-sim",
+    "crates/oxplow-ai-fake",
+    "crates/oxplow-workspace-hack",
 ]
 
 [workspace.package]
@@ -172,6 +174,7 @@ oxplow-provider-fake = { path = "crates/oxplow-provider-fake" }
 oxplow-provider-linear = { path = "crates/oxplow-provider-linear" }
 oxplow-provider-mcp = { path = "crates/oxplow-provider-mcp" }
 oxplow-oauth-sim = { path = "crates/oxplow-oauth-sim" }
+oxplow-ai-fake = { path = "crates/oxplow-ai-fake" }
 oxplow-config = { path = "crates/oxplow-config" }
 oxplow-fs-watch = { path = "crates/oxplow-fs-watch" }
 oxplow-git = { path = "crates/oxplow-git" }

@@ -128,8 +128,10 @@ ai:
 - Every call, including failures, is a row in `ai_call` / `v_ai_call`
   (role, provider, model, caller, tokens, latency, ok, error), so AI
   usage is itself queryable in the [semantic layer](./semantic-layer.md).
-- Tests use `oxplow_ai::testing::mock` (feature `test-support`), a local
-  axum server standing in for a provider. `Services::in_memory` gets
+- Tests use `oxplow_ai_fake::mock` (the dev-only `oxplow-ai-fake` crate,
+  not a feature of `oxplow-ai`, so no build compiles it two ways —
+  working-in-this-repo.md "Builds and `target/`"), a local axum server
+  standing in for a provider. `Services::in_memory` gets
   `MemorySecrets` and a config dir under the test project's `.oxplow/`, so
   rpc/mcp tests never touch the real keychain or `ai.yaml`.
 - `oxplow_app::ai_service` re-exports the `oxplow-ai` types the adapters

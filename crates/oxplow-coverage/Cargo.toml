@@ -10,6 +10,7 @@ license.workspace = true
 # Test-report types derive Serialize so the runtime can embed the parsed
 # suite/case tree directly in an observation payload.
 serde = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

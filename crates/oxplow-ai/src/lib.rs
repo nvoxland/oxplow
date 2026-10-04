@@ -4,6 +4,3 @@
 pub mod client;
 pub mod config;
 pub mod secrets;
-
-#[cfg(any(test, feature = "test-support"))]
-pub mod testing;

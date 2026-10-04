@@ -12,6 +12,7 @@ globset = { workspace = true }
 tree-sitter = { workspace = true }
 serde = { workspace = true }
 specta = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

@@ -1,0 +1,22 @@
+[package]
+name = "oxplow-ai-fake"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A local stand-in for an AI provider's HTTP API, for oxplow's tests"
+publish = false
+
+# Development only: the test double for `oxplow-ai`'s providers, a
+# dev-dependency of the crates whose tests call a model. It is its own
+# crate (not a feature of `oxplow-ai`) so no build ever compiles
+# `oxplow-ai` two ways — a test build and an app build share it.
+[dependencies]
+axum = { version = "0.8", features = ["json"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+
+[lints]
+workspace = true
