@@ -30,13 +30,15 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   opens `/events` first, does a write, and resolves once the daemon says
   each named model changed — so a seeding write is never raced;
   `approveProgram()` approves one of the project's programs as a person
-  does.
+  does; `searchable()` waits until site search has indexed a write;
+  `until()` polls any such background state.
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
   - `daemon`, one per worker. Before any page opens it selects an ACP thread
     on the fake agent: the boot thread is a terminal agent's, and the suite
     never starts a real agent CLI.
-  - `daemon` is settled before any page opens, and carries the `stream` and
-    `thread` its pages open on.
+  - `daemon` is settled before any page opens — boot's background tasks
+    done and the extensions' models published — and carries the `stream`
+    and `thread` its pages open on.
   - `storageState` points the page at that daemon (`connectedTo()` builds one
     for a context of a spec's own, e.g. with another token).
   - `pageErrors` fails any spec whose page threw.

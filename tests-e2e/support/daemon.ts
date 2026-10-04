@@ -114,8 +114,11 @@ export function run<T = unknown>(daemon: Daemon, name: string, input: Record<str
   return ipc<T>(daemon, "run_command", { name, input, confirmed: true });
 }
 
-/** Poll `check` every 200 ms until it holds; throw `what` after `ms`. */
-async function until(what: string, ms: number, check: () => Promise<boolean>): Promise<void> {
+/** Poll `check` every 200 ms until it holds; throw `what` after `ms`. For
+ *  daemon state a write settles into in the background (boot's tasks, the
+ *  search index), never for the page — specs wait on the page with
+ *  web-first `expect`. */
+export async function until(what: string, ms: number, check: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + ms;
   while (!(await check())) {
     if (Date.now() > deadline) throw new Error(`timed out waiting: ${what}`);
@@ -173,4 +176,15 @@ export async function approveProgram(daemon: Daemon, kind: string, name: string)
   if (!program) throw new Error(`no program ${kind}:${name}`);
   if (program.approved) return;
   await ipc(daemon, "approve_project_program", { kind, name, version: program.version });
+}
+
+type SearchHit = { kind: string; title: string };
+
+/** Wait until site search finds `query` among `kind` hits (`task`,
+ *  `wiki`): the index is built in the background after a write. */
+export async function searchable(daemon: Daemon, query: string, kind: string): Promise<void> {
+  await until(`search to index "${query}" (${kind})`, 30_000, async () => {
+    const hits = await ipc<SearchHit[]>(daemon, "search", { query, streamId: null, kinds: [kind], limit: 10 });
+    return hits.length > 0;
+  });
 }

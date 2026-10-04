@@ -2,7 +2,7 @@
 // guard that fails any spec whose page threw.
 import { test as base, expect, type Page } from "@playwright/test";
 
-import { ipc, run, settle, startDaemon, type Daemon } from "./daemon.js";
+import { ipc, run, settle, startDaemon, until, type Daemon } from "./daemon.js";
 
 type Stream = { id: string };
 type Thread = { id: string; agent: string };
@@ -30,6 +30,14 @@ export type Workspace = Daemon & { stream: string; thread: string };
 async function workspace(): Promise<Workspace> {
   const daemon = await startDaemon();
   await settle(daemon);
+  // Extensions' models compile in the background after boot: the test
+  // extension's is published once they are.
+  await until("the extensions' models to publish", 60_000, async () => {
+    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+      sql: "SELECT 1 FROM v_model WHERE view = 'v_e2e_item'",
+    });
+    return out.rows.length > 0;
+  });
   return { ...daemon, ...(await selectFakeAgentThread(daemon)) };
 }
 

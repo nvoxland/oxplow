@@ -485,6 +485,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                 return (
                   <button type="button"
                     key={`page:${result.entry.id}`}
+                    data-testid={`launcher-page-${result.entry.id}`}
                     data-row-index={index}
                     onClick={() => confirm(result)}
                     style={{
@@ -510,6 +511,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                 return (
                   <button type="button"
                     key={`command:${result.entry.id}`}
+                    data-testid={`launcher-command-${result.entry.id}`}
                     data-row-index={index}
                     onClick={() => confirm(result)}
                     style={{
@@ -536,6 +538,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                 return (
                   <button type="button"
                     key={`hit:${result.hit.kind}:${result.hit.ref_id}:${result.hit.stream_id ?? ""}`}
+                    data-testid={`launcher-hit-${result.hit.kind}:${result.hit.ref_id}`}
                     data-row-index={index}
                     onClick={() => confirm(result)}
                     style={{
