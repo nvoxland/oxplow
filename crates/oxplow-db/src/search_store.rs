@@ -9,7 +9,8 @@
 //!
 //! Two writers drive it from `oxplow-app`: a kind indexed from a model
 //! (tasks, comments, notes, wiki pages, a plugin's searchable kind) is
-//! restated whole by its asset (`kind_search`, [`restate_kind_tx`]); file
+//! restated by its asset (`kind_search`, [`restate_kind_tx`]: only the
+//! entries that changed are written); file
 //! contents are upserted by the `search.index` consumer (`indexer`). See
 //! `.context/refs.md`.
 
@@ -65,77 +66,99 @@ pub fn sanitize_query(raw: &str) -> String {
 /// belongs to one — `None` for a project-global entry.
 pub type EntryKey = (String, Option<String>);
 
-/// Replace every entry of `kind` with `entries` (`(ref_id, stream)` →
-/// `(title, body)`), in the caller's transaction: what a kind whose whole
-/// index is derived from a model does on each recompute, and — with none —
-/// how a kind leaves the index. Entries that hash the same as the last
-/// restate's (`search_kind_state`) write nothing (tsk864); returns whether
-/// it wrote.
+/// Make `kind`'s entries `entries` (`(ref_id, stream)` → `(title,
+/// body)`), in the caller's transaction: what a kind whose whole index is
+/// derived from a model does on each recompute, and — with none — how a
+/// kind leaves the index. Only what differs is written (tsk896): an entry
+/// whose title and body hash as stored is left alone, a changed one is
+/// rewritten in place, a new one added, a gone one removed.
 pub fn restate_kind_tx(
     conn: &rusqlite::Connection,
     kind: &str,
     entries: &std::collections::BTreeMap<EntryKey, (String, String)>,
-) -> Result<bool, DomainError> {
+) -> Result<Restated, DomainError> {
     let sql = crate::database::map_sql_err;
-    let digest = (!entries.is_empty()).then(|| {
-        let mut h = xxhash_rust::xxh3::Xxh3::new();
-        for ((ref_id, stream), (title, body)) in entries {
-            for part in [
-                ref_id.as_str(),
-                stream.as_deref().unwrap_or("\u{0}"),
-                title,
-                body,
-            ] {
-                h.update(&(part.len() as u64).to_le_bytes());
-                h.update(part.as_bytes());
+    let mut stored: std::collections::HashMap<EntryKey, (i64, Option<String>)> = {
+        let mut st = conn
+            .prepare(
+                "SELECT rowid, ref_id, stream_id, content_hash FROM search_entry WHERE kind = ?1",
+            )
+            .map_err(sql)?;
+        let rows = st
+            .query_map(params![kind], |r| {
+                Ok(((r.get(1)?, r.get(2)?), (r.get(0)?, r.get(3)?)))
+            })
+            .map_err(sql)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(sql)?
+    };
+    let mut out = Restated::default();
+    for ((ref_id, stream), (title, body)) in entries {
+        let hash = entry_hash(title, body);
+        match stored.remove(&(ref_id.clone(), stream.clone())) {
+            Some((_, Some(old))) if old == hash => {}
+            Some((rowid, _)) => {
+                conn.execute(
+                    "UPDATE search_entry SET content_hash = ?2 WHERE rowid = ?1",
+                    params![rowid, hash],
+                )
+                .map_err(sql)?;
+                conn.execute(
+                    "UPDATE search_fts SET title = ?2, body = ?3 WHERE rowid = ?1",
+                    params![rowid, title, body],
+                )
+                .map_err(sql)?;
+                out.changed += 1;
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO search_entry (kind, ref_id, stream_id, content_hash) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![kind, ref_id, stream, hash],
+                )
+                .map_err(sql)?;
+                conn.execute(
+                    "INSERT INTO search_fts (rowid, title, body) VALUES (?1, ?2, ?3)",
+                    params![conn.last_insert_rowid(), title, body],
+                )
+                .map_err(sql)?;
+                out.added += 1;
             }
         }
-        format!("{:032x}", h.digest128())
-    });
-    if let Some(digest) = &digest {
-        let last: Option<String> = conn
-            .query_row(
-                "SELECT digest FROM search_kind_state WHERE kind = ?1",
-                params![kind],
-                |r| r.get(0),
-            )
-            .optional()
+    }
+    for (rowid, _) in stored.into_values() {
+        conn.execute("DELETE FROM search_fts WHERE rowid = ?1", params![rowid])
             .map_err(sql)?;
-        if last.as_ref() == Some(digest) {
-            return Ok(false);
-        }
-    }
-    conn.execute(
-        "DELETE FROM search_fts WHERE rowid IN (SELECT rowid FROM search_entry WHERE kind = ?1)",
-        params![kind],
-    )
-    .map_err(sql)?;
-    conn.execute("DELETE FROM search_entry WHERE kind = ?1", params![kind])
-        .map_err(sql)?;
-    let mut entry = conn
-        .prepare("INSERT INTO search_entry (kind, ref_id, stream_id) VALUES (?1, ?2, ?3)")
-        .map_err(sql)?;
-    let mut text = conn
-        .prepare("INSERT INTO search_fts (rowid, title, body) VALUES (?1, ?2, ?3)")
-        .map_err(sql)?;
-    for ((ref_id, stream), (title, body)) in entries {
-        entry.execute(params![kind, ref_id, stream]).map_err(sql)?;
-        text.execute(params![conn.last_insert_rowid(), title, body])
+        conn.execute("DELETE FROM search_entry WHERE rowid = ?1", params![rowid])
             .map_err(sql)?;
+        out.removed += 1;
     }
-    match digest {
-        Some(digest) => conn.execute(
-            "INSERT INTO search_kind_state (kind, digest) VALUES (?1, ?2)
-               ON CONFLICT(kind) DO UPDATE SET digest = excluded.digest",
-            params![kind, digest],
-        ),
-        None => conn.execute(
-            "DELETE FROM search_kind_state WHERE kind = ?1",
-            params![kind],
-        ),
+    Ok(out)
+}
+
+/// What a restate wrote.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Restated {
+    pub added: usize,
+    pub changed: usize,
+    pub removed: usize,
+}
+
+impl Restated {
+    /// Whether it wrote anything.
+    pub fn wrote(&self) -> bool {
+        self.added + self.changed + self.removed > 0
     }
-    .map_err(sql)?;
-    Ok(true)
+}
+
+/// An entry's title and body, hashed (length-prefixed, so the split is
+/// part of it).
+fn entry_hash(title: &str, body: &str) -> String {
+    let mut h = xxhash_rust::xxh3::Xxh3::new();
+    for part in [title, body] {
+        h.update(&(part.len() as u64).to_le_bytes());
+        h.update(part.as_bytes());
+    }
+    format!("{:032x}", h.digest128())
 }
 
 impl SqliteSearchStore {
@@ -495,16 +518,27 @@ mod tests {
         assert_eq!(got, vec![("file", Some("s-b")), ("task", Some("s-a"))]);
     }
 
-    /// tsk864: a kind restated with what it already holds writes nothing;
-    /// different entries replace them; none removes the kind.
+    /// tsk864, tsk896: a restate writes only what differs — the same
+    /// entries write nothing, an edit to one of three rewrites that one,
+    /// and none removes the kind.
     #[tokio::test]
-    async fn a_restate_of_the_same_entries_writes_nothing() {
+    async fn a_restate_writes_only_the_entries_that_changed() {
         let s = store().await;
-        let entries = |title: &str| {
-            std::collections::BTreeMap::from([(
-                ("tsk1".to_string(), Some("str1".to_string())),
-                (title.to_string(), "body".to_string()),
-            )])
+        let entries = |second: &str| {
+            std::collections::BTreeMap::from([
+                (
+                    ("tsk1".to_string(), Some("str1".to_string())),
+                    ("widget".to_string(), "body".to_string()),
+                ),
+                (
+                    ("tsk2".to_string(), Some("str1".to_string())),
+                    (second.to_string(), "body".to_string()),
+                ),
+                (
+                    ("tsk3".to_string(), Some("str1".to_string())),
+                    ("sprocket".to_string(), "body".to_string()),
+                ),
+            ])
         };
         let restate = |e: std::collections::BTreeMap<EntryKey, (String, String)>| {
             let db = s.db.clone();
@@ -514,15 +548,25 @@ mod tests {
                     .unwrap()
             }
         };
-        assert!(restate(entries("widget")).await);
-        assert!(!restate(entries("widget")).await, "the same entries");
-        assert!(restate(entries("gadget")).await);
+        let r = |added, changed, removed| Restated {
+            added,
+            changed,
+            removed,
+        };
+        assert_eq!(restate(entries("cog")).await, r(3, 0, 0));
+        assert_eq!(
+            restate(entries("cog")).await,
+            r(0, 0, 0),
+            "the same entries"
+        );
+        assert_eq!(restate(entries("gadget")).await, r(0, 1, 0));
         let hits = s.search("gadget", Some("str1"), &[], 10).await.unwrap();
         assert_eq!(
             (hits[0].kind.as_str(), hits[0].ref_id.as_str()),
-            ("task", "tsk1")
+            ("task", "tsk2")
         );
-        assert!(restate(Default::default()).await);
+        assert!(s.search("cog", None, &[], 10).await.unwrap().is_empty());
+        assert_eq!(restate(Default::default()).await, r(0, 0, 3));
         assert!(s.search("gadget", None, &[], 10).await.unwrap().is_empty());
     }
 

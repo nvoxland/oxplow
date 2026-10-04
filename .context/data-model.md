@@ -2020,9 +2020,8 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   plugin ref kind** (`acme_pr`, P9.D3); `ref_id` is the task id, comment
   id, note id, wiki slug, repo-relative path, or the plugin ref's id.
   Every kind but `file` is derived from a model by an asset per kind
-  (`kind_search.rs`, `restate_kind_tx`: the kind's entries replaced whole,
-  or nothing written when they hash the same as `search_kind_state`'s,
-  V158); core's read `v_search_task` / `_comment` / `_note` / `_wiki`
+  (`kind_search.rs`, `restate_kind_tx`: only entries added, changed or
+  gone are written, by each entry's `content_hash`, V164; tsk896); core's read `v_search_task` / `_comment` / `_note` / `_wiki`
   (tsk864). Files are upserted by the `search.index` pump consumer from
   `snapshot.taken` (`indexer.rs`).
 - `stream_id` is `NULL` for project-global rows (wiki, a backlog task) and

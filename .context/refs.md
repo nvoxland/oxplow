@@ -126,10 +126,14 @@ thread notes and wiki pages are indexed the same way (tsk864): each an
 asset over its `v_search_<kind>` model (`kind_search::CORE_KINDS`),
 whose rows also carry their stream and aren't bounded; only files stay
 on the `search.index` pump consumer, since their text comes from
-snapshot blobs. A restate whose rows hash the same as the last
-(`search_kind_state`, V158) writes nothing — so a start, which registers
-every kind and builds each once, rewrites nothing when nothing changed,
-and a task edit that changes no indexed text costs a read. A thread or
+snapshot blobs. A restate writes only the entries that differ (tsk896):
+each `search_entry` keeps its title-and-body hash (`content_hash`, V164,
+replacing V158's kind-wide digest, which skipped an unchanged kind but
+rewrote every entry on any edit) — so a start, which registers every kind
+and builds each once, rewrites nothing when nothing changed, and editing
+one wiki page rewrites that page's entry (measured at 500 pages of ~5 KB:
+31.8 ms → 0.47 ms). The kind's rows are still read and hashed on every
+recompute. A thread or
 stream delete, a move, a soft delete: the kind follows its model, so
 nothing is left behind (the old upsert-only boot backfill kept orphans).
 Archiving a stream purges only its files (`purge_stream_files`). A plugin

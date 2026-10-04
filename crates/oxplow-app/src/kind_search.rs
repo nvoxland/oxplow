@@ -23,9 +23,9 @@
 //! A plugin kind is bounded: at most [`MAX_ROWS`] rows, each body cut at
 //! [`MAX_BODY`] bytes; core's aren't. A row whose `ref` isn't one of the
 //! kind's (`<kind>:<id>`, the id matching its pattern) is skipped. A
-//! recompute whose rows are what the index already holds writes nothing
-//! (`restate_kind_tx`'s digest), so a start with nothing changed rebuilds
-//! nothing.
+//! recompute writes only the entries whose title or body changed, were
+//! added or went (`restate_kind_tx`, per-entry hashes; tsk896), so an edit
+//! writes one entry and a start with nothing changed writes nothing.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
