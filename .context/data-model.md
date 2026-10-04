@@ -1088,9 +1088,10 @@ are exposed as Tauri commands (`list_backlinks` / `list_outbound`,
 which decorate each row with a best-effort `source_label` from
 the source store) and as MCP tools of the same names.
 
-Boot-time backfill: `oxplow_app::page_ref_backfill::run(...)` re-
+Boot-time restate: `oxplow_app::page_ref_backfill::run(...)` re-
 projects every existing task body, link and finding into the table on
-app start, idempotently; the effort slice (touched files + summary refs
+app start, idempotently — the graph's repair path after a migration
+that resets `page_ref` (V92) or a writer's drift, so it stays (tsk920); the effort slice (touched files + summary refs
 + declared impacts) goes through the effort store's own
 `project_effort_slice` for every work item with an effort
 (`list_work_items`) — another provider's included (tsk452; a copy of the

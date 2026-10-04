@@ -196,9 +196,9 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
       | null;
     if (!editor) return;
     const refreshChanges = () => {
-      const legacy = editor.getLineChanges?.();
-      if (legacy) {
-        setChangeStarts(legacy.map((c) => c.modifiedStartLineNumber).sort((a, b) => a - b));
+      const changes = editor.getLineChanges?.();
+      if (changes) {
+        setChangeStarts(changes.map((c) => c.modifiedStartLineNumber).sort((a, b) => a - b));
         return;
       }
       const computed = editor.getDiffComputationResult?.();

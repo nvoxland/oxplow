@@ -120,7 +120,7 @@ interface DashboardData {
 /**
  * Local History dashboard — analogue of GitDashboardPage but driven
  * by snapshot rows (one per `request_snapshot()` call) instead of
- * git commits. Replaces the legacy per-file SnapshotsPanel.
+ * git commits.
  *
  * Layout mirrors GitDashboardPage: scrollable column of Cards. Each
  * card surfaces a different cut of the snapshot history; click into a

@@ -2066,7 +2066,7 @@ impl MetricEngine {
 /// Returns `Some("fail")` / `Some("warn")` when the value is in that zone, else
 /// `None`. `neutral` metrics (no better/worse) never cross. The worse side is
 /// "higher" for `lower-better` and "lower" for `higher-better`. Shared by the
-/// legacy effort-panel read (`collection.rs`) and the fact finding view.
+/// effort panel's read (`collection.rs`) and the fact finding view.
 pub fn threshold_state(
     direction: &str,
     value: f64,

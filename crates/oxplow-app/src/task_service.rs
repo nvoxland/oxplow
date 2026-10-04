@@ -550,8 +550,7 @@ impl TaskService {
             None => None,
         };
 
-        // Write the durable facts (epic tsk12; the legacy run/sample writes are
-        // gone, T-E2): cycle time as a fact on `oxplow.cycle_time` (subject =
+        // Write the durable facts (epic tsk12): cycle time as a fact on `oxplow.cycle_time` (subject =
         // the just-closed effort) + the efforts-so-far count on
         // `oxplow.task_effort` (subject = the task, the redo-rate signal). The
         // capture stamps `effort_id` directly — this producer knows the exact

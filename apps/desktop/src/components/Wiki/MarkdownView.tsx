@@ -489,10 +489,7 @@ function WikiLinkSpan({
  * (external URLs, anchors, empty and broken refs).
  *
  * Every internal link kind resolves through here so they all behave the
- * same under "open in a new tab". They didn't: `task` routed through
- * the nav chokepoint with the caller's `newTab`, while `file`,
- * `directory` and `commit` fell through to legacy single-tab
- * callbacks and silently ignored it (tsk265).
+ * same under "open in a new tab" (tsk265).
  */
 export function linkTarget(parsed: ParsedLink): TabRef | null {
   switch (parsed.kind) {

@@ -184,10 +184,12 @@ and the link checker never drift.
 `crates/oxplow-db/src/page_ref_projections.rs` writes `(kind, id)` pairs
 that are exactly a canonical ref's: kinds `work_item`, `commit`, `dir`,
 `task_note`, `wiki`, `file`, `finding`; a task's id is
-`work_item_id(TaskId)` = `oxplow:tsk<n>`. `normalize_impact_kind` still
-accepts the spellings agents write (`task`, `git_commit`, `directory`)
-but only ever stores canonical ones. Migration V92 wiped the old rows;
-the boot backfill regenerates them. `v_commit_task` reads the new shape.
+`work_item_id(TaskId)` = `oxplow:tsk<n>`. An effort's impacts name
+their kind in the agent tools' vocabulary (`IMPACT_KINDS`: `wiki | task
+| file | directory | git_commit | finding`; `effort.report` refuses any
+other, and V165 renamed stored spellings), which `impact_kind` projects
+to the canonical ones. Migration V92 wiped the old rows; the boot
+restate regenerates them. `v_commit_task` reads the new shape.
 `ref_resolver::resolve_ref` and `CommentTarget` use the same kinds.
 
 ## The TS side is on canonical refs (built)

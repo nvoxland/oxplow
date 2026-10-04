@@ -45,8 +45,6 @@ use serde::{Deserialize, Serialize};
 pub const COLLECTOR_TIMEOUT: Duration = Duration::from_secs(120);
 /// Largest stdout a collector may produce.
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
-/// Local (gitignored) consent file under `.oxplow/` (see `exec_consent`).
-pub use crate::exec_consent::LEGACY_APPROVALS_FILE;
 
 /// Outcome of one run, as reported to the UI / agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]

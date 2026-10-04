@@ -19,11 +19,6 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// The approvals file oxplow used to keep inside the repo. It is never
-/// read: a repo could commit one, or an agent write one, and
-/// pre-approve its own programs.
-pub const LEGACY_APPROVALS_FILE: &str = "source-approvals.json";
-
 /// Keychain name of the key approvals are MACed with.
 const MAC_KEY_SECRET: &str = "approvals-mac-key";
 
@@ -964,9 +959,10 @@ mod tests {
             )
         };
 
-        // A committed (or agent-written) file in the repo, with the right hash.
+        // A committed (or agent-written) file in the repo, with the right
+        // hash: approvals are never read from inside a project.
         std::fs::write(
-            dir.path().join(".oxplow").join(LEGACY_APPROVALS_FILE),
+            dir.path().join(".oxplow").join("source-approvals.json"),
             format!("{{\"approved\":{{\"collector:repo.count\":\"{hash}\"}}}}"),
         )
         .unwrap();

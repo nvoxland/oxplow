@@ -605,22 +605,6 @@ fn parse_actions(
     }
     let mut out: Vec<LensAction> = Vec::new();
     for v in raw {
-        let old_form = match &v {
-            serde_yaml::Value::String(s) => Some(s.clone()),
-            serde_yaml::Value::Mapping(m) => m
-                .get(serde_yaml::Value::String("action".into()))
-                .and_then(|a| a.as_str())
-                .map(str::to_string),
-            _ => None,
-        };
-        if let Some(kind) = old_form {
-            return Err(format!(
-                "actions: `{kind}` is the old fixed registry; an action is now a command \
-                 (`{{ id, label, command, input }}`). Copy and Add to Agent Context are on \
-                 every lens; to sync a collector use `command: collector.sync` with \
-                 `input: {{ owner, id }}`"
-            ));
-        }
         let f = serde_yaml::from_value::<Full>(v).map_err(|e| format!("actions: {e}"))?;
         if f.id.trim().is_empty() {
             return Err("actions: an action needs an `id`".into());
@@ -763,17 +747,6 @@ pub const SLOTS: &[(&str, &[&str])] = &[
     ("settings.section", &[]),
 ];
 
-/// Slot names before they were one namespace: a mount using one is an
-/// error naming the new name.
-pub const RENAMED_SLOTS: &[(&str, &str)] = &[
-    ("effort-review", "effort.review.details"),
-    ("task-detail", "work_item.detail.body"),
-    ("thread", "thread.plan.header"),
-    ("commit", "vcs.commit.details"),
-    ("uncommitted", "vcs.status.details"),
-    ("settings", "settings.section"),
-];
-
 /// What a left-nav panel is bound to: the project, the current stream, or
 /// the current thread — which of `stream_id` / `thread_id` its lenses get.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -888,7 +861,7 @@ pub struct Lens {
     pub hidden: bool,
     /// Commands the lens offers, as buttons or row actions (P6.B1).
     pub actions: Vec<LensAction>,
-    /// When the lens needs attention (a rail badge when mounted in `rail`).
+    /// When the lens needs attention (its panel's badge).
     pub alert: Option<LensAlert>,
     /// Repo-relative path of the lens file.
     pub path: String,
@@ -1929,24 +1902,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             _ => vec![],
         };
         let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
-        let renamed = RENAMED_SLOTS.iter().find(|(old, _)| *old == s.slot);
-        if let Some((old, new)) = renamed {
-            ext.errors.push(at(
-                &file,
-                mount_line,
-                format!("slot `{old}` is now `{new}`"),
-            ));
-        } else if s.slot == "rail" {
-            ext.errors.push(at(
-                &file,
-                mount_line,
-                format!(
-                    "the `rail` slot is gone: a lens that needs attention is a left-nav panel's \
-                     badge — `panels: [{{ id, title, scope: project, body: {0}, badge: {0} }}]`",
-                    s.lens
-                ),
-            ));
-        } else if slot_params.is_none() {
+        if slot_params.is_none() {
             ext.errors.push(at(
                 &file,
                 mount_line,
@@ -5761,10 +5717,10 @@ commands:
         assert!(!run("review/cov", "v", 91).await.firing);
     }
 
-    /// P6b.C1: slot names are one dotted namespace; an old name says its
-    /// new one, and the top-level keys that moved under `ui:` say where.
+    /// P6b.C1: slot names are one dotted namespace — any other is an
+    /// unknown slot — and `ui:` keys are unknown at the top.
     #[test]
-    fn old_slot_names_say_where_they_went_and_ui_keys_stay_under_ui() {
+    fn an_unknown_slot_is_an_error_and_ui_keys_stay_under_ui() {
         let (_d, ext) = load_x(
             &[(
                 "c",
@@ -5775,8 +5731,7 @@ commands:
         assert!(ext.ui.slots.is_empty());
         let errs = ext.errors.join("\n");
         assert!(
-            errs.contains("slot `commit` is now `vcs.commit.details`")
-                && errs.contains("extension.yaml:"),
+            errs.contains("unknown slot `commit`") && errs.contains("extension.yaml:"),
             "{errs}"
         );
         // Keys that live under `ui:` are unknown at the top.
@@ -5791,32 +5746,6 @@ commands:
                 "{key}: {errs}"
             );
         }
-    }
-
-    /// P6.G1: the `rail` slot is gone — a lens that needs attention is a
-    /// panel's badge. A rail mount says where it went.
-    /// The migration and the load error both rename into the one
-    /// namespace: every new name is a slot, no old name still is one.
-    #[test]
-    fn every_renamed_slot_names_a_slot() {
-        for (old, new) in RENAMED_SLOTS {
-            assert!(SLOTS.iter().any(|(s, _)| s == new), "{old} → {new}");
-            assert!(SLOTS.iter().all(|(s, _)| s != old), "{old}");
-        }
-    }
-
-    #[test]
-    fn a_rail_mount_is_an_error_naming_panels() {
-        let (_d, ext) = load_x(
-            &[("ok", "title: A\nquery: SELECT 1\nalert: { min_rows: 1 }\n")],
-            "ui:\n  slots:\n    - { slot: rail, lens: ok }\n",
-        );
-        assert!(ext.ui.slots.is_empty());
-        let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("`rail`") && errs.contains("panels:"),
-            "{errs}"
-        );
     }
 
     /// P6.G1: a panel is a lens in the left nav, bound to a scope, with an
@@ -5878,8 +5807,7 @@ commands:
     }
 
     /// P6.B1: an action is a command. Its placeholders must name a param
-    /// (or, in a row action, a column); the old fixed registry is refused
-    /// with where it went.
+    /// (or, in a row action, a column); anything else is refused.
     #[test]
     fn lens_actions_are_commands() {
         let (_d, ext) = load_x(
@@ -5913,8 +5841,8 @@ commands:
             ]
         );
         for (slug, needle) in [
-            ("b", "old fixed registry"),
-            ("c", "collector.sync"),
+            ("b", "actions:"),
+            ("c", "unknown field `action`"),
             ("d", "names no param"),
             ("e", "needs `row: true`"),
             ("f", "command name"),

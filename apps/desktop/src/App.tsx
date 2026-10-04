@@ -291,9 +291,8 @@ export function App() {
   // Per-thread active center tab. The map is the source of truth; `centerActive`
   // and `setCenterActive` below are derived helpers so existing handler code
   // keeps working unchanged. Each thread remembers its last active tab so
-  // switching threads restores it. The initial seed comes from the legacy
-  // global localStorage key (the "default" thread inherits whatever was last
-  // active before the per-thread refactor).
+  // switching threads restores it. A thread with none yet takes the
+  // last-active tab persisted across restarts (`readPersistedCenterActive`).
   // …and the rest of the tab layout (per-thread tab lists, per-tab
   // back/forward history, diff-spec registry) lives in the
   // useThreadPageTabs hook below, which also owns its persistence.
@@ -1310,8 +1309,7 @@ export function App() {
     },
     newTask() {
       // handleOpenPage is declared further down; forward through the ref
-      // so the menu/keyboard handler routes to a NewTaskPage tab
-      // (replaces the legacy openCreateModal-via-PlanPane path).
+      // so the menu/keyboard handler routes to a NewTaskPage tab.
       handleOpenPageRef.current?.(newTaskRef());
     },
     newStream() {
@@ -1562,8 +1560,8 @@ export function App() {
     });
     // Diff tabs live in threadPageTabs as the primary track now —
     // they participate in per-tab back/forward and share the same
-    // chrome as every other page kind. The legacy `diffTabs` array
-    // is just a spec registry indexed by id.
+    // chrome as every other page kind. `diffTabs` is only a spec
+    // registry indexed by id.
     if (selectedThreadId) {
       const ref: TabRef = {
         id,

@@ -87,10 +87,8 @@ export interface NewStreamPageProps {
 }
 
 /**
- * Full-tab "New stream" form. Replaces the inline modal that used to
- * live inside `StreamRail.tsx`. Form layout matches the legacy modal
- * (existing branch / new branch / existing worktree) so muscle memory
- * carries over.
+ * Full-tab "New stream" form: existing branch / new branch / existing
+ * worktree.
  */
 export function NewStreamPage({ vcsEnabled, defaultTitle, onClose, onCreated }: NewStreamPageProps) {
   const [mode, setMode] = useState<NewStreamMode>("existing");

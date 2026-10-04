@@ -437,25 +437,66 @@ fn a_test_only_module_is_not_production() {
     assert!(!has("crates/oxplow-app/src/test_fixtures.rs"));
 }
 
-/// What only a shim, alias or migrator for an old shape says (tsk865: no
-/// legacy code, no migration code). The SQL schema migrations aren't
-/// sources here — they upgrade the one database — and the two readers of
-/// rows already in it (`SnapshotTrigger::Legacy`, the comment selectors'
-/// position objects) don't say any of these.
-const LEGACY_SHIMS: &[&str] = &[
+/// What marks code kept for an old shape (tsk865, tsk920): a general
+/// word, matched case-insensitively, and the names of shims already
+/// removed, so neither comes back under any name.
+const LEGACY_MARKERS: &[&str] = &[
+    "legacy",
+    "back-compat",
+    "backcompat",
+    "backward compat",
+    "backwards compat",
+    "backward-compat",
+    "older shape",
+    "old shape",
+    "deprecated alias",
+    "#[deprecated",
+    "@deprecated",
+    "compat shim",
+    "for compatibility",
+    "api compatibility",
+    "old data",
     "migrate_v1",
     "migrate_gauges",
     "gauges_to_collectors",
-    "GAUGES_RETIRED",
+    "gauges_retired",
     "plugin migrate",
-    "migrate_legacy",
     "hook_bridge.py",
-    "\"legacy:",
-    "#[deprecated",
-    "@deprecated",
-    "Legacy alias",
-    "API compatibility",
-    "for back-compat",
+];
+
+/// Lines that carry a marker and stay, each with why: `(file, a piece of
+/// the line, reason)`. A row that no longer matches is stale.
+const LEGACY_KEPT: &[(&str, &str, &str)] = &[
+    (
+        "crates/oxplow-domain/src/snapshot.rs",
+        "Legacy",
+        "the `legacy` trigger V97 gave the snapshots taken before the op log: rows already in the database",
+    ),
+    (
+        "crates/oxplow-domain/src/events/schema.rs",
+        "Legacy,",
+        "`snapshot.taken`'s trigger for those same V97 rows",
+    ),
+    (
+        "apps/desktop/src/pages/LocalHistoryDashboardPage.tsx",
+        "legacy: \"\"",
+        "the label of that trigger",
+    ),
+    (
+        "apps/desktop/src/components/Comments/selectors.ts",
+        "egacy",
+        "comment selectors stored as a per-surface position object: rows already in the database",
+    ),
+    (
+        "apps/desktop/src/api-types.ts",
+        "egacy",
+        "the hand-written IPC types the generated bindings replace: tsk880",
+    ),
+    (
+        "apps/desktop/src/api.ts",
+        "egacy",
+        "the types still read from api-types.ts: tsk880",
+    ),
 ];
 
 /// The desktop's own TypeScript, tests and generated bindings aside.
@@ -488,23 +529,47 @@ fn desktop_sources() -> Vec<(String, String)> {
     out
 }
 
-/// tsk865: no production source keeps a shim, alias or migrator for an
-/// old shape — a manifest without `manifest: 2`, a `gauges:` block, a
-/// `collection:` block, an old key are errors, not conversions.
+/// tsk865, tsk920: no production source keeps a shim, alias or migrator
+/// for an old shape — a manifest without `manifest: 2`, a `gauges:`
+/// block, an old slot name, an old impact kind are errors, not
+/// conversions. Any line naming one (`LEGACY_MARKERS`) is either gone or
+/// listed in `LEGACY_KEPT` with why it stays.
 #[test]
 fn no_legacy_shims() {
-    let found: Vec<String> = production_sources()
-        .into_iter()
-        .chain(desktop_sources())
-        .flat_map(|(path, text)| {
-            LEGACY_SHIMS
+    let mut found = Vec::new();
+    let mut used = BTreeSet::new();
+    for (path, text) in production_sources().into_iter().chain(desktop_sources()) {
+        for (n, line) in text.lines().enumerate() {
+            let lower = line.to_lowercase();
+            if !LEGACY_MARKERS.iter().any(|m| lower.contains(m)) {
+                continue;
+            }
+            match LEGACY_KEPT
                 .iter()
-                .filter(|needle| text.contains(*needle))
-                .map(|needle| format!("{path}: {needle}"))
-                .collect::<Vec<_>>()
-        })
+                .position(|(p, piece, _)| *p == path && line.contains(piece))
+            {
+                Some(i) => {
+                    used.insert(i);
+                }
+                None => found.push(format!("{path}:{}: {}", n + 1, line.trim())),
+            }
+        }
+    }
+    assert_eq!(
+        found,
+        Vec::<String>::new(),
+        "remove the old shape, or list the line in LEGACY_KEPT with why it stays"
+    );
+    let stale: Vec<_> = LEGACY_KEPT
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !used.contains(i))
+        .map(|(_, k)| k)
         .collect();
-    assert_eq!(found, Vec::<String>::new());
+    assert!(
+        stale.is_empty(),
+        "LEGACY_KEPT rows that match nothing: {stale:?}"
+    );
 }
 
 /// The `[section]` each line of a Cargo manifest is in, paired with the

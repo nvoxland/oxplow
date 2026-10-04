@@ -19,9 +19,8 @@ export interface FilesPageProps {
 }
 
 /**
- * Thin Page wrapper around the existing ProjectPanel (the file tree +
- * git summary). The legacy left-rail "Files" tool window stays available
- * during the migration.
+ * Thin Page wrapper around the ProjectPanel (the file tree + git
+ * summary).
  */
 export function FilesPage(props: FilesPageProps) {
   return (

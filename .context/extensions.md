@@ -141,8 +141,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     panel's lenses from one owner (`useExtensionPanelRuns`), so a badge
     runs once per refresh. The body renders compact; the badge's
     alert count shows on the panel, and the core **Alerts** panel lists
-    every firing badge. The `rail` slot is gone: a rail mount is a load
-    error naming `panels:`. oxplow-review's Waiting on You is a panel
+    every firing badge. oxplow-review's Waiting on You is a panel
     whose badge is its own lens.
   - **Actions are commands** (P6.B1, target §11.4): `actions:` declares
     `{ id, label, command, input?, row? }` — a button above the result, or,
@@ -161,9 +160,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       alike, so the two can't disagree.
       At load, a `{{param.x}}` must name a declared param and `{{row.x}}`
       needs `row: true`; `validate_extension` checks `{{row.x}}` against
-      the result's columns; the command name must be well-formed. The old
-      fixed registry (`copy`, `add-to-context`, `run-source`) is a load
-      error saying where each went.
+      the result's columns; the command name must be well-formed. Any
+      other shape is a field error.
     - **A lens grants no power.** `lens_actions::run_lens_action` runs the
       command through the bus as `Actor::Lens { lens_id, on_behalf_of }`
       — `Human` from the UI (`run_lens_action` RPC), the calling agent from
@@ -627,8 +625,10 @@ kind is exactly the evidence promotion requires (target §10.1, §12).
 **Only v2 loads (tsk865).** A manifest without `manifest: 2` is a load
 error (`extension.yaml:1`); so is any key v2 doesn't have (`sources:`, a
 top-level `slots:`, `gauges:` — `deny_unknown_fields`). There is no
-reader or migrator for v1. An old slot name under `ui.slots` is an error
-naming its new one (`RENAMED_SLOTS`). `Extension.manifest_version` is the
+reader or migrator for v1, and no recogniser for an old shape: a slot
+name that isn't one is an unknown slot, an action that isn't `{ id,
+label, command, input?, row? }` a field error (tsk920).
+`Extension.manifest_version` is the
 version the file declares.
 
 ## The SDK
@@ -852,7 +852,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - `actions`: commands the lens offers, `{ id, label, command, input?,
   row? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
   for whoever pressed, so they grant no power.
-- `alert`: a row-count or threshold condition that shows a rail badge
+- `alert`: a row-count or threshold condition that shows a panel badge
   (nudging the agent is what advisories are for).
 
 > **Target (not built yet).** From the original design: `hunks` (an
@@ -874,12 +874,10 @@ Slots are the **only** way an extension reaches a core page. Core pages
 declare them (`SLOTS` in `extensions.rs`) and render whatever is mounted,
 in declaration order (there is no `order` field). With nothing mounted,
 the page is plain. **Slot names are one dotted namespace,
-`<capability>.<page>.<region>`** (P6b.C1): a mount using an old name
-(`effort-review`, `task-detail`, `thread`, `commit`, `uncommitted`,
-`settings` — `RENAMED_SLOTS`) is an error naming the new one, and a
-manifest still using top-level `slot_mounts:` / `decorators:` /
-`replacements:` fails at that line with where it moved under `ui:`
-(`manifest_v2::moved_key`).
+`<capability>.<page>.<region>`** (P6b.C1): a mount naming anything else
+is an unknown slot (listing the known ones), and a top-level
+`slot_mounts:` / `decorators:` / `replacements:` is an unknown field —
+they live under `ui:`.
 
 | Slot | Core page | Params |
 |---|---|---|

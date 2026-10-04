@@ -89,8 +89,8 @@ pub fn parse_claude_usage(content: &str) -> UsageDelta {
         // Claude writes one JSONL line per content block (thinking/text/
         // tool_use) and repeats the message's cumulative `usage` on each, so
         // count each `message.id` once — else a message inflates ~2-3× by its
-        // block count (tsk23). Lines without an id (synthetic/legacy) fall
-        // through and are counted as before.
+        // block count (tsk23). A line without an id (a synthetic one) is
+        // counted on its own.
         if let Some(id) = msg.get("id").and_then(|i| i.as_str()) {
             if !seen.insert(id.to_string()) {
                 continue;
@@ -357,7 +357,7 @@ pub struct TokenUsageService {
     efforts: Arc<SqliteEffortStore>,
     threads: Arc<SqliteThreadStore>,
     /// Durable fact layer (epic tsk12): per-kind token totals land as facts
-    /// on the `oxplow.tokens` measure (the legacy sample write is gone, T-E2).
+    /// on the `oxplow.tokens` measure.
     facts: Arc<SqliteFactStore>,
 }
 

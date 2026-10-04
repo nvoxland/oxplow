@@ -401,8 +401,7 @@ pub enum AnalysisIngest {
 #[derive(Clone)]
 pub struct CollectionService {
     /// Durable fact layer (epic tsk12): coverage/test/analysis producers
-    /// dual-write atomic facts here beside the legacy samples/findings. The
-    /// aggregation engine reads these; the samples are the rebuildable cache.
+    /// write their atomic facts here; the aggregation engine reads them.
     facts: Arc<SqliteFactStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
     efforts: Arc<SqliteEffortStore>,
@@ -1145,7 +1144,7 @@ impl CollectionService {
         // ATTRIBUTE via the unified run ledger (the effort resolved above), then
         // refresh the panel for the effort it landed on (if any). Observe-always:
         // the run is already recorded above regardless of effort. The claimed ref
-        // is the CAPTURE id (T-E1) — the legacy run row is no longer the identity.
+        // is the CAPTURE id (T-E1).
         if let (Some(cid), Some(effort)) = (capture_id, owning.as_ref()) {
             self.claim_run(effort, cid).await;
         }
@@ -1507,8 +1506,7 @@ impl CollectionService {
             .first()
             .cloned()
             .unwrap_or_else(|| "analysis".to_string());
-        // The capture-spine copy of the verbatim payload (T-E1, tsk48) — taken
-        // before the legacy detail-finding write consumes `detail`.
+        // The capture-spine copy of the verbatim payload (T-E1, tsk48).
         let capture_detail_json = detail
             .as_ref()
             .and_then(|d| Self::capture_detail("analysis-detail", d));
@@ -2425,8 +2423,7 @@ impl CollectionService {
                 return Ok::<(), DomainError>(());
             }
             // One fact on the `oxplow.nudge` event measure (value 1), the nudge
-            // kind as subject so Sum() reconstructs the fired count (epic tsk12;
-            // the legacy sample write is gone, T-E2).
+            // kind as subject so Sum() reconstructs the fired count (epic tsk12).
             if let Some(measure) = self.facts.get_measure("oxplow.nudge").await? {
                 let fact = NewFact {
                     subject_kind: Some("nudge".into()),
@@ -2808,9 +2805,9 @@ impl CollectionService {
                     self.file_delta_from_facts(spec, &effort, &claimed, stream, &mut fact_cache)
                         .await
                 }
-                // Coverage stays effort-relative + on the legacy detail payload
-                // (line-sets aren't in facts yet) — derive the diff from it via
-                // the spec's legacy definition (tsk270, T-D scope guard).
+                // Coverage stays effort-relative, on the capture's detail
+                // payload (line-sets aren't in facts yet): the diff is derived
+                // from it (tsk270, T-D scope guard).
                 EffortAttributionFamily::Coverage => {
                     self.coverage_delta_for_spec(spec, &effort).await
                 }

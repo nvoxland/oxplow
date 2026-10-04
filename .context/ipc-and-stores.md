@@ -682,9 +682,10 @@ each other:
    relevant write methods (upsert, record_file, link create/delete)
    call the slice helper after the primary write. There is no way to
    construct a store that silently skips graph mirroring — tests get
-   the projection for free, and the backfill
-   (`page_ref_backfill.rs`) exists only for rows written before
-   mirroring did.
+   the projection for free, and the boot restate
+   (`page_ref_backfill.rs`) is the repair path: it re-projects every
+   SQLite-sourced slice, so a migration that resets `page_ref` (V92)
+   or a writer's drift is undone at the next start.
 4. **Event-driven projection** where the write logs an event. A task
    transition logs `work_item.transitioned` in its transaction, and
    `PageRefWorkItemConsumer` (`oxplow-app/src/page_ref_consumers.rs`)

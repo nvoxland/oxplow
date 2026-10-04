@@ -362,8 +362,7 @@ pub struct MetricCapture {
     pub ended_at: Option<Timestamp>,
     /// The verbatim per-run detail payload, as an envelope
     /// `{"kind": "<detail kind>", "payload": {…}}` (test suite/case tree,
-    /// coverage per-file line-sets, analysis findings) — the capture-spine home
-    /// of the legacy `metric_finding` `*-detail` rows (T-E1, tsk48).
+    /// coverage per-file line-sets, analysis findings; T-E1, tsk48).
     pub detail_json: Option<String>,
     /// Fingerprint of the LOGIC that produced this capture (V56, tsk45) — for a
     /// gauge, a hash of its script + compute knobs + `emits`. When a gauge's current

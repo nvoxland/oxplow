@@ -48,8 +48,8 @@ pub enum EffortAttributionFamily {
     /// `(current − baseline)`. Backed by [`FileKind`].
     File,
     /// Coverage: effort-relative — the diff is DERIVED at read against the
-    /// effort's start snapshot (`coverage_delta`), a documented special case still
-    /// on the legacy detail payload (line-sets aren't in facts yet). Backed by
+    /// effort's start snapshot (`coverage_delta`), a documented special case
+    /// on the capture's detail payload (line-sets aren't in facts yet). Backed by
     /// [`RunKind`].
     Coverage,
     /// Other run-kind facts (tests, analysis): before→after / `sum` over the facts

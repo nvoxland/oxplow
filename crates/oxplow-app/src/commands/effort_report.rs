@@ -194,6 +194,22 @@ async fn report(
     input: ReportInput,
 ) -> Result<Value, CommandError> {
     validate_work_item_ref(&input.work_item).map_err(|e| invalid("/work_item", e.to_string()))?;
+    use oxplow_db::page_ref_projections::{impact_kind, IMPACT_KINDS};
+    if let Some((i, imp)) = input
+        .impacts
+        .iter()
+        .enumerate()
+        .find(|(_, imp)| impact_kind(&imp.kind).is_none())
+    {
+        return Err(invalid(
+            &format!("/impacts/{i}/kind"),
+            format!(
+                "`{}` isn't an impact kind: one of {}",
+                imp.kind,
+                IMPACT_KINDS.join(", ")
+            ),
+        ));
+    }
     // The report reads the settled effort: a transition just before it
     // (the close's) has its snapshot bracket pinned.
     deps.tasks.settle_lifecycle().await;
@@ -515,6 +531,39 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+    }
+
+    /// tsk920: an impact names its target in the one documented vocabulary
+    /// (`wiki | task | file | directory | git_commit | finding`); any other
+    /// kind is refused at its index, not dropped.
+    #[tokio::test]
+    async fn an_impact_of_another_kind_is_refused() {
+        let fx = services_with_effort().await;
+        for kind in ["commit", "work_item", "dir", "git-commit", "page"] {
+            let err = fx
+                .svc
+                .commands
+                .run(
+                    &agent(&fx),
+                    REPORT,
+                    json!({
+                        "work_item": work_item_ref(fx.task),
+                        "summary": "s",
+                        "impacts": [
+                            { "kind": "wiki", "id": "a-page" },
+                            { "kind": kind, "id": "abc1234" },
+                        ],
+                    }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), message }
+                    if f == "/impacts/1/kind" && message.contains("git_commit")),
+                "{kind}: {err:?}"
+            );
+        }
     }
 
     /// Amending claims and disclaims files (a disclaim is acknowledged;

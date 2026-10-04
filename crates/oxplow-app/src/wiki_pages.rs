@@ -13,8 +13,8 @@
 //!    - `bare-slug` (kebab-case, no slash, no extension) → related-note ref
 //!
 //!    Custom display text after `|` is stripped (`[[a/b.ts|label]]`).
-//! 2. **Inline file paths** — fallback for legacy pages that didn't
-//!    use the `[[…]]` syntax. At least one slash + a 1-6 char extension,
+//! 2. **Inline file paths** — a path written as plain text, without
+//!    the `[[…]]` syntax. At least one slash + a 1-6 char extension,
 //!    not preceded by `/` or alphanumerics so we don't pick up partial
 //!    URLs.
 
@@ -126,7 +126,7 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
         // they're for the renderer, not wiki indexing.
     }
 
-    // 2. Inline file paths (legacy free-text mentions).
+    // 2. Inline file paths (plain-text mentions).
     let stripped = strip_urls(body);
     for path in find_inline_paths(&stripped) {
         files.insert(path);

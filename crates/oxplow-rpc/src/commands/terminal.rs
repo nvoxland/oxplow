@@ -198,11 +198,9 @@ fn toml_cli_string(value: &str) -> String {
 /// non-shell `pane_target`.
 ///
 /// `pane_target` is either the bare `"shell"` (the default Terminal-page
-/// terminal — kept verbatim so it reattaches the existing persistent
-/// shell after this upgrade) or `"shell:<id>"` for an additional
-/// terminal. The full `pane_target` rides inside the key so each terminal
-/// id resolves to its own PTY; the bare-shell case reproduces the legacy
-/// `{stream}|shell|{mode}` key exactly.
+/// terminal) or `"shell:<id>"` for an additional terminal. The full
+/// `pane_target` rides inside the key (`{stream}|{pane_target}|{mode}`),
+/// so each terminal id resolves to its own PTY.
 fn shell_session_key(stream_id: &str, pane_target: &str, transport_mode: &str) -> Option<String> {
     if pane_target == "shell" || pane_target.starts_with("shell:") {
         Some(format!("{stream_id}|{pane_target}|{transport_mode}"))

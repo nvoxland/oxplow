@@ -127,8 +127,8 @@ export function CommitGraphTable({
 
 /**
  * Adapter that owns the per-row `useRouteDispatch` so the page-context
- * path picks up siblings while the legacy `onSelect` callback (rail
- * cases, dashboard) still works as the new-tab fallback.
+ * path picks up siblings while the `onSelect` callback (rail, dashboard)
+ * is the new-tab fallback.
  */
 function CommitRowDispatcher({
   sha,
@@ -364,8 +364,8 @@ function pad3(n: number): string {
  */
 export function formatTimestamp(input: string | number): string {
   if (!input && input !== 0) return "";
-  // Bindings ship timestamps as Unix seconds; the legacy code path
-  // passed an ISO string. Accept both.
+  // Bindings ship timestamps as Unix seconds; rows read through models
+  // carry an ISO string. Accept both.
   const date =
     typeof input === "number"
       ? new Date(input * 1000)

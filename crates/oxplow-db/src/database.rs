@@ -1302,6 +1302,43 @@ mod tests {
         }
     }
 
+    /// V165 (tsk920): impacts stored under another spelling of a kind take
+    /// the documented one; the rest are untouched.
+    #[test]
+    fn v165_names_every_stored_impact_kind_as_documented() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        migrate_to_for_tests(&mut conn, 164);
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        let impacts = r#"[{"kind":"commit","id":"abc"},{"kind":"wiki","id":"p","action":"updated"},{"kind":"work_item","id":"oxplow:tsk3"},{"kind":"dir","id":"src"},{"kind":"git-commit","id":"def"}]"#;
+        conn.execute(
+            "INSERT INTO effort (id, thread_id, work_item, started_at, impacts_json)
+             VALUES (1, 1, 'work_item:oxplow:tsk1', '2026-01-01T00:00:00.000000Z', ?1),
+                    (2, 1, 'work_item:oxplow:tsk2', '2026-01-01T00:00:00.000000Z', NULL)",
+            [impacts],
+        )
+        .unwrap();
+        migrate_and_compile(&mut conn).unwrap();
+        let kept: Vec<Option<String>> = conn
+            .prepare("SELECT impacts_json FROM effort ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let first: serde_json::Value = serde_json::from_str(kept[0].as_deref().unwrap()).unwrap();
+        assert_eq!(
+            first,
+            serde_json::json!([
+                {"kind":"git_commit","id":"abc"},
+                {"kind":"wiki","id":"p","action":"updated"},
+                {"kind":"task","id":"oxplow:tsk3"},
+                {"kind":"directory","id":"src"},
+                {"kind":"git_commit","id":"def"},
+            ])
+        );
+        assert_eq!(kept[1], None);
+    }
+
     /// V97 backfills one `legacy` op per existing snapshot, each pointing
     /// at the previous snapshot of its own stream.
     #[test]

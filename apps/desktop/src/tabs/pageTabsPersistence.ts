@@ -2,8 +2,8 @@
 // lists, per-tab back/forward history, the diff-spec registry, open
 // file sessions (paths only), and the last-active center tab.
 //
-// Extracted from App.tsx so the read-side coercions (corrupt JSON,
-// legacy blob shapes) are unit-testable without mounting the shell.
+// Extracted from App.tsx so the read side (corrupt JSON, a shape that
+// isn't the current one) is unit-testable without mounting the shell.
 // Every reader is total: parse failures and shape mismatches degrade
 // to "nothing persisted", never a throw.
 
@@ -83,8 +83,6 @@ export function readPersistedThreadPageHistory(): ThreadHistory {
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
-    // Persisted blob may be the older shape (TabRef[] for back/
-    // forward) — coerce on the fly so old data still restores.
     const out: ThreadHistory = {};
     for (const [threadId, perThread] of Object.entries(parsed as Record<string, unknown>)) {
       if (typeof threadId !== "string" || !perThread || typeof perThread !== "object") continue;
@@ -92,18 +90,14 @@ export function readPersistedThreadPageHistory(): ThreadHistory {
       for (const [tabId, raw] of Object.entries(perThread as Record<string, unknown>)) {
         if (!raw || typeof raw !== "object") continue;
         const entry = raw as { back?: unknown; forward?: unknown; siblings?: unknown };
-        const coerce = (arr: unknown): HistoryFrame[] => {
-          if (!Array.isArray(arr)) return [];
-          return arr.map((item) => {
-            if (item && typeof item === "object" && "ref" in (item as object)) {
-              return item as HistoryFrame;
-            }
-            return { ref: item as TabRef, siblings: null };
-          });
-        };
+        // A stack entry that isn't a frame is dropped.
+        const frames = (arr: unknown): HistoryFrame[] =>
+          Array.isArray(arr)
+            ? arr.filter((item): item is HistoryFrame => !!item && typeof item === "object" && "ref" in item)
+            : [];
         inner[tabId] = {
-          back: coerce(entry.back),
-          forward: coerce(entry.forward),
+          back: frames(entry.back),
+          forward: frames(entry.forward),
           siblings: (entry.siblings ?? null) as ThreadHistory[string][string]["siblings"],
         };
       }

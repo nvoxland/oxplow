@@ -34,8 +34,8 @@ pub struct PageVisit {
     pub page_kind: String,
     pub page_id: String,
     /// Human-readable label captured at activation time — the same
-    /// string the tab strip displays. NULL for legacy rows recorded
-    /// before V10 (renderer falls back to page_id for those).
+    /// string the tab strip displays. NULL when none was captured (the
+    /// renderer falls back to page_id).
     pub label: Option<String>,
     pub visited_at: Timestamp,
     pub duration_ms: Option<i64>,
@@ -64,7 +64,7 @@ pub trait PageVisitStore: Send + Sync {
         thread_id: Option<&str>,
     ) -> Result<PageVisit, DomainError>;
     /// Recent visits, optionally scoped to one thread. `None` returns
-    /// every visit across threads (the legacy global view).
+    /// every visit across threads (the global view).
     async fn list_recent(
         &self,
         limit: usize,

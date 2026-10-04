@@ -7,7 +7,7 @@
 //! A test regenerates each schema from its Rust type and fails if the
 //! file differs: a published `type@v` is a contract consumers (plugins,
 //! lenses, the agent) were written against, so a change is a **new
-//! version** (`V + 1`, with an `upcast` from the old shape), never an
+//! version** (`V + 1`, with an `upcast` from the version before), never an
 //! edit. Run the test with `OXPLOW_BLESS=1` to write a new golden.
 //!
 //! **Namespaces.** Core types live in the namespaces of

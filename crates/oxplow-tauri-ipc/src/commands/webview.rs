@@ -4,7 +4,7 @@ use crate::error::IpcError;
 
 /// Open an external URL in a sandboxed `WebviewWindow`.
 ///
-/// Replaces the legacy `<webview>` tag flow. The new window inherits
+/// The new window inherits
 /// the `external-url` capability defined in
 /// `apps/desktop/src-tauri/capabilities/external-url.json`, which
 /// grants zero oxplow commands and zero plugin permissions.

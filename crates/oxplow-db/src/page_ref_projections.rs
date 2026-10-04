@@ -128,16 +128,18 @@ pub fn effort_ref_types() -> Vec<String> {
     ]
 }
 
-/// Normalize a `TaskImpact.kind` an agent wrote (`task`, `git_commit`,
-/// `directory`, …) to the canonical ref kind it means. Input
-/// normalization only: what's stored is always canonical.
-pub fn normalize_impact_kind(kind: &str) -> Option<&'static str> {
+/// The kinds a `TaskImpact` may name, as the agent's tools document them.
+pub const IMPACT_KINDS: [&str; 6] = ["wiki", "task", "file", "directory", "git_commit", "finding"];
+
+/// The page-ref kind a `TaskImpact.kind` (one of [`IMPACT_KINDS`])
+/// projects to; `None` for any other (refused where impacts come in).
+pub fn impact_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "wiki" => Some(KIND_WIKI),
-        "task" | "work_item" => Some(KIND_WORK_ITEM),
+        "task" => Some(KIND_WORK_ITEM),
         "file" => Some(KIND_FILE),
-        "directory" | "dir" => Some(KIND_DIR),
-        "git_commit" | "git-commit" | "commit" => Some(KIND_COMMIT),
+        "directory" => Some(KIND_DIR),
+        "git_commit" => Some(KIND_COMMIT),
         "finding" => Some(KIND_FINDING),
         _ => None,
     }
@@ -150,7 +152,7 @@ pub fn normalize_impact_kind(kind: &str) -> Option<&'static str> {
 pub fn effort_impact_edges(source: &str, impacts: &[TaskImpact]) -> Vec<PageRefEdge> {
     let mut out = Vec::new();
     for imp in impacts {
-        let Some(target_kind) = normalize_impact_kind(&imp.kind) else {
+        let Some(target_kind) = impact_kind(&imp.kind) else {
             continue;
         };
         if imp.id.trim().is_empty() {
@@ -683,10 +685,15 @@ mod tests {
                 action: Some("referenced".into()),
             },
             TaskImpact {
-                kind: "dir".into(),
+                kind: "directory".into(),
                 id: "src/x".into(),
                 action: None,
             },
+            TaskImpact {
+                kind: "dir".into(),
+                id: "src/y".into(),
+                action: None,
+            }, // not an impact kind — filtered
             TaskImpact {
                 kind: "task".into(),
                 id: "7".into(),

@@ -32,8 +32,8 @@ pub struct RecoveryService {
     /// Optional wiring for reconciling unattributed changes when a
     /// restart-recovery close brackets an orphaned effort. When absent
     /// (e.g. minimal test setups), orphan efforts are still closed —
-    /// they just keep the legacy `finish(None, None)` behaviour with no
-    /// end snapshot and no per-path reconciliation.
+    /// they finish with `finish(None, None)`: no end snapshot and no
+    /// per-path reconciliation.
     threads: Option<Arc<SqliteThreadStore>>,
     snapshot_captures: Option<SnapshotCaptureRegistry>,
 }

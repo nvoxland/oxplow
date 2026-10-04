@@ -466,9 +466,8 @@ export function dashboardRef(variant: DashboardKind): TabRef {
 }
 
 /**
- * Form pages. These replaced the legacy modal dialogs (NewStreamModal /
- * NewtasksModal / Stream-Thread settings) with a focused full-tab
- * workspace, matching `SettingsPage`.
+ * Form pages: a focused full-tab workspace for each form (new stream,
+ * new task, stream and thread settings), matching `SettingsPage`.
  */
 
 export interface NewtasksPayload {

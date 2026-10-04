@@ -4,11 +4,9 @@
  * unit-testable (see `terminalTabs.test.ts`).
  *
  * The FIRST terminal in every stream uses the sentinel id
- * {@link DEFAULT_TERMINAL_ID}. It maps to the legacy bare `"shell"`
- * `pane_target` and the legacy `stream.id` comment target, so the
- * single shell + any comments that existed before multi-terminal support
- * keep working with zero migration. Additional terminals get generated
- * ids → `shell:<id>` pane target + `<streamId>:<id>` comment target.
+ * {@link DEFAULT_TERMINAL_ID}: the bare `"shell"` `pane_target` and the
+ * `stream.id` comment target. Additional terminals get generated ids →
+ * `shell:<id>` pane target + `<streamId>:<id>` comment target.
  */
 export interface TerminalTab {
   id: string;

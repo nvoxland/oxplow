@@ -81,15 +81,14 @@ interface Props {
    *  menu-click dispatches where React's effect scheduler can stall. */
   registerOpenCreate?(fn: () => void): void;
   /** Route the "new task" / "+ Task on epic" buttons to a NewTaskPage
-   *  tab. When omitted, the legacy modal path stays in place (used by
-   *  tests and standalone usages). */
+   *  tab. When omitted, those buttons do nothing (tests, standalone
+   *  usages). */
   onOpenNewTaskPage?(payload: { parentId?: string | null }): void;
   /** Route a row click / Enter to the read+edit TaskPage tab for that
    *  item. When omitted, row clicks still select but no page opens. */
   onOpenTaskPage?(itemId: string): void;
   /** When true, agent-authored tasks are filtered out of the visible
-   *  groups. Mirrors the legacy `plan-toggle-hide-auto` toggle from the
-   *  pre-IA-redesign Plan pane. Epics are always kept so their children
+   *  groups. Epics are always kept so their children
    *  don't silently lose their container row. */
   hideAuto?: boolean;
   /** Restrict the visible sections (Ready / Blocked / etc). Used by the
@@ -384,9 +383,8 @@ export function PlanPane({
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
   const openCreateModal = (parentId: string | null = null) => {
-    // The legacy inline NewtasksModal was retired by the IA redesign;
-    // creation always routes through a full-tab NewTaskPage now. Tests
-    // / standalone harnesses must wire `onOpenNewTaskPage`.
+    // Creation always routes through a full-tab NewTaskPage. Tests /
+    // standalone harnesses must wire `onOpenNewTaskPage`.
     onOpenNewTaskPage?.({ parentId });
   };
 

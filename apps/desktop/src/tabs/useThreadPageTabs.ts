@@ -22,8 +22,8 @@ import {
  * - `diffTabs` — the diff-spec registry, indexed by tab id (diff tabs
  *   themselves live in `threadPageTabs`; this carries their specs).
  * - `threadCenterActive` — per-thread last-active center tab pointer
- *   (in-memory; the cross-restart seed is the legacy global
- *   centerActive key, still handled by the shell).
+ *   (in-memory; across restarts the shell persists the last-active
+ *   tab, `CENTER_ACTIVE_STORAGE_KEY`).
  *
  * State restores from localStorage on mount and writes back on every
  * change. App.tsx consumes this as the single owner of tab layout.

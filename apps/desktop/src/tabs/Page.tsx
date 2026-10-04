@@ -34,7 +34,7 @@ export interface PageNavBarConfig {
   /** The page's ref and stream, for the Ask menu. */
   ask?: AskTarget;
   /** Backlinks dropdown content. Mutually exclusive with the
-   *  legacy footer panel — when this is supplied, the footer is
+   *  collapsible footer panel — when this is supplied, the footer is
    *  suppressed even if the `backlinks` prop is also set. */
   backlinks?: { count: number; body: ReactNode };
   /** Outbound dropdown — same shape as backlinks. Pages set this
@@ -77,7 +77,7 @@ export interface PageProps {
   /** Optional backlinks. When the active page has a nav bar (which it
    *  always does inside a `PageNavigationContext`), backlinks render
    *  as a dropdown in the nav bar with the count badge; otherwise the
-   *  legacy collapsible footer renders. Pass either a bare `ReactNode`
+   *  collapsible footer renders. Pass either a bare `ReactNode`
    *  (count unknown) or `{ count, body }` to surface a badge. */
   backlinks?: ReactNode | { count: number; body: ReactNode };
   /** Optional outbound list — what THIS page points AT. Renders as a
@@ -94,7 +94,7 @@ export interface PageProps {
   commentsNav?: ReactNode;
   /** Optional nav-bar config. When supplied, the browser-style nav bar
    *  renders between header and body, and (if it carries a `backlinks`
-   *  block) suppresses the legacy footer panel. */
+   *  block) suppresses the footer panel. */
   navBar?: PageNavBarConfig;
   /** Test id applied to the page root. */
   testId?: string;
@@ -213,7 +213,7 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
     ask: ctxNav.ask,
   } : undefined);
   // When a nav bar is present, promote backlinks into its dropdown
-  // and suppress the legacy footer. Pages that explicitly set
+  // and suppress the footer. Pages that explicitly set
   // `navBar.backlinks` themselves still win.
   const effectiveNavBar: PageNavBarConfig | undefined = baseNavBar
     ? {

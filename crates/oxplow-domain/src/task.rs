@@ -147,10 +147,10 @@ pub struct TaskNote {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct TaskImpact {
     /// Page kind being impacted — `wiki | task | file | directory
-    /// | git_commit | finding`. Stored snake-case on the wire,
-    /// normalized to the canonical `page_ref` kinds at projection
-    /// time (`git_commit` → `commit`, `directory` → `dir`, `task` →
-    /// `work_item`; see `normalize_impact_kind`).
+    /// | git_commit | finding`, and no other (`effort.report` refuses
+    /// one). Projected to the canonical `page_ref` kinds (`git_commit`
+    /// → `commit`, `directory` → `dir`, `task` → `work_item`; see
+    /// `impact_kind`).
     pub kind: String,
     /// Canonical id for that page kind (slug, integer string, repo
     /// path, sha — see `page_ref_projections` docs).

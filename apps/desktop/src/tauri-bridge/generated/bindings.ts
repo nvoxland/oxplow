@@ -895,7 +895,7 @@ export const commands = {
 	/**
 	 *  Open an external URL in a sandboxed `WebviewWindow`.
 	 * 
-	 *  Replaces the legacy `<webview>` tag flow. The new window inherits
+	 *  The new window inherits
 	 *  the `external-url` capability defined in
 	 *  `apps/desktop/src-tauri/capabilities/external-url.json`, which
 	 *  grants zero oxplow commands and zero plugin permissions.
@@ -3601,7 +3601,7 @@ export type Lens_Deserialize = {
 	hidden: boolean,
 	// Commands the lens offers, as buttons or row actions (P6.B1).
 	actions: LensAction[],
-	// When the lens needs attention (a rail badge when mounted in `rail`).
+	// When the lens needs attention (its panel's badge).
 	alert: LensAlert | null,
 	// Repo-relative path of the lens file.
 	path: string,
@@ -3640,7 +3640,7 @@ export type Lens_Serialize = {
 	hidden: boolean,
 	// Commands the lens offers, as buttons or row actions (P6.B1).
 	actions: LensAction[],
-	// When the lens needs attention (a rail badge when mounted in `rail`).
+	// When the lens needs attention (its panel's badge).
 	alert: LensAlert | null,
 	// Repo-relative path of the lens file.
 	path: string,
@@ -4274,8 +4274,8 @@ export type PageVisit = {
 	page_id: string,
 	/**
 	 *  Human-readable label captured at activation time — the same
-	 *  string the tab strip displays. NULL for legacy rows recorded
-	 *  before V10 (renderer falls back to page_id for those).
+	 *  string the tab strip displays. NULL when none was captured (the
+	 *  renderer falls back to page_id).
 	 */
 	label: string | null,
 	visited_at: Timestamp,

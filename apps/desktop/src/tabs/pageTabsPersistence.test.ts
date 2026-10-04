@@ -65,7 +65,7 @@ describe("readPersistedThreadPageHistory", () => {
     expect(readPersistedThreadPageHistory()).toEqual({});
   });
 
-  test("legacy shape (bare TabRef[] stacks) coerces to HistoryFrame[]", () => {
+  test("a stack entry that isn't a frame is dropped (tsk920)", () => {
     window.localStorage.setItem(
       THREAD_HISTORY_STORAGE_KEY,
       JSON.stringify({
@@ -73,11 +73,7 @@ describe("readPersistedThreadPageHistory", () => {
       }),
     );
     const restored = readPersistedThreadPageHistory();
-    expect(restored.thr1["file:src/b.ts"]).toEqual({
-      back: [{ ref: FILE_A, siblings: null }],
-      forward: [],
-      siblings: null,
-    });
+    expect(restored.thr1["file:src/b.ts"]).toEqual({ back: [], forward: [], siblings: null });
   });
 
   test("current shape round-trips unchanged", () => {

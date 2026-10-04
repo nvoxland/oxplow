@@ -860,8 +860,8 @@ impl MetricsService {
     ///    tests, coverage, analysis, lifecycle, nudges — `toggleable: false`,
     ///    listed even with zero recorded data so the user can see they exist
     ///    (tsk286);
-    /// 4. every other seeded `metric_definition` — installed plugin metrics (and
-    ///    legacy rows) not covered above. Also `toggleable: false`.
+    /// 4. every other seeded spec — installed plugin metrics not covered
+    ///    above. Also `toggleable: false`.
     pub async fn catalog(&self) -> Vec<MetricCatalogEntry> {
         let resolved = self.resolved_specs();
         let by_key: std::collections::HashMap<&str, &_> =
@@ -965,8 +965,8 @@ impl MetricsService {
             }
         }
         // Every other seeded SPEC — installed plugin metrics and anything else
-        // in the spec catalog not covered above (T-E2: the legacy definition
-        // table is gone). Best-effort: a store read error just yields the set
+        // in the spec catalog not covered above. Best-effort: a store read
+        // error just yields the set
         // assembled so far.
         if let Some(facts) = self.fact_store.as_ref() {
             if let Ok(specs) = facts.list_specs().await {

@@ -24,8 +24,7 @@ export type DoneWorkPageProps =
 /**
  * Full descending list of done + canceled items for the current
  * thread. Archived items live on the dedicated Archived page (link
- * in the Done section header) so the in-section toggle the legacy
- * AllWorkPage carried is gone.
+ * in the Done section header).
  */
 export function DoneWorkPage({ onOpenPage, ...rest }: DoneWorkPageProps) {
   const viewArchived = (

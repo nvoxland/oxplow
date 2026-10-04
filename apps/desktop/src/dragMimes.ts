@@ -8,8 +8,8 @@
  *
  * **A new drag kind gets a new MIME here rather than overloading an
  * existing one**, and it gets it *here* rather than as a `const` next to
- * whichever component happened to introduce it. That was the old shape and
- * it went wrong the predictable way: `application/x-oxplow-task` ended up
+ * whichever component happened to introduce it. Declared beside their
+ * components, they went wrong the predictable way: `application/x-oxplow-task` ended up
  * declared twice — once in the (long-dead) `ThreadRail` component and once
  * in `agent-context-dnd.ts` so the decoder could avoid importing the React
  * tree — with a unit test whose entire job was to assert the two copies

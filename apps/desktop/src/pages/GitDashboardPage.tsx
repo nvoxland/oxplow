@@ -1310,7 +1310,7 @@ function RemoteBranchesCard({
 function formatDate(input: string | number | null | undefined): string {
   if (!input && input !== 0) return "";
   try {
-    // Bindings ship Unix-seconds numbers; legacy callers pass ISO strings.
+    // Bindings ship Unix-seconds numbers; model rows carry ISO strings.
     const d =
       typeof input === "number" ? new Date(input * 1000) : new Date(input);
     return d.toLocaleDateString();

@@ -29,7 +29,7 @@ export function backdropShouldClose<T>({ target, currentTarget }: { target: T; c
  * Layout note: Slideover is portal-free — it renders in-place and uses
  * `position: fixed` so it covers the entire viewport. Each host opens its
  * own Slideover; per-thread tab state does NOT track them (slideovers
- * are transient, like the legacy modals they replace).
+ * are transient).
  */
 export function Slideover({
   open,

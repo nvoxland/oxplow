@@ -1,11 +1,13 @@
-//! One-shot boot-time backfill for the unified page-ref graph.
+//! The page-ref graph restated from its SQLite sources at boot.
 //!
 //! The writers in `oxplow-db` mirror their outbound refs into
-//! `page_ref` on every save, but pre-existing data (rows that
-//! existed before the migration ran) doesn't get touched until
-//! someone re-saves it. This module re-projects every relevant
-//! row exactly once on boot so backlinks for an upgraded DB
-//! aren't blank until the user starts editing.
+//! `page_ref` on every save, so between boots the graph follows its
+//! sources. A migration that resets `page_ref` (V92 rewrote its kinds
+//! and cleared it) leaves every unsaved row without its edges, and a
+//! writer's bug leaves drift. This restates every task, link, effort,
+//! finding and note slice from its row on boot, so the graph is its
+//! sources' again — which is why it stays (tsk920): it is the graph's
+//! one repair path.
 //!
 //! Ordering doesn't matter — projections are per-source and each
 //! writer owns its own slice. The backfill is idempotent: running

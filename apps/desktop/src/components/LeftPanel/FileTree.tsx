@@ -124,8 +124,8 @@ export function TreeEntries({
               title: parentPath ? `Files in ${parentPath}` : "Files at the project root",
             }
           : undefined;
-        // "Marked" = this row's path (or, for legacy segment entries,
-        // its name) is itself in the config list.
+        // "Marked" = this row's path (or, for a segment entry, its
+        // name) is itself in the config list.
         // "Inside" = some ancestor matches, so this row is being
         // ignored by inheritance even if it isn't a marked path itself.
         // Mirrors the Rust WorkspaceFilter semantics: segment entries
