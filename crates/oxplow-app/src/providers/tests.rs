@@ -3439,6 +3439,54 @@ async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
     (fx, sim)
 }
 
+/// tsk910: a slow token exchange holds up only its own credential's
+/// sign-in — another credential's begins meanwhile.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
+    let fx = services_with_effort().await;
+    let sim = OAuthSim::start().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let other = format!(
+        "      - name: OTHER_TOKEN\n        oauth:\n          authorize_url: {}\n          token_url: {}\n          client_id: oxplow-test\n",
+        sim.authorize_url, sim.token_url
+    );
+    write_oauth_extension(&project, "", &sim.authorize_url, &sim.token_url, &other);
+    approve(&fx, &extension(&project));
+    configure(&fx, true, json!({ "team": "core" }));
+    let page = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let redirect = browse(&page).await;
+    sim.delay_token_requests(3_000);
+    let finishing = {
+        let svc = fx.svc.clone();
+        tokio::spawn(async move {
+            svc.providers
+                .complete_sign_in(INSTANCE, "FAKE_TOKEN", &redirect)
+                .await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let started = std::time::Instant::now();
+    fx.svc
+        .providers
+        .begin_sign_in(INSTANCE, "OTHER_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "waited {:?} for another credential's exchange",
+        started.elapsed()
+    );
+    assert!(matches!(
+        finishing.await.unwrap(),
+        Ok(SignInCompletion::SignedIn)
+    ));
+}
+
 fn refreshes(sim: &OAuthSim) -> usize {
     sim.grants()
         .iter()

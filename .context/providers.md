@@ -725,12 +725,14 @@ form; sign-in is a provider's.
   (`oauth::SIGN_IN_WAIT`) ends, and the renderer hears why; the shell's
   listener stops by then too. A second sign-in for the same credential
   abandons the first (its redirect is no longer the sign-in's; the row
-  stops its listener). `sign_in_gate` is held while one begins,
-  finishes — across the code exchange — expires or is abandoned, so two
-  clicks at once leave one under way, and removing an instance — a
-  project entry that uncovers a global one too — waits for a finish in
+  stops its listener). Each `(instance, credential)` has its own gate
+  (`sign_in_gate`), held while its sign-in begins, finishes — across the
+  code exchange — expires or is abandoned, so two clicks at once leave one
+  under way, and removing an instance — a project entry that uncovers a
+  global one too — takes its credentials' gates, waits for a finish in
   flight and abandons its sign-ins first, so nothing is kept for what's
-  gone (tsk826). The row's Sign in is off while one starts, and off
+  gone (tsk826). A slow token endpoint holds up only its own sign-in
+  (tsk910). The row's Sign in is off while one starts, and off
   without the desktop app (a plain browser can't catch the redirect),
   with the reason shown.
   `set_instance_credential` refuses a value for a signed-in credential;

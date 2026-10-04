@@ -911,11 +911,12 @@ pub struct ProviderRegistry {
     /// Sign-ins under way, by `(instance, credential)`: a newer one for
     /// the same credential replaces the older.
     sign_ins: parking_lot::Mutex<BTreeMap<(String, String), SignInUnderWay>>,
-    /// Held while a sign-in is started, finished, expired or abandoned —
-    /// across a finish's code exchange, so an abandon (a removed
-    /// instance) waits for it and nothing is kept for what's gone
-    /// (tsk826).
-    sign_in_gate: tokio::sync::Mutex<()>,
+    /// One gate per `(instance, credential)`, held while that sign-in is
+    /// started, finished, expired or abandoned — across a finish's code
+    /// exchange, so an abandon (a removed instance) waits for it and
+    /// nothing is kept for what's gone (tsk826) — and only for it: a slow
+    /// token endpoint holds up no other sign-in (tsk910).
+    sign_in_gates: parking_lot::Mutex<BTreeMap<(String, String), Arc<tokio::sync::Mutex<()>>>>,
     /// One change to a person's instances at a time in this process: each
     /// reads them as they are and writes them back before another reads
     /// (tsk837). Never held across a check or a reconcile.
@@ -1025,7 +1026,7 @@ impl ProviderRegistry {
             disables: parking_lot::Mutex::new(BTreeMap::new()),
             global: parking_lot::Mutex::new(global),
             sign_ins: parking_lot::Mutex::new(BTreeMap::new()),
-            sign_in_gate: tokio::sync::Mutex::new(()),
+            sign_in_gates: parking_lot::Mutex::new(BTreeMap::new()),
             instances_gate: tokio::sync::Mutex::new(()),
             sign_in_seq: std::sync::atomic::AtomicU64::new(0),
         })
@@ -2270,7 +2271,8 @@ impl ProviderRegistry {
         let key = (instance.to_string(), name.to_string());
         // The old one is gone before the new one is tracked, and no finish
         // is half done meanwhile.
-        let _gate = self.sign_in_gate.lock().await;
+        let gate = self.sign_in_gate(&key);
+        let _gate = gate.lock().await;
         self.abandon_sign_ins_locked(|k| *k == key);
         let seq = self
             .sign_in_seq
@@ -2328,7 +2330,8 @@ impl ProviderRegistry {
         redirect: &str,
     ) -> Result<SignInCompletion, DomainError> {
         let key = (instance.to_string(), name.to_string());
-        let gate = self.sign_in_gate.lock().await;
+        let gate = self.sign_in_gate(&key);
+        let gate = gate.lock().await;
         let redirected = {
             let sign_ins = self.sign_ins.lock();
             let Some(under_way) = sign_ins.get(&key) else {
@@ -2410,7 +2413,8 @@ impl ProviderRegistry {
     /// Sign-in `seq` for `key` was never finished: end it, and tell the
     /// renderer.
     async fn expire_sign_in(&self, key: (String, String), seq: u64) {
-        let _gate = self.sign_in_gate.lock().await;
+        let gate = self.sign_in_gate(&key);
+        let _gate = gate.lock().await;
         let expired = {
             let mut sign_ins = self.sign_ins.lock();
             if sign_ins.get(&key).is_some_and(|s| s.seq == seq) {
@@ -2435,13 +2439,32 @@ impl ProviderRegistry {
     }
 
     /// End the sign-ins `which` picks, keeping nothing; one being finished
-    /// is waited for first.
+    /// is waited for first (each picked credential's gate, in key order).
     async fn abandon_sign_ins(&self, which: impl Fn(&(String, String)) -> bool) {
-        let _gate = self.sign_in_gate.lock().await;
+        let gates: Vec<_> = self
+            .sign_in_gates
+            .lock()
+            .iter()
+            .filter(|(k, _)| which(k))
+            .map(|(_, g)| g.clone())
+            .collect();
+        let mut held = Vec::with_capacity(gates.len());
+        for gate in &gates {
+            held.push(gate.lock().await);
+        }
         self.abandon_sign_ins_locked(which);
     }
 
-    /// [`Self::abandon_sign_ins`], the gate already held.
+    /// The gate of the sign-in for `key` (`(instance, credential)`).
+    fn sign_in_gate(&self, key: &(String, String)) -> Arc<tokio::sync::Mutex<()>> {
+        self.sign_in_gates
+            .lock()
+            .entry(key.clone())
+            .or_default()
+            .clone()
+    }
+
+    /// [`Self::abandon_sign_ins`], the gates already held.
     fn abandon_sign_ins_locked(&self, which: impl Fn(&(String, String)) -> bool) {
         let mut sign_ins = self.sign_ins.lock();
         let keys: Vec<_> = sign_ins.keys().filter(|k| which(k)).cloned().collect();
