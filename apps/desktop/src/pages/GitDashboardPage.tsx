@@ -27,9 +27,9 @@ import { gitRevision, vcsRevOf } from "../revision.js";
 import { readBranches, readHistory, type History } from "../vcsHistory.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, indexRef, opErrorRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { awaitGitOp, gitOpErrorMessage, opErrorOf } from "../git-op.js";
+import { awaitGitOp, opErrorOf } from "../git-op.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
 import { CommitGraphTable, indexRefsBySha, type CommitStats } from "../components/History/CommitGraphTable.js";
@@ -332,31 +332,13 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       } finally {
         removePending(label);
       }
-      // A failure surfaces globally (toast + status-bar indicator) via
-      // recordOpError — no per-site toast. Refresh either way so any
-      // partial progress is reflected.
-      if (!result.success) recordOpError(opErrorOf(label, command, result));
+      // A failure is recorded globally (toast + status-bar indicator) and,
+      // since the person is on this page, its details open (usability.md
+      // "Errors"). Refresh either way so any partial progress shows.
+      if (!result.success) onOpenPage(opErrorRef(recordOpError(opErrorOf(label, command, result))));
       void refresh();
     },
     [refresh, onOpenPage, addPending, removePending],
-  );
-
-  const runUnconfirmed = useCallback(
-    async (label: string, action: () => Promise<import("../api.js").GitOpKickoff>) => {
-      addPending(label);
-      let result: OpOutcome;
-      try {
-        result = await awaitGitOp(await action());
-      } finally {
-        removePending(label);
-      }
-      if (!result.success) {
-        recordOpError({ label, message: gitOpErrorMessage(result, "error") });
-      } else {
-        void refresh();
-      }
-    },
-    [refresh, addPending, removePending],
   );
 
   if (!streamId) {
@@ -399,7 +381,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   () => vcsPull(streamId, undefined, true),
                 )
               }
-              onFetch={() => runUnconfirmed("Fetch", () => vcsFetch(streamId))}
+              onFetch={() => runOp("Fetch", "fetch", () => vcsFetch(streamId))}
               isPending={isPending}
             />
 
