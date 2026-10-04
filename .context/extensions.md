@@ -859,10 +859,9 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - `alert`: a row-count or threshold condition that shows a panel badge
   (nudging the agent is what advisories are for).
 
-> **Target (not built yet).** From the original design: `hunks` (an
-> ordered file/range list that opens the diff at the range) and `steps`
-> (a guided walkthrough) viz; a column `format`; a `decision` link kind;
-> `followup-comment` and `open-diff` actions. (`copy-review-prompt` became
+> **Not built.** From the original design: a column `format`; a
+> `decision` link kind; `followup-comment` and `open-diff` actions.
+> (`hunks` and `steps` are built, above; `copy-review-prompt` became
 > `copy` on the Review Prompt lens.)
 
 Lenses render through one core `LensPage` / `LensSlots` in oxplow's design

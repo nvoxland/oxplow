@@ -559,8 +559,6 @@ and `v_model_test` are the catalog of all of them:
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `ModelsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@1` is logged per changed file (P5.C5) |
 | `v_symbol` / `v_symbol_capture` | the symbols the running language servers report for each stream's files (V117, P5.C6) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`ref` `symbol:<path>/<name>@snap:<id>`, nested names as container paths, unique — a repeated name path numbered `~2`; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`, v2), and what each snapshot's collection covered (collected, failed (the server errored or timed out; V120 `files_failed`), over the `symbolsMaxFilesPerSnapshot` bound — which counts attempts — no running server). Only languages with a running server are covered: the collector never starts one (lsp.md) |
 
-Still target: the rest of the shipped-sources table above (tsk327).
-
 **Column docs live with the model, not here.** `models.yaml` documents
 every column, and the registry is the catalog: `v_model` +
 `v_model_column`, read through `query_sql` (extension entities too —
