@@ -32,9 +32,10 @@ pub const REPLACEABLE: &[Replaceable] = &[
         capability: "work_items",
         props: &["scope", "thread_id"],
     },
-    // A work item's state control (`WorkItemPage`'s State and Move To):
-    // `ref` is the item (P10). The item's own provider's extension
-    // replaces it, whichever is active (tsk918).
+    // A work item's state control (`WorkItemPage`'s State; its Move To is
+    // never replaced, so an item can always move — tsk919): `ref` is the
+    // item (P10). The item's own provider's extension replaces it,
+    // whichever is active (tsk918).
     Replaceable {
         target: "work_item.detail.state",
         capability: "work_items",

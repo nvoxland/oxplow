@@ -115,9 +115,9 @@ export function WorkItemPage({
         <div style={labelStyle}>Provider</div>
         <div>{item.provider}</div>
       </div>
-      {/* The state control — State and Move To — is replaceable by the
-          extension of the item's own provider (P10, tsk918), given the
-          item's ref. */}
+      {/* The item's state — how its provider shows it, and the provider's
+          own moves — is replaceable by the extension of the item's own
+          provider (P10, tsk918), given the item's ref. */}
       <Replaceable
         target="work_item.detail.state"
         props={{ ref: item.ref }}
@@ -125,32 +125,33 @@ export function WorkItemPage({
         provider={item.provider}
         onOpenPage={onOpenPage}
         fallback={
-          <>
+          <div>
+            <div style={labelStyle}>State</div>
             <div>
-              <div style={labelStyle}>State</div>
-              <div>
-                {STATE_LABEL[item.state]} <span style={mutedInline}>({item.nativeState})</span>
-              </div>
+              {STATE_LABEL[item.state]} <span style={mutedInline}>({item.nativeState})</span>
             </div>
-            <div>
-              <div style={labelStyle}>Move To</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                {CANONICAL_STATES.filter((s) => s !== item.state).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    data-testid={`work-item-move-${s}`}
-                    style={buttonStyle}
-                    onClick={() => void transitionWorkItem(item.ref, s)}
-                  >
-                    {STATE_LABEL[s]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </>
+          </div>
         }
       />
+      {/* Oxplow's Move To is never replaced: every provider takes a
+          canonical transition, so whatever a replacement offers, the item
+          can always move (tsk919). */}
+      <div>
+        <div style={labelStyle}>Move To</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {CANONICAL_STATES.filter((s) => s !== item.state).map((s) => (
+            <button
+              key={s}
+              type="button"
+              data-testid={`work-item-move-${s}`}
+              style={buttonStyle}
+              onClick={() => void transitionWorkItem(item.ref, s)}
+            >
+              {STATE_LABEL[s]}
+            </button>
+          ))}
+        </div>
+      </div>
       {features.hierarchy && item.parentRef ? (
         <div data-testid="work-item-parent">
           <div style={labelStyle}>Parent</div>

@@ -916,7 +916,7 @@ host state.
 | Target | Core component | Capability | Props |
 |---|---|---|---|
 | `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
-| `work_item.detail.state` | a work item's State and Move To (`WorkItemPage`'s rail; P10) | `work_items` | `ref` (the item) |
+| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | `ref` (the item) |
 
 The history graph and the conflict resolver §11.2 names wait for a
 provider that needs them. Every target has a label a person reads
@@ -925,7 +925,9 @@ provider that needs them. Every target has a label a person reads
 both: its Board by Linear's states, and the state control with its
 `state` lens — the Linear states a synced issue of the team is in (Linear
 publishes no list of them), each with **Move Here** (`work_item.transition`
-with the `native_state`).
+with the `native_state`). A state no synced issue is in has no row, so
+oxplow's Move To stays beside it: the canonical states every provider
+takes.
 
 **At load** (`parse_replacements`, errors at the entry's line): the
 target is in the table; the lens is one of the extension's and declares

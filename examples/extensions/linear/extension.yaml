@@ -29,9 +29,9 @@ providers:
     declarations: provider.json
 ui:
   # While Linear is "Active for work items", the Board's cards are this
-  # lens instead of oxplow's columns, and a work item's State / Move To is
-  # Linear's own workflow states (experimental; Settings → Integrations
-  # switches back to oxplow's own).
+  # lens instead of oxplow's columns, and a work item's State is Linear's
+  # own workflow states, beside oxplow's Move To (experimental; Settings →
+  # Integrations switches back to oxplow's own).
   replacements:
     - { target: work_item.board, lens: board }
     - { target: work_item.detail.state, lens: state }

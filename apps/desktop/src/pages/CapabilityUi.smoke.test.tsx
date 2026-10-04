@@ -287,7 +287,10 @@ test("a work item's own provider's extension replaces its state control, not the
   try {
     const replaced = page();
     await waitFor(() => expect(replaced.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by y"));
-    expect(replaced.queryByTestId("work-item-move-done")).toBeNull();
+    // Oxplow's Move To isn't the replacement's to take: whatever states the
+    // lens offers, the item can always move (tsk919).
+    expect(replaced.getByTestId("work-item-move-done")).toBeTruthy();
+    expect(replaced.getByTestId("replacement-work_item.detail.state").contains(replaced.getByTestId("work-item-move-done"))).toBe(false);
     expect(lensRuns).toEqual([["y/state", { ref: "work_item:fake:W-1" }]]);
     // The rest of the page is still oxplow's.
     expect(replaced.getByTestId("work-item-page").textContent).toContain("It breaks.");
