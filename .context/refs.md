@@ -111,8 +111,11 @@ function that reads kinds takes them: `refs::validate_ref(&kinds, r)`,
 `canonical_wikilink`, `classify_wikilinks`, `extract`, and the
 `page_ref_projections` edge builders. Tests build `core_kinds()` or their
 own handle; two handles in one process never share a kind. An extension's
-`ref_kinds:` (P8.D6, extensions.md "Ref kinds") join the running kinds
-through the vocabulary reactor, and `v_ref_kind` lists them all.
+`ref_kinds:` (P8.D6, stable since P10 — extensions.md "Ref kinds") join
+the running kinds through the vocabulary reactor, and `v_ref_kind` lists
+them all. The documented one is the github example's `github_pr`
+(`[[pr:12]]`, its `pr` page). A `wikilink:` prefix two extensions share
+costs only the sugar; each namespaced kind still registers.
 
 **Searchable kinds** (P9.D3). A plugin kind declared `searchable:
 <model>` has that model's rows (`ref`, `title`, `body`) in the site-wide

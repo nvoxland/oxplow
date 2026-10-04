@@ -319,14 +319,14 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(
             folder.join("extension.yaml"),
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nref_kinds:\n  - kind: ticket\n",
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - id: ticket\n",
         )
         .unwrap();
         let (code, out, _) = cli(&["check", folder.to_str().unwrap()]);
         assert_eq!(code, 1);
         assert!(
             out.contains(
-                "error: oxplow/extensions/team/extension.yaml:8: `ref_kinds` is experimental"
+                "error: oxplow/extensions/team/extension.yaml:8: `effects` is experimental"
             ),
             "{out}"
         );

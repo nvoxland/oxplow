@@ -1,5 +1,6 @@
-//! An extension's ref kinds (`ref_kinds:` in its manifest, experimental —
-//! a private extension only; P8.D6): new kinds of thing a ref can name,
+//! An extension's ref kinds (`ref_kinds:` in its manifest; P8.D6, stable
+//! since P10 on the github example's pull requests): new kinds of thing a
+//! ref can name,
 //! registered into the running vocabulary's `KindRegistry` by
 //! `vocabulary_reactor`, so `[[acme_pr:12]]` (and `[[pr:12]]`, with a
 //! `wikilink:` prefix) links while the extension is installed.

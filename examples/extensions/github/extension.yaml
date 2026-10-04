@@ -13,6 +13,9 @@ intent:
     - name: a stream whose branch has an open PR
       input: { lens: open-prs, params: { stream_id: 1 } }
       expect: the PR's number, title and author on that stream's row
+    - name: pr-link
+      input: { wikilink: "pr:12" }
+      expect: the pull request's ref, `github_pr:12`
 collectors:
   - id: prs
     doc: The repo's 100 most recent pull requests (open and closed).
@@ -34,6 +37,7 @@ collectors:
         columns:
           number: { type: int, doc: PR number }
           title: text
+          body: { type: text, doc: Its description }
           state: { type: text, doc: "`open` or `closed`" }
           author: { type: text, doc: GitHub login of the author }
           head_branch: { type: text, doc: Branch the PR is from }
@@ -44,3 +48,25 @@ collectors:
         relations:
           - { to: v_stream, on: "v_github_pr.head_branch = v_stream.branch" }
           - { to: v_task, on: "v_github_pr.title LIKE '%tsk' || v_task.id || '%'" }
+models:
+  - name: pull_request
+    version: 1
+    key: [ref]
+    description: "Each synced pull request as a ref oxplow can name (`github_pr:<number>`): its title, which a ref to it shows, and its description, which search finds."
+    columns:
+      - { name: ref, type: TEXT, doc: "`github_pr:<number>`." }
+      - { name: title, type: TEXT, doc: "Its title." }
+      - { name: body, type: TEXT, doc: "Its description ('' for none)." }
+pages:
+  - { id: pr, title: Pull request, category: Work, lens: pr }
+# A pull request is a kind of thing a ref can name: `github_pr:12`, or
+# `[[pr:12]]` in any text oxplow renders. It links to its `pr` page.
+ref_kinds:
+  - kind: github_pr
+    label: Pull request
+    id: '^\d+$'
+    resolve: pull_request
+    searchable: pull_request
+    page: pr
+    wikilink: pr
+    icon: git-pull-request

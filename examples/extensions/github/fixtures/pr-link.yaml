@@ -1,0 +1,2 @@
+input: { wikilink: "pr:12" }
+expect: { ref: "github_pr:12" }

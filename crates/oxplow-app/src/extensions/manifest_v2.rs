@@ -317,13 +317,15 @@ pub struct ManifestV2 {
     #[serde(default)]
     pub event_types: Option<Value>,
 
+    /// Kinds of thing a ref can name (stable since P10).
+    #[serde(default)]
+    pub ref_kinds: Option<Value>,
+
     // ---- experimental kinds (private extensions only) ----
     #[serde(default)]
     pub providers: Option<Value>,
     #[serde(default)]
     pub effects: Option<Value>,
-    #[serde(default)]
-    pub ref_kinds: Option<Value>,
     #[serde(default)]
     pub custom_components: Option<Value>,
 }
@@ -332,7 +334,6 @@ pub struct ManifestV2 {
 pub const EXPERIMENTAL_KINDS: &[&str] = &[
     "providers",
     "effects",
-    "ref_kinds",
     "custom_components",
     "ui.replacements",
 ];
@@ -352,6 +353,7 @@ pub const STABLE_KINDS: &[&str] = &[
     "ui.slots",
     "ui.commands",
     "ui.decorators",
+    "ref_kinds",
     "config",
     "advisories",
     "event_types",
@@ -367,9 +369,6 @@ impl ManifestV2 {
         }
         if present(&self.effects) {
             out.push("effects");
-        }
-        if present(&self.ref_kinds) {
-            out.push("ref_kinds");
         }
         if present(&self.custom_components) {
             out.push("custom_components");
@@ -630,17 +629,17 @@ mod tests {
 
     #[test]
     fn shared_needs_engine_and_stable_kinds_only_with_file_line() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nintent:\n  purpose: x\n  examples: [{ name: a }]\nref_kinds:\n  - kind: ticket\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - id: ticket\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(
             errors.iter().any(|e| e.contains("must declare `engine")),
             "{errors:?}"
         );
-        let ref_kinds = errors
+        let effects = errors
             .iter()
-            .find(|e| e.contains("`ref_kinds` is experimental"))
+            .find(|e| e.contains("`effects` is experimental"))
             .unwrap();
-        assert!(ref_kinds.starts_with("e/extension.yaml:7:"), "{ref_kinds}");
+        assert!(effects.starts_with("e/extension.yaml:7:"), "{effects}");
         let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
         let (errors, warnings) = check(&parse(text), "e/extension.yaml", text, true);
         assert!(
@@ -684,7 +683,7 @@ mod tests {
         let mut experimental = EXPERIMENTAL_KINDS.to_vec();
         experimental.sort();
         assert_eq!(used, experimental);
-        for kept in ["effects", "ref_kinds", "providers"] {
+        for kept in ["effects", "providers"] {
             assert!(EXPERIMENTAL_KINDS.contains(&kept), "{kept}");
         }
     }

@@ -21,6 +21,7 @@ fi
 printf '%s' "$json" | jq '{entities: {pr: [.[] | {
   number,
   title,
+  body: (.body // ""),
   state,
   author: .user.login,
   head_branch: .head.ref,

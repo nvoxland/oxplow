@@ -1,0 +1,14 @@
+title: Pull Request
+description: One pull request — what a `github_pr:<number>` ref opens.
+params: [{ name: ref }]
+query: |
+  SELECT printf('**#%d %s** · %s · by %s · from `%s`%s', pr.number, pr.title, pr.state,
+                pr.author, pr.head_branch,
+                CASE WHEN pr.url IS NULL THEN '' ELSE ' · [on GitHub](' || pr.url || ')' END)
+         || CASE WHEN p.body = '' THEN '' ELSE char(10) || char(10) || p.body END AS summary
+  FROM v_github_pull_request p
+  JOIN v_github_pr pr ON 'github_pr:' || pr.number = p.ref
+  WHERE p.ref = :ref
+viz: markdown
+empty: That pull request isn't synced yet.
+hidden: true

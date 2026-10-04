@@ -1541,11 +1541,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .clone()
             .filter(|_| m.sharing == Sharing::Private);
     let page_files = m.pages.clone();
-    // An experimental kind: a shared manifest's is refused by `check`.
-    let ref_kind_files = m
-        .ref_kinds
-        .clone()
-        .filter(|_| m.sharing == Sharing::Private);
+    // A stable kind (P10): a shared extension's load too.
+    let ref_kind_files = m.ref_kinds.clone();
     let slot_files = {
         // A stable kind (P9.D6): a shared extension's load too.
         if let Some(v) = m.event_types.as_ref() {
@@ -4805,7 +4802,7 @@ empty: No tasks.
     #[test]
     fn a_shared_manifest_may_not_use_an_experimental_kind() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nref_kinds:\n  - kind: ticket\n";
+        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - id: ticket\n";
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
@@ -4815,7 +4812,7 @@ empty: No tasks.
         let err = e
             .errors
             .iter()
-            .find(|m| m.contains("`ref_kinds` is experimental"))
+            .find(|m| m.contains("`effects` is experimental"))
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
             err.starts_with("oxplow/extensions/review/extension.yaml:8:"),
@@ -5208,6 +5205,12 @@ commands:
         for name in names {
             let ext = load_one(&Disk(examples.join(&name)), &name, &name, "project");
             assert!(ext.errors.is_empty(), "{name}: {:?}", ext.errors);
+            // P10 (K3): the github example's pull-request kind is the use
+            // that made `ref_kinds` stable.
+            if name == "github" {
+                let kinds: Vec<&str> = ext.ref_kinds.iter().map(|k| k.kind.as_str()).collect();
+                assert_eq!(kinds, vec!["github_pr"]);
+            }
         }
     }
 

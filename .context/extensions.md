@@ -585,10 +585,10 @@ models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<e
 pages: …  panels: …  # running (P6.G1/G2): see "Panels" and "Pages"
 commands:  [...]   # Starlark scripts composing core commands (see "Commands")
 config: …          # parsed as data
+ref_kinds: …        # kinds of thing a ref can name (stable since P10; see "Ref kinds")
 # experimental kinds — a PRIVATE extension only
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 event_types: …      # its own namespace's event types (see "Event types", P8)
-ref_kinds: …        # kinds of thing a ref can name (see "Ref kinds", P8)
 effects: …          # scripts reacting to logged events by composing commands (see "Effects", P8)
 custom_components: …   # sandboxed components for `viz: custom` lenses (see "Custom components")
 # and ui.replacements above
@@ -1501,10 +1501,14 @@ already counts every extension's runs.
 declaration is a load problem, like a model's contract drift, not a
 failing run that counts toward a disable.
 
-## Ref kinds (experimental)
+## Ref kinds
 
-`ref_kinds:` (a private extension only, P8.D6; `extension_ref_kinds.rs`,
-`vocabulary_reactor.rs`) adds kinds of thing a ref can name:
+`ref_kinds:` (P8.D6; **stable since P10**; `extension_ref_kinds.rs`,
+`vocabulary_reactor.rs`) adds kinds of thing a ref can name. It was
+promoted on the github example's pull requests (an example counts as a
+first-party use): kind `github_pr` over model `pull_request`, page `pr`,
+`[[pr:12]]`. What is promised: the manifest keys below, the portable id
+pattern subset, the page's `?ref=`, and `v_ref_kind`'s columns.
 
 ```yaml
 ref_kinds:
@@ -2163,7 +2167,11 @@ own view" step.
 Each loads clean (`documented_examples_load_without_errors`):
 
 - **`github`** — an `exec` collector bringing pull requests in as the
-  entity `v_github_pr`, with a lens joining them to streams and tasks.
+  entity `v_github_pr`, with a lens joining them to streams and tasks;
+  and (P10) a pull request as a **ref kind**, `github_pr` — model
+  `pull_request` (`ref`, `title`, `body`; it resolves and is searchable),
+  page `pr` (the `pr` lens, given `?ref=`), `[[pr:12]]`. `crates/oxplow-
+  sdk/tests/examples.rs` checks and tests it and opens a pull request.
 - **`linear`** (P7.A5) — the reference external **provider**: Linear
   issues as work items, through `crates/oxplow-provider-linear`
   (private, since `providers:` is experimental). `tests/kit.rs` in that
