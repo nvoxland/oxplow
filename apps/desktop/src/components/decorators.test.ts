@@ -1,7 +1,16 @@
 import { expect, test } from "bun:test";
 
 import type { Extension, SqlQueryResult, UiDecorator } from "../tauri-bridge/generated/bindings.js";
-import { chipsFor, decorationQuery, decorationsFromResult, decoratorsFor, safeColor } from "./decorators.js";
+import {
+  chipsFor,
+  decorationQueries,
+  decorationsFromResult,
+  decoratorsFor,
+  MAX_DECORATIONS_PER_REF,
+  MAX_LABEL,
+  REFS_PER_QUERY,
+  safeColor,
+} from "./decorators.js";
 
 const decorator = (over: Partial<UiDecorator>): UiDecorator => ({
   id: "flags/0",
@@ -25,14 +34,40 @@ test("the enabled extensions' decorators for a placement", () => {
 });
 
 test("one query per decorator, over the refs of its kind", () => {
-  expect(decorationQuery(decorator({}), ["work_item:oxplow:tsk1", "commit:abc1234", "work_item:fake:W-1"])).toEqual({
-    sql: 'SELECT ref, "label" AS label, "color" AS color FROM v_flags_flags WHERE ref IN (?1, ?2)',
-    params: ["work_item:oxplow:tsk1", "work_item:fake:W-1"],
-  });
-  expect(decorationQuery(decorator({ color: null }), ["work_item:oxplow:tsk1"])?.sql).toBe(
+  expect(decorationQueries(decorator({}), ["work_item:oxplow:tsk1", "commit:abc1234", "work_item:fake:W-1"])).toEqual([
+    {
+      sql: 'SELECT ref, "label" AS label, "color" AS color FROM v_flags_flags WHERE ref IN (?1, ?2)',
+      params: ["work_item:oxplow:tsk1", "work_item:fake:W-1"],
+      limit: 2 * MAX_DECORATIONS_PER_REF,
+    },
+  ]);
+  expect(decorationQueries(decorator({ color: null }), ["work_item:oxplow:tsk1"])[0]?.sql).toBe(
     'SELECT ref, "label" AS label FROM v_flags_flags WHERE ref IN (?1)',
   );
-  expect(decorationQuery(decorator({}), ["commit:abc1234"])).toBeNull();
+  expect(decorationQueries(decorator({}), ["commit:abc1234"])).toEqual([]);
+});
+
+// tsk934: a large table's row badges aren't cut off by one row limit —
+// the refs go in chunks, each with room for every ref's decorations.
+test("many refs are asked in chunks, each with room for all its decorations", () => {
+  const refs = Array.from({ length: 2 * REFS_PER_QUERY + 50 }, (_, i) => `work_item:oxplow:tsk${i}`);
+  const queries = decorationQueries(decorator({}), refs);
+  expect(queries.map((q) => q.params.length)).toEqual([REFS_PER_QUERY, REFS_PER_QUERY, 50]);
+  expect(queries.flatMap((q) => q.params)).toEqual(refs);
+  expect(queries[0].limit).toBe(REFS_PER_QUERY * MAX_DECORATIONS_PER_REF);
+});
+
+// tsk934: one extension adds at most a few short labels to a ref.
+test("an extension's decorations on one ref are few and short", () => {
+  const res = {
+    columns: ["ref", "label"],
+    rows: Array.from({ length: 10 }, (_, i) => ["work_item:oxplow:tsk1", `${i}${"x".repeat(100)}`]),
+    truncated: false,
+  } as unknown as SqlQueryResult;
+  const decorations = decorationsFromResult(res, "flags");
+  expect(decorations.length).toBe(MAX_DECORATIONS_PER_REF);
+  expect(decorations.every((d) => [...d.label].length <= MAX_LABEL)).toBe(true);
+  expect(decorations[0].label.endsWith("…")).toBe(true);
 });
 
 // The loader refuses a column or view that isn't a plain identifier; the
@@ -40,7 +75,7 @@ test("one query per decorator, over the refs of its kind", () => {
 // query with anything else in it.
 test("a decorator naming anything but identifiers builds no query", () => {
   for (const bad of [{ label: 'x" ; DROP TABLE task; --' }, { color: "c)" }, { view: "v_x; DELETE FROM task" }]) {
-    expect(decorationQuery(decorator(bad), ["work_item:oxplow:tsk1"])).toBeNull();
+    expect(decorationQueries(decorator(bad), ["work_item:oxplow:tsk1"])).toEqual([]);
   }
 });
 

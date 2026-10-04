@@ -5,9 +5,9 @@ import { useExtensions } from "../extensionsStore.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { DecoratorPlacement, Reads } from "../tauri-bridge/generated/bindings.js";
-import { decorationQuery, decorationsFromResult, decoratorsFor, type Decoration } from "./decorators.js";
+import { decorationQueries, decorationsFromResult, decoratorsFor, type Decoration } from "./decorators.js";
 
-/** The decorations for `refs` in `placement`: one query per decorator,
+/** The decorations for `refs` in `placement`: each decorator's queries,
  *  re-run when a model it read changes or the extensions do. A decorator
  *  whose query fails shows nothing — decorations are additive. An answer
  *  for inputs that have since changed is dropped. */
@@ -27,16 +27,16 @@ export function useDecorations(placement: DecoratorPlacement, refs: string[], st
       return;
     }
     const results = await Promise.all(
-      decorators.map(async (d) => {
-        const q = decorationQuery(d, wanted);
-        if (!q) return null;
-        try {
-          const res = await querySql(q.sql, q.params, 1_000);
-          return { decorations: decorationsFromResult(res, d.extension), reads: res.reads };
-        } catch {
-          return null;
-        }
-      }),
+      decorators.flatMap((d) =>
+        decorationQueries(d, wanted).map(async (q) => {
+          try {
+            const res = await querySql(q.sql, q.params, q.limit);
+            return { decorations: decorationsFromResult(res, d.extension), reads: res.reads };
+          } catch {
+            return null;
+          }
+        }),
+      ),
     );
     if (!current()) return;
     setDecorations(results.flatMap((r) => r?.decorations ?? []));

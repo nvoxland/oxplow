@@ -19,38 +19,77 @@ export function decoratorsFor(extensions: Extension[], placement: DecoratorPlace
   return extensions.filter((e) => e.enabled).flatMap((e) => e.ui.decorators.filter((d) => d.placement === placement));
 }
 
-/** The query for `decorator` over the refs of its kind; `null` when none
- *  of `refs` is. Column names are identifiers (checked at load). */
-export function decorationQuery(decorator: UiDecorator, refs: string[]): { sql: string; params: SqlCell[] } | null {
+/** The most decorations one extension adds to one ref (tsk934). */
+export const MAX_DECORATIONS_PER_REF = 3;
+/** The longest label shown, in characters; a longer one ends in `…`. */
+export const MAX_LABEL = 40;
+/** The most refs one query asks about; more go in further queries. */
+export const REFS_PER_QUERY = 200;
+
+/** One query of a decorator's: its SQL, the refs it binds, and a row
+ *  limit with room for each of them. */
+export interface DecorationQuery {
+  sql: string;
+  params: SqlCell[];
+  limit: number;
+}
+
+/** The queries for `decorator` over the refs of its kind, `REFS_PER_QUERY`
+ *  at a time, so a large table's badges aren't cut off by a row limit;
+ *  none when no ref is its kind. Column names are identifiers (checked at
+ *  load). */
+export function decorationQueries(decorator: UiDecorator, refs: string[]): DecorationQuery[] {
   // Named in the SQL as is: plain identifiers only (the loader checks the
   // same; this is where the SQL is built).
   const names = [decorator.view, decorator.label, ...(decorator.color ? [decorator.color] : [])];
-  if (!names.every((n) => IDENTIFIER.test(n))) return null;
+  if (!names.every((n) => IDENTIFIER.test(n))) return [];
   const mine = refs.filter((r) => parseRef(r)?.kind === decorator.kind);
-  if (mine.length === 0) return null;
   const color = decorator.color ? `, "${decorator.color}" AS color` : "";
-  const slots = mine.map((_, i) => `?${i + 1}`).join(", ");
-  return {
-    sql: `SELECT ref, "${decorator.label}" AS label${color} FROM ${decorator.view} WHERE ref IN (${slots})`,
-    params: mine,
-  };
+  const out: DecorationQuery[] = [];
+  for (let at = 0; at < mine.length; at += REFS_PER_QUERY) {
+    const chunk = mine.slice(at, at + REFS_PER_QUERY);
+    const slots = chunk.map((_, i) => `?${i + 1}`).join(", ");
+    out.push({
+      sql: `SELECT ref, "${decorator.label}" AS label${color} FROM ${decorator.view} WHERE ref IN (${slots})`,
+      params: chunk,
+      limit: chunk.length * MAX_DECORATIONS_PER_REF,
+    });
+  }
+  return out;
 }
 
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 
+/** `extension`'s decorations from a query's rows: at most
+ *  `MAX_DECORATIONS_PER_REF` on one ref, each label at most `MAX_LABEL`
+ *  characters (tsk934). */
 export function decorationsFromResult(result: SqlQueryResult, extension: string): Decoration[] {
   const at = (row: SqlCell[], name: string) => {
     const i = result.columns.indexOf(name);
     return i < 0 ? null : row[i] ?? null;
   };
-  return result.rows
-    .filter((row) => at(row, "label") !== null && at(row, "label") !== "")
-    .map((row) => ({
-      ref: String(at(row, "ref")),
-      label: String(at(row, "label")),
+  const perRef = new Map<string, number>();
+  const out: Decoration[] = [];
+  for (const row of result.rows) {
+    const label = at(row, "label");
+    if (label === null || label === "") continue;
+    const ref = String(at(row, "ref"));
+    const count = perRef.get(ref) ?? 0;
+    if (count >= MAX_DECORATIONS_PER_REF) continue;
+    perRef.set(ref, count + 1);
+    out.push({
+      ref,
+      label: shortened(String(label)),
       color: at(row, "color") == null ? null : String(at(row, "color")),
       extension,
-    }));
+    });
+  }
+  return out;
+}
+
+function shortened(label: string): string {
+  const chars = [...label];
+  return chars.length <= MAX_LABEL ? label : `${chars.slice(0, MAX_LABEL - 1).join("")}…`;
 }
 
 /** A color from extension data, only when it's a plain one: `#rgb[a]` /

@@ -1336,10 +1336,14 @@ The model (`v_<extension>_<model>`) must declare a `ref` column and the
 `label` (and optional `color`) columns named — checked at load against
 the model's declared columns, which are its contract; column names must
 be plain identifiers, since the desktop names them in its query. The
-desktop (`components/decorators.ts`, `useDecorations`) runs one query per
-decorator over the refs it shows (`SELECT ref, "<label>" AS label[,
-"<color>" AS color] FROM <view> WHERE ref IN (…)`), re-run when the model
-changes. `ref-chip`: a chip in the header of a page whose ref the model
+desktop (`components/decorators.ts`, `useDecorations`) runs each
+decorator's queries over the refs it shows (`SELECT ref, "<label>" AS
+label[, "<color>" AS color] FROM <view> WHERE ref IN (…)`), re-run when
+the model changes. **Bounded** (tsk934): the refs go 200 to a query
+(`REFS_PER_QUERY`), each query with a row limit that has room for all of
+them, so a large table loses no badge; one extension adds at most 3
+decorations to one ref (`MAX_DECORATIONS_PER_REF`), each label at most 40
+characters (`MAX_LABEL`, then `…`). `ref-chip`: a chip in the header of a page whose ref the model
 lists, after the page's own chips (`Page`, by the page's ref from its
 navigation context). `row-badge`: a `RefBadge` (tone `label`) after a
 lens cell that links to a listed ref. A color is used only when it's a
