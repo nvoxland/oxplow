@@ -17,10 +17,13 @@ import { join } from "node:path";
 const SRC_DIR = import.meta.dir;
 
 // These files ARE the human-input path and are allowed to touch the
-// transport: the `api.ts` facade + the xterm pane that pipes the user's
-// own keystrokes/paste. Generated bindings and test files are excluded
-// from the scan entirely (below), so they need no entry here.
-const ALLOWED = new Set<string>(["api.ts", join("components", "TerminalPane.tsx")]);
+// transport: the `api.ts` facade, the xterm pane that pipes the user's
+// own keystrokes/paste, and the pane's ordered sender (tsk979), which
+// sends only through the call the pane hands it. Generated bindings and
+// test files are excluded from the scan entirely (below), so they need no
+// entry here.
+const TERMINAL_PANE = join("components", "TerminalPane.tsx");
+const ALLOWED = new Set<string>(["api.ts", TERMINAL_PANE, join("components", "terminalInput.ts")]);
 
 function sourceFiles(): string[] {
   return readdirSync(SRC_DIR, { recursive: true })
@@ -46,6 +49,16 @@ describe("no agent input automation", () => {
 
   test('{type:"input"} terminal messages are only built on the human-input path', () => {
     expect(offenders(/type:\s*"input(-binary)?"/)).toEqual([]);
+  });
+
+  // The ordered sender carries `{type:"input"}` messages: only the pane may
+  // make one, so nothing else gets a way to type at the agent through it.
+  test("terminalSender is only used by the terminal pane", () => {
+    const allowed = new Set([TERMINAL_PANE, join("components", "terminalInput.ts")]);
+    const hits = sourceFiles()
+      .filter((rel) => !allowed.has(rel))
+      .filter((rel) => /\bterminalSender\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));
+    expect(hits).toEqual([]);
   });
 
   // ACP agents (tsk281): a prompt is sent only by the prompt box, on the

@@ -68,7 +68,8 @@ would be automating the agent CLI, which risks violating its
 - Frontend source-scan
   (`apps/desktop/src/no-agent-input-automation.test.ts`): confines
   `forwardTerminalInput` calls and `{type:"input"}` message construction
-  to the human-input files (`TerminalPane.tsx`, the `api.ts` facade,
+  to the human-input files (`TerminalPane.tsx`, its ordered sender
+  `terminalInput.ts` — used by the pane alone — the `api.ts` facade,
   generated bindings).
 - Rust source-scan (in
   `crates/oxplow-rpc/src/commands/terminal.rs` tests): asserts the only

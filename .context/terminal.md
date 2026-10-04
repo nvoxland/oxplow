@@ -134,10 +134,10 @@ from the PTY output stream) — wraps the text in `\x1b[200~`…`\x1b[201~`.
 It then fires **one** `onData` event with the whole payload (verified in
 `@xterm/xterm`'s `triggerDataEvent`, which calls `_onData.fire(e)` once).
 `TerminalPane`'s `onData` ships that as a single
-`sendTerminalMessage({type:"input", bytes:base64})`. In remote/daemon
-mode this is one `POST /ipc/send_terminal_message`; the backend
-`TerminalSessionRegistry::send` does a single `pty.write` → one
-`write_all` on the PTY owner task's FIFO mpsc.
+`forwardTerminalInput(sessionId, {type:"input", bytes:base64})`. In
+remote/daemon mode this is one `POST /ipc/forward_terminal_input`; the
+backend `TerminalSessionRegistry::send` does a single `pty.write` → one
+`write_all` on the PTY owner task's FIFO mpsc, and replies once it has.
 
 **A single paste is therefore one contiguous, in-order write to the PTY
 child — there is no oxplow-side chunking or reordering.** This is
@@ -160,6 +160,17 @@ output, testing the wrong direction).
 > (info not obtainable statically). A possible oxplow-side mitigation —
 > delivering agent-pane pastes with `\n` separators instead of `\r` — is
 > tracked as a follow-up but unverified, so it was not shipped.
+
+**Between messages, the pane keeps the order (tsk979).** Every message a
+pane sends — each keystroke's `onData`, a resize, a history move —
+goes through one `terminalSender` (`components/terminalInput.ts`): a
+message is sent only once the one before it returned. Fired off as
+independent calls they were separate HTTP requests in daemon mode, and a
+later keystroke could overtake an earlier one (the browser suite typed
+`$((6*7))` and the shell got `$((67*))`). Keystrokes made while a send is
+in flight wait together and go as one `input` message, so fast typing
+costs no extra round trips; a failed send is logged and the next still
+goes. Locked by `terminalInput.test.ts`.
 
 ## Multiple terminals (Terminal page)
 

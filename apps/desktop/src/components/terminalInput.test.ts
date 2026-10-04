@@ -1,0 +1,74 @@
+import { expect, test } from "bun:test";
+
+import { terminalSender } from "./terminalInput.js";
+
+// tsk979: a terminal's messages reach the daemon one at a time, in the
+// order they were made — each its own request would let a later keystroke
+// overtake an earlier one — and keystrokes that wait together go as one.
+
+function harness() {
+  const sent: Array<[string, unknown]> = [];
+  const replies: Array<(ok: boolean) => void> = [];
+  const errors: unknown[] = [];
+  const send = terminalSender(
+    (sessionId, message) => {
+      sent.push([sessionId, JSON.parse(message)]);
+      return new Promise<void>((resolve, reject) => replies.push((ok) => (ok ? resolve() : reject(new Error("lost")))));
+    },
+    (e) => errors.push(e),
+  );
+  /** Answer the call in flight and let the sender go on. */
+  const answer = async (ok = true) => {
+    replies.shift()!(ok);
+    await new Promise((r) => setTimeout(r, 0));
+  };
+  return { send, sent, answer, errors };
+}
+
+const decoded = (m: unknown) => new TextDecoder().decode(Uint8Array.from(atob((m as { bytes: string }).bytes), (c) => c.charCodeAt(0)));
+
+test("a message waits for the one before it, and keystrokes waiting together go as one", async () => {
+  const { send, sent, answer } = harness();
+  send("s1", { type: "input", data: "6" });
+  send("s1", { type: "input", data: "*" });
+  send("s1", { type: "input", data: "7" });
+  expect(sent.length).toBe(1);
+  expect(decoded(sent[0]![1])).toBe("6");
+  await answer();
+  expect(sent.length).toBe(2);
+  expect(sent[1]![1]).toMatchObject({ type: "input" });
+  expect(decoded(sent[1]![1])).toBe("*7");
+  await answer();
+  expect(sent.length).toBe(2);
+});
+
+test("only neighbouring keystrokes of one session merge; everything else keeps its place", async () => {
+  const { send, sent, answer } = harness();
+  send("s1", { type: "history-exit" });
+  send("s1", { type: "input", data: "a" });
+  send("s1", { type: "resize", cols: 80, rows: 24 });
+  send("s1", { type: "input", data: "é" });
+  send("s2", { type: "input", data: "b" });
+  send("s1", { type: "input-binary", data: "\x01" });
+  for (let i = 0; i < 6; i++) await answer();
+  expect(sent.map(([s, m]) => [s, (m as { type: string }).type])).toEqual([
+    ["s1", "history-exit"],
+    ["s1", "input"],
+    ["s1", "resize"],
+    ["s1", "input"],
+    ["s2", "input"],
+    ["s1", "input-binary"],
+  ]);
+  expect(decoded(sent[3]![1])).toBe("é");
+  expect(sent[2]![1]).toEqual({ type: "resize", cols: 80, rows: 24 });
+});
+
+test("a failed send is reported and the next one still goes", async () => {
+  const { send, sent, answer, errors } = harness();
+  send("s1", { type: "input", data: "x" });
+  send("s1", { type: "input", data: "y" });
+  await answer(false);
+  expect(errors.length).toBe(1);
+  expect(sent.length).toBe(2);
+  expect(decoded(sent[1]![1])).toBe("y");
+});

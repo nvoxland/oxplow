@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import type { TerminalEvent } from "../editor-session.js";
 import { desktopBridge } from "../api.js";
 import { logUi } from "../logger.js";
+import { terminalSender } from "./terminalInput.js";
 import { TASK_DRAG_MIME } from "../dragMimes.js";
 import {
   shouldHandleTerminalPageKey,
@@ -158,6 +159,13 @@ export function TerminalPane({
   // the terminal is opened (and unmounts on dispose).
   const [term, setTerm] = useState<Terminal | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  // Every message to the session, in order (tsk979).
+  const [sendToTerminal] = useState(() =>
+    terminalSender(
+      (sessionId, message) => desktopBridge().forwardTerminalInput(sessionId, message),
+      (error) => logUi("warn", "terminal input failed", { error: String(error) }),
+    ),
+  );
   const [mode, setMode] = useState<"live" | "history">("live");
   const modeRef = useRef<"live" | "history">("live");
   const [dragHovering, setDragHovering] = useState(false);
@@ -184,7 +192,7 @@ export function TerminalPane({
     if (!visible) return;
     termRef.current?.focus();
     if (transportMode === "tmux" && sessionIdRef.current) {
-      void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+      sendToTerminal(sessionIdRef.current, { type: "history-exit" });
     }
     setInteractionMode("live");
   }, [paneTarget, transportMode, visible]);
@@ -331,10 +339,7 @@ export function TerminalPane({
       if (event.key === "Enter" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         if (sessionIdRef.current) {
-          void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({
-            type: "input",
-            bytes: btoa("\x1b\r"),
-          }));
+          sendToTerminal(sessionIdRef.current, { type: "input", data: "\x1b\r" });
         }
         return false;
       }
@@ -348,10 +353,10 @@ export function TerminalPane({
 
         if (routeToTmuxHistory) {
           if (sessionIdRef.current) {
-            void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({
+            sendToTerminal(sessionIdRef.current, {
               type: "history-page",
               direction: event.key === "PageUp" ? "up" : "down",
-            }));
+            });
           }
           setInteractionMode("history");
           return false;
@@ -367,7 +372,7 @@ export function TerminalPane({
 
         if (transportMode === "tmux" && modeRef.current === "history" && shouldReturnTerminalToPrompt(event)) {
         if (sessionIdRef.current) {
-          void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+          sendToTerminal(sessionIdRef.current, { type: "history-exit" });
         }
         setInteractionMode("live");
         term.focus();
@@ -413,7 +418,7 @@ export function TerminalPane({
       }
 
       if (sessionIdRef.current) {
-        void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "history-scroll", lines }));
+        sendToTerminal(sessionIdRef.current, { type: "history-scroll", lines });
       }
       setInteractionMode("history");
       event.preventDefault();
@@ -424,12 +429,12 @@ export function TerminalPane({
     let ro: ResizeObserver | null = null;
     const dataDisp = term.onData((data) => {
       if (sessionIdRef.current) {
-        void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "input", bytes: utf8ToBase64(data) }));
+        sendToTerminal(sessionIdRef.current, { type: "input", data });
       }
     });
     const binaryDisp = term.onBinary((data) => {
       if (sessionIdRef.current) {
-        void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "input-binary", bytes: binaryToBase64(data) }));
+        sendToTerminal(sessionIdRef.current, { type: "input-binary", data });
       }
     });
 
@@ -452,7 +457,7 @@ export function TerminalPane({
       }
       const handleMouseDown = () => {
         if (sessionIdRef.current) {
-          void desktopBridge().forwardTerminalInput(sessionIdRef.current, JSON.stringify({ type: "history-exit" }));
+          sendToTerminal(sessionIdRef.current, { type: "history-exit" });
         }
         setInteractionMode("live");
         term.focus();
@@ -527,7 +532,7 @@ export function TerminalPane({
         pendingEvents.length = 0;
         term.focus();
         if (transportMode === "tmux") {
-          void desktopBridge().forwardTerminalInput(sessionId, JSON.stringify({ type: "history-exit" }));
+          sendToTerminal(sessionId, { type: "history-exit" });
         }
         setInteractionMode("live");
         logUi("info", "terminal session opened", { paneTarget, sessionId, transportMode });
@@ -550,10 +555,7 @@ export function TerminalPane({
             fit.fit();
             if (term.cols < 2 || term.rows < 2) return;
             if (sessionIdRef.current) {
-              void desktopBridge().forwardTerminalInput(
-                sessionIdRef.current,
-                JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }),
-              );
+              sendToTerminal(sessionIdRef.current, { type: "resize", cols: term.cols, rows: term.rows });
             }
           } catch {}
         }, 80);
@@ -670,30 +672,3 @@ export function TerminalPane({
   );
 }
 
-
-function binaryToBase64(data: string) {
-  let binary = "";
-  for (let i = 0; i < data.length; i++) {
-    binary += String.fromCharCode(data.charCodeAt(i) & 0xff);
-  }
-  return btoa(binary);
-}
-
-/**
- * Encode a JS string as UTF-8 bytes, then base64. `btoa()` directly
- * rejects strings containing any character > U+00FF — pasting log
- * output with smart quotes / em-dashes / emoji used to throw
- * InvalidCharacterError and silently drop the paste. Going through
- * TextEncoder gets us proper UTF-8 round-tripping for the PTY.
- */
-function utf8ToBase64(data: string) {
-  const bytes = new TextEncoder().encode(data);
-  let binary = "";
-  // String.fromCharCode is fine for one byte at a time; chunked to
-  // avoid the apply-with-large-array argument-limit pitfall.
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-  }
-  return btoa(binary);
-}
