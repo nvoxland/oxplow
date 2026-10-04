@@ -684,9 +684,15 @@ form; sign-in is a provider's.
   renewal its service refuses for good never lapses one it didn't name.
   None of that counts as a failure; an `Auth` after the renewal does,
   like any other. Renewals of one account are **serialized** in-process
-  (`renewal_lock`): a caller that waited re-reads the keychain and uses
-  what the first renewed, so a rotating refresh token is spent once
-  (tsk827). The write compares first: a sign-out during the renewal
+  (`renewal_lock`), and **a refusal renews only the token it refused**
+  (tsk928): `oauth::access_token` takes the refused access token, and
+  forces a renewal only while that token is still the one stored — a
+  caller that waited, another project's instance on the same global
+  account, or a Settings Check refused for a token already replaced gets
+  the stored one (renewed only if it is lapsing), so a rotating refresh
+  token is spent once (tsk827). Each instance keeps the credentials it
+  gave its process (`Live.given`), which is how it names the refused
+  token. The write compares first: a sign-out during the renewal
   stays signed out, a token replaced meanwhile (a new sign-in, another
   process) is used rather than overwritten, and a refused renewal marks
   the token lapsed only if it is still the one that was refused. Calls

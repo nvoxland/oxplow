@@ -320,11 +320,17 @@ pub(super) enum Refusal {
 }
 
 /// A started process and the handle its `check` returned.
+/// A start's `check` answered `Auth`: the credential it named (if any),
+/// and the credentials the process was given.
+type CheckRefusal = (Option<String>, BTreeMap<String, String>);
+
 struct Live {
     conn: Connection,
     handle: Handle,
     /// When it started: a call older than it wasn't refused by it.
     since: Instant,
+    /// The credentials it was given: a refusal is of one of these (tsk928).
+    given: BTreeMap<String, String>,
 }
 
 /// One enabled instance.
@@ -392,11 +398,12 @@ impl Instance {
     /// refused it. A client secret is the host's to send with a token
     /// request, never the process's. A signed-in credential with no token
     /// to give is a problem with the instance, at `/credentials/<NAME>`.
-    /// Its credentials' values, for a start. `renew` names the signed-in
-    /// credential whose token is renewed first (the one an `Auth` refused).
+    /// Its credentials' values, for a start. `refused` names the signed-in
+    /// credential an `Auth` refused and the token it refused: that one is
+    /// renewed first, unless it was replaced meanwhile (tsk928).
     async fn credentials(
         &self,
-        renew: Option<&str>,
+        refused: Option<(&str, &str)>,
     ) -> Result<BTreeMap<String, String>, HostError> {
         let failed = |name: &str, why: String| HostError::Failed {
             name: self.name.clone(),
@@ -444,7 +451,7 @@ impl Instance {
                 &self.account(name),
                 decl,
                 client_secret.as_deref(),
-                renew == Some(name),
+                refused.filter(|(n, _)| *n == name).map(|(_, token)| token),
             )
             .await
             {
@@ -481,20 +488,26 @@ impl Instance {
     /// the refusal points at a signed-in credential ([`Self::renewable`]).
     async fn start(&self) -> Result<Live, HostError> {
         match self.start_once(None).await {
-            Err((e, Some(named))) => match self.renewable(named.as_deref()) {
-                Some(cred) => self.start_once(Some(&cred)).await.map_err(|(e, _)| e),
+            Err((e, Some((named, given)))) => match self.renewable(named.as_deref()) {
+                Some(cred) => match given.get(&cred) {
+                    Some(token) => self
+                        .start_once(Some((&cred, token)))
+                        .await
+                        .map_err(|(e, _)| e),
+                    None => Err(e),
+                },
                 None => Err(e),
             },
             other => other.map_err(|(e, _)| e),
         }
     }
 
-    /// One start, renewing `renew` first; the error carries, when its
-    /// `check` answered `Auth`, the credential that named (if any).
+    /// One start, renewing the `refused` credential's token first; the
+    /// error carries, when its `check` answered `Auth`, the refusal.
     async fn start_once(
         &self,
-        renew: Option<&str>,
-    ) -> Result<Live, (HostError, Option<Option<String>>)> {
+        refused: Option<(&str, &str)>,
+    ) -> Result<Live, (HostError, Option<CheckRefusal>)> {
         let plain = |e: HostError| (e, None);
         let copy = copy_approved(&self.deps, &self.ext, &self.spec)
             .await
@@ -506,8 +519,9 @@ impl Instance {
             }));
         }
         let (dir, declared) = (copy.ext_dir, copy.declared);
-        let credentials = self.credentials(renew).await.map_err(plain)?;
+        let credentials = self.credentials(refused).await.map_err(plain)?;
         let names: Vec<String> = credentials.keys().cloned().collect();
+        let given = credentials.clone();
         let conn = host::connect(&Launch {
             name: self.name.clone(),
             instance_id: self.id.clone(),
@@ -532,7 +546,7 @@ impl Instance {
         .await
         .map_err(|e| {
             let auth = match &e {
-                ProtocolError::Auth { credential, .. } => Some(credential.clone()),
+                ProtocolError::Auth { credential, .. } => Some((credential.clone(), given.clone())),
                 _ => None,
             };
             (
@@ -548,6 +562,7 @@ impl Instance {
                 conn,
                 handle,
                 since,
+                given,
             }),
             _ => Err(plain(HostError::Unconfigured {
                 name: self.name.clone(),
@@ -606,18 +621,22 @@ impl Instance {
         {
             return true;
         }
-        {
+        // The token its process was given is the one refused.
+        let refused = {
             let mut live = self.live.lock().await;
             if live.as_ref().is_some_and(|l| l.since > called) {
                 return true;
             }
-            live.take();
-        }
+            live.take().and_then(|l| l.given.get(&cred).cloned())
+        };
         self.renewed_at.lock().insert(cred.clone(), Instant::now());
         // What can't be renewed shows when it next starts (its `check`
         // names the credential); here the only question is whether to
         // try again.
-        if let Err(e) = self.credentials(Some(&cred)).await {
+        let Some(refused) = refused else {
+            return true;
+        };
+        if let Err(e) = self.credentials(Some((&cred, &refused))).await {
             tracing::info!(instance = %self.name, error = %e, "renewing its sign-in failed");
         }
         true

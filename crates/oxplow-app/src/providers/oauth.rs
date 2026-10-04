@@ -134,9 +134,13 @@ fn renewal_lock(account: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
 }
 
 /// The access token for the credential kept under `account`, renewed
-/// first (and kept) when it is about to lapse — or, with `renew`, because
-/// the service refused it. A renewal the service refuses for good
-/// (`invalid_grant`) leaves the token marked as needing the person.
+/// first (and kept) when it is about to lapse — or because its service
+/// refused it: `refused` is the access token that was refused, and it is
+/// renewed only while it is still the one stored (tsk928). A caller that
+/// waited on another's renewal, or a refusal of a token another instance
+/// has already replaced, gets what is stored and spends no refresh. A
+/// renewal the service refuses for good (`invalid_grant`) leaves the
+/// token marked as needing the person.
 ///
 /// Renewals of one account are serialized in this process (a second
 /// finds the token the first stored), and every write first re-reads what
@@ -150,13 +154,16 @@ pub async fn access_token(
     account: &str,
     decl: &OAuthDecl,
     client_secret: Option<&str>,
-    renew: bool,
+    refused: Option<&str>,
 ) -> Result<String, CredentialProblem> {
     let lock = renewal_lock(account);
     let _one = lock.lock().await;
     let token = stored(secrets, account)
         .map_err(CredentialProblem::Failed)?
         .ok_or(CredentialProblem::NotSignedIn)?;
+    // Refused, and still the one stored: renew it. Already replaced: the
+    // replacement is used like any stored token.
+    let renew = refused.is_some_and(|r| r == token.access_token);
     if !renew && !token.lapses_within(RENEW_MARGIN_MS) {
         return Ok(token.access_token);
     }
@@ -793,7 +800,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let d = decl(&sim);
         assert_eq!(
-            access_token(&secrets, "acct", &d, None, false).await,
+            access_token(&secrets, "acct", &d, None, None).await,
             Err(CredentialProblem::NotSignedIn)
         );
         assert_eq!(state(&secrets, "acct"), SignInState::NotSignedIn);
@@ -805,24 +812,33 @@ mod tests {
             SignInState::SignedIn { until: None }
         );
         sim.set_ttl(3600);
-        let renewed = access_token(&secrets, "acct", &d, None, false)
+        let renewed = access_token(&secrets, "acct", &d, None, None)
             .await
             .unwrap();
         assert_ne!(renewed, first.access_token);
         assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
         // Kept: the next one asks nobody.
         assert_eq!(
-            access_token(&secrets, "acct", &d, None, false)
+            access_token(&secrets, "acct", &d, None, None)
                 .await
                 .unwrap(),
             renewed
         );
         assert_eq!(sim.grants().len(), 2);
         // Its service refused it: renewed although it looks good.
-        let forced = access_token(&secrets, "acct", &d, None, true)
+        let forced = access_token(&secrets, "acct", &d, None, Some(&renewed))
             .await
             .unwrap();
         assert_ne!(forced, renewed);
+        assert_eq!(sim.grants().len(), 3);
+        // tsk928: another caller refused the same token, arriving after the
+        // renewal: it gets the renewed one, and spends no refresh.
+        assert_eq!(
+            access_token(&secrets, "acct", &d, None, Some(&renewed))
+                .await
+                .unwrap(),
+            forced
+        );
         assert_eq!(sim.grants().len(), 3);
     }
 
@@ -834,7 +850,7 @@ mod tests {
         sim.set_ttl(-10);
         signed_in(&sim, &secrets, "acct").await;
         sim.revoke();
-        let refused = access_token(&secrets, "acct", &d, None, false).await;
+        let refused = access_token(&secrets, "acct", &d, None, None).await;
         assert!(
             matches!(refused, Err(CredentialProblem::SignInAgain(_))),
             "{refused:?}"
@@ -845,7 +861,7 @@ mod tests {
         assert!(stored(&secrets, "acct").unwrap().is_some());
         let grants = sim.grants().len();
         assert!(matches!(
-            access_token(&secrets, "acct", &d, None, false).await,
+            access_token(&secrets, "acct", &d, None, None).await,
             Err(CredentialProblem::SignInAgain(_))
         ));
         assert_eq!(sim.grants().len(), grants);
@@ -869,14 +885,14 @@ mod tests {
             }
         );
         assert_eq!(
-            access_token(&secrets, "acct", &d, None, false)
+            access_token(&secrets, "acct", &d, None, None)
                 .await
                 .unwrap(),
             alone.access_token
         );
         // Refused by its service with nothing to renew it: the person's.
         assert!(matches!(
-            access_token(&secrets, "acct", &d, None, true).await,
+            access_token(&secrets, "acct", &d, None, Some(&alone.access_token)).await,
             Err(CredentialProblem::SignInAgain(_))
         ));
         assert_eq!(state(&secrets, "acct"), SignInState::SignInAgain);
@@ -913,7 +929,7 @@ mod tests {
         let run = || {
             let (secrets, d) = (secrets.clone(), d.clone());
             tokio::spawn(
-                async move { access_token(secrets.as_ref(), "acct", &d, None, false).await },
+                async move { access_token(secrets.as_ref(), "acct", &d, None, None).await },
             )
         };
         let (a, b) = (run(), run());
@@ -934,13 +950,13 @@ mod tests {
         let sim = OAuthSim::start().await;
         let secrets = std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let d = decl(&sim);
-        signed_in(&sim, secrets.as_ref(), "acct").await;
+        let refused = signed_in(&sim, secrets.as_ref(), "acct").await.access_token;
         sim.delay_token_requests(300);
         let renewing = {
             let (secrets, d) = (secrets.clone(), d.clone());
-            tokio::spawn(
-                async move { access_token(secrets.as_ref(), "acct", &d, None, true).await },
-            )
+            tokio::spawn(async move {
+                access_token(secrets.as_ref(), "acct", &d, None, Some(&refused)).await
+            })
         };
         tokio::time::sleep(Duration::from_millis(100)).await;
         secrets.delete("acct").unwrap();
@@ -970,7 +986,14 @@ mod tests {
         };
         // ...and this one, reading the first token meanwhile, is refused.
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let ours = access_token(secrets.as_ref(), "acct", &d, None, true).await;
+        let ours = access_token(
+            secrets.as_ref(),
+            "acct",
+            &d,
+            None,
+            Some(&first.access_token),
+        )
+        .await;
         let theirs = other.await.unwrap();
         assert_eq!(ours, Ok(theirs.access_token.clone()));
         assert_eq!(stored(secrets.as_ref(), "acct").unwrap(), Some(theirs));
