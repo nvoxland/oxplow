@@ -198,8 +198,10 @@ nosniff`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer` and
 a CSP that sandboxes the document itself (`sandbox allow-scripts`, so
 its origin is opaque however it is loaded, not only inside the host's
 iframe) and lets it load only its own files — `default-src 'none'`,
-scripts, styles, images and fonts from `'self'` and the bundle folder's
-URL (the origin is opaque), `connect-src 'none'`, `form-action 'none'`,
+scripts, styles, images and fonts from the bundle folder's URL only —
+no `'self'`, which even in a sandboxed frame matches the daemon's whole
+origin (the response URL's; checked in Chromium and WebKit) and would let
+a frame load another bundle's files (tsk983) — `connect-src 'none'`, `form-action 'none'`,
 `base-uri 'none'` (`bundle_csp`); `/component-lib/` is named as a
 script source (the client library) and a style source (the kit's sheet,
 P11). `style-src` keeps `'unsafe-inline'` for the bundle's own inline

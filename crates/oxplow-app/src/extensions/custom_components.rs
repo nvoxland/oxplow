@@ -234,7 +234,8 @@ pub fn page_problems(html: &str, index: bool) -> Vec<String> {
             if url == LIB_SCRIPT && tag.name == "script" {
                 loads_lib = true;
             }
-            if outside(url) {
+            // An image or font may be a `data:` URL; a script or sheet can't.
+            if outside(url, !matches!(tag.name.as_str(), "script" | "link")) {
                 out.push(format!(
                     "`{url}` is outside the bundle — the frame's CSP loads only the bundle's own \
                      files and oxplow's `/component-lib/`"
@@ -267,25 +268,42 @@ pub fn page_problems(html: &str, index: bool) -> Vec<String> {
     out
 }
 
-/// A URL the frame would fetch from somewhere other than the bundle or
-/// oxplow's library: one with a scheme (`data:` is allowed) or a
-/// protocol-relative `//host`.
-fn outside(url: &str) -> bool {
+/// A URL the frame would fetch from somewhere other than its own bundle
+/// folder or oxplow's `/component-lib/` (tsk983): one with a scheme
+/// (`data:` too, for a script or stylesheet — `data` says when it's a
+/// load that may take one), a protocol-relative `//host`, an absolute path
+/// elsewhere on the daemon, or a relative one whose `..` climbs out of the
+/// bundle.
+fn outside(url: &str, data: bool) -> bool {
     let url = url.trim();
-    if url.starts_with("//") {
+    let path = url.split(['?', '#']).next().unwrap_or_default();
+    if path.starts_with("//") {
         return true;
     }
-    match url.split_once(':') {
-        Some((scheme, _))
-            if !scheme.is_empty()
-                && scheme
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c)) =>
+    if let Some((scheme, _)) = path.split_once(':') {
+        if !scheme.is_empty()
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
         {
-            !scheme.eq_ignore_ascii_case("data")
+            return !(data && scheme.eq_ignore_ascii_case("data"));
         }
-        _ => false,
     }
+    if let Some(rest) = path.strip_prefix('/') {
+        return !rest.starts_with("component-lib/");
+    }
+    let mut depth = 0i32;
+    for segment in path.split('/') {
+        match segment {
+            ".." => depth -= 1,
+            "" | "." => {}
+            _ => depth += 1,
+        }
+        if depth < 0 {
+            return true;
+        }
+    }
+    false
 }
 
 /// One start tag of a page: its lowercased name, its attributes
@@ -619,6 +637,41 @@ mod tests {
         ] {
             let problems = page_problems(&format!("{LIB_TAG}{html}"), true).join("\n");
             assert!(problems.contains(says), "{html}: {problems}");
+        }
+        // tsk983: the frame loads its own folder and the library only — a
+        // path that leaves the bundle is refused, so it's reported.
+        for (html, says) in [
+            (
+                "<script src=\"../b/app.js\"></script>",
+                "`../b/app.js` is outside the bundle",
+            ),
+            (
+                "<script src=\"/elsewhere/x.js\"></script>",
+                "`/elsewhere/x.js` is outside the bundle",
+            ),
+            (
+                "<link rel=stylesheet href=\"lib/../../x.css\">",
+                "`lib/../../x.css` is outside the bundle",
+            ),
+            (
+                "<script src=\"data:text/javascript,1\"></script>",
+                "`data:text/javascript,1` is outside the bundle",
+            ),
+        ] {
+            let problems = page_problems(&format!("{LIB_TAG}{html}"), true).join("\n");
+            assert!(problems.contains(says), "{html}: {problems}");
+        }
+        for inside in [
+            "<script src=\"lib/../app.js\"></script>",
+            "<script src=\"./app.js?v=2#x\"></script>",
+            "<link rel=stylesheet href=\"/component-lib/oxplow-kit.css\">",
+            "<img src=\"data:image/png;base64,AA==\">",
+        ] {
+            assert_eq!(
+                page_problems(&format!("{LIB_TAG}{inside}"), true),
+                Vec::<String>::new(),
+                "{inside}"
+            );
         }
         assert!(page_problems("<script src=app.js></script>", true)
             .join("\n")

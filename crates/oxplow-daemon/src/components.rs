@@ -38,17 +38,19 @@ pub const MAX_FILE_BYTES: u64 = MAX_BUNDLE_BYTES;
 /// kit's sheet, tsk961), nothing else. `sandbox allow-scripts` makes the
 /// document's origin opaque however it is loaded — the host's iframe
 /// attribute is not the only fence. `source` is the bundle's own folder
-/// (`http://<host>/components/<ext>/<component>/`), named beside `'self'`
-/// because that origin is opaque; nothing may connect, submit or rebase
-/// anywhere. A bundle's own inline styles are allowed (`'unsafe-inline'`
-/// in `style-src`): CSS here can fetch nothing from outside, since every
-/// fetching directive is bounded to the bundle. Inline *scripts* stay
-/// refused — `check_components` says so at check, since the frame won't.
+/// (`http://<host>/components/<ext>/<component>/`), named: there is no
+/// `'self'` anywhere (tsk983), since in a sandboxed frame it still matches
+/// the daemon's whole origin — the response URL's — and would let a frame
+/// load another bundle's files, which its approval never covered. Nothing
+/// may connect, submit or rebase anywhere. A bundle's own inline styles
+/// are allowed (`'unsafe-inline'` in `style-src`): CSS here can fetch
+/// nothing from outside, since every fetching directive is bounded to the
+/// bundle. Inline *scripts* stay refused — `check_components` says so at
+/// check, since the frame won't.
 pub fn bundle_csp(source: &str, lib: &str) -> String {
-    let own = format!(" {source}");
     format!(
-        "sandbox allow-scripts; default-src 'none'; script-src 'self'{own} {lib}; style-src 'self' 'unsafe-inline'{own} {lib}; \
-         img-src 'self' data: blob:{own}; font-src 'self' data:{own}; connect-src 'none'; \
+        "sandbox allow-scripts; default-src 'none'; script-src {source} {lib}; style-src 'unsafe-inline' {source} {lib}; \
+         img-src data: blob: {source}; font-src data: {source}; connect-src 'none'; \
          form-action 'none'; base-uri 'none'"
     )
 }
@@ -298,9 +300,11 @@ mod tests {
         assert!(directives.contains(&"connect-src 'none'"), "{csp}");
     }
 
-    /// P9.A4: a bundle may load its own scripts and the client library —
-    /// named, because a sandboxed frame's origin is opaque and `'self'`
-    /// matches nothing.
+    /// P9.A4, tsk983: a bundle may load its own files and the client
+    /// library, named — and nothing else on the daemon. `'self'` would
+    /// match the daemon's whole origin (the response URL's, even in a
+    /// sandboxed frame — checked in Chromium and WebKit), so a frame could
+    /// load another bundle's code, which its approval never covered.
     #[test]
     fn the_csp_names_the_client_library_beside_the_bundle() {
         let csp = bundle_csp(
@@ -314,8 +318,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             script,
-            "script-src 'self' http://127.0.0.1:1/components/x/c/ http://127.0.0.1:1/component-lib/"
+            "script-src http://127.0.0.1:1/components/x/c/ http://127.0.0.1:1/component-lib/"
         );
+        assert!(!csp.contains("'self'"), "{csp}");
         // tsk961: and the kit's stylesheet, beside it — no image or font.
         let style = csp
             .split(';')

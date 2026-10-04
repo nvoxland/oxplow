@@ -1322,8 +1322,13 @@ hand: the daemon serves `oxplow-component.js` (and its `.d.ts`) at
 (`crates/oxplow-daemon/assets/`, `components::component_lib`), served
 like a bundle (loopback `Host` only, ungated, outside CORS, `nosniff`),
 and named in every bundle's CSP `script-src` beside the bundle's own
-folder (`bundle_csp(source, lib)`; a sandboxed frame's origin is opaque,
-so `'self'` matches nothing). It is a **classic script that defines the
+folder (`bundle_csp(source, lib)`). There is no `'self'` in that CSP
+(tsk983): even in a sandboxed frame it matches the daemon's whole origin
+— the response URL's, checked in Chromium and WebKit — so it would let
+an approved component load another bundle's code; and the check lint
+reports a page path that leaves the bundle (`..` past its folder, an
+absolute path other than `/component-lib/`, a `data:` script or sheet).
+It is a **classic script that defines the
 global `oxplow`**, not a module: module scripts are fetched with CORS,
 which an opaque origin never passes and nothing served to a frame allows
 — the same reason a bundle's own scripts are classic. `oxplow.connect()`
