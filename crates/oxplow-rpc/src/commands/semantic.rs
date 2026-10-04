@@ -86,6 +86,10 @@ pub async fn get_panel_layout(svc: &Services) -> Result<Vec<oxplow_db::PanelPlac
 }
 
 /// Replace the layout (the order is the list's).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "off the bus: the left-nav panel layout"
+)]
 pub async fn set_panel_layout(
     svc: &Services,
     layout: Vec<oxplow_db::PanelPlacement>,

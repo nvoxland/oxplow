@@ -37,18 +37,35 @@ command):
 | AI providers and roles, credentials, approving a program or source | secrets and consent: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
 | a person's global provider instances (`instances.yaml`, P9.B2: `add_provider_instance` / `set_provider_instance` / `remove_provider_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `config.set`) |
 
-**Guards** (`crates/oxplow-app/src/source_guards.rs`), over the thin
-callers — oxplow-rpc, oxplow-mcp and oxplow-control-plane:
-`thin_callers_never_write_the_database_themselves` fails on a
-transaction, a rehearsal or a store's `_tx` core;
-`thin_caller_store_writes_are_listed_off_the_bus` fails on a call to any
-store method that isn't a read (`get…`, `list…`, `recent…`, …) unless
-its `(file, call)` is in `OFF_BUS` with a reason this table gives — the
-stores keep their async write methods for the services and tests that
-own them, so the scan, not the compiler, holds the line (tsk785). The
-scan reads code with comments dropped and the whitespace around each
-`.` removed, so a chain laid out over several lines
-(`svc⏎.comment_store⏎.set_anchor(`) is one call (tsk861);
+**Guards** (`crates/oxplow-app/src/source_guards.rs`). The thin
+callers — oxplow-rpc, oxplow-mcp, oxplow-control-plane, oxplow-daemon,
+oxplow-tauri-ipc and the desktop shell (`apps/desktop/src-tauri`) —
+are **denied every database write by type** (tsk903): each has a
+generated `clippy.toml` whose `disallowed-methods` lists every public
+function of oxplow-db that writes (the store traits' methods by their
+trait, `Database::transaction` / `rehearse` included) and every
+`ApprovalStore` / `SecretStore` call, and CI's clippy runs with `-D
+warnings`. Since the compiler resolves the call, an alias, a store
+built in place, a trait path or a turbofish is the same call, and
+clippy itself warns on a listed path that no longer resolves.
+`source_guards/db_writes.rs` builds the list from oxplow-db's syntax
+trees: a function writes when its body runs `execute`,
+`execute_batch`, `commit`, `transaction` or `rehearse`, or calls one
+of oxplow-db's functions that writes (to a fixpoint); a trait method
+writes when an implementation does. So a write is told by what it
+does, not its name (`get_or_create` writes), and `Database::read` —
+always rolled back — is a read. A read's own session state (its temp
+tables and views and `query_only`, the `SESSION_ONLY` types) isn't a
+write. `thin_caller_clippy_configs_are_current` regenerates the files
+under `OXPLOW_BLESS=1` (after any store change);
+`the_write_classifier_tells_writes_from_reads` pins the edge cases. A
+write in this table is lifted where it is made, with
+`#[expect(clippy::disallowed_methods, reason = "off the bus: <its
+row>")]` — `expect`, so it fails once the call no longer writes — and
+`thin_caller_off_bus_writes_say_why` fails on any other lifting in a
+thin caller's production code (tests seed through stores under an
+`allow`). The stores keep their async write methods for the services
+and tests that own them. Also:
 `ui_events_have_their_pinned_sources` pins which file may
 push each UI event (its `EMITTERS` table), and
 `every_ui_event_has_an_emitter` fails on a variant with none (a listener

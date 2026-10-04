@@ -13,7 +13,8 @@ pub async fn record_usage(
 ) -> Result<UsageEvent, IpcError> {
     let payload: serde_json::Value =
         serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
-    // Off the bus (navigation telemetry); views re-read `v_usage_event`.
+    // Views re-read `v_usage_event`.
+    #[expect(clippy::disallowed_methods, reason = "off the bus: usage recording")]
     let event = svc.usage_store.record(&kind, payload).await?;
     Ok(event)
 }

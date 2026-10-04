@@ -313,6 +313,11 @@ pub async fn run_server(addr: SocketAddr, state: DaemonState) -> std::io::Result
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::disallowed_methods,
+        reason = "a test seeds the database through its stores"
+    )]
+
     use super::*;
     use oxplow_app::Services;
     use oxplow_domain::stores::StreamStore as _;

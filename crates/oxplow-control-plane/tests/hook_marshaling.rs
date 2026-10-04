@@ -4,6 +4,10 @@
 //! Claude Code plugin depends on — the unit tests in lib.rs cover the
 //! helpers, but nothing else exercises `handle_hook` end to end.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test seeds the database through its stores"
+)]
 // Test-only crate: terse unwraps are the assertion style here (the
 // clippy.toml allow-unwrap-in-tests carve-out doesn't reach helper
 // fns in integration-test crates).

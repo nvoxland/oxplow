@@ -270,6 +270,11 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::disallowed_methods,
+        reason = "a test seeds the database through its stores"
+    )]
+
     use super::*;
 
     fn cli(args: &[&str]) -> (i32, String, String) {

@@ -4427,6 +4427,7 @@ dependencies = [
  "similar",
  "specta",
  "specta-typescript",
+ "syn 2.0.119",
  "tempfile",
  "thiserror 2.0.21",
  "time",

@@ -24,6 +24,7 @@ pub async fn record_page_visit(
     duration_ms: Option<i64>,
     thread_id: Option<String>,
 ) -> Result<PageVisit, IpcError> {
+    #[expect(clippy::disallowed_methods, reason = "off the bus: page visits")]
     let visit = svc
         .page_visit_store
         .record(
@@ -67,6 +68,7 @@ pub async fn top_visited_pages(
         .collect())
 }
 
+#[expect(clippy::disallowed_methods, reason = "off the bus: forgetting a page")]
 pub async fn forget_page(
     svc: &Services,
     page_kind: String,

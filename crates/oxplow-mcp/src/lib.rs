@@ -3434,6 +3434,11 @@ pub async fn serve_stdio(services: Arc<Services>) -> Result<(), Box<dyn std::err
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::disallowed_methods,
+        reason = "a test seeds the database through its stores"
+    )]
+
     use super::*;
     use oxplow_domain::stores::TaskStore;
     use oxplow_domain::task::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};

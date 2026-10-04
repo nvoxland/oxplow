@@ -8,6 +8,10 @@
 //! written as `<ROOT>`. A mismatch fails; `UPDATE_GOLDENS=1` rewrites them
 //! (then review the diff: a changed golden is a changed agent contract).
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test seeds the database through its stores"
+)]
 #![allow(clippy::unwrap_used)]
 
 mod common;

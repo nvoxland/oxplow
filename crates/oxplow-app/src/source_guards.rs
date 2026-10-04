@@ -1,7 +1,9 @@
 //! Source-scan guards over the workspace's production code (P7.B6,
-//! P8.A1, `.context/ipc-and-stores.md`): what the compiler can't hold —
-//! who may push which UI event, and that the thin callers (the RPC, MCP
-//! and control-plane layers) never write the database themselves.
+//! P8.A1, `.context/ipc-and-stores.md`): who may push which UI event, and
+//! the thin callers' generated clippy configs, which deny them every
+//! database write by type (tsk903).
+
+mod db_writes;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -189,180 +191,150 @@ fn ui_events_have_their_pinned_sources() {
     );
 }
 
-/// The layers that only call into oxplow-app: the RPC dispatch, the MCP
-/// tools and the control plane (hooks, OTLP). A write from one of them is
-/// a command on the bus, or a service's own ingest — never its own.
-fn thin_caller(path: &str) -> bool {
-    [
-        "crates/oxplow-rpc/",
-        "crates/oxplow-mcp/",
-        "crates/oxplow-control-plane/",
-    ]
-    .iter()
-    .any(|p| path.starts_with(p))
-}
-
-/// P8.A1: the thin callers never open a transaction or call a store's
-/// `_tx` core of their own.
-#[test]
-fn thin_callers_never_write_the_database_themselves() {
-    let offenders: Vec<String> = production_sources()
-        .into_iter()
-        .filter(|(path, _)| thin_caller(path))
-        .flat_map(|(path, text)| {
-            text.lines()
-                .enumerate()
-                .filter(|(_, line)| {
-                    let code = line.split("//").next().unwrap_or("");
-                    code.contains(".transaction(")
-                        || code.contains(".rehearse(")
-                        || code
-                            .match_indices("_tx(")
-                            .any(|(i, _)| code[..i].ends_with(|c: char| c.is_alphanumeric()))
-                })
-                .map(|(n, line)| format!("{path}:{}: {}", n + 1, line.trim()))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    assert_eq!(offenders, Vec::<String>::new());
-}
-
-/// The writes the thin callers make through a store themselves, each with
-/// the off-bus reason the doc's table gives (`ipc-and-stores.md` "What
-/// stays off the bus") — the needle that table must contain.
-const OFF_BUS: &[(&str, &str, &str)] = &[
-    (
-        "crates/oxplow-rpc/src/commands/semantic.rs",
-        "panel_layout_store.set",
-        "left-nav panel layout",
-    ),
-    (
-        "crates/oxplow-rpc/src/commands/usage.rs",
-        "usage_store.record",
-        "usage recording",
-    ),
-    (
-        "crates/oxplow-rpc/src/commands/page_visit.rs",
-        "page_visit_store.record",
-        "page visits",
-    ),
-    (
-        "crates/oxplow-rpc/src/commands/page_visit.rs",
-        "page_visit_store.forget_page",
-        "forgetting a page",
-    ),
+/// The crates that only call into oxplow-app: the RPC dispatch, the MCP
+/// tools, the control plane (hooks, OTLP), the daemon and the desktop
+/// shell. A write from one of them is a command on the bus, or a
+/// service's own ingest — never its own.
+const THIN_CALLERS: [&str; 6] = [
+    "crates/oxplow-rpc",
+    "crates/oxplow-mcp",
+    "crates/oxplow-control-plane",
+    "crates/oxplow-daemon",
+    "crates/oxplow-tauri-ipc",
+    "apps/desktop/src-tauri",
 ];
 
-/// A store method that only reads, by its name.
-fn reads(method: &str) -> bool {
-    const READS: [&str; 11] = [
-        "get", "list", "read", "primary", "current", "selected", "stats", "find", "count",
-        "search", "recent",
-    ];
-    READS
+fn thin_caller(path: &str) -> bool {
+    THIN_CALLERS
         .iter()
-        .any(|r| method == *r || method.starts_with(&format!("{r}_")))
+        .any(|p| path.starts_with(&format!("{p}/")))
 }
 
-/// `text`'s code with its `//` comments gone and the whitespace around
-/// each `.` removed, so a call chain split across lines
-/// (`svc\n    .comment_store\n    .set_anchor(`) reads as one.
-fn joined_code(text: &str) -> String {
-    let code: String = text
-        .lines()
-        .map(|line| line.split("//").next().unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut out = String::with_capacity(code.len());
-    let mut chars = code.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c.is_whitespace() {
-            while chars.peek().is_some_and(|n| n.is_whitespace()) {
-                chars.next();
-            }
-            // Before a `.` or after one, it is the chain's own layout.
-            if chars.peek() == Some(&'.') || out.ends_with('.') {
-                continue;
-            }
-            out.push(' ');
-        } else {
-            out.push(c);
-        }
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// A thin caller's `clippy.toml`: the root one's settings, and every
+/// database write, consent and credential call denied by type
+/// ([`db_writes::denied`]).
+fn thin_caller_clippy_toml() -> String {
+    let root = repo_root();
+    let base = std::fs::read_to_string(root.join("clippy.toml")).unwrap();
+    let mut out = String::from(
+        "# Generated by crates/oxplow-app/src/source_guards.rs\n\
+         # (`thin_caller_clippy_configs_are_current`); rewrite it with\n\
+         # OXPLOW_BLESS=1. The root clippy.toml's settings, then every\n\
+         # database write, consent and credential call this crate may not\n\
+         # make (tsk903, .context/ipc-and-stores.md).\n\n",
+    );
+    out.push_str(&base);
+    out.push_str("\ndisallowed-methods = [\n");
+    for (path, reason) in db_writes::denied(&root) {
+        out.push_str(&format!(
+            "  {{ path = \"{path}\", reason = \"{reason}\" }},\n"
+        ));
     }
+    out.push_str("]\n");
     out
 }
 
-/// The store writes in `text`: each `<x>_store.<method>(` call whose
-/// method doesn't read, however the chain is laid out.
-fn store_writes(text: &str) -> Vec<String> {
-    let code = joined_code(text);
-    let mut out = Vec::new();
-    for (i, _) in code.match_indices("_store.") {
-        let start = code[..i]
-            .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
-            .map_or(0, |p| p + 1);
-        let rest = &code[i + "_store.".len()..];
-        let method: String = rest
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '_')
-            .collect();
-        if rest[method.len()..].starts_with('(') && !reads(&method) {
-            out.push(format!("{}_store.{method}", &code[start..i]));
+/// tsk903: each thin caller's clippy denies, by type, what it may not
+/// call — an alias, a store built in place, a trait path or a turbofish
+/// is the same call to the compiler. The list is generated; a change to a
+/// store regenerates it.
+#[test]
+fn thin_caller_clippy_configs_are_current() {
+    let want = thin_caller_clippy_toml();
+    let bless = std::env::var("OXPLOW_BLESS").is_ok_and(|v| v == "1");
+    let mut stale = Vec::new();
+    for krate in THIN_CALLERS {
+        let file = repo_root().join(krate).join("clippy.toml");
+        if bless {
+            std::fs::write(&file, &want).unwrap();
+        } else if std::fs::read_to_string(&file).ok().as_deref() != Some(want.as_str()) {
+            stale.push(krate);
         }
     }
-    out
+    assert!(
+        stale.is_empty(),
+        "stale clippy.toml (run with OXPLOW_BLESS=1): {stale:?}"
+    );
 }
 
-/// tsk861: a call chain laid out over several lines is one call.
+/// tsk903: a write is told by what its body does, not by its name — a
+/// `get_or_create` writes, a trait's write is denied through the trait,
+/// and a read through `Database::read` (always rolled back) is a read.
 #[test]
-fn a_multiline_store_write_is_caught() {
-    let text = "Ok(svc\n        .comment_store // where it is now\n        .set_anchor(id, &s, o)\n        .await?)\nsvc.thread_store.get(id)";
-    assert_eq!(store_writes(text), vec!["comment_store.set_anchor"]);
+fn the_write_classifier_tells_writes_from_reads() {
+    let denied: BTreeSet<String> = db_writes::denied(&repo_root())
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    for write in [
+        "oxplow_db::change_store::SqliteChangeStore::get_or_create",
+        "oxplow_db::analytics_stores::SqliteUsageStore::record",
+        "oxplow_domain::stores::ThreadStore::upsert",
+        "oxplow_db::database::Database::transaction",
+        "oxplow_db::database::Database::rehearse",
+        "oxplow_app::exec_consent::ApprovalStore::approve",
+    ] {
+        assert!(denied.contains(write), "{write} isn't denied");
+    }
+    for read in [
+        "oxplow_domain::stores::ThreadStore::get",
+        "oxplow_domain::stores::ThreadStore::list_for_stream",
+        "oxplow_db::database::Database::read",
+        "oxplow_db::semantic_layer::SemanticLayer::query_sql",
+    ] {
+        assert!(!denied.contains(read), "{read} is denied");
+    }
 }
 
-/// tsk785: a store call in a thin caller is a read, or a write listed in
-/// `OFF_BUS` with its reason — and the doc's off-bus table names each
-/// listed one. A write through a store's async method used to slip past
-/// the transaction scan above, and one laid out over several lines past
-/// this one (tsk861).
+/// The marker a thin caller's off-bus write carries, its reason a row of
+/// the doc's table (`ipc-and-stores.md` "What stays off the bus").
+const OFF_BUS: &str = "#[expect(clippy::disallowed_methods, reason = \"off the bus: ";
+
+/// tsk785, tsk903: a thin caller's write through a store is listed off
+/// the bus where it is made — `#[expect]`, so it fails once it no longer
+/// writes — with a reason the doc's table gives; nothing else lifts the
+/// denial.
 #[test]
-fn thin_caller_store_writes_are_listed_off_the_bus() {
-    let mut found: BTreeSet<(String, String)> = BTreeSet::new();
+fn thin_caller_off_bus_writes_say_why() {
+    let doc = std::fs::read_to_string(repo_root().join(".context/ipc-and-stores.md")).unwrap();
     let mut offenders = Vec::new();
+    let mut listed = 0;
     for (path, text) in production_sources() {
         if !thin_caller(&path) {
             continue;
         }
-        for call in store_writes(&text) {
-            if OFF_BUS.iter().any(|(p, c, _)| *p == path && *c == call) {
-                found.insert((path.clone(), call));
-            } else {
-                offenders.push(format!("{path}: {call}"));
+        for (i, _) in text.match_indices("disallowed_methods") {
+            // The whole attribute, however rustfmt laid it out.
+            let start = text[..i].rfind("#[").unwrap_or(i);
+            let end = text[i..].find(")]").map_or(text.len(), |e| i + e + 2);
+            let attr = text[start..end]
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .replace("( ", "(")
+                .replace(" )", ")");
+            let reason = attr
+                .strip_prefix(OFF_BUS)
+                .and_then(|r| r.strip_suffix("\")]"));
+            match reason {
+                Some(r) if doc.contains(r) => listed += 1,
+                _ => {
+                    let line = text[..i].lines().count();
+                    offenders.push(format!("{path}:{line}: {attr}"));
+                }
             }
         }
     }
     assert_eq!(
         offenders,
         Vec::<String>::new(),
-        "a write through a store from a thin caller: make it a command, or list it in OFF_BUS and the doc's table"
+        "lift the denial only with `{OFF_BUS}<a row of the doc's off-bus table>\")]`"
     );
-    let stale: Vec<_> = OFF_BUS
-        .iter()
-        .filter(|(p, c, _)| !found.contains(&(p.to_string(), c.to_string())))
-        .collect();
-    assert!(stale.is_empty(), "OFF_BUS rows no longer called: {stale:?}");
-    let doc = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.context/ipc-and-stores.md"),
-    )
-    .unwrap();
-    let missing: Vec<_> = OFF_BUS
-        .iter()
-        .filter(|(_, _, needle)| !doc.contains(needle))
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "OFF_BUS rows the doc's table doesn't give: {missing:?}"
-    );
+    assert!(listed > 0, "the scan saw no off-bus write");
 }
 
 /// The `OxplowEvent` variants, as the wire names them (`kind`, camelCase).

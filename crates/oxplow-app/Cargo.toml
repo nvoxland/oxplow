@@ -86,6 +86,9 @@ oxplow-oauth-sim = { workspace = true }
 # P8.B4: incremental materialization equals a full refill over random
 # write sequences.
 proptest = "1"
+# tsk903: the store-write guard reads oxplow-db's functions to tell which
+# write.
+syn = { version = "2", features = ["full", "visit"] }
 
 [lints]
 workspace = true
