@@ -315,13 +315,21 @@ fn already(key: &EffectRunKey) -> DomainError {
 }
 
 /// Claim `key`'s attempt before a run with a step outside the
-/// transaction: a `started` row. `Invalid` when that attempt was already
-/// made.
-pub fn claim_tx(conn: &Connection, key: &EffectRunKey, now: &str) -> Result<(), DomainError> {
+/// transaction: a `started` row, keeping `resend` — what it composed, when
+/// every step is safe to send again — so an attempt cut off before it is
+/// recorded can be sent again by itself (tsk954). `Invalid` when that
+/// attempt was already made.
+pub fn claim_tx(
+    conn: &Connection,
+    key: &EffectRunKey,
+    now: &str,
+    resend: Option<&str>,
+) -> Result<(), DomainError> {
     let inserted = conn
         .execute(
-            "INSERT INTO effect_run (effect, event_id, event_seq, attempt, origin, state, started_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'started', ?6)
+            "INSERT INTO effect_run
+                 (effect, event_id, event_seq, attempt, origin, state, started_at, resend_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'started', ?6, ?7)
              ON CONFLICT (effect, event_id, attempt) DO NOTHING",
             params![
                 key.effect,
@@ -329,7 +337,8 @@ pub fn claim_tx(conn: &Connection, key: &EffectRunKey, now: &str) -> Result<(), 
                 key.event_seq,
                 key.attempt,
                 key.origin.as_str(),
-                now
+                now,
+                resend
             ],
         )
         .map_err(map_sql_err)?;
@@ -339,9 +348,35 @@ pub fn claim_tx(conn: &Connection, key: &EffectRunKey, now: &str) -> Result<(), 
     Ok(())
 }
 
+/// A `started` attempt's claim: what it kept to send again, and when it
+/// started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Claimed {
+    pub resend: Option<String>,
+    pub started_at: String,
+}
+
+/// `key`'s claim, while its attempt is `started`.
+pub fn claimed_tx(conn: &Connection, key: &EffectRunKey) -> Result<Option<Claimed>, DomainError> {
+    conn.query_row(
+        "SELECT resend_json, started_at FROM effect_run
+          WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3 AND state = 'started'",
+        params![key.effect, key.event_id, key.attempt],
+        |r| {
+            Ok(Claimed {
+                resend: r.get(0)?,
+                started_at: r.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(map_sql_err)
+}
+
 /// Record how `key`'s attempt ended: its row, or its `started` claim
-/// finished. `Invalid` when it already ended (a concurrent or earlier
-/// delivery got there first).
+/// finished — keeping what the claim composed only when it failed, for its
+/// automatic retry. `Invalid` when it already ended (a concurrent or
+/// earlier delivery got there first).
 pub fn finish_tx(
     conn: &Connection,
     key: &EffectRunKey,
@@ -352,7 +387,8 @@ pub fn finish_tx(
         Some(RunState::Started) => {
             conn.execute(
                 "UPDATE effect_run
-                    SET state = ?4, reason = ?5, audit_id = ?6, proposal_id = ?7, finished_at = ?8
+                    SET state = ?4, reason = ?5, audit_id = ?6, proposal_id = ?7, finished_at = ?8,
+                        resend_json = CASE WHEN ?4 = 'failed' THEN resend_json END
                   WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3",
                 params![
                     key.effect,
@@ -418,15 +454,64 @@ mod tests {
             finish_tx(tx, &key(), &ok(), "t")?;
             assert_eq!(state_tx(tx, &key())?, Some(RunState::Ok));
             assert!(finish_tx(tx, &key(), &ok(), "t").is_err());
-            assert!(claim_tx(tx, &key(), "t").is_err());
+            assert!(claim_tx(tx, &key(), "t", None).is_err());
             let other = EffectRunKey {
                 event_id: "e2".into(),
                 ..key()
             };
-            claim_tx(tx, &other, "t")?;
+            claim_tx(tx, &other, "t", None)?;
             assert_eq!(state_tx(tx, &other)?, Some(RunState::Started));
             finish_tx(tx, &other, &ok(), "t")?;
             assert_eq!(state_tx(tx, &other)?, Some(RunState::Ok));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    /// tsk954: an attempt claimed with what it composed keeps it while it
+    /// runs — what is sent again when it is cut off — and after, only if
+    /// it failed (for its automatic retry).
+    #[tokio::test]
+    async fn a_claim_keeps_what_it_composed() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            claim_tx(tx, &key(), "t1", Some("{\"calls\":[]}"))?;
+            assert_eq!(
+                claimed_tx(tx, &key())?,
+                Some(Claimed {
+                    resend: Some("{\"calls\":[]}".into()),
+                    started_at: "t1".into(),
+                })
+            );
+            finish_tx(tx, &key(), &ok(), "t2")?;
+            assert_eq!(claimed_tx(tx, &key())?, None, "no longer started");
+            assert_eq!(latest_tx(tx, "acme/notify", "e1")?.unwrap().resend, None);
+            let failing = EffectRunKey {
+                event_id: "e2".into(),
+                ..key()
+            };
+            claim_tx(tx, &failing, "t1", Some("x"))?;
+            let failed = Finished {
+                state: RunState::Failed,
+                reason: Some("boom".into()),
+                audit_id: None,
+                proposal_id: None,
+            };
+            finish_tx(tx, &failing, &failed, "t2")?;
+            assert_eq!(
+                latest_tx(tx, "acme/notify", "e2")?
+                    .unwrap()
+                    .resend
+                    .as_deref(),
+                Some("x")
+            );
+            let plain = EffectRunKey {
+                event_id: "e3".into(),
+                ..key()
+            };
+            claim_tx(tx, &plain, "t1", None)?;
+            assert_eq!(claimed_tx(tx, &plain)?.unwrap().resend, None);
             Ok(())
         })
         .await
@@ -463,7 +548,7 @@ mod tests {
                 origin: ReactionOrigin::Retry,
                 ..key()
             };
-            claim_tx(tx, &retry, "t2")?;
+            claim_tx(tx, &retry, "t2", None)?;
             assert_eq!(
                 latest_tx(tx, "acme/notify", "e1")?,
                 Some(Latest {
@@ -475,7 +560,7 @@ mod tests {
                 })
             );
             assert!(
-                claim_tx(tx, &retry, "t2").is_err(),
+                claim_tx(tx, &retry, "t2", None).is_err(),
                 "an attempt is made once"
             );
             finish_tx(tx, &retry, &ok(), "t3")?;

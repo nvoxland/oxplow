@@ -4835,6 +4835,167 @@ async fn a_long_overdue_retry_is_a_persons() {
     assert_eq!(effect_failures(&fx).await, 1);
 }
 
+/// Append the event the fixture's effect reacts to, and cut its attempt
+/// off with its write under way — what oxplow stopping does: `run` drives
+/// the attempt, and is dropped once the fake has the call (its write still
+/// lands after). The fake's hooks are cleared after.
+async fn cut_off<F, Fut>(fx: &EffortFixture, run: F) -> oxplow_domain::StoredEvent
+where
+    F: FnOnce(std::sync::Arc<crate::Services>, oxplow_domain::StoredEvent) -> Fut,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
+    let env = oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
+        "human",
+        &WorkItemTransitionedV1 {
+            work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
+            from: oxplow_domain::TaskStatus::InProgress,
+            to: oxplow_domain::TaskStatus::Done,
+            effort: None,
+        },
+    );
+    let id = env.id.clone();
+    fx.svc.event_log_store.append(env).await.unwrap();
+    let ev = fx.svc.event_log_store.get(id).await.unwrap().unwrap();
+    let started = fx.svc.layout.project_dir.join("invoke-started");
+    let _ = std::fs::remove_file(&started);
+    set_hooks(fx, &format!("slow:1500,started-file:{}", started.display())).await;
+    let under_way = tokio::spawn(run(fx.svc.clone(), ev.clone()));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !started.exists() {
+        assert!(
+            std::time::Instant::now() < deadline && !under_way.is_finished(),
+            "the attempt never reached the fake"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    under_way.abort();
+    let _ = under_way.await;
+    set_hooks(fx, "").await;
+    ev
+}
+
+/// The pump delivering `ev` to the effects.
+async fn deliver(svc: std::sync::Arc<crate::Services>, ev: oxplow_domain::StoredEvent) {
+    use crate::event_pump::AsyncEventConsumer as _;
+    crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&svc))
+        .handle(&ev)
+        .await
+        .unwrap();
+}
+
+/// tsk954: an attempt cut off by oxplow stopping, its every step a write
+/// to a provider keeping `idempotent_writes`, kept what it composed with
+/// its claim: found again (the pump's redelivery), it is failed and sent
+/// again by itself from when it started — and lands once.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_attempt_cut_off_by_a_stop_is_sent_again_and_lands_once() {
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    let ev = cut_off(&fx, deliver).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "started", 0]]));
+    deliver(fx.svc.clone(), ev).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    assert_eq!(effect_failures(&fx).await, 0, "awaiting its retry");
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "live", "failed", 1], [2, "auto", "ok", 0]])
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
+}
+
+/// tsk954: cut off toward a provider that doesn't keep `idempotent_writes`,
+/// nothing was kept to send again: the interrupted attempt is a person's,
+/// and counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cut_off_attempt_toward_a_plain_provider_waits_for_a_person() {
+    let fx = with_effect("plain-writes", FILE_ON_FAKE).await;
+    let ev = cut_off(&fx, deliver).await;
+    deliver(fx.svc.clone(), ev).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
+    assert_eq!(effect_failures(&fx).await, 1);
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(3600))
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+/// tsk954: a person's backfill cut off with its write under way is found
+/// at start (`recover_interrupted`) and sent again by itself, like a live
+/// attempt.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cut_off_retry_or_backfill_is_sent_again_at_start() {
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    cut_off(&fx, |svc, _| async move {
+        // Approved again after the event: it's the past a backfill covers.
+        crate::effects::approved(&svc.db, &format!("{EXT}/file"))
+            .await
+            .unwrap();
+        let (ext, decl) =
+            crate::effect_triggers::find_effect(&svc, &format!("{EXT}/file")).expect("its effect");
+        let range = crate::commands::effect::Range {
+            from_seq: None,
+            since: None,
+            to_seq: None,
+        };
+        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50).await;
+    })
+    .await;
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "backfill", "started", 0]])
+    );
+    assert_eq!(
+        crate::effect_triggers::recover_interrupted(&fx.svc)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "backfill", "failed", 1]])
+    );
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
+}
+
+/// tsk954: a cut-off attempt's retry is due from when it started, so one
+/// found more than an hour later (oxplow was closed meanwhile) isn't sent
+/// by itself: it's a person's, and counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cut_off_attempt_found_an_hour_late_is_a_persons() {
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    let ev = cut_off(&fx, deliver).await;
+    deliver(fx.svc.clone(), ev).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(2 * 3600))
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
+    assert_eq!(effect_failures(&fx).await, 1);
+}
+
 /// tsk935: a reaction cut off midway — its first write landed, its reply
 /// lost, the second never sent — is sent again whole under the same keys:
 /// each write lands once.

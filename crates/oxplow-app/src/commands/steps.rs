@@ -405,7 +405,7 @@ impl CommandBus {
                     RunOrigin::Undo(original) => {
                         finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
                     }
-                    RunOrigin::Effect(key) => crate::effects::finished_tx(
+                    RunOrigin::Effect(key, _) => crate::effects::finished_tx(
                         tx,
                         &vocabulary.current(),
                         key,

@@ -439,8 +439,13 @@ enum RunOrigin {
     Approval(i64),
     /// An extension's effect reacting to an event (P8.D10): the run's
     /// `effect_run` row and `effect.result` land with it, and its
-    /// `command.executed` is caused by the event.
-    Effect(Arc<oxplow_db::effect_run_store::EffectRunKey>),
+    /// `command.executed` is caused by the event. With what it composed
+    /// when every step is safe to send again, kept with its claim
+    /// (tsk954).
+    Effect(
+        Arc<oxplow_db::effect_run_store::EffectRunKey>,
+        Option<Arc<str>>,
+    ),
 }
 
 impl RunOrigin {
@@ -448,7 +453,7 @@ impl RunOrigin {
     /// effect reacted to.
     fn cause(&self) -> Option<oxplow_domain::EventId> {
         match self {
-            RunOrigin::Effect(key) => Some(oxplow_domain::EventId(key.event_id.clone())),
+            RunOrigin::Effect(key, _) => Some(oxplow_domain::EventId(key.event_id.clone())),
             _ => None,
         }
     }
@@ -458,7 +463,7 @@ impl RunOrigin {
         Invocation {
             actor: actor.clone(),
             idempotency_key: match self {
-                RunOrigin::Effect(run) => Some(effect_step_key(run, index, call, input)),
+                RunOrigin::Effect(run, _) => Some(effect_step_key(run, index, call, input)),
                 _ => None,
             },
         }
@@ -684,9 +689,12 @@ impl CommandBus {
     /// `effect.result` landing with the run — in its transaction, after a
     /// `started` claim when a step leaves it, or with its proposal when a
     /// command asks — and its `command.executed` caused by the event.
+    /// `resend`: what it composed, when every step is safe to send again,
+    /// kept with its claim (tsk954).
     pub(crate) async fn run_effect(
         &self,
         key: oxplow_db::effect_run_store::EffectRunKey,
+        resend: Option<String>,
         command: Command,
         input: Value,
     ) -> Result<CommandOutcome, CommandError> {
@@ -698,7 +706,7 @@ impl CommandBus {
             Arc::new(command),
             input,
             false,
-            RunOrigin::Effect(Arc::new(key)),
+            RunOrigin::Effect(Arc::new(key), resend.map(Arc::from)),
         )
         .await
     }
@@ -951,7 +959,7 @@ impl CommandBus {
                             RunOrigin::Approval(id) => {
                                 proposal_store::approve_tx(tx, *id, recorded.audit_id).map(|_| ())
                             }
-                            RunOrigin::Effect(key) => crate::effects::finished_tx(
+                            RunOrigin::Effect(key, _) => crate::effects::finished_tx(
                                 tx,
                                 &vocabulary.current(),
                                 key,
@@ -1093,7 +1101,7 @@ impl CommandBus {
         // A proposal is a plain call (an effect's included); an undo kept
         // as one would lose the row it undoes (an approval is a person's,
         // so never here).
-        if !matches!(origin, RunOrigin::Call | RunOrigin::Effect(_)) {
+        if !matches!(origin, RunOrigin::Call | RunOrigin::Effect(..)) {
             return CommandError::Denied {
                 reason: format!(
                     "`{}` needs a person's confirmation; ask them to undo it",
@@ -1136,7 +1144,7 @@ impl CommandBus {
             preview.destructive,
         );
         let effect = match &origin {
-            RunOrigin::Effect(key) => Some(key.clone()),
+            RunOrigin::Effect(key, _) => Some(key.clone()),
             _ => None,
         };
         let stored = self
@@ -1634,7 +1642,7 @@ impl CommandBus {
                     RunOrigin::Undo(original) => {
                         finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
                     }
-                    RunOrigin::Effect(key) => crate::effects::finished_tx(
+                    RunOrigin::Effect(key, _) => crate::effects::finished_tx(
                         tx,
                         &vocabulary.current(),
                         key,
@@ -1700,11 +1708,18 @@ impl CommandBus {
                     .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from))
             }
             // A step will leave the transaction: claim the reaction first,
-            // so a redelivery finds it and never sends the steps again.
-            RunOrigin::Effect(key) => {
-                let (key, now) = (key.clone(), oxplow_domain::Timestamp::now().to_string());
+            // so a redelivery finds it — keeping what it composed when it
+            // may be sent again by itself.
+            RunOrigin::Effect(key, resend) => {
+                let (key, resend, now) = (
+                    key.clone(),
+                    resend.clone(),
+                    oxplow_domain::Timestamp::now().to_string(),
+                );
                 self.db
-                    .transaction(move |tx| oxplow_db::effect_run_store::claim_tx(tx, &key, &now))
+                    .transaction(move |tx| {
+                        oxplow_db::effect_run_store::claim_tx(tx, &key, &now, resend.as_deref())
+                    })
                     .await
                     .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from))
             }
@@ -1720,7 +1735,7 @@ impl CommandBus {
             // runs it again — and one cut off before that is recorded at
             // the next start (a person's retry or backfill) or by the
             // pump's redelivery (a live one).
-            RunOrigin::Call | RunOrigin::Effect(_) => return,
+            RunOrigin::Call | RunOrigin::Effect(..) => return,
             RunOrigin::Undo(audit_id) => {
                 self.db
                     .transaction(move |tx| {
@@ -1761,7 +1776,7 @@ fn lost_race(
     let message = match origin {
         RunOrigin::Undo(audit_id) => format!("audit row {audit_id} was already undone"),
         RunOrigin::Approval(id) => format!("proposal:{id} was already decided"),
-        RunOrigin::Effect(key) => format!(
+        RunOrigin::Effect(key, _) => format!(
             "effect `{}` {} {}",
             key.effect,
             crate::effects::ALREADY_REACTED,

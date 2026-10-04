@@ -1731,14 +1731,20 @@ event, each enabled effect whose `on`/`where` match **reacts at most
 once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
 1. a row exists — a redelivery: nothing. A `started` row the live
    consumer claimed is a run that claimed a step outside oxplow and was
-   interrupted: recorded `failed` ("interrupted") and **never sent
-   again**; one a person's retry or backfill claimed is theirs, under
-   way, and the pump leaves it be (tsk847). A person's retry or
-   backfill is no pump delivery, so nothing redelivers one cut off
-   between its claim and its record: at start (`boot.rs`,
+   cut off (`effect_triggers::cut_off`): recorded `failed`
+   ("interrupted"). When its claim kept what it composed — every step a
+   write to a provider keeping `idempotent_writes` (`claim_tx` writes
+   `resend_json` then, P11, tsk954) — it is **sent again by itself** like
+   a failure that may pass, its delay counted from when it started (so
+   one found more than an hour late is a person's); otherwise it is a
+   person's, never sent again by itself. One a person's retry or
+   backfill claimed is theirs, under way, and the pump leaves it be
+   (tsk847). A person's retry or backfill — or an automatic attempt — is
+   no pump delivery, so nothing redelivers one cut off between its claim
+   and its record: at start (`boot.rs`,
    `effect_triggers::recover_interrupted`) every attempt still `started`
-   whose origin is `retry` or `backfill` is recorded the same way, with
-   its `effect.result` saying what started it — Delivery lists it, and a
+   whose origin isn't `live` is recovered the same way, with its
+   `effect.result` saying what started it — Delivery lists it, and a
    person may retry it (tsk845);
 2. `effects::gate` isn't `Runs`: nothing;
 3. the loop guard (`lineage`, walking the event's `cause` chain): an
@@ -1831,9 +1837,12 @@ overdue (`MAX_RETRY_LATENESS`: one due longer ago — oxplow was closed — is
 a person's, its failure counted; tsk915) — otherwise the
 retry is dropped and the failure is a person's. An attempt awaiting its
 retry isn't counted against the effect's health (`Reacted::Retrying`);
-the attempt that exhausts the retries counts once. A step inside oxplow,
-a provider that doesn't declare the promise, or an attempt cut off by
-oxplow stopping (what it composed isn't kept) waits for a person. Delivery
+the attempt that exhausts the retries counts once. A step inside oxplow, or
+a provider that doesn't declare the promise, waits for a person. An
+attempt cut off by oxplow stopping is sent again by itself on the same
+terms: its claim keeps what it composed when every step is safe to send
+again, and the store keeps it after only for a failed attempt
+(`finish_tx`). Delivery
 says "sent again by itself shortly" on a reaction awaiting its retry; a
 person may still retry it first.
 
