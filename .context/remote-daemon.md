@@ -200,12 +200,16 @@ its origin is opaque however it is loaded, not only inside the host's
 iframe) and lets it load only its own files — `default-src 'none'`,
 scripts, styles, images and fonts from `'self'` and the bundle folder's
 URL (the origin is opaque), `connect-src 'none'`, `form-action 'none'`,
-`base-uri 'none'` (`bundle_csp`). `style-src` keeps `'unsafe-inline'`
-because the host hands the bundle the kit CSS and theme tokens as text
-it injects as a `<style>`; inline scripts stay refused. The main
-window's CSP (`tauri.conf.json`) has `frame-src http://127.0.0.1:*` for
-it, pinned by `tauriCsp.test.ts`; with no `devCsp`, Tauri applies the
-same `csp` in dev.
+`base-uri 'none'` (`bundle_csp`); `/component-lib/` is named as a
+script source (the client library) and a style source (the kit's sheet,
+P11). `style-src` keeps `'unsafe-inline'` for the bundle's own inline
+styles — CSS there can fetch nothing from outside, every fetching
+directive being bounded to the bundle; inline scripts stay refused. The
+page bounds where a frame may go with `frame-src http://127.0.0.1:*`:
+the main window's CSP (`tauri.conf.json`; with no `devCsp`, Tauri
+applies the same `csp` in dev) and, for a plain browser, a one-directive
+meta CSP in `index.html` (P11, tsk960) — `lens/frameBound.test.ts`
+keeps the two one value.
 
 ## Dispatch context
 
