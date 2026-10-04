@@ -141,7 +141,7 @@ fn row(s: oxplow_domain::code_intel::Symbol) -> SymbolRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV1};
+    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2};
 
     fn sql(e: rusqlite::Error) -> DomainError {
         DomainError::Storage(e.to_string())
@@ -202,7 +202,7 @@ mod tests {
         svc.event_log_store
             .append(oxplow_domain::Envelope::typed::<SnapshotTaken>(
                 "system:test",
-                &SnapshotTakenV1 {
+                &SnapshotTakenV2 {
                     stream: format!("stream:{stream}"),
                     snapshot: format!("snapshot:{id}"),
                     parent: None,

@@ -76,7 +76,7 @@ impl EventConsumer for UiPush {
 #[cfg(test)]
 mod tests {
 
-    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV1};
+    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2};
     use oxplow_domain::{Anchors, Envelope};
 
     use super::*;
@@ -84,7 +84,7 @@ mod tests {
     fn taken(stream: StreamId, snapshot: i64, unchanged: bool) -> Envelope {
         Envelope::typed::<SnapshotTaken>(
             "system:snapshots",
-            &SnapshotTakenV1 {
+            &SnapshotTakenV2 {
                 stream: format!("stream:{stream}"),
                 snapshot: format!("snapshot:{snapshot}"),
                 parent: None,

@@ -688,7 +688,7 @@
     - { name: "stream_id", type: "INTEGER", doc: "Stream (worktree) the take ran on." }
     - { name: "snapshot_id", type: "INTEGER", doc: "Snapshot the worktree is at after the take (v_snapshot.id)." }
     - { name: "parent_snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)." }
-    - { name: "trigger", type: "TEXT", doc: "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, legacy." }
+    - { name: "trigger", type: "TEXT", doc: "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, coverage (a run's coverage was recorded: the code it measured), legacy." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread the take belongs to, if any." }
     - { name: "turn_id", type: "INTEGER", doc: "Agent turn the take belongs to, if any (v_agent_turn.id)." }
     - { name: "effort_id", type: "INTEGER", doc: "Effort the take belongs to, if any (v_effort.id)." }

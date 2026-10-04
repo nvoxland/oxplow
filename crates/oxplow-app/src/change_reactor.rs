@@ -157,7 +157,7 @@ impl AsyncEventConsumer for ChangeReactor {
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
-        SnapshotTaken, SnapshotTakenV1, VcsHeadMoved, VcsHeadMovedV1,
+        SnapshotTaken, SnapshotTakenV2, VcsHeadMoved, VcsHeadMovedV1,
     };
     use oxplow_domain::events::Anchors;
     use oxplow_domain::{Envelope, StreamId};
@@ -177,7 +177,7 @@ mod tests {
     fn taken(unchanged: bool, file_count: u32) -> Envelope {
         Envelope::typed::<SnapshotTaken>(
             "system",
-            &SnapshotTakenV1 {
+            &SnapshotTakenV2 {
                 stream: "stream:str1".into(),
                 snapshot: "snapshot:1".into(),
                 parent: None,

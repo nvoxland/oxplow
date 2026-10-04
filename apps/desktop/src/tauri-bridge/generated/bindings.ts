@@ -4851,6 +4851,11 @@ export type SnapshotTrigger =
  *  new commit (a re-stamp, no new snapshot).
  */
 "head_moved" | 
+/**
+ *  A run's coverage was recorded: the code it measured, which its
+ *  coverage capture is pinned to (tsk883).
+ */
+"coverage" | 
 // Backfilled for a snapshot taken before the operation log existed.
 "legacy";
 

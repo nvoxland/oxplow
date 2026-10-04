@@ -3875,7 +3875,7 @@
         {
           "name": "trigger",
           "type": "TEXT",
-          "doc": "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, legacy."
+          "doc": "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, coverage (a run's coverage was recorded: the code it measured), legacy."
         },
         {
           "name": "thread_id",

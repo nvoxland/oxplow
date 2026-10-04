@@ -817,6 +817,7 @@ const TRIGGER_LABEL: Record<SnapshotTrigger, string> = {
   manual: "manual",
   git_refs: "git",
   head_moved: "HEAD moved",
+  coverage: "coverage run",
   legacy: "",
 };
 const errorBanner: React.CSSProperties = {

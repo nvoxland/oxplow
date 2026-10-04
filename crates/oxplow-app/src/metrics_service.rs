@@ -3178,7 +3178,7 @@ mod tests {
     ) -> oxplow_domain::StoredEvent {
         let env = oxplow_domain::Envelope::typed::<oxplow_domain::events::schema::SnapshotTaken>(
             "system",
-            &oxplow_domain::events::schema::SnapshotTakenV1 {
+            &oxplow_domain::events::schema::SnapshotTakenV2 {
                 stream: "stream:1".into(),
                 snapshot: format!("snapshot:{snap}"),
                 parent: None,

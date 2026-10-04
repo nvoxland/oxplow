@@ -136,6 +136,8 @@ impl EventSchemaRegistry {
         r.register::<EffectResultAtV3>()
             .expect("core type registers");
         r.register::<EffectResult>().expect("core type registers");
+        r.register::<SnapshotTakenAtV1>()
+            .expect("core type registers");
         r.register::<SnapshotTaken>().expect("core type registers");
         r.register::<VcsHeadMoved>().expect("core type registers");
         r.register::<AgentTurnStarted>()
@@ -901,11 +903,73 @@ impl EventType for EffectResult {
     }
 }
 
+/// Why a snapshot take happened: one row of the operation log each
+/// (`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.
+// `snapshot.taken@1`'s trigger: every reason but `coverage`. Its doc
+// comments match `SnapshotTrigger`'s, so the v1 schema stays as published.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "SnapshotTrigger")]
+pub enum SnapshotTriggerV1 {
+    /// An agent turn ended (Stop / interrupt).
+    TurnEnd,
+    /// The worktree went quiet with no turn open (human edits).
+    Quiet,
+    /// An effort opened (its start bracket).
+    EffortStart,
+    /// An effort closed (its end bracket), including a restart closing
+    /// an orphaned effort.
+    EffortEnd,
+    /// The boot sweep.
+    Startup,
+    /// An explicit request (metric baseline rebuild, tests).
+    Manual,
+    /// HEAD or a ref moved; the take drains whatever was dirty.
+    GitRefs,
+    /// HEAD moved on a clean tree: the latest snapshot now also is the
+    /// new commit (a re-stamp, no new snapshot).
+    HeadMoved,
+    /// Backfilled for a snapshot taken before the operation log existed.
+    Legacy,
+}
+
 /// `snapshot.taken@1`: one snapshot take (one `snapshot_op` row). Refs
 /// are canonical (`.context/refs.md`): `stream:str1`, `snapshot:123`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotTakenV1 {
+    pub stream: String,
+    /// The snapshot the worktree is at after the take: a new one, or the
+    /// parent when nothing changed (`unchanged`).
+    pub snapshot: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    pub trigger: SnapshotTriggerV1,
+    /// True when the take recorded no new snapshot.
+    pub unchanged: bool,
+    /// File rows the take recorded (0 when unchanged).
+    pub file_count: u32,
+    pub elapsed_ms: u64,
+    /// The time budget the caller gave the take, when it had one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_ms: Option<u64>,
+    /// `elapsed_ms > budget_ms`: reported, never silent.
+    pub over_budget: bool,
+}
+
+/// The v1 shape of `snapshot.taken`, as a registry entry.
+pub struct SnapshotTakenAtV1;
+impl EventType for SnapshotTakenAtV1 {
+    const TYPE: &'static str = "snapshot.taken";
+    const V: u32 = 1;
+    type Payload = SnapshotTakenV1;
+}
+
+/// `snapshot.taken@2` (tsk883): v1, its trigger able to say `coverage`
+/// — the take that pins a run's coverage to the code it measured.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotTakenV2 {
     pub stream: String,
     /// The snapshot the worktree is at after the take: a new one, or the
     /// parent when nothing changed (`unchanged`).
@@ -928,8 +992,19 @@ pub struct SnapshotTakenV1 {
 pub struct SnapshotTaken;
 impl EventType for SnapshotTaken {
     const TYPE: &'static str = "snapshot.taken";
-    const V: u32 = 1;
-    type Payload = SnapshotTakenV1;
+    const V: u32 = 2;
+    type Payload = SnapshotTakenV2;
+    /// Every v1 trigger is a v2 trigger: the payload reads as it is.
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        if from_v != 1 {
+            return Err(DomainError::Invalid(format!(
+                "snapshot.taken@{from_v} has no upcast to v2"
+            )));
+        }
+        let _: SnapshotTakenV1 = serde_json::from_value(payload.clone())
+            .map_err(|e| DomainError::Invalid(format!("snapshot.taken@1: {e}")))?;
+        Ok(payload)
+    }
 }
 
 /// `vcs.head.moved@1`: HEAD moved while the worktree was clean, so the
@@ -1916,6 +1991,7 @@ mod tests {
                 ("plugin.disabled", 1),
                 ("plugin.enabled", 1),
                 ("snapshot.taken", 1),
+                ("snapshot.taken", 2),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 1),
                 ("vcs.head.moved", 1),

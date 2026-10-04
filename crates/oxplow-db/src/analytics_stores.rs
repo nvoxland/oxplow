@@ -20,7 +20,7 @@ use crate::event_log_store::append_tx;
 use crate::page_ref_projections::finding_edges;
 use crate::page_ref_store::SqlitePageRefStore;
 use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
-use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV1, VcsHeadMoved, VcsHeadMovedV1};
+use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2, VcsHeadMoved, VcsHeadMovedV1};
 use oxplow_domain::events::{Anchors, Envelope};
 use oxplow_domain::refs::build::{commit_ref, snapshot_ref, stream_ref};
 use oxplow_domain::snapshot::SnapshotTrigger;
@@ -1269,7 +1269,7 @@ fn record_take_tx(
     let stream = stream_ref(take.stream_id);
     let env = Envelope::typed::<SnapshotTaken>(
         take.source.clone(),
-        &SnapshotTakenV1 {
+        &SnapshotTakenV2 {
             stream: stream.clone(),
             snapshot: snapshot_ref(snapshot_id),
             parent: parent.map(snapshot_ref),

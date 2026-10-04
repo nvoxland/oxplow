@@ -315,9 +315,14 @@ effort-relative diff is DERIVED with the effort's evidence
 (`diff_coverage_for_effort`) — so a coverage run claimed *after* the effort closed
 still produces a diff. The diff is between two **snapshots**, never a working
 tree (tsk862): the effort's start snapshot and the one the coverage capture is
-pinned to (`metric_capture.snapshot_id`, the stream's latest when the report was
-read — the code the run measured). So it holds for a worktree stream, and an
-edit after the run moves nothing. A path new since the start counts all its
+pinned to (`metric_capture.snapshot_id`). Recording a run's coverage takes that
+snapshot (`measured_snapshot`, trigger `coverage`; tsk883): the stream's
+worktree as the report is read — the code the run measured, even when the
+agent edited and ran in one turn, which no other take sees (turn-end and quiet
+takes never run mid-turn). A run delivered after an edit landed (a file in the
+take written after the run's event time) is recorded with **no pin**, so no
+diff rather than one against code it never ran. So it holds for a worktree
+stream, and an edit after the run moves nothing. A path new since the start counts all its
 lines as changed; a side whose bytes were collected (blob GC) gives **no row**,
 not "every line changed"; an oversize file (no bytes kept) contributes nothing. The earlier `find_single_open_for_thread` *drop-gates* on
 the producers are gone — the helper stays only as the Class-A auto-attribute

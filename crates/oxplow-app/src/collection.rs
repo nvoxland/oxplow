@@ -403,6 +403,9 @@ pub struct CollectionService {
     tasks: Arc<oxplow_db::SqliteTaskStore>,
     threads: Arc<SqliteThreadStore>,
     snapshots: Arc<SqliteSnapshotStore>,
+    /// Each stream's snapshot taker: a run's coverage is pinned to a take
+    /// of the code it measured (tsk883).
+    captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
     content: crate::snapshot_content::SnapshotContent,
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
@@ -479,6 +482,7 @@ impl CollectionService {
         tasks: Arc<oxplow_db::SqliteTaskStore>,
         threads: Arc<SqliteThreadStore>,
         snapshots: Arc<SqliteSnapshotStore>,
+        captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
         content: crate::snapshot_content::SnapshotContent,
         vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
@@ -496,6 +500,7 @@ impl CollectionService {
             tasks,
             threads,
             snapshots,
+            captures,
             content,
             vcs,
             config,
@@ -1594,17 +1599,23 @@ impl CollectionService {
             return Ok(CoverageIngest::NoChangedCoverage);
         };
 
-        // Pin to the stream's current snapshot — the code state the report
-        // measured — independent of any effort (observe-always).
-        let pin = match oxplow_domain::StreamId::try_from_str(stream_id) {
-            Some(s) => self
-                .snapshots
-                .latest_snapshot_id_for_stream(s)
-                .await
-                .ok()
-                .flatten(),
-            None => None,
-        };
+        // The owning effort stamps the coverage capture AND receives the ledger
+        // claim below — the capture IS the run now (T-E1, tsk48).
+        let attribute_to = self
+            .resolve_owner(thread, None, anchored_effort(cause), None)
+            .await;
+        let owning_val = attribute_to.as_ref().map(|e| e.id.value());
+        let turn = self.turn_of(thread, cause).await;
+        // Pin to a take of the code the report measured (tsk883),
+        // independent of any effort (observe-always).
+        let pin = self
+            .measured_snapshot(
+                thread,
+                stream_id,
+                (turn, attribute_to.as_ref().map(|e| e.id)),
+                cause,
+            )
+            .await;
         let version = match pin {
             Some(p) => {
                 file_ref_version::resolve(&self.snapshots, &*self.vcs, &self.project_dir, p).await?
@@ -1615,12 +1626,6 @@ impl CollectionService {
                 vcs_rev_exact: false,
             },
         };
-        // The owning effort stamps the coverage capture AND receives the ledger
-        // claim below — the capture IS the run now (T-E1, tsk48).
-        let attribute_to = self
-            .resolve_owner(thread, None, anchored_effort(cause), None)
-            .await;
-        let owning_val = attribute_to.as_ref().map(|e| e.id.value());
 
         // The run CAPTURE (epic tsk12): one fact on `oxplow.coverage` per file,
         // value = its line-%, numerator/denominator = covered/instrumented
@@ -1693,7 +1698,6 @@ impl CollectionService {
                 capture.basis_ref = version.closest_vcs_rev.clone();
                 capture.branch = branch;
                 capture.effort_id = owning_val;
-                let turn = self.turn_of(thread, cause).await;
                 capture.turn_id = turn;
                 capture.detail_json = Self::capture_detail("coverage-detail", &payload);
                 capture.idempotency_key = Self::ingest_idempotency_key(
@@ -1736,6 +1740,51 @@ impl CollectionService {
             changed_lines: total_instr,
             covered_lines: total_cov,
         })
+    }
+
+    /// The snapshot a run's coverage measured (tsk883): a take of the
+    /// stream's worktree now, as the run's report is recorded. The take is
+    /// the code the run measured only while nothing changed after the run
+    /// ended, so a run delivered late (a file in the take written after
+    /// the run's `cause.at`) gets no pin — no diff rather than a wrong one.
+    /// An explicit ingest (no cause) is of the code as it stands.
+    async fn measured_snapshot(
+        &self,
+        thread: &ThreadId,
+        stream_id: &str,
+        (turn, effort): (Option<i64>, Option<EffortId>),
+        cause: Option<&RunCause>,
+    ) -> Option<i64> {
+        let stream = oxplow_domain::StreamId::try_from_str(stream_id)?;
+        let capture = self.captures.get(&stream)?;
+        capture.await_initial_ready().await;
+        let taken = capture
+            .request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::Coverage,
+                thread_id: Some(*thread),
+                turn_id: turn,
+                effort_id: effort,
+                budget: None,
+            })
+            .await;
+        let id = match taken {
+            Ok(id) => id?,
+            Err(e) => {
+                tracing::warn!(error = %e, "coverage: the measured snapshot failed");
+                return None;
+            }
+        };
+        if let Some(cause) = cause {
+            let ended = cause.at.unix_ms();
+            let tree = self.snapshots.tree_at(id).await.ok()?;
+            if tree
+                .values()
+                .any(|entry| entry.mtime_ms.is_some_and(|m| m > ended))
+            {
+                return None;
+            }
+        }
+        Some(id)
     }
 
     /// Derive the effort-relative **diff-coverage** from a run's stored ABSOLUTE
@@ -3983,9 +4032,7 @@ mod tests {
     /// built through the public store APIs.
     mod integration {
         use super::*;
-        use oxplow_db::{
-            Database, FileSnapshot, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskStore,
-        };
+        use oxplow_db::{Database, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskStore};
         use oxplow_domain::stores::{StreamStore, TaskStore};
         use oxplow_domain::{
             EffortId, Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskId,
@@ -4016,8 +4063,9 @@ mod tests {
         /// Build the fixture. `report_xml` Some → write it + configure the
         /// `tests.coverage` report collector (cobertura/coverage.xml); None →
         /// no report collector. The effort's start snapshot holds
-        /// `src/foo.rs` as `a\nb\nc\n`; the stream's latest snapshot (and the
-        /// working tree) has `a\nB\nc\nd\n` (lines 2 changed, 4 added).
+        /// `src/foo.rs` as `a\nb\nc\n`; the working tree has
+        /// `a\nB\nc\nd\n` (lines 2 changed, 4 added), in no snapshot yet:
+        /// a coverage run takes the snapshot of what it measured.
         async fn build(report_xml: Option<&str>) -> Harness {
             build_full(report_xml, false).await
         }
@@ -4123,26 +4171,44 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Start-snapshot content for src/foo.rs (the baseline).
+            // The stream's snapshot taker, as boot registers one.
             let blobs = BlobStore::new(project_dir.join(".oxplow/snapshots"));
             let snapshots = Arc::new(SqliteSnapshotStore::new(db.clone()));
-            let old_hash = blobs.write(b"a\nb\nc\n").unwrap();
-            let snap_id = snapshots.create_snapshot(stream.id).await.unwrap();
-            snapshots
-                .capture(FileSnapshot {
-                    id: 0,
-                    stream_id: stream.id,
-                    path: "src/foo.rs".into(),
-                    blob_hash: Some(old_hash),
-                    size_bytes: 6,
-                    captured_at: now,
-                    storage: oxplow_db::SnapshotStorage::Oxplow,
-                    snapshot_id: Some(snap_id),
-                    mtime_ms: None,
-                    content_hash: None,
-                })
+            let capture = Arc::new(
+                crate::snapshot_capture::SnapshotCaptureService::new(
+                    snapshots.clone(),
+                    blobs.clone(),
+                    project_dir.clone(),
+                    Arc::new(crate::vcs::GitProvider),
+                    stream.id,
+                    1_000_000,
+                    oxplow_fs_watch::WorkspaceFilter::default(),
+                )
+                .with_settle_duration(std::time::Duration::ZERO)
+                .with_predrain_delay(std::time::Duration::ZERO),
+            );
+            let captures = crate::snapshot_capture_registry::SnapshotCaptureRegistry::new(
+                crate::snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                    vcs: Arc::new(crate::vcs::GitProvider),
+                    snapshot_store: snapshots.clone(),
+                    blobs: blobs.clone(),
+                    max_file_bytes: 1_000_000,
+                    workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                    open_turn_probe: None,
+                },
+            );
+            captures.insert_for_test(stream.id, capture.clone());
+
+            // The effort's start snapshot: src/foo.rs as `a b c`.
+            let foo = project_dir.join("src/foo.rs");
+            std::fs::create_dir_all(project_dir.join("src")).unwrap();
+            std::fs::write(&foo, "a\nb\nc\n").unwrap();
+            capture.mark_dirty(foo.clone(), oxplow_fs_watch::WatchEventKind::Other);
+            let snap_id = capture
+                .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::EffortStart)
                 .await
-                .unwrap();
+                .unwrap()
+                .expect("start snapshot");
 
             let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
             let effort = efforts
@@ -4150,28 +4216,10 @@ mod tests {
                 .await
                 .unwrap();
 
-            // The code the test run measures: line 2 changed, line 4 added —
-            // on disk, and in the stream's latest snapshot (what a coverage
-            // capture is pinned to and diffed against the start).
-            std::fs::create_dir_all(project_dir.join("src")).unwrap();
-            std::fs::write(project_dir.join("src/foo.rs"), NEW_FOO).unwrap();
-            let new_hash = blobs.write(NEW_FOO.as_bytes()).unwrap();
-            let measured = snapshots.create_snapshot(stream.id).await.unwrap();
-            snapshots
-                .capture(FileSnapshot {
-                    id: 0,
-                    stream_id: stream.id,
-                    path: "src/foo.rs".into(),
-                    blob_hash: Some(new_hash),
-                    size_bytes: NEW_FOO.len() as i64,
-                    captured_at: now,
-                    storage: oxplow_db::SnapshotStorage::Oxplow,
-                    snapshot_id: Some(measured),
-                    mtime_ms: None,
-                    content_hash: None,
-                })
-                .await
-                .unwrap();
+            // The agent's edit, on disk only — line 2 changed, line 4 added.
+            // A coverage run takes the snapshot it measured (tsk883).
+            std::fs::write(&foo, NEW_FOO).unwrap();
+            capture.mark_dirty(foo, oxplow_fs_watch::WatchEventKind::Other);
             // Optional git repo + base commit so HEAD has a parent.
             if git_init {
                 git_in(&project_dir, &["init", "-q"]);
@@ -4208,6 +4256,7 @@ mod tests {
                 Arc::new(SqliteTaskStore::new(db.clone())),
                 Arc::new(SqliteThreadStore::new(db.clone())),
                 snapshots,
+                captures,
                 crate::snapshot_content::SnapshotContent::new(
                     blobs,
                     oxplow_domain::vcs::Vcs::object_store(&crate::vcs::GitProvider, &project_dir),
@@ -4311,6 +4360,46 @@ mod tests {
             std::fs::remove_file(h.tmp.path().join("src/foo.rs")).unwrap();
             let pct = diff_pct(&h).await.expect("a diff from snapshots alone");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
+        }
+
+        /// tsk883: a run delivered after an edit landed can't know what it
+        /// measured — its coverage is recorded, with no snapshot and so no
+        /// diff rather than a wrong one.
+        #[tokio::test]
+        async fn a_run_delivered_after_an_edit_gets_no_diff() {
+            let h = build(Some(COBERTURA_50PCT)).await;
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            let cause = RunCause {
+                event_id: "evt-before-the-edit".into(),
+                seq: 0,
+                anchors: oxplow_domain::Anchors {
+                    effort_id: Some(eid),
+                    ..Default::default()
+                },
+                // The run ended before the harness's edit landed.
+                at: Timestamp::from_unix_ms(Timestamp::now().unix_ms() - 30_000),
+            };
+            h.service
+                .on_post_tool_use(&h.thread, &bash_payload("bun test", 0), Some(&cause))
+                .await
+                .unwrap();
+            let pinned: Vec<Option<i64>> =
+                h.db.transaction(|tx| {
+                    let mut stmt = tx
+                        .prepare(
+                            "SELECT snapshot_id FROM metric_capture WHERE producer = 'coverage'",
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| r.get(0))
+                        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(rows)
+                })
+                .await
+                .unwrap();
+            assert_eq!(pinned, vec![None], "recorded, unpinned");
+            assert_eq!(diff_pct(&h).await, None);
         }
 
         /// tsk884: `cargo llvm-cov` names files by absolute path. They're
