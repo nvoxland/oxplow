@@ -1,55 +1,36 @@
-# App-level harness: the real UI in a real browser
+# The browser suite: the real UI in a real browser
 
-Drives the actual React app in headless Chromium against `oxplow-daemon`,
-using the `VITE_OXPLOW_REMOTE` transport switch. Standard Playwright — no
-`tauri-driver`, no WebdriverIO.
+`bun run e2e` drives the built React app in headless Chromium against a real
+daemon — Playwright (`@playwright/test`), no `tauri-driver`. The frontend
+reaches the daemon the way a remote window does: the transport reads its base
+and token from localStorage (`oxplow.remoteBase`, `oxplow.remoteToken`), and
+CORS is permissive for exactly this (`.context/remote-daemon.md`).
 
-`tests-e2e.electron-archive/README.md` lists three "paths forward" for Tauri
-e2e and says none had been built. It predates **remote-daemon mode**, which is
-a fourth and better one: `.context/remote-daemon.md` says CORS is
-`permissive()` specifically so "the frontend can run in a plain browser
-(Playwright-driven UX testing)", `listenRoute` degrades shell-local channels to
-inert without a Tauri host, and `no-tauri-imports.test.ts` guards the facade so
-native assumptions can't leak in.
+## How a run is put together
 
-**That path is verified working** (2026-07-21): the app boots with 0 page
-errors and 0 failed requests, renders the rail, file tree, work sections and a
-live agent terminal. See `boot-check.mjs`.
-
-This is *not* a port of the archive's 35 probes — those remain a behaviour
-corpus to draw on. Keep the archive until they're ported or consciously
-dropped.
-
-## Bring it up
-
-```sh
-# 1. a throwaway project (never point the daemon at real work — it takes the
-#    per-project instance lock and runs full boot orchestration: watchers,
-#    indexers, gauges, snapshot capture)
-mkdir -p /tmp/oxproj && cd /tmp/oxproj && git init -q .
-git commit -q --allow-empty -m init
-
-# 2. daemon (--init creates .oxplow/ on a fresh project)
-cargo build -p oxplow-daemon --release
-./target/release/oxplow-daemon --project /tmp/oxproj --bind 127.0.0.1:7431 --init
-
-# 3. vite pointed at it. Use a non-default port if you already have a dev
-#    server on 5173 — that one has no VITE_OXPLOW_REMOTE and will try to talk
-#    to a Tauri host that isn't there.
-VITE_OXPLOW_REMOTE=http://127.0.0.1:7431 \
-  bun run --cwd apps/desktop dev -- --port 5199 --strictPort
-
-# 4. drive it
-APP_URL=http://localhost:5199/ node tests-e2e/boot-check.mjs
-```
+- **`playwright.config.ts`** (repo root). Its `webServer` builds the frontend
+  once (`vite build`) and serves it with `vite preview` on 127.0.0.1:4173, so a
+  spec never meets a stale `dist/`.
+- **`support/global-setup.ts`** builds `oxplow-daemon-sim` and
+  `oxplow-acp-fake` and hands their paths to the workers
+  (`OXPLOW_E2E_DAEMON`, `OXPLOW_E2E_ACP_FAKE`).
+- **`support/daemon.ts`** starts one daemon: `oxplow-daemon-sim` (the daemon
+  with its secrets in memory — nothing reaches the keychain) over a throwaway
+  git project, with its own `OXPLOW_HOME` and `TMUX_TMPDIR`. `ipc()` calls
+  `/ipc/<name>` as the person; `run()` runs a bus command, confirmed.
+- **`support/fixtures.ts`** — `test` and `expect` for specs:
+  - `daemon`, one per worker. Before any page opens it selects an ACP thread
+    on the fake agent: the boot thread is a terminal agent's, and the suite
+    never starts a real agent CLI.
+  - `storageState` points the page at that daemon.
+  - `pageErrors` fails any spec whose page threw.
+- **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`, never
+  a sleep.
 
 ## Scripts
 
-- **`boot-check.mjs`** — does the UI boot in a browser at all? Reports page
-  errors, failed requests, console output, a screenshot, and a dump of every
-  `data-testid` the build exposes. That dump is the starting point for writing
-  a probe; the archive's selectors are stale.
-- **`profile-renderer.mjs`** — CDP V8 CPU profile of the renderer.
+- **`profile-renderer.mjs`** — CDP V8 CPU profile of the renderer, against an
+  app you bring up by hand (a daemon plus `vite` with `VITE_OXPLOW_REMOTE`).
   `CLICK_TESTID=rail-section-toggle-work` expands a collapsed section first, so
   you don't profile an unmounted list by accident.
 

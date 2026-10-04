@@ -16,7 +16,7 @@
 // rank by SELF time actually attributed to samples, and treat an idle profile's
 // "(program)"/"(idle)" nodes as what they are — not as work.
 
-import { chromium } from "playwright";
+import { chromium } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 
 const APP_URL = process.env.APP_URL ?? "http://localhost:5199/";

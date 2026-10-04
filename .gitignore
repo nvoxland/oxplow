@@ -34,4 +34,6 @@ apps/desktop/test-report.xml
 # App-level harness output (screenshots, CPU profiles) — the scripts default
 # to writing these next to themselves
 tests-e2e/*.png
+tests-e2e/.output/
 tests-e2e/*.json
+!tests-e2e/tsconfig.json

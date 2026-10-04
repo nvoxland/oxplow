@@ -1,0 +1,32 @@
+// The browser suite (P11, `tests-e2e/README.md`): the built frontend, served
+// by `vite preview`, against a real daemon — `oxplow-daemon-sim`, secrets in
+// memory — over a throwaway git project, one per worker.
+import { defineConfig, devices } from "@playwright/test";
+
+const PREVIEW = "http://127.0.0.1:4173";
+
+export default defineConfig({
+  testDir: "tests-e2e/specs",
+  outputDir: "tests-e2e/.output/results",
+  globalSetup: "./tests-e2e/support/global-setup.ts",
+  fullyParallel: false,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  workers: process.env.CI ? 2 : undefined,
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
+  reporter: [["list"]],
+  use: {
+    baseURL: PREVIEW,
+    trace: "retain-on-failure",
+  },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  webServer: {
+    // Built once per run, so a spec never meets a stale `dist/`.
+    command:
+      "bun run --cwd apps/desktop build && bun run --cwd apps/desktop preview -- --host 127.0.0.1 --port 4173 --strictPort",
+    url: PREVIEW,
+    timeout: 300_000,
+    reuseExistingServer: false,
+  },
+});
