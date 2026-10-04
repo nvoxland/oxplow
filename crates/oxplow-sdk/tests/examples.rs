@@ -90,6 +90,17 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         row("SELECT title FROM v_github_pull_request WHERE ref = 'github_pr:12'").await,
         serde_json::json!([["Fix the hover state"]])
     );
+    // tsk894: `[[pr:12]]` is a valid link; one to a pull request the
+    // model doesn't have is flagged.
+    let warnings = oxplow_app::link_check::check_links(&svc, "See [[pr:12]] and [[pr:99]].").await;
+    assert_eq!(
+        warnings
+            .iter()
+            .map(|w| w.target.as_str())
+            .collect::<Vec<_>>(),
+        vec!["pr:99"],
+        "{warnings:?}"
+    );
     // Its page is the `pr` lens, given `?ref=`.
     let run = oxplow_app::extensions::run_lens(
         &svc.sql,

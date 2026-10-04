@@ -1455,10 +1455,16 @@ so backlinks/freshness work without parser changes. The
 `check_links_in`) run `oxplow_app::link_check` over the text they just
 persisted and return a `link_warnings` array naming each invalid `[[…]]`
 — unrecognized syntax or a dangling target — so the authoring agent
-self-corrects in the same turn. Task descriptions get no check: the
-deleted MCP `create_task` / `update_task` returned one, and
-`work_item.create` / `work_item.update` don't. `knowledge.write_page` refuses instead, through the same
-synchronous core (`check_links_in`). The shared classifier is `oxplow_domain::refs::classify_wikilinks`
+self-corrects in the same turn; `work_item.create` / `work_item.update`
+check an oxplow item's body the same way (tsk775).
+`knowledge.write_page` refuses instead, through the same synchronous core
+(`check_links_in`). **Every kind the vocabulary knows is a link**
+(tsk894): a typed `Reference` (task, wiki, file, dir, commit, finding) is
+probed for existence; another known kind (an effort, another provider's
+work item, a run) is valid as it stands; a plugin kind with a `resolve`
+model (`v_ref_kind.resolve`) is valid when that model has its `ref`
+(`[[pr:12]]` → `github_pr:12`). Only an interior matching no kind is
+"not a recognized reference". The shared classifier is `oxplow_domain::refs::classify_wikilinks`
 (the single source of truth for "is this interior a real ref"), and
 existence probes reuse the `ref_resolver` store/git/fs surfaces. The
 `<wiki-capture-hint>` block injected on exploration UserPromptSubmits

@@ -49,8 +49,19 @@ pub struct LinkWorld<'a> {
 pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     let mut out = Vec::new();
     for link in classify_wikilinks(world.kinds, body) {
-        match &link.reference {
-            None => out.push(LinkWarning {
+        match (&link.reference, &link.canonical) {
+            // A kind the vocabulary knows with no typed probe here: a
+            // plugin kind is checked against its `resolve` model, any
+            // other is a link as it stands (tsk894).
+            (None, Some(canonical)) => {
+                if let Some(reason) = unresolved_plugin_ref(world, canonical) {
+                    out.push(LinkWarning {
+                        target: link.raw.clone(),
+                        reason,
+                    });
+                }
+            }
+            (None, None) => out.push(LinkWarning {
                 target: link.raw.clone(),
                 reason: format!(
                     "`[[{}]]` is not a recognized reference — use `[[tsk42]]` for a task \
@@ -59,7 +70,7 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
                     link.raw
                 ),
             }),
-            Some(reference) => {
+            (Some(reference), _) => {
                 if let Some(reason) = missing_reason(world, reference) {
                     out.push(LinkWarning {
                         target: link.raw.clone(),
@@ -147,6 +158,43 @@ fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -
         .unwrap_or(false)
 }
 
+/// `Some(reason)` when `canonical` is of a plugin kind whose `resolve`
+/// model has no row for it (`v_ref_kind.resolve`, by its `ref` column).
+/// A kind with no `resolve` model, or one that can't be read, isn't
+/// probed.
+fn unresolved_plugin_ref(
+    world: &LinkWorld<'_>,
+    canonical: &oxplow_domain::refs::grammar::CanonicalRef,
+) -> Option<String> {
+    use rusqlite::OptionalExtension;
+    let resolve: String = world
+        .conn
+        .query_row(
+            "SELECT resolve FROM v_ref_kind WHERE kind = ?1 AND resolve IS NOT NULL",
+            [&canonical.kind],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+    let at = canonical.to_string();
+    let found = world
+        .conn
+        .query_row(
+            &format!(
+                "SELECT 1 FROM \"{}\" WHERE ref = ?1",
+                resolve.replace('"', "")
+            ),
+            [&at],
+            |_| Ok(()),
+        )
+        .optional()
+        .ok()?;
+    found
+        .is_none()
+        .then(|| format!("`{at}` does not exist (no row in `{resolve}`)"))
+}
+
 /// `Some(reason)` when a recognized reference's object doesn't exist,
 /// `None` when it resolves.
 fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
@@ -203,6 +251,21 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].target, "#13");
         assert!(warnings[0].reason.contains("not a recognized reference"));
+    }
+
+    /// tsk894: a ref of any kind the vocabulary knows is a link — an
+    /// effort, another provider's work item — even with no typed view
+    /// to probe.
+    #[tokio::test]
+    async fn accepts_refs_of_kinds_with_no_probe() {
+        let dir = git_repo();
+        let services = Services::in_memory(dir.path()).unwrap();
+        let warnings = check_links(
+            &services,
+            "See [[effort:eff1]] and [[work_item:linear:ENG-12]].",
+        )
+        .await;
+        assert!(warnings.is_empty(), "got {warnings:?}");
     }
 
     #[tokio::test]
