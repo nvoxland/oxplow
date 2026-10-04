@@ -46,7 +46,7 @@ const RUST: &[BuiltinMetric] = &[
         direction: "lower-better",
         grain: "tree",
         language: "rust",
-        dimensions: &["package", "language", "vcs_rev"],
+        dimensions: &["oxplow.package", "oxplow.language", "oxplow.vcs_rev"],
         target: Some(0.0),
         on: &["snapshot.taken"],
         filter: &[],
@@ -64,7 +64,7 @@ const RUST: &[BuiltinMetric] = &[
         direction: "lower-better",
         grain: "tree",
         language: "rust",
-        dimensions: &["package", "language", "vcs_rev"],
+        dimensions: &["oxplow.package", "oxplow.language", "oxplow.vcs_rev"],
         target: None,
         on: &["snapshot.taken"],
         filter: &[],
@@ -82,7 +82,7 @@ const RUST: &[BuiltinMetric] = &[
         direction: "lower-better",
         grain: "tree",
         language: "rust",
-        dimensions: &["package", "language", "vcs_rev"],
+        dimensions: &["oxplow.package", "oxplow.language", "oxplow.vcs_rev"],
         target: None,
         on: &["snapshot.taken"],
         filter: &[],
@@ -138,7 +138,7 @@ const CODE: &[BuiltinMetric] = &[
         direction: "higher-better",
         grain: "tree",
         language: "",
-        dimensions: &["package", "language", "vcs_rev"],
+        dimensions: &["oxplow.package", "oxplow.language", "oxplow.vcs_rev"],
         target: None,
         on: &["snapshot.taken"],
         filter: &[],
@@ -163,7 +163,7 @@ const TREE: &[BuiltinMetric] = &[BuiltinMetric {
     direction: "lower-better",
     grain: "tree",
     language: "",
-    dimensions: &["vcs_rev"],
+    dimensions: &["oxplow.vcs_rev"],
     target: None,
     on: &["snapshot.taken"],
     filter: &[("trigger", "git_refs")],
@@ -189,7 +189,7 @@ const fn code_metric(
         direction,
         grain: "tree",
         language: "",
-        dimensions: &["package", "language", "vcs_rev"],
+        dimensions: &["oxplow.package", "oxplow.language", "oxplow.vcs_rev"],
         target: None,
         on: &["snapshot.taken"],
         filter: &[],
@@ -220,7 +220,7 @@ const fn ast_metric(
         direction,
         grain: "tree",
         language,
-        dimensions: &["package", "language", "vcs_rev"],
+        dimensions: &["oxplow.package", "oxplow.language", "oxplow.vcs_rev"],
         target,
         on: &["snapshot.taken"],
         filter: &[],
@@ -402,6 +402,17 @@ fn b() {
             "unsafe { not code } panic!()".to_string(),
         );
         m
+    }
+
+    /// tsk989: a dimension has one name, its namespaced key (V166): a
+    /// built-in metric declares only conformed keys, never a bare alias.
+    #[test]
+    fn builtin_metrics_slice_by_conformed_keys() {
+        for m in builtin_metrics() {
+            for d in m.dimensions {
+                assert!(d.contains('.'), "{}: `{d}` isn't namespaced", m.key);
+            }
+        }
     }
 
     #[test]

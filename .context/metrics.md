@@ -775,7 +775,11 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   (`SqliteFactStore::refused_dims`, tsk986): a run whose facts would be
   refused is a **failed run** — its `collector_run` row and a failed
   capture say why, health counts it, a `collector.sync` errors — never a
-  capture rolled back behind a run reported as recorded. Project config
+  capture rolled back behind a run reported as recorded. The engine
+  refuses a bare key to slice or filter by (`series_in_stream` →
+  `bare_dimension`, tsk989), naming the conformed one — a bare key would
+  read nothing, an empty slice that looks like no data — and the built-in
+  metrics declare only conformed keys. Project config
   refuses one in `sliceableDims` or
   `filter.dimEq` (`subject`, the raw-subject pseudo-dimension, aside). V166
   renamed stored bare `language` facts and specs' bare dims, dropped the
@@ -1800,7 +1804,7 @@ metrics:                              # the read SPEC (the chartable metric)
     unit: count
     displayKind: gauge                # gauge|findings|test|coverage|event
     filter: { minValue: 1 }           # optional predicate before aggregating
-    sliceableDims: [language]
+    sliceableDims: [oxplow.language]
   - use: myglobal.todo_density        # ENABLE a catalog metric (+ threshold overrides)
     target: 5
 ```

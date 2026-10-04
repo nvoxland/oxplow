@@ -1327,6 +1327,14 @@ impl MetricEngine {
         stream: Option<i64>,
         window: Option<TimeWindow>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
+        for key in group_by
+            .into_iter()
+            .chain(filter.dim_eq.as_ref().map(|(k, _)| k.as_str()))
+        {
+            if let Some(problem) = self.bare_dimension(key).await? {
+                return Err(DomainError::Invalid(problem));
+            }
+        }
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(Vec::new());
         };
@@ -1832,6 +1840,29 @@ impl MetricEngine {
             }
         }
         Ok(series)
+    }
+
+    /// Why `key` can't slice or filter facts, when it's a bare key (tsk989):
+    /// a dimension has one name, its namespaced one (V166), so a bare key
+    /// would read nothing — an empty slice that looks like no data. It
+    /// names the conformed `oxplow.<key>` when the catalog declares it.
+    /// `subject`, the raw-subject pseudo-dimension, isn't a catalog key.
+    async fn bare_dimension(&self, key: &str) -> Result<Option<String>, DomainError> {
+        if key == "subject" || key.contains('.') {
+            return Ok(None);
+        }
+        let conformed = format!("oxplow.{key}");
+        let declared = self
+            .facts
+            .list_dimensions()
+            .await?
+            .iter()
+            .any(|d| d.key == conformed);
+        Ok(Some(if declared {
+            format!("dimension `{key}` isn't namespaced: its name is `{conformed}`")
+        } else {
+            format!("dimension `{key}` isn't namespaced: dimensions are `<namespace>.{key}`")
+        }))
     }
 
     /// The entity dimension `key` over `view`, or an error naming what can

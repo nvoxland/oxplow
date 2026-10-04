@@ -7,7 +7,8 @@
 -- now on.
 
 -- Facts recorded before the collector scripts namespaced their dims carry
--- bare `language`. Where a fact has both, the conformed value is kept.
+-- bare `language`. Where a fact has both, the conformed value is kept. The
+-- `LIKE` comes first so only a row that could have the key is parsed.
 UPDATE fact
    SET dims_json = CASE
          WHEN json_extract(dims_json, '$."oxplow.language"') IS NULL
@@ -15,7 +16,8 @@ UPDATE fact
                          '$."oxplow.language"', json_extract(dims_json, '$.language'))
          ELSE json_remove(dims_json, '$.language')
        END
- WHERE json_valid(dims_json)
+ WHERE dims_json LIKE '%"language"%'
+   AND json_valid(dims_json)
    AND json_type(dims_json, '$.language') IS NOT NULL;
 
 -- A nudge carried its kind twice: as its subject and as a bare `kind` dim
@@ -23,6 +25,7 @@ UPDATE fact
 UPDATE fact
    SET dims_json = NULLIF(json_remove(dims_json, '$.kind'), '{}')
  WHERE measure_id IN (SELECT id FROM measure WHERE key = 'oxplow.nudge')
+   AND dims_json LIKE '%"kind"%'
    AND json_valid(dims_json)
    AND json_type(dims_json, '$.kind') IS NOT NULL;
 

@@ -4835,20 +4835,25 @@ def transform(input):
                 engine
                     .series_for_spec(&spec, Some(dim))
                     .await
-                    .unwrap()
-                    .into_iter()
-                    .map(|p| (p.group, p.value))
-                    .collect::<Vec<_>>()
+                    .map(|points| {
+                        points
+                            .into_iter()
+                            .map(|p| (p.group, p.value))
+                            .collect::<Vec<_>>()
+                    })
             }
         };
-        let by_language = groups("oxplow.language").await;
+        let by_language = groups("oxplow.language").await.unwrap();
         assert_eq!(
             by_language.len(),
             1,
             "one language group, got {by_language:?}"
         );
         assert_eq!(by_language[0].0.as_deref(), Some("rust"));
-        assert!(groups("language").await.is_empty(), "no alias");
+        // tsk989: a bare key isn't an empty slice — it's refused, naming
+        // the key it means.
+        let err = groups("language").await.unwrap_err().to_string();
+        assert!(err.contains("`oxplow.language`"), "{err}");
     }
 
     #[tokio::test]
