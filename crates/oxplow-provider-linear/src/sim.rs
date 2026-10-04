@@ -54,6 +54,8 @@ struct World {
     clock: u64,
     max_page: usize,
     rate_limit_secs: Option<u64>,
+    /// Refuse the next request of this operation as rate limited.
+    rate_limit_op: Option<(String, u64)>,
     requests: Vec<Request>,
     /// Issues answered with this state type instead of their own (a
     /// workflow the provider can't map).
@@ -113,6 +115,7 @@ impl LinearSim {
             clock: 0,
             max_page: 50,
             rate_limit_secs: None,
+            rate_limit_op: None,
             requests: Vec::new(),
             odd_state_types: std::collections::HashMap::new(),
         }));
@@ -150,6 +153,12 @@ impl LinearSim {
     /// Refuse the next request as rate limited, retrying after `secs`.
     pub fn rate_limit_next(&self, secs: u64) {
         self.lock().rate_limit_secs = Some(secs);
+    }
+
+    /// Refuse the next `operation` request (`Issue`) as rate limited,
+    /// retrying after `secs`; other requests go through.
+    pub fn rate_limit_next_of(&self, operation: &str, secs: u64) {
+        self.lock().rate_limit_op = Some((operation.to_string(), secs));
     }
 
     /// Answer `identifier` with workflow state type `kind`, whatever its
@@ -270,7 +279,11 @@ fn answer(w: &mut World, key: &str, request: &Value) -> (u16, Vec<(String, Strin
         .unwrap_or_default()
         .to_string();
     let vars = request["variables"].clone();
-    if let Some(secs) = w.rate_limit_secs.take() {
+    let of_op = match &w.rate_limit_op {
+        Some((name, _)) if *name == operation => w.rate_limit_op.take().map(|(_, s)| s),
+        _ => None,
+    };
+    if let Some(secs) = w.rate_limit_secs.take().or(of_op) {
         return (
             400,
             vec![("Retry-After".into(), secs.to_string())],

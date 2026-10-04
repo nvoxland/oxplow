@@ -601,23 +601,30 @@ async fn current(
     instance.record(&data["issue"])
 }
 
-/// The id a create sends, derived from its idempotency key (a v5 UUID
-/// over the verb and the key): the same write sent again carries the same
-/// id, which Linear refuses as taken. None without a key.
+/// The id a create sends, derived from its idempotency key: the same
+/// write sent again carries the same id, which Linear refuses as taken.
+/// None without a key. Shaped as a v4 UUID — the form a client-chosen
+/// Linear id takes — from the bytes of a v5 UUID over the verb and the
+/// key (tsk931), so its shape is never the question.
 fn client_id(verb: &str, key: Option<&str>) -> Option<String> {
     key.map(|key| {
-        uuid::Uuid::new_v5(
+        let derived = uuid::Uuid::new_v5(
             &uuid::Uuid::NAMESPACE_OID,
             format!("oxplow:linear:{verb}:{key}").as_bytes(),
-        )
-        .to_string()
+        );
+        uuid::Builder::from_random_bytes(*derived.as_bytes())
+            .into_uuid()
+            .to_string()
     })
 }
 
 /// Run create `op`, sending `id` (a client id) when there is one. A create
 /// refused whose id already names what it would make was sent before and
 /// landed: `lookup` reads that, and it is the answer. A rate limit or a
-/// refused key never landed, and is the error as it is.
+/// refused key never landed, and is the error as it is. When the id names
+/// nothing, the refusal was the create's own; when the lookup itself
+/// fails (rate limited, unreachable), that is the answer — the write may
+/// have landed, and only the lookup can say (tsk931).
 async fn create(
     client: &Client,
     op: graphql::Operation,
@@ -633,7 +640,11 @@ async fn create(
         Err(e @ (ProtocolError::RateLimited { .. } | ProtocolError::Auth { .. })) => Err(e),
         Err(e) => match id {
             None => Err(e),
-            Some(id) => client.run(lookup, json!({ "id": id })).await.map_err(|_| e),
+            Some(id) => match client.run(lookup, json!({ "id": id })).await {
+                Ok(found) => Ok(found),
+                Err(ProtocolError::InvalidInput { .. }) => Err(e),
+                Err(lookup_failed) => Err(lookup_failed),
+            },
         },
     }
 }
@@ -857,5 +868,20 @@ async fn read(
         if !more {
             return Ok(json!({ "records": total }));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// tsk931: a create's client id is a v4-shaped UUID, the same for the
+    /// same verb and key.
+    #[test]
+    fn a_client_id_is_v4_shaped_and_stable() {
+        let id = super::client_id("create", Some("k")).unwrap();
+        let parsed = uuid::Uuid::parse_str(&id).unwrap();
+        assert_eq!(parsed.get_version_num(), 4);
+        assert_eq!(super::client_id("create", Some("k")).unwrap(), id);
+        assert_ne!(super::client_id("comment", Some("k")).unwrap(), id);
+        assert_eq!(super::client_id("create", None), None);
     }
 }

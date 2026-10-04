@@ -163,11 +163,16 @@ overriding `https://api.linear.app/graphql`). Its example extension is
   `duplicates` → `duplicate`; other link types refused); `comment` →
   `commentCreate`; `delete` → the issue then `issueDelete` (Linear's
   trash). Each records the issue as it now stands. **A create sent with
-  an idempotency key carries a client `id`** (P10: a v5 UUID over the
-  verb and the key, `client_id`) on `issueCreate`, `commentCreate` and
-  `issueRelationCreate`; a create refused whose id already names what it
-  would make was sent before and landed, so the provider looks it up
-  (`issue` / `comment` / `issueRelation` by id) and answers with it. It
+  an idempotency key carries a client `id`** (P10, `client_id`: a
+  v4-shaped UUID built from the bytes of a v5 UUID over the verb and the
+  key — stable per key, in the form a client-chosen Linear id takes,
+  tsk931) on `issueCreate`, `commentCreate` and `issueRelationCreate`; a
+  create refused whose id already names what it would make was sent
+  before and landed, so the provider looks it up (`issue` / `comment` /
+  `issueRelation` by id) and answers with it. When the lookup finds
+  nothing the refusal was the create's own; when the lookup itself fails
+  (rate limited, unreachable) that is the answer, since only it could say
+  whether the write landed (`LinearSim::rate_limit_next_of`). It
   does **not** declare `idempotent_writes` until a live run confirms
   Linear refuses a repeated client id (`LinearSim` refuses one;
   `a_repeated_create_is_one_issue`). A missing issue named

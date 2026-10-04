@@ -570,6 +570,7 @@ async fn a_rate_limited_reply_is_rate_limited_with_its_retry_after() {
 /// waits on a live run confirming Linear keeps client ids.
 #[tokio::test]
 async fn a_repeated_create_is_one_issue() {
+    a_repeated_create_whose_lookup_fails_says_why().await;
     let sim = LinearSim::start(KEY).await.unwrap();
     let (_child, peer) = spawn(&sim, Some(KEY));
     let declared = initialize(&peer).await;
@@ -620,4 +621,31 @@ async fn a_repeated_create_is_one_issue() {
     let identifier = item.rsplit(':').next().unwrap();
     assert_eq!(sim.comments(identifier), vec!["once"]);
     assert_eq!(sim.relations().len(), 1);
+}
+
+/// tsk931: a create sent again is refused as taken, and the lookup of what
+/// it made is rate limited: the caller is told it is rate limited — the
+/// write may well have landed — not the refusal of the repeat.
+async fn a_repeated_create_whose_lookup_fails_says_why() {
+    let sim = LinearSim::start(KEY).await.unwrap();
+    let (_child, peer) = spawn(&sim, Some(KEY));
+    initialize(&peer).await;
+    let handle = checked(&peer).await;
+    let create = || {
+        keyed(
+            &peer,
+            &handle,
+            "create",
+            json!({ "title": "Once" }),
+            Some("k-lookup"),
+        )
+    };
+    create().await.unwrap();
+    sim.rate_limit_next_of("Issue", 3);
+    let again = create().await.unwrap_err();
+    assert!(
+        matches!(again, ProtocolError::RateLimited { .. }),
+        "{again:?}"
+    );
+    assert_eq!(sim.live_issues().len(), 1);
 }
