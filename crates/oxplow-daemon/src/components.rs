@@ -34,18 +34,20 @@ pub const LIB_PATH: &str = "/component-lib/";
 pub const MAX_FILE_BYTES: u64 = MAX_BUNDLE_BYTES;
 
 /// The CSP on every bundle file. `lib` is the client library's folder
-/// ([`LIB_PATH`]), a script source only. `sandbox allow-scripts` makes the
+/// ([`LIB_PATH`]): a script source (the library) and a style source (the
+/// kit's sheet, tsk961), nothing else. `sandbox allow-scripts` makes the
 /// document's origin opaque however it is loaded — the host's iframe
 /// attribute is not the only fence. `source` is the bundle's own folder
 /// (`http://<host>/components/<ext>/<component>/`), named beside `'self'`
 /// because that origin is opaque; nothing may connect, submit or rebase
-/// anywhere. `style-src 'unsafe-inline'` is there because the host sends
-/// the kit's CSS and theme tokens as text the bundle injects as a
-/// `<style>`; inline *scripts* stay refused.
+/// anywhere. A bundle's own inline styles are allowed (`'unsafe-inline'`
+/// in `style-src`): CSS here can fetch nothing from outside, since every
+/// fetching directive is bounded to the bundle. Inline *scripts* stay
+/// refused — `check_components` says so at check, since the frame won't.
 pub fn bundle_csp(source: &str, lib: &str) -> String {
     let own = format!(" {source}");
     format!(
-        "sandbox allow-scripts; default-src 'none'; script-src 'self'{own} {lib}; style-src 'self' 'unsafe-inline'{own}; \
+        "sandbox allow-scripts; default-src 'none'; script-src 'self'{own} {lib}; style-src 'self' 'unsafe-inline'{own} {lib}; \
          img-src 'self' data: blob:{own}; font-src 'self' data:{own}; connect-src 'none'; \
          form-action 'none'; base-uri 'none'"
     )
@@ -58,9 +60,12 @@ pub fn bundle_csp(source: &str, lib: &str) -> String {
 const LIB_JS: &str = include_str!("../assets/oxplow-component.js");
 /// Its types, for bundle authors.
 const LIB_TYPES: &str = include_str!("../assets/oxplow-component.d.ts");
+/// The kit's stylesheet (tsk961): classes over the theme's tokens, which
+/// the library's `applyTheme()` sets on the frame's root.
+const KIT_CSS: &str = include_str!("../assets/oxplow-kit.css");
 
-/// `/component-lib/{file}` — the client library or its types, to a
-/// loopback `Host` only. Ungated and outside CORS like a bundle; it's
+/// `/component-lib/{file}` — the client library, its types or the kit's
+/// stylesheet, to a loopback `Host` only. Ungated and outside CORS like a bundle; it's
 /// oxplow's own code, the same for every project.
 pub async fn component_lib(AxumPath(file): AxumPath<String>, headers: HeaderMap) -> Response {
     if loopback_host(&headers).is_none() {
@@ -69,6 +74,7 @@ pub async fn component_lib(AxumPath(file): AxumPath<String>, headers: HeaderMap)
     let (body, content_type) = match file.as_str() {
         "oxplow-component.js" => (LIB_JS, "text/javascript; charset=utf-8"),
         "oxplow-component.d.ts" => (LIB_TYPES, "text/plain; charset=utf-8"),
+        "oxplow-kit.css" => (KIT_CSS, "text/css; charset=utf-8"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     let mut response = body.into_response();
@@ -310,8 +316,17 @@ mod tests {
             script,
             "script-src 'self' http://127.0.0.1:1/components/x/c/ http://127.0.0.1:1/component-lib/"
         );
-        // Scripts only: the library is no stylesheet, image or font source.
-        assert_eq!(csp.matches("/component-lib/").count(), 1, "{csp}");
+        // tsk961: and the kit's stylesheet, beside it — no image or font.
+        let style = csp
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with("style-src"))
+            .unwrap();
+        assert!(
+            style.ends_with(" http://127.0.0.1:1/component-lib/"),
+            "{style}"
+        );
+        assert_eq!(csp.matches("/component-lib/").count(), 2, "{csp}");
     }
 
     #[test]

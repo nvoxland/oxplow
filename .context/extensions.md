@@ -1291,7 +1291,7 @@ asks, never the frame. Both are UI RPCs (`ui` in surface parity).
 referrerPolicy="no-referrer">` at `componentBundleUrl` (the daemon's
 `/components/…` route; with no daemon base — `remoteBaseUrl()` null —
 the lens shows its table), under a **custom** badge. On the frame's first
-`load` the host posts `init { protocol, run, props, tokens, kitCss }`
+`load` the host posts `init { protocol, run, props, tokens }`
 (`initMessage`, the one builder) with one end
 of a `MessageChannel` (to `"*"`: the frame's origin is opaque; the port
 goes to that frame alone) and listens on the other end only. Frame
@@ -1312,8 +1312,7 @@ failure is remembered per URL. An invoke that asks shows the host's
 navigated itself), tears it down and shows the table. `ready` records
 `usage { kind: "custom_component", key: <ext>/<id> }` — the evidence a
 kind needs to be promoted. `tokens` are the root's CSS custom properties
-(`tokensFromStyle`) and `kitCss` is them plus a body baseline; there is no
-kit stylesheet to share yet. No gesture check on invoke: the frame's
+(`tokensFromStyle`). No gesture check on invoke: the frame's
 clicks don't reliably activate the host across webviews, and the real
 bounds are the declared list, the person's policy and the host's
 confirmation.
@@ -1330,8 +1329,8 @@ global `oxplow`**, not a module: module scripts are fetched with CORS,
 which an opaque origin never passes and nothing served to a frame allows
 — the same reason a bundle's own scripts are classic. `oxplow.connect()`
 waits for `init`, answers `ready`, and resolves with `{ run (the latest),
-props, tokens, kitCss, protocol, onUpdate(fn) → unsubscribe, query(asset,
-params), invoke(command, input), navigate(ref), applyKitCss() }`; a
+props, tokens, protocol, onUpdate(fn) → unsubscribe, query(asset,
+params), invoke(command, input), navigate(ref), applyTheme(doc?) }`; a
 failed request rejects with the host's `{ code, message }`. `init`
 carries `protocol` (`BRIDGE_PROTOCOL` in `componentBridge.ts`, `PROTOCOL`
 in the library — one number, bumped when a message's shape changes), and
@@ -1343,6 +1342,27 @@ component <name>` scaffolds a private extension — the component, its
 `viz: custom` lens and a bundle using the library — that checks and
 tests clean (`just_works.rs`). The reference is in
 `docs/guide/lenses.md`.
+
+**The kit's stylesheet** (P11, tsk961). `/component-lib/oxplow-kit.css`
+(`assets/oxplow-kit.css`, served beside the library as `text/css`, and
+named in every bundle's CSP `style-src`) is a few `ox-` classes in
+oxplow's look — text, card, badge, buttons, table, states, chart
+series — that read only the theme's tokens (`kitSheet.test.ts`: every
+`var(--x)` is one the app's root defines, and no literal color). A
+bundle links it and calls `component.applyTheme()`, which sets each of
+`init`'s `tokens` on the frame's root through the CSSOM — no `<style>`
+text crosses the bridge. `init` used to carry the CSS as `kitCss`; that
+went, and the protocol is 2.
+
+**Check lints** (P11, tsk961): what a bundle's CSP refuses without a
+word is an error at check, at its file (`bundle_problems` /
+`page_problems`, from `check_components`): an inline `<script>` or event
+handler, a `type="module"` script, a `src` (or a `<link>`'s `href`)
+from outside the bundle — a scheme other than `data:`, or `//host` — and
+an `index.html` that never loads the client library. A component in an
+extension that comes with oxplow is an error too: the daemon never
+serves a bundled extension's bundle. The scan is a start-tag reader,
+comments skipped, not a full HTML parser.
 
 ## Decorators
 

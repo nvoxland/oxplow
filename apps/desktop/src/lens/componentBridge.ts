@@ -9,7 +9,7 @@
 ///                 { id, method: "query", asset, params }     a declared lens's run
 ///                 { id, method: "invoke", command, input }   a declared command
 ///                 { id, method: "navigate", ref }            open a page
-///   host → frame  { type: "init", protocol, run, props, tokens, kitCss }
+///   host → frame  { type: "init", protocol, run, props, tokens }
 ///                 { type: "update", run }                    the lens re-ran
 ///                 { id, ok: true, result } | { id, ok: false, error: { code, message } }
 ///
@@ -23,8 +23,9 @@ import type { TabRef } from "../tabs/tabState.js";
 import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
-/// with the served library (`crates/oxplow-daemon/assets/`).
-export const BRIDGE_PROTOCOL = 1;
+/// with the served library (`crates/oxplow-daemon/assets/`). 2: `init`
+/// lost `kitCss` — the kit is a stylesheet the bundle links (tsk961).
+export const BRIDGE_PROTOCOL = 2;
 
 export type BridgeRequest =
   | { id: string; method: "query"; asset: string; params: Record<string, SqlCell> }
@@ -82,19 +83,10 @@ export function tokensFromStyle(style: {
   return out;
 }
 
-/** CSS a component can adopt to look like the host: the tokens and a body
- *  baseline. (There is no kit stylesheet to share yet.) */
-export function kitCss(tokens: Record<string, string>): string {
-  const vars = Object.entries(tokens)
-    .map(([k, v]) => `${k}: ${v};`)
-    .join(" ");
-  return `:root { ${vars} } body { margin: 0; font-family: var(--font-ui, system-ui, sans-serif); color: var(--text-primary); background: transparent; }`;
-}
-
 /** The `init` the host posts to a component's frame: the protocol it
- *  speaks, the first run, the lens's `custom.props`, the theme's tokens
- *  and the kit's CSS over them. One builder, so the library's tests read
- *  the message the host really sends. */
+ *  speaks, the first run, the lens's `custom.props` and the theme's
+ *  tokens. One builder, so the library's tests read the message the host
+ *  really sends. */
 export function initMessage(run: LensRun, tokens: Record<string, string>) {
   return {
     type: "init" as const,
@@ -102,7 +94,6 @@ export function initMessage(run: LensRun, tokens: Record<string, string>) {
     run,
     props: run.lens.custom?.props ?? null,
     tokens,
-    kitCss: kitCss(tokens),
   };
 }
 

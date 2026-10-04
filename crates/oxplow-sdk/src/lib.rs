@@ -382,7 +382,9 @@ pub fn scaffold(
                 &format!("{rel_dir}/components/{name}/index.html"),
                 "<!doctype html>\n\
                  <meta charset=\"utf-8\">\n\
-                 <div id=\"out\"></div>\n\
+                 <!-- oxplow's look: the kit's classes over the theme, set by applyTheme(). -->\n\
+                 <link rel=\"stylesheet\" href=\"/component-lib/oxplow-kit.css\">\n\
+                 <div id=\"out\" class=\"ox-muted\"></div>\n\
                  <!-- oxplow's client library (it defines `oxplow`), then this bundle's own\n\
                  \x20    script. Both are plain scripts: a sandboxed frame can't load modules. -->\n\
                  <script src=\"/component-lib/oxplow-component.js\"></script>\n\
@@ -399,7 +401,7 @@ pub fn scaffold(
                  //   component.invoke(command, input)  a command listed in `commands`\n\
                  //   component.navigate(ref)           open one of oxplow's pages\n\
                  oxplow.connect().then((component) => {\n\
-                 \x20 component.applyKitCss();\n\
+                 \x20 component.applyTheme();\n\
                  \x20 const out = document.getElementById(\"out\");\n\
                  \x20 const render = (run) => {\n\
                  \x20   out.textContent = run.result.rows.length + \" open tasks\";\n\

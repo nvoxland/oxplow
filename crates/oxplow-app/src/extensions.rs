@@ -2775,7 +2775,9 @@ pub fn check_commands(ext: &mut Extension, root: &Path, commands: Option<Command
 /// A custom component's declared commands must exist; a `custom` lens
 /// that also fills a kit role block gets a nudge — the kit may already
 /// render it (the honest extent of a "this reimplements the kit" lint).
-fn check_components(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
+fn check_components(ext: &mut Extension, root: &Path, commands: Option<CommandSchemas<'_>>) {
+    let pages = custom_components::bundle_problems(ext, root);
+    ext.errors.extend(pages);
     if let Some(schema_of) = commands {
         let missing: Vec<(String, String)> = ext
             .custom_components
@@ -2942,7 +2944,7 @@ async fn prepare(
     commands: Option<CommandSchemas<'_>>,
 ) -> Prepared {
     check_commands(ext, root, commands);
-    check_components(ext, commands);
+    check_components(ext, root, commands);
     let (overlay, errors) = model_overlay(layer, catalog, root, ext).await;
     ext.errors.extend(errors);
     let layer = &layer.with_overlay(overlay.clone());

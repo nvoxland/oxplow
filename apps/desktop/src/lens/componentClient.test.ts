@@ -58,10 +58,27 @@ test("connect resolves with what init carried and says ready once", async () => 
   expect(c.run.result.rows).toEqual([[1]]);
   expect(c.props).toEqual({ color: "accent" });
   expect(c.tokens).toEqual({ "--accent": "#08f" });
-  expect(c.kitCss).toContain("--accent: #08f");
+  // The kit is a stylesheet the bundle links (tsk961), not text in `init`.
+  expect("kitCss" in c).toBe(false);
   expect(c.protocol).toBe(BRIDGE_PROTOCOL);
   await settle();
   expect(h.readies()).toBe(1);
+  h.close();
+});
+
+// tsk961: the theme reaches the frame as custom properties set on its
+// root through the CSSOM — the kit's sheet reads them, and no inline
+// <style> is needed.
+test("applyTheme sets each token on the document's root", async () => {
+  const h = harness();
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  const set: Array<[string, string]> = [];
+  const doc = { documentElement: { style: { setProperty: (k: string, v: string) => set.push([k, v]) } } };
+  c.applyTheme(doc);
+  expect(set).toEqual([["--accent", "#08f"]]);
+  expect("applyKitCss" in c).toBe(false);
   h.close();
 });
 
@@ -111,10 +128,11 @@ test("onUpdate hears a re-run until it unsubscribes", async () => {
 });
 
 test("a host speaking another protocol is refused, by number", async () => {
-  const h = harness({}, 2);
+  const other = BRIDGE_PROTOCOL + 1;
+  const h = harness({}, other);
   const connecting = connect({ target: h.frame });
   h.init();
-  await expect(connecting).rejects.toThrow(/protocol 2/);
+  await expect(connecting).rejects.toThrow(new RegExp(`protocol ${other}`));
   await settle();
   expect(h.readies()).toBe(0);
   h.close();

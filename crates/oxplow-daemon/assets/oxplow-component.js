@@ -14,6 +14,10 @@
 //     component.onUpdate(render);            // the lens re-ran
 //   });
 //
+// For oxplow's look, link the kit's stylesheet too —
+//   <link rel="stylesheet" href="/component-lib/oxplow-kit.css">
+// — and call `component.applyTheme()` once connected.
+//
 // It is a classic script (it defines the global `oxplow`), not a module:
 // a sandboxed frame's origin is opaque, and module scripts are fetched
 // with CORS, which nothing served to a frame allows.
@@ -21,7 +25,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 1;
+  const PROTOCOL = 2;
 
   function component(port, init) {
     let next = 0;
@@ -52,7 +56,7 @@
         port.postMessage(Object.assign({ id }, message));
       });
 
-    const kitCss = typeof init.kitCss === "string" ? init.kitCss : "";
+    const tokens = init.tokens || {};
     port.postMessage({ type: "ready" });
     return {
       // The lens's latest run: `{ lens, params, result: { columns, rows } }`.
@@ -62,9 +66,7 @@
       // The lens's `custom.props`, or null.
       props: init.props === undefined ? null : init.props,
       // The theme's CSS variables, by name (`--text-primary`).
-      tokens: init.tokens || {},
-      // A small stylesheet built from the tokens.
-      kitCss,
+      tokens,
       protocol: init.protocol,
       // Hear each re-run of the lens; returns how to stop.
       onUpdate(listener) {
@@ -80,13 +82,11 @@
       invoke: (command, input) => call({ method: "invoke", command, input: input === undefined ? {} : input }),
       // Open one of oxplow's pages (`work_item:oxplow:tsk42`).
       navigate: (ref) => call({ method: "navigate", ref }),
-      // Adopt oxplow's look: add `kitCss` to the document.
-      applyKitCss(doc) {
-        const target = doc || global.document;
-        const style = target.createElement("style");
-        style.textContent = kitCss;
-        target.head.appendChild(style);
-        return style;
+      // Adopt oxplow's theme: set each token on the document's root, where
+      // the kit's stylesheet (and your own CSS) reads them.
+      applyTheme(doc) {
+        const root = (doc || global.document).documentElement;
+        for (const name of Object.keys(tokens)) root.style.setProperty(name, tokens[name]);
       },
     };
   }

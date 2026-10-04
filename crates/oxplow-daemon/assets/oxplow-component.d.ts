@@ -25,8 +25,6 @@ export interface OxplowComponent {
   readonly props: unknown;
   /** The theme's CSS variables, by name (`--text-primary`). */
   readonly tokens: Record<string, string>;
-  /** A small stylesheet built from the tokens. */
-  readonly kitCss: string;
   /** The protocol the host speaks. */
   readonly protocol: number;
   /** Hear each re-run of the lens; returns how to stop. */
@@ -35,12 +33,15 @@ export interface OxplowComponent {
   query(asset: string, params?: Record<string, OxplowCell>): Promise<OxplowRun>;
   /** Run a command this component declares in `commands`, as the person
    *  looking at it; one that asks is confirmed by them, in oxplow.
-   *  Rejects with an {@link OxplowError} (`CANCELLED` when they decline). */
+   *  Rejects with an {@link OxplowError} (`CANCELLED` when they decline;
+   *  `DENIED` until a person approves the component in Settings → Data →
+   *  Programs). */
   invoke(command: string, input?: unknown): Promise<unknown>;
   /** Open one of oxplow's pages. Rejects with an {@link OxplowError}. */
   navigate(ref: string): Promise<null>;
-  /** Add `kitCss` to the document. */
-  applyKitCss(doc?: Document): HTMLStyleElement;
+  /** Set each theme token on the document's root, where the kit's
+   *  stylesheet (`/component-lib/oxplow-kit.css`) reads them. */
+  applyTheme(doc?: Document): void;
 }
 
 declare global {

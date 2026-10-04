@@ -540,6 +540,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(types.status(), 200);
+        // tsk961: the kit's stylesheet, as CSS.
+        let kit = bare
+            .get(format!("{base}/component-lib/oxplow-kit.css"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(kit.status(), 200);
+        assert_eq!(kit.headers()["content-type"], "text/css; charset=utf-8");
+        assert!(kit.text().await.unwrap().contains(".ox-"));
         for path in [
             "/component-lib/other.js",
             "/component-lib/",

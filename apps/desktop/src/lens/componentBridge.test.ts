@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { componentBundleUrl, componentNavigationTarget, componentRefusal, createBridgeHost, kitCss, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
+import { componentBundleUrl, componentNavigationTarget, componentRefusal, createBridgeHost, initMessage, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
 
 // P6b.D4: a custom component talks to the host over a MessageChannel —
 // three requests (query, invoke, navigate) and a `ready`; everything else
@@ -50,7 +50,20 @@ test("theme tokens come from the root's custom properties", () => {
   };
   const tokens = tokensFromStyle(style);
   expect(tokens).toEqual({ "--text-primary": "#eee", "--accent": "#08f" });
-  expect(kitCss(tokens)).toContain(":root { --text-primary: #eee; --accent: #08f; }");
+});
+
+// tsk961: `init` carries the theme's tokens; the kit is a stylesheet the
+// bundle links from the daemon. Dropping `kitCss` changed `init`'s shape,
+// so the protocol is 2.
+test("init carries the run, props and tokens, at protocol 2", () => {
+  const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
+  expect(initMessage(r, { "--accent": "#08f" })).toEqual({
+    type: "init",
+    protocol: 2,
+    run: r,
+    props: { a: 1 },
+    tokens: { "--accent": "#08f" },
+  });
 });
 
 const run = { lens: { id: "x/burn" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;

@@ -148,6 +148,233 @@ pub fn stat_bundle(dir: &Path) -> Option<BundleStat> {
     Some(stat)
 }
 
+/// The client library's path, as a bundle's `index.html` loads it.
+pub const LIB_SCRIPT: &str = "/component-lib/oxplow-component.js";
+
+/// What `ext`'s components ask for that their frame would refuse without a
+/// word (tsk961), as check errors at the file: each page of each bundle
+/// ([`page_problems`]), and any component in an extension that comes with
+/// oxplow — the daemon never serves a bundled extension's bundle.
+pub fn bundle_problems(ext: &super::Extension, root: &Path) -> Vec<String> {
+    let dir = ext.path.trim_end_matches('/');
+    if ext.origin == "bundled" {
+        return ext
+            .custom_components
+            .iter()
+            .map(|c| {
+                format!(
+                    "{dir}/extension.yaml: custom component `{}`: an extension that comes with \
+                     oxplow can't declare one — its bundle is never served",
+                    c.id
+                )
+            })
+            .collect();
+    }
+    let Ok(files) = super::files_at(root, dir) else {
+        return Vec::new();
+    };
+    let paths = files.paths().unwrap_or_default();
+    let mut out = Vec::new();
+    for c in &ext.custom_components {
+        let bundle = c.bundle.trim_end_matches('/');
+        let prefix = format!("{bundle}/");
+        for rel in &paths {
+            let Some(inner) = rel.strip_prefix(&prefix) else {
+                continue;
+            };
+            let lower = inner.to_ascii_lowercase();
+            if !(lower.ends_with(".html") || lower.ends_with(".htm")) {
+                continue;
+            }
+            let Some(html) = files.read(rel) else {
+                continue;
+            };
+            out.extend(
+                page_problems(&html, inner == "index.html")
+                    .into_iter()
+                    .map(|p| format!("{dir}/{rel}: {p}")),
+            );
+        }
+    }
+    out
+}
+
+/// What one of a bundle's pages asks for that the bundle's CSP refuses
+/// silently: an inline `<script>` or event handler, a `type="module"`
+/// script, a script or stylesheet from outside the bundle; and, for its
+/// `index.html`, never loading the client library. A link (`<a href>`) is
+/// a navigation, not a load, and isn't one.
+pub fn page_problems(html: &str, index: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut loads_lib = false;
+    for tag in tags(html) {
+        for (name, _) in &tag.attrs {
+            if name.len() > 2
+                && name.starts_with("on")
+                && name[2..].chars().all(|c| c.is_ascii_alphabetic())
+            {
+                out.push(format!(
+                    "an inline event handler (`{name}`) — the frame's CSP refuses it; add the \
+                     listener from a script file"
+                ));
+            }
+        }
+        let attr = |n: &str| {
+            tag.attrs
+                .iter()
+                .find(|(k, _)| k == n)
+                .map(|(_, v)| v.as_str())
+        };
+        let loaded = match tag.name.as_str() {
+            "link" => attr("href"),
+            "a" => None,
+            _ => attr("src"),
+        };
+        if let Some(url) = loaded {
+            if url == LIB_SCRIPT && tag.name == "script" {
+                loads_lib = true;
+            }
+            if outside(url) {
+                out.push(format!(
+                    "`{url}` is outside the bundle — the frame's CSP loads only the bundle's own \
+                     files and oxplow's `/component-lib/`"
+                ));
+            }
+        }
+        if tag.name == "script" {
+            if attr("type").is_some_and(|t| t.eq_ignore_ascii_case("module")) {
+                out.push(
+                    "a `type=\"module\"` script — a sandboxed frame can't load modules; use a \
+                     classic script"
+                        .into(),
+                );
+            }
+            if attr("src").is_none() && !tag.body.trim().is_empty() {
+                out.push(
+                    "an inline <script> — the frame's CSP runs only script files; move it into a \
+                     `.js` file"
+                        .into(),
+                );
+            }
+        }
+    }
+    if index && !loads_lib {
+        out.push(format!(
+            "doesn't load the client library (`<script src=\"{LIB_SCRIPT}\"></script>`), which \
+             is how a component talks to oxplow"
+        ));
+    }
+    out
+}
+
+/// A URL the frame would fetch from somewhere other than the bundle or
+/// oxplow's library: one with a scheme (`data:` is allowed) or a
+/// protocol-relative `//host`.
+fn outside(url: &str) -> bool {
+    let url = url.trim();
+    if url.starts_with("//") {
+        return true;
+    }
+    match url.split_once(':') {
+        Some((scheme, _))
+            if !scheme.is_empty()
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c)) =>
+        {
+            !scheme.eq_ignore_ascii_case("data")
+        }
+        _ => false,
+    }
+}
+
+/// One start tag of a page: its lowercased name, its attributes
+/// (lowercased names, unquoted values) and, for a `<script>`, its text.
+struct Tag {
+    name: String,
+    attrs: Vec<(String, String)>,
+    body: String,
+}
+
+/// The start tags of `html`, comments left out — enough to see what a page
+/// loads and runs, not a full HTML parser.
+fn tags(html: &str) -> Vec<Tag> {
+    let lower = html.to_ascii_lowercase();
+    let bytes = html.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(at) = html[i..].find('<').map(|p| p + i) {
+        if html[at..].starts_with("<!--") {
+            i = html[at..].find("-->").map_or(html.len(), |e| at + e + 3);
+            continue;
+        }
+        let mut j = at + 1;
+        while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'-') {
+            j += 1;
+        }
+        if j == at + 1 {
+            i = at + 1;
+            continue;
+        }
+        let name = lower[at + 1..j].to_string();
+        let mut attrs = Vec::new();
+        loop {
+            while j < bytes.len() && (bytes[j].is_ascii_whitespace() || bytes[j] == b'/') {
+                j += 1;
+            }
+            if j >= bytes.len() || bytes[j] == b'>' {
+                break;
+            }
+            let start = j;
+            while j < bytes.len() && !bytes[j].is_ascii_whitespace() && !b"=>/".contains(&bytes[j])
+            {
+                j += 1;
+            }
+            let key = lower[start..j].to_string();
+            let mut value = String::new();
+            if j < bytes.len() && bytes[j] == b'=' {
+                j += 1;
+                match bytes.get(j) {
+                    Some(&q) if q == b'"' || q == b'\'' => {
+                        let end = html[j + 1..]
+                            .find(q as char)
+                            .map_or(html.len(), |e| j + 1 + e);
+                        value = html[j + 1..end].to_string();
+                        j = (end + 1).min(html.len());
+                    }
+                    _ => {
+                        let start = j;
+                        while j < bytes.len() && !bytes[j].is_ascii_whitespace() && bytes[j] != b'>'
+                        {
+                            j += 1;
+                        }
+                        value = html[start..j].to_string();
+                    }
+                }
+            }
+            if key.is_empty() {
+                j += 1;
+            } else {
+                attrs.push((key, value));
+            }
+        }
+        let open_end = (j + 1).min(html.len());
+        let body = if name == "script" {
+            let close = lower[open_end..]
+                .find("</script")
+                .map_or(html.len(), |e| open_end + e);
+            let text = html[open_end..close].to_string();
+            i = close;
+            text
+        } else {
+            i = open_end;
+            String::new()
+        };
+        out.push(Tag { name, attrs, body });
+    }
+    out
+}
+
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id
@@ -317,6 +544,7 @@ mod tests {
         );
     }
 
+    use super::{bundle_problems, page_problems};
     use crate::extensions::{load_extensions, Extension, LensViz};
     use std::path::Path;
 
@@ -341,7 +569,7 @@ mod tests {
         write(
             root,
             "oxplow/extensions/x/components/burndown/index.html",
-            "<!doctype html><script src=\"app.js\"></script>",
+            &format!("<!doctype html>{LIB_TAG}<script src=\"app.js\"></script>"),
         );
         write(root, "oxplow/extensions/x/components/burndown/app.js", "1");
         write(root, "oxplow/extensions/x/lenses/burn.yaml", LENS);
@@ -354,6 +582,85 @@ mod tests {
             .into_iter()
             .find(|e| e.name == "x")
             .unwrap()
+    }
+
+    const LIB_TAG: &str = "<script src=\"/component-lib/oxplow-component.js\"></script>";
+
+    /// P11 (tsk961): what a bundle's CSP would refuse without a word — an
+    /// inline script or event handler, a module, anything from outside the
+    /// bundle — is an error at check, and so is an `index.html` that never
+    /// loads the client library. The kit's sheet and the bundle's own
+    /// files are fine.
+    #[test]
+    fn a_page_the_csp_would_silently_refuse_is_an_error() {
+        let ok = format!(
+            "<!doctype html><!-- <script>not code</script> --><link rel=\"stylesheet\" \
+             href=\"/component-lib/oxplow-kit.css\"><link rel=stylesheet href=own.css>{LIB_TAG}\
+             <script src=\"app.js\"></script><img src=\"data:image/png;base64,AA==\">\
+             <a href=\"https://example.com\">a link</a>"
+        );
+        assert_eq!(page_problems(&ok, true), Vec::<String>::new());
+        for (html, says) in [
+            ("<script>render()</script>", "an inline <script>"),
+            (
+                "<script type=\"module\" src=\"app.js\"></script>",
+                "`type=\"module\"`",
+            ),
+            (
+                "<script src=\"https://cdn.example/x.js\"></script>",
+                "`https://cdn.example/x.js` is outside the bundle",
+            ),
+            (
+                "<link rel=stylesheet href=//cdn.example/x.css>",
+                "`//cdn.example/x.css` is outside the bundle",
+            ),
+            ("<button onclick=\"go()\">Go</button>", "`onclick`"),
+            ("<SCRIPT>render()</SCRIPT>", "an inline <script>"),
+        ] {
+            let problems = page_problems(&format!("{LIB_TAG}{html}"), true).join("\n");
+            assert!(problems.contains(says), "{html}: {problems}");
+        }
+        assert!(page_problems("<script src=app.js></script>", true)
+            .join("\n")
+            .contains("doesn't load the client library"));
+        assert_eq!(
+            page_problems("<p>another page</p>", false),
+            Vec::<String>::new(),
+            "only index.html must load it"
+        );
+    }
+
+    /// tsk961: the check reports a bundle's page problems at the page, and
+    /// a component in an extension that comes with oxplow — the daemon
+    /// never serves a bundled extension's bundle.
+    #[tokio::test]
+    async fn a_bundles_pages_and_a_bundled_component_are_checked() {
+        let d = tempfile::tempdir().unwrap();
+        load(d.path(), "private", "  - { id: burndown }\n");
+        write(
+            d.path(),
+            "oxplow/extensions/x/components/burndown/index.html",
+            "<!doctype html><script>render()</script>",
+        );
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let cat = crate::extension_catalog::ExtensionCatalog::new();
+        let v = crate::extensions::validate_extension(&layer, &cat, d.path(), "x", None)
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(
+            errs.contains("oxplow/extensions/x/components/burndown/index.html: an inline <script>"),
+            "{errs}"
+        );
+        assert!(errs.contains("doesn't load the client library"), "{errs}");
+        let mut ext = load(d.path(), "private", "  - { id: burndown }\n");
+        ext.origin = "bundled".into();
+        assert!(
+            bundle_problems(&ext, d.path())
+                .join("\n")
+                .contains("comes with oxplow"),
+            "{ext:?}"
+        );
     }
 
     #[test]

@@ -198,11 +198,13 @@ custom: { component: burndown, props: { color: accent } }
 ```
 
 The bundle lives in `components/burndown/` and needs an `index.html`.
-It loads oxplow's client library, then its own script:
+It loads oxplow's client library, then its own script, and can link
+oxplow's kit stylesheet:
 
 ```html
 <!doctype html>
-<div id="out"></div>
+<link rel="stylesheet" href="/component-lib/oxplow-kit.css">
+<div id="out" class="ox-muted"></div>
 <script src="/component-lib/oxplow-component.js"></script>
 <script src="app.js"></script>
 ```
@@ -210,7 +212,7 @@ It loads oxplow's client library, then its own script:
 ```js
 // app.js
 oxplow.connect().then((component) => {
-  component.applyKitCss();               // look like oxplow
+  component.applyTheme();                // the theme the kit's classes read
   const render = (run) => {
     document.getElementById("out").textContent = `${run.result.rows.length} days`;
   };
@@ -225,11 +227,22 @@ oxplow.connect().then((component) => {
 
 `oxplow plugin new component <name>` writes all of this for you.
 
-`component` also carries `props`, the theme's CSS variables (`tokens`)
-and `kitCss`, a small stylesheet built from them. A request that fails
-rejects with `{ code, message }`. Both scripts are plain scripts, not
-modules — a sandboxed frame can't load modules. Types for the library
-are served beside it (`/component-lib/oxplow-component.d.ts`).
+`component` also carries `props` and the theme's CSS variables
+(`tokens`). The kit stylesheet has a few classes in oxplow's look:
+`ox-muted`, `ox-small`, `ox-mono`, `ox-heading`, `ox-link`, `ox-card`,
+`ox-badge`, `ox-button` (add `ox-primary` for the one main action),
+`ox-table`, `ox-num`, the states `ox-ok`, `ox-waiting`, `ox-running` and
+`ox-bad`, and chart series `ox-series-1` to `ox-series-8` (a `fill` for
+SVG, a `background` otherwise). They only work after `applyTheme()`. A
+request that fails rejects with `{ code, message }`. Types for the
+library are served beside it (`/component-lib/oxplow-component.d.ts`).
+
+The frame refuses some things silently, so `oxplow plugin check` reports
+them as errors: an inline `<script>` or `onclick=` handler (put the code
+in a `.js` file), a `type="module"` script (the scripts must be plain
+scripts, since a sandboxed frame can't load modules), a script or
+stylesheet from outside the bundle, and an `index.html` that doesn't
+load the client library.
 
 If the component doesn't connect within 3 seconds, or navigates itself
 somewhere else, oxplow shows the lens's table instead. Agents always

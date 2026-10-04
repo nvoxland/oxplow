@@ -1,0 +1,88 @@
+/* oxplow's component kit: a few classes in oxplow's look, for custom
+   components (`viz: custom` lenses). Link it beside the client library:
+
+     <link rel="stylesheet" href="/component-lib/oxplow-kit.css">
+
+   and, once connected, call `component.applyTheme()`: it sets the
+   theme's tokens (`--text-primary`, …) on the frame's root, which every
+   rule here reads. Token-only — no color of its own — so a component
+   follows the theme. */
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-snug);
+  color: var(--text-primary);
+  background: transparent;
+}
+
+/* Text */
+.ox-muted { color: var(--text-secondary); }
+.ox-faint { color: var(--text-muted); }
+.ox-small { font-size: var(--text-xs); }
+.ox-mono { font-family: var(--font-mono); }
+.ox-heading {
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  margin: 0 0 6px;
+}
+.ox-link { color: var(--accent); cursor: pointer; text-decoration: none; }
+.ox-link:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* Surfaces */
+.ox-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+.ox-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* Buttons: one primary per region, the rest plain. */
+.ox-button {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--button-secondary-fg);
+  background: var(--button-secondary-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.ox-button:hover { color: var(--button-secondary-fg-hover); background: var(--button-secondary-bg-hover); }
+.ox-button.ox-primary { color: var(--button-primary-fg); background: var(--button-primary-bg); border-color: var(--button-primary-bg); }
+.ox-button.ox-primary:hover { background: var(--button-primary-bg-hover); }
+.ox-button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Tables */
+.ox-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.ox-table th,
+.ox-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--border-subtle); }
+.ox-table th { color: var(--text-secondary); font-weight: var(--weight-medium); }
+.ox-num { font-variant-numeric: tabular-nums; text-align: right; }
+
+/* States */
+.ox-ok { color: var(--status-done); }
+.ox-waiting { color: var(--status-waiting); }
+.ox-running { color: var(--status-running); }
+.ox-bad { color: var(--severity-critical); }
+
+/* Chart series, in order: a fill for SVG shapes, a background for boxes. */
+.ox-series-1 { fill: var(--chart-1); background: var(--chart-1); }
+.ox-series-2 { fill: var(--chart-2); background: var(--chart-2); }
+.ox-series-3 { fill: var(--chart-3); background: var(--chart-3); }
+.ox-series-4 { fill: var(--chart-4); background: var(--chart-4); }
+.ox-series-5 { fill: var(--chart-5); background: var(--chart-5); }
+.ox-series-6 { fill: var(--chart-6); background: var(--chart-6); }
+.ox-series-7 { fill: var(--chart-7); background: var(--chart-7); }
+.ox-series-8 { fill: var(--chart-8); background: var(--chart-8); }
+.ox-axis { stroke: var(--border-strong); fill: var(--text-secondary); font-size: var(--text-xs); }
