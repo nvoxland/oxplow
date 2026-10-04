@@ -633,7 +633,10 @@ null `ruleId` → no rule).
 
 Declare a report collector with its own `entry` — no recompile. The
 **script lives in its own file** (project-relative; absolute paths and `..`
-are rejected), not inline in the yaml. Example: a Clover (XML) coverage
+are rejected), not inline in the yaml. The entry and the report `path` are
+also resolved through every symlink before anything is read, and one that
+lands outside the checkout is refused (`in_checkout`, tsk927): a repo can't
+point a collector at a file of the person's. Example: a Clover (XML) coverage
 parser in jaq:
 
 ```yaml

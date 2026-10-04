@@ -627,6 +627,22 @@ impl CollectionService {
         self.report_collectors().iter().any(|s| s.id == id)
     }
 
+    /// `rel` under the checkout `root`, after every symlink (tsk927): `None`
+    /// when it isn't there, an error when it resolves outside `root` — a
+    /// repo can't point a collector at a file of the person's. The config
+    /// check is lexical (no `..`, not absolute); this is the one that
+    /// follows links.
+    fn in_checkout(root: &std::path::Path, rel: &str) -> Result<Option<PathBuf>, String> {
+        let base = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        match root.join(rel).canonicalize() {
+            Ok(abs) if abs.starts_with(&base) => Ok(Some(abs)),
+            Ok(_) => Err(format!(
+                "`{rel}` resolves outside the checkout (a symlink?); refused"
+            )),
+            Err(_) => Ok(None),
+        }
+    }
+
     /// The parser a report collector names: a bundled one, or its own jaq /
     /// Starlark script or program — a program only once a person approved
     /// it on this machine, as it is now (tsk331).
@@ -649,7 +665,9 @@ impl CollectionService {
             Records::Analysis => CollectorKind::Analysis,
         };
         let entry = spec.entry.as_deref().unwrap_or_default();
-        let abs = root.join(entry);
+        let abs = Self::in_checkout(root, entry)
+            .map_err(|e| ParserProblem::Broken(format!("entry {e}")))?
+            .unwrap_or_else(|| root.join(entry));
         if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
             use crate::exec_consent::{may_run, needs_approval, ProgramKind};
             if !may_run(
@@ -705,7 +723,13 @@ impl CollectionService {
         let Some(report) = spec.report.as_ref() else {
             return ReportRead::Missing(String::new());
         };
-        let abs = root.join(&report.path);
+        let abs = match Self::in_checkout(root, &report.path) {
+            Ok(Some(abs)) => abs,
+            Ok(None) => return ReportRead::Missing(report.path.clone()),
+            Err(e) => {
+                return ReportRead::Failed(format!("{} ({}): report {e}", report.path, spec.id))
+            }
+        };
         if window.is_some_and(|w| !w.holds(&abs)) {
             return ReportRead::NotFresh;
         }
@@ -8250,6 +8274,64 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(stamped, Some(open.id.value()));
+        }
+
+        /// tsk927: a report path or a parser entry that a symlink takes
+        /// outside the checkout is refused before anything is read — a
+        /// repo can't point a collector at a file of the person's.
+        #[tokio::test]
+        async fn a_report_or_parser_outside_the_checkout_is_refused() {
+            let h = build(None).await;
+            let outside = tempfile::tempdir().unwrap();
+            std::fs::write(outside.path().join("secret"), "[]").unwrap();
+            std::fs::write(outside.path().join("p.jq"), ".").unwrap();
+            std::fs::create_dir_all(h.tmp.path().join("reports")).unwrap();
+            std::os::unix::fs::symlink(
+                outside.path().join("secret"),
+                h.tmp.path().join("reports/x.json"),
+            )
+            .unwrap();
+            std::fs::write(h.tmp.path().join("reports/ok.json"), ESLINT_JSON).unwrap();
+            std::os::unix::fs::symlink(outside.path().join("p.jq"), h.tmp.path().join("p.jq"))
+                .unwrap();
+            declare(
+                &h,
+                vec![
+                    report_collector(
+                        "lint.report",
+                        "analysis",
+                        "oxplow:eslint",
+                        "reports/x.json",
+                        "analysis",
+                    ),
+                    {
+                        let value: serde_yaml::Value = serde_yaml::from_str(
+                            "- { id: lint.entry, records: analysis, runtime: jaq, entry: p.jq, \
+                             report: { path: reports/ok.json, format: json }, \
+                             trigger: { on_run: analysis } }",
+                        )
+                        .unwrap();
+                        let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
+                            oxplow_config::collectors::PROJECT,
+                            &value,
+                            &|_| true,
+                        );
+                        assert_eq!(errors, Vec::<String>::new());
+                        specs.remove(0)
+                    },
+                ],
+            );
+            for id in ["lint.report", "lint.entry"] {
+                let err = h
+                    .service
+                    .sync_report_collector(&h.thread, id, "human", None)
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(&err, crate::collector_runner::RunCollectorError::Failed(m) if m.contains("outside the checkout")),
+                    "{id}: {err:?}"
+                );
+            }
         }
 
         /// tsk863: a by-hand run of a collector whose report isn't there
