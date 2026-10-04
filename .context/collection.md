@@ -404,6 +404,12 @@ offers that for iterating and `command` for the closing run (this repo's
 `agentHint` says the same) — says the run wrote none of the reports the
 project's report collectors read when there are some but no `command`, or
 routes to `/oxplow:configure` when the project reads no reports at all.
+When a collector **should** have read a report but didn't count — its
+parse failed, it is disabled, or its program awaits approval — the nudge
+says that instead, collector by collector (`RunReports::unread`,
+`unread_reports_message`; tsk893): running the tests again wouldn't help,
+and the reasons name what a person must do. A coverage collector that
+didn't count also leaves the lost coverage's `failed` capture.
 
 **Tool-agnostic design:** the hook never encodes tool→command knowledge.
 It keys only on (1) "was this a test run?" (substring match against

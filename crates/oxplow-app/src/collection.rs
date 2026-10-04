@@ -829,14 +829,19 @@ impl CollectionService {
                     exec,
                     label,
                 } => out.add(output, exec, label),
-                ReportRead::Failed(e) => {
-                    tracing::warn!(collector = %spec.id, error = %e, "report collector failed");
+                // Why it didn't count, kept for the run's nudge (tsk893); a
+                // coverage collector's is the lost coverage's failed capture.
+                ReportRead::Failed(e) | ReportRead::Disabled(e) | ReportRead::NeedsApproval(e) => {
+                    tracing::warn!(collector = %spec.id, "{e}");
+                    let why = if e.contains(&spec.id) {
+                        e
+                    } else {
+                        format!("collector `{}`: {e}", spec.id)
+                    };
                     if spec.records == Some(Records::Coverage) {
-                        out.coverage_errors.push(e);
+                        out.coverage_errors.push(why.clone());
                     }
-                }
-                ReportRead::Disabled(m) | ReportRead::NeedsApproval(m) => {
-                    tracing::warn!(collector = %spec.id, "{m}")
+                    out.unread.push(why);
                 }
                 ReportRead::NotFresh | ReportRead::Missing(_) => {}
             }
@@ -2333,8 +2338,11 @@ impl CollectionService {
         // from the project's own config.
         let produced_report = report.is_some() || coverage.is_some();
         if !produced_report && self.mark_nudged(&effort.id).await {
-            let msg =
-                report_nudge_message(&cfg, !self.report_collectors().is_empty(), &bash.command);
+            let msg = if reads.unread.is_empty() {
+                report_nudge_message(&cfg, !self.report_collectors().is_empty(), &bash.command)
+            } else {
+                unread_reports_message(&bash.command, &reads.unread)
+            };
             self.persist_nudge(
                 thread,
                 Some(&effort),
@@ -3427,6 +3435,17 @@ fn report_nudge_message(
     }
 }
 
+/// The report-less nudge when the run's collectors didn't count (tsk893):
+/// why each didn't. Running the tests again changes none of it.
+fn unread_reports_message(command: &str, unread: &[String]) -> String {
+    format!(
+        "Tests ran (`{}`) but oxplow read none of their reports: {}. Running the tests again \
+         won't change that.",
+        command.trim(),
+        unread.join("; ")
+    )
+}
+
 /// Effort-panel group ordering: code-health gauges first, then coverage, tests,
 /// static-analysis, operational. Drives the grouped rendering on the task page.
 fn effort_metric_group_order(d: &oxplow_db::EffortMetricDelta) -> u8 {
@@ -3614,9 +3633,13 @@ struct RunReports {
     exec_tests: Vec<String>,
     exec_coverage: Vec<String>,
     exec_analysis: Vec<String>,
-    /// Coverage reports this run wrote that failed to parse (tsk79: a lost
-    /// coverage run is recorded, not only logged).
+    /// Coverage reports this run wrote that failed to parse, or whose
+    /// collector didn't run (tsk79: a lost coverage run is recorded, not
+    /// only logged).
     coverage_errors: Vec<String>,
+    /// Why each collector that should have read a report didn't count:
+    /// disabled, awaiting approval, or its parse failed (tsk893).
+    unread: Vec<String>,
 }
 
 impl RunReports {
@@ -7508,6 +7531,52 @@ mod tests {
                 .has_fired(eid.value(), "report-less-run")
                 .await
                 .unwrap());
+        }
+
+        /// tsk893: when the run's reports weren't read because a collector
+        /// failed (or is disabled, or awaits approval), the nudge says so —
+        /// not "run the tests again", which the agent just did — and a
+        /// coverage collector that didn't run leaves a failed capture.
+        #[tokio::test]
+        async fn a_run_whose_collector_failed_says_why() {
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("r.xml"), "not junit").unwrap();
+            std::fs::write(h.tmp.path().join("cov.xml"), "<coverage").unwrap();
+            declare(
+                &h,
+                vec![
+                    report_collector("tests.junit", "tests", "oxplow:junit", "r.xml", "test"),
+                    report_collector(
+                        "tests.cov",
+                        "coverage",
+                        "oxplow:cobertura",
+                        "cov.xml",
+                        "test",
+                    ),
+                ],
+            );
+            let msg = h
+                .service
+                .on_post_tool_use(&h.thread, &bash_payload("bun test", 0), None)
+                .await
+                .unwrap()
+                .expect("a nudge");
+            assert!(msg.contains("tests.junit"), "{msg}");
+            assert!(msg.contains("tests.cov"), "{msg}");
+            assert!(!msg.contains("produced no report"), "{msg}");
+            let failed: i64 =
+                h.db.transaction(|tx| {
+                    tx.query_row(
+                        "SELECT count(*) FROM metric_capture \
+                         WHERE producer = 'coverage' AND status = 'failed'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap();
+            assert_eq!(failed, 1);
         }
 
         #[tokio::test]
