@@ -75,8 +75,8 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    own. A handler that found **nothing to change** and wrote nothing
    returns `HandlerOutput::unchanged` (tsk861): a plain call then leaves
    no record — no audit row, no `command.executed`, `audit_id: None` —
-   like a read (`knowledge.relocate_comment` re-run on every render is
-   the case). The bus enforces it (tsk901): an unchanged call's
+   like a read (`knowledge.relocate_comment` re-run on a settled
+   document is the case). The bus enforces it (tsk901): an unchanged call's
    transaction is **rolled back**, so nothing it wrote lands unaudited,
    and one that also returns events or an inverse is refused (audited as
    `error`). An undo, an approval or an effect's reaction is recorded

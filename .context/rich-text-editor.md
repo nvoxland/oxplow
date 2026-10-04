@@ -219,8 +219,15 @@ item.thread_id }`.
   what the re-anchor fast path reads).
 - **Live un-orphan.** The re-anchor effect also keys on a debounced
   `docVersion` bumped from `editor.on("update")`, so retyping a deleted
-  quote re-attaches promptly instead of waiting for the blur/commit that
-  updates `value`.
+  quote re-attaches its highlight promptly instead of waiting for the
+  blur/commit that updates `value`.
+- **Anchors are stored when the document settles** (tsk902): every
+  re-anchor queues the moved anchors (`pendingAnchorsRef`), and
+  `flushAnchors` stores them — at once when the editor isn't focused, on
+  blur, and on unmount — never per typing pause, since each
+  `knowledge.relocate_comment` is a command run (an audit row and events)
+  on the person's behalf. A store that fails (the comment deleted
+  meanwhile) is caught; the bus audited it.
 - **Relinking.** When a selection is active, the editor context menu
   lists "Relink orphaned: …" entries that re-attach an orphaned comment
   to the current selection via `relink_comment` (rewrites quote +

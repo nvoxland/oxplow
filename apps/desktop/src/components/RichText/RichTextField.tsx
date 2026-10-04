@@ -127,6 +127,21 @@ export function RichTextField({
 }: RichTextFieldProps) {
   const lastCommittedRef = useRef(value);
   const debounceRef = useRef<number | null>(null);
+  // Re-found comment anchors waiting to be stored (tsk902): written when
+  // the document settles — on blur, on leaving, or at once when the
+  // person isn't typing — never per keystroke pause, since each is a
+  // command run on the person's behalf.
+  const pendingAnchorsRef = useRef(new Map<string, { anchor: string; orphaned: boolean }>());
+  const flushAnchors = () => {
+    const pending = pendingAnchorsRef.current;
+    for (const [id, { anchor, orphaned }] of pending) {
+      relocateComment(id, anchor, orphaned).catch(() => {
+        // Deleted meanwhile, or the run failed (the bus audited it):
+        // there is nothing left to re-anchor.
+      });
+    }
+    pending.clear();
+  };
 
   // Comment state. The hook is always called (empty target → no fetch).
   const { threads } = useCommentsForTarget(comments?.targetKind ?? "", comments?.targetId ?? "");
@@ -165,6 +180,7 @@ export function RichTextField({
       }, 300);
     },
     onBlur({ editor }) {
+      flushAnchors();
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
         debounceRef.current = null;
@@ -196,20 +212,24 @@ export function RichTextField({
     });
   }, [editor, value]);
 
-  // On unmount, flush any pending debounce.
+  // On unmount, flush any pending debounce, and store the anchors the
+  // last edits moved.
   useEffect(() => {
     return () => {
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
       }
+      flushAnchors();
     };
+    // flushAnchors reads only refs.
   }, []);
 
   // Re-anchor each comment's quote against the current doc and push the
   // resolved ranges into the decoration plugin. Recomputes when the
   // thread list changes or the document content is re-synced; live
   // typing in between is handled by the plugin mapping its set forward.
-  // A corrected/orphaned anchor is persisted via `relocateComment`; the
+  // A corrected/orphaned anchor is queued and stored via
+  // `relocateComment` once the document settles (`flushAnchors`); the
   // stored anchor then equals the recomputed one, so the re-read it
   // causes stops here.
   // Bumped (debounced) on every doc-changing transaction so the
@@ -262,12 +282,20 @@ export function RichTextField({
         // location so the hint + context self-heal (and old comments
         // upgrade in place); guard keeps DB churn down.
         const aj = buildAnchorJson(doc, range.from, range.to, range.approx);
-        if (c.orphaned || c.selectors_json !== aj) void relocateComment(c.id, aj, false);
+        if (c.orphaned || c.selectors_json !== aj) {
+          pendingAnchorsRef.current.set(c.id, { anchor: aj, orphaned: false });
+        } else {
+          pendingAnchorsRef.current.delete(c.id);
+        }
       } else if (!c.orphaned) {
-        void relocateComment(c.id, c.selectors_json, true);
+        pendingAnchorsRef.current.set(c.id, { anchor: c.selectors_json, orphaned: true });
+      } else {
+        pendingAnchorsRef.current.delete(c.id);
       }
     }
     editor.view.dispatch(editor.state.tr.setMeta(commentDecorationsKey, ranges));
+    // Not being typed in: the document is settled now.
+    if (!editor.isFocused) flushAnchors();
   }, [editor, threads, comments, value, docVersion]);
 
   // Honor cross-page "go to location" requests from the Comments

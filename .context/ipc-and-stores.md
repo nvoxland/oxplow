@@ -732,7 +732,10 @@ messages) — `subscribeCommentEvents` in `api.ts`. The renderer's
 re-anchor after it re-finds a quote is `knowledge.relocate_comment`
 (`relocateComment`, tsk861): recorded when the anchor moved; one already
 where it was is `HandlerOutput::unchanged` and leaves no audit row and no
-event (commands.md step 5), so the re-read it causes ends the loop.
+event (commands.md step 5), so the re-read it causes ends the loop. The
+field stores anchors only once the document settles (blur, leaving, not
+focused; tsk902), so typing above N comments doesn't run N commands per
+pause.
 
 ## Search index (read model + indexer)
 
