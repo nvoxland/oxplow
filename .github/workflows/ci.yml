@@ -156,6 +156,84 @@ jobs:
       - name: Daemon contract tests
         run: cargo test -p oxplow-daemon
 
+  # The browser suite (P11, tests-e2e/README.md): the built frontend in
+  # headless Chromium against oxplow-daemon-sim (secrets in memory, so the
+  # runner needs no keychain) over throwaway git projects. Separate from
+  # daemon-contract, which stays browser-free.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Playwright's runner is Node.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # tmux for the terminal paths; build-essential for the vendored
+      # native deps. No webkit2gtk — the daemon is headless.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential tmux
+
+      - name: Cache Cargo registry + target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
+      # The suite's global setup builds these too; building them here keeps
+      # the compile out of the suite's own timing.
+      - name: Build the test daemon and the fakes
+        run: cargo build -p oxplow-daemon-sim -p oxplow-acp-fake
+
+      - name: Browser suite
+        run: bun run e2e
+        env:
+          CI: "true"
+          # vite build's heap (see the package job).
+          NODE_OPTIONS: "--max-old-space-size=6144"
+
+      - name: Upload the JUnit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-junit
+          path: tests-e2e/.output/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-traces
+          path: tests-e2e/.output/results
+          if-no-files-found: ignore
+          retention-days: 14
+
   # Dependency vulnerability scan (RustSec + npm advisories). Advisory-
   # only for now: each audit step is `continue-on-error` so a newly
   # published advisory in a transitive dep can't block unrelated PRs

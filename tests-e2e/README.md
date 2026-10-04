@@ -26,6 +26,11 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   - `pageErrors` fails any spec whose page threw.
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`, never
   a sleep.
+- **Reports**: a JUnit report at `tests-e2e/.output/junit.xml` and, for a
+  failed spec, its trace under `tests-e2e/.output/results` (both gitignored).
+- **CI**: the `e2e` job in `.github/workflows/ci.yml` — two workers, one
+  retry, the JUnit report uploaded always and traces on failure.
+  `daemon-contract` stays browser-free.
 
 ## Scripts
 

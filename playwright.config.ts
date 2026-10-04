@@ -15,7 +15,8 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   timeout: 60_000,
   expect: { timeout: 15_000 },
-  reporter: [["list"]],
+  // The JUnit report is what oxplow's own collector reads.
+  reporter: [["list"], ["junit", { outputFile: "tests-e2e/.output/junit.xml" }]],
   use: {
     baseURL: PREVIEW,
     trace: "retain-on-failure",
