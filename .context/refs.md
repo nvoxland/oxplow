@@ -136,7 +136,11 @@ one wiki page rewrites that page's entry (measured at 500 pages of ~5 KB:
 recompute. A thread or
 stream delete, a move, a soft delete: the kind follows its model, so
 nothing is left behind (the old upsert-only boot backfill kept orphans).
-Archiving a stream purges only its files (`purge_stream_files`). A plugin
+**Archived work leaves search** (tsk921): archiving a stream purges its
+files (`purge_stream_files`), and the task, note and comment models skip
+an archived thread or stream (`archived_at`), so their kinds restate
+without it; a backlog task (no thread) stays. Wiki pages belong to no
+stream (`archived_threads_and_streams_leave_search`). A plugin
 kind is never `revisioned` yet: no plugin kind has a reader for a
 revision. The design is recorded (extensions.md "Ref kinds" →
 "Revisioned plugin kinds"): `revisioned: true`, a `rev` column on the

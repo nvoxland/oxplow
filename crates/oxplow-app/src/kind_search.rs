@@ -871,6 +871,53 @@ mod core_tests {
         .await;
     }
 
+    /// tsk921: archived work leaves search as its files do — an archived
+    /// thread's tasks, then an archived stream's — and the backlog stays.
+    #[tokio::test]
+    async fn archived_threads_and_streams_leave_search() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let kept = crate::test_fixtures::new_thread(&svc, stream.id, "kept").await;
+        let shelved = crate::test_fixtures::new_thread(&svc, stream.id, "shelved").await;
+        change_loop(&svc);
+        let stays = task(&svc, kept.id, "Stays put").await;
+        task(&svc, shelved.id, "Shelved with its thread").await;
+        let backlog = svc
+            .tasks
+            .create(
+                None,
+                crate::CreateTaskInput {
+                    title: "On the backlog".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        eventually("all three are indexed", || async {
+            entries(&svc, "task").await.len() == 3
+        })
+        .await;
+        oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &shelved.id)
+            .await
+            .unwrap();
+        eventually("the archived thread's task leaves", || async {
+            entries(&svc, "task").await
+                == vec![
+                    (stays.id.to_string(), Some(stream.id.to_string())),
+                    (backlog.id.to_string(), None),
+                ]
+        })
+        .await;
+        oxplow_domain::stores::StreamStore::archive(&*svc.stream_store, &stream.id)
+            .await
+            .unwrap();
+        eventually(
+            "the archived stream's tasks leave; the backlog stays",
+            || async { entries(&svc, "task").await == vec![(backlog.id.to_string(), None)] },
+        )
+        .await;
+    }
+
     /// A task moved to the backlog is indexed there and nowhere else
     /// (tsk508): its entry's stream follows its thread.
     #[tokio::test]
