@@ -1379,17 +1379,25 @@ export interface RemoteBranchTarget {
   branch: string;
 }
 
-export async function vcsPush(streamId: string, to?: RemoteBranchTarget): Promise<GitOpKickoff> {
+export async function vcsPush(
+  streamId: string,
+  to?: RemoteBranchTarget,
+  confirmed = false,
+): Promise<GitOpKickoff> {
   const where = to ? ` ${to.remote} ${to.branch}` : "";
   return runAsBackgroundTask(to ? `Push to ${to.remote}/${to.branch}` : "Push", "vcs", `push${where}`, () =>
-    runVcs("vcs.push", { stream: streamId, ...to }),
+    runVcs("vcs.push", { stream: streamId, ...to }, confirmed),
   );
 }
 
-export async function vcsPull(streamId: string, from?: RemoteBranchTarget): Promise<GitOpKickoff> {
+export async function vcsPull(
+  streamId: string,
+  from?: RemoteBranchTarget,
+  confirmed = false,
+): Promise<GitOpKickoff> {
   const where = from ? ` ${from.remote} ${from.branch}` : "";
   return runAsBackgroundTask(from ? `Pull ${from.remote}/${from.branch}` : "Pull", "vcs", `pull${where}`, () =>
-    runVcs("vcs.pull", { stream: streamId, ...from }),
+    runVcs("vcs.pull", { stream: streamId, ...from }, confirmed),
   );
 }
 

@@ -182,6 +182,9 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Destructive actions
 
+- **A button that runs a command asks when the command's spec does**
+  (`SpecConfirm`, `apps/desktop/src/components/SpecConfirm.tsx`; tsk898):
+  never a second rule in the page — while the spec loads it asks.
 - **Per-row destructives use `InlineConfirm`** at
   `apps/desktop/src/components/InlineConfirm.tsx`. First click on the trigger
   swaps to a `[Confirm] [Cancel]` pair in the same horizontal real

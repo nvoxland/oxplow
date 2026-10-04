@@ -1,5 +1,5 @@
 import { EmptyState } from "../components/Prompts/EmptyState.js";
-import { InlineConfirm } from "../components/InlineConfirm.js";
+import { SpecConfirm } from "../components/SpecConfirm.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MergeReadiness, OpOutcome, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
 import {
@@ -320,8 +320,9 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     return out;
   }, [agentStatuses]);
 
-  // A push, merge or rebase asks on its own button (`InlineConfirm`): the
-  // person's second click is the confirmation the command runs with.
+  // Each git action's button asks first when its command's spec does
+  // (`SpecConfirm`, tsk898); the run goes confirmed either way — the
+  // person confirmed, or the command doesn't ask.
   const runOp = useCallback(
     async (label: string, command: string, action: () => Promise<import("../api.js").GitOpKickoff>) => {
       addPending(label);
@@ -388,14 +389,14 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                 runOp(
                   "Push",
                   "push",
-                  () => vcsPush(streamId),
+                  () => vcsPush(streamId, undefined, true),
                 )
               }
               onPullUpstream={() =>
                 runOp(
                   "Pull",
                   "pull",
-                  () => vcsPull(streamId),
+                  () => vcsPull(streamId, undefined, true),
                 )
               }
               onFetch={() => runUnconfirmed("Fetch", () => vcsFetch(streamId))}
@@ -457,14 +458,14 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                 runOp(
                   `Pull ${remote}/${branch} into current`,
                   `pull ${remote} ${branch}`,
-                  () => vcsPull(streamId, { remote, branch }),
+                  () => vcsPull(streamId, { remote, branch }, true),
                 )
               }
               onPush={(remote, branch) =>
                 runOp(
                   `Push current → ${remote}/${branch}`,
                   `push ${remote} ${branch}`,
-                  () => vcsPush(streamId, { remote, branch }),
+                  () => vcsPush(streamId, { remote, branch }, true),
                 )
               }
               isPending={isPending}
@@ -513,28 +514,32 @@ function UpstreamCard({
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           {hasUpstream ? (
             <>
-              <InlineConfirm onConfirm={onPush} confirmLabel="Push" testIdPrefix="git-dashboard-push">
-                {(arm) => (
+              <SpecConfirm command="vcs.push" onConfirm={onPush} confirmLabel="Push" testIdPrefix="git-dashboard-push">
+                {(run) => (
                   <button
                     type="button"
                     data-testid="git-dashboard-push"
-                    onClick={arm}
+                    onClick={run}
                     disabled={pushing || nothingToPush}
                     style={primaryButton}
                   >
                     {pushing ? "Pushing…" : "Push"}
                   </button>
                 )}
-              </InlineConfirm>
-              <button
-                type="button"
-                data-testid="git-dashboard-pull"
-                onClick={onPullUpstream}
-                disabled={pulling || nothingToPull}
-                style={smallButton}
-              >
-                {pulling ? "Pulling…" : "Pull"}
-              </button>
+              </SpecConfirm>
+              <SpecConfirm command="vcs.pull" onConfirm={onPullUpstream} confirmLabel="Pull" testIdPrefix="git-dashboard-pull">
+                {(run) => (
+                  <button
+                    type="button"
+                    data-testid="git-dashboard-pull"
+                    onClick={run}
+                    disabled={pulling || nothingToPull}
+                    style={smallButton}
+                  >
+                    {pulling ? "Pulling…" : "Pull"}
+                  </button>
+                )}
+              </SpecConfirm>
             </>
           ) : null}
           <button
@@ -906,23 +911,24 @@ function MergeReadinessCard({
                   <ReadinessBadge readiness={row.readiness} />
                   <span style={{ flex: 1 }} />
                   {canMerge ? (
-                    <InlineConfirm
+                    <SpecConfirm
+                      command="vcs.merge"
                       onConfirm={() => onMerge(row.branch)}
                       confirmLabel="Merge"
                       testIdPrefix="git-dashboard-divergence-merge"
                     >
-                      {(arm) => (
+                      {(run) => (
                         <button
                           type="button"
                           data-testid="git-dashboard-divergence-merge"
-                          onClick={arm}
+                          onClick={run}
                           disabled={isPending(mergeLabel)}
                           style={primaryButton}
                         >
                           {isPending(mergeLabel) ? "Merging…" : `Merge into ${report.base}`}
                         </button>
                       )}
-                    </InlineConfirm>
+                    </SpecConfirm>
                   ) : null}
                 </div>
                 {row.readiness === "conflict" ? (
@@ -1029,17 +1035,18 @@ function MergeRebaseSplitButton({
 
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
-      <InlineConfirm
+      <SpecConfirm
+        command={mode === "merge" ? "vcs.merge" : "git.rebase"}
         onConfirm={onPrimary}
         confirmLabel={mode === "merge" ? "Merge" : "Rebase"}
         testIdPrefix="git-dashboard-stream-merge-rebase"
       >
-        {(arm) => (
+        {(run) => (
           <button
             type="button"
             data-testid="git-dashboard-stream-merge-rebase"
             data-mode={mode}
-            onClick={arm}
+            onClick={run}
             disabled={disabled}
             title={primaryTitle}
             style={{ ...smallButton, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none" }}
@@ -1047,7 +1054,7 @@ function MergeRebaseSplitButton({
             {pending ? busyLabel : idleLabel}
           </button>
         )}
-      </InlineConfirm>
+      </SpecConfirm>
       <button
         type="button"
         aria-label="Choose merge or rebase"
@@ -1259,23 +1266,33 @@ function RemoteBranchesCard({
                   behind={c?.behind ?? 0}
                   context={row.short_name}
                 />
-                <button
-                  type="button"
-                  onClick={() => {
+                <SpecConfirm
+                  command="vcs.pull"
+                  onConfirm={() => {
                     const [remote, ...rest] = row.short_name.split("/");
                     onPull(remote, rest.join("/"));
                   }}
-                  disabled={isPending(pullLabel) || (c?.behind ?? 0) === 0}
-                  title={
-                    (c?.behind ?? 0) === 0
-                      ? `${row.short_name} has no commits not already in current — nothing to pull.`
-                      : undefined
-                  }
-                  style={smallButton}
+                  confirmLabel="Pull"
+                  testIdPrefix={`git-dashboard-remote-pull-${row.short_name}`}
                 >
-                  {isPending(pullLabel) ? "Pulling…" : "Pull into"}
-                </button>
-                <InlineConfirm
+                  {(run) => (
+                    <button
+                      type="button"
+                      onClick={run}
+                      disabled={isPending(pullLabel) || (c?.behind ?? 0) === 0}
+                      title={
+                        (c?.behind ?? 0) === 0
+                          ? `${row.short_name} has no commits not already in current — nothing to pull.`
+                          : undefined
+                      }
+                      style={smallButton}
+                    >
+                      {isPending(pullLabel) ? "Pulling…" : "Pull into"}
+                    </button>
+                  )}
+                </SpecConfirm>
+                <SpecConfirm
+                  command="vcs.push"
                   onConfirm={() => {
                     const [remote, ...rest] = row.short_name.split("/");
                     onPush(remote, rest.join("/"));
@@ -1283,10 +1300,10 @@ function RemoteBranchesCard({
                   confirmLabel="Push"
                   testIdPrefix={`git-dashboard-remote-push-${row.short_name}`}
                 >
-                  {(arm) => (
+                  {(run) => (
                     <button
                       type="button"
-                      onClick={arm}
+                      onClick={run}
                       disabled={isPending(pushLabel) || (c?.ahead ?? 0) === 0}
                       title={
                         (c?.ahead ?? 0) === 0
@@ -1298,7 +1315,7 @@ function RemoteBranchesCard({
                       {isPending(pushLabel) ? "Pushing…" : "Push to"}
                     </button>
                   )}
-                </InlineConfirm>
+                </SpecConfirm>
               </div>
             );
           })}
