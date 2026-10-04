@@ -369,7 +369,14 @@ to `runtime.handleHookEnvelope`, which:
    ended"), status Stopped (tsk449), so no turn holds the quiet-period
    snapshot trigger open after its agent is gone; another session's turns
    are left alone. (A crash that sends no `SessionEnd` is closed by the
-   next `SessionStart`, above.) It logs `agent.session.ended` every time, and when
+   next `SessionStart`, above.) **Each close keeps the turn's
+   transcript** (tsk924): `SessionEnd` passes its body's
+   `transcript_path`, as `Stop` does, and a `SessionStart` passes its own
+   only to the turns of the session it resumes (another session's file
+   isn't theirs), so `TurnTokensConsumer` records an interrupted turn's
+   tokens under it. A hook carries no process identity, so a `SessionEnd`
+   delivered after its session was resumed would close the resumed turn;
+   Claude posts it before exiting, before oxplow can resume. It logs `agent.session.ended` every time, and when
    `reason` is `clear` and the id is the resume id it blanks it: `/clear`
    starts a fresh session with no HTTP hook, so until its first prompt the
    token would still point at the cleared one. Other end reasons keep it so

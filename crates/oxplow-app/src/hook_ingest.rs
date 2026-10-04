@@ -24,7 +24,8 @@
 //! - A session id seen for the first time on a thread (on any kind)
 //!   becomes its resume id and logs `agent.session.started` once.
 //! - `SessionEnd`: closes the turns that session left open (interrupted,
-//!   "session ended" — an exit mid-turn sends no Stop, tsk449), status
+//!   "session ended" — an exit mid-turn sends no Stop, tsk449) with its
+//!   transcript, so their tokens are theirs (tsk924), status
 //!   Stopped when it closed one; `agent.session.ended`; `reason: clear` of
 //!   the resume session clears the resume id.
 //!
@@ -378,6 +379,7 @@ fn record_tx(
     let mut applied = Applied::default();
     let mut status = None;
     let starts = starts_session(env.kind, &body);
+    let transcript_path = body.get("transcript_path").and_then(|p| p.as_str());
     if starts {
         // The process that owned any open turn is gone: they end
         // interrupted, before the session start that resets the thread.
@@ -385,7 +387,22 @@ fn record_tx(
             answer: Some("session restarted"),
             ..TurnEnd::new(now, TurnOutcome::Interrupted)
         };
-        applied.closed_turn = close_open_turns_tx(conn, ev, thread, &end)?;
+        // A resumed session's own turns keep its transcript (tsk924): it
+        // is the file their tokens are in. Another session's file isn't.
+        if let Some(sid) = session {
+            let own = TurnEnd {
+                transcript_path,
+                ..end.clone()
+            };
+            for id in open_session_turn_ids_tx(conn, thread, sid)? {
+                if close_turn_tx(conn, ev, id, &own)?.is_some() && applied.closed_turn.is_none() {
+                    applied.closed_turn = Some(id);
+                }
+            }
+        }
+        if let Some(id) = close_open_turns_tx(conn, ev, thread, &end)? {
+            applied.closed_turn = applied.closed_turn.or(Some(id));
+        }
         status = Some((AgentStatusState::Idle, None));
     }
     if env.kind != HookKind::SessionEnd {
@@ -433,7 +450,7 @@ fn record_tx(
             };
             let end = TurnEnd {
                 answer,
-                transcript_path: body.get("transcript_path").and_then(|p| p.as_str()),
+                transcript_path,
                 // Counts a harness reported with the turn itself (ACP).
                 usage: body
                     .get(TURN_USAGE_KEY)
@@ -452,8 +469,10 @@ fn record_tx(
             if let Some(sid) = session {
                 // A session that ends mid-turn (an exit with no Stop)
                 // leaves no one to close its turn (tsk449).
+                // Its transcript, so the turn's tokens are its own (tsk924).
                 let end = TurnEnd {
                     answer: Some("session ended"),
+                    transcript_path,
                     ..TurnEnd::new(now, TurnOutcome::Interrupted)
                 };
                 for id in open_session_turn_ids_tx(conn, thread, sid)? {
@@ -1062,6 +1081,65 @@ mod tests {
         assert_eq!(ended[0].envelope.payload["outcome"], "interrupted");
         let status = of_type(&events, "agent.status.changed");
         assert_eq!(status.last().unwrap().envelope.payload["state"], "stopped");
+    }
+
+    /// tsk924: a turn a session end or a restart closes keeps its
+    /// transcript, so its tokens are recorded as its own — the session's
+    /// own file, for a resume of that session; another session's file is
+    /// someone else's.
+    #[tokio::test]
+    async fn a_turn_closed_by_its_session_keeps_its_transcript() {
+        let (svc, tid) = fixture().await;
+        let prompt = |sid: &'static str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some(sid),
+                json!({"prompt": "go"}),
+            )
+        };
+        svc.ingest(prompt("s1")).await.unwrap();
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("s1"),
+            json!({"reason": "prompt_input_exit", "transcript_path": "/s1.jsonl"}),
+        ))
+        .await
+        .unwrap();
+        // A resume of s1 closes its open turn with s1's file…
+        svc.ingest(prompt("s1")).await.unwrap();
+        svc.ingest(hook(
+            HookKind::SessionStart,
+            tid,
+            Some("s1"),
+            json!({"source": "resume", "transcript_path": "/s1.jsonl"}),
+        ))
+        .await
+        .unwrap();
+        // …a new session's start closes s1's with none of its own.
+        svc.ingest(prompt("s1")).await.unwrap();
+        svc.ingest(hook(
+            HookKind::SessionStart,
+            tid,
+            Some("s2"),
+            json!({"source": "startup", "transcript_path": "/s2.jsonl"}),
+        ))
+        .await
+        .unwrap();
+        let events = logged(&svc).await;
+        let paths: Vec<serde_json::Value> = of_type(&events, "agent.turn.ended")
+            .iter()
+            .map(|e| e.envelope.payload["transcript_path"].clone())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                json!("/s1.jsonl"),
+                json!("/s1.jsonl"),
+                serde_json::Value::Null
+            ]
+        );
     }
 
     /// Every prompt is logged — one inside an open turn is a re-prompt —
