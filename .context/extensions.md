@@ -1682,7 +1682,7 @@ effects:
     summary: Note a finished item on its thread.
     on: [work_item.transitioned]   # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these
-    input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields bound
+    input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields bound, and :event_id / :event_seq
     entry: effects/announce.star   # transform({event, rows}) → {commands, events?} | {skip}
     after: [page_ref.work_item]    # optional: consumers it waits for
 ```
@@ -1752,7 +1752,10 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    triggers it; one that `MAX_CHAIN` (4) effect runs already led to is
    `skipped`;
 4. the script runs sandboxed over `{ event: { id, type, v, seq, source,
-   subject, payload }, rows }` (`input` with the payload's fields bound):
+   subject, payload }, rows }` (`input` with the payload's fields bound,
+   and the event itself as `:event_id` and `:event_seq` — to read its own
+   `v_event` row, its subject or cause; P11, tsk955 — one
+   `effects::input_query` for the run and `dry_run` alike):
    `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs.
    The script and its `input` rows run on a read **before** the run's
    transaction: the composed calls are fixed by then, so a row can be

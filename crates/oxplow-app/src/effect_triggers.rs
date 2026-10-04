@@ -852,9 +852,10 @@ async fn run_script(
     decl: &EffectDecl,
     event: &StoredEvent,
 ) -> Result<Reaction, String> {
+    let event = effects::event_json(event);
     let rows = match &decl.input {
         Some(sql) => {
-            let query = crate::extension_commands::input_query(sql, &event.envelope.payload);
+            let query = effects::input_query(sql, &event);
             let result = svc
                 .db
                 .read(move |tx| oxplow_db::semantic_layer::read_on(tx, &query))
@@ -864,7 +865,7 @@ async fn run_script(
         }
         None => Vec::new(),
     };
-    let (script, event) = (decl.script.clone(), effects::event_json(event));
+    let script = decl.script.clone();
     tokio::task::spawn_blocking(move || effects::run_script(&script, event, rows))
         .await
         .map_err(|e| format!("the script panicked: {e}"))?
@@ -980,6 +981,44 @@ mod tests {
             )
             .await,
             json!([["ok", format!("event:{}", ev.envelope.id), executed[0][0]]])
+        );
+    }
+
+    /// tsk955: an effect's `input` binds the event itself beside its
+    /// payload's fields — `:event_id`, `:event_seq` — so it can read the
+    /// event's own row (its subject, its cause) from `v_event`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effects_input_binds_the_events_id_and_seq() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.transitioned]\n    where: { to: done }\n    input: \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\"\n    entry: stamp.star\n";
+        let script = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": ref, \"title\": x[\"rows\"][0][\"type\"] + \" #\" + str(x[\"rows\"][0][\"seq\"])}}]}\n";
+        extension(&svc.layout.project_dir, stamp, &[("stamp.star", script)]);
+        approve(svc).await;
+        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        EffectTriggers::new(Arc::downgrade(svc))
+            .handle(&ev)
+            .await
+            .unwrap();
+        assert_eq!(
+            title(&fx).await,
+            format!("work_item.transitioned #{}", ev.seq)
+        );
+        // The dry run (`plugin test`, a change's review) binds them alike.
+        let (_, decl) = effects(svc).into_iter().next().unwrap();
+        let reaction = effects::dry_run(
+            &svc.sql,
+            &decl,
+            &decl.script,
+            effects::event_json(&ev),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            format!("{reaction:?}").contains(&format!("work_item.transitioned #{}", ev.seq)),
+            "{reaction:?}"
         );
     }
 

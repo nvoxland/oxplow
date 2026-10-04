@@ -321,6 +321,29 @@ pub fn event_json(event: &oxplow_domain::StoredEvent) -> serde_json::Value {
     })
 }
 
+/// The query an effect's `input` runs for `event` (its [`event_json`]):
+/// the payload's top-level fields bound as named parameters, and the event
+/// itself as `:event_id` and `:event_seq` — so it can read the event's own
+/// row (its subject, its cause) from `v_event` (tsk955); a payload field of
+/// either name is the event's. Capped as a command's `input` is.
+pub fn input_query(sql: &str, event: &serde_json::Value) -> oxplow_db::SqlQuery {
+    let mut params: Vec<(String, oxplow_db::SqlCell)> = crate::extension_commands::input_params(
+        event.get("payload").unwrap_or(&serde_json::Value::Null),
+    )
+    .into_iter()
+    .filter(|(name, _)| name != "event_id" && name != "event_seq")
+    .collect();
+    if let Some(id) = event.get("id").and_then(serde_json::Value::as_str) {
+        params.push(("event_id".into(), oxplow_db::SqlCell::Text(id.into())));
+    }
+    if let Some(seq) = event.get("seq").and_then(serde_json::Value::as_i64) {
+        params.push(("event_seq".into(), oxplow_db::SqlCell::Int(seq)));
+    }
+    oxplow_db::SqlQuery::new(sql)
+        .named(params)
+        .limit(Some(crate::extension_commands::INPUT_ROW_CAP))
+}
+
 /// Whether `decl` reacts to an event of `event_type` with `payload`: its
 /// `on` names the type and its `where` matches.
 pub fn reacts_to(decl: &EffectDecl, event_type: &str, payload: &serde_json::Value) -> bool {
@@ -363,15 +386,12 @@ pub async fn dry_run(
 ) -> Result<Reaction, String> {
     let rows = match (rows, &decl.input) {
         (Some(rows), _) => rows,
-        (None, Some(sql)) => {
-            let payload = event.get("payload").cloned().unwrap_or_default();
-            crate::extension_commands::rows_json(
-                &layer
-                    .run(crate::extension_commands::input_query(sql, &payload))
-                    .await
-                    .map_err(|e| format!("`input`: {e}"))?,
-            )
-        }
+        (None, Some(sql)) => crate::extension_commands::rows_json(
+            &layer
+                .run(input_query(sql, &event))
+                .await
+                .map_err(|e| format!("`input`: {e}"))?,
+        ),
         (None, None) => Vec::new(),
     };
     let script = script.to_string();
