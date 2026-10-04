@@ -29,6 +29,9 @@
 use std::net::SocketAddr;
 
 pub mod components;
+mod run;
+
+pub use run::run_main;
 
 use axum::{
     extract::{

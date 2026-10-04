@@ -697,8 +697,14 @@ impl Services {
             .unwrap_or(project)
     }
 
-    /// Bootstrap. Run once at app startup.
-    pub fn boot(layout: AppLayout) -> Result<Self, AppInitError> {
+    /// Bootstrap. Run once at app startup. `secrets` is where keys,
+    /// tokens and the approval key live: the OS keychain for the shipped
+    /// daemon, always; memory only for the browser suite's
+    /// `oxplow-daemon-sim` (tsk948).
+    pub fn boot(
+        layout: AppLayout,
+        secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
+    ) -> Result<Self, AppInitError> {
         ensure_state_dir(&layout.state_dir)?;
 
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
@@ -710,7 +716,7 @@ impl Services {
 
         let db = Database::open(&layout.state_db_path)?;
         let machine = MachineEnv {
-            secrets: Arc::new(oxplow_ai::secrets::KeychainSecrets),
+            secrets,
             config_dir: oxplow_config::global_config_dir(),
             approvals_file: None,
             provider_backoff: std::time::Duration::from_secs(1),
@@ -1589,7 +1595,11 @@ mod tests {
             .join(".oxplow/runtime/claude-plugin/skills/oxplow-extension/SKILL.md");
         std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
         std::fs::write(&skill, "stale").unwrap();
-        let _svc = Services::boot(AppLayout::for_project(project.path())).unwrap();
+        let _svc = Services::boot(
+            AppLayout::for_project(project.path()),
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(&skill).unwrap(),
             oxplow_plugin::skill_body("oxplow-extension").unwrap()
@@ -1615,7 +1625,11 @@ mod tests {
             .unwrap();
 
         let layout = AppLayout::for_project(project.path());
-        let services = Services::boot(layout).unwrap();
+        let services = Services::boot(
+            layout,
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+        .unwrap();
         assert!(services.layout.state_dir.exists());
         assert!(services.layout.state_db_path.exists());
     }

@@ -4572,6 +4572,7 @@ version = "0.7.0"
 dependencies = [
  "axum",
  "futures",
+ "oxplow-ai",
  "oxplow-app",
  "oxplow-control-plane",
  "oxplow-domain",
@@ -4587,6 +4588,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "oxplow-daemon-sim"
+version = "0.7.0"
+dependencies = [
+ "oxplow-ai",
+ "oxplow-daemon",
+ "oxplow-workspace-hack",
+ "reqwest",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

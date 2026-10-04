@@ -671,6 +671,8 @@ fn no_test_double_is_a_production_dependency() {
         "oxplow-ai-fake",
         "oxplow-provider-fake",
         "oxplow-acp-fake",
+        // The browser suite's daemon: secrets in memory (tsk948).
+        "oxplow-daemon-sim",
     ] {
         assert!(
             doubles.contains(double),

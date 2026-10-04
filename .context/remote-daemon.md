@@ -36,6 +36,16 @@ developer-facing mechanics.
   `/health` doesn't. CORS stays permissive so the frontend can run in a
   plain browser (Playwright, a served `dist/`): a page can't obtain the
   token and no cookies are involved, so it exposes nothing.
+- **`crates/oxplow-daemon-sim`** — the browser suite's daemon (P11,
+  tsk948): the same `oxplow_daemon::run_main` (arguments, boot, server),
+  with its secrets in memory (`MemorySecrets`) instead of the keychain,
+  so a headless CI runner needs none and a local run writes no test key
+  into the person's. They go with the process — a restarted sim no
+  longer trusts an approval it recorded. Dev-only: nothing that ships
+  depends on it (`no_test_double_is_a_production_dependency`), and the
+  shipped `oxplow-daemon` always passes `KeychainSecrets` —
+  `Services::boot(layout, secrets)` takes the store, no flag skips it.
+  Isolate its global config (approvals, `ai.yaml`) with `OXPLOW_HOME`.
 - **Facade guard** — `@tauri-apps/*` may only be imported under
   `apps/desktop/src/tauri-bridge/`; everywhere else funnels native
   access through a bridge module (e.g. `nativeDialog.ts` wraps the OS

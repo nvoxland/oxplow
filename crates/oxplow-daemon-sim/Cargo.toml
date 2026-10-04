@@ -1,0 +1,30 @@
+[package]
+name = "oxplow-daemon-sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "oxplow's daemon with its secrets in memory, for the browser suite and a headless CI runner without a keychain"
+publish = false
+
+# Development only: the browser suite runs it; nothing that ships depends
+# on it (guard `no_test_double_is_a_production_dependency`). The shipped
+# `oxplow-daemon` has no way to skip the keychain.
+[[bin]]
+name = "oxplow-daemon-sim"
+path = "src/main.rs"
+
+[dependencies]
+oxplow-daemon = { workspace = true }
+oxplow-ai = { workspace = true }
+tokio = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

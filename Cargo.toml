@@ -17,6 +17,7 @@ members = [
     "crates/oxplow-app",
     "crates/oxplow-rpc",
     "crates/oxplow-daemon",
+    "crates/oxplow-daemon-sim",
     "crates/oxplow-tauri-ipc",
     "crates/oxplow-plugin",
     "crates/oxplow-control-plane",
@@ -190,6 +191,7 @@ oxplow-mcp = { path = "crates/oxplow-mcp" }
 oxplow-app = { path = "crates/oxplow-app" }
 oxplow-rpc = { path = "crates/oxplow-rpc" }
 oxplow-daemon = { path = "crates/oxplow-daemon" }
+oxplow-daemon-sim = { path = "crates/oxplow-daemon-sim" }
 oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }
 oxplow-plugin = { path = "crates/oxplow-plugin" }
 oxplow-sdk = { path = "crates/oxplow-sdk" }
