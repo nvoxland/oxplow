@@ -1,5 +1,5 @@
--- tsk883: a run's coverage is pinned to a snapshot taken when it is
--- recorded (`coverage`), the code the run measured. The CHECK can't
+-- tsk883: a run's reports (coverage, analysis) are pinned to a snapshot
+-- taken when they're recorded (`run_measured`), the code the run measured. The CHECK can't
 -- change in place, so `snapshot_op` is rebuilt.
 CREATE TABLE snapshot_op_new (
     seq                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -8,7 +8,7 @@ CREATE TABLE snapshot_op_new (
     parent_snapshot_id INTEGER REFERENCES snapshot(id) ON DELETE SET NULL,
     trigger            TEXT NOT NULL CHECK (trigger IN (
                           'turn_end', 'quiet', 'effort_start', 'effort_end', 'startup',
-                          'manual', 'git_refs', 'head_moved', 'coverage', 'legacy')),
+                          'manual', 'git_refs', 'head_moved', 'run_measured', 'legacy')),
     thread_id          INTEGER REFERENCES threads(id) ON DELETE SET NULL,
     turn_id            INTEGER REFERENCES agent_turn(id) ON DELETE SET NULL,
     effort_id          INTEGER REFERENCES effort(id) ON DELETE SET NULL,

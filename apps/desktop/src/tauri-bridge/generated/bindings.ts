@@ -4852,10 +4852,10 @@ export type SnapshotTrigger =
  */
 "head_moved" | 
 /**
- *  A run's coverage was recorded: the code it measured, which its
- *  coverage capture is pinned to (tsk883).
+ *  A run's reports were recorded (coverage, analysis): the code it
+ *  measured, which their captures are pinned to (tsk883).
  */
-"coverage" | 
+"run_measured" | 
 // Backfilled for a snapshot taken before the operation log existed.
 "legacy";
 

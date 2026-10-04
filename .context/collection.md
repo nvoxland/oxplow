@@ -331,7 +331,7 @@ effort-relative diff is DERIVED with the effort's evidence
 still produces a diff. The diff is between two **snapshots**, never a working
 tree (tsk862): the effort's start snapshot and the one the coverage capture is
 pinned to (`metric_capture.snapshot_id`). Recording a run's coverage takes that
-snapshot (`measured_snapshot`, trigger `coverage`; tsk883): the stream's
+snapshot (`measured_snapshot`, trigger `run_measured`; tsk883 — an analysis run's capture is pinned the same way, tsk937): the stream's
 worktree as the report is read — the code the run measured, even when the
 agent edited and ran in one turn, which no other take sees (turn-end and quiet
 takes never run mid-turn). A run delivered after an edit landed (a file in the

@@ -905,7 +905,7 @@ impl EventType for EffectResult {
 
 /// Why a snapshot take happened: one row of the operation log each
 /// (`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.
-// `snapshot.taken@1`'s trigger: every reason but `coverage`. Its doc
+// `snapshot.taken@1`'s trigger: every reason but `run_measured`. Its doc
 // comments match `SnapshotTrigger`'s, so the v1 schema stays as published.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -965,8 +965,9 @@ impl EventType for SnapshotTakenAtV1 {
     type Payload = SnapshotTakenV1;
 }
 
-/// `snapshot.taken@2` (tsk883): v1, its trigger able to say `coverage`
-/// — the take that pins a run's coverage to the code it measured.
+/// `snapshot.taken@2` (tsk883): v1, its trigger able to say
+/// `run_measured` — the take that pins a run's reports to the code it
+/// measured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotTakenV2 {

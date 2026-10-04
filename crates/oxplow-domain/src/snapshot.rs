@@ -30,9 +30,9 @@ pub enum SnapshotTrigger {
     /// HEAD moved on a clean tree: the latest snapshot now also is the
     /// new commit (a re-stamp, no new snapshot).
     HeadMoved,
-    /// A run's coverage was recorded: the code it measured, which its
-    /// coverage capture is pinned to (tsk883).
-    Coverage,
+    /// A run's reports were recorded (coverage, analysis): the code it
+    /// measured, which their captures are pinned to (tsk883).
+    RunMeasured,
     /// Backfilled for a snapshot taken before the operation log existed.
     Legacy,
 }
@@ -49,7 +49,7 @@ impl SnapshotTrigger {
             SnapshotTrigger::Manual => "manual",
             SnapshotTrigger::GitRefs => "git_refs",
             SnapshotTrigger::HeadMoved => "head_moved",
-            SnapshotTrigger::Coverage => "coverage",
+            SnapshotTrigger::RunMeasured => "run_measured",
             SnapshotTrigger::Legacy => "legacy",
         }
     }
@@ -64,7 +64,7 @@ impl SnapshotTrigger {
             "manual" => SnapshotTrigger::Manual,
             "git_refs" => SnapshotTrigger::GitRefs,
             "head_moved" => SnapshotTrigger::HeadMoved,
-            "coverage" => SnapshotTrigger::Coverage,
+            "run_measured" => SnapshotTrigger::RunMeasured,
             "legacy" => SnapshotTrigger::Legacy,
             _ => return None,
         })
@@ -79,7 +79,7 @@ impl SnapshotTrigger {
         SnapshotTrigger::Manual,
         SnapshotTrigger::GitRefs,
         SnapshotTrigger::HeadMoved,
-        SnapshotTrigger::Coverage,
+        SnapshotTrigger::RunMeasured,
         SnapshotTrigger::Legacy,
     ];
 }

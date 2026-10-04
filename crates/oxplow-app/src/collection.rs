@@ -1776,7 +1776,8 @@ impl CollectionService {
         })
     }
 
-    /// The snapshot a run's coverage measured (tsk883): a take of the
+    /// The snapshot a run's report measured (tsk883 coverage, tsk937
+    /// analysis): a take of the
     /// stream's worktree now, as the run's report is recorded. The take is
     /// the code the run measured only while nothing changed after the run
     /// ended, so a run delivered late (a file in the take written after
@@ -1794,7 +1795,7 @@ impl CollectionService {
         capture.await_initial_ready().await;
         let taken = capture
             .request_snapshot(crate::snapshot_capture::TakeRequest {
-                trigger: oxplow_domain::snapshot::SnapshotTrigger::Coverage,
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::RunMeasured,
                 thread_id: Some(*thread),
                 turn_id: turn,
                 effort_id: effort,
@@ -2534,20 +2535,21 @@ impl CollectionService {
             (errors + warnings) as f64
         });
 
-        // Snapshot pin: the effort's end-or-start snapshot when one is open, else
-        // the stream's current snapshot (the code state the analyzer ran against)
-        // — so observe-always still pins the run to a code state under 0/N efforts.
-        let pin = match &effort {
-            Some(e) => e.end_snapshot_id.or(e.start_snapshot_id),
-            None => match oxplow_domain::StreamId::try_from_str(&stream_id) {
-                Some(s) => self
-                    .snapshots
-                    .latest_snapshot_id_for_stream(s)
-                    .await
-                    .ok()
-                    .flatten(),
-                None => None,
-            },
+        // Pin a parsed report's capture to a take of the code the analyzer
+        // ran on (tsk937, as coverage does — tsk883); a report-less run
+        // records no capture, so takes nothing.
+        let pin = match report {
+            Some(_) => {
+                let turn = self.turn_of(thread, cause).await;
+                self.measured_snapshot(
+                    thread,
+                    &stream_id,
+                    (turn, effort.as_ref().map(|e| e.id)),
+                    cause,
+                )
+                .await
+            }
+            None => None,
         };
         let (local_snapshot_id, closest_vcs_rev, vcs_rev_exact) = match pin {
             Some(p) => {
@@ -8029,13 +8031,20 @@ mod tests {
                 AnalysisIngest::Stored { findings, .. } => assert_eq!(findings, 3),
                 other => panic!("expected Stored with no baseline, got {other:?}"),
             }
-            // The observation landed, pinned to no local snapshot.
+            // The observation landed, pinned to a take of the code the
+            // analyzer ran on — not to the effort's (missing) start
+            // (tsk937).
             let rows = h
                 .service
                 .effort_observations_from_metrics(&no_base.id.to_string(), Some("static-analysis"))
                 .await;
             assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].local_snapshot_id, None);
+            let pinned = rows[0].local_snapshot_id.expect("pinned");
+            assert_ne!(
+                Some(pinned),
+                open.start_snapshot_id,
+                "not the effort's bracket"
+            );
         }
 
         /// tsk863: a by-hand run of a collector whose report isn't there

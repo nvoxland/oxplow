@@ -2,7 +2,7 @@
   "stream": "stream:str1",
   "snapshot": "snapshot:12",
   "parent": "snapshot:11",
-  "trigger": "coverage",
+  "trigger": "run_measured",
   "unchanged": false,
   "file_count": 3,
   "elapsed_ms": 140,

@@ -44,8 +44,8 @@
           "type": "string"
         },
         {
-          "const": "coverage",
-          "description": "A run's coverage was recorded: the code it measured, which its\ncoverage capture is pinned to (tsk883).",
+          "const": "run_measured",
+          "description": "A run's reports were recorded (coverage, analysis): the code it\nmeasured, which their captures are pinned to (tsk883).",
           "type": "string"
         },
         {
@@ -58,7 +58,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`snapshot.taken@2` (tsk883): v1, its trigger able to say `coverage`\n— the take that pins a run's coverage to the code it measured.",
+  "description": "`snapshot.taken@2` (tsk883): v1, its trigger able to say\n`run_measured` — the take that pins a run's reports to the code it\nmeasured.",
   "properties": {
     "budget_ms": {
       "description": "The time budget the caller gave the take, when it had one.",
