@@ -274,7 +274,11 @@ hook + MCP wiring):
   a test run, a coverage capture or a static-analysis capture, with
   `collector.sync project/<id>` as the run's command — and answers
   `{ recorded: { status, records, run } }` (`run:<capture>`, what
-  `claim_runs` takes). The run is the collector's (`trigger: manual`). It
+  `claim_runs` takes — the real capture for every kind, tsk891).
+  `status` is `stored`, or why nothing landed: `no_stream`, `no_cases`
+  (tests), `no_coverage` (nothing instrumented, or no coverage measure),
+  `metric_off` (no enabled metric reads analysis). A failed write is an
+  error, never `stored`. The run is the collector's (`trigger: manual`). It
   replaced `test.ingest_coverage` / `test.ingest_analysis` (P8.A8). **No
   baseline gate** for analysis: findings are *absolute* (current-file),
   so they store even when the effort has no start snapshot (tsk86).

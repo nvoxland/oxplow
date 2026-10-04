@@ -303,7 +303,8 @@ pub enum CoverageIngest {
     /// off).
     NoChangedCoverage,
     Stored {
-        observation_id: i64,
+        /// The run's capture (`run:<id>`, what `claim_runs` takes).
+        run: i64,
         summary_pct: f64,
         changed_lines: usize,
         covered_lines: usize,
@@ -335,27 +336,30 @@ impl ReportSync {
                 json!({ "status": "no_cases", "records": "tests" })
             }
             ReportSync::Coverage(CoverageIngest::NoStream)
-            | ReportSync::Analysis(AnalysisIngest::NotRecorded) => {
+            | ReportSync::Analysis(AnalysisIngest::NoStream) => {
                 json!({ "status": "no_stream" })
+            }
+            ReportSync::Analysis(AnalysisIngest::Off) => {
+                json!({ "status": "metric_off", "records": "analysis" })
             }
             ReportSync::Coverage(CoverageIngest::NoChangedCoverage) => {
                 json!({ "status": "no_coverage", "records": "coverage" })
             }
             ReportSync::Coverage(CoverageIngest::Stored {
-                observation_id,
+                run,
                 summary_pct,
                 changed_lines,
                 covered_lines,
             }) => json!({
                 "status": "stored",
                 "records": "coverage",
-                "run": format!("run:{observation_id}"),
+                "run": format!("run:{run}"),
                 "summaryPct": summary_pct,
                 "instrumentedLines": changed_lines,
                 "coveredLines": covered_lines,
             }),
             ReportSync::Analysis(AnalysisIngest::Stored {
-                observation_id,
+                run,
                 error_count,
                 warning_count,
                 info_count,
@@ -364,7 +368,7 @@ impl ReportSync {
             }) => json!({
                 "status": "stored",
                 "records": "analysis",
-                "run": format!("run:{observation_id}"),
+                "run": format!("run:{run}"),
                 "errorCount": error_count,
                 "warningCount": warning_count,
                 "infoCount": info_count,
@@ -378,10 +382,14 @@ impl ReportSync {
 /// What recording an analysis report came to. Mirrors [`CoverageIngest`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum AnalysisIngest {
-    /// Nothing was recorded (no stream).
-    NotRecorded,
+    /// The thread has no stream to record in.
+    NoStream,
+    /// No enabled metric reads static analysis (the stop-collecting gate):
+    /// nothing was recorded.
+    Off,
     Stored {
-        observation_id: i64,
+        /// The run's capture (`run:<id>`, what `claim_runs` takes).
+        run: i64,
         error_count: u64,
         warning_count: u64,
         info_count: u64,
@@ -1390,8 +1398,11 @@ impl CollectionService {
                 )
             }
             Some(Records::Analysis) | None => {
+                if self.stream_id_for(thread).await.map_err(storage)?.is_none() {
+                    return Ok(ReportSync::Analysis(AnalysisIngest::NoStream));
+                }
                 let Some((report, source)) = reads.analysis() else {
-                    return Ok(ReportSync::Analysis(AnalysisIngest::NotRecorded));
+                    return Ok(ReportSync::Analysis(AnalysisIngest::Off));
                 };
                 let (mut error_count, mut warning_count, mut info_count, mut note_count) =
                     (0u64, 0, 0, 0);
@@ -1418,15 +1429,15 @@ impl CollectionService {
                         .await
                         .map_err(storage)?
                     {
-                        Some(observation_id) => AnalysisIngest::Stored {
-                            observation_id,
+                        Some(run) => AnalysisIngest::Stored {
+                            run,
                             error_count,
                             warning_count,
                             info_count,
                             note_count,
                             findings: report.findings.len(),
                         },
-                        None => AnalysisIngest::NotRecorded,
+                        None => AnalysisIngest::Off,
                     },
                 )
             }
@@ -1479,8 +1490,11 @@ impl CollectionService {
         vcs_rev_exact: bool,
         detail: Option<serde_json::Value>,
         turn: Option<i64>,
-    ) -> Option<i64> {
-        let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
+    ) -> Result<Option<i64>, DomainError> {
+        let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
+        else {
+            return Ok(None);
+        };
         let branch = self
             .current_branch(&self.worktrees.resolve(Some(stream_id)).await)
             .await;
@@ -1560,13 +1574,8 @@ impl CollectionService {
             Ok(Some(id))
         }
         .await;
-        match dual {
-            Ok(capture_id) => capture_id,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to write the analysis capture");
-                None
-            }
-        }
+        // A failed write is the caller's to report (tsk891).
+        dual
     }
 
     /// OBSERVE-ALWAYS coverage (tsk270): record the **absolute** whole-report
@@ -1741,21 +1750,21 @@ impl CollectionService {
                 Ok(Some(id))
             }
             .await;
-            match dual {
-                Ok(id) => capture_id = id,
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to write the coverage capture")
-                }
-            }
+            // A failed write is the caller's to retry or record (tsk79).
+            capture_id = dual?;
         }
+        // No coverage measure: nothing records it.
+        let Some(run) = capture_id else {
+            return Ok(CoverageIngest::NoChangedCoverage);
+        };
         // ATTRIBUTE via the unified run ledger (the capture id is the ref), then
         // refresh the panel for the effort it landed on (if any).
-        if let (Some(cid), Some(effort)) = (capture_id, attribute_to.as_ref()) {
-            self.claim_run(effort, cid).await;
+        if let Some(effort) = attribute_to.as_ref() {
+            self.claim_run(effort, run).await;
         }
 
         Ok(CoverageIngest::Stored {
-            observation_id: 0,
+            run,
             summary_pct: abs_pct,
             changed_lines: total_instr,
             covered_lines: total_cov,
@@ -2457,8 +2466,9 @@ impl CollectionService {
     /// unified `"run"` ledger. This single kind is both the ran-record (when
     /// `report` is `None` — analyzer ran but regenerated no parseable report) and
     /// the findings (when a report parsed). The headline metric is the
-    /// error+warning count (lower = better). Returns `Ok(None)` only when there's
-    /// no stream or nothing was recorded.
+    /// error+warning count (lower = better). Returns the run's capture, or
+    /// `Ok(None)` when there's no stream, no report, or no enabled metric
+    /// reads static analysis.
     async fn record_static_analysis(
         &self,
         thread: &ThreadId,
@@ -2559,7 +2569,7 @@ impl CollectionService {
                 Some(serde_json::Value::Object(payload.clone())),
                 self.turn_of(thread, cause).await,
             )
-            .await
+            .await?
         } else {
             None
         };
@@ -2580,7 +2590,7 @@ impl CollectionService {
                 self.claim_run(effort, rid).await;
             }
         }
-        Ok(Some(0))
+        Ok(run_id)
     }
 
     /// Reconstruct the effort-review observations for `effort_id` from the
@@ -4355,11 +4365,14 @@ mod tests {
             let outcome = ingest_coverage(&h).await;
             match outcome {
                 CoverageIngest::Stored {
+                    run,
                     summary_pct,
                     changed_lines,
                     covered_lines,
-                    ..
                 } => {
+                    // tsk891: `run` is the coverage capture agents claim.
+                    let capture = h.service.facts.get_capture(run).await.unwrap();
+                    assert_eq!(capture.map(|c| c.producer), Some("coverage".to_string()));
                     assert_eq!(changed_lines, 3, "absolute instrumented");
                     assert_eq!(covered_lines, 2, "absolute covered");
                     assert!((summary_pct - 66.666).abs() < 0.01, "abs got {summary_pct}");
@@ -7678,7 +7691,9 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert!(id.is_some());
+            // tsk891: the id is the run's real capture.
+            let capture = h.service.facts.get_capture(id.unwrap()).await.unwrap();
+            assert_eq!(capture.map(|c| c.producer), Some("clippy".to_string()));
             let rows = h
                 .service
                 .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
@@ -7783,7 +7798,8 @@ mod tests {
                 .record_static_analysis(&h.thread, "cargo clippy", None, &[], "analysis-report")
                 .await
                 .unwrap();
-            assert!(recorded.is_some(), "the run is acknowledged");
+            // tsk891: nothing was recorded, so there's no run to claim.
+            assert_eq!(recorded, None);
             let rows = h
                 .service
                 .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
