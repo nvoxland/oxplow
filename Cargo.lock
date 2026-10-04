@@ -4459,7 +4459,6 @@ name = "oxplow-code-dup"
 version = "0.7.0"
 dependencies = [
  "oxplow-code-metrics",
- "oxplow-workspace-hack",
  "tree-sitter",
 ]
 
@@ -4467,7 +4466,6 @@ dependencies = [
 name = "oxplow-code-metrics"
 version = "0.7.0"
 dependencies = [
- "oxplow-workspace-hack",
  "streaming-iterator",
  "tree-sitter",
  "tree-sitter-c",
@@ -4494,7 +4492,6 @@ dependencies = [
  "oxplow-code-dup",
  "oxplow-code-metrics",
  "oxplow-coverage",
- "oxplow-workspace-hack",
  "quick-xml 0.42.0",
  "regex",
  "serde",
@@ -4562,7 +4559,6 @@ dependencies = [
 name = "oxplow-coverage"
 version = "0.7.0"
 dependencies = [
- "oxplow-workspace-hack",
  "serde",
  "serde_json",
 ]
@@ -4655,7 +4651,6 @@ version = "0.7.0"
 dependencies = [
  "async-trait",
  "jsonschema",
- "oxplow-workspace-hack",
  "regex",
  "schemars 1.2.2",
  "serde",
@@ -4808,7 +4803,6 @@ version = "0.7.0"
 dependencies = [
  "oxplow-domain",
  "oxplow-provider-protocol",
- "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "tokio",
@@ -4822,7 +4816,6 @@ dependencies = [
  "oxplow-domain",
  "oxplow-provider-protocol",
  "oxplow-sdk",
- "oxplow-workspace-hack",
  "reqwest",
  "serde",
  "serde_json",
@@ -4845,7 +4838,6 @@ dependencies = [
  "oxplow-oauth-sim",
  "oxplow-provider-protocol",
  "oxplow-sdk",
- "oxplow-workspace-hack",
  "reqwest",
  "rmcp",
  "schemars 1.2.2",
@@ -4862,7 +4854,6 @@ name = "oxplow-provider-protocol"
 version = "0.7.0"
 dependencies = [
  "jsonschema",
- "oxplow-workspace-hack",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -5088,15 +5079,9 @@ dependencies = [
  "num",
  "num-bigint",
  "num-traits",
- "objc2",
- "objc2-app-kit",
- "objc2-core-foundation",
- "objc2-core-graphics",
- "objc2-foundation",
  "once_cell",
  "parking_lot",
  "percent-encoding",
- "phf_shared",
  "ppv-lite86",
  "proc-macro2",
  "quote",
@@ -5114,7 +5099,6 @@ dependencies = [
  "rustls",
  "rustls-webpki",
  "schemars 1.2.2",
- "semver",
  "serde",
  "serde_core",
  "serde_json",
@@ -5130,9 +5114,6 @@ dependencies = [
  "syn 2.0.119",
  "syn 3.0.6",
  "sync_wrapper",
- "tauri",
- "tauri-build",
- "tauri-utils",
  "time",
  "tokio",
  "tokio-util",

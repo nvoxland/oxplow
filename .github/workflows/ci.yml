@@ -108,6 +108,11 @@ jobs:
           cargo hakari generate --diff
           cargo hakari manage-deps --dry-run
 
+      # The daemon and the providers never build Tauri, WebKit or AppKit,
+      # through the hack or otherwise (tsk885).
+      - name: The headless binaries stay headless
+        run: scripts/check-headless-graph.sh
+
       - name: Cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 

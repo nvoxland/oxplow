@@ -31,3 +31,41 @@ platforms = [
 
 # Write out exact versions rather than a semver range. (Defaults to false.)
 # exact-versions = true
+
+# Crates only the desktop shell builds (Tauri and what only it pulls in)
+# stay out of the hack's output, or every crate, the headless daemon among
+# them, would build Tauri, AppKit and, on Linux, WebKit. No core crate
+# builds these, so leaving them out costs no rebuilds. The features the
+# shell turns on in crates the core shares stay unified (see
+# `.context/working-in-this-repo.md`).
+#
+# The providers are binaries of their own, shipped out of the workspace
+# (`scripts/install-linear.sh` builds one with `-p`): they and the crates
+# they're built from don't depend on the hack, so a provider is built from
+# its own dependencies only. Their features still count toward the union,
+# so a workspace build and a `-p` build of the core stay the same build.
+[final-excludes]
+workspace-members = [
+    "oxplow-code-dup",
+    "oxplow-code-metrics",
+    "oxplow-collect-plugin",
+    "oxplow-coverage",
+    "oxplow-domain",
+    "oxplow-provider-fake",
+    "oxplow-provider-linear",
+    "oxplow-provider-mcp",
+    "oxplow-provider-protocol",
+]
+third-party = [
+    { name = "block2" },
+    { name = "objc2" },
+    { name = "objc2-app-kit" },
+    { name = "objc2-core-foundation" },
+    { name = "objc2-core-graphics" },
+    { name = "objc2-foundation" },
+    { name = "phf_shared" },
+    { name = "semver" },
+    { name = "tauri" },
+    { name = "tauri-build" },
+    { name = "tauri-utils" },
+]

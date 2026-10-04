@@ -53,7 +53,6 @@ num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = { version = "0.2", features = ["i128"] }
 parking_lot = { version = "0.12", features = ["send_guard"] }
 percent-encoding = { version = "2" }
-phf_shared = { version = "0.13", default-features = false, features = ["std"] }
 ppv-lite86 = { version = "0.2", default-features = false, features = ["simd", "std"] }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9" }
 rand-93f6ce9d446188ac = { package = "rand", version = "0.10" }
@@ -66,7 +65,6 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 rmcp = { version = "3", features = ["client", "reqwest", "transport-child-process", "transport-io", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
 rusqlite = { version = "0.39", features = ["backup", "bundled", "preupdate_hook", "serde_json", "time", "uuid"] }
 schemars = { version = "1", features = ["chrono04"] }
-semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", features = ["alloc", "rc"] }
 serde_json = { version = "1", features = ["alloc", "arbitrary_precision", "float_roundtrip", "preserve_order", "raw_value"] }
@@ -76,8 +74,6 @@ slab = { version = "0.4", default-features = false, features = ["std"] }
 smallvec = { version = "1", default-features = false, features = ["const_new"] }
 specta = { version = "2.0.0-rc.24", features = ["derive", "function", "serde_json", "time"] }
 sync_wrapper = { version = "1", default-features = false, features = ["futures"] }
-tauri = { version = "2", features = ["specta", "test"] }
-tauri-utils = { version = "2", default-features = false, features = ["compression", "resources"] }
 time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 tokio-util = { version = "0.7", features = ["codec", "compat", "rt"] }
@@ -110,14 +106,12 @@ indexmap = { version = "2" }
 memchr = { version = "2" }
 parking_lot = { version = "0.12" }
 percent-encoding = { version = "2", default-features = false, features = ["std"] }
-phf_shared = { version = "0.13" }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = { version = "1" }
 refinery-core = { version = "0.9" }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "std", "unicode"] }
 regex-syntax = { version = "0.8" }
-semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["alloc", "derive"] }
 serde_core = { version = "1", features = ["alloc"] }
 serde_json = { version = "1", features = ["alloc", "preserve_order", "unbounded_depth"] }
@@ -129,8 +123,6 @@ specta-macros = { version = "2.0.0-rc.24", features = ["DO_NOT_USE_function", "s
 stable_deref_trait = { version = "1" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit", "visit-mut"] }
-tauri-build = { version = "2" }
-tauri-utils = { version = "2", default-features = false, features = ["build-2", "compression", "resources"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
@@ -143,11 +135,6 @@ hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
 libsqlite3-sys = { version = "0.37", features = ["bundled", "preupdate_hook"] }
 nix = { version = "0.28", features = ["fs", "ioctl", "poll", "signal", "term"] }
-objc2 = { version = "0.6", features = ["disable-encoding-assertions", "exception"] }
-objc2-app-kit = { version = "0.3" }
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFArray", "CFAttributedString", "CFBase", "CFCGTypes", "CFCalendar", "CFCharacterSet", "CFData", "CFDate", "CFDictionary", "CFError", "CFFileSecurity", "CFLocale", "CFMachPort", "CFMessagePort", "CFNumber", "CFRunLoop", "CFSet", "CFStream", "CFString", "CFURL", "CFUserNotification", "objc2", "std"] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDataProvider", "CGDirectDisplay", "CGEventTypes", "CGFont", "CGImage", "CGPath", "objc2", "std"] }
-objc2-foundation = { version = "0.3" }
 once_cell = { version = "1" }
 rustix = { version = "1", features = ["event", "fs", "net", "pipe", "process", "time"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "aws_lc_rs", "ring", "std", "tls12"] }
@@ -161,8 +148,6 @@ zerocopy = { version = "0.8", default-features = false, features = ["derive", "s
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
 libc = { version = "0.2" }
-objc2 = { version = "0.6", default-features = false, features = ["std"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSProcessInfo", "std"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }

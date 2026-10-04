@@ -20,7 +20,6 @@ tree-sitter-c-sharp = { workspace = true }
 # Streaming-iterator trait for tree-sitter 0.26 query cursors (re-exported by
 # tree-sitter, pinned here so `.matches(...).next()` resolves).
 streaming-iterator = "0.1"
-oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [lints]
 workspace = true

@@ -257,16 +257,40 @@ and kept every copy — 85 GB of `target/debug` was about five builds of
 duplicates, and rebuilds were slow for the same reason. The
 **`oxplow-workspace-hack`** crate (managed by
 [cargo-hakari](https://docs.rs/cargo-hakari), config
-`.config/hakari.toml`) pins the union: every workspace crate depends on
-it, so any subset builds the same artifacts, and an alternating build
-is a no-op. Build-script (host) dependencies keep their own features
+`.config/hakari.toml`) pins the union: every core crate depends on it,
+so any subset builds the same artifacts, and an alternating build is a
+no-op. Build-script (host) dependencies keep their own features
 (`unify-target-host = "none"`), so the app never ships what only a build
-script asked for. It does carry tokio's `test-util` (test APIs only;
-keeping it out would bring the churn back).
+script asked for.
+
+What the hack leaves out, and why (tsk885):
+
+- **The providers stay out.** `oxplow-provider-{fake,linear,mcp}`,
+  `oxplow-provider-protocol` and the crates they're built from
+  (`oxplow-domain`, `oxplow-collect-plugin`, `oxplow-code-dup`,
+  `oxplow-code-metrics`, `oxplow-coverage`) are traversal-excluded and
+  don't depend on the hack: a provider ships as its own binary
+  (`scripts/install-linear.sh` builds it with `-p`) and is built from its
+  own dependencies only. Their second copy inside a workspace build is
+  small.
+- **The desktop stack stays out.** Tauri and the crates only it pulls in
+  (AppKit's bindings, `semver`, `phf_shared`) are final-excluded, so the
+  headless daemon never builds Tauri, AppKit or WebKit.
+  `scripts/check-headless-graph.sh` (in CI) fails if the daemon,
+  `oxplow-rpc` or a provider reaches any of them.
+
+What the hack still adds to every core crate, the daemon included, is
+features of crates they already build, unified so builds don't churn:
+tokio's `test-util` (test APIs only); reqwest's `system-proxy` and
+rustls's `ring` provider, which Tauri's updater turns on (so the daemon
+also follows the macOS system proxy, and builds `ring` beside
+aws-lc-rs).
 
 - **After changing a dependency** (adding one, its version or
   features), run `cargo hakari generate` (and `cargo hakari manage-deps`
-  for a new crate). CI fails when the hack is stale (`cargo hakari
+  for a new crate). A new crate the providers are built from goes in
+  `traversal-excludes`; a new crate only Tauri pulls in, in
+  `final-excludes`. CI fails when the hack is stale (`cargo hakari
   generate --diff`). Install with `cargo install cargo-hakari --locked`.
 - **A workspace crate never takes a feature only tests turn on**: hakari
   covers third-party crates only, so a `test-support`-style feature on
