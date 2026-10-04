@@ -14,7 +14,9 @@
 pub struct Replaceable {
     /// Its name: `<capability's noun>.<component>`.
     pub target: &'static str,
-    /// The capability whose **active provider's** extension may replace it.
+    /// The capability whose provider's extension may replace it: the
+    /// provider of the thing the component shows when it shows one (a
+    /// work item's), else the capability's **active** provider.
     pub capability: &'static str,
     /// What the replacement is given, by name; its lens declares each.
     pub props: &'static [&'static str],
@@ -31,7 +33,8 @@ pub const REPLACEABLE: &[Replaceable] = &[
         props: &["scope", "thread_id"],
     },
     // A work item's state control (`WorkItemPage`'s State and Move To):
-    // `ref` is the item (P10).
+    // `ref` is the item (P10). The item's own provider's extension
+    // replaces it, whichever is active (tsk918).
     Replaceable {
         target: "work_item.detail.state",
         capability: "work_items",

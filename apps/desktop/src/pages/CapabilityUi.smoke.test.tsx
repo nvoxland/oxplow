@@ -247,31 +247,36 @@ test("the active provider's extension replaces the Board; another's doesn't", as
 
 
 // P10 (K4): a work item's state control (State and Move To) is the second
-// replaceable component — by the active work-items provider's extension
-// only, given the item's ref and nothing else.
-test("the active provider's extension replaces a work item's state control", async () => {
-  extensions = [
-    {
-      name: "x",
-      enabled: true,
-      ui: {
-        slots: [],
-        commands: [],
-        decorators: [],
-        replacements: [{ id: "x/work_item.detail.state", extension: "x", target: "work_item.detail.state", capability: "work_items", lensId: "x/state" }],
-      },
-      lenses: [{ id: "x/state", params: [{ name: "ref", label: null, default: null }] }],
+// replaceable component, given the item's ref and nothing else. Which
+// extension replaces it is the **item's own provider's**, not the active
+// one's: another provider's item never gets a lens that sends that
+// provider's states (tsk918).
+test("a work item's own provider's extension replaces its state control, not the active one's", async () => {
+  const stateLens = (name: string) => ({
+    name,
+    enabled: true,
+    ui: {
+      slots: [],
+      commands: [],
+      decorators: [],
+      replacements: [
+        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", lensId: `${name}/state` },
+      ],
     },
-  ];
+    lenses: [{ id: `${name}/state`, params: [{ name: "ref", label: null, default: null }] }],
+  });
+  extensions = [stateLens("x"), stateLens("y")];
   const realQuery = answers.querySql!;
-  let active = "oxplow";
+  // The item is `fake`'s; `lin` (extension x) is active.
+  let fakeExtension: string | null = "y";
   answers.querySql = async (...args) => {
     if (!String(args[0]).includes("v_capability_provider")) return realQuery(...args);
     return ok({
       columns: ["capability", "provider", "extension", "features", "active"],
       rows: [
-        ["work_items", "oxplow", null, "{}", active === "oxplow" ? 1 : 0],
-        ["work_items", "fake", "x", "{}", active === "fake" ? 1 : 0],
+        ["work_items", "oxplow", null, "{}", 0],
+        ["work_items", "lin", "x", "{}", 1],
+        ["work_items", "fake", fakeExtension, "{}", 0],
       ],
       truncated: false,
       reads: { models: ["v_capability_provider"], tables: [], measures: [] },
@@ -280,20 +285,21 @@ test("the active provider's extension replaces a work item's state control", asy
   };
   const page = () => mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" streamId="str1" onOpenPage={() => {}} />);
   try {
-    // Not active: oxplow's own Move To, and no replacement.
+    const replaced = page();
+    await waitFor(() => expect(replaced.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by y"));
+    expect(replaced.queryByTestId("work-item-move-done")).toBeNull();
+    expect(lensRuns).toEqual([["y/state", { ref: "work_item:fake:W-1" }]]);
+    // The rest of the page is still oxplow's.
+    expect(replaced.getByTestId("work-item-page").textContent).toContain("It breaks.");
+    cleanup();
+    lensRuns.length = 0;
+
+    // A provider no extension brings: oxplow's own Move To.
+    fakeExtension = null;
     const own = page();
     await waitFor(() => expect(own.getByTestId("work-item-move-done")).toBeTruthy());
     expect(own.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
     expect(lensRuns).toEqual([]);
-    cleanup();
-
-    active = "fake";
-    const replaced = page();
-    await waitFor(() => expect(replaced.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by x"));
-    expect(replaced.queryByTestId("work-item-move-done")).toBeNull();
-    expect(lensRuns).toEqual([["x/state", { ref: "work_item:fake:W-1" }]]);
-    // The rest of the page is still oxplow's.
-    expect(replaced.getByTestId("work-item-page").textContent).toContain("It breaks.");
   } finally {
     answers.querySql = realQuery;
   }

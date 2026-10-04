@@ -116,11 +116,13 @@ export function WorkItemPage({
         <div>{item.provider}</div>
       </div>
       {/* The state control — State and Move To — is replaceable by the
-          active provider's extension (P10), given the item's ref. */}
+          extension of the item's own provider (P10, tsk918), given the
+          item's ref. */}
       <Replaceable
         target="work_item.detail.state"
         props={{ ref: item.ref }}
         streamId={streamId}
+        provider={item.provider}
         onOpenPage={onOpenPage}
         fallback={
           <>

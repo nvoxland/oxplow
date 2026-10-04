@@ -8,15 +8,17 @@ import type { TabRef } from "../tabs/tabState.js";
 /**
  * A core sub-component an extension may replace (P9.A1,
  * `.context/extensions.md` → "Replacements"): `fallback` is oxplow's own,
- * shown unless the target's capability's active provider's extension
- * replaces it — then its lens renders instead, given `props` (the
- * target's contract) and nothing of the host's, under a badge naming the
- * extension. A replacement that can't load shows `fallback` and says why.
+ * shown unless the extension of the provider it is for — `provider`, or
+ * the capability's active one — replaces it; then its lens renders
+ * instead, given `props` (the target's contract) and nothing of the
+ * host's, under a badge naming the extension. A replacement that can't
+ * load shows `fallback` and says why.
  */
 export function Replaceable({
   target,
   props,
   streamId,
+  provider = null,
   fallback,
   onOpenPage,
 }: {
@@ -25,11 +27,14 @@ export function Replaceable({
   /** The target's props contract, by name. */
   props: Record<string, SqlCell>;
   streamId: string | null;
+  /** The provider whose thing it shows (a work item's); none: the
+   *  capability's active provider decides. */
+  provider?: string | null;
   /** Oxplow's own component. */
   fallback: ReactNode;
   onOpenPage?(ref: TabRef): void;
 }) {
-  const r = useReplacement(target, props, streamId);
+  const r = useReplacement(target, props, streamId, provider);
   if (r.state === "pending") return null;
   if (r.state === "core") return <>{fallback}</>;
   const extension = r.replacement.extension;

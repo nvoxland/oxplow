@@ -951,12 +951,18 @@ fallback={<WorkBoard …/>}>` (`BoardPage`). `useReplacement` reads the
 enabled extensions' replacements of the target and, only when one
 exists, the capability's providers (`v_capability_provider`, re-read
 when it changes) and `replacementsOff` (re-read on `configChanged`):
-- **only the active provider's extension replaces** — the candidate
-  whose `extension` is the active row's. That is decided here, not at
-  load: the active provider changes with `activeProviders` and no
-  reload. One provider is active, so there is never a second candidate;
-- no candidate, oxplow's own provider active, or the target turned off →
-  `fallback`, untouched;
+- **only the deciding provider's extension replaces** — the candidate
+  whose `extension` is that provider's row's. A component showing one
+  provider's thing passes it (`<Replaceable provider={item.provider}>`
+  on `work_item.detail.state`): the **item's own provider** decides,
+  whichever is active, so another provider's item never gets a lens
+  that sends this one's states (tsk918). A component showing the
+  capability as a whole (the Board) passes none: the **active** row
+  decides, here and not at load, since the active provider changes
+  with `activeProviders` and no reload. Either way there is one
+  candidate;
+- no candidate, a deciding provider no extension brings (oxplow's own),
+  or the target turned off → `fallback`, untouched;
 - chosen → its lens runs with the props it declares (`childParams`) and
   renders through `LensResultView` (the one render path: kit, or `viz:
   custom` with its sandbox and "custom" badge) under a **"replaced by
@@ -981,7 +987,9 @@ so one that never loads isn't counted. A replacement is a lens, so
 its text rendering is the lens's; agents read work items from
 `v_work_item` either way. The capability smoke test renders the Board
 with every enhancement off (no `replacement-*`), and with two extensions
-replacing it shows that only the active provider's does.
+replacing it shows that only the active provider's does; a work item's
+state control, with two extensions replacing it, shows the item's own
+provider's, not the active one's.
 
 The first real one is the Linear example
 (`examples/extensions/linear`): `lenses/board.yaml` lists the team's

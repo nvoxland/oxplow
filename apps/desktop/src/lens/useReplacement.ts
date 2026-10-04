@@ -2,11 +2,14 @@
  * Which lens, if any, stands in for a core sub-component right now
  * (P9.A1, `.context/extensions.md` → "Replacements"). An extension
  * declares `ui.replacements: [{ target, lens }]`; it renders only while
- * the target's capability's **active provider** is that extension's —
- * `v_capability_provider.active`, which changes with `activeProviders`
- * and no reload, so the choice is made here, not at load — and while the
- * person hasn't listed the target in `replacementsOff`. There is never a
- * second candidate: one provider is active.
+ * the provider the component is for is that extension's, and while the
+ * person hasn't listed the target in `replacementsOff`. A component
+ * showing one provider's thing (a work item's state control) passes that
+ * `provider`: its extension, and no other, may replace it (tsk918). One
+ * showing the capability as a whole (the Board) passes none: the
+ * capability's **active provider** decides — `v_capability_provider.active`,
+ * which changes with `activeProviders` and no reload, so the choice is
+ * made here, not at load. Either way there is one candidate.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -49,7 +52,13 @@ async function readReplacementsOff(): Promise<string[]> {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
-export function useReplacement(target: string, props: Record<string, SqlCell>, streamId: string | null): Replacement {
+export function useReplacement(
+  target: string,
+  props: Record<string, SqlCell>,
+  streamId: string | null,
+  /** The provider whose thing the component shows; none: the active one. */
+  provider: string | null = null,
+): Replacement {
   const exts = useExtensions(streamId);
   const candidates = (exts ?? [])
     .filter((e) => e.enabled)
@@ -57,9 +66,9 @@ export function useReplacement(target: string, props: Record<string, SqlCell>, s
     .filter((r) => r.target === target);
   const capability = candidates[0]?.capability ?? null;
 
-  // The capability's active provider's extension (`null`: oxplow's own),
+  // The deciding provider's extension (`null`: one no extension brings),
   // and the targets turned off; `undefined` while not read.
-  const [activeExtension, setActiveExtension] = useState<string | null | undefined>(undefined);
+  const [owner, setOwner] = useState<string | null | undefined>(undefined);
   const [providerReads, setProviderReads] = useState<Reads>(NO_READS);
   const [off, setOff] = useState<string[] | undefined>(undefined);
   // Reads overlap (one per change): the newest one asked decides, however
@@ -71,13 +80,14 @@ export function useReplacement(target: string, props: Record<string, SqlCell>, s
     try {
       const out = await readCapabilityProviders(capability);
       if (providersSeq.current !== mine) return;
-      setActiveExtension(out.providers.find((p) => p.active)?.extension ?? null);
+      const deciding = out.providers.find((p) => (provider === null ? p.active : p.provider === provider));
+      setOwner(deciding?.extension ?? null);
       setProviderReads(out.reads);
     } catch {
-      // Unknown who's active: oxplow's own is always right to show.
-      if (providersSeq.current === mine) setActiveExtension(null);
+      // Unknown whose it is: oxplow's own is always right to show.
+      if (providersSeq.current === mine) setOwner(null);
     }
-  }, [capability]);
+  }, [capability, provider]);
   const readOff = useCallback(async () => {
     try {
       setOff(await readReplacementsOff());
@@ -95,9 +105,9 @@ export function useReplacement(target: string, props: Record<string, SqlCell>, s
   }, [capability, readProviders, readOff]);
 
   const chosen =
-    activeExtension === undefined || off === undefined || activeExtension === null || off.includes(target)
+    owner === undefined || off === undefined || owner === null || off.includes(target)
       ? null
-      : (candidates.find((c) => c.extension === activeExtension) ?? null);
+      : (candidates.find((c) => c.extension === owner) ?? null);
   const lens = chosen === null ? null : ((exts ?? []).flatMap((e) => e.lenses).find((l) => l.id === chosen.lensId) ?? null);
 
   const [ran, setRan] = useState<{ id: string; key: string; run: LensRun | null; error: string | null } | null>(null);
@@ -146,7 +156,7 @@ export function useReplacement(target: string, props: Record<string, SqlCell>, s
 
   if (exts === null) return { state: "pending" };
   if (candidates.length === 0) return { state: "core" };
-  if (activeExtension === undefined || off === undefined) return { state: "pending" };
+  if (owner === undefined || off === undefined) return { state: "pending" };
   if (chosen === null) return { state: "core" };
   if (lens === null) return { state: "failed", replacement: chosen, message: `its lens ${chosen.lensId} didn't load` };
   if (ran === null || ran.key !== runKey) return { state: "pending" };
