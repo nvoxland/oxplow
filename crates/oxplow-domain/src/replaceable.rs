@@ -30,6 +30,13 @@ pub const REPLACEABLE: &[Replaceable] = &[
         capability: "work_items",
         props: &["scope", "thread_id"],
     },
+    // A work item's state control (`WorkItemPage`'s State and Move To):
+    // `ref` is the item (P10).
+    Replaceable {
+        target: "work_item.detail.state",
+        capability: "work_items",
+        props: &["ref"],
+    },
 ];
 
 /// The replaceable sub-component named `target`.

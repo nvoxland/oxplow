@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { runCommand } from "../api.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
+import { Replaceable } from "../components/Replaceable.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
@@ -114,12 +115,40 @@ export function WorkItemPage({
         <div style={labelStyle}>Provider</div>
         <div>{item.provider}</div>
       </div>
-      <div>
-        <div style={labelStyle}>State</div>
-        <div>
-          {STATE_LABEL[item.state]} <span style={mutedInline}>({item.nativeState})</span>
-        </div>
-      </div>
+      {/* The state control — State and Move To — is replaceable by the
+          active provider's extension (P10), given the item's ref. */}
+      <Replaceable
+        target="work_item.detail.state"
+        props={{ ref: item.ref }}
+        streamId={streamId}
+        onOpenPage={onOpenPage}
+        fallback={
+          <>
+            <div>
+              <div style={labelStyle}>State</div>
+              <div>
+                {STATE_LABEL[item.state]} <span style={mutedInline}>({item.nativeState})</span>
+              </div>
+            </div>
+            <div>
+              <div style={labelStyle}>Move To</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {CANONICAL_STATES.filter((s) => s !== item.state).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    data-testid={`work-item-move-${s}`}
+                    style={buttonStyle}
+                    onClick={() => void transitionWorkItem(item.ref, s)}
+                  >
+                    {STATE_LABEL[s]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        }
+      />
       {features.hierarchy && item.parentRef ? (
         <div data-testid="work-item-parent">
           <div style={labelStyle}>Parent</div>
@@ -128,22 +157,7 @@ export function WorkItemPage({
           </RouteLink>
         </div>
       ) : null}
-      <div>
-        <div style={labelStyle}>Move To</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {CANONICAL_STATES.filter((s) => s !== item.state).map((s) => (
-            <button
-              key={s}
-              type="button"
-              data-testid={`work-item-move-${s}`}
-              style={buttonStyle}
-              onClick={() => void transitionWorkItem(item.ref, s)}
-            >
-              {STATE_LABEL[s]}
-            </button>
-          ))}
-        </div>
-      </div>
+
       {features.delete ? (
         <div>
           <InlineConfirm triggerLabel="Delete" confirmLabel="Delete" testIdPrefix="work-item-delete" triggerStyle={buttonStyle} onConfirm={() => void remove()} />

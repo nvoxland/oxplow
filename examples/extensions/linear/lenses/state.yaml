@@ -1,0 +1,24 @@
+title: Linear State
+description: The issue's Linear state, and the Linear states it can move to. Linear publishes no list of a team's workflow states to oxplow, so these are the states a synced issue of the team is in.
+# The work item state control's props (oxplow's `work_item.detail.state`
+# contract): the item.
+params: [{ name: ref }]
+query: |
+  SELECT DISTINCT :ref AS ref, o.native_state, o.state,
+         CASE WHEN o.native_state = (SELECT w.native_state FROM v_work_item w WHERE w.ref = :ref)
+              THEN 'now' ELSE '' END AS here
+  FROM v_work_item o
+  -- The same Linear instance's issues (a second instance has its own id).
+  WHERE o.provider = (SELECT w.provider FROM v_work_item w WHERE w.ref = :ref)
+  ORDER BY CASE o.state WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'blocked' THEN 2
+                        WHEN 'done' THEN 3 ELSE 4 END,
+           o.native_state
+viz: table
+columns:
+  - { key: native_state, label: Linear State }
+  - { key: here, label: "" }
+actions:
+  # In each row's right-click menu, run as the person; the write goes to Linear.
+  - { id: move, label: Move Here, command: work_item.transition, input: { ref: "{{row.ref}}", to: "{{row.state}}", native_state: "{{row.native_state}}" }, row: true }
+empty: No Linear states seen yet — sync the issues first.
+hidden: true

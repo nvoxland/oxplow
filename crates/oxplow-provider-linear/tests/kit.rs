@@ -53,7 +53,10 @@ async fn the_example_extension_passes_plugin_test() {
         .collect();
     assert_eq!(
         replaced,
-        vec![("work_item.board", "linear/board")],
+        vec![
+            ("work_item.board", "linear/board"),
+            ("work_item.detail.state", "linear/state")
+        ],
         "{:?}",
         loaded.errors
     );

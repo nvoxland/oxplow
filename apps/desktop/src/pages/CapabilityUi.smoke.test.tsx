@@ -245,3 +245,56 @@ test("the active provider's extension replaces the Board; another's doesn't", as
   }
 });
 
+
+// P10 (K4): a work item's state control (State and Move To) is the second
+// replaceable component — by the active work-items provider's extension
+// only, given the item's ref and nothing else.
+test("the active provider's extension replaces a work item's state control", async () => {
+  extensions = [
+    {
+      name: "x",
+      enabled: true,
+      ui: {
+        slots: [],
+        commands: [],
+        decorators: [],
+        replacements: [{ id: "x/work_item.detail.state", extension: "x", target: "work_item.detail.state", capability: "work_items", lensId: "x/state" }],
+      },
+      lenses: [{ id: "x/state", params: [{ name: "ref", label: null, default: null }] }],
+    },
+  ];
+  const realQuery = answers.querySql!;
+  let active = "oxplow";
+  answers.querySql = async (...args) => {
+    if (!String(args[0]).includes("v_capability_provider")) return realQuery(...args);
+    return ok({
+      columns: ["capability", "provider", "extension", "features", "active"],
+      rows: [
+        ["work_items", "oxplow", null, "{}", active === "oxplow" ? 1 : 0],
+        ["work_items", "fake", "x", "{}", active === "fake" ? 1 : 0],
+      ],
+      truncated: false,
+      reads: { models: ["v_capability_provider"], tables: [], measures: [] },
+      freshness: [],
+    });
+  };
+  const page = () => mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" streamId="str1" onOpenPage={() => {}} />);
+  try {
+    // Not active: oxplow's own Move To, and no replacement.
+    const own = page();
+    await waitFor(() => expect(own.getByTestId("work-item-move-done")).toBeTruthy());
+    expect(own.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
+    expect(lensRuns).toEqual([]);
+    cleanup();
+
+    active = "fake";
+    const replaced = page();
+    await waitFor(() => expect(replaced.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by x"));
+    expect(replaced.queryByTestId("work-item-move-done")).toBeNull();
+    expect(lensRuns).toEqual([["x/state", { ref: "work_item:fake:W-1" }]]);
+    // The rest of the page is still oxplow's.
+    expect(replaced.getByTestId("work-item-page").textContent).toContain("It breaks.");
+  } finally {
+    answers.querySql = realQuery;
+  }
+});

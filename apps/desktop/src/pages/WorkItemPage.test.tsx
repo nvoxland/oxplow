@@ -50,6 +50,7 @@ mock.module("../api.js", () => ({
         ],
         commands: [],
         decorators: [],
+        replacements: [],
       },
       lenses: ["x/body", "x/side"].map((id) => ({ id, params: [{ name: "ref", label: null, default: null }] })),
     },

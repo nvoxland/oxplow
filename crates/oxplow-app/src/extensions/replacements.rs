@@ -177,6 +177,11 @@ mod tests {
             "oxplow/extensions/tracker/lenses/partial.yaml",
             "title: Partial\nparams: [{ name: scope }]\nquery: SELECT 1 AS n\n",
         );
+        write(
+            d.path(),
+            "oxplow/extensions/tracker/lenses/state.yaml",
+            "title: State\nparams: [{ name: ref }]\nquery: SELECT :ref AS ref\n",
+        );
         load_extensions(d.path())
             .into_iter()
             .find(|e| e.name == "tracker")
@@ -217,7 +222,7 @@ mod tests {
         for (entry, says) in [
             (
                 "{ target: vcs.history.graph, lens: board }",
-                "isn't a replaceable component (work_item.board)",
+                "isn't a replaceable component (work_item.board, work_item.detail.state)",
             ),
             (
                 "{ target: work_item.board, lens: nope }",
@@ -239,6 +244,51 @@ mod tests {
                 "{entry}: {errs}"
             );
             assert!(ext.ui.replacements.is_empty(), "{entry}");
+        }
+    }
+
+    /// P10 (K4): the second replaceable component — a work item's state
+    /// control — is given the item's `ref`, and its lens must take it.
+    #[test]
+    fn a_detail_state_replacement_takes_ref() {
+        let ext = load(
+            "private",
+            PROVIDER,
+            "    - { target: work_item.detail.state, lens: state }\n",
+        );
+        assert_eq!(said(&ext), "");
+        assert_eq!(
+            ext.ui
+                .replacements
+                .iter()
+                .map(|r| (r.target.as_str(), r.lens_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("work_item.detail.state", "tracker/state")]
+        );
+        let ext = load(
+            "private",
+            PROVIDER,
+            "    - { target: work_item.detail.state, lens: board }\n",
+        );
+        assert!(said(&ext).contains("must declare `ref`"), "{}", said(&ext));
+    }
+
+    /// Every replaceable target has a name a person reads (Settings →
+    /// Integrations, the replaced badge): the desktop's
+    /// `REPLACEABLE_LABELS` names each one.
+    #[test]
+    fn every_replaceable_target_has_a_label() {
+        let labels = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../apps/desktop/src/lens/useReplacement.ts"),
+        )
+        .unwrap();
+        for r in oxplow_domain::replaceable::REPLACEABLE {
+            assert!(
+                labels.contains(&format!("\"{}\":", r.target)),
+                "`{}` has no label in REPLACEABLE_LABELS",
+                r.target
+            );
         }
     }
 

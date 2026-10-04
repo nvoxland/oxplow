@@ -39,6 +39,7 @@ export type Replacement =
 /** What a person calls each replaceable component. */
 export const REPLACEABLE_LABELS: Readonly<Record<string, string>> = {
   "work_item.board": "board",
+  "work_item.detail.state": "state control",
 };
 
 /** The targets the person turned replacements off for (`replacementsOff`). */
