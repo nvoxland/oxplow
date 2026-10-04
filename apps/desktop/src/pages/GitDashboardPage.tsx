@@ -459,7 +459,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
   );
 }
 
-function UpstreamCard({
+export function UpstreamCard({
   data,
   onPush,
   onPullUpstream,
@@ -841,7 +841,7 @@ function ReadinessBadge({ readiness }: { readiness: StreamDivergenceRow["readine
 /// stream's ahead/behind + merge-readiness; a clean stream can be merged
 /// in one click, but only while you're viewing the integration branch
 /// itself (the merge runs into the current stream's branch).
-function MergeReadinessCard({
+export function MergeReadinessCard({
   report,
   currentBranch,
   onMerge,

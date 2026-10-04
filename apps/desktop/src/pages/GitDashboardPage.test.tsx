@@ -3,13 +3,10 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 // tsk899: each Git Dashboard action is wired through its command's spec —
 // one that asks arms on the first click and runs only on the confirm, one
-// that doesn't runs on the click.
+// that doesn't runs on the click. The cards are rendered from props, so
+// only the spec lookup is stubbed.
 
 const realApi = await import("../api.js");
-const ran: string[] = [];
-const kickoff = { taskId: "t1", await: async () => ({ success: true, log: "", conflicts: [], auto_resolved: [] }) };
-const stream = { id: "str1", title: "Main", branch: "main" };
-const other = { id: "str2", title: "Feature", branch: "feature" };
 mock.module("../api.js", () => ({
   ...realApi,
   getCommand: async (name: string) => ({
@@ -17,87 +14,66 @@ mock.module("../api.js", () => ({
     summary: name,
     confirm: name === "vcs.merge" || name === "git.rebase" ? "destructive" : "never",
   }),
-  vcsHead: async () => ({ branch: "main", revision: "git:abc", detached: false }),
-  vcsStatus: async () => ({ entries: [] }),
-  countStatus: () => ({ added: 0, modified: 0, deleted: 0, untracked: 0, conflicted: 0, total: 0 }),
-  listRecentRemoteBranches: async () => [
-    { short_name: "origin/main", last_commit_subject: "s", last_commit_at: "2026-01-01T00:00:00Z" },
-  ],
-  listStreams: async () => [stream, other],
-  vcsDivergence: async () => ({ ahead: 2, behind: 1, overlapping_files: [], readiness: "clean" }),
-  vcsRevision: async () => null,
-  vcsRevisionsBetween: async () => [],
-  listAgentStatuses: async () => [],
-  subscribeAgentStatus: () => () => {},
-  subscribeGitRefsEvents: () => () => {},
-  subscribeWorkspaceEvents: () => () => {},
-  vcsPush: async () => {
-    ran.push("push");
-    return kickoff;
-  },
-  vcsPull: async () => {
-    ran.push("pull");
-    return kickoff;
-  },
-  vcsFetch: async () => {
-    ran.push("fetch");
-    return kickoff;
-  },
-  vcsMerge: async (_s: string, rev: string) => {
-    ran.push(`merge ${rev}`);
-    return kickoff;
-  },
-  gitRebase: async (_s: string, rev: string) => {
-    ran.push(`rebase ${rev}`);
-    return kickoff;
-  },
-}));
-mock.module("../vcsHistory.js", () => ({
-  readHistory: async () => ({
-    commits: [],
-    branchHeads: [],
-    tags: [],
-    reads: { models: [], tables: [], measures: [] },
-  }),
-  readBranches: async () => ({
-    branches: [{ name: "main", remote: null, isDefault: true }],
-    reads: { models: [], tables: [], measures: [] },
-  }),
-}));
-mock.module("../git-op.js", () => ({
-  awaitGitOp: async (k: typeof kickoff) => k.await(),
-  opErrorOf: (label: string) => ({ label }),
 }));
 
-const { GitDashboardPage } = await import("./GitDashboardPage.js");
+const { MergeReadinessCard, UpstreamCard } = await import("./GitDashboardPage.js");
 
-afterEach(() => {
-  cleanup();
-  ran.length = 0;
-});
+afterEach(cleanup);
 
-function page() {
-  return render(
-    <GitDashboardPage stream={stream as never} onOpenPage={() => {}} onRevealCommit={() => {}} />,
+/** Long enough for each button's spec to load. */
+const specsLoad = () => new Promise((r) => setTimeout(r, 30));
+
+test("push and pull don't ask: a click runs them", async () => {
+  const ran: string[] = [];
+  const view = render(
+    <UpstreamCard
+      data={{
+        branch: "main",
+        headSha: "abc",
+        headSubject: "s",
+        headDate: null,
+        upstream: "origin/main",
+        aheadUpstream: 2,
+        behindUpstream: 1,
+      }}
+      onPush={() => ran.push("push")}
+      onPullUpstream={() => ran.push("pull")}
+      onFetch={() => ran.push("fetch")}
+      isPending={() => false}
+    />,
   );
-}
-
-test("push doesn't ask: one click runs it", async () => {
-  const view = page();
-  await waitFor(() => view.getByTestId("git-dashboard-push"));
-  // Its spec says `never` once loaded (until then it asks).
-  await new Promise((r) => setTimeout(r, 30));
+  await specsLoad();
   fireEvent.click(view.getByTestId("git-dashboard-push"));
-  await waitFor(() => expect(ran).toEqual(["push"]));
-  expect(view.queryByTestId("git-dashboard-push-confirm")).toBeNull();
+  fireEvent.click(view.getByTestId("git-dashboard-pull"));
+  await waitFor(() => expect(ran).toEqual(["push", "pull"]));
 });
 
-test("a stream's merge asks: the first click arms, the confirm runs", async () => {
-  const view = page();
-  const merge = await waitFor(() => view.getByTestId("git-dashboard-stream-merge-rebase"));
-  await new Promise((r) => setTimeout(r, 30));
-  fireEvent.click(merge);
+test("a merge asks: the first click arms, the confirm runs", async () => {
+  const ran: string[] = [];
+  const view = render(
+    <MergeReadinessCard
+      report={{
+        base: "main",
+        rows: [
+          {
+            streamId: "str2",
+            title: "Feature",
+            branch: "feature",
+            ahead: 2,
+            behind: 0,
+            overlappingFiles: [],
+            readiness: "clean",
+          },
+        ],
+      }}
+      currentBranch="main"
+      onMerge={(branch) => ran.push(`merge ${branch}`)}
+      isPending={() => false}
+    />,
+  );
+  await specsLoad();
+  fireEvent.click(view.getByTestId("git-dashboard-divergence-merge"));
   expect(ran).toEqual([]);
-  fireEvent.click(view.getByTestId("git-dashboard-stream-merge-rebase-confirm"));
-  await waitFor(() => expect(ran).toEqual(["merge feature"]));
+  fireEvent.click(view.getByTestId("git-dashboard-divergence-merge-confirm"));
+  expect(ran).toEqual(["merge feature"]);
 });
