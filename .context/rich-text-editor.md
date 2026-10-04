@@ -74,8 +74,13 @@ show the pencil — that's the consistent signal "this is for reading."
   editable `<pre><code>` when the caret enters. Round-trips as a
   ` ```mermaid …``` ` fenced code block, so storage is unchanged.
 - **`InternalLink.ts`** — extends Tiptap's standard `Link` mark to
-  allow `file:`, `dir:`, `gitcommit:`, `task:` URL schemes through the URL
-  sanitizer. `openOnClick: false` — click handling is owned by the
+  allow `file:`, `dir:`, `commit:`, `work_item:` URL schemes through the
+  URL sanitizer — Link's `isAllowedUri`, which every parse, render and
+  set-link check goes through. **Never as Link's `protocols`**: Tiptap
+  registers those with linkify (for autolinking, off here), and linkify
+  throws on a scheme it can't tokenize — `work_item`'s underscore broke
+  every rich-text field (tsk974; `InternalLink.test.ts`). `openOnClick:
+  false` — click handling is owned by the
   React layer: the `RichTextField` wrapper's `onClick` /
   `onAuxClick` intercepts clicks on `<a>` descendants, parses the
   href via `parseMarkdownLink` (reused from `MarkdownView`), and

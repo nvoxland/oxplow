@@ -27,13 +27,19 @@ import Link from "@tiptap/extension-link";
 const INTERNAL_PROTOCOL_RE = /^(file|dir|commit|work_item):/i;
 
 export const InternalLink = Link.extend({
-  // Allow our schemes through the URL sanitizer.
+  // Allow our schemes through the URL sanitizer — `isAllowedUri`, which
+  // every parse, render and set-link check goes through. Not as Link's
+  // `protocols`: Tiptap registers those with linkify (for autolinking,
+  // which is off), and linkify throws on a scheme it can't tokenize, so
+  // `work_item` broke every rich-text field (tsk974).
   addOptions() {
     return {
       ...this.parent?.(),
       openOnClick: false,
       autolink: false,
-      protocols: ["file", "dir", "commit", "work_item"],
+      protocols: [],
+      isAllowedUri: (url: string, ctx: { defaultValidate: (url: string) => boolean }) =>
+        INTERNAL_PROTOCOL_RE.test(url.trim()) || ctx.defaultValidate(url),
     };
   },
   addStorage() {
