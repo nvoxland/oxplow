@@ -10,18 +10,23 @@ import {
 } from "./git-op.js";
 import type { BackgroundTask, GitOpKickoff, OpOutcome } from "./api.js";
 
-function task(over: Partial<BackgroundTask>): BackgroundTask {
+/// A task as the daemon sends it; `result`, when given, is what its
+/// producer attached (JSON-encoded on the wire, as `result_json`).
+function task(over: Partial<BackgroundTask> & { result?: unknown }): BackgroundTask {
+  const { result, ...rest } = over;
   return {
     id: "t1",
     kind: "vcs",
     label: "merge",
+    detail: null,
     status: "done",
     progress: null,
-    startedAt: 0,
-    endedAt: 1,
+    started_at: 0,
+    ended_at: 1,
     error: null,
-    ...over,
-  } as BackgroundTask;
+    result_json: result === undefined ? null : JSON.stringify(result),
+    ...rest,
+  };
 }
 
 const outcome = (over: Partial<OpOutcome> = {}): OpOutcome => ({

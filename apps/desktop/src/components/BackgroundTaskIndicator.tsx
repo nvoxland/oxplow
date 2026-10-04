@@ -7,11 +7,12 @@ import {
 } from "../api.js";
 
 const KIND_LABEL: Record<BackgroundTask["kind"], string> = {
-  git: "Git",
+  vcs: "Git",
   "code-quality": "Code quality",
   lsp: "LSP",
   "notes-resync": "Notes",
   snapshot: "Snapshot",
+  metrics: "Metrics",
 };
 
 /**
@@ -173,7 +174,7 @@ export function BackgroundTaskIndicator() {
 }
 
 function BackgroundTaskRow({ task }: { task: BackgroundTask }) {
-  const elapsed = Math.max(0, Math.round(((task.endedAt ?? Date.now()) - task.startedAt) / 1000));
+  const elapsed = Math.max(0, Math.round(((task.ended_at ?? Date.now()) - task.started_at) / 1000));
   return (
     <div
       data-testid={`background-task-row-${task.id}`}

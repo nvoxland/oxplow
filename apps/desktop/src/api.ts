@@ -1,5 +1,19 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { BegunSignIn, ExtensionChange, OpOutcome, OxplowConfig, OxplowEvent, ProviderEffect, Reads, Scope, SignInCompletion, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type {
+  BackgroundTask,
+  BegunSignIn,
+  ChangeScopes,
+  ExtensionChange,
+  OpOutcome,
+  OxplowConfig,
+  OxplowEvent,
+  ProviderEffect,
+  Reads,
+  Scope,
+  SignInCompletion,
+  SnapshotTrigger,
+  TextSearchHit,
+} from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -104,30 +118,6 @@ function slugifyTitle(title: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return base.length > 0 ? base : `stream-${Date.now()}`;
-}
-
-/// Map the bindings BackgroundTask shape to the renderer's
-/// flavor: dates as epoch-ms numbers (camelCase) and `result`
-/// pre-parsed from the JSON-encoded `result_json`. Stays in
-/// place because the renderer's task-list views still read
-/// startedAt / endedAt / result directly.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function adaptBackgroundTask(t: any): any {
-  if (!t) return t;
-  let result: unknown = undefined;
-  if (typeof t.result_json === "string" && t.result_json.length > 0) {
-    try {
-      result = JSON.parse(t.result_json);
-    } catch {
-      // ignore
-    }
-  }
-  return {
-    ...t,
-    startedAt: typeof t.started_at === "number" ? t.started_at : Date.now(),
-    endedAt: typeof t.ended_at === "number" ? t.ended_at : null,
-    result,
-  };
 }
 
 /// Desktop bridge facade: a small object that exposes the few
@@ -278,38 +268,13 @@ function buildBridge() {
 export type DesktopBridge = ReturnType<typeof buildBridge>;
 let cachedBridge: DesktopBridge | null = null;
 
-export type { OxplowConfig, OxplowEvent };
-// Use the tauri-specta-generated shapes directly for the
-// snake_case-native bindings (CommitDetail, GitLogCommit,
-// RemoteBranchEntry, BlameLine, …). The api-types
-// camelCase legacy definitions were drifting from runtime shape
-// and only existed because the original Electron build wrapped
-// them in adapters; nothing converts shape today.
-// Bindings shapes for the types whose call sites have been
-// migrated. Adding more is a per-call-site refactor: each consumer
-// has to be updated to the new field names. Types not on this list
-// stay on the api-types camelCase legacy shape until their consumers
-// are migrated.
-export type {
-  OpOutcome,
-  RemoteBranchEntry,
-  MergeReadiness,
-} from "./tauri-bridge/index.js";
-// The remaining legacy types still come from api-types because
-// their consumers read fields that don't exist on the bindings
-// shape yet (e.g. GitLogResult.currentBranch / branchHeads / tags,
-// RemoteBranchEntry.remote / branch / lastCommitDate, GitWorktreeEntry
-// camelCase aliases, ChangeScopes' BranchChangeEntry.status — bindings
-// expose .change).
-// Migrating each one is per-call-site work; until then the shape
-// the runtime hands the renderer is the bindings shape but the
-// renderer's TypeScript believes it's the legacy shape.
-export type {
-  ChangeScopes,
-  TextSearchHit,
-  RefOption,
-  GroupedGitRefs,
-} from "./api-types.js";
+// The wire's own shapes, from the generated bindings: nothing converts a
+// shape at the boundary (P11, tsk963–964).
+export type { BackgroundTask, ChangeScopes, OxplowConfig, OxplowEvent, TextSearchHit };
+export type { OpOutcome, RemoteBranchEntry, MergeReadiness } from "./tauri-bridge/index.js";
+// Renderer-side views over the refs (`vcsHistory.ts` builds them); C9
+// moves them beside it.
+export type { RefOption, GroupedGitRefs } from "./api-types.js";
 
 // Stream / Thread come straight from the Tauri bindings — the
 // renderer reads the flat shape (working_pane / talking_pane /
@@ -1358,28 +1323,16 @@ export async function setThreadPrompt(
   return [];
 }
 
-export async function getChangeScopes(
-  streamId: string,
-): Promise<import("./api-types.js").ChangeScopes> {
-  const raw = unwrap(await commands.gitChangeScopes(streamId));
-  return {
-    staged: raw.staged as unknown as import("./api-types.js").BranchChangeEntry[],
-    unstaged: raw.unstaged as unknown as import("./api-types.js").BranchChangeEntry[],
-    currentBranch: raw.current_branch ?? undefined,
-    branchBase: raw.branch_base ?? undefined,
-    upstream: raw.upstream ?? undefined,
-    onDefaultBranch: raw.on_default_branch,
-  };
+export async function getChangeScopes(streamId: string): Promise<ChangeScopes> {
+  return unwrap(await commands.gitChangeScopes(streamId));
 }
 
 export async function searchWorkspaceText(
   streamId: string,
   query: string,
   options?: { limit?: number },
-): Promise<import("./api-types.js").TextSearchHit[]> {
-  return unwrap(
-    await commands.searchWorkspaceText(streamId, query, options?.limit ?? null),
-  ) as unknown as import("./api-types.js").TextSearchHit[];
+): Promise<TextSearchHit[]> {
+  return unwrap(await commands.searchWorkspaceText(streamId, query, options?.limit ?? null));
 }
 
 /** Throw away the workspace's changes to `paths` — destructive, so the
@@ -1642,18 +1595,23 @@ export async function removeFollowup(_threadId: string, id: string): Promise<voi
   unwrap(await commands.removeFollowup(id));
 }
 
-export type BackgroundTask = import("./api-types.js").BackgroundTask;
-
 export async function listBackgroundTasks(): Promise<BackgroundTask[]> {
-  return (unwrap(await commands.listBackgroundTasks()) as unknown[]).map(
-    adaptBackgroundTask,
-  ) as BackgroundTask[];
+  return unwrap(await commands.listBackgroundTasks());
 }
 
 export async function getBackgroundTask(id: string): Promise<BackgroundTask | null> {
-  return adaptBackgroundTask(unwrap(await commands.getBackgroundTask(id))) as
-    | BackgroundTask
-    | null;
+  return unwrap(await commands.getBackgroundTask(id));
+}
+
+/** What a finished task's producer attached (`result_json`, parsed);
+ *  `undefined` when it attached nothing readable. */
+export function taskResult(task: BackgroundTask): unknown {
+  if (!task.result_json) return undefined;
+  try {
+    return JSON.parse(task.result_json);
+  } catch {
+    return undefined;
+  }
 }
 
 export function subscribeBackgroundTaskEvents(

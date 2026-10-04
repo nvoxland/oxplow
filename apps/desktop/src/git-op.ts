@@ -12,16 +12,16 @@
 //! inline message), so a stateful `useGitOps` would force a wrong shared
 //! abstraction. The shared part is pure result-normalization.
 
-import type { BackgroundTask, GitOpKickoff, OpOutcome } from "./api.js";
+import { taskResult, type BackgroundTask, type GitOpKickoff, type OpOutcome } from "./api.js";
 import type { OpErrorInput } from "./components/opErrorsStore.js";
 
 /// Normalize a finished (or failed) background task into an `OpOutcome`.
-/// When the task ended without a `result` payload (the command was
+/// When the task ended without a result (the command was
 /// refused or threw) we synthesize one: `success` follows the task status
 /// and the task's `error` becomes the log so callers still get a message.
 export function normalizeGitOpResult(task: BackgroundTask | null): OpOutcome {
   return (
-    (task?.result as OpOutcome | undefined) ?? {
+    ((task ? taskResult(task) : undefined) as OpOutcome | undefined) ?? {
       success: task?.status === "done",
       log: task?.error ?? "",
       conflicts: [],

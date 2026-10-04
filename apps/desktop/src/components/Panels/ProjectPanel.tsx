@@ -227,7 +227,7 @@ export function ProjectPanel({
   // to the default branch), fall back to a sensible default.
   useEffect(() => {
     if (!scopes) return;
-    if (filterMode === "branch" && (scopes.onDefaultBranch || !scopes.branchBase)) setFilterMode("uncommitted");
+    if (filterMode === "branch" && (scopes.on_default_branch || !scopes.branch_base)) setFilterMode("uncommitted");
     if (filterMode === "unpushed" && !scopes.upstream) setFilterMode("uncommitted");
   }, [scopes, filterMode]);
 
@@ -254,7 +254,7 @@ export function ProjectPanel({
       return;
     }
     if (!vcsEnabled) { setScopedPaths(null); setScopedDeletions(new Set()); return; }
-    const ref = filterMode === "branch" ? scopes?.branchBase : scopes?.upstream;
+    const ref = filterMode === "branch" ? scopes?.branch_base : scopes?.upstream;
     if (!ref) { setScopedPaths([]); setScopedDeletions(new Set()); return; }
     let cancelled = false;
     void vcsMergeBase(stream.id, gitRevision("HEAD"), gitRevision(ref))
@@ -270,7 +270,7 @@ export function ProjectPanel({
         setScopedDeletions(new Set());
       });
     return () => { cancelled = true; };
-  }, [stream?.id, vcsEnabled, filterMode, scopes?.branchBase, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles]);
+  }, [stream?.id, vcsEnabled, filterMode, scopes?.branch_base, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles]);
 
   const changedPathSet = useMemo(() => {
     const paths = scopedPaths ?? [];
@@ -433,8 +433,8 @@ export function ProjectPanel({
     onOpenDiff?.({ path, leftVersion: gitRevision("HEAD"), rightVersion: WORKING, baseLabel: "HEAD" });
   }
   function openBranchDiff(path: string) {
-    if (!scopes?.branchBase) return;
-    onOpenDiff?.({ path, leftVersion: gitRevision(scopes.branchBase), rightVersion: WORKING, baseLabel: scopes.branchBase });
+    if (!scopes?.branch_base) return;
+    onOpenDiff?.({ path, leftVersion: gitRevision(scopes.branch_base), rightVersion: WORKING, baseLabel: scopes.branch_base });
   }
   function openOriginDiff(path: string) {
     if (!scopes?.upstream) return;
@@ -445,7 +445,7 @@ export function ProjectPanel({
   // current filter — file in "all", matching diff in scope-filtered views.
   function openForCurrentFilter(path: string, opts?: { newTab?: boolean }) {
     if (filterMode === "uncommitted") { openUncommittedDiff(path); return; }
-    if (filterMode === "branch" && scopes?.branchBase) { openBranchDiff(path); return; }
+    if (filterMode === "branch" && scopes?.branch_base) { openBranchDiff(path); return; }
     if (filterMode === "unpushed" && scopes?.upstream) { openOriginDiff(path); return; }
     onOpenFile(path, opts);
   }
@@ -646,8 +646,8 @@ export function ProjectPanel({
                   },
                   {
                     id: "files.diff-branch",
-                    label: scopes?.branchBase ? `Show branch changes (vs ${scopes.branchBase})` : "Show branch changes",
-                    enabled: !!scopes?.branchBase && !scopes.onDefaultBranch,
+                    label: scopes?.branch_base ? `Show branch changes (vs ${scopes.branch_base})` : "Show branch changes",
+                    enabled: !!scopes?.branch_base && !scopes.on_default_branch,
                     run: () => handleContextAction("diff-branch"),
                   },
                   {
@@ -1359,11 +1359,11 @@ const FILTER_CHIP_LABELS: Record<Exclude<FilterMode, "all">, string> = {
 
 function filterModeLabel(
   mode: FilterMode,
-  scopes: { branchBase?: string | null; upstream?: string | null; onDefaultBranch?: boolean } | null,
+  scopes: Pick<ChangeScopes, "branch_base" | "upstream" | "on_default_branch"> | null,
 ): string {
   if (mode === "all") return "all files";
   if (mode === "uncommitted") return "uncommitted changes";
-  if (mode === "branch") return `branch changes${scopes?.branchBase ? ` (vs ${scopes.branchBase})` : ""}`;
+  if (mode === "branch") return `branch changes${scopes?.branch_base ? ` (vs ${scopes.branch_base})` : ""}`;
   if (mode === "unpushed") return `unpushed changes${scopes?.upstream ? ` (vs ${scopes.upstream})` : ""}`;
   return mode;
 }
@@ -1377,7 +1377,7 @@ function FilterMenuButton({
   filterMode: FilterMode;
   setFilterMode: (mode: FilterMode) => void;
   vcsEnabled: boolean;
-  scopes: { branchBase?: string | null; upstream?: string | null; onDefaultBranch?: boolean } | null;
+  scopes: Pick<ChangeScopes, "branch_base" | "upstream" | "on_default_branch"> | null;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1399,8 +1399,8 @@ function FilterMenuButton({
   if (vcsEnabled) options.push({ value: "uncommitted", label: "Uncommitted changes" });
   if (vcsEnabled) options.push({
     value: "branch",
-    label: `Branch changes${scopes?.branchBase && !scopes?.onDefaultBranch ? ` (vs ${scopes.branchBase})` : ""}`,
-    disabled: !scopes?.branchBase || !!scopes?.onDefaultBranch,
+    label: `Branch changes${scopes?.branch_base && !scopes?.on_default_branch ? ` (vs ${scopes.branch_base})` : ""}`,
+    disabled: !scopes?.branch_base || !!scopes?.on_default_branch,
   });
   if (vcsEnabled) options.push({
     value: "unpushed",

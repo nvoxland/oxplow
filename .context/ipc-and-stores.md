@@ -466,7 +466,10 @@ UI). Active producers:
   runtime registers a row only when `total >= 5` (smaller dirs aren't
   worth a flash). Determinate.
 
-IPC: one method `listBackgroundTasks()` returns the snapshot. Renderer
+IPC: one method `listBackgroundTasks()` returns the snapshot, as the
+generated `BackgroundTask` (snake_case: `started_at`, `ended_at`, and
+the producer's result JSON-encoded as `result_json`, which
+`taskResult(task)` parses — P11, tsk964; there is no adapter). Renderer
 subscribes via `subscribeBackgroundTaskEvents(onChange)` (filters
 `background-task.changed` events) and refetches. The renderer never
 writes — only the runtime starts/updates tasks. Cancellation is not
@@ -476,7 +479,7 @@ supported (v1).
 live row has been evicted. The snapshot is captured on
 `complete()`/`fail()` and retained for `SNAPSHOT_RETENTION_MS` (5 min,
 LRU-capped) so the renderer's `awaitBackgroundTask` can still read the
-final `result` / `error` even if the 4s grace window expired between
+final `result_json` / `error` even if the 4s grace window expired between
 the "ended" event and the IPC re-fetch. Without this, fast git ops
 that succeed silently could surface a blank op-error page (no stderr,
 no stdout, no exitCode) — `opErrorOf` (`git-op.ts`) flags a failure
