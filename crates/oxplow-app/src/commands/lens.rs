@@ -42,6 +42,9 @@ pub struct LensTarget {
     pub project_dir: PathBuf,
     pub catalog: Arc<ExtensionCatalog>,
     pub db: oxplow_db::Database,
+    /// Checks a kept spec's query as the explorer runs it, metric
+    /// functions and all (tsk987).
+    pub sql: crate::sql_gateway::SqlGateway,
 }
 
 /// `lens.show`: show the person an answer in a thread.
@@ -181,11 +184,7 @@ fn check_spec_tx(
     params: &BTreeMap<String, Value>,
     lens_ctx: &LensContext,
 ) -> Result<(), CommandError> {
-    if let Some(problem) = extensions::spec_problem(spec) {
-        return Err(invalid("/spec", problem));
-    }
-    let lens = extensions::Lens::from_spec("answer/new", spec);
-    let bound = extensions::resolve_params(&lens, &cells(params), lens_ctx).map_err(domain)?;
+    let bound = check_spec_shape(spec, params, lens_ctx)?;
     if !spec.query.trim().is_empty() {
         check_query_on(
             conn,
@@ -194,6 +193,20 @@ fn check_spec_tx(
         .map_err(|e| invalid("/spec/query", e.to_string()))?;
     }
     Ok(())
+}
+
+/// A spec's shape and its params bound in `lens_ctx` — everything of its
+/// check but the query: the bound params.
+fn check_spec_shape(
+    spec: &LensSpec,
+    params: &BTreeMap<String, Value>,
+    lens_ctx: &LensContext,
+) -> Result<BTreeMap<String, SqlCell>, CommandError> {
+    if let Some(problem) = extensions::spec_problem(spec) {
+        return Err(invalid("/spec", problem));
+    }
+    let lens = extensions::Lens::from_spec("answer/new", spec);
+    extensions::resolve_params(&lens, &cells(params), lens_ctx).map_err(domain)
 }
 
 fn cells(params: &BTreeMap<String, Value>) -> BTreeMap<String, SqlCell> {
@@ -381,7 +394,7 @@ async fn keeping_spec(
 ) -> Result<Keeping, CommandError> {
     let project_dir = target.project_dir.clone();
     let thread = thread.map(|t| t.value());
-    target
+    let keeping = target
         .db
         .read(move |tx| {
             let (stream_id, root) = match stream.as_deref() {
@@ -403,7 +416,7 @@ async fn keeping_spec(
                 thread_id: thread,
             };
             Ok(
-                check_spec_tx(tx, &spec, &BTreeMap::new(), &lens_ctx).map(|()| Keeping {
+                check_spec_shape(&spec, &BTreeMap::new(), &lens_ctx).map(|_| Keeping {
                     spec,
                     root,
                     thread,
@@ -412,7 +425,18 @@ async fn keeping_spec(
             )
         })
         .await
-        .map_err(CommandError::from)?
+        .map_err(CommandError::from)??;
+    // Its query is checked as the explorer runs it: the metric functions
+    // (`metric_grid()`, `metric_findings()`) rewritten, then the read
+    // contract (tsk987).
+    if !keeping.spec.query.trim().is_empty() {
+        target
+            .sql
+            .check(&keeping.spec.query)
+            .await
+            .map_err(|e| invalid("/spec/query", e.to_string()))?;
+    }
+    Ok(keeping)
 }
 
 /// `lens.keep` writes a file, so it's an `External` command: a `Tx`
@@ -1031,6 +1055,49 @@ mod tests {
             .join("oxplow/extensions/saved")
             .exists());
         assert!(events_of(&fx, "lens.kept").await.is_empty());
+    }
+
+    /// tsk987: Explore Data's "Chart a metric" seeds a `metric_grid()`
+    /// query; keeping it as a lens checks it the way the explorer runs it
+    /// — the metric functions rewritten — so it's kept, not refused as "no
+    /// such table".
+    #[tokio::test]
+    async fn keep_takes_a_metric_spec() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        fx.svc
+            .fact_store
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.todo", "TODOs"))
+            .await
+            .unwrap();
+        fx.svc
+            .fact_store
+            .upsert_spec(oxplow_db::NewMetricSpec::base(
+                "acme.todos",
+                "TODOs",
+                "acme.todo",
+                "sum",
+            ))
+            .await
+            .unwrap();
+        let saved = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                KEEP,
+                json!({
+                    "spec": {
+                        "title": "Weekly TODOs",
+                        "query": "SELECT bucket, MEASURE('acme.todos') AS todos FROM metric_grid('week')",
+                        "viz": "table"
+                    },
+                    "extension": "saved"
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.result["lens"], "saved/weekly-todos");
     }
 
     /// `lens.keep` keeps an answer or a spec: neither, or both, is refused;

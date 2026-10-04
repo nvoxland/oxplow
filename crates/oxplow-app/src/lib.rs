@@ -1243,6 +1243,7 @@ impl Services {
             project_dir: layout.project_dir.clone(),
             catalog: extension_catalog.clone(),
             db: db.clone(),
+            sql: sql.clone(),
         }) {
             commands.register(command).expect("lens commands register");
         }

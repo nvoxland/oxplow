@@ -291,8 +291,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - **Pin to Dashboard** adds the query as a `query` tile shown with
       the chosen viz (`PinToDashboard.tsx`, shared with the lens page).
     - **Save as Lens** runs `lens.keep` with the query as a `spec` (P11,
-      tsk943 — on the bus like Keep This, in the stream's worktree, its
-      query checked as `lens.show` checks one), then opens the new lens.
+      tsk943 — on the bus like Keep This, in the stream's worktree; its
+      shape checked as `lens.show` checks one, its query through the SQL
+      gateway as the explorer runs it, so a `metric_grid()` chart is kept,
+      tsk987), then opens the new lens.
       It creates the extension if missing
       (with the same v2 manifest `oxplow plugin new` writes —
       `extensions::scaffold_manifest`, so a saved lens starts as a
