@@ -885,6 +885,29 @@ fn validate_report_collector(
             "a report collector runs `{ on_run: test | analysis }` or by hand (`manual`)".into(),
         ));
     }
+    // A test run's reports are tests and coverage, an analysis run's are
+    // analysis (tsk892): another pairing would be parsed and dropped.
+    let reads = |run: RunKind| match run {
+        RunKind::Test => records != Records::Analysis,
+        RunKind::Analysis => records == Records::Analysis,
+    };
+    if let Trigger::OnRun { run } = trigger {
+        if !reads(run) {
+            let (name, by) = match records {
+                Records::Tests => ("tests", "a test run"),
+                Records::Coverage => ("coverage", "a test run"),
+                Records::Analysis => ("analysis", "an analysis run"),
+            };
+            return Err(ctx(format!(
+                "records `{name}`, which {by} reads: use `trigger: {{ on_run: {} }}`",
+                if records == Records::Analysis {
+                    "analysis"
+                } else {
+                    "test"
+                }
+            )));
+        }
+    }
     let Some(report) = raw.report else {
         return Err(ctx(
             "names the `report: { path }` it reads, relative to the project".into(),
@@ -1367,6 +1390,16 @@ mod tests {
         refused(
             &format!("{base}  records: logs\n  entry: oxplow:junit\n"),
             "records `logs`",
+        );
+        // tsk892: a test run's leg reads tests and coverage, an analysis
+        // run's analysis — anything else would be parsed and dropped.
+        refused(
+            &format!("{base}  records: analysis\n  entry: oxplow:eslint\n  trigger: {{ on_run: test }}\n"),
+            "records `analysis`, which an analysis run reads",
+        );
+        refused(
+            &format!("{base}  records: coverage\n  entry: oxplow:lcov\n  trigger: {{ on_run: analysis }}\n"),
+            "records `coverage`, which a test run reads",
         );
         refused(
             "- id: r\n  runtime: jaq\n  entry: r.jq\n  facts: [a.b]\n  trigger: { on_run: test }\n",

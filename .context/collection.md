@@ -57,8 +57,10 @@ section for the column.
   "Collectors"). Validation (`crates/oxplow-config/src/collectors.rs`,
   `validate_report_collector`): the project's only (not an extension's);
   no `input`, `env`, `credentials`, `network`, `after` or `sync`; the
-  trigger is `on_run` or `manual`; a `records:` collector writes no facts
-  or entities. Example:
+  trigger is `on_run` or `manual`, and an `on_run` matches what it records
+  — `tests` / `coverage` on `test`, `analysis` on `analysis` (tsk892: each
+  run's leg reads only its kinds, so another pairing would be parsed and
+  dropped); a `records:` collector writes no facts or entities. Example:
 
   ```yaml
   collectors:
