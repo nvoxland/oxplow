@@ -616,15 +616,22 @@ async fn schedule_retry(
         .await
 }
 
+/// How late a retry may be sent by itself: one due longer ago (oxplow was
+/// closed meanwhile) is a person's — the write it would send is from
+/// another time (tsk915).
+pub(crate) const MAX_RETRY_LATENESS: Duration = Duration::from_secs(60 * 60);
+
 /// Send again every failed attempt whose automatic retry is due by `now`
 /// (P10): the next attempt, `auto`, made when the effect is still there,
-/// enabled and approved as it is now — otherwise the retry is dropped and
-/// the failure counted, a person's to retry. Its health is counted as a
-/// live attempt's. How many were sent.
+/// enabled and approved as it is now, and the retry not more than
+/// [`MAX_RETRY_LATENESS`] overdue — otherwise the retry is dropped and the
+/// failure counted, a person's to retry. Its health is counted as a live
+/// attempt's. How many were sent.
 pub async fn auto_retry_due(
     svc: &Arc<Services>,
     now: oxplow_domain::Timestamp,
 ) -> Result<usize, DomainError> {
+    let now_ms = now.unix_ms();
     let now = now.to_string();
     let due = svc
         .db
@@ -632,7 +639,9 @@ pub async fn auto_retry_due(
         .await?;
     let health = crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut sent = 0;
-    for key in due {
+    for (key, due_at) in due {
+        let late = oxplow_domain::Timestamp::parse(&due_at)
+            .is_ok_and(|at| now_ms - at.unix_ms() > MAX_RETRY_LATENESS.as_millis() as i64);
         // At its newest version, as the pump, `effect.retry` and backfill
         // hand it over (tsk911). The attempt sends what the failed one
         // composed (tsk887), so an expired payload doesn't stop it.
@@ -654,8 +663,24 @@ pub async fn auto_retry_due(
             }
             _ => false,
         };
-        let (Some((ext, decl)), Some(event), true) = (effect, event, runnable) else {
+        let (Some((ext, decl)), Some(event), true, false) = (effect.clone(), event, runnable, late)
+        else {
             drop_retry(svc, &key).await?;
+            // Its failure, not counted while it waited, counts now.
+            if let Some((_, decl)) = effect {
+                let why = if late {
+                    "not sent again by itself: its retry was due more than an hour ago"
+                } else {
+                    "not sent again by itself: the effect can't run as it is"
+                };
+                count(
+                    &health,
+                    &decl,
+                    &Reacted::NotResent(why.into()),
+                    Duration::ZERO,
+                )
+                .await;
+            }
             continue;
         };
         let started = std::time::Instant::now();
@@ -682,6 +707,12 @@ async fn drop_retry(svc: &Services, key: &EffectRunKey) -> Result<(), DomainErro
 pub fn spawn_auto_retry(state: &Arc<Services>) {
     let services = Arc::downgrade(state);
     tokio::spawn(async move {
+        // Not before the providers the config names are up: a write sent
+        // to one not yet registered fails for nothing (tsk915).
+        match services.upgrade() {
+            Some(svc) => svc.providers.first_reconciled().await,
+            None => return,
+        }
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
             let Some(svc) = services.upgrade() else {

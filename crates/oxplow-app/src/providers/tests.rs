@@ -4622,6 +4622,44 @@ async fn a_rate_limited_reaction_waits_as_asked() {
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
 }
 
+/// tsk915: a retry overdue by more than an hour (oxplow was closed
+/// meanwhile) isn't sent by itself — what it would send is from another
+/// time — and the failure it waited on counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_long_overdue_retry_is_a_persons() {
+    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(2 * 3600))
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
+    assert_eq!(effect_failures(&fx).await, 1);
+}
+
+/// tsk915: what waits for the providers the config names (the automatic
+/// retries' first tick) waits for the registry's first reconcile.
+#[tokio::test]
+async fn the_first_reconcile_is_waited_for() {
+    let fx = services_with_effort().await;
+    let waited = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        fx.svc.providers.first_reconciled(),
+    )
+    .await;
+    assert!(waited.is_err(), "not before it has run");
+    fx.svc.providers.reconcile().await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        fx.svc.providers.first_reconciled(),
+    )
+    .await
+    .expect("at once after it has");
+}
+
 /// P10: at most two automatic attempts, 10 s then 60 s after the failure
 /// before; the attempt that exhausts them counts as the one failure.
 #[tokio::test(flavor = "multi_thread")]

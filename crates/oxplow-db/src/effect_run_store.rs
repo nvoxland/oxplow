@@ -221,32 +221,46 @@ pub fn drop_retry_tx(conn: &Connection, key: &EffectRunKey) -> Result<(), Domain
 }
 
 /// The failed latest attempts due to be sent again by `now` (RFC 3339),
-/// oldest due first.
-pub fn due_retries_tx(conn: &Connection, now: &str) -> Result<Vec<EffectRunKey>, DomainError> {
+/// oldest due first, each with when it was due.
+pub fn due_retries_tx(
+    conn: &Connection,
+    now: &str,
+) -> Result<Vec<(EffectRunKey, String)>, DomainError> {
     let mut st = conn
         .prepare(
-            "SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.origin FROM effect_run r
+            "SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.origin, r.retry_at
+               FROM effect_run r
               WHERE r.state = 'failed' AND r.retry_at IS NOT NULL AND r.retry_at <= ?1
                 AND r.attempt = (SELECT max(l.attempt) FROM effect_run l
                                   WHERE l.effect = r.effect AND l.event_id = r.event_id)
               ORDER BY r.retry_at",
         )
         .map_err(map_sql_err)?;
-    let rows: Vec<(String, String, i64, u32, String)> = st
+    let rows: Vec<(String, String, i64, u32, String, String)> = st
         .query_map([now], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
         })
         .and_then(|rows| rows.collect::<rusqlite::Result<_>>())
         .map_err(map_sql_err)?;
     rows.into_iter()
-        .map(|(effect, event_id, event_seq, attempt, origin)| {
-            Ok(EffectRunKey {
-                effect,
-                event_id,
-                event_seq,
-                attempt,
-                origin: ReactionOrigin::parse(&origin)?,
-            })
+        .map(|(effect, event_id, event_seq, attempt, origin, retry_at)| {
+            Ok((
+                EffectRunKey {
+                    effect,
+                    event_id,
+                    event_seq,
+                    attempt,
+                    origin: ReactionOrigin::parse(&origin)?,
+                },
+                retry_at,
+            ))
         })
         .collect()
 }

@@ -955,6 +955,9 @@ pub struct ProviderRegistry {
     health: parking_lot::Mutex<BTreeMap<String, InstanceHealth>>,
     /// One reconcile at a time.
     reconciling: tokio::sync::Mutex<()>,
+    /// Set once its first reconcile has run: what waits for the
+    /// instances the config names to be up (tsk915).
+    reconciled: tokio::sync::watch::Sender<bool>,
     /// How many times each instance has been disabled: a start that began
     /// before a disable doesn't register what the disable stopped.
     disables: parking_lot::Mutex<BTreeMap<String, u64>>,
@@ -1077,6 +1080,7 @@ impl ProviderRegistry {
             running: tokio::sync::Mutex::new(BTreeMap::new()),
             health: parking_lot::Mutex::new(BTreeMap::new()),
             reconciling: tokio::sync::Mutex::new(()),
+            reconciled: tokio::sync::watch::Sender::new(false),
             disables: parking_lot::Mutex::new(BTreeMap::new()),
             global: parking_lot::Mutex::new(global),
             sign_ins: parking_lot::Mutex::new(BTreeMap::new()),
@@ -1456,6 +1460,17 @@ impl ProviderRegistry {
 
     /// Make the running instances match the project's config.
     pub async fn reconcile(&self) {
+        self.reconcile_pass().await;
+        self.reconciled.send_replace(true);
+    }
+
+    /// Once its first reconcile has run — at once after that.
+    pub async fn first_reconciled(&self) {
+        let mut done = self.reconciled.subscribe();
+        let _ = done.wait_for(|d| *d).await;
+    }
+
+    async fn reconcile_pass(&self) {
         let _one = self.reconciling.lock().await;
         let seen = self.global_mtime();
         let configured = self.instances_config();
