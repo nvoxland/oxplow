@@ -214,6 +214,42 @@ mod tests {
         assert!(reported(svc).await.is_empty());
     }
 
+    /// tsk935: an export whose points say no time is the open turn's, and
+    /// the open effort's.
+    #[tokio::test]
+    async fn an_export_with_no_point_time_is_the_open_turns() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        svc.hook_ingest
+            .ingest(hook(fx.thread, HookKind::UserPromptSubmit))
+            .await
+            .unwrap();
+        let open = open_turn(svc).await;
+        let body = encoded_claude_export_at("claude-opus-4-8", 100, 20, None);
+        assert!(svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap());
+        let events = reported(svc).await;
+        assert_eq!(events[0].envelope.anchors.turn_id, Some(open));
+        assert_eq!(events[0].envelope.anchors.effort_id, Some(fx.effort));
+    }
+
+    /// tsk935: an export measured before the thread's first turn is no
+    /// turn's — and no effort's.
+    #[tokio::test]
+    async fn an_export_before_the_first_turn_is_no_turns() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let before = Timestamp::from_unix_ms(Timestamp::now().unix_ms() - 60_000);
+        svc.hook_ingest
+            .ingest(hook(fx.thread, HookKind::UserPromptSubmit))
+            .await
+            .unwrap();
+        let body = encoded_claude_export_at("claude-opus-4-8", 100, 20, Some(before));
+        assert!(svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap());
+        let events = reported(svc).await;
+        assert_eq!(events[0].envelope.anchors.turn_id, None);
+        assert_eq!(events[0].envelope.anchors.effort_id, None);
+    }
+
     /// An export arrives after the turn it measured has ended and the
     /// next begun: it is that turn's, by its own time window.
     #[tokio::test]

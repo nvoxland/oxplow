@@ -122,6 +122,38 @@ mod tests {
         }
     }
 
+    /// tsk935: a turn a session end closes (an exit mid-turn, tsk449) ends
+    /// at a snapshot too, as one a Stop closes does.
+    #[tokio::test]
+    async fn a_turn_a_session_end_closes_ends_at_a_snapshot() {
+        let f = services_with_effort().await;
+        let svc = &f.svc;
+        let stream = svc.streams.list_streams().await.unwrap()[0].id;
+        let capture = svc.snapshot_captures.get(&stream).unwrap();
+        capture.enqueue_startup_diff().await.unwrap();
+        capture
+            .request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        svc.hook_ingest
+            .ingest(envelope(HookKind::UserPromptSubmit, f.thread))
+            .await
+            .unwrap();
+        let turn = svc.agent_turn_store.list_open(&f.thread).await.unwrap()[0].id;
+        svc.hook_ingest
+            .ingest(HookEnvelope {
+                payload_json: r#"{"reason":"prompt_input_exit"}"#.into(),
+                ..envelope(HookKind::SessionEnd, f.thread)
+            })
+            .await
+            .unwrap();
+        let ops = svc.snapshot_store.list_ops(stream, 5).await.unwrap();
+        assert_eq!(ops[0].trigger, SnapshotTrigger::TurnEnd);
+        assert_eq!(ops[0].turn_id, Some(turn.value()));
+        let ended = svc.agent_turn_store.get(&turn).await.unwrap().unwrap();
+        assert_eq!(ended.snapshot_id, Some(ops[0].snapshot_id));
+    }
+
     #[tokio::test]
     async fn a_turn_ends_at_a_snapshot_and_its_diff_runs_from_where_it_started() {
         let f = services_with_effort().await;

@@ -4628,6 +4628,103 @@ mod tests {
             assert_eq!(diff_pct(&h).await, None);
         }
 
+        /// tsk935: every capture a tool event's run records carries that
+        /// event's turn — coverage, analysis and the nudge alike, not only
+        /// the test run (tsk483).
+        #[tokio::test]
+        async fn coverage_analysis_and_nudge_captures_carry_the_tools_turn() {
+            const ESLINT: &str = r#"[{"filePath":"src/a.ts","messages":[{"ruleId":"r","severity":2,"message":"m","line":1,"column":1}]}]"#;
+            let h = build(Some(COBERTURA_50PCT)).await;
+            std::fs::write(h.tmp.path().join("eslint.json"), ESLINT).unwrap();
+            let mut specs = h.service.report_collectors();
+            specs.push(report_collector(
+                "lint.eslint",
+                "analysis",
+                "oxplow:eslint",
+                "eslint.json",
+                "analysis",
+            ));
+            declare(&h, specs);
+            let thread = h.thread;
+            let turn: i64 =
+                h.db.transaction(move |tx| {
+                    tx.execute(
+                        "INSERT INTO agent_turn (thread_id, prompt, started_at)
+                         VALUES (?1, 'go', '2026-01-01T00:00:00.000000Z')",
+                        [thread.value()],
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                    Ok(tx.last_insert_rowid())
+                })
+                .await
+                .unwrap();
+            for (n, command) in ["bun test", "cargo clippy --workspace"]
+                .into_iter()
+                .enumerate()
+            {
+                let cause = RunCause {
+                    event_id: format!("evt-tool-{n}"),
+                    seq: n as i64,
+                    anchors: oxplow_domain::Anchors {
+                        turn_id: Some(turn),
+                        ..Default::default()
+                    },
+                    at: Timestamp::now(),
+                    started: None,
+                };
+                h.service
+                    .on_post_tool_use(
+                        &h.thread,
+                        &bash_payload(command, 0),
+                        crate::collection::RunOrigin::Tool(&cause),
+                    )
+                    .await
+                    .unwrap();
+            }
+            // A nudge a tool event fires — every nudge goes through here.
+            let cause = RunCause {
+                event_id: "evt-nudge".into(),
+                seq: 9,
+                anchors: oxplow_domain::Anchors {
+                    turn_id: Some(turn),
+                    ..Default::default()
+                },
+                at: Timestamp::now(),
+                started: None,
+            };
+            h.service
+                .persist_nudge(
+                    &h.thread,
+                    None,
+                    "report-less-run",
+                    "m",
+                    "cmd",
+                    crate::collection::RunOrigin::Tool(&cause),
+                )
+                .await;
+            let by_producer: Vec<(String, Option<i64>)> =
+                h.db.transaction(|tx| {
+                    let mut stmt = tx
+                        .prepare("SELECT producer, turn_id FROM metric_capture ORDER BY producer")
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(rows)
+                })
+                .await
+                .unwrap();
+            let producers: Vec<&str> = by_producer.iter().map(|(p, _)| p.as_str()).collect();
+            for wanted in ["coverage", "eslint", "nudges", "test-run"] {
+                assert!(producers.contains(&wanted), "{wanted}: {by_producer:?}");
+            }
+            assert!(
+                by_producer.iter().all(|(_, t)| *t == Some(turn)),
+                "{by_producer:?}"
+            );
+        }
+
         /// tsk884: `cargo llvm-cov` names files by absolute path. They're
         /// read repo-relative, so they diff against the snapshots and their
         /// facts name repo files; a file outside the project is dropped.

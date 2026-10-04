@@ -111,6 +111,19 @@ pub fn parse_every(text: &str) -> Option<std::time::Duration> {
 mod tests {
     use super::*;
 
+    /// tsk935: a time from outside (an OTLP point) past what a timestamp
+    /// can hold is none, never a panic.
+    #[test]
+    fn unix_nanos_out_of_range_is_none() {
+        assert_eq!(Timestamp::from_unix_nanos(i128::MAX), None);
+        assert_eq!(Timestamp::from_unix_nanos(i128::MIN), None);
+        let epoch = Timestamp::from_unix_nanos(0).unwrap();
+        assert_eq!(epoch.unix_nanos(), 0);
+        // An OTLP point's largest time (u64 nanos, the year 2554) holds.
+        let far = Timestamp::from_unix_nanos(u64::MAX as i128).unwrap();
+        assert_eq!(far.unix_nanos(), u64::MAX as i128);
+    }
+
     #[test]
     fn round_trip_unix_ms() {
         let ms = 1_700_000_000_123_i64;
