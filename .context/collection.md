@@ -224,7 +224,10 @@ hook + MCP wiring):
   **The effort the command ran in owns the run** — the event's effort
   anchor ranks after an `OXPLOW_TASK=` token and before the thread's open
   efforts (`resolve_owner`) — so a run the reactor records after `Stop` +
-  the close (`work_item.transition` → done) closed the effort still lands on it. Each run capture logs
+  the close (`work_item.transition` → done) closed the effort still lands on it.
+  A test, coverage or analysis run resolves its owner **once**: the same
+  effort stamps its capture, receives its ledger claim and pins its take
+  (tsk926). Each run capture logs
   `test.run.recorded` (subject `run:<capture>`, anchored to the tool's turn,
   caused by the tool event) and each coverage capture `test.coverage.recorded`
   in the capture's transaction (`SqliteFactStore::record_facts_logged`); the

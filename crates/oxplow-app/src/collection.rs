@@ -1546,7 +1546,7 @@ impl CollectionService {
         vcs_rev: Option<String>,
         vcs_rev_exact: bool,
         detail: Option<serde_json::Value>,
-        turn: Option<i64>,
+        (turn, owning): (Option<i64>, Option<EffortId>),
     ) -> Result<Option<i64>, DomainError> {
         let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
         else {
@@ -1602,13 +1602,10 @@ impl CollectionService {
                     ..NewFact::new(measure.id, 1.0)
                 });
             }
-            // Stamp the owning effort (single-open, matching the run
-            // auto-claim below) so `captures_for_effort` attributes these
+            // Stamp the owning effort — the one the run's ledger claim
+            // names (tsk926) — so `captures_for_effort` attributes these
             // lint facts (tsk37).
-            let owning_val = self
-                .resolve_owning_effort(thread, None)
-                .await
-                .map(|e| e.id.value());
+            let owning_val = owning.map(|e| e.value());
             let mut capture =
                 NewMetricCapture::done(stream_val, analyzer.clone(), source.to_string());
             capture.thread_id = Some(thread.value());
@@ -2566,9 +2563,12 @@ impl CollectionService {
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
-        // The run's effort — for the snapshot pin + panel refresh only;
-        // attribution rides the ledger (auto-claimed below when unambiguous).
-        let effort = self.run_effort(thread, origin).await?;
+        // Resolve the owning effort ONCE (tsk926) — it stamps the capture,
+        // receives the ledger claim and pins the take, as a test or
+        // coverage run's does.
+        let effort = self
+            .resolve_owner(thread, None, anchored_effort(cause), Some(command))
+            .await;
         let mut payload = serde_json::Map::new();
         payload.insert("command".into(), json!(command));
         if !analyzers.is_empty() {
@@ -2638,7 +2638,7 @@ impl CollectionService {
                 closest_vcs_rev.clone(),
                 vcs_rev_exact,
                 Some(serde_json::Value::Object(payload.clone())),
-                origin.turn(),
+                (origin.turn(), effort.as_ref().map(|e| e.id)),
             )
             .await?
         } else {
@@ -2653,13 +2653,8 @@ impl CollectionService {
             vcs_rev_exact,
         );
         // Attribute the run via the unified ledger.
-        if let Some(rid) = run_id {
-            let owner = self
-                .resolve_owner(thread, None, anchored_effort(cause), Some(command))
-                .await;
-            if let Some(effort) = owner.as_ref() {
-                self.claim_run(effort, rid).await;
-            }
+        if let (Some(rid), Some(effort)) = (run_id, effort.as_ref()) {
+            self.claim_run(effort, rid).await;
         }
         Ok(run_id)
     }
@@ -8192,6 +8187,69 @@ mod tests {
                 open.start_snapshot_id,
                 "not the effort's bracket"
             );
+        }
+
+        /// tsk926: an analysis run delivered after its effort closed is
+        /// that effort's — the capture is stamped with the effort the
+        /// ledger claims, one resolution for both.
+        #[tokio::test]
+        async fn a_late_analysis_is_stamped_with_the_effort_it_claims() {
+            let h = build(None).await;
+            let open = h
+                .efforts
+                .find_open_for_thread(&h.thread)
+                .await
+                .unwrap()
+                .unwrap();
+            h.efforts.finish(&open.id, None, None).await.unwrap();
+            let report = oxplow_coverage::AnalysisReport {
+                findings: vec![oxplow_coverage::AnalysisFinding {
+                    path: "src/a.rs".into(),
+                    line: Some(1),
+                    column: None,
+                    severity: oxplow_coverage::Severity::Error,
+                    rule: Some("E0308".into()),
+                    message: "boom".into(),
+                }],
+            };
+            let cause = RunCause {
+                event_id: "evt-late-lint".into(),
+                seq: 0,
+                anchors: oxplow_domain::Anchors {
+                    effort_id: Some(open.id),
+                    ..Default::default()
+                },
+                at: Timestamp::now(),
+                started: None,
+            };
+            let run = h
+                .service
+                .record_static_analysis_caused(
+                    &h.thread,
+                    "eslint .",
+                    Some(&report),
+                    &["eslint".into()],
+                    "analysis-report",
+                    RunOrigin::Tool(&cause),
+                )
+                .await
+                .unwrap()
+                .expect("a capture");
+            let stamped: Option<i64> = h
+                .service
+                .facts
+                .database()
+                .read(move |c| {
+                    c.query_row(
+                        "SELECT effort_id FROM metric_capture WHERE id = ?1",
+                        [run],
+                        |r| r.get(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap();
+            assert_eq!(stamped, Some(open.id.value()));
         }
 
         /// tsk863: a by-hand run of a collector whose report isn't there
