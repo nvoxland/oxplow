@@ -32,6 +32,10 @@ ui:
   commands:
     - { command: oxplow_review.accept, label: Accept Review, about: effort }
     - { command: oxplow_review.request_changes, label: Request Changes, about: effort }
+  # The verdict where the effort is shown: it shows; it never acts.
+  decorators:
+    - { model: verdict, kind: effort, placement: ref-chip, label: label, color: color }
+    - { model: verdict, kind: effort, placement: row-badge, label: label, color: color }
 panels:
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
 models:
@@ -42,6 +46,24 @@ models:
       - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative file path." }
       - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
+  - name: verdicts
+    version: 1
+    key: [seq]
+    materialize: { incremental: seq }
+    description: "Every verdict a reviewer gave (`oxplow_review.verdict`), oldest first — appended as each lands, so reading the latest never scans the log."
+    columns:
+      - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
+      - { name: ref, type: TEXT, doc: "The effort reviewed (`effort:eff<id>`)." }
+      - { name: verdict, type: TEXT, doc: "`accepted` or `changes_requested`." }
+      - { name: forced, type: "", doc: "1 when accepted although claims were unverified or decisions unreviewed." }
+  - name: verdict
+    version: 1
+    key: [ref]
+    description: "Each effort's latest verdict, as its decorators show it: a chip on the effort's page and a badge where a lens row links to it."
+    columns:
+      - { name: ref, type: TEXT, doc: "The effort (`effort:eff<id>`)." }
+      - { name: label, type: TEXT, doc: "`Accepted`, `Accepted (forced)` or `Changes requested`." }
+      - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
 event_types:
   types:
     - type: oxplow_review.verdict

@@ -82,9 +82,9 @@ pub struct SlotMount {
 
 /// `ui:` — everything an extension adds to the core UI (P6b): lenses
 /// mounted into core pages (`slots`, stable), its commands in core menus
-/// (`commands`, stable), decorations on core refs (`decorators`,
-/// experimental) and replaced sub-components (`replacements`,
-/// experimental; `extensions/replacements.rs`).
+/// (`commands`, stable), decorations on core refs (`decorators`, stable
+/// since P10) and replaced sub-components (`replacements`, experimental;
+/// `extensions/replacements.rs`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiBlock {
@@ -334,7 +334,6 @@ pub const EXPERIMENTAL_KINDS: &[&str] = &[
     "effects",
     "ref_kinds",
     "custom_components",
-    "ui.decorators",
     "ui.replacements",
 ];
 
@@ -352,6 +351,7 @@ pub const STABLE_KINDS: &[&str] = &[
     "launcher",
     "ui.slots",
     "ui.commands",
+    "ui.decorators",
     "config",
     "advisories",
     "event_types",
@@ -373,9 +373,6 @@ impl ManifestV2 {
         }
         if present(&self.custom_components) {
             out.push("custom_components");
-        }
-        if present(&self.ui.decorators) {
-            out.push("ui.decorators");
         }
         if present(&self.ui.replacements) {
             out.push("ui.replacements");
@@ -690,6 +687,22 @@ mod tests {
         for kept in ["effects", "ref_kinds", "providers"] {
             assert!(EXPERIMENTAL_KINDS.contains(&kept), "{kept}");
         }
+    }
+
+    /// P10 (K1): `ui.decorators` is stable — oxplow-review's verdict
+    /// chip is its bundled, shared use — so a shared extension may declare
+    /// decorators; the tables still partition the kinds.
+    #[test]
+    fn decorators_is_stable_and_the_tables_partition_the_kinds() {
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  decorators: []\n";
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(STABLE_KINDS.contains(&"ui.decorators"));
+        assert!(!EXPERIMENTAL_KINDS.contains(&"ui.decorators"));
+        assert!(
+            !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
+            "a kind is stable or experimental, not both"
+        );
     }
 
     #[test]

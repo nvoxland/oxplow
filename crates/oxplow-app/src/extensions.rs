@@ -982,8 +982,7 @@ pub struct ExtensionUi {
     pub slots: Vec<LensSlot>,
     /// Commands in core menus, for a page's or a row's ref (valid ones).
     pub commands: Vec<ui_commands::UiCommand>,
-    /// Labels from its models on core refs (experimental: a private
-    /// extension's only; valid ones).
+    /// Labels from its models on core refs (valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
     /// Lenses that take the place of a core sub-component while its
     /// provider is the capability's active one (experimental: a private
@@ -1535,11 +1534,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.errors.extend(errors);
     let panel_files = m.panels.clone();
     let ui_command_files = m.ui.commands.clone();
-    // An experimental kind: a shared manifest's is refused by `check`.
-    let decorator_files =
-        m.ui.decorators
-            .clone()
-            .filter(|_| m.sharing == Sharing::Private);
+    let decorator_files = m.ui.decorators.clone();
     // An experimental kind: a shared manifest's is refused by `check`.
     let replacement_files =
         m.ui.replacements

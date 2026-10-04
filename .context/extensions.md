@@ -574,7 +574,7 @@ ui:                  # what it adds to the core UI
   slots:             # lenses mounted into core pages; see "Slots"
     - { slot: effort.review.details, lens: change-review }
   commands: …        # its commands in core menus (stable; P6b)
-  decorators: …      # experimental: a private extension only
+  decorators: …      # labels from its models on core refs (stable since P10; see "Decorators")
   replacements: …    # experimental: a lens in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
 launcher:            # entries for non-lens targets; a lens uses its own launcher: block
@@ -591,7 +591,7 @@ event_types: …      # its own namespace's event types (see "Event types", P8)
 ref_kinds: …        # kinds of thing a ref can name (see "Ref kinds", P8)
 effects: …          # scripts reacting to logged events by composing commands (see "Effects", P8)
 custom_components: …   # sandboxed components for `viz: custom` lenses (see "Custom components")
-# and ui.decorators / ui.replacements above
+# and ui.replacements above
 ```
 
 Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
@@ -1306,11 +1306,10 @@ component <name>` scaffolds a private extension — the component, its
 tests clean (`just_works.rs`). The reference is in
 `docs/guide/lenses.md`.
 
-## Decorators (experimental)
+## Decorators
 
-`ui.decorators` (a private extension only, P6b.C5;
-`extensions/decorators.rs`) put labels from one of the extension's
-**models** on core refs:
+`ui.decorators` (P6b.C5; **stable since P10**; `extensions/decorators.rs`)
+put labels from one of the extension's **models** on core refs:
 
 ```yaml
 ui:
@@ -1331,6 +1330,16 @@ navigation context). `row-badge`: a `RefBadge` (tone `label`) after a
 lens cell that links to a listed ref. A color is used only when it's a
 plain one (`#rgb…` or a CSS color name, `safeColor`). Decorations are
 additive: a decorator whose query fails shows nothing.
+
+**Promoted to stable (P10)** on its first-party use: bundled oxplow-review
+shows each effort's latest verdict on the effort — a `ref-chip` on its
+page and a `row-badge` where a lens row links to it. Its model `verdict`
+(`Accepted`, `Accepted (forced)` or `Changes requested`; green, orange,
+red) reads `verdicts`, which keeps every `oxplow_review.verdict@1`
+(`materialize: { incremental: seq }`, appended as each lands — so the
+decorator never re-reads the event log). It shows; it never acts.
+`STABLE_KINDS` lists `ui.decorators`; a shared extension may declare
+them.
 
 ## Event types
 
@@ -1371,7 +1380,8 @@ a removed type's rows stay readable. `STABLE_KINDS` lists it;
 `EXPERIMENTAL_KINDS` keeps `effects` (its contract just changed —
 attempts, retry, backfill — and no first-party extension acts yet),
 `ref_kinds` (no shared extension needs a new kind), `providers`,
-`custom_components`, `ui.decorators` and `ui.replacements`.
+`custom_components` and `ui.replacements` (`ui.decorators` was promoted
+in P10, "Decorators").
 
 **Retention** (P8.D5) is the namespace's window for payloads and large
 content (data-model.md "event_log" retention): either omitted part is the

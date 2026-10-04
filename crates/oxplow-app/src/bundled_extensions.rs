@@ -76,6 +76,8 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-review", "handlers/accept.star"),
             ext_file!("oxplow-review", "handlers/request_changes.star"),
             ext_file!("oxplow-review", "models/deviation.sql"),
+            ext_file!("oxplow-review", "models/verdicts.sql"),
+            ext_file!("oxplow-review", "models/verdict.sql"),
             ext_file!("oxplow-review", "lenses/context-read.yaml"),
             ext_file!("oxplow-review", "lenses/decisions.yaml"),
             ext_file!("oxplow-review", "lenses/inferred-decisions.yaml"),
@@ -1425,5 +1427,108 @@ mod tests {
         .await;
         assert!(again.is_err());
         assert_eq!(verdicts().await.as_array().unwrap().len(), 2);
+    }
+
+    /// P10 (K1): oxplow-review shows the verdict where the effort is shown
+    /// — the first bundled use of `ui.decorators`, which made it stable.
+    /// Its `verdict` model is each effort's latest verdict (over
+    /// `verdicts`, appended as each lands), as a label and a color the
+    /// effort's chip and rows show. It shows; it never acts.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_verdict_decorates_its_effort() {
+        let f = review_fixture().await;
+        let review_ext = f
+            .svc
+            .listed_extensions(f._dir.path())
+            .await
+            .into_iter()
+            .find(|e| e.name == "oxplow-review")
+            .unwrap();
+        assert_eq!(review_ext.errors, Vec::<String>::new());
+        use crate::extensions::decorators::DecoratorPlacement;
+        let decorators: Vec<(&str, &str, DecoratorPlacement)> = review_ext
+            .ui
+            .decorators
+            .iter()
+            .map(|d| (d.view.as_str(), d.kind.as_str(), d.placement))
+            .collect();
+        assert_eq!(
+            decorators,
+            vec![
+                (
+                    "v_oxplow_review_verdict",
+                    "effort",
+                    DecoratorPlacement::RefChip
+                ),
+                (
+                    "v_oxplow_review_verdict",
+                    "effort",
+                    DecoratorPlacement::RowBadge
+                )
+            ]
+        );
+        // What keeps `verdicts` current in the app (boot starts it): each
+        // verdict appended to the log lands in the model.
+        crate::models_changed::spawn(
+            f.svc.db.clone(),
+            std::sync::Arc::new(crate::models_changed::ModelWatermarks::default()),
+            f.svc.events.clone(),
+            f.svc.assets.clone(),
+            f.svc.event_pump.clone(),
+        );
+        let shown = || async {
+            f.svc
+                .sql
+                .query_sql(
+                    "SELECT ref, label, color FROM v_oxplow_review_verdict",
+                    vec![],
+                    None,
+                )
+                .await
+                .map(|r| serde_json::to_value(&r.rows).unwrap())
+                .unwrap_or_default()
+        };
+        let until = |want: serde_json::Value| async move {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let rows = shown().await;
+                    if rows == want {
+                        return;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("never showed {want}"))
+        };
+        let human = oxplow_domain::Actor::Human;
+        review(
+            &f,
+            &human,
+            "oxplow_review.request_changes",
+            serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
+        )
+        .await
+        .unwrap();
+        until(serde_json::json!([[
+            effort_ref(&f),
+            "Changes requested",
+            "red"
+        ]]))
+        .await;
+        review(
+            &f,
+            &human,
+            "oxplow_review.accept",
+            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+        )
+        .await
+        .unwrap();
+        until(serde_json::json!([[
+            effort_ref(&f),
+            "Accepted (forced)",
+            "orange"
+        ]]))
+        .await;
     }
 }

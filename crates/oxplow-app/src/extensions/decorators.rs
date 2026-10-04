@@ -1,4 +1,4 @@
-//! `ui.decorators` (experimental — a private extension only; P6b.C5):
+//! `ui.decorators` (P6b.C5; stable since P10, on oxplow-review's verdict):
 //! labels from one of the extension's models shown on core refs — a chip
 //! on a page whose ref the model lists (`ref-chip`), a badge after a lens
 //! cell that links to one (`row-badge`). Additive: a page is complete
@@ -210,19 +210,15 @@ mod tests {
         }
     }
 
+    /// P10: stable, so a shared extension's decorators load like a
+    /// private one's.
     #[test]
-    fn a_shared_extension_may_not_declare_decorators() {
+    fn a_shared_extension_may_declare_decorators() {
         let ext = load(
             "shared",
             "    - { model: flags, kind: work_item, placement: ref-chip, label: label }\n",
         );
-        assert!(
-            ext.errors
-                .join("\n")
-                .contains("`ui.decorators` is experimental"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(ext.ui.decorators.is_empty());
+        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(ext.ui.decorators.len(), 1);
     }
 }

@@ -2575,10 +2575,7 @@ export type ExtensionUi = {
 	slots: LensSlot[],
 	// Commands in core menus, for a page's or a row's ref (valid ones).
 	commands: UiCommand[],
-	/**
-	 *  Labels from its models on core refs (experimental: a private
-	 *  extension's only; valid ones).
-	 */
+	// Labels from its models on core refs (valid ones).
 	decorators: UiDecorator[],
 	/**
 	 *  Lenses that take the place of a core sub-component while its

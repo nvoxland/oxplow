@@ -22,8 +22,29 @@ mock.module("../api.js", () => ({
         decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", kind: "work_item", placement: "ref-chip", label: "label", color: "color" }],
       },
     },
+    // P10 (K1): oxplow-review's verdict, on the effort it was given on.
+    {
+      name: "oxplow-review",
+      enabled: true,
+      ui: {
+        slots: [],
+        commands: [],
+        decorators: [
+          { id: "oxplow-review/0", extension: "oxplow-review", view: "v_oxplow_review_verdict", kind: "effort", placement: "ref-chip", label: "label", color: "color" },
+        ],
+      },
+    },
   ],
   querySql: async (sql: string, ...rest: unknown[]) => {
+    if (sql.includes("FROM v_oxplow_review_verdict")) {
+      return {
+        columns: ["ref", "label", "color"],
+        rows: [["effort:eff7", "Changes requested", "red"]],
+        truncated: false,
+        reads: { models: ["v_oxplow_review_verdict"], tables: [], measures: [] },
+        freshness: {},
+      };
+    }
     if (!sql.includes("FROM v_flags_flags")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
     queries.push(sql);
     return {
@@ -72,4 +93,17 @@ test("a disabled extension decorates nothing", async () => {
   await new Promise((r) => setTimeout(r, 30));
   expect(view.getByTestId("page-chips").textContent).toBe("todo");
   expect(queries).toHaveLength(0);
+});
+
+// An effort opens as its diff, the effort's ref in the navigation.
+test("an effort page shows its review verdict as a chip", async () => {
+  const effortNav = { ...nav, ask: { ref: "effort:eff7", streamId: null } } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={effortNav}>
+      <Page title="Changes" kind="diff-view" chips={[{ label: "closed" }]}>
+        body
+      </Page>
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(view.getByTestId("page-chips").textContent).toBe("closedChanges requested"));
 });
