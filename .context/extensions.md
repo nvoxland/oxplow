@@ -1708,6 +1708,20 @@ catalog's `Arc`), not per event: an edit reloads the catalog, so it's
 hashed again and stops the effect (tsk798). The approvals file is read
 on each check, so revoking one takes effect at once.
 
+**A bundled extension's effect is approved the same way** (P11, tsk953).
+What an approval covers is read through one resolver,
+`extensions::files_at(project_dir, path)`: a bundled extension's
+embedded files for `bundled:<name>`, else the folder on disk. The digest
+(`exec_consent::files_hash`, over `ExtensionFiles::paths` / `bytes`) is
+the same for a folder and its embedded copy, and stays byte-identical
+for folders (path order component by component; pinned by
+`a_folders_digest_is_pinned`). So a bundled effect has a version to
+approve, there is no bundled branch in the gate, and a new oxplow that
+changes the extension's files asks again. Settings → Data says the
+effect comes with oxplow and offers **Read the script** — the
+`program_source` RPC (UI only) returns any program's entry from where it
+lives.
+
 **Running** (P8.D10, `effect_triggers.rs`): one async pump consumer,
 `effect.triggers` (registered at boot beside `collector.triggers`, with
 the same `after`/`after_for` handling of each effect's `after:` — one

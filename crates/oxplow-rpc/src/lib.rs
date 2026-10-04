@@ -285,6 +285,7 @@ macro_rules! oxplow_command_table {
                 list_project_programs => $crate::commands::collectors::list_project_programs {} -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
                 provider_declaration_effects => $crate::commands::collectors::provider_declaration_effects { instance: String } -> ::oxplow_app::extension_effects::ProviderEffect,
                 approve_project_program => $crate::commands::collectors::approve_project_program { kind: ::oxplow_app::exec_consent::ProgramKind, name: String, version: String } -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
+                program_source => $crate::commands::collectors::program_source { kind: ::oxplow_app::exec_consent::ProgramKind, name: String } -> String,
                 // providers (Settings → Integrations)
                 list_provider_instances => $crate::commands::providers::list_provider_instances {} -> Vec<::oxplow_app::providers::ProviderInstanceView>,
                 check_provider_instance => $crate::commands::providers::check_provider_instance { instance: String, config: ::oxplow_domain::Json } -> ::oxplow_app::providers::ProviderInstanceView,

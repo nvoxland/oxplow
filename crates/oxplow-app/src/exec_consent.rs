@@ -314,28 +314,25 @@ impl ProjectProgram {
                     h.update([6u8]);
                 } else {
                     h.update([0u8]);
-                    h.update(std::fs::read(&file)?);
+                    h.update(self.entry_bytes(project_dir)?);
                 }
-                let dir = project_dir.join(self.tree.as_deref().unwrap_or_default());
                 h.update([2u8]);
                 h.update(
-                    tree_hash_except(&dir, &|rel| {
+                    files_hash(&*self.files(project_dir)?, &|rel| {
                         rel == Path::new("extension.yaml") || rel.starts_with("lenses")
                     })?
                     .as_bytes(),
                 );
             }
             // The script, and every file of its extension: the manifest
-            // says when and with what it runs.
+            // says when and with what it runs. A bundled extension's are
+            // its embedded files, hashed alike (tsk953).
             ProgramKind::Effect => {
                 h.update(self.program.as_bytes());
                 h.update([0u8]);
-                h.update(std::fs::read(&file)?);
+                h.update(self.entry_bytes(project_dir)?);
                 h.update([2u8]);
-                h.update(
-                    tree_hash(&project_dir.join(self.tree.as_deref().unwrap_or_default()))?
-                        .as_bytes(),
-                );
+                h.update(files_hash(&*self.files(project_dir)?, &|_| false)?.as_bytes());
             }
             ProgramKind::AcpAgent => {
                 h.update(self.program.as_bytes());
@@ -370,6 +367,36 @@ impl ProjectProgram {
     }
 }
 
+impl ProjectProgram {
+    /// Its extension's files (`tree`), on disk or embedded.
+    fn files(
+        &self,
+        project_dir: &Path,
+    ) -> std::io::Result<Box<dyn crate::extensions::ExtensionFiles>> {
+        crate::extensions::files_at(project_dir, self.tree.as_deref().unwrap_or_default())
+    }
+
+    /// Its entry's text, for a person to read before approving: a bundled
+    /// extension's from its embedded files (tsk953).
+    pub fn source(&self, project_dir: &Path) -> std::io::Result<String> {
+        Ok(String::from_utf8_lossy(&self.entry_bytes(project_dir)?).into_owned())
+    }
+
+    /// Its entry's bytes: a file of its extension when it's under `tree`
+    /// (a bundled one's is embedded), else a project file.
+    fn entry_bytes(&self, project_dir: &Path) -> std::io::Result<Vec<u8>> {
+        let in_tree = self.tree.as_deref().and_then(|tree| {
+            self.program
+                .strip_prefix(tree.trim_end_matches('/'))
+                .and_then(|rest| rest.strip_prefix('/'))
+        });
+        match in_tree {
+            Some(rel) => self.files(project_dir)?.bytes(rel),
+            None => std::fs::read(project_dir.join(&self.program)),
+        }
+    }
+}
+
 /// Most files and bytes [`tree_hash`] covers; a bigger directory can't be
 /// approved as a whole (move the script into its own directory).
 const TREE_MAX_FILES: usize = 500;
@@ -387,44 +414,41 @@ pub fn tree_hash(dir: &Path) -> std::io::Result<String> {
 /// [`tree_hash`] leaving out files whose path relative to `dir` `skip`
 /// accepts.
 pub fn tree_hash_except(dir: &Path, skip: &dyn Fn(&Path) -> bool) -> std::io::Result<String> {
+    files_hash(&crate::extensions::Disk(dir.to_path_buf()), skip)
+}
+
+/// SHA-256 over an extension's files (relative path + content, in path
+/// order), leaving out those `skip` accepts — alike for a folder on disk
+/// and a bundled extension's embedded copy of the same files (tsk953).
+pub(crate) fn files_hash(
+    files: &dyn crate::extensions::ExtensionFiles,
+    skip: &dyn Fn(&Path) -> bool,
+) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
-    let mut files: Vec<std::path::PathBuf> = Vec::new();
-    for entry in walkdir::WalkDir::new(dir).follow_links(false) {
-        let entry = entry.map_err(std::io::Error::other)?;
-        let rel = entry.path().strip_prefix(dir).unwrap_or(entry.path());
-        if entry.path_is_symlink() {
-            // Its target isn't in what was approved, and can change freely.
-            return Err(std::io::Error::other(format!(
-                "{} is a symlink; a program's folder can't contain symlinks to be approved \
-                 (copy the file in instead)",
-                entry.path().display()
-            )));
-        }
-        let noise = entry.file_name() == ".DS_Store";
-        if entry.file_type().is_file() && !noise && !skip(rel) {
-            files.push(entry.into_path());
-        }
-    }
-    files.sort();
-    if files.len() > TREE_MAX_FILES {
+    let mut paths: Vec<String> = files
+        .paths()?
+        .into_iter()
+        .filter(|rel| !skip(Path::new(rel)))
+        .collect();
+    // Path order, component by component (`a/b` before `a-b/x`), as the
+    // disk walk always sorted: the digests people approved against.
+    paths.sort_by(|a, b| Path::new(a).cmp(Path::new(b)));
+    if paths.len() > TREE_MAX_FILES {
         return Err(std::io::Error::other(format!(
-            "{} has more than {TREE_MAX_FILES} files to approve; give the program its own directory",
-            dir.display()
+            "more than {TREE_MAX_FILES} files to approve; give the program its own directory"
         )));
     }
     let mut h = Sha256::new();
     let mut total = 0u64;
-    for f in files {
-        let bytes = std::fs::read(&f)?;
+    for rel in paths {
+        let bytes = files.bytes(&rel)?;
         total += bytes.len() as u64;
         if total > TREE_MAX_BYTES {
-            return Err(std::io::Error::other(format!(
-                "{} is too large to approve as a whole; give the program its own directory",
-                dir.display()
-            )));
+            return Err(std::io::Error::other(
+                "too large to approve as a whole; give the program its own directory",
+            ));
         }
-        let rel = f.strip_prefix(dir).unwrap_or(&f);
-        h.update(rel.to_string_lossy().as_bytes());
+        h.update(rel.as_bytes());
         h.update([0u8]);
         h.update(&bytes);
         h.update([0u8]);
@@ -741,6 +765,140 @@ pub fn approve_program(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder whose order differs as strings and as paths (`a-b/x` sorts
+    /// before `a/b` as text, after it as path components), dot-files and
+    /// all.
+    fn pin_folder(dir: &Path) {
+        for (rel, body) in [
+            ("a/b", "one"),
+            ("a-b/x", "two"),
+            (".hidden", "three"),
+            ("effects/run.star", "def transform(x):\n    return {}\n"),
+        ] {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+    }
+
+    /// tsk953: an approval's digest of a folder on disk is the one people
+    /// approved against — it must not move, or every approval lapses.
+    #[test]
+    fn a_folders_digest_is_pinned() {
+        let dir = tempfile::tempdir().unwrap();
+        pin_folder(dir.path());
+        assert_eq!(tree_hash(dir.path()).unwrap(), PINNED_DIGEST);
+    }
+
+    const PINNED_DIGEST: &str = "d5f817bd20dd343db4f8f6e30743b005d14604c1ae43dab78e55dde3836ffa4b";
+
+    /// tsk953: a bundled extension's files are hashed as they're embedded,
+    /// alike with the same files on disk — so a bundled effect can be
+    /// approved, and its approval means what a folder's would.
+    #[test]
+    fn a_folder_and_its_embedded_copy_hash_alike() {
+        let review = crate::bundled_extensions::BUNDLED
+            .iter()
+            .find(|b| b.name == "oxplow-review")
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for (rel, body) in review.files {
+            let path = dir.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let none = |_: &Path| false;
+        let embedded = files_hash(
+            &*crate::extensions::files_at(dir.path(), "bundled:oxplow-review").unwrap(),
+            &none,
+        )
+        .unwrap();
+        assert_eq!(embedded, tree_hash(dir.path()).unwrap());
+        assert_eq!(
+            files_hash(
+                &*crate::extensions::files_at(Path::new("/"), dir.path().to_str().unwrap())
+                    .unwrap(),
+                &none
+            )
+            .unwrap(),
+            embedded
+        );
+        // An effect program in a bundled extension has a version to approve.
+        let program = ProjectProgram {
+            kind: ProgramKind::Effect,
+            name: "oxplow-review/x".into(),
+            program: "bundled:oxplow-review/extension.yaml".into(),
+            args: Vec::new(),
+            env: Vec::new(),
+            credentials: Vec::new(),
+            network: Vec::new(),
+            tree: Some("bundled:oxplow-review".into()),
+            remote: false,
+            approved: false,
+            version: None,
+        };
+        assert!(program.hash(dir.path()).is_ok());
+    }
+
+    /// tsk953: a person reads what they're asked to approve where it lives —
+    /// a bundled program's entry from its embedded files.
+    #[test]
+    fn a_programs_source_is_read_where_it_lives() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundled = ProjectProgram {
+            kind: ProgramKind::Effect,
+            name: "oxplow-review/x".into(),
+            program: "bundled:oxplow-review/extension.yaml".into(),
+            args: Vec::new(),
+            env: Vec::new(),
+            credentials: Vec::new(),
+            network: Vec::new(),
+            tree: Some("bundled:oxplow-review".into()),
+            remote: false,
+            approved: false,
+            version: None,
+        };
+        assert!(bundled
+            .source(dir.path())
+            .unwrap()
+            .contains("name: oxplow-review"));
+        std::fs::create_dir_all(dir.path().join("oxplow/extensions/acme/effects")).unwrap();
+        std::fs::write(
+            dir.path().join("oxplow/extensions/acme/effects/run.star"),
+            "def transform(x): pass\n",
+        )
+        .unwrap();
+        let disk = ProjectProgram {
+            program: "oxplow/extensions/acme/effects/run.star".into(),
+            tree: Some("oxplow/extensions/acme".into()),
+            ..bundled
+        };
+        assert_eq!(disk.source(dir.path()).unwrap(), "def transform(x): pass\n");
+    }
+
+    /// tsk953: what an embedded extension's approval covers is every file:
+    /// a new oxplow that changes one asks again.
+    #[test]
+    fn a_changed_embedded_file_changes_the_hash() {
+        let leak = |files: Vec<(&'static str, &'static str)>| -> &'static crate::bundled_extensions::BundledExtension {
+            Box::leak(Box::new(crate::bundled_extensions::BundledExtension {
+                name: "acme",
+                files: Box::leak(files.into_boxed_slice()),
+            }))
+        };
+        let before = leak(vec![
+            ("extension.yaml", "name: acme"),
+            ("effects/run.star", "one"),
+        ]);
+        let after = leak(vec![
+            ("extension.yaml", "name: acme"),
+            ("effects/run.star", "two"),
+        ]);
+        let none = |_: &Path| false;
+        let hash = |b| files_hash(&crate::extensions::Embedded(b), &none).unwrap();
+        assert_ne!(hash(before), hash(after));
+    }
 
     /// A store outside `dir`'s project tree, with an in-memory keychain.
     fn store(home: &Path, project: &Path) -> ApprovalStore {

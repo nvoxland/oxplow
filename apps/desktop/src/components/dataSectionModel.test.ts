@@ -102,6 +102,29 @@ test("programRow shows an effect as reacting to events from approval on (P8.D9)"
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("events logged after you approve");
   expect(m.approveTitle).toContain("every file in oxplow/extensions/acme");
+  expect(m.bundled).toBe(false);
+});
+
+// tsk953: a bundled extension's effect is approved like any other; its
+// files come with oxplow, so a new oxplow that changes them asks again.
+test("programRow says a bundled effect asks again when a new oxplow changes it", () => {
+  const m = programRow({
+    kind: "effect",
+    name: "oxplow-review/verify-unchecked",
+    program: "bundled:oxplow-review/effects/verify.star",
+    args: [],
+    env: [],
+    credentials: [],
+    network: [],
+    tree: "bundled:oxplow-review",
+    remote: false,
+    approved: false,
+    version: "abc",
+  });
+  expect(m.bundled).toBe(true);
+  expect(m.command).toBe("effects/verify.star, part of oxplow-review (comes with oxplow)");
+  expect(m.approveTitle).toContain("comes with oxplow");
+  expect(m.approveTitle).toContain("A new oxplow that changes it asks again");
 });
 
 import { backfillAsk, backfillDone, backfillRunLabel, canApprove, providerEffectLines } from "./dataSectionModel.js";

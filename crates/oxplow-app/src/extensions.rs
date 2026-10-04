@@ -1092,10 +1092,38 @@ pub fn read_extension_file(root: &Path, name: &str, rel: &str) -> Option<String>
     Disk(root.join(EXTENSIONS_DIR).join(name)).read(rel)
 }
 
-/// Where an extension's files come from.
-trait ExtensionFiles {
+/// The files at an extension's `path` as a listing gives it: a bundled
+/// extension's embedded files for `bundled:<name>`, else the folder
+/// `project_dir/path` on disk — one resolver, so what an approval covers is
+/// read the same way wherever the extension lives (tsk953).
+pub(crate) fn files_at(project_dir: &Path, path: &str) -> std::io::Result<Box<dyn ExtensionFiles>> {
+    match path.strip_prefix("bundled:") {
+        Some(name) => crate::bundled_extensions::BUNDLED
+            .iter()
+            .find(|b| b.name == name.trim_end_matches('/'))
+            .map(|b| Box::new(Embedded(b)) as Box<dyn ExtensionFiles>)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("no bundled extension `{name}`"),
+                )
+            }),
+        None => Ok(Box::new(Disk(project_dir.join(path)))),
+    }
+}
+
+/// Where an extension's files come from: a folder on disk, a bundled
+/// extension's embedded files, or one revision's in memory.
+pub(crate) trait ExtensionFiles {
     /// Contents of a file, by path inside the extension folder.
     fn read(&self, rel: &str) -> Option<String>;
+    /// Every file's path inside the extension folder (`/`-separated), what
+    /// an approval covers. On disk, dot-files included and macOS's
+    /// `.DS_Store` left out; a symlink is an error — its target isn't what
+    /// was approved, and can change freely.
+    fn paths(&self) -> std::io::Result<Vec<String>>;
+    /// A file's bytes, by path inside the extension folder.
+    fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>>;
     /// File names directly inside `dir` (e.g. `lenses`).
     fn list(&self, dir: &str) -> Vec<String>;
     /// What the folder `rel` holds, for a custom component's bundle;
@@ -1103,11 +1131,32 @@ trait ExtensionFiles {
     fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook;
 }
 
-struct Disk(std::path::PathBuf);
+pub(crate) struct Disk(pub(crate) std::path::PathBuf);
 
 impl ExtensionFiles for Disk {
     fn read(&self, rel: &str) -> Option<String> {
         std::fs::read_to_string(self.0.join(rel)).ok()
+    }
+    fn paths(&self) -> std::io::Result<Vec<String>> {
+        let mut out = Vec::new();
+        for entry in walkdir::WalkDir::new(&self.0).follow_links(false) {
+            let entry = entry.map_err(std::io::Error::other)?;
+            if entry.path_is_symlink() {
+                return Err(std::io::Error::other(format!(
+                    "{} is a symlink; a program's folder can't contain symlinks to be approved \
+                     (copy the file in instead)",
+                    entry.path().display()
+                )));
+            }
+            if entry.file_type().is_file() && entry.file_name() != ".DS_Store" {
+                let rel = entry.path().strip_prefix(&self.0).unwrap_or(entry.path());
+                out.push(rel.to_string_lossy().into_owned());
+            }
+        }
+        Ok(out)
+    }
+    fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
+        std::fs::read(self.0.join(rel))
     }
     fn list(&self, dir: &str) -> Vec<String> {
         std::fs::read_dir(self.0.join(dir))
@@ -1150,6 +1199,15 @@ impl Tree {
 impl ExtensionFiles for Tree {
     fn read(&self, rel: &str) -> Option<String> {
         self.0.get(rel).cloned()
+    }
+    fn paths(&self) -> std::io::Result<Vec<String>> {
+        Ok(self.0.keys().cloned().collect())
+    }
+    fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
+        self.0
+            .get(rel)
+            .map(|t| t.clone().into_bytes())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, rel.to_string()))
     }
     /// What `dir` holds directly: its files, and the folders on the way to
     /// deeper ones, as a directory listing would show them.
@@ -1337,7 +1395,7 @@ pub async fn effects_between(
     .await
 }
 
-struct Embedded(&'static crate::bundled_extensions::BundledExtension);
+pub(crate) struct Embedded(pub(crate) &'static crate::bundled_extensions::BundledExtension);
 
 impl ExtensionFiles for Embedded {
     fn read(&self, rel: &str) -> Option<String> {
@@ -1346,6 +1404,14 @@ impl ExtensionFiles for Embedded {
             .iter()
             .find(|(p, _)| *p == rel)
             .map(|(_, c)| (*c).to_string())
+    }
+    fn paths(&self) -> std::io::Result<Vec<String>> {
+        Ok(self.0.files.iter().map(|(p, _)| (*p).to_string()).collect())
+    }
+    fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
+        self.read(rel)
+            .map(String::into_bytes)
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, rel.to_string()))
     }
     fn list(&self, dir: &str) -> Vec<String> {
         let prefix = format!("{dir}/");

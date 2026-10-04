@@ -879,6 +879,12 @@ export async function approveProjectProgram(
   return unwrap(await commands.approveProjectProgram(kind, name, version));
 }
 
+/// A program's entry, to read before approving it (a bundled extension's
+/// comes from its embedded files).
+export async function programSource(kind: ProgramKind, name: string): Promise<string> {
+  return unwrap(await commands.programSource(kind, name));
+}
+
 /// Extension providers' instances on this machine, with health
 /// (Settings → Integrations).
 export async function listProviderInstances(): Promise<ProviderInstanceView[]> {

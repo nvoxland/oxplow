@@ -237,6 +237,10 @@ pub const MANIFEST: &[Capability] = &[
         "consent to run a program from the repo is a person's (tsk331)",
     ),
     ui(
+        "program_source",
+        "a person reads what they're asked to approve; an agent reads its worktree's files",
+    ),
+    ui(
         "provider_declaration_effects",
         "what a provider's approval would change, shown before a person approves it (P6b.E3)",
     ),

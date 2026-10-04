@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   approveProjectProgram,
+  programSource,
   listDataEntities,
   providerDeclarationEffects,
   listProjectPrograms,
@@ -288,6 +289,7 @@ export function DataSection() {
                   </button>
                 )}
               </div>
+              {m.bundled ? <ProgramSource rowKey={m.key} program={p} /> : null}
               {p.kind === "effect" && p.approved ? <BackfillAction rowKey={m.key} effect={p.name} /> : null}
               {effect === "loading" ? (
                 <div style={mutedStyle}>Comparing its declarations…</div>
@@ -465,6 +467,37 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
       >
         {planned > 0 ? "Cancel" : "Close"}
       </button>
+    </div>
+  );
+}
+
+/** A bundled program's entry, shown on request: its files come with
+ *  oxplow, so this is where a person reads what they approve (tsk953). */
+function ProgramSource({ rowKey, program }: { rowKey: string; program: ProjectProgram }) {
+  const [source, setSource] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  async function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    try {
+      setSource(await programSource(program.kind, program.name));
+      setOpen(true);
+    } catch (e) {
+      recordOpError({ label: `Read ${program.name}`, message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return (
+    <div>
+      <button type="button" data-testid={`program-source-toggle-${rowKey}`} onClick={() => void toggle()}>
+        {open ? "Hide the script" : "Read the script"}
+      </button>
+      {open && source !== null ? (
+        <pre data-testid={`program-source-${rowKey}`} style={{ ...mutedStyle, whiteSpace: "pre-wrap", margin: "4px 0 0" }}>
+          {source}
+        </pre>
+      ) : null}
     </div>
   );
 }

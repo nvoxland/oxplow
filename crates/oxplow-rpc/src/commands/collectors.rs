@@ -66,6 +66,24 @@ pub async fn list_project_programs(
     ))
 }
 
+/// The entry of one of the project's programs (`kind`, `name`), for a
+/// person to read before approving it — a bundled extension's from its
+/// embedded files (tsk953). UI only.
+pub async fn program_source(
+    svc: &Services,
+    kind: oxplow_app::exec_consent::ProgramKind,
+    name: String,
+) -> Result<String, IpcError> {
+    let programs = list_project_programs(svc).await?;
+    let program = programs
+        .iter()
+        .find(|p| p.kind == kind && p.name == name)
+        .ok_or_else(|| IpcError::invalid(format!("no program `{name}`")))?;
+    program
+        .source(&svc.layout.project_dir)
+        .map_err(|e| IpcError::invalid(format!("couldn't read `{name}`: {e}")))
+}
+
 /// The primary worktree's extensions, whose advisories are approved here.
 async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extension> {
     let root = svc.worktrees.resolve(None).await;
@@ -143,6 +161,41 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// tsk953: a person reads a program's entry before approving it — an
+    /// effect's script, wherever its extension lives.
+    #[tokio::test]
+    async fn a_programs_source_dispatches() {
+        let (svc, _dir) = crate::test_support::services();
+        let ext = svc.layout.project_dir.join("oxplow/extensions/acme");
+        std::fs::create_dir_all(ext.join("effects")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Effects., origin: null, examples: [] }\neffects:\n  - id: look\n    summary: Looks.\n    on: [work_item.created]\n    entry: effects/look.star\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("effects/look.star"),
+            "def transform(x):\n    return {}\n",
+        )
+        .unwrap();
+        let source = crate::dispatch(
+            "program_source",
+            serde_json::json!({ "kind": "effect", "name": "acme/look" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(source, "def transform(x):\n    return {}\n");
+        let err = crate::dispatch(
+            "program_source",
+            serde_json::json!({ "kind": "effect", "name": "acme/nope" }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID");
     }
 
     #[tokio::test]
