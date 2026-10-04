@@ -106,6 +106,7 @@ mock.module("../api.js", () => ({
   },
   completeOauthSignIn: async (_inst: string, _name: string, redirect: string) => {
     steps.push(`complete ${redirect}`);
+    if (redirect.includes("lost")) throw new Error("the connection to the daemon was lost");
     return redirect.includes("forged")
       ? { outcome: "not_this_sign_in", reason: "this isn't the sign-in oxplow started" }
       : { outcome: "signed_in" };
@@ -244,7 +245,8 @@ test("a signed-in credential has a Sign in button and no value box", async () =>
     "complete /callback?code=c&state=abc",
     "answer 1 signed_in",
   ]);
-  await waitFor(() => expect(row.textContent).toContain("Finish signing in in your browser"));
+  // Signed in: the row stops waiting (oxplow's news then re-reads it).
+  await waitFor(() => expect(row.textContent).not.toContain("Finish signing in in your browser"));
 
   // It came to nothing: why, on the row.
   const hear = (error: string | null) =>
@@ -328,6 +330,20 @@ test("Sign in is off without the desktop app", async () => {
   expect(button.title).toContain("desktop app");
   fireEvent.click(button);
   expect(steps).toEqual([]);
+});
+
+// tsk906: a completion that fails without the core announcing it (the
+// connection to a remote daemon lost) shows on the row, and the row stops
+// waiting.
+test("a failed completion shows on its row", async () => {
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: null }];
+  const view = render(<IntegrationsSection />);
+  const row = await waitFor(() => view.getByTestId("sign-in-tracker/fake-FAKE_TOKEN"));
+  redirects = ["/callback?code=c&state=lost"];
+  fireEvent.click(view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"));
+  await waitFor(() => expect(steps.at(-1)).toBe("answer 1 failed"));
+  await waitFor(() => expect(row.textContent).toContain("the connection to the daemon was lost"));
+  expect(row.textContent).not.toContain("Finish signing in in your browser");
 });
 
 // tsk905: Sign in again while one is under way: the old listener is

@@ -2322,9 +2322,13 @@ impl ProviderRegistry {
     /// `redirect` is the path and query the browser asked for. One that
     /// isn't that sign-in's is refused and the sign-in waits on; one that
     /// is ends it — the code exchanged (the provider re-checked as
-    /// approved, with the declaration it began with) and the token kept,
-    /// the instance restarted on it, and the renderer told
-    /// (`CredentialChanged`). With no sign-in under way (never begun,
+    /// approved, with the declaration it began with) and the token kept —
+    /// and answers then, so the browser hears at once; the instance
+    /// restarts on it afterwards and the renderer is told
+    /// (`CredentialChanged`) when it has (tsk906). Once the sign-in is
+    /// taken off the waiting list the finish runs to its end even if the
+    /// caller goes away (a dropped connection to a remote daemon): it is
+    /// never left half done. With no sign-in under way (never begun,
     /// finished, expired, abandoned) it is an error.
     pub async fn complete_sign_in(
         &self,
@@ -2332,7 +2336,25 @@ impl ProviderRegistry {
         name: &str,
         redirect: &str,
     ) -> Result<SignInCompletion, DomainError> {
-        let key = (instance.to_string(), name.to_string());
+        let me = self
+            .me
+            .upgrade()
+            .ok_or_else(|| DomainError::Invalid("oxplow is shutting down".into()))?;
+        let (instance, name, redirect) =
+            (instance.to_string(), name.to_string(), redirect.to_string());
+        tokio::spawn(async move { me.finish_sign_in(instance, name, redirect).await })
+            .await
+            .map_err(|e| DomainError::Invariant(format!("finishing the sign-in: {e}")))?
+    }
+
+    /// [`Self::complete_sign_in`]'s work, on a task of its own.
+    async fn finish_sign_in(
+        self: Arc<Self>,
+        instance: String,
+        name: String,
+        redirect: String,
+    ) -> Result<SignInCompletion, DomainError> {
+        let key = (instance.clone(), name.clone());
         let gate = self.sign_in_gate(&key);
         let gate = gate.lock().await;
         let redirected = {
@@ -2342,7 +2364,7 @@ impl ProviderRegistry {
                     "no sign-in for `{name}` of `{instance}` is under way"
                 )));
             };
-            match under_way.pending.redirected(redirect) {
+            match under_way.pending.redirected(&redirect) {
                 Ok(redirected) => redirected,
                 Err(reason) => return Ok(SignInCompletion::NotThisSignIn { reason }),
             }
@@ -2356,7 +2378,7 @@ impl ProviderRegistry {
         let outcome = match redirected {
             oauth::Redirected::Refused(why) => Err(why),
             oauth::Redirected::Code(code) => {
-                match self.still_approved(instance, name, &under_way) {
+                match self.still_approved(&instance, &name, &under_way) {
                     Err(why) => Err(why),
                     Ok(()) => match under_way.pending.exchange(&code).await {
                         Ok(token) => {
@@ -2368,16 +2390,21 @@ impl ProviderRegistry {
             }
         };
         drop(gate);
-        if outcome.is_ok() {
-            self.credential_changed(instance).await;
-        }
-        self.deps
-            .events
-            .emit(crate::events::OxplowEvent::CredentialChanged {
-                instance: instance.to_string(),
-                name: name.to_string(),
-                error: outcome.clone().err(),
-            });
+        // The restart and the renderer's news follow on their own: the
+        // browser isn't kept waiting for a slow `check`.
+        let (me, error) = (self.clone(), outcome.clone().err());
+        tokio::spawn(async move {
+            if error.is_none() {
+                me.credential_changed(&instance).await;
+            }
+            me.deps
+                .events
+                .emit(crate::events::OxplowEvent::CredentialChanged {
+                    instance,
+                    name,
+                    error,
+                });
+        });
         Ok(match outcome {
             Ok(()) => SignInCompletion::SignedIn,
             Err(error) => SignInCompletion::Failed { error },

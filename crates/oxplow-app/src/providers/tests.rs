@@ -3487,6 +3487,76 @@ async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
     ));
 }
 
+/// tsk906: once a redirect is taken as the sign-in's, the finish runs to
+/// its end even when its caller goes away mid-exchange (a dropped
+/// connection to a remote daemon): the token is kept and the renderer
+/// hears it, rather than the sign-in vanishing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finish_runs_to_its_end_when_its_caller_goes_away() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let mut ui = fx.svc.events.subscribe_ui();
+    let page = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let redirect = browse(&page).await;
+    sim.delay_token_requests(500);
+    let caller = {
+        let svc = fx.svc.clone();
+        tokio::spawn(async move {
+            svc.providers
+                .complete_sign_in(INSTANCE, "FAKE_TOKEN", &redirect)
+                .await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    caller.abort();
+    let heard = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            if let Ok(crate::events::OxplowEvent::CredentialChanged { name, error, .. }) =
+                ui.recv().await
+            {
+                if name == "FAKE_TOKEN" {
+                    return error;
+                }
+            }
+        }
+    })
+    .await
+    .expect("the finish ran to its end");
+    assert_eq!(heard, None);
+    assert!(matches!(
+        sign_in_state(&fx.svc.providers.list().await, "FAKE_TOKEN").1,
+        Some(oauth::SignInState::SignedIn { .. })
+    ));
+}
+
+/// tsk906: the browser hears how its sign-in went as soon as the token is
+/// kept — not after the instance has restarted on it (a slow `check`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_in_answers_before_the_instance_restarts() {
+    let (fx, _sim) = signing_in("slow-check:2000", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let page = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let redirect = browse(&page).await;
+    let started = std::time::Instant::now();
+    let done = complete(&fx, "FAKE_TOKEN", &redirect).await.unwrap();
+    assert_eq!(done, SignInCompletion::SignedIn);
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(1500),
+        "answered after {:?}",
+        started.elapsed()
+    );
+}
+
 fn refreshes(sim: &OAuthSim) -> usize {
     sim.grants()
         .iter()

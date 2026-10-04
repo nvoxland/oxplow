@@ -721,11 +721,15 @@ form; sign-in is a provider's.
   (an endpoint edited meanwhile gets nothing) and with its credentials
   where they were (a global instance turned off here, or a project entry of
   its name arriving, moves them: `failed`, sign in again — tsk909), the
-  code is exchanged, the
-  token stored, `credential_changed` restarts the instance on it, and
-  the renderer hears `CredentialChanged { instance, name, error }` — the
-  keychain is no model, so this is one of the bus's UI-only signals. A
-  completed sign-in can't be completed again. Sign-ins are tracked per
+  code is exchanged and the token stored — and then it answers, so the
+  browser hears at once; `credential_changed` restarts the instance on it
+  afterwards and the renderer hears `CredentialChanged { instance, name,
+  error }` when it has — the keychain is no model, so this is one of the
+  bus's UI-only signals (tsk906). The finish runs on a task of its own: a
+  caller that goes away mid-exchange (a dropped connection to a remote
+  daemon) never leaves it half done. The row acts on the outcome it holds
+  too — it stops waiting, and shows a failure the core didn't announce.
+  A completed sign-in can't be completed again. Sign-ins are tracked per
   instance and credential (`sign_ins`, each with a sequence number and
   an expiry timer): one not finished within five minutes
   (`oauth::SIGN_IN_WAIT`) ends, and the renderer hears why; the shell's

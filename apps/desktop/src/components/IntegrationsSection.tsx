@@ -390,6 +390,11 @@ function SignInRow({
         await answerSignInRedirect(id, outcome);
         if (outcome.outcome === "not_this_sign_in") continue;
         if (listening.current === id) listening.current = null;
+        // The row says how it went from what it holds (tsk906): a failure
+        // the core didn't announce (no sign-in under way, a lost
+        // connection to a remote daemon) must not leave it waiting.
+        setWaiting(false);
+        if (outcome.outcome === "failed") setError(outcome.error);
         return;
       }
     } catch (e) {
