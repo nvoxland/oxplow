@@ -4055,6 +4055,11 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
 /// effect `file` that reacts to an oxplow task moved to done with the
 /// calls `script` composes; both approved, the provider enabled.
 async fn with_effect(hooks: &str, script: &str) -> EffortFixture {
+    with_effect_reading(hooks, None, script).await
+}
+
+/// [`with_effect`], its effect reading `input` rows first when given.
+async fn with_effect_reading(hooks: &str, input: Option<&str>, script: &str) -> EffortFixture {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, hooks);
@@ -4063,7 +4068,10 @@ async fn with_effect(hooks: &str, script: &str) -> EffortFixture {
     std::fs::write(
         dir.join("extension.yaml"),
         manifest
-            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.transitioned]\n    where: { to: done }\n    entry: file.star\n",
+            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.transitioned]\n    where: { to: done }\n    entry: file.star\n"
+            + &input
+                .map(|sql| format!("    input: \"{sql}\"\n"))
+                .unwrap_or_default(),
     )
     .unwrap();
     std::fs::write(dir.join("file.star"), script).unwrap();
@@ -4189,6 +4197,87 @@ async fn a_lost_reply_is_sent_again_and_lands_once() {
     probe.settle().await;
     assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
     assert_eq!(effect_failures(&fx).await, 0);
+}
+
+/// tsk887: an automatic retry sends exactly what the failed attempt
+/// composed — not a fresh composition — so a write that landed under the
+/// first attempt's key isn't made again when what the effect reads
+/// changed in between.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
+    let titled_from_the_task = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"provider\": \"fake\", \"title\": \"after \" + x[\"rows\"][0][\"title\"]}}]}\n";
+    let fx = with_effect_reading(
+        "lose-reply",
+        Some("SELECT title FROM v_work_item WHERE ref = :work_item"),
+        titled_from_the_task,
+    )
+    .await;
+    let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+    let rows = fx
+        .svc
+        .sql
+        .query_sql(
+            &format!("SELECT title FROM v_work_item WHERE ref = '{task}'"),
+            vec![],
+            None,
+        )
+        .await
+        .unwrap()
+        .rows;
+    let title = serde_json::to_value(rows).unwrap()[0][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    // What the effect reads changes before its retry.
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            "work_item.update",
+            json!({ "ref": task, "title": "renamed" }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "live", "failed", 1], [2, "auto", "ok", 0]])
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(
+        probe.titled("fake", &format!("after {title}")).await.len(),
+        1
+    );
+    assert_eq!(probe.titled("fake", "after renamed").await.len(), 0);
+}
+
+/// tsk887: a scheduled retry is sent only while every step it would send
+/// still goes to a provider keeping `idempotent_writes`: with the
+/// provider gone, it isn't sent, and the failure counts — a person's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_whose_provider_went_away_is_not_sent() {
+    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    assert!(fx.svc.providers.stop(INSTANCE).await);
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
+    assert_eq!(effect_failures(&fx).await, 1);
 }
 
 /// P10: only a reaction whose every step is a write to a provider

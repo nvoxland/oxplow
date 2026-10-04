@@ -349,7 +349,7 @@ pub fn composed(value: Value) -> Result<Composed, String> {
 /// An event a script emits: one of its own extension's declared types, at
 /// that type's newest version, appended caused by the run's
 /// `command.executed`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComposedEvent {
     #[serde(rename = "type")]

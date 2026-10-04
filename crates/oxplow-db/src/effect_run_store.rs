@@ -129,6 +129,9 @@ pub struct Latest {
     pub origin: ReactionOrigin,
     /// A failed one sent again by itself at this time (RFC 3339).
     pub retry_at: Option<String>,
+    /// What that retry sends: the failed attempt's composition, as
+    /// [`schedule_retry_tx`] kept it.
+    pub resend: Option<String>,
 }
 
 /// The reaction of `effect` to `event_id` as it stands: its latest
@@ -138,22 +141,31 @@ pub fn latest_tx(
     effect: &str,
     event_id: &str,
 ) -> Result<Option<Latest>, DomainError> {
-    let latest: Option<(u32, String, String, Option<String>)> = conn
+    let latest = conn
         .query_row(
-            "SELECT attempt, state, origin, retry_at FROM effect_run
+            "SELECT attempt, state, origin, retry_at, resend_json FROM effect_run
               WHERE effect = ?1 AND event_id = ?2 ORDER BY attempt DESC LIMIT 1",
             params![effect, event_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| {
+                Ok((
+                    r.get::<_, u32>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                ))
+            },
         )
         .optional()
         .map_err(map_sql_err)?;
     latest
-        .map(|(attempt, state, origin, retry_at)| {
+        .map(|(attempt, state, origin, retry_at, resend)| {
             Ok(Latest {
                 attempt,
                 state: RunState::parse(&state)?,
                 origin: ReactionOrigin::parse(&origin)?,
                 retry_at,
+                resend,
             })
         })
         .transpose()
@@ -179,16 +191,19 @@ pub fn automatic_in_a_row_tx(
     Ok(origins.iter().take_while(|o| o.as_str() == "auto").count() as u32)
 }
 
-/// Send `key`'s failed attempt again by itself at `at` (RFC 3339).
+/// Send `key`'s failed attempt again by itself at `at` (RFC 3339): the
+/// automatic attempt sends `resend`, what the failed one composed
+/// (tsk887).
 pub fn schedule_retry_tx(
     conn: &Connection,
     key: &EffectRunKey,
     at: &str,
+    resend: &str,
 ) -> Result<(), DomainError> {
     conn.execute(
-        "UPDATE effect_run SET retry_at = ?4
+        "UPDATE effect_run SET retry_at = ?4, resend_json = ?5
           WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3 AND state = 'failed'",
-        params![key.effect, key.event_id, key.attempt, at],
+        params![key.effect, key.event_id, key.attempt, at, resend],
     )
     .map_err(map_sql_err)?;
     Ok(())
@@ -197,7 +212,7 @@ pub fn schedule_retry_tx(
 /// Drop `key`'s scheduled retry: it won't be sent again by itself.
 pub fn drop_retry_tx(conn: &Connection, key: &EffectRunKey) -> Result<(), DomainError> {
     conn.execute(
-        "UPDATE effect_run SET retry_at = NULL
+        "UPDATE effect_run SET retry_at = NULL, resend_json = NULL
           WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3",
         params![key.effect, key.event_id, key.attempt],
     )
@@ -426,6 +441,7 @@ mod tests {
                     state: RunState::Failed,
                     origin: ReactionOrigin::Live,
                     retry_at: None,
+                    resend: None,
                 })
             );
             let retry = EffectRunKey {
@@ -441,6 +457,7 @@ mod tests {
                     state: RunState::Started,
                     origin: ReactionOrigin::Retry,
                     retry_at: None,
+                    resend: None,
                 })
             );
             assert!(

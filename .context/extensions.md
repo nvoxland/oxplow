@@ -1758,9 +1758,16 @@ timed out, lost its reply) while **every** step it composed was a write
 to a provider keeping `idempotent_writes` (`safe_to_resend`, through
 `work_item::provider_for`) is scheduled again — `effect_run.retry_at`, at
 most two in a row (`RETRY_DELAYS`: 10 s, then 60 s after the failure
-before). Each step carries its idempotency key, the same on every attempt
-([commands.md](./commands.md) `effect_step_key`), so a write that landed
-lands once. A loop every 5 s (`spawn_auto_retry`, at boot) runs what is
+before). The failed attempt keeps what it composed (`effect_run.
+resend_json`, V162), and the automatic attempt **sends exactly that**
+instead of running the script again (tsk887): composing afresh could read
+changed rows, change a step's input and so its key, and make a write that
+landed again. It is sent only while every step still goes to a provider
+keeping the promise; otherwise it isn't sent (`Reacted::NotResent`) and the
+failure counts, a person's. Each step carries its idempotency key, the
+same on every attempt ([commands.md](./commands.md) `effect_step_key`), so
+a write that landed lands once. A person's **Retry** composes afresh from
+what the effect reads now — the person decides it should. A loop every 5 s (`spawn_auto_retry`, at boot) runs what is
 due as the next attempt, `origin: auto` (`effect.result@4`), when the
 effect is still there, enabled and approved as it is now — otherwise the
 retry is dropped and the failure is a person's. An attempt awaiting its

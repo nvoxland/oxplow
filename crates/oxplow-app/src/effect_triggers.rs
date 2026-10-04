@@ -274,6 +274,9 @@ pub(crate) enum Reacted {
     Proposed,
     /// It failed, and will be sent again by itself: not counted yet.
     Retrying(String),
+    /// A scheduled automatic retry that wasn't sent (tsk887): the failed
+    /// attempt's failure stands, a person's to retry, and counts now.
+    NotResent(String),
     /// Nothing was attempted: not its to run (unapproved, before its
     /// approval, its own event) or already recorded by another delivery.
     Nothing,
@@ -290,7 +293,9 @@ pub(crate) async fn count(
     let key = plugin_key(decl);
     let counted = match reacted {
         Reacted::Ran => health.succeeded(&key, Some(took)).await,
-        Reacted::Failed(reason) => health.failed(&key, reason).await.map(|_| ()),
+        Reacted::Failed(reason) | Reacted::NotResent(reason) => {
+            health.failed(&key, reason).await.map(|_| ())
+        }
         Reacted::Skipped(_) | Reacted::Proposed | Reacted::Retrying(_) | Reacted::Nothing => Ok(()),
     };
     if let Err(error) = counted {
@@ -364,7 +369,10 @@ pub(crate) const NOT_REACTED: &str = "hasn't reacted";
 ///   whose latest **failed**; `Invalid` otherwise. The person named the
 ///   event, so when it was logged doesn't matter;
 /// - `Backfill`: the first attempt at an event the effect never reacted
-///   to, whenever it was logged.
+///   to, whenever it was logged;
+/// - `Auto`: the next attempt at a failed one scheduled to be sent again,
+///   sending exactly what that one composed (tsk887) — a person's retry
+///   composes afresh, from what the effect reads now.
 ///
 /// Every origin needs the effect `approved` as it is now, and passes the
 /// loop guard.
@@ -384,6 +392,7 @@ pub(crate) async fn run_reaction(
             .await?
     };
     let scheduled = latest.as_ref().is_some_and(|l| l.retry_at.is_some());
+    let resend = latest.as_ref().and_then(|l| l.resend.clone());
     let attempt = match (origin, latest.map(|l| (l.attempt, l.state, l.origin))) {
         (ReactionOrigin::Live | ReactionOrigin::Backfill, None) => 1,
         // A live attempt left `started`: the run that claimed it was cut
@@ -467,14 +476,39 @@ pub(crate) async fn run_reaction(
             },
         )
     };
-    let composed = match run_script(svc, decl, event).await {
-        Ok(c) => c,
-        Err(reason) => return failed(reason).await,
+    // An automatic attempt sends exactly what the failed one composed
+    // (tsk887): composing afresh could change a step's input — so its
+    // key — and make a write that landed again. Unless every step still
+    // goes to a provider that keeps `idempotent_writes`, it isn't sent:
+    // the failure is a person's.
+    let (calls, events) = if origin == ReactionOrigin::Auto {
+        let failed_attempt = EffectRunKey {
+            attempt: key.attempt - 1,
+            ..key.clone()
+        };
+        let resend = resend
+            .and_then(|json| serde_json::from_str::<Resend>(&json).ok())
+            .filter(|r| safe_to_resend(svc, &r.calls));
+        let Some(Resend { calls, events }) = resend else {
+            drop_retry(svc, &failed_attempt).await?;
+            return Ok(Reacted::NotResent(NO_LONGER_RESENT.into()));
+        };
+        (calls, events)
+    } else {
+        let composed = match run_script(svc, decl, event).await {
+            Ok(c) => c,
+            Err(reason) => return failed(reason).await,
+        };
+        match composed {
+            Reaction::Skip(why) => return skipped(why).await,
+            Reaction::Run { calls, events } => (calls, events),
+        }
     };
-    let (calls, events) = match composed {
-        Reaction::Skip(why) => return skipped(why).await,
-        Reaction::Run { calls, events } => (calls, events),
-    };
+    let resend = serde_json::to_string(&Resend {
+        calls: calls.clone(),
+        events: events.clone(),
+    })
+    .map_err(|e| DomainError::Invariant(e.to_string()))?;
     let events = match own_events(
         &svc.vocabulary.current(),
         &ext.name,
@@ -485,7 +519,7 @@ pub(crate) async fn run_reaction(
         Err(e) => return failed(e.to_string()).await,
     };
     let input = json!({ "calls": calls });
-    let resend = safe_to_resend(svc, &calls);
+    let safe = safe_to_resend(svc, &calls);
     let command = effect_command(&svc.commands, calls, events)
         .map_err(|e| DomainError::Invariant(e.to_string()))?;
     match svc.commands.run_effect(key.clone(), command, input).await {
@@ -505,9 +539,9 @@ pub(crate) async fn run_reaction(
         Err(e) => {
             let reason = e.to_string();
             finish(svc, &key, ended(RunState::Failed, reason.clone())).await?;
-            if resend
+            if safe
                 && matches!(e, CommandError::Failed { .. })
-                && schedule_retry(svc, &key).await?
+                && schedule_retry(svc, &key, resend).await?
             {
                 return Ok(Reacted::Retrying(reason));
             }
@@ -515,6 +549,19 @@ pub(crate) async fn run_reaction(
         }
     }
 }
+
+/// What a failed attempt composed, kept for its automatic retry to send
+/// exactly (tsk887).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Resend {
+    calls: Vec<CommandCall>,
+    events: Vec<crate::extension_commands::ComposedEvent>,
+}
+
+/// Why a scheduled automatic retry wasn't sent: what it would send no
+/// longer goes only to providers that keep `idempotent_writes`.
+pub(crate) const NO_LONGER_RESENT: &str =
+    "not sent again by itself: a step's provider no longer keeps idempotent writes";
 
 /// How long after a failed attempt each automatic retry waits: at most
 /// two in a row (P10).
@@ -535,7 +582,11 @@ fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
 
 /// Schedule `key`'s failed attempt to be sent again, unless the reaction
 /// already had its automatic retries: whether it was.
-async fn schedule_retry(svc: &Services, key: &EffectRunKey) -> Result<bool, DomainError> {
+async fn schedule_retry(
+    svc: &Services,
+    key: &EffectRunKey,
+    resend: String,
+) -> Result<bool, DomainError> {
     let key = key.clone();
     svc.db
         .transaction(move |tx| {
@@ -547,7 +598,7 @@ async fn schedule_retry(svc: &Services, key: &EffectRunKey) -> Result<bool, Doma
             let at = oxplow_domain::Timestamp::from_unix_ms(
                 oxplow_domain::Timestamp::now().unix_ms() + delay.as_millis() as i64,
             );
-            oxplow_db::effect_run_store::schedule_retry_tx(tx, &key, &at.to_string())?;
+            oxplow_db::effect_run_store::schedule_retry_tx(tx, &key, &at.to_string(), &resend)?;
             Ok(true)
         })
         .await
@@ -588,7 +639,7 @@ pub async fn auto_retry_due(
         };
         let started = std::time::Instant::now();
         let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto).await?;
-        if reacted != Reacted::Nothing {
+        if !matches!(reacted, Reacted::Nothing | Reacted::NotResent(_)) {
             sent += 1;
         }
         count(&health, &decl, &reacted, started.elapsed()).await;

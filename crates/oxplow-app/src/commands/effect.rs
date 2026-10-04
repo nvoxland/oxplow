@@ -129,7 +129,7 @@ fn outcome(effect: &str, event: &str, attempt: i64, reacted: &Reacted) -> serde_
     let mut out = json!({ "effect": effect, "event": event, "attempt": attempt });
     let (outcome, reason) = match reacted {
         Reacted::Ran => ("ok", None),
-        Reacted::Failed(why) => ("failed", Some(why.clone())),
+        Reacted::Failed(why) | Reacted::NotResent(why) => ("failed", Some(why.clone())),
         // Failed, and sent again by itself shortly (P10).
         Reacted::Retrying(why) => ("retrying", Some(why.clone())),
         Reacted::Skipped(why) => ("skipped", Some(why.clone())),
@@ -335,7 +335,7 @@ pub async fn backfill(
         attempted += 1;
         match reacted {
             Reacted::Ran => out.ran += 1,
-            Reacted::Failed(_) | Reacted::Retrying(_) => out.failed += 1,
+            Reacted::Failed(_) | Reacted::Retrying(_) | Reacted::NotResent(_) => out.failed += 1,
             Reacted::Proposed => out.proposed += 1,
             // Its own run's event, or one another delivery got to first.
             Reacted::Skipped(_) | Reacted::Nothing => out.skipped += 1,

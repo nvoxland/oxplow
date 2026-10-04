@@ -1001,8 +1001,9 @@ tell it is the same write. The contract (P10, built):
   declaring `idempotent_writes`** — to any other the cut-off is the
   call's failure.
 - **An effect's failed attempt is sent again by itself** only when every
-  step it composed was a write to such a provider, at most twice
-  ([extensions.md](./extensions.md) "Attempts"); anything else waits for
+  step it composed was a write to such a provider, at most twice, and it
+  sends exactly what the failed attempt composed, so its keys are the
+  same ([extensions.md](./extensions.md) "Attempts"); anything else waits for
   a person's `effect.retry`, asked first. A failed command a person ran
   is reported, not retried.
 - **The kit checks the promise** (the work-items suite,
