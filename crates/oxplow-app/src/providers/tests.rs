@@ -4658,6 +4658,14 @@ async fn auto_retry_stops_after_two_and_counts_one_failure() {
         ])
     );
     assert_eq!(effect_failures(&fx).await, 1);
+    // tsk913: the provider counts the one write once too — its re-sends
+    // under the same key aren't three failures that halt the instance.
+    let health = fx.svc.providers.health(INSTANCE).unwrap();
+    assert_eq!(health.consecutive_failures, 1, "{health:?}");
+    assert!(
+        !matches!(health.state, InstanceState::Disabled { .. }),
+        "{health:?}"
+    );
     assert_eq!(
         crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(3600))
             .await

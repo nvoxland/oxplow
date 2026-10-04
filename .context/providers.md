@@ -882,7 +882,10 @@ resets the count and updates `last_ok_at` and the moving-average
 contribution shares (P7.C1, `plugin_health.rs`; [extensions.md](./extensions.md)):
 the `plugin_health` row keyed `<extension>` / `<instance id>`, kind
 `provider` (`v_plugin_health`). **Three failures in a row disable the
-instance**: it stops, and the row (`disabled`, its reason) and
+instance** — a write counts once however often it is sent again under
+its idempotency key (an effect's automatic retries, a person's retry of
+the same composition: `Instance::failed_keys`, tsk913), so one outage
+that a reaction retries through doesn't halt it: it stops, and the row (`disabled`, its reason) and
 `plugin.disabled@1 { plugin, contribution, kind, reason }` commit
 together (source `system:plugins`, subject `plugin:<extension>`). So is
 a handshake that doesn't match the approved declarations. The row is

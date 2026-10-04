@@ -57,6 +57,10 @@ const ERRORS_KEPT: usize = 5;
 /// once); a longer one fails the call — never counted as a failure.
 pub const RATE_LIMIT_WAIT_MAX: Duration = Duration::from_secs(10);
 
+/// How many failed writes' keys an instance remembers, so a write's
+/// re-sends count once toward its health.
+const FAILED_KEYS_KEPT: usize = 256;
+
 /// What the registry needs from the host.
 #[derive(Clone)]
 pub struct HostDeps {
@@ -349,6 +353,12 @@ pub struct Instance {
     /// When each signed-in credential was last renewed because its
     /// service refused it (tsk828, per credential since tsk821).
     renewed_at: parking_lot::Mutex<BTreeMap<String, Instant>>,
+    /// The idempotency keys of writes whose failure its health has counted
+    /// (newest last, at most [`FAILED_KEYS_KEPT`]): a write sent again
+    /// under its key — an automatic retry, a person's — failing again is
+    /// the same failure, counted once (tsk913). A key that lands is
+    /// forgotten.
+    failed_keys: parking_lot::Mutex<std::collections::VecDeque<String>>,
     not_before: parking_lot::Mutex<Option<Instant>>,
     /// One read per collector at a time (tsk715): a second waits, then
     /// resumes from the checkpoint the first left.
@@ -780,7 +790,7 @@ impl Instance {
                     continue;
                 }
             }
-            return self.after_call(result, started).await;
+            return self.after_call(result, started, &key).await;
         }
     }
 
@@ -820,21 +830,25 @@ impl Instance {
         &self,
         result: Result<InvokeResult, ProtocolError>,
         started: Instant,
+        key: &str,
     ) -> Result<InvokeResult, CommandError> {
         let registry = self.registry.upgrade();
         match result {
             Ok(out) => {
+                self.failed_keys.lock().retain(|k| k != key);
                 if let Some(r) = registry {
                     r.call_succeeded(self, started.elapsed()).await;
                 }
                 Ok(out)
             }
             Err(e) => {
-                // A refused input or a cancel is the caller's, not a failure.
+                // A refused input or a cancel is the caller's, not a
+                // failure; a write that already failed under its key is
+                // that same failure (tsk913).
                 let counts = !matches!(
                     e,
                     ProtocolError::InvalidInput { .. } | ProtocolError::Cancelled
-                );
+                ) && self.first_failure_of(key);
                 let err = self.command_error(e);
                 if let (true, Some(r)) = (counts, registry) {
                     r.call_failed(self, err.to_string()).await;
@@ -849,6 +863,20 @@ impl Instance {
     /// process died — `Internal`) is `Unavailable`, worth sending again;
     /// anything else — refused credentials renewal didn't fix, a method or
     /// configuration it lacks, a cancel — is `Failed`, a person's (tsk914).
+    /// Whether this is the first counted failure of the write `key`;
+    /// remembers it.
+    fn first_failure_of(&self, key: &str) -> bool {
+        let mut failed = self.failed_keys.lock();
+        if failed.iter().any(|k| k == key) {
+            return false;
+        }
+        if failed.len() == FAILED_KEYS_KEPT {
+            failed.pop_front();
+        }
+        failed.push_back(key.to_string());
+        true
+    }
+
     pub(super) fn command_error(&self, e: ProtocolError) -> CommandError {
         match e {
             ProtocolError::InvalidInput { field, message } => CommandError::Invalid {
@@ -1554,6 +1582,7 @@ impl ProviderRegistry {
             stopped: std::sync::atomic::AtomicBool::new(false),
             starting: tokio::sync::Mutex::new(()),
             renewed_at: parking_lot::Mutex::new(BTreeMap::new()),
+            failed_keys: parking_lot::Mutex::new(std::collections::VecDeque::new()),
             not_before: parking_lot::Mutex::new(None),
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
         }))
