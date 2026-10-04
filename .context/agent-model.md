@@ -2097,28 +2097,32 @@ transaction (`record_effort_atomic`).
 snapshot-bracketed effort close — whatever moved the task out of
 `in_progress` (a desktop edit, `work_item.transition` / `work_item.update`,
 the close half of the agent's close sequence), the effort-lifecycle
-consumer of `effort.closed` (`TaskService::on_effort_closed`) runs
-`reconcile_unattributed_on_close`
-(`crates/oxplow-app/src/task_service.rs`) diffs the effort's snapshot
-bracket against its claims and records the `changed_but_not_claimed`
-delta into `effort_unattributed_file` (see data-model.md). This is the
+consumer of `effort.closed` (`TaskService::on_effort_closed`,
+`crates/oxplow-app/src/task_service.rs`) runs `attribution::reconcile_close`
+over the file kind: it diffs the effort's snapshot bracket against its
+claims and records the `changed_but_not_claimed` delta into
+`effort_unattributed_file` (see data-model.md). That consumer is the
+**one place** a close is reconciled (tsk942; guard
+`effort_close_reconciles_in_one_place`). This is the
 AUDIT layer of claim-first attribution: an out-of-band close (UI, weaker
 agent) can't leave a parallel/external write looking like the agent's
 authored work. Best-effort, never blocks the close; the existing
 `effort.report` file review (`compute_effort_file_review`) is unaffected
 because it reads claims, not the residue table. Claiming a path later
 (`record_file`) clears its residue, so the two sets never overlap.
-Restart-recovery orphan closes are reconciled too: `RecoveryService`
-(wired via `with_snapshot_reconcile` in `Services::new`, after the capture
-registry is built) brackets each orphaned effort that has a start snapshot
-— it drains the worktree (`enqueue_startup_diff`) and requests an
-`EffortEnd` snapshot, since the boot worktree still reflects the dead
-effort's final state, stamps it via `finish(Some(end_id), …)`, then runs
-the same `reconcile_unattributed_on_close`. So a process that died
-mid-effort records its unclaimed residue as unattributed rather than
-silently attributing it. Best-effort and never blocks recovery: an effort
-with no start snapshot (or any capture failure) keeps the legacy
-`finish(None, None)` close.
+Restart-recovery orphan closes are reconciled the same way:
+`RecoveryService` (wired via `with_end_snapshots` in `Services::new`,
+after the capture registry is built) brackets each orphaned effort that
+has a start snapshot — it drains the worktree (`enqueue_startup_diff`)
+and requests an `EffortEnd` snapshot, since the boot worktree still
+reflects the dead effort's final state — and stamps it via
+`finish(Some(end_id), …)`. That close logs `effort.closed` like any, so
+the consumer reconciles it when the pump first runs; recovery records no
+residue itself. So a process that died mid-effort records its unclaimed
+residue as unattributed rather than silently attributing it. Best-effort
+and never blocks recovery: an effort with no start snapshot (or any
+capture failure) closes with `finish(None, None)`, and has no bracket to
+reconcile.
 
 **File-and-close shortcut.** An item that was never `in_progress` has
 no effort; `effort.report` on it (after a `work_item.transition` straight

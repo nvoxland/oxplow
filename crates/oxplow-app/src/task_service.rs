@@ -474,9 +474,8 @@ impl TaskService {
                 // Claim-first reconciliation: changed-but-not-claimed paths
                 // become unattributed residue, and so do the concurrent
                 // case's runs (tsk263/tsk269).
-                let marked =
-                    reconcile_unattributed_on_close(effort_store, snapshot.store(), &effort_id)
-                        .await;
+                let files = crate::attribution::FileKind::new(effort_store, snapshot.store());
+                let marked = crate::attribution::reconcile_close(&files, &effort_id).await;
                 if !marked.is_empty() {
                     tracing::debug!(effort = %effort_id, count = marked.len(), "effort close: recorded unattributed changes");
                 }
@@ -1229,29 +1228,6 @@ pub async fn recompute_effort_file_review(
         &acknowledged,
         &other_claimed,
     )
-}
-
-/// Reconcile an effort's claimed files against the snapshot diff at CLOSE
-/// time and persist the `changed_but_not_claimed` delta as **unattributed**
-/// audit residue (Child 2 of the claim-first attribution epic). Runs on
-/// every snapshot-bracketed close (`TaskService::update` out of
-/// `in_progress`, so every `work_item.transition` / `work_item.update` out
-/// of it flows through here). Best-effort: returns the
-/// marked paths, or an empty vec when the effort has no snapshot bracket
-/// (e.g. a recovery-closed orphan with no end snapshot) or on any error —
-/// it never blocks the close. The existing agent nudge
-/// (`compute_effort_file_review`) is unaffected; this writes a separate
-/// table so a path stays in exactly one of {claimed, unattributed}
-/// (`record_file` clears the residue when a path is later claimed).
-pub async fn reconcile_unattributed_on_close(
-    effort_store: &SqliteEffortStore,
-    snapshot_store: &SqliteSnapshotStore,
-    effort_id: &EffortId,
-) -> Vec<String> {
-    // Files are now one `AttributionKind`; the close-time residue runs through
-    // the shared engine (tsk261). Behavior-identical to the pre-refactor path.
-    let kind = crate::attribution::FileKind::new(effort_store, snapshot_store);
-    crate::attribution::reconcile_close(&kind, effort_id).await
 }
 
 /// Build a file review from the claimed/changed/acknowledged/other-claimed sets

@@ -602,8 +602,8 @@ relying on the hook's one-fire silent-agreement grace.
 audit residue of an effort close: the `changed_but_not_claimed` paths the
 snapshot diff saw change during the effort that nothing claimed. Columns:
 `effort_id`, `path`, `recorded_at`, primary key `(effort_id, path)`,
-CASCADE on the effort. Written by `reconcile_unattributed_on_close`
-(`oxplow_app::task_service`) at every snapshot-bracketed effort close
+CASCADE on the effort. Written by `attribution::reconcile_close` (called
+only from `TaskService::on_effort_closed`) at every snapshot-bracketed effort close
 (the effort-lifecycle consumer of `effort.closed`, whatever moved the task
 out of `in_progress` — a desktop edit, `work_item.transition` /
 `work_item.update`, the close half of the agent's close sequence), so an out-of-band
@@ -614,16 +614,17 @@ UNATTRIBUTED here, never both** — `record_file` deletes any matching
 residue row, so a later `effort.report` / `effort.amend` claim moves a path back into the
 claimed set. The existing agent nudge (`compute_effort_file_review`) reads
 `effort_file`, not this table, so it's unaffected. Restart-recovery
-orphan closes are also reconciled: `RecoveryService` (wired with the
-capture registry + thread store via `with_snapshot_reconcile`) brackets
-each orphaned effort that has a start snapshot by draining the worktree
-(`enqueue_startup_diff`) and requesting an `EffortEnd` snapshot — the boot
-worktree still reflects the dead effort's final state — then stamps it via
-`finish(Some(end_id), …)` and calls `reconcile_unattributed_on_close`. So
-a process that died mid-effort still records its unclaimed residue as
-unattributed instead of leaving it silently attributed. Best-effort: an
-effort with no start snapshot (or any capture failure) falls back to the
-legacy `finish(None, None)` close with no reconciliation.
+orphan closes are reconciled by the same consumer (tsk942):
+`RecoveryService` (wired with the capture registry + thread store via
+`with_end_snapshots`) brackets each orphaned effort that has a start
+snapshot by draining the worktree (`enqueue_startup_diff`) and requesting
+an `EffortEnd` snapshot — the boot worktree still reflects the dead
+effort's final state — and stamps it via `finish(Some(end_id), …)`, whose
+`effort.closed` the consumer reconciles once the pump runs. So a process
+that died mid-effort still records its unclaimed residue as unattributed
+instead of leaving it silently attributed. Best-effort: an effort with no
+start snapshot (or any capture failure) closes with `finish(None, None)`
+and has no bracket to reconcile.
 
 `effort_attribution` (V40) is the **kind-agnostic attribution ledger** —
 the generalization of the file tables above to any fact oxplow OBSERVES

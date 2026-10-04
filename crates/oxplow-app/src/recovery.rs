@@ -21,7 +21,6 @@ use oxplow_domain::stores::{AgentTurnStore, ThreadStore};
 use oxplow_domain::DomainError;
 
 use crate::snapshot_capture_registry::SnapshotCaptureRegistry;
-use crate::task_service::reconcile_unattributed_on_close;
 use oxplow_domain::snapshot::SnapshotTrigger;
 
 #[derive(Clone)]
@@ -29,11 +28,10 @@ pub struct RecoveryService {
     turns: Arc<dyn AgentTurnStore>,
     tasks: Arc<SqliteTaskStore>,
     efforts: Arc<SqliteEffortStore>,
-    /// Optional wiring for reconciling unattributed changes when a
-    /// restart-recovery close brackets an orphaned effort. When absent
-    /// (e.g. minimal test setups), orphan efforts are still closed —
-    /// they finish with `finish(None, None)`: no end snapshot and no
-    /// per-path reconciliation.
+    /// Optional wiring for bracketing an orphaned effort's close with an
+    /// end snapshot. When absent (e.g. minimal test setups), orphan
+    /// efforts are still closed — they finish with `finish(None, None)`:
+    /// no end snapshot, so nothing for the close's reconcile to diff.
     threads: Option<Arc<SqliteThreadStore>>,
     snapshot_captures: Option<SnapshotCaptureRegistry>,
 }
@@ -54,12 +52,11 @@ impl RecoveryService {
     }
 
     /// Attach the thread store + per-stream snapshot capture registry so
-    /// restart-recovery orphan closes capture an `EffortEnd` snapshot and
-    /// record their `changed_but_not_claimed` residue as unattributed
-    /// (the death/restart counterpart to the in-process close-time
-    /// reconciliation). Must be called after the registry is built and
+    /// a restart-recovery orphan close captures an `EffortEnd` snapshot —
+    /// the bracket the effort-lifecycle consumer then reconciles against,
+    /// as for any close. Must be called after the registry is built and
     /// its streams registered (see `Services::new`).
-    pub fn with_snapshot_reconcile(
+    pub fn with_end_snapshots(
         mut self,
         threads: Arc<SqliteThreadStore>,
         snapshot_captures: SnapshotCaptureRegistry,
@@ -111,13 +108,12 @@ impl RecoveryService {
             if !in_progress_ids.contains(&task_id) {
                 // Death/restart case: the worktree still reflects the dead
                 // effort's final state, so bracket the effort with an
-                // EffortEnd snapshot and reconcile its unclaimed residue
-                // as unattributed. Best-effort — never blocks the close.
+                // EffortEnd snapshot now (best-effort — it never blocks the
+                // close). The close logs `effort.closed`, and the
+                // effort-lifecycle consumer reconciles what the effort left
+                // unclaimed, as it does for every close (tsk942).
                 let end_snapshot = self.capture_orphan_end_snapshot(&effort).await;
                 self.efforts.finish(&effort.id, end_snapshot, None).await?;
-                if end_snapshot.is_some() {
-                    self.reconcile_orphan_unattributed(&effort.id).await;
-                }
                 closed_efforts += 1;
             }
         }
@@ -152,7 +148,7 @@ impl RecoveryService {
 
     /// Capture an `EffortEnd` snapshot for an orphaned effort so its
     /// close has a snapshot bracket to reconcile against. Returns the
-    /// snapshot id, or `None` when reconciliation isn't wired, the
+    /// snapshot id, or `None` when the capture registry isn't wired, the
     /// effort has no start snapshot (nothing to bracket), the stream's
     /// capture service can't be resolved, or the capture fails. Drains
     /// the worktree's current state first (`enqueue_startup_diff`) since
@@ -193,31 +189,6 @@ impl RecoveryService {
                 tracing::warn!(error = %e, effort = %effort.id, "recovery: end snapshot failed");
                 None
             }
-        }
-    }
-
-    /// Record an orphaned effort's `changed_but_not_claimed` residue as
-    /// unattributed, now that recovery has stamped its end snapshot.
-    async fn reconcile_orphan_unattributed(&self, effort_id: &oxplow_domain::EffortId) {
-        let Some(registry) = self.snapshot_captures.as_ref() else {
-            return;
-        };
-        // Any registered service shares the same SqliteSnapshotStore, so
-        // the primary's handle is fine for the diff read.
-        let Some(capture) = registry
-            .primary()
-            .or_else(|| registry.list().into_iter().next())
-        else {
-            return;
-        };
-        let marked =
-            reconcile_unattributed_on_close(&self.efforts, capture.store(), effort_id).await;
-        if !marked.is_empty() {
-            tracing::debug!(
-                effort = %effort_id,
-                count = marked.len(),
-                "recovery: recorded unattributed changes on orphan close",
-            );
         }
     }
 }
@@ -410,153 +381,107 @@ mod tests {
         assert_eq!(again.opened_efforts, 0);
     }
 
+    /// tsk942: recovery closes an orphaned effort and brackets it with an
+    /// end snapshot. What the effort changed but never claimed is
+    /// reconciled where every close's is — by the effort-lifecycle
+    /// consumer, on the close's `effort.closed` — and recovery records
+    /// none of it itself.
     #[tokio::test]
-    async fn recovery_close_of_orphan_effort_records_unattributed_changes() {
+    async fn an_orphan_recovery_closes_is_reconciled_by_the_lifecycle_consumer() {
+        use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::TaskStore as _;
         use oxplow_domain::{Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus};
-        use std::time::Duration;
 
-        use crate::blob_store::BlobStore;
-        use crate::snapshot_capture::SnapshotCaptureService;
-        use crate::snapshot_capture_registry::{
-            SnapshotCaptureRegistry, SnapshotCaptureRegistryConfig,
-        };
-        use oxplow_db::SqliteSnapshotStore;
-        use oxplow_fs_watch::WorkspaceFilter;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        let stream = svc.streams.list_streams().await.unwrap()[0].id;
+        let capture = svc.snapshot_captures.get(&stream).unwrap();
 
-        let project = tempfile::tempdir().unwrap();
-        let db = Database::in_memory();
-        let now = Timestamp::from_unix_ms(1);
-        let s = Stream {
-            id: StreamId::new(1),
-            kind: StreamKind::Primary,
-            title: "p".into(),
-            branch: "main".into(),
-            branch_ref: "refs/heads/main".into(),
-            branch_source: "main".into(),
-            worktree_path: project.path().to_string_lossy().into(),
-            working_pane: String::new(),
-            talking_pane: String::new(),
-            working_session_id: String::new(),
-            talking_session_id: String::new(),
-            custom_prompt: None,
-            created_at: now,
-            updated_at: now,
-            archived_at: None,
-        };
-        SqliteStreamStore::new(db.clone()).upsert(&s).await.unwrap();
-        let t = Thread {
-            id: ThreadId::new(1),
-            stream_id: s.id,
-            title: "x".into(),
-            status: ThreadStatus::Active,
-            sort_index: 0,
-            pane_target: "working".into(),
-            agent: oxplow_domain::AgentKind::Claude,
-            acp_agent: None,
-            resume_session_id: String::new(),
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: now,
-            updated_at: now,
-            archived_at: None,
-        };
-        SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-
-        let tasks = Arc::new(SqliteTaskStore::new(db.clone()));
-        let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
-        let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
-        let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
-
-        // Per-stream capture service over the real worktree, with a zero
-        // predrain so captures resolve synchronously in the test.
-        let reg = SnapshotCaptureRegistry::new(SnapshotCaptureRegistryConfig {
-            vcs: std::sync::Arc::new(crate::vcs::GitProvider),
-            snapshot_store: snapshot_store.clone(),
-            blobs: BlobStore::new(project.path().join(".oxplow/snapshots")),
-            max_file_bytes: 1_000_000,
-            workspace_filter: WorkspaceFilter::default(),
-            open_turn_probe: None,
-        });
-        let capture = Arc::new(
-            SnapshotCaptureService::new(
-                snapshot_store.clone(),
-                BlobStore::new(project.path().join(".oxplow/snapshots")),
-                project.path().to_path_buf(),
-                std::sync::Arc::new(crate::vcs::GitProvider),
-                s.id,
-                1_000_000,
-                WorkspaceFilter::default(),
-            )
-            .with_predrain_delay(Duration::ZERO),
-        );
-        reg.insert_for_test(s.id, capture.clone());
-
-        // Initial worktree state + a START snapshot to anchor the bracket.
-        std::fs::write(project.path().join("foo.rs"), "v1").unwrap();
+        // The worktree as the effort found it, and a start snapshot.
+        std::fs::write(root.join("foo.rs"), "v1").unwrap();
         capture.enqueue_startup_diff().await.unwrap();
-        let start_id = capture
+        let start = capture
             .request_snapshot(SnapshotTrigger::EffortStart)
             .await
             .unwrap()
             .expect("start snapshot");
 
-        // Orphaned effort: a not-in_progress task with an open effort that
-        // has a start snapshot but never closed (process died mid-effort).
-        let task_row = Task {
-            id: TaskId::placeholder(),
-            thread_id: Some(t.id),
-            parent_id: None,
-            title: "dead".into(),
-            description: String::new(),
-            status: TaskStatus::Done,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
-        };
-        let task_id = tasks.insert(&task_row).await.unwrap();
-        let effort = efforts
-            .start(&work_item_ref(task_id), &t.id, Some(start_id))
+        // Orphaned: a task no longer in progress whose effort never closed
+        // (the process died mid-effort), with a change it never claimed.
+        let now = Timestamp::now();
+        let task = svc
+            .task_store
+            .insert(&Task {
+                id: TaskId::placeholder(),
+                thread_id: Some(f.thread),
+                parent_id: None,
+                title: "dead".into(),
+                description: String::new(),
+                status: TaskStatus::Done,
+                priority: TaskPriority::Medium,
+                sort_index: 0,
+                created_by: TaskActorKind::User,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                deleted_at: None,
+                note_count: 0,
+                author: Some(TaskAuthor::User),
+            })
             .await
             .unwrap();
+        let effort = svc
+            .effort_store
+            .start(&work_item_ref(task), &f.thread, Some(start))
+            .await
+            .unwrap();
+        std::fs::write(root.join("foo.rs"), "version-two-longer").unwrap();
+        // A run the effort saw and never claimed.
+        let mut run = oxplow_db::NewMetricCapture::done(stream.value(), "tests", "junit");
+        run.thread_id = Some(f.thread.value());
+        run.trigger = Some("on-report".into());
+        let run = svc.fact_store.record_facts(run, Vec::new()).await.unwrap();
 
-        // An unclaimed worktree change the dead effort left behind.
-        std::fs::write(project.path().join("foo.rs"), "version-two-longer").unwrap();
-
-        let svc = RecoveryService::new(
-            Arc::new(SqliteAgentTurnStore::new(db.clone())),
-            tasks.clone(),
-            efforts.clone(),
-        )
-        .with_snapshot_reconcile(thread_store.clone(), reg.clone());
-        svc.run().await.unwrap();
-
-        // The effort closed with an end snapshot, and the unclaimed change
-        // is recorded as unattributed (not silently attributed).
-        let closed = efforts.get_effort(&effort.id).await.unwrap().unwrap();
-        assert!(closed.ended_at.is_some(), "orphan effort should be closed");
+        assert_eq!(svc.recovery.run().await.unwrap().closed_efforts, 1);
+        let closed = svc
+            .effort_store
+            .get_effort(&effort.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(closed.ended_at.is_some(), "the orphan is closed");
         assert!(
             closed.end_snapshot_id.is_some(),
-            "recovery should capture an end snapshot to bracket the effort",
+            "bracketed by an end snapshot"
         );
-        let unattributed = efforts.list_unattributed_files(&effort.id).await.unwrap();
+        let unattributed = || async {
+            let files = svc
+                .effort_store
+                .list_unattributed_files(&effort.id)
+                .await
+                .unwrap();
+            let runs = svc
+                .attribution_store
+                .list_refs(&effort.id, "run", oxplow_db::STATE_UNATTRIBUTED)
+                .await
+                .unwrap();
+            (files, runs)
+        };
         assert_eq!(
-            unattributed,
-            vec!["foo.rs".to_string()],
-            "the unclaimed worktree change must be recorded as unattributed",
+            unattributed().await,
+            (Vec::new(), Vec::new()),
+            "recovery reconciles nothing itself"
+        );
+        svc.tasks.settle_lifecycle().await;
+        assert_eq!(
+            unattributed().await,
+            (vec!["foo.rs".to_string()], vec![format!("run:{run}")]),
+            "the consumer reconciles both files and runs"
         );
 
-        // Idempotent: re-running recovery finds no open efforts to close.
-        let again = svc.run().await.unwrap();
-        assert_eq!(again.closed_efforts, 0);
+        // Idempotent: nothing is left to close.
+        assert_eq!(svc.recovery.run().await.unwrap().closed_efforts, 0);
     }
 
     #[tokio::test]

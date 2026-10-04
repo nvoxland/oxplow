@@ -572,6 +572,35 @@ fn no_legacy_shims() {
     );
 }
 
+/// tsk942: an effort's close is reconciled in one place — the
+/// effort-lifecycle consumer's `on_effort_closed` (`task_service.rs`),
+/// on `effort.closed`. Nothing else (crash recovery, a command) runs the
+/// reconcile itself.
+#[test]
+fn effort_close_reconciles_in_one_place() {
+    let callers: Vec<String> = production_sources()
+        .into_iter()
+        .filter(|(_, text)| text.contains("reconcile_close("))
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(
+        callers,
+        vec![
+            "crates/oxplow-app/src/attribution.rs".to_string(),
+            "crates/oxplow-app/src/task_service.rs".to_string(),
+        ]
+    );
+    let recovery = production_sources()
+        .into_iter()
+        .find(|(path, _)| path == "crates/oxplow-app/src/recovery.rs")
+        .expect("recovery.rs")
+        .1;
+    assert!(
+        !recovery.contains("unattributed"),
+        "recovery records no residue itself"
+    );
+}
+
 /// The workspace's test doubles, by their names' convention: a crate
 /// that stands in for a service in tests is `<name>-fake` or `<name>-sim`.
 fn is_test_double(name: &str) -> bool {

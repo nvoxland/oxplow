@@ -990,7 +990,7 @@ impl Services {
         // registered, give recovery the wiring to bracket + reconcile
         // orphaned efforts left open by a crash (death/restart case).
         let recovery_svc =
-            recovery_svc.with_snapshot_reconcile(thread_store.clone(), snapshot_captures.clone());
+            recovery_svc.with_end_snapshots(thread_store.clone(), snapshot_captures.clone());
         let hook_ingest =
             hook_ingest.with_turn_snapshots(Arc::new(turn_snapshots::CaptureTurnSnapshots {
                 captures: snapshot_captures.clone(),
