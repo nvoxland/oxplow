@@ -3,7 +3,7 @@
 /// answers in `PersonCommandConfirm` (mounted once, in `App`), then runs
 /// again confirmed. Pages that hold their own confirm (lens actions, form
 /// lenses) keep it inline; this is for runs with nowhere to show it.
-import { runCommand } from "./api.js";
+import { runCommand, undoCommand } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { showToast } from "./components/toastStore.js";
 import { needsConfirmation } from "./ipc-error.js";
@@ -17,7 +17,10 @@ export interface PendingCommand {
 
 export interface PersonCommandDeps {
   runCommand(name: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
-  toast(message: string): void;
+  /** Undo the run recorded as `auditId`, as the person (`undo_command`). */
+  undo(auditId: number): Promise<unknown>;
+  /** A toast; with `undo`, it offers Undo. */
+  toast(message: string, undo?: () => void): void;
   recordError(label: string, message: string): void;
 }
 
@@ -30,11 +33,22 @@ export function createPersonCommands(deps: PersonCommandDeps) {
   };
   /** Whether the command ran (false when it failed, or waits for the
    *  person's confirmation). */
+  // Taking a toast's Undo: the run undone, as the person (tsk975).
+  const undo = async (label: string, auditId: number) => {
+    try {
+      await deps.undo(auditId);
+      deps.toast(`${label}: undone.`);
+    } catch (e) {
+      deps.recordError(`Undo ${label}`, e instanceof Error ? e.message : String(e));
+    }
+  };
   const attempt = async (p: PendingCommand, confirmed: boolean): Promise<boolean> => {
     try {
-      await deps.runCommand(p.command, p.input, confirmed);
+      const out = await deps.runCommand(p.command, p.input, confirmed);
       set(null);
-      deps.toast(`${p.label}: done.`);
+      // A run that came back undoable offers its Undo.
+      const auditId = out.inverse && out.audit_id != null ? out.audit_id : null;
+      deps.toast(`${p.label}: done.`, auditId === null ? undefined : () => void undo(p.label, auditId));
       return true;
     } catch (e) {
       if (!confirmed && needsConfirmation(e)) {
@@ -66,6 +80,8 @@ export type PersonCommands = ReturnType<typeof createPersonCommands>;
 
 export const personCommands: PersonCommands = createPersonCommands({
   runCommand: (name, input, confirmed) => runCommand(name, input, confirmed),
-  toast: (message) => showToast({ message }),
+  // The person's click on Undo is their confirmation of it.
+  undo: (auditId) => undoCommand(auditId, true),
+  toast: (message, undo) => showToast({ message, onUndo: undo }),
   recordError: (label, message) => recordOpError({ label, message }),
 });

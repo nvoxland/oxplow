@@ -475,7 +475,12 @@ input, confirmed }` and `undo_command { audit_id, confirmed }`
 `NEEDS_CONFIRMATION` and the UI asks, then calls again with `confirmed`.
 A typed IPC setter is a convenience over one command; anything new the
 UI writes goes through `run_command`. Parity: `both("run_command")`,
-`ui("undo_command")`. The thrown error keeps its IPC code
+`ui("undo_command")`. A person's undo is offered where they ran it: a
+command run through `personCommands` (a board move, a launcher entry)
+that comes back undoable (its outcome's `inverse`) shows **Undo** on its
+"done" toast, which runs `undoCommand(audit_id)` — the click is the
+person's confirmation — and says "undone" or records the failure
+(P11, tsk975). The thrown error keeps its IPC code
 (`IpcCallError.code`, `needsConfirmation(e)` in `ipc-error.ts`), and
 the UI asks with **`CommandConfirm`** (`components/CommandConfirm.tsx`:
 the command's summary from RPC **`get_command { name }`**, destructive
