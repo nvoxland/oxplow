@@ -172,10 +172,13 @@ async fn plugin_namespaces(db: &Database) -> Result<Vec<String>, DomainError> {
 }
 
 /// What one sweep removed.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SweepReport {
     pub content_deleted: usize,
     pub payloads_expired: usize,
+    /// A project's windows naming a namespace nothing logs (tsk985): kept
+    /// for a plugin not installed yet, and said, since a typo does nothing.
+    pub unused: Vec<String>,
 }
 
 /// Rows one sweep transaction touches: small enough that a hook waiting on
@@ -203,8 +206,19 @@ async fn sweep_in_batches(
 ) -> Result<SweepReport, DomainError> {
     let mut report = SweepReport::default();
     let stamp = ts_to_string(now);
-    let before = |days: i64| ts_to_string(Timestamp::from_unix_ms(now.unix_ms() - days * DAY_MS));
-    for (ns, window) in windows(db, project).await? {
+    // A window is at most `MAX_DAYS` (checked where it's set); the bound
+    // here keeps the cutoff arithmetic in range whatever reaches it.
+    let before = |days: i64| {
+        let days = days.clamp(0, oxplow_domain::events::retention::MAX_DAYS);
+        ts_to_string(Timestamp::from_unix_ms(now.unix_ms() - days * DAY_MS))
+    };
+    let windows = windows(db, project).await?;
+    report.unused = project
+        .keys()
+        .filter(|ns| !windows.iter().any(|(w, _)| w == *ns))
+        .cloned()
+        .collect();
+    for (ns, window) in windows {
         let (payload_days, content_days) = (window.payload_days, window.content_days);
         let (ns, cutoff) = (ns.to_string(), before(content_days));
         loop {
@@ -316,7 +330,8 @@ mod tests {
             report,
             SweepReport {
                 content_deleted: 5,
-                payloads_expired: 5
+                payloads_expired: 5,
+                unused: Vec::new(),
             }
         );
         let kept: String = db
@@ -462,6 +477,23 @@ mod tests {
         sweep(&db, now, &project).await.unwrap();
         // agent: kept 60 days, not 30; test: 10, not 90.
         assert_eq!(expired(&db).await, vec!["a70", "t20"]);
+    }
+
+    /// tsk985: the longest window a project may set keeps what it says —
+    /// the cutoff a hundred years back, never wrapped into the future — and
+    /// a window naming a namespace nothing logs is reported, not silent.
+    #[tokio::test]
+    async fn the_longest_window_keeps_and_an_unused_one_is_reported() {
+        let db = Database::in_memory();
+        let now = Timestamp::from_unix_ms(1_700_000_000_000);
+        seed_payloads(&db, now, &[("a40", "agent.tool.finished", 40)]).await;
+        let project = BTreeMap::from([
+            ("agent".to_string(), RetentionWindow::new(36_500, 36_500)),
+            ("agnet".to_string(), RetentionWindow::new(60, 14)),
+        ]);
+        let report = sweep(&db, now, &project).await.unwrap();
+        assert_eq!(expired(&db).await, Vec::<String>::new());
+        assert_eq!(report.unused, vec!["agnet".to_string()]);
     }
 
     /// tsk947: a project can keep a plugin's events for less, never for

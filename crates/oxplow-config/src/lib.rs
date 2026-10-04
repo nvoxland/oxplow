@@ -1703,14 +1703,10 @@ fn validate_event_retention(
                 "eventRetention: `{namespace}` isn't an event namespace (lowercase letters, digits and `_`)"
             )));
         }
-        if oxplow_domain::events::retention::is_kept_whole(namespace) {
+        if let Some(problem) = oxplow_domain::events::retention::window_problem(namespace, *window)
+        {
             return Err(ConfigError::Invalid(format!(
-                "eventRetention: `{namespace}` is core state: its events are kept whole"
-            )));
-        }
-        if window.payload_days < 1 || window.content_days < 1 {
-            return Err(ConfigError::Invalid(format!(
-                "eventRetention.{namespace}: windows are at least 1 day"
+                "eventRetention.{namespace}: {problem}"
             )));
         }
     }
@@ -3069,10 +3065,39 @@ mod tests {
             err.contains("`snapshot`") && err.contains("kept whole"),
             "{err}"
         );
-        let err = parse("eventRetention:\n  agent: { payloadDays: 0, contentDays: 3 }\n")
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("at least 1 day"), "{err}");
+        // tsk985: windows are bounded — at least a week for a core
+        // namespace oxplow reads back, a day for a plugin's; at most a
+        // hundred years; and a body is never kept longer than its payload.
+        for (yaml, says) in [
+            (
+                "agent: { payloadDays: 3, contentDays: 3 }",
+                "at least 7 days",
+            ),
+            (
+                "acme_pr: { payloadDays: 0, contentDays: 0 }",
+                "at least 1 day",
+            ),
+            (
+                "agent: { payloadDays: 999999, contentDays: 14 }",
+                "at most 36500 days",
+            ),
+            (
+                "acme_pr: { payloadDays: 7, contentDays: 99999999999 }",
+                "at most 36500 days",
+            ),
+            (
+                "agent: { payloadDays: 30, contentDays: 60 }",
+                "contentDays can't be longer than payloadDays",
+            ),
+        ] {
+            let err = parse(&format!("eventRetention:\n  {yaml}\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(says), "{yaml}: {err}");
+        }
+        assert!(
+            parse("eventRetention:\n  agent: { payloadDays: 36500, contentDays: 36500 }\n").is_ok()
+        );
         let plain = parse("agents: [claude]\n").unwrap();
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(render_project_config(
             &plain, "demo",

@@ -1236,7 +1236,16 @@ own windows** with the person-only key `eventRetention: { <namespace>:
 { payloadDays, contentDays } }` (tsk947): each sweep reads it, a core
 namespace's replaces the default, a plugin namespace's is capped at the
 plugin's window (`RetentionWindow::at_most`), and core state is refused
-at load (`is_kept_whole`). **An expired event is
+at load (`is_kept_whole`). A window is bounded (`window_problem`,
+tsk985): at least 7 days for a core namespace oxplow reads back (the
+agent policy reads a turn's tool payloads), at least a day for a
+plugin's, at most `MAX_DAYS` (36,500 — beyond about 127,000 days the
+cutoff arithmetic used to wrap into the future and wipe the namespace),
+and its `contentDays` no longer than its `payloadDays`.
+`Timestamp::from_unix_ms` computes in `i128`, and the sweep clamps a
+cutoff to `MAX_DAYS` whatever reaches it. A window naming a namespace
+nothing logs is kept — a plugin may be installed later — and reported
+(`SweepReport.unused`, a warning in the log). **An expired event is
 history only** (tsk501): `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
 renamed consumer replaying the log never sees `{}`); `retry_dead_letter`

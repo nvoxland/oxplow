@@ -418,7 +418,15 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                 )
                 .await
                 {
-                    Ok(report) => tracing::info!(?report, "event retention sweep done"),
+                    Ok(report) => {
+                        if !report.unused.is_empty() {
+                            tracing::warn!(
+                                namespaces = ?report.unused,
+                                "eventRetention names namespaces nothing logs; their windows do nothing until something does"
+                            );
+                        }
+                        tracing::info!(?report, "event retention sweep done");
+                    }
                     Err(error) => tracing::warn!(%error, "event retention sweep failed"),
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;

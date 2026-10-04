@@ -54,6 +54,51 @@ pub const CORE_WINDOWS: &[(&str, RetentionWindow)] = &[
 /// one (`event_types.retention`, P8.D5).
 pub const PLUGIN_DEFAULT: RetentionWindow = RetentionWindow::new(30, 14);
 
+/// The longest window a project may set: a hundred years (tsk985).
+pub const MAX_DAYS: i64 = 36_500;
+
+/// The shortest window a project may set for one of core's expiring
+/// namespaces: oxplow reads them back (the agent policy reads a turn's
+/// tool payloads, evidence reads a run's), so a week (tsk985). A plugin's
+/// namespace may be kept for as little as a day.
+pub const MIN_CORE_DAYS: i64 = 7;
+
+/// What's wrong with a project's `window` for `namespace`, if anything:
+/// core state (kept whole), a window under the floor or over
+/// [`MAX_DAYS`], or a body kept longer than its payload.
+pub fn window_problem(namespace: &str, window: RetentionWindow) -> Option<String> {
+    if is_kept_whole(namespace) {
+        return Some(format!(
+            "`{namespace}` is core state: its events are kept whole"
+        ));
+    }
+    let min = if core_window(namespace).is_some() {
+        MIN_CORE_DAYS
+    } else {
+        1
+    };
+    let days = [window.payload_days, window.content_days];
+    if days.iter().any(|d| *d < min) {
+        return Some(if min == 1 {
+            "windows are at least 1 day".to_string()
+        } else {
+            format!("windows of a core namespace are at least {min} days (oxplow reads them back)")
+        });
+    }
+    if days.iter().any(|d| *d > MAX_DAYS) {
+        return Some(format!(
+            "windows are at most {MAX_DAYS} days (a hundred years)"
+        ));
+    }
+    if window.content_days > window.payload_days {
+        return Some(
+            "contentDays can't be longer than payloadDays: an event's large content goes with its payload"
+                .to_string(),
+        );
+    }
+    None
+}
+
 /// Whether `namespace` is core state, whose events are kept whole — no
 /// window applies to it.
 pub fn is_kept_whole(namespace: &str) -> bool {

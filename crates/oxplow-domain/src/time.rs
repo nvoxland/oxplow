@@ -37,11 +37,12 @@ impl Timestamp {
         Self(OffsetDateTime::now_utc())
     }
 
+    /// The instant `ms` milliseconds from the Unix epoch. The nanoseconds
+    /// are computed in `i128`, so a far instant is computed, never wrapped
+    /// (tsk985); one outside the calendar's ±9999 years is a bug.
     pub fn from_unix_ms(ms: i64) -> Self {
-        let secs = ms / 1000;
-        let ns = ((ms % 1000) * 1_000_000) as i32;
-        let nanos = secs * 1_000_000_000 + ns as i64;
-        Self(OffsetDateTime::from_unix_timestamp_nanos(nanos as i128).expect("valid timestamp"))
+        let nanos = i128::from(ms) * 1_000_000;
+        Self(OffsetDateTime::from_unix_timestamp_nanos(nanos).expect("valid timestamp"))
     }
 
     pub fn unix_ms(&self) -> i64 {
@@ -198,5 +199,15 @@ mod tests {
         );
         assert!(Timestamp::parse("yesterday").is_err());
         assert!(serde_json::from_str::<Timestamp>("42").is_err());
+    }
+
+    /// tsk985: a timestamp far from now is computed, never wrapped — the
+    /// nanosecond product overflowed i64 past about 292 years, which turned
+    /// a retention cutoff 300 years back into one in the future.
+    #[test]
+    fn a_far_timestamp_doesnt_wrap() {
+        let far = Timestamp::from_unix_ms(-10_000_000_000_000);
+        assert!(far.to_string().starts_with("1653-"), "{far}");
+        assert_eq!(far.unix_ms(), -10_000_000_000_000);
     }
 }
