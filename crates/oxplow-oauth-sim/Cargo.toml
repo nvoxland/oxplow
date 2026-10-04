@@ -10,7 +10,7 @@ publish = false
 
 # Development only: a dev-dependency of the crates that test sign-in, and a
 # binary to run by hand. Never a dependency of anything that ships (guard
-# `the_oauth_sim_is_never_a_production_dependency`).
+# `no_test_double_is_a_production_dependency`, over the resolved graph).
 [[bin]]
 name = "oxplow-oauth-sim"
 path = "src/main.rs"

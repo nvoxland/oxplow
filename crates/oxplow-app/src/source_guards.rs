@@ -572,77 +572,102 @@ fn no_legacy_shims() {
     );
 }
 
-/// The `[section]` each line of a Cargo manifest is in, paired with the
-/// line.
-fn manifest_lines(text: &str) -> Vec<(String, String)> {
-    let mut section = String::new();
-    text.lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') {
-                section = trimmed.to_string();
-                None
-            } else {
-                Some((section.clone(), trimmed.to_string()))
-            }
-        })
-        .collect()
+/// The workspace's test doubles, by their names' convention: a crate
+/// that stands in for a service in tests is `<name>-fake` or `<name>-sim`.
+fn is_test_double(name: &str) -> bool {
+    name.ends_with("-fake") || name.ends_with("-sim")
 }
 
-/// The sections a development-only crate may be named in: a crate's
-/// dev-dependencies, and the workspace's table of paths.
-fn names_it_for_production(manifest: &str, krate: &str) -> Vec<String> {
-    manifest_lines(manifest)
-        .into_iter()
-        .filter(|(_, line)| {
-            line.starts_with(&format!("{krate} "))
-                || line.starts_with(&format!("{krate}="))
-                || line.starts_with(&format!("{krate}."))
-        })
-        .filter(|(section, _)| {
-            !matches!(
-                section.as_str(),
-                "[dev-dependencies]" | "[workspace.dependencies]"
-            ) && !section.ends_with(".dev-dependencies]")
-        })
-        .map(|(section, line)| format!("{section} {line}"))
-        .collect()
-}
-
-/// P10: the stand-in OAuth server signs anyone in; it is the sign-in
-/// tests' dev-dependency and a binary run by hand, never part of anything
-/// that ships.
+/// tsk930: a test double (the stand-in OAuth server signs anyone in; the
+/// fakes answer whatever a test scripts) is a dev-dependency only — no
+/// workspace crate reaches one through a normal or build edge of the
+/// **resolved** graph (`cargo metadata`), however its manifest spells
+/// the dependency (a `[dependencies.x]` table, a renamed `package =`, the
+/// workspace-hack).
 #[test]
-fn the_oauth_sim_is_never_a_production_dependency() {
-    assert_eq!(
-        names_it_for_production(
-            "[package]\nname = \"a\"\n[dependencies]\noxplow-oauth-sim = { workspace = true }\n[dev-dependencies]\noxplow-oauth-sim = { workspace = true }\n[target.'cfg(unix)'.dev-dependencies]\noxplow-oauth-sim.workspace = true\n",
-            "oxplow-oauth-sim"
-        ),
-        vec!["[dependencies] oxplow-oauth-sim = { workspace = true }"]
+fn no_test_double_is_a_production_dependency() {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let out = std::process::Command::new(cargo)
+        .args(["metadata", "--format-version", "1", "--offline", "--locked"])
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut manifests = vec![
-        root.join("Cargo.toml"),
-        root.join("apps/desktop/src-tauri/Cargo.toml"),
-    ];
-    for entry in std::fs::read_dir(root.join("crates")).unwrap() {
-        let manifest = entry.unwrap().path().join("Cargo.toml");
-        if manifest.exists() {
-            manifests.push(manifest);
-        }
-    }
-    let offenders: Vec<String> = manifests
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let name_of: std::collections::HashMap<&str, &str> = meta["packages"]
+        .as_array()
+        .unwrap()
         .iter()
-        .filter(|m| !m.ends_with("crates/oxplow-oauth-sim/Cargo.toml"))
-        .flat_map(|m| {
-            let text = std::fs::read_to_string(m).unwrap();
-            names_it_for_production(&text, "oxplow-oauth-sim")
-                .into_iter()
-                .map(move |l| format!("{}: {l}", m.display()))
+        .map(|p| (p["id"].as_str().unwrap(), p["name"].as_str().unwrap()))
+        .collect();
+    // Each package's normal and build edges.
+    let edges: std::collections::HashMap<&str, Vec<&str>> = meta["resolve"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| {
+            let shipped = n["deps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|d| {
+                    d["dep_kinds"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|k| k["kind"].as_str() != Some("dev"))
+                })
+                .map(|d| d["pkg"].as_str().unwrap())
+                .collect();
+            (n["id"].as_str().unwrap(), shipped)
         })
         .collect();
-    assert!(offenders.is_empty(), "{offenders:#?}");
+    let members: Vec<&str> = meta["workspace_members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m.as_str().unwrap())
+        .collect();
+    let doubles: BTreeSet<&str> = members
+        .iter()
+        .map(|m| name_of[m])
+        .filter(|n| is_test_double(n))
+        .collect();
+    for double in [
+        "oxplow-oauth-sim",
+        "oxplow-ai-fake",
+        "oxplow-provider-fake",
+        "oxplow-acp-fake",
+    ] {
+        assert!(
+            doubles.contains(double),
+            "{double} isn't seen as a test double"
+        );
+    }
+    let mut offenders = Vec::new();
+    for member in members.iter().filter(|m| !is_test_double(name_of[*m])) {
+        let mut seen = BTreeSet::new();
+        let mut stack = vec![(*member, vec![name_of[member]])];
+        while let Some((id, path)) = stack.pop() {
+            for dep in edges.get(id).into_iter().flatten() {
+                if !seen.insert(*dep) {
+                    continue;
+                }
+                let mut via = path.clone();
+                via.push(name_of[dep]);
+                if doubles.contains(name_of[dep]) {
+                    offenders.push(via.join(" → "));
+                } else {
+                    stack.push((dep, via));
+                }
+            }
+        }
+    }
+    assert_eq!(offenders, Vec::<String>::new(), "a test double ships");
 }
 
 /// P10: a sign-in's redirect is caught by the desktop shell, never the

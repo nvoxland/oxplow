@@ -802,7 +802,12 @@ form; sign-in is a provider's.
   with `cargo run -p oxplow-oauth-sim -- --http 127.0.0.1:8124` (it
   prints its urls). **Development only:** it is a dev-dependency of the
   crates that test sign-in and a binary, never a dependency of anything
-  that ships (guard `the_oauth_sim_is_never_a_production_dependency`).
+  that ships. Guard `no_test_double_is_a_production_dependency`
+  (tsk930) holds that for every test double — a workspace crate named
+  `*-fake` or `*-sim` (`oxplow-oauth-sim`, `oxplow-ai-fake`,
+  `oxplow-provider-fake`, `oxplow-acp-fake`): no workspace crate reaches
+  one through a normal or build edge of the resolved graph (`cargo
+  metadata`), however its manifest spells the dependency.
 
 The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
 shared with the team; whether it *runs* is per machine (approval,
