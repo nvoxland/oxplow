@@ -906,22 +906,6 @@ mod core_tests {
             found(&svc, "sprocket", Some(stream.id), "task")
         })
         .await;
-        let rowids = |svc: Arc<Services>| async move {
-            svc.db
-                .read(|c| {
-                    let mut s = c
-                        .prepare("SELECT rowid FROM search_entry ORDER BY rowid")
-                        .map_err(oxplow_db::map_sql_err)?;
-                    let r = s
-                        .query_map([], |r| r.get::<_, i64>(0))
-                        .map_err(oxplow_db::map_sql_err)?
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .map_err(oxplow_db::map_sql_err)?;
-                    Ok(r)
-                })
-                .await
-                .unwrap()
-        };
         let computed = |svc: Arc<Services>| async move {
             svc.db
                 .read(|c| {
@@ -935,8 +919,11 @@ mod core_tests {
                 .await
                 .unwrap()
         };
-        let before = rowids(svc.clone()).await;
         let first = computed(svc.clone()).await;
+        // tsk897: hear every commit from here on — a rewrite of the index
+        // touches `search_entry` (rowids alone can't tell: a delete and
+        // re-insert hands the same ones back).
+        let mut commits = svc.db.subscribe_changes();
         // A restart: a new change loop registers every kind again, and each
         // builds once.
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -945,7 +932,14 @@ mod core_tests {
             computed(svc.clone()).await != first
         })
         .await;
-        assert_eq!(rowids(svc.clone()).await, before, "nothing was rewritten");
+        let mut touched = Vec::new();
+        while let Ok(changed) = commits.try_recv() {
+            touched.extend(changed.tables.iter().cloned());
+        }
+        assert!(
+            !touched.iter().any(|t| t == "search_entry"),
+            "the restart rewrote the index: {touched:?}"
+        );
     }
 
     /// Run `name` as a person; its result.
