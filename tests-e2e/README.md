@@ -1,7 +1,8 @@
 # The browser suite: the real UI in a real browser
 
-`bun run e2e` drives the built React app in headless Chromium against a real
-daemon — Playwright (`@playwright/test`), no `tauri-driver`. The frontend
+`bun run e2e` drives the built React app in headless Chromium — and the
+custom-component specs in WebKit too — against a real daemon: Playwright
+(`@playwright/test`), no `tauri-driver`. The frontend
 reaches the daemon the way a remote window does: the transport reads its base
 and token from localStorage (`oxplow.remoteBase`, `oxplow.remoteToken`), and
 CORS is permissive for exactly this (`.context/remote-daemon.md`).
@@ -20,17 +21,27 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   then, runs the fake this checkout built; its `provider.json` is checked
   in and kept equal to the fake's declarations by
   `the_suite_fixture_declares_what_the_fake_does`), an effect, a model, a
-  lens with its page, and a ref kind. Private, so it may use experimental
-  kinds. Nothing in it is approved until a spec approves it.
+  lens with its page, and a ref kind. Private, since `providers` is still
+  experimental. The effect comments on each created task; a title with
+  `[fail]` makes it fail (Delivery, Retry) and one with `[delete]` makes it
+  delete the task (a proposal). Nothing in it is approved until a spec
+  approves it.
+- **The github example** (`examples/extensions/github`) is copied in too,
+  its `sync.sh` swapped for one that prints `fixtures/github-prs.json`
+  (two pull requests) — the documented example, no GitHub.
 - **`support/daemon.ts`** starts one daemon: `oxplow-daemon-sim` (the daemon
   with its secrets in memory — nothing reaches the keychain) over a throwaway
-  git project, with its own `OXPLOW_HOME` and `TMUX_TMPDIR`. `ipc()` calls
+  git project, with its own `OXPLOW_HOME` and `TMUX_TMPDIR` and no `$TMUX`
+  (a tmux client finds its server by it first); a tmux server it started
+  is killed with it. (No spec starts one today: the threads speak ACP
+  and the Terminal page is a plain shell.) `ipc()` calls
   `/ipc/<name>` as the person; `run()` runs a bus command, confirmed;
   `settle()` waits until boot's background tasks are done; `waitForModels()`
   opens `/events` first, does a write, and resolves once the daemon says
   each named model changed — so a seeding write is never raced;
-  `approveProgram()` approves one of the project's programs as a person
-  does; `searchable()` waits until site search has indexed a write;
+  `approveProgram()` / `approveCollector()` approve a program or an
+  extension's collector as a person does; `searchable()` waits until site
+  search has indexed a write;
   `until()` polls any such background state.
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
   - `daemon`, one per worker. Before any page opens it selects an ACP thread
@@ -45,15 +56,36 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   - `fresh` — a daemon and page of the spec's own, for a spec whose state
     no other may touch first (nothing approved, an empty project).
 - **`support/ui.ts`** — a person's moves (`expandRailSection`, `openNewTask`,
-  `openFromLauncher`).
+  `openFromLauncher` — which waits for the query's own row before Enter).
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect` or
   `waitForModels`, never a sleep: global setup refuses a spec that calls
   `waitForTimeout`.
 - **Reports**: a JUnit report at `tests-e2e/.output/junit.xml` and, for a
   failed spec, its trace under `tests-e2e/.output/results` (both gitignored).
-- **CI**: the `e2e` job in `.github/workflows/ci.yml` — two workers, one
-  retry, the JUnit report uploaded always and traces on failure.
-  `daemon-contract` stays browser-free.
+- **Projects**: `chromium` runs every spec; `webkit` runs
+  `specs/components/` (a custom component's frame, the one place the two
+  engines are checked apart — the macOS window is WebKit).
+- **CI**: the `e2e` job in `.github/workflows/ci.yml` — Chromium and WebKit,
+  two workers, one retry, the JUnit report uploaded always and traces on
+  failure. `daemon-contract` stays browser-free.
+
+## What the specs cover
+
+`shell/` boot and connecting with a token; `work/` tasks, the Board
+(transition, confirm, undo) and launcher search; `knowledge/` the wiki and
+an extension's ref kind; `code/` a commit's diff; `data/` Explore Data
+(Save as Lens), lenses and dashboards, extension pages; `settings/`
+Programs approval and the settings pages; `integrations/` the fake tracker
+(configure, Check, Enable, active, Sync Now), Delivery (a failed reaction,
+a person's Retry, Backfill) and Approvals (an effect's destructive step);
+`review/` the verdict chip; `agent/` the fake ACP agent's reply and a
+Terminal shell; `components/` the github example's PR Lifetimes (frame,
+filters, navigation, approval-gated `invoke`, and a self-navigation off
+this machine sending no request).
+
+What stays a hand walk: the WKWebView window itself, shell-only surfaces
+(project setup, the native menu, the clipboard, external URLs), OAuth
+sign-in and a live Linear run.
 
 ## Scripts
 
@@ -66,7 +98,8 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 
 **It's Chromium, not WKWebView.** The shipped app runs WKWebView. This is a
 good proxy for React/JS work and a poor one for paint, scroll and GC. Say which
-you measured.
+you measured. (The suite's WebKit project is Playwright's WebKit build, close
+to but not the system WKWebView.)
 
 **Rank by what's actually executing.** An idle renderer reports ~100%
 `(idle)`/`(program)`. `profile-renderer.mjs` separates those from real JS for

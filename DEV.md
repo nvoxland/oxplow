@@ -201,45 +201,41 @@ launch does. Putting it on the command keeps the scoping explicit.
 
 The full app also runs without the Tauri shell: `oxplow-daemon`
 serves the backend over HTTP/WebSocket, and the frontend in remote
-mode talks to it from any browser. This is the route for driving the
-UI with Playwright (no Tauri driver exists for macOS) and for remote
-dev (see `.context/remote-daemon.md`).
+mode talks to it from any browser. This is the route the browser suite
+takes (`bun run e2e`, below) and the one for remote dev (see
+`.context/remote-daemon.md`).
 
 ```
-  # terminal 1 — headless backend on loopback
+  # terminal 1 — headless backend on loopback; it prints `ui token: <token>`
   cargo build -p oxplow-daemon && ./target/debug/oxplow-daemon --project . --bind 127.0.0.1:7420
 
-  # terminal 2 — frontend in remote mode (vite on :5173)
-  VITE_OXPLOW_REMOTE=http://127.0.0.1:7420 bun run --cwd apps/desktop dev
+  # terminal 2 — frontend in remote mode (vite on :5173), with that token
+  VITE_OXPLOW_REMOTE=http://127.0.0.1:7420 VITE_OXPLOW_REMOTE_TOKEN=<token> \
+    bun run --cwd apps/desktop dev
 ```
 
-No HMR wanted? Serve a static production build instead of the dev
-server — either bake the remote base in at build time:
+`/ipc` and `/events` refuse a call without the token (`Authorization:
+Bearer`, or `?token=` on the WebSocket). To hand it over without
+putting it in a command line, start the daemon with `--token-stdin` and
+write it to its stdin.
 
-```
-  VITE_OXPLOW_REMOTE=http://127.0.0.1:7420 bun run --cwd apps/desktop build
-  bun run --cwd apps/desktop preview      # serves dist/ on :4173
-```
+No HMR wanted? Build plain (`bun run --cwd apps/desktop build`), serve
+`dist/` (`bun run --cwd apps/desktop preview`, or any static server), and
+connect from the launcher's Remote connect flow — a token field, or open
+`http://localhost:4173/#oxplow-token=<token>` after setting the base. It
+keeps both in localStorage (`oxplow.remoteBase`, `oxplow.remoteToken`).
 
-or build plain (`bun run --cwd apps/desktop build`), serve `dist/`
-with any static server, and use the launcher's Remote connect flow —
-it stores `oxplow.remoteBase` in localStorage at runtime, no baked-in
-URL.
-
-Then open `http://localhost:5173` in a browser (or point Playwright
-at it). Notes:
+Notes:
 
 - The project dir must already contain `.oxplow/`; sanity-check the
-  daemon with `curl http://127.0.0.1:7420/health`.
-- `VITE_OXPLOW_REMOTE` flips the frontend transport switch
-  (`apps/desktop/src/tauri-bridge/transport.ts`) into remote mode at
-  dev/build time; without it the frontend expects Tauri IPC and a
-  browser tab won't boot.
+  daemon with `curl http://127.0.0.1:7420/health` (no token needed).
 - The daemon takes the same per-project instance lock as the desktop
   shell — the app and the daemon can't run against the same project
   simultaneously.
 - Shell-native surfaces (native menus, window chrome, Tauri dialogs)
   don't exist in this mode; everything else is the real app.
+- A custom component's frame only loads from a loopback daemon: its
+  bundle is served to a loopback `Host` alone.
 
 ## Test
 
@@ -256,17 +252,20 @@ of that file is non-empty after the test run.
 
 Frontend tests still use `bun test` (run from `apps/desktop/`).
 
-App-level tests live in `tests-e2e/` and drive the real React UI in
-headless Chromium against `oxplow-daemon`, over the remote-mode
-transport described under "Run headless" above — ordinary Playwright,
-no driver. Read `tests-e2e/README.md` before writing one; two things
-there will otherwise bite you (it's Chromium, not the shipped
-WKWebView; and an idle renderer profiles as ~100% `(idle)`).
+The browser suite drives the real React UI against a real daemon, over
+the remote-mode transport described under "Run headless" above:
 
-The original Electron-era Playwright suite lives under
-`tests-e2e.electron-archive/`. It does **not** run against the Tauri
-build and its selectors are long dead, but the 35 probes are still a
-useful behaviour corpus when writing new ones — none have been ported.
+```
+bunx playwright install chromium webkit   # one-time
+bun run e2e                               # builds the frontend and the test daemon, then runs every spec
+bunx playwright test tests-e2e/specs/work # one area
+```
+
+Each worker boots `oxplow-daemon-sim` (the daemon with its secrets in
+memory) over a throwaway git project, so nothing reaches your config,
+keychain or tmux server. Read `tests-e2e/README.md` before writing a
+spec, and `.context/working-in-this-repo.md` → "The browser suite" for
+when to run it.
 
 ### Coverage
 

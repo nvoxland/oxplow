@@ -6,9 +6,6 @@ public/dist/
 .idea
 *.iml
 .playwright-mcp
-tests-e2e.electron-archive/screenshots/
-tests-e2e.electron-archive/scratch-edit-target.txt
-tests-e2e.electron-archive/scratch-commit-target.txt
 .self-ralph/
 site/
 .venv/

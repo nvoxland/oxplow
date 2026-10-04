@@ -105,7 +105,9 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   `boot.rs`), `oxplow-rpc` (transport-neutral command cores + the
   `rpc_dispatch!` registry; no tauri deps), `oxplow-daemon` (headless
   HTTP backend for remote dev — serves the dispatch over loopback,
-  paired with an `ssh -L` tunnel), `oxplow-tauri-ipc`
+  paired with an `ssh -L` tunnel), `oxplow-daemon-sim` (the same
+  daemon with its secrets in memory: the browser suite's, dev-only),
+  `oxplow-tauri-ipc`
   (`#[tauri::command]` adapters + `tauri-specta` exports; one-line
   delegates into `oxplow-rpc`).
 - Old top-level `src/` (the Electron/Node backend) is gone; nothing
@@ -155,6 +157,32 @@ test:collect; wait)`, still one foreground command (see
 (`Database::in_memory()` restores `<temp>/oxplow-db-templates/<build+date>.sqlite`
 instead of running every migration, ~330 ms → a few ms). A new migration
 or model needs nothing: a rebuilt test binary is a new template key.
+
+### The browser suite (`bun run e2e`, P11)
+
+`tests-e2e/` drives the built frontend in Chromium (and, for custom
+components, WebKit) against `oxplow-daemon-sim` over a throwaway git
+project — the real app, a real daemon, the fake ACP agent and the fake
+work-item provider; `tests-e2e/README.md` has the harness. It isn't part
+of `test:collect` (it builds the frontend and boots a daemon per worker,
+~40 s); CI runs it as its own `e2e` job. **Run it when a change touches
+what a person sees or does in the app** — a page, a rail section, a
+command's UI path, a testid — and add or extend a spec under
+`tests-e2e/specs/<area>/` for a new user path. Rules a spec keeps:
+
+- select by `data-testid` (a renamed testid breaks specs — grep
+  `tests-e2e/` first);
+- wait on the page with web-first `expect`, and on the daemon with the
+  helpers (`until`, `settle`, `searchable`, `waitForModels`) — never a
+  sleep: global setup refuses a spec that calls `waitForTimeout`;
+- seed through `run()` (the bus, as the person) or files written before
+  boot, never through a backdoor; approve as a person does
+  (`approveProgram`, `approveCollector`);
+- a spec whose state no other may touch first (nothing approved, a
+  provider configured) takes the `fresh` fixture, its own daemon.
+
+A bug the suite finds is its own task, fixed with a unit test where one
+can pin it; the spec stays as the end-to-end check.
 
 ### Timing assertions flake under `cargo cov` (tsk175)
 

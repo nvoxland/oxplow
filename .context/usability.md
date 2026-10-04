@@ -653,7 +653,8 @@ declaring *what it is* and mounting the generic layer.
     `terminal-tab-new` on the
     strip's "+" button and `terminal-tab-new-overlay` on the overlay's
     "+ New terminal" button
-  These are load-bearing for `tests-e2e/` — don't rename casually.
+  These are load-bearing for the browser suite (`tests-e2e/specs/`) —
+  don't rename casually; grep the specs before renaming any testid.
 
 ## Empty states
 
