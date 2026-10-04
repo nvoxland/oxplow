@@ -98,18 +98,33 @@ pub async fn set_instance_credential(
 /// Start signing in for one of `instance`'s credentials (one its
 /// provider declares with `oauth:`), its redirect coming back to
 /// `redirect_port` on the person's machine, where the desktop shell
-/// listens: the page the person signs in on, to open in their browser.
-/// UI only: an agent never signs in.
+/// listens: the page the person signs in on, to open in their browser,
+/// and the sign-in's number (its news names it; it cancels it). UI only:
+/// an agent never signs in.
 pub async fn begin_oauth_sign_in(
     svc: &Services,
     instance: String,
     name: String,
     redirect_port: u16,
-) -> Result<String, IpcError> {
+) -> Result<oxplow_app::providers::BegunSignIn, IpcError> {
     Ok(svc
         .providers
         .begin_sign_in(&instance, &name, redirect_port)
         .await?)
+}
+
+/// End sign-in `sign_in` (its row was left, or the browser never opened):
+/// nothing of it is kept, and its news says it was cancelled. UI only.
+pub async fn cancel_oauth_sign_in(
+    svc: &Services,
+    instance: String,
+    name: String,
+    sign_in: u32,
+) -> Result<(), IpcError> {
+    svc.providers
+        .cancel_sign_in(&instance, &name, sign_in)
+        .await;
+    Ok(())
 }
 
 /// The redirect the shell caught for that sign-in (`redirect`: the path

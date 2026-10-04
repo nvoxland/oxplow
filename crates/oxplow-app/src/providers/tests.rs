@@ -3149,12 +3149,12 @@ const REDIRECT_PORT: u16 = 8124;
 
 /// What the person's browser does with a sign-in's page: the redirect it
 /// is sent back with, as the shell catches it (its path and query).
-async fn browse(page: &str) -> String {
+async fn browse(page: &crate::providers::BegunSignIn) -> String {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
-    let resp = client.get(page).send().await.unwrap();
+    let resp = client.get(&page.url).send().await.unwrap();
     let to = url::Url::parse(resp.headers()["location"].to_str().unwrap()).unwrap();
     format!("{}?{}", to.path(), to.query().unwrap_or_default())
 }
@@ -3225,6 +3225,7 @@ async fn sign_in(fx: &EffortFixture, name: &str) -> Option<String> {
                 instance,
                 name: of,
                 error,
+                ..
             }) = ui.recv().await
             {
                 assert_eq!((instance.as_str(), of.as_str()), (INSTANCE, name));
@@ -3554,6 +3555,69 @@ async fn a_sign_in_answers_before_the_instance_restarts() {
         started.elapsed() < std::time::Duration::from_millis(1500),
         "answered after {:?}",
         started.elapsed()
+    );
+}
+
+/// The next `CredentialChanged` for `name`: its sign-in and error.
+async fn next_news(
+    ui: &mut tokio::sync::broadcast::Receiver<crate::events::OxplowEvent>,
+    name: &str,
+) -> (Option<u32>, Option<String>) {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Ok(crate::events::OxplowEvent::CredentialChanged {
+                name: of,
+                sign_in,
+                error,
+                ..
+            }) = ui.recv().await
+            {
+                if of == name {
+                    return (sign_in, error);
+                }
+            }
+        }
+    })
+    .await
+    .expect("news of the sign-in")
+}
+
+/// tsk929: a sign-in replaced by a newer one (another window's Sign in)
+/// says so, naming itself, so the row waiting on it stops waiting; and a
+/// person's cancel ends a sign-in at once — nothing of it kept — with its
+/// news saying so.
+#[tokio::test]
+async fn a_replaced_or_cancelled_sign_in_is_announced_by_its_number() {
+    let (fx, _sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let providers = &fx.svc.providers;
+    let mut ui = fx.svc.events.subscribe_ui();
+    let first = providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let second = providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    assert_ne!(first.sign_in, second.sign_in);
+    let (of, error) = next_news(&mut ui, "FAKE_TOKEN").await;
+    assert_eq!(of, Some(first.sign_in));
+    assert!(error.unwrap().contains("replaced"));
+    // A cancel for the old one does nothing; for the current one, it ends.
+    providers
+        .cancel_sign_in(INSTANCE, "FAKE_TOKEN", first.sign_in)
+        .await;
+    providers
+        .cancel_sign_in(INSTANCE, "FAKE_TOKEN", second.sign_in)
+        .await;
+    let (of, error) = next_news(&mut ui, "FAKE_TOKEN").await;
+    assert_eq!(of, Some(second.sign_in));
+    assert!(error.unwrap().contains("cancelled"));
+    let redirect = browse(&second).await;
+    assert!(
+        complete(&fx, "FAKE_TOKEN", &redirect).await.is_err(),
+        "nothing kept"
     );
 }
 

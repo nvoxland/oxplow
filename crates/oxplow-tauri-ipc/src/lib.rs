@@ -154,6 +154,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::turn_off_provider_instance_here,
             commands::generated::set_instance_credential,
             commands::generated::begin_oauth_sign_in,
+            commands::generated::cancel_oauth_sign_in,
             commands::generated::complete_oauth_sign_in,
             // The sign-in redirect, caught by the shell (P10).
             commands::oauth_redirect::listen_for_oauth_redirect,

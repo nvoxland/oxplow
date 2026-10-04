@@ -211,6 +211,7 @@ pub const MANIFEST: &[Capability] = &[
     // Signing in is a person's, in their browser (P9.B3); the shell hands
     // the redirect it caught to the core (P10).
     ui("begin_oauth_sign_in"),
+    ui("cancel_oauth_sign_in"),
     ui("complete_oauth_sign_in"),
     ui("listen_for_oauth_redirect"),
     ui("await_oauth_redirect"),

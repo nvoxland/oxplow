@@ -1,5 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { ExtensionChange, OpOutcome, ProviderEffect, Reads, Scope, SignInCompletion, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type { BegunSignIn, ExtensionChange, OpOutcome, ProviderEffect, Reads, Scope, SignInCompletion, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -934,8 +934,14 @@ export async function setInstanceCredential(
 /// Start signing in for one of an instance's credentials (one its provider
 /// declares with `oauth:`), its redirect coming back to `redirectPort`
 /// where the shell listens: the page to open in the person's browser.
-export async function beginOauthSignIn(instance: string, name: string, redirectPort: number): Promise<string> {
+export async function beginOauthSignIn(instance: string, name: string, redirectPort: number): Promise<BegunSignIn> {
   return unwrap(await commands.beginOauthSignIn(instance, name, redirectPort));
+}
+
+/// End sign-in `signIn` (its row was left, or the browser never opened):
+/// nothing of it is kept, and its news says it was cancelled.
+export async function cancelOauthSignIn(instance: string, name: string, signIn: number): Promise<void> {
+  unwrap(await commands.cancelOauthSignIn(instance, name, signIn));
 }
 
 /// Hand the redirect the shell caught (its path and query) to the core:

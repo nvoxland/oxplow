@@ -93,7 +93,10 @@ mock.module("../api.js", () => ({
     signIns.push([inst, name]);
     steps.push(`begin ${inst} ${name} ${port}`);
     await signInGate;
-    return "https://auth.example.com/authorize?state=abc";
+    return { url: "https://auth.example.com/authorize?state=abc", signIn: 40 + signIns.length };
+  },
+  cancelOauthSignIn: async (_inst: string, _name: string, signIn: number) => {
+    steps.push(`cancel ${signIn}`);
   },
   openInSystemBrowser: async (url: string) => {
     browsed.push(url);
@@ -251,7 +254,7 @@ test("a signed-in credential has a Sign in button and no value box", async () =>
   // It came to nothing: why, on the row.
   const hear = (error: string | null) =>
     act(() => {
-      for (const l of [...listeners]) l({ kind: "credentialChanged", instance: "tracker/fake", name: "FAKE_TOKEN", error });
+      for (const l of [...listeners]) l({ kind: "credentialChanged", instance: "tracker/fake", name: "FAKE_TOKEN", signIn: null, error });
     });
   hear("the sign-in was refused: access_denied");
   await waitFor(() => expect(row.textContent).toContain("the sign-in was refused: access_denied"));
@@ -344,6 +347,24 @@ test("a failed completion shows on its row", async () => {
   await waitFor(() => expect(steps.at(-1)).toBe("answer 1 failed"));
   await waitFor(() => expect(row.textContent).toContain("the connection to the daemon was lost"));
   expect(row.textContent).not.toContain("Finish signing in in your browser");
+});
+
+// tsk929: leaving the row cancels its sign-in in the core (nothing of it
+// kept), and news of another sign-in of the credential isn't the row's.
+test("leaving a sign-in cancels it, and another sign-in's news isn't the row's", async () => {
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: null }];
+  const view = render(<IntegrationsSection />);
+  const row = await waitFor(() => view.getByTestId("sign-in-tracker/fake-FAKE_TOKEN"));
+  fireEvent.click(view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"));
+  await waitFor(() => expect(row.textContent).toContain("Finish signing in in your browser"));
+  act(() => {
+    for (const l of [...listeners])
+      l({ kind: "credentialChanged", instance: "tracker/fake", name: "FAKE_TOKEN", signIn: 7, error: "a newer sign-in replaced it" });
+  });
+  expect(row.textContent).toContain("Finish signing in in your browser");
+  expect(row.textContent).not.toContain("replaced");
+  view.unmount();
+  await waitFor(() => expect(steps).toContain("cancel 41"));
 });
 
 // tsk905: Sign in again while one is under way: the old listener is

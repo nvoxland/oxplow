@@ -129,7 +129,7 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         .begin_sign_in(INSTANCE, "NOTES_TOKEN", listener.port())
         .await
         .unwrap();
-    let browser = tokio::spawn(async move { reqwest::get(&page).await.unwrap().status() });
+    let browser = tokio::spawn(async move { reqwest::get(&page.url).await.unwrap().status() });
     let redirect = listener.next().await.unwrap();
     let completion = svc
         .providers

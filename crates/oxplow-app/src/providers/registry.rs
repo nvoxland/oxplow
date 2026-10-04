@@ -214,10 +214,23 @@ pub struct InstanceCredential {
 /// One `(instance, credential)`'s sign-in gate.
 type SignInGate = Arc<tokio::sync::Mutex<()>>;
 
+/// A sign-in's number, from its begin: the renderer tells its own
+/// sign-in's news from another's by it, and cancels it by it (tsk929).
+pub type SignInId = u32;
+
+/// A sign-in begun: the page the person signs in on, and its number.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BegunSignIn {
+    pub url: String,
+    pub sign_in: SignInId,
+}
+
 /// A sign-in waiting for its redirect.
 struct SignInUnderWay {
-    /// Which start it was ([`ProviderRegistry`]'s `sign_in_seq`).
-    seq: u64,
+    /// Which start it was ([`ProviderRegistry`]'s `sign_in_seq`): the
+    /// `sign_in` its news names, and what cancels it.
+    seq: SignInId,
     /// The keychain account its token goes to.
     account: String,
     pending: oauth::PendingSignIn,
@@ -925,7 +938,7 @@ pub struct ProviderRegistry {
     /// (tsk837). Never held across a check or a reconcile.
     instances_gate: tokio::sync::Mutex<()>,
     /// Numbers each sign-in, so a finished one untracks only itself.
-    sign_in_seq: std::sync::atomic::AtomicU64,
+    sign_in_seq: std::sync::atomic::AtomicU32,
 }
 
 /// Where `scope`'s credentials are kept: the project's key, or the
@@ -1031,7 +1044,7 @@ impl ProviderRegistry {
             sign_ins: parking_lot::Mutex::new(BTreeMap::new()),
             sign_in_gates: parking_lot::Mutex::new(BTreeMap::new()),
             instances_gate: tokio::sync::Mutex::new(()),
-            sign_in_seq: std::sync::atomic::AtomicU64::new(0),
+            sign_in_seq: std::sync::atomic::AtomicU32::new(1),
         })
     }
 
@@ -2233,7 +2246,7 @@ impl ProviderRegistry {
         instance: &str,
         name: &str,
         redirect_port: u16,
-    ) -> Result<String, DomainError> {
+    ) -> Result<BegunSignIn, DomainError> {
         let (account, decl, resolved) = self.credential(instance, name)?;
         let Some(oauth_decl) = decl.oauth else {
             return Err(DomainError::Invalid(format!(
@@ -2276,7 +2289,11 @@ impl ProviderRegistry {
         // is half done meanwhile.
         let gate = self.sign_in_gate(&key);
         let _gate = gate.lock().await;
-        self.abandon_sign_ins_locked(|k| *k == key);
+        // The one it replaces is told — another window's row may be
+        // waiting on it (tsk929).
+        for replaced in self.abandon_sign_ins_locked(|k| *k == key) {
+            self.sign_in_news(&key, replaced, Some("a newer sign-in replaced it".into()));
+        }
         let seq = self
             .sign_in_seq
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2298,7 +2315,45 @@ impl ProviderRegistry {
                 expiry,
             },
         );
-        Ok(sign_in.authorize_url)
+        Ok(BegunSignIn {
+            url: sign_in.authorize_url,
+            sign_in: seq,
+        })
+    }
+
+    /// A person ends sign-in `sign_in` for `instance`'s `name` (the row was
+    /// left, or its browser never opened): nothing of it is kept — its
+    /// verifier and client secret go now, not in five minutes — and its
+    /// news says so (tsk929). One already over is nothing to cancel.
+    pub async fn cancel_sign_in(&self, instance: &str, name: &str, sign_in: SignInId) {
+        let key = (instance.to_string(), name.to_string());
+        let gate = self.sign_in_gate(&key);
+        let _gate = gate.lock().await;
+        let cancelled = {
+            let mut sign_ins = self.sign_ins.lock();
+            if sign_ins.get(&key).is_some_and(|s| s.seq == sign_in) {
+                sign_ins.remove(&key)
+            } else {
+                None
+            }
+        };
+        if let Some(cancelled) = cancelled {
+            cancelled.expiry.abort();
+            self.sign_in_news(&key, sign_in, Some("the sign-in was cancelled".into()));
+        }
+    }
+
+    /// Tell the renderer how sign-in `sign_in` for `key` went
+    /// (`CredentialChanged`, naming it).
+    fn sign_in_news(&self, key: &(String, String), sign_in: SignInId, error: Option<String>) {
+        self.deps
+            .events
+            .emit(crate::events::OxplowEvent::CredentialChanged {
+                instance: key.0.clone(),
+                name: key.1.clone(),
+                sign_in: Some(sign_in),
+                error,
+            });
     }
 
     /// Refused unless `resolved`'s provider is approved as it is now.
@@ -2392,18 +2447,12 @@ impl ProviderRegistry {
         drop(gate);
         // The restart and the renderer's news follow on their own: the
         // browser isn't kept waiting for a slow `check`.
-        let (me, error) = (self.clone(), outcome.clone().err());
+        let (me, error, seq) = (self.clone(), outcome.clone().err(), under_way.seq);
         tokio::spawn(async move {
             if error.is_none() {
                 me.credential_changed(&instance).await;
             }
-            me.deps
-                .events
-                .emit(crate::events::OxplowEvent::CredentialChanged {
-                    instance,
-                    name,
-                    error,
-                });
+            me.sign_in_news(&(instance, name), seq, error);
         });
         Ok(match outcome {
             Ok(()) => SignInCompletion::SignedIn,
@@ -2442,7 +2491,7 @@ impl ProviderRegistry {
 
     /// Sign-in `seq` for `key` was never finished: end it, and tell the
     /// renderer.
-    async fn expire_sign_in(&self, key: (String, String), seq: u64) {
+    async fn expire_sign_in(&self, key: (String, String), seq: SignInId) {
         let gate = self.sign_in_gate(&key);
         let _gate = gate.lock().await;
         let expired = {
@@ -2454,17 +2503,14 @@ impl ProviderRegistry {
             }
         };
         if expired.is_some() {
-            let (instance, name) = key;
-            self.deps
-                .events
-                .emit(crate::events::OxplowEvent::CredentialChanged {
-                    instance,
-                    name,
-                    error: Some(format!(
-                        "the sign-in wasn't finished within {} minutes",
-                        oauth::SIGN_IN_WAIT.as_secs() / 60
-                    )),
-                });
+            self.sign_in_news(
+                &key,
+                seq,
+                Some(format!(
+                    "the sign-in wasn't finished within {} minutes",
+                    oauth::SIGN_IN_WAIT.as_secs() / 60
+                )),
+            );
         }
     }
 
@@ -2495,14 +2541,18 @@ impl ProviderRegistry {
     }
 
     /// [`Self::abandon_sign_ins`], the gates already held.
-    fn abandon_sign_ins_locked(&self, which: impl Fn(&(String, String)) -> bool) {
+    /// The numbers of the sign-ins it ended.
+    fn abandon_sign_ins_locked(&self, which: impl Fn(&(String, String)) -> bool) -> Vec<SignInId> {
         let mut sign_ins = self.sign_ins.lock();
         let keys: Vec<_> = sign_ins.keys().filter(|k| which(k)).cloned().collect();
+        let mut ended = Vec::new();
         for key in keys {
             if let Some(abandoned) = sign_ins.remove(&key) {
                 abandoned.expiry.abort();
+                ended.push(abandoned.seq);
             }
         }
+        ended
     }
 
     /// Check `instance` with `config` for a person (Settings' Check): its

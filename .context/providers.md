@@ -738,7 +738,14 @@ form; sign-in is a provider's.
   it holds is answered and the socket closed, so a declared port is free
   again; tsk904). A stop returns once the socket is closed. A second sign-in for the same credential
   abandons the first (its redirect is no longer the sign-in's; the row
-  stops its listener). Each `(instance, credential)` has its own gate
+  stops its listener), and the first's news says it was replaced. Every
+  sign-in has a **number** (`begin_oauth_sign_in` → `{ url, signIn }`,
+  `SignInId`); `CredentialChanged { …, signIn }` names the sign-in it is
+  about, so a row ignores news of another sign-in of the credential — its
+  own replaced one, another window's (tsk929). A row that is left, or
+  whose browser never opened, cancels its sign-in (`cancel_oauth_sign_in
+  { instance, name, signIn }`, UI-only): nothing of it — verifier, client
+  secret — is kept the five minutes, and its news says it was cancelled. Each `(instance, credential)` has its own gate
   (`sign_in_gate`), held while its sign-in begins, finishes — across the
   code exchange — expires or is abandoned, so two clicks at once leave one
   under way, and removing an instance — a project entry that uncovers a

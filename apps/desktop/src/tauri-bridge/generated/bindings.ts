@@ -310,7 +310,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	beginOauthSignIn: (instance: string, name: string, redirectPort: number) => typedError<string, IpcError>(__TAURI_INVOKE("begin_oauth_sign_in", { instance, name, redirectPort })),
+	beginOauthSignIn: (instance: string, name: string, redirectPort: number) => typedError<BegunSignIn, IpcError>(__TAURI_INVOKE("begin_oauth_sign_in", { instance, name, redirectPort })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	cancelOauthSignIn: (instance: string, name: string, signIn: number) => typedError<null, IpcError>(__TAURI_INVOKE("cancel_oauth_sign_in", { instance, name, signIn })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1340,6 +1345,12 @@ export type BacklinkEdge = {
 	 *  renderer when None.
 	 */
 	source_label: string | null,
+};
+
+// A sign-in begun: the page the person signs in on, and its number.
+export type BegunSignIn = {
+	url: string,
+	signIn: number,
 };
 
 // Who last changed one line.
@@ -4249,7 +4260,13 @@ detail: string | null } |
  *  The keychain is no model, so there is nothing to re-read but the
  *  instances themselves (`list_provider_instances`).
  */
-{ kind: "credentialChanged"; instance: string; name: string; error: string | null };
+{ kind: "credentialChanged"; instance: string; name: string; 
+/**
+ *  The sign-in this news is about, when it is about one (tsk929):
+ *  a row waiting on another sign-in of the same credential
+ *  ignores it.
+ */
+signIn: number | null; error: string | null };
 
 export type PageVisit = {
 	id: string,

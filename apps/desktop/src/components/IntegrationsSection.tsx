@@ -23,6 +23,7 @@ import {
   beginOauthSignIn,
   canCatchSignInRedirect,
   checkProviderInstance,
+  cancelOauthSignIn,
   completeOauthSignIn,
   effectiveConfig,
   listExtensions,
@@ -332,16 +333,24 @@ function SignInRow({
   /** The shell's listener for this row's sign-in under way (its id, not
    *  its port — a newer sign-in may listen on the same port). */
   const listening = useRef<number | null>(null);
+  /** The core's number for this row's sign-in under way: news of another
+   *  sign-in of the credential isn't this row's, and leaving cancels it
+   *  (tsk929). */
+  const signingIn = useRef<number | null>(null);
   const shell = canCatchSignInRedirect();
   const id = `${instance}-${name}`;
   const line = signInLine(state);
 
   /** The sign-in under way is over: the shell stops listening — resolved
-   *  once its socket is closed (tsk905). */
+   *  once its socket is closed (tsk905) — and, unless it ended in the core
+   *  already, the core forgets it now (tsk929). */
   async function stopListening() {
     const id = listening.current;
+    const signIn = signingIn.current;
     listening.current = null;
+    signingIn.current = null;
     if (id !== null) await stopSignInRedirect(id).catch(() => {});
+    if (signIn !== null) await cancelOauthSignIn(instance, name, signIn).catch(() => {});
   }
   // Leaving the page ends it.
   useEffect(() => () => void stopListening(), []);
@@ -350,6 +359,9 @@ function SignInRow({
     () =>
       subscribeOxplowEvents((event) => {
         if (event.kind !== "credentialChanged" || event.instance !== instance || event.name !== name) return;
+        // News of another sign-in of this credential (this row's own,
+        // replaced; another window's) isn't this row's.
+        if (event.signIn !== null && event.signIn !== signingIn.current) return;
         setWaiting(false);
         setError(typeof event.error === "string" ? event.error : null);
       }),
@@ -369,7 +381,9 @@ function SignInRow({
       const listener = await listenForSignInRedirect(redirectPort);
       id = listener.id;
       listening.current = id;
-      await openInSystemBrowser(await beginOauthSignIn(instance, name, listener.port));
+      const begun = await beginOauthSignIn(instance, name, listener.port);
+      signingIn.current = begun.signIn;
+      await openInSystemBrowser(begun.url);
       setWaiting(true);
     } catch (e) {
       await stopListening();
@@ -389,7 +403,11 @@ function SignInRow({
         );
         await answerSignInRedirect(id, outcome);
         if (outcome.outcome === "not_this_sign_in") continue;
-        if (listening.current === id) listening.current = null;
+        if (listening.current === id) {
+          listening.current = null;
+          // Over in the core too: nothing to cancel.
+          signingIn.current = null;
+        }
         // The row says how it went from what it holds (tsk906): a failure
         // the core didn't announce (no sign-in under way, a lost
         // connection to a remote daemon) must not leave it waiting.
@@ -402,6 +420,7 @@ function SignInRow({
       // concern), or never finished.
       if (listening.current !== id) return;
       listening.current = null;
+      signingIn.current = null;
       setWaiting(false);
       setError(message(e));
     }

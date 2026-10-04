@@ -162,6 +162,10 @@ pub enum OxplowEvent {
     CredentialChanged {
         instance: String,
         name: String,
+        /// The sign-in this news is about, when it is about one (tsk929):
+        /// a row waiting on another sign-in of the same credential
+        /// ignores it.
+        sign_in: Option<u32>,
         error: Option<String>,
     },
 }

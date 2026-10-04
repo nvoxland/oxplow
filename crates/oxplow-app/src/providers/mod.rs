@@ -22,6 +22,7 @@ pub mod work_items;
 mod tests;
 
 pub use host::HostError;
+pub use registry::{BegunSignIn, SignInId};
 pub use registry::{
     CollectorView, ConfigProblem, HostDeps, Instance, InstanceHealth, InstanceState,
     ProviderInstanceView, ProviderRegistry, Scope, SignInCompletion,
