@@ -9,6 +9,7 @@
 //! and the test suite/case tree.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use serde::Serialize;
 
@@ -31,9 +32,9 @@ pub struct FileCoverage {
     pub functions_hit: u32,
 }
 
-/// A parsed coverage report: report-relative path → its line coverage. Paths
-/// are exactly as they appear in the report; mapping them to repo-relative is
-/// the caller's job.
+/// A parsed coverage report: path → its line coverage. A parser writes paths
+/// as the report has them (often absolute: `cargo llvm-cov`);
+/// [`CoverageReport::relative_to`] maps them to repo-relative.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CoverageReport {
     pub files: BTreeMap<String, FileCoverage>,
@@ -66,6 +67,64 @@ pub struct TestSuite {
     pub cases: Vec<TestCase>,
 }
 
+impl CoverageReport {
+    /// The report with every path repo-relative to `root` (the checkout
+    /// the run ran in), files outside it dropped. Two spellings of one
+    /// file merge as [`Self::merge`] does.
+    pub fn relative_to(self, root: &Path) -> Self {
+        let mut files: BTreeMap<String, FileCoverage> = BTreeMap::new();
+        for (path, fc) in self.files {
+            let Some(path) = repo_relative(&path, root) else {
+                continue;
+            };
+            files.entry(path).or_default().absorb(fc);
+        }
+        Self { files }
+    }
+
+    /// Fold `other` in: line sets union and the branch/function counters
+    /// sum (tsk160) — two toolchains reporting the same file each
+    /// contribute their own.
+    pub fn merge(&mut self, other: CoverageReport) {
+        for (path, fc) in other.files {
+            self.files.entry(path).or_default().absorb(fc);
+        }
+    }
+}
+
+impl FileCoverage {
+    fn absorb(&mut self, other: FileCoverage) {
+        self.instrumented.extend(other.instrumented);
+        self.covered.extend(other.covered);
+        self.branches_found = self.branches_found.saturating_add(other.branches_found);
+        self.branches_hit = self.branches_hit.saturating_add(other.branches_hit);
+        self.functions_found = self.functions_found.saturating_add(other.functions_found);
+        self.functions_hit = self.functions_hit.saturating_add(other.functions_hit);
+    }
+}
+
+/// `path`, as a report wrote it, repo-relative to `root`: an absolute path
+/// under `root` (as given, or with symlinks resolved) loses the prefix; a
+/// relative one is already relative to the checkout the run ran in and
+/// loses only a leading `./`. `None` for a path outside `root` — not a
+/// file of this project. An empty path (a project-level finding) stays
+/// empty.
+pub fn repo_relative(path: &str, root: &Path) -> Option<String> {
+    let p = Path::new(path);
+    if !p.is_absolute() {
+        let rel = path.trim_start_matches("./");
+        return (!rel.split('/').any(|part| part == "..")).then(|| rel.to_string());
+    }
+    let under = |p: &Path, r: &Path| -> Option<String> {
+        p.strip_prefix(r).ok()?.to_str().map(str::to_string)
+    };
+    if let Some(rel) = under(p, root) {
+        return Some(rel);
+    }
+    let canonical_root = root.canonicalize().ok()?;
+    under(p, &canonical_root).or_else(|| under(&p.canonicalize().ok()?, &canonical_root))
+}
+
 /// A parsed JUnit-style report: suites → cases. Tech-agnostic — every
 /// framework whose results a collector maps here (pytest, jest,
 /// go-junit-report, cargo-nextest, …) lands in this shape, so individual test
@@ -88,8 +147,8 @@ pub enum Severity {
 }
 
 /// One static-analysis finding — a single diagnostic a linter/analyzer
-/// emitted. `path` is verbatim from the report (the caller maps it to
-/// repo-relative); `line`/`column` are 1-based and optional (some findings
+/// emitted. `path` is as the report wrote it until
+/// [`AnalysisReport::relative_to`] maps it to repo-relative; `line`/`column` are 1-based and optional (some findings
 /// are file- or project-level); `rule` is the lint name (clippy `code.code`,
 /// eslint `ruleId`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -113,9 +172,68 @@ pub struct AnalysisReport {
     pub findings: Vec<AnalysisFinding>,
 }
 
+impl AnalysisReport {
+    /// The report with every finding's path repo-relative to `root` (see
+    /// [`repo_relative`]); a finding in a file outside it is dropped.
+    pub fn relative_to(self, root: &Path) -> Self {
+        let findings = self
+            .findings
+            .into_iter()
+            .filter_map(|mut f| {
+                f.path = repo_relative(&f.path, root)?;
+                Some(f)
+            })
+            .collect();
+        Self { findings }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_paths_become_repo_relative() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let abs = format!("{}/src/a.rs", root.display());
+        assert_eq!(repo_relative(&abs, root).as_deref(), Some("src/a.rs"));
+        assert_eq!(
+            repo_relative("./src/a.rs", root).as_deref(),
+            Some("src/a.rs")
+        );
+        assert_eq!(repo_relative("src/a.rs", root).as_deref(), Some("src/a.rs"));
+        assert_eq!(repo_relative("", root).as_deref(), Some(""));
+        assert_eq!(repo_relative("/elsewhere/a.rs", root), None);
+        assert_eq!(repo_relative("../a.rs", root), None);
+        // Through the root's resolved spelling (macOS: /var → /private/var).
+        let canonical = format!("{}/src/b.rs", root.canonicalize().unwrap().display());
+        assert_eq!(repo_relative(&canonical, root).as_deref(), Some("src/b.rs"));
+    }
+
+    #[test]
+    fn two_spellings_of_one_file_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = |lines: &[u32], branches: u32| FileCoverage {
+            instrumented: lines.iter().copied().collect(),
+            covered: lines.iter().copied().collect(),
+            branches_found: branches,
+            ..Default::default()
+        };
+        let report = CoverageReport {
+            files: BTreeMap::from([
+                (format!("{}/src/a.rs", root.display()), file(&[1], 2)),
+                ("src/a.rs".to_string(), file(&[2], 3)),
+                ("/elsewhere/dep.rs".to_string(), file(&[1], 0)),
+            ]),
+        }
+        .relative_to(root);
+        assert_eq!(report.files.keys().collect::<Vec<_>>(), vec!["src/a.rs"]);
+        let a = &report.files["src/a.rs"];
+        assert_eq!(a.instrumented, BTreeSet::from([1, 2]));
+        assert_eq!(a.branches_found, 5);
+    }
 
     #[test]
     fn test_report_serializes_in_the_ui_wire_shape() {

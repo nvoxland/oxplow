@@ -139,6 +139,18 @@ pub enum CollectorOutput {
 }
 
 impl CollectorOutput {
+    /// The output with its file paths repo-relative to `root`, the
+    /// checkout the run ran in (coverage files and analysis findings;
+    /// see [`oxplow_coverage::repo_relative`]). A test report names no
+    /// files.
+    pub fn relative_to(self, root: &std::path::Path) -> Self {
+        match self {
+            Self::Coverage(r) => Self::Coverage(r.relative_to(root)),
+            Self::Analysis(r) => Self::Analysis(r.relative_to(root)),
+            Self::Test(r) => Self::Test(r),
+        }
+    }
+
     /// The kind this output corresponds to.
     pub fn kind(&self) -> CollectorKind {
         match self {

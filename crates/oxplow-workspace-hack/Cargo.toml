@@ -51,6 +51,7 @@ log = { version = "0.4", default-features = false, features = ["std"] }
 memchr = { version = "2" }
 num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = { version = "0.2", features = ["i128"] }
+once_cell = { version = "1" }
 parking_lot = { version = "0.12", features = ["send_guard"] }
 percent-encoding = { version = "2" }
 ppv-lite86 = { version = "0.2", default-features = false, features = ["simd", "std"] }
@@ -135,7 +136,6 @@ hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
 libsqlite3-sys = { version = "0.37", features = ["bundled", "preupdate_hook"] }
 nix = { version = "0.28", features = ["fs", "ioctl", "poll", "signal", "term"] }
-once_cell = { version = "1" }
 rustix = { version = "1", features = ["event", "fs", "net", "pipe", "process", "time"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "aws_lc_rs", "ring", "std", "tls12"] }
 rustls-webpki = { version = "0.103", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
@@ -159,7 +159,6 @@ linux-raw-sys = { version = "0.12", default-features = false, features = ["auxve
 mio = { version = "1", features = ["net", "os-ext"] }
 nix = { version = "0.28", features = ["fs", "ioctl", "poll", "signal", "term"] }
 num = { version = "0.4" }
-once_cell = { version = "1" }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
 rustix = { version = "1", features = ["event", "fs", "net", "pipe", "process", "system", "time"] }

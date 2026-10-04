@@ -78,9 +78,13 @@ section for the column.
   `the_bundled_parsers_agree_with_what_config_accepts` holds the two
   together. Any other `entry` is the project's own `jaq` / `starlark` /
   `exec` parser (`runtime:`, `report.format` = the host pre-parse). There
-  is no format registry: a collector names its parser. Paths/classnames
-  are verbatim from the report; the caller maps paths to repo-relative and
-  the UI builds the test tree from `classname`+`name`.
+  is no format registry: a collector names its parser. A parser writes
+  paths as the report has them (`cargo llvm-cov` and eslint write absolute
+  ones); `read_report` maps every coverage file and finding path to
+  repo-relative against the checkout the report came from
+  (`CollectorOutput::relative_to`, `oxplow_coverage::repo_relative`; tsk884)
+  and drops files outside it, so diffs and facts always name repo files.
+  The UI builds the test tree from `classname`+`name`.
 - **`testing:` block** (`TestingConfig`, `crates/oxplow-config/src/lib.rs`):
   `command`, `fastCommand`, `runPatterns`, `analysisPatterns`,
   `agentHint` — how the project's tests run, read by the detector and the

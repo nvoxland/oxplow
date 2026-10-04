@@ -690,11 +690,15 @@ impl CollectionService {
                     .strip_prefix("oxplow.")
                     .unwrap_or(parser.name())
                     .to_string();
-                tokio::task::spawn_blocking(move || parser.run(&content))
-                    .await
-                    .map_err(|e| format!("parser task failed: {e}"))
-                    .and_then(|r| r.map_err(|e| e.to_string()))
-                    .map(|output| (output, exec, label))
+                // Paths as the checkout the report came from names them.
+                let root = self.project_dir.clone();
+                tokio::task::spawn_blocking(move || {
+                    parser.run(&content).map(|output| output.relative_to(&root))
+                })
+                .await
+                .map_err(|e| format!("parser task failed: {e}"))
+                .and_then(|r| r.map_err(|e| e.to_string()))
+                .map(|output| (output, exec, label))
             }
         };
         let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
@@ -3544,8 +3548,9 @@ impl RunReports {
                 self.exec_tests.extend(exec);
             }
             CollectorOutput::Coverage(parsed) => {
-                let merged = self.coverage.get_or_insert_with(Default::default);
-                merge_coverage(merged, parsed);
+                self.coverage
+                    .get_or_insert_with(Default::default)
+                    .merge(parsed);
                 self.exec_coverage.extend(exec);
             }
             CollectorOutput::Analysis(parsed) => {
@@ -3592,26 +3597,6 @@ fn trust(observed: &str, exec: &[String]) -> String {
         observed.to_string()
     } else {
         format!("plugin-exec:{}", exec.join(","))
-    }
-}
-
-/// Fold `parsed` into `merged`: line sets union and the branch/function
-/// counters SUM (tsk160) — two toolchains reporting the same file each
-/// contribute their own. Dropping the counters left `observe_coverage`'s
-/// `*_found > 0` gate closed, so `oxplow.coverage.branch`/`.function` never
-/// got a fact.
-fn merge_coverage(
-    merged: &mut oxplow_coverage::CoverageReport,
-    parsed: oxplow_coverage::CoverageReport,
-) {
-    for (path, fc) in parsed.files {
-        let entry = merged.files.entry(path).or_default();
-        entry.instrumented.extend(fc.instrumented);
-        entry.covered.extend(fc.covered);
-        entry.branches_found = entry.branches_found.saturating_add(fc.branches_found);
-        entry.branches_hit = entry.branches_hit.saturating_add(fc.branches_hit);
-        entry.functions_found = entry.functions_found.saturating_add(fc.functions_found);
-        entry.functions_hit = entry.functions_hit.saturating_add(fc.functions_hit);
     }
 }
 
@@ -4326,6 +4311,38 @@ mod tests {
             std::fs::remove_file(h.tmp.path().join("src/foo.rs")).unwrap();
             let pct = diff_pct(&h).await.expect("a diff from snapshots alone");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
+        }
+
+        /// tsk884: `cargo llvm-cov` names files by absolute path. They're
+        /// read repo-relative, so they diff against the snapshots and their
+        /// facts name repo files; a file outside the project is dropped.
+        #[tokio::test]
+        async fn an_absolute_report_path_is_read_repo_relative() {
+            let h = build(Some(COBERTURA_50PCT)).await;
+            let root = h.tmp.path().to_string_lossy().into_owned();
+            let absolute = COBERTURA_50PCT.replace(
+                r#"filename="src/foo.rs""#,
+                &format!(r#"filename="{root}/src/foo.rs""#),
+            );
+            let outside = r#"<class name="Dep" filename="/elsewhere/dep.rs"><lines>
+    <line number="1" hits="1"/></lines></class>
+</classes>"#;
+            let absolute = absolute.replace("</classes>", outside);
+            std::fs::write(h.tmp.path().join("coverage.xml"), absolute).unwrap();
+            ingest_coverage(&h).await;
+
+            let pct = diff_pct(&h).await.expect("a diff");
+            assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let measure = facts.get_measure("oxplow.coverage").await.unwrap().unwrap();
+            let refs: Vec<_> = facts
+                .facts_for_measure(measure.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|f| f.subject_ref)
+                .collect();
+            assert_eq!(refs, vec![Some("file:src/foo.rs".to_string())]);
         }
 
         /// tsk862: a baseline whose bytes are gone (collected) can't be
