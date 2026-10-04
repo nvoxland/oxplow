@@ -699,6 +699,13 @@ pub struct OxplowConfig {
     /// even when the active provider's extension replaces it.
     #[serde(rename = "replacementsOff")]
     pub replacements_off: std::collections::BTreeSet<String>,
+    /// How long this project keeps each event namespace's payloads and
+    /// large content (`eventRetention: { agent: { payloadDays,
+    /// contentDays } }`), over core's defaults; a plugin's namespace is
+    /// kept no longer than its own window.
+    #[serde(rename = "eventRetention")]
+    pub event_retention:
+        std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
     /// This project's AI role assignments (`ai: { roles: … }`), layered
     /// over the user-global `ai.yaml`. Keyed by role name (one of
     /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -904,6 +911,11 @@ struct RawConfig {
     /// Core components that stay oxplow's own, by target: `[work_item.board]`. Listed, an extension's replacement of it (the active provider's `ui.replacements`) isn't shown.
     #[serde(rename = "replacementsOff", default)]
     replacements_off: Option<Vec<String>>,
+    /// How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). A plugin's namespace is kept no longer than its extension's window; core state (snapshot, vcs, effort, …) is kept whole.
+    #[serde(rename = "eventRetention", default)]
+    event_retention: Option<
+        std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
+    >,
     /// AI role assignments `{ roles: { <role>: { provider, model } } }`, layered over the user's ai.yaml.
     #[serde(default)]
     ai: Option<RawAiBlock>,
@@ -1262,6 +1274,11 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         to_yaml(&config.replacements_off),
         !config.replacements_off.is_empty(),
     );
+    put(
+        "eventRetention",
+        to_yaml(&config.event_retention),
+        !config.event_retention.is_empty(),
+    );
     {
         let mut ext = serde_yaml::Mapping::new();
         ext.insert("disabled".into(), to_yaml(&config.extensions_disabled));
@@ -1385,6 +1402,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         extension_instances: std::collections::BTreeMap::new(),
         active_providers: std::collections::BTreeMap::new(),
         replacements_off: std::collections::BTreeSet::new(),
+        event_retention: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
         extensions_disabled: Vec::new(),
     }
@@ -1667,6 +1685,38 @@ fn validate_replacements_off(
     Ok(raw.into_iter().collect())
 }
 
+/// Validate `eventRetention:`: a namespace each — never core state, which
+/// is kept whole — at windows of at least a day.
+fn validate_event_retention(
+    raw: std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
+) -> Result<
+    std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
+    ConfigError,
+> {
+    for (namespace, window) in &raw {
+        if namespace.is_empty()
+            || !namespace
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(ConfigError::Invalid(format!(
+                "eventRetention: `{namespace}` isn't an event namespace (lowercase letters, digits and `_`)"
+            )));
+        }
+        if oxplow_domain::events::retention::is_kept_whole(namespace) {
+            return Err(ConfigError::Invalid(format!(
+                "eventRetention: `{namespace}` is core state: its events are kept whole"
+            )));
+        }
+        if window.payload_days < 1 || window.content_days < 1 {
+            return Err(ConfigError::Invalid(format!(
+                "eventRetention.{namespace}: windows are at least 1 day"
+            )));
+        }
+    }
+    Ok(raw)
+}
+
 /// Validate `activeProviders:`: a swappable capability each, naming an
 /// instance by its id (a provider's default instance has the provider's).
 fn validate_active_providers(
@@ -1859,6 +1909,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         validate_extension_instances(raw.extension_instances.unwrap_or_default())?;
     let active_providers = validate_active_providers(raw.active_providers.unwrap_or_default())?;
     let replacements_off = validate_replacements_off(raw.replacements_off.unwrap_or_default())?;
+    let event_retention = validate_event_retention(raw.event_retention.unwrap_or_default())?;
 
     let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
         Some(servers) => {
@@ -1927,6 +1978,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         extension_instances,
         active_providers,
         replacements_off,
+        event_retention,
         ai_roles: validate_ai_roles(raw.ai)?,
         extensions_disabled: raw.extensions.map(|b| b.disabled).unwrap_or_default(),
     })
@@ -2987,6 +3039,48 @@ mod tests {
             .unwrap()
             .active_providers
             .is_empty());
+    }
+
+    /// tsk947: `eventRetention` sets a namespace's windows — a person's key.
+    /// Core state (kept whole) and a window under a day are refused.
+    #[test]
+    fn event_retention_sets_a_namespaces_windows() {
+        use oxplow_domain::events::retention::RetentionWindow;
+        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        let config = parse(
+            "eventRetention:\n  agent: { payloadDays: 60, contentDays: 14 }\n  acme_pr: { payloadDays: 7, contentDays: 3 }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config.event_retention.get("agent"),
+            Some(&RetentionWindow::new(60, 14))
+        );
+        assert_eq!(
+            config.event_retention.get("acme_pr"),
+            Some(&RetentionWindow::new(7, 3))
+        );
+        let doc = render_project_config(&config, "demo");
+        let again = parse_project_config(serde_yaml::Value::Mapping(doc), "demo").unwrap();
+        assert_eq!(again.event_retention, config.event_retention);
+        let err = parse("eventRetention:\n  snapshot: { payloadDays: 7, contentDays: 3 }\n")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("`snapshot`") && err.contains("kept whole"),
+            "{err}"
+        );
+        let err = parse("eventRetention:\n  agent: { payloadDays: 0, contentDays: 3 }\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("at least 1 day"), "{err}");
+        let plain = parse("agents: [claude]\n").unwrap();
+        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(render_project_config(
+            &plain, "demo",
+        )))
+        .unwrap();
+        assert!(!yaml.contains("eventRetention"), "{yaml}");
+        // How long a project keeps its agents' activity is a person's call.
+        assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"eventRetention"));
     }
 
     /// P9.A1: `replacementsOff` names core components a replacement may

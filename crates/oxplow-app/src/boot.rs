@@ -402,12 +402,21 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // per `.context/target-architecture.md` §5.4 — a while after boot (the
     // first sweep after an upgrade may have a large backlog, and hooks
     // shouldn't meet it while the app is starting), then daily.
+    // Each sweep reads the project's windows (`eventRetention`) as they
+    // stand then.
     {
         let db = state.db.clone();
+        let config = state.config.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(10 * 60)).await;
             loop {
-                match oxplow_db::event_retention::sweep(&db, oxplow_domain::Timestamp::now()).await
+                let windows = crate::config_service::read_config(&config).event_retention;
+                match oxplow_db::event_retention::sweep(
+                    &db,
+                    oxplow_domain::Timestamp::now(),
+                    &windows,
+                )
+                .await
                 {
                     Ok(report) => tracing::info!(?report, "event retention sweep done"),
                     Err(error) => tracing::warn!(%error, "event retention sweep failed"),

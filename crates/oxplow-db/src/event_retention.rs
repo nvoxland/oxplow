@@ -11,11 +11,18 @@
 //! | a plugin's (any namespace core doesn't own) | 30 days, or its declared window | 14 days, or its declared window |
 //! | core's state (`snapshot`, `vcs`, `effort`, `work_item`, `command`, `config`, …) | kept | kept |
 //!
+//! The windows are `oxplow_domain::events::retention`'s. A project may set
+//! its own per namespace (`eventRetention`, a person's key): it replaces
+//! core's default, and for a plugin's namespace it is capped at the
+//! plugin's window (tsk947).
+//!
 //! An expired payload is replaced by `{}` and stamped `payload_expired_at`
 //! (the column is NOT NULL); an expired body's row is deleted, and a
-//! `read_event_content` of its hash reads as gone. Per-project settings
-//! for these windows are a later phase; these are the spec's defaults.
+//! `read_event_content` of its hash reads as gone.
 
+use std::collections::BTreeMap;
+
+use oxplow_domain::events::retention::{RetentionWindow, CORE_WINDOWS, PLUGIN_DEFAULT};
 use oxplow_domain::{DomainError, Timestamp};
 use rusqlite::{params, OptionalExtension};
 
@@ -23,26 +30,11 @@ use crate::database::{map_sql_err, ts_to_string, Database};
 
 pub const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// Core's windows: `(namespace, payload days, large-content days)`. A
-/// core namespace not listed is state, kept whole.
-pub const POLICY: &[(&str, i64, i64)] = &[
-    ("agent", 30, 14),
-    ("test", 90, 30),
-    ("code", 90, 30),
-    ("collector", 90, 30),
-    ("effect", 90, 30),
-];
-
-/// Every plugin namespace's window (§5.4): payloads 30 days, large
-/// content 14 — unless its extension declares a shorter one
-/// (`event_types.retention`, P8.D5; `plugin_event_retention`).
-pub const PLUGIN_DEFAULT: (i64, i64) = (30, 14);
-
 /// Whether an extension may declare this window: at least a day, and no
 /// longer than [`PLUGIN_DEFAULT`] — a plugin may keep its rows for less,
 /// never more.
 pub fn check_declared(payload_days: i64, content_days: i64) -> Result<(), String> {
-    let (p, c) = PLUGIN_DEFAULT;
+    let (p, c) = (PLUGIN_DEFAULT.payload_days, PLUGIN_DEFAULT.content_days);
     if payload_days < 1 || content_days < 1 {
         return Err("retention windows are at least 1 day".into());
     }
@@ -103,12 +95,17 @@ pub fn restate_declared_tx(
 }
 
 /// The namespaces the sweep expires and their windows: core's
-/// [`POLICY`], then every namespace in the log or the content store
-/// that core doesn't own, at its declared window or [`PLUGIN_DEFAULT`].
-async fn windows(db: &Database) -> Result<Vec<(String, i64, i64)>, DomainError> {
-    let mut out: Vec<(String, i64, i64)> = POLICY
+/// [`CORE_WINDOWS`], each replaced by the project's when it sets one; then
+/// every namespace in the log or the content store that core doesn't own,
+/// at its declared window or [`PLUGIN_DEFAULT`] — the project's when
+/// shorter, never longer.
+async fn windows(
+    db: &Database,
+    project: &BTreeMap<String, RetentionWindow>,
+) -> Result<Vec<(String, RetentionWindow)>, DomainError> {
+    let mut out: Vec<(String, RetentionWindow)> = CORE_WINDOWS
         .iter()
-        .map(|(ns, p, c)| (ns.to_string(), *p, *c))
+        .map(|(ns, default)| (ns.to_string(), *project.get(*ns).unwrap_or(default)))
         .collect();
     let declared: std::collections::HashMap<String, (i64, i64)> = db
         .read(|tx| {
@@ -124,8 +121,11 @@ async fn windows(db: &Database) -> Result<Vec<(String, i64, i64)>, DomainError> 
         })
         .await?;
     for ns in plugin_namespaces(db).await? {
-        let (p, c) = declared.get(&ns).copied().unwrap_or(PLUGIN_DEFAULT);
-        out.push((ns, p, c));
+        let plugin = declared
+            .get(&ns)
+            .map_or(PLUGIN_DEFAULT, |(p, c)| RetentionWindow::new(*p, *c));
+        let window = project.get(&ns).map_or(plugin, |w| w.at_most(plugin));
+        out.push((ns, window));
     }
     Ok(out)
 }
@@ -182,24 +182,30 @@ pub struct SweepReport {
 /// the writer lock waits milliseconds, not the whole backlog.
 pub const BATCH: i64 = 5000;
 
-/// Apply [`POLICY`] and the plugin default as of `now`, in transactions
-/// of at most [`BATCH`]
-/// rows, so the first sweep over a large old log never holds the writer
-/// lock for long. Idempotent: an already-expired payload or an
-/// already-deleted body is not counted again.
-pub async fn sweep(db: &Database, now: Timestamp) -> Result<SweepReport, DomainError> {
-    sweep_in_batches(db, now, BATCH).await
+/// Apply the windows ([`windows`], with the project's `project`) as of
+/// `now`, in transactions of at most [`BATCH`] rows, so the first sweep
+/// over a large old log never holds the writer lock for long. Idempotent:
+/// an already-expired payload or an already-deleted body is not counted
+/// again.
+pub async fn sweep(
+    db: &Database,
+    now: Timestamp,
+    project: &BTreeMap<String, RetentionWindow>,
+) -> Result<SweepReport, DomainError> {
+    sweep_in_batches(db, now, project, BATCH).await
 }
 
 async fn sweep_in_batches(
     db: &Database,
     now: Timestamp,
+    project: &BTreeMap<String, RetentionWindow>,
     batch: i64,
 ) -> Result<SweepReport, DomainError> {
     let mut report = SweepReport::default();
     let stamp = ts_to_string(now);
     let before = |days: i64| ts_to_string(Timestamp::from_unix_ms(now.unix_ms() - days * DAY_MS));
-    for (ns, payload_days, content_days) in windows(db).await? {
+    for (ns, window) in windows(db, project).await? {
+        let (payload_days, content_days) = (window.payload_days, window.content_days);
         let (ns, cutoff) = (ns.to_string(), before(content_days));
         loop {
             let (ns, cutoff) = (ns.clone(), cutoff.clone());
@@ -303,7 +309,9 @@ mod tests {
         })
         .await
         .unwrap();
-        let report = sweep_in_batches(&db, now, 2).await.unwrap();
+        let report = sweep_in_batches(&db, now, &BTreeMap::new(), 2)
+            .await
+            .unwrap();
         assert_eq!(
             report,
             SweepReport {
@@ -360,7 +368,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let report = sweep(&db, now).await.unwrap();
+        let report = sweep(&db, now, &BTreeMap::new()).await.unwrap();
         assert_eq!(report.payloads_expired, 1, "only the 8-day-old payload");
 
         // Back without a window: the default (30 days) again.
@@ -384,6 +392,117 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    /// Seed `agent.tool.finished` and `acme_pr.merged` payloads `days`
+    /// old, by id.
+    async fn seed_payloads(db: &Database, now: Timestamp, rows: &[(&str, &str, i64)]) {
+        let rows: Vec<(String, String, String)> = rows
+            .iter()
+            .map(|(id, ty, days)| {
+                let at = crate::database::ts_to_string(Timestamp::from_unix_ms(
+                    now.unix_ms() - days * DAY_MS,
+                ));
+                (id.to_string(), ty.to_string(), at)
+            })
+            .collect();
+        db.transaction(move |tx| {
+            for (id, ty, at) in &rows {
+                tx.execute(
+                    "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                       VALUES (?1, ?2, 1, ?3, 'test', '[]', '{\"a\":1}')",
+                    rusqlite::params![id, ty, at],
+                )
+                .map_err(crate::map_sql_err)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn expired(db: &Database) -> Vec<String> {
+        db.read(|tx| {
+            let mut st = tx
+                .prepare(
+                    "SELECT id FROM event_log WHERE payload_expired_at IS NOT NULL ORDER BY id",
+                )
+                .map_err(crate::map_sql_err)?;
+            let ids = st
+                .query_map([], |r| r.get(0))
+                .map_err(crate::map_sql_err)?
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .map_err(crate::map_sql_err)?;
+            Ok(ids)
+        })
+        .await
+        .unwrap()
+    }
+
+    /// tsk947: a project's window for a core namespace replaces core's
+    /// default — longer or shorter.
+    #[tokio::test]
+    async fn a_project_window_overrides_the_default() {
+        let db = Database::in_memory();
+        let now = Timestamp::from_unix_ms(200 * DAY_MS);
+        seed_payloads(
+            &db,
+            now,
+            &[
+                ("a40", "agent.tool.finished", 40),
+                ("a70", "agent.tool.finished", 70),
+                ("t20", "test.run.recorded", 20),
+            ],
+        )
+        .await;
+        let project = BTreeMap::from([
+            ("agent".to_string(), RetentionWindow::new(60, 14)),
+            ("test".to_string(), RetentionWindow::new(10, 5)),
+        ]);
+        sweep(&db, now, &project).await.unwrap();
+        // agent: kept 60 days, not 30; test: 10, not 90.
+        assert_eq!(expired(&db).await, vec!["a70", "t20"]);
+    }
+
+    /// tsk947: a project can keep a plugin's events for less, never for
+    /// longer than its extension declared (or the plugin default).
+    #[tokio::test]
+    async fn a_plugin_namespace_cant_be_kept_longer_by_a_project() {
+        let db = Database::in_memory();
+        let now = Timestamp::from_unix_ms(200 * DAY_MS);
+        db.transaction(|tx| {
+            restate_declared_tx(
+                tx,
+                &[DeclaredRetention {
+                    namespace: "acme_pr".into(),
+                    extension: "acme-pr".into(),
+                    window: Some((7, 3)),
+                }],
+                "t",
+            )
+        })
+        .await
+        .unwrap();
+        seed_payloads(
+            &db,
+            now,
+            &[
+                ("p5", "acme_pr.merged", 5),
+                ("p8", "acme_pr.merged", 8),
+                ("o20", "other_ns.thing", 20),
+                ("o35", "other_ns.thing", 35),
+            ],
+        )
+        .await;
+        let longer = BTreeMap::from([
+            ("acme_pr".to_string(), RetentionWindow::new(90, 90)),
+            ("other_ns".to_string(), RetentionWindow::new(90, 90)),
+        ]);
+        sweep(&db, now, &longer).await.unwrap();
+        assert_eq!(expired(&db).await, vec!["o35", "p8"], "capped at 7 and 30");
+        let shorter = BTreeMap::from([("acme_pr".to_string(), RetentionWindow::new(3, 1))]);
+        sweep(&db, now, &shorter).await.unwrap();
+        assert_eq!(expired(&db).await, vec!["o35", "p5", "p8"]);
     }
 
     #[test]
@@ -421,7 +540,7 @@ mod tests {
         })
         .await
         .unwrap();
-        sweep(&db, now).await.unwrap();
+        sweep(&db, now, &BTreeMap::new()).await.unwrap();
         let states: Vec<(i64, String)> = db
             .transaction(|tx| {
                 let mut s = tx
@@ -480,9 +599,9 @@ mod tests {
         .await
         .unwrap();
 
-        let first = sweep(&db, now).await.unwrap();
+        let first = sweep(&db, now, &BTreeMap::new()).await.unwrap();
         assert_eq!((first.content_deleted, first.payloads_expired), (1, 1));
-        let again = sweep(&db, now).await.unwrap();
+        let again = sweep(&db, now, &BTreeMap::new()).await.unwrap();
         assert_eq!(
             (again.content_deleted, again.payloads_expired),
             (0, 0),
@@ -571,7 +690,7 @@ mod tests {
         })
         .await
         .unwrap();
-        sweep(&db, now).await.unwrap();
+        sweep(&db, now, &BTreeMap::new()).await.unwrap();
         let expired: Vec<String> = db
             .read(|tx| {
                 let mut st = tx

@@ -118,7 +118,8 @@ pub fn parse_event_types(
     };
     let mut errors = Vec::new();
     let retention = block.retention.and_then(|r| {
-        let (p, c) = oxplow_db::event_retention::PLUGIN_DEFAULT;
+        let default = oxplow_domain::events::retention::PLUGIN_DEFAULT;
+        let (p, c) = (default.payload_days, default.content_days);
         let window = EventRetention {
             payload_days: r.payload_days.unwrap_or(p as u32),
             content_days: r.content_days.unwrap_or(c as u32),

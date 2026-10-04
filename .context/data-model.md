@@ -1219,7 +1219,8 @@ and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11,
 ten minutes after boot, then daily; batches of 5,000 rows per transaction
 through the partial index `event_log_live_payload (type, at) WHERE
 payload_expired_at IS NULL`, V103, read as a `type` range because a `LIKE`
-can't use a BINARY index; windows in its `POLICY`: `agent` 30 d payload / 14 d body,
+can't use a BINARY index; windows in `oxplow_domain::events::retention`'s
+`CORE_WINDOWS`: `agent` 30 d payload / 14 d body,
 `test`, `code`, `collector` and `effect` 90 / 30, and every namespace core
 doesn't own — a plugin's, found by skipping through that index one
 namespace per probe, and in `event_content` — `PLUGIN_DEFAULT` 30 / 14
@@ -1230,7 +1231,12 @@ restated by the vocabulary reactor, longer than the default refused by
 its rows stay under the window it promised; an extension present without
 a window drops back to the default — unless a declaring extension holds
 the same namespace, which a namesake that declares nothing never speaks
-for, tsk796); core's state namespaces are kept). **An expired event is
+for, tsk796); core's state namespaces are kept). **A project sets its
+own windows** with the person-only key `eventRetention: { <namespace>:
+{ payloadDays, contentDays } }` (tsk947): each sweep reads it, a core
+namespace's replaces the default, a plugin namespace's is capped at the
+plugin's window (`RetentionWindow::at_most`), and core state is refused
+at load (`is_kept_whole`). **An expired event is
 history only** (tsk501): `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
 renamed consumer replaying the log never sees `{}`); `retry_dead_letter`

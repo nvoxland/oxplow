@@ -17,7 +17,8 @@ use crate::{
 /// `acpAgents`, `extensionInstances`, `agents`, `collectors`), chooses the model that
 /// reads the project (`ai`, `agentModels`), enables code (`extensions`),
 /// chooses where the project's work goes (`activeProviders`: an agent
-/// moving filing to another tracker), or steers every agent (`agentPromptAppend`, `testing` — its agent hint —
+/// moving filing to another tracker), decides how long its agents'
+/// activity is kept (`eventRetention`), or steers every agent (`agentPromptAppend`, `testing` — its agent hint —
 /// where an agent setting it could persist instructions into all threads): an agent asking to change one
 /// gets a proposal the person approves or declines. Everything else is the
 /// agent's to set through `config.set`. A key whose doc says it runs
@@ -29,6 +30,7 @@ pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "extensionInstances",
     "activeProviders",
     "replacementsOff",
+    "eventRetention",
     "ai",
     "lsp",
     "testing",

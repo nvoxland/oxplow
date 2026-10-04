@@ -4142,6 +4142,13 @@ export type OxplowConfig = {
 	 */
 	replacementsOff: string[],
 	/**
+	 *  How long this project keeps each event namespace's payloads and
+	 *  large content (`eventRetention: { agent: { payloadDays,
+	 *  contentDays } }`), over core's defaults; a plugin's namespace is
+	 *  kept no longer than its own window.
+	 */
+	eventRetention: { [key in string]: RetentionWindow },
+	/**
 	 *  This project's AI role assignments (`ai: { roles: … }`), layered
 	 *  over the user-global `ai.yaml`. Keyed by role name (one of
 	 *  [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -4625,6 +4632,14 @@ export type ReportInput = {
 	 *  `json`, `xml`, `lcov` or `lines`.
 	 */
 	format?: string,
+};
+
+// How long a namespace's event payloads and large content are kept.
+export type RetentionWindow = {
+	// Days an event's payload is kept; after it, `{}`.
+	payloadDays: number,
+	// Days its large content (tool input and output) is kept.
+	contentDays: number,
 };
 
 // One revision in full: its message and the files it changed.

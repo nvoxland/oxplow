@@ -7,6 +7,7 @@
 //! `oxplow_db::event_log_store`; the per-type payload schemas live in
 //! [`schema`]; the delivery pump is a later P1 step.
 
+pub mod retention;
 pub mod schema;
 
 use serde::{Deserialize, Serialize};

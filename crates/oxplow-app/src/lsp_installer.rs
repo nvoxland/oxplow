@@ -269,6 +269,7 @@ mod tests {
             extension_instances: Default::default(),
             active_providers: Default::default(),
             replacements_off: Default::default(),
+            event_retention: Default::default(),
             ai_roles: Default::default(),
             extensions_disabled: Vec::new(),
         }));

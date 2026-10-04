@@ -1550,7 +1550,7 @@ mod tests {
         let later = oxplow_domain::Timestamp::from_unix_ms(
             oxplow_domain::Timestamp::now().unix_ms() + 31 * oxplow_db::event_retention::DAY_MS,
         );
-        let swept = oxplow_db::event_retention::sweep(&f.svc.db, later)
+        let swept = oxplow_db::event_retention::sweep(&f.svc.db, later, &Default::default())
             .await
             .unwrap();
         assert!(swept.payloads_expired >= 2, "{swept:?}");
