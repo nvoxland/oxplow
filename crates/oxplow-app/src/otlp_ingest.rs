@@ -58,7 +58,7 @@ impl OtlpIngestService {
                 .map(|c| TokenCount {
                     model: c.model.clone(),
                     kind: c.kind,
-                    value: c.value.max(0) as u64,
+                    value: c.value as u64,
                 })
                 .collect(),
             window_end: export.window_end.map(|t| t.to_text()),
@@ -67,6 +67,20 @@ impl OtlpIngestService {
         let logged = self
             .db
             .transaction(move |tx| {
+                use rusqlite::OptionalExtension as _;
+                // A thread that isn't there (deleted, or never) gets
+                // nothing logged, as a hook for one doesn't (tsk925).
+                let known = tx
+                    .query_row(
+                        "SELECT 1 FROM threads WHERE id = ?1",
+                        [thread.value()],
+                        |_| Ok(()),
+                    )
+                    .optional()
+                    .map_err(oxplow_db::map_sql_err)?;
+                if known.is_none() {
+                    return Ok(false);
+                }
                 let vocabulary = vocabulary.current();
                 let mut anchors = activity_anchors_tx(tx, thread)?;
                 // The turn it measured, not the one open as it arrives: an
@@ -183,6 +197,21 @@ mod tests {
             .await
             .unwrap());
         assert_eq!(reported(svc).await.len(), 1);
+    }
+
+    /// tsk925: an export naming a thread that isn't there (deleted, or
+    /// never) logs nothing, as a hook for one does.
+    #[tokio::test]
+    async fn an_export_for_an_unknown_thread_logs_nothing() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let body = encoded_claude_export("claude-opus-4-8", 100, 20);
+        assert!(!svc
+            .otlp_ingest
+            .ingest(ThreadId::new(999), &body)
+            .await
+            .unwrap());
+        assert!(reported(svc).await.is_empty());
     }
 
     /// An export arrives after the turn it measured has ended and the

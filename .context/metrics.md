@@ -1021,7 +1021,11 @@ summed every assistant line) and was Claude-only + format-fragile.
   (`otlp_tokens::decode_token_export`) and logs **one
   `agent.tokens.reported@1 { thread, counts: [{model, kind, value}],
   window_end? }`** in one transaction — deduped by a hash of the body, so an
-  SDK retransmit logs nothing — anchored to the thread, its stream, **the
+  SDK retransmit logs nothing; an export for a thread that isn't there
+  (deleted, or never) logs nothing, as a hook for one doesn't. The body is
+  untrusted (tsk925): a negative count is dropped and Codex's `input −
+  cached` / `output + reasoning` saturate rather than overflow. It is
+  anchored to the thread, its stream, **the
   turn the export measured**, and the effort open during that turn (tsk900).
   A Claude export is stamped with when it was *collected* (delta
   temporality: its points cover `start_time_unix_nano..time_unix_nano`, since

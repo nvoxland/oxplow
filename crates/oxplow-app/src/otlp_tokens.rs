@@ -164,7 +164,8 @@ fn collect_claude(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFa
             continue;
         };
         let value = number_value(&dp.value);
-        if value == 0 {
+        // An untrusted body: a negative count is no count (tsk925).
+        if value <= 0 {
             continue;
         }
         out.push(TokenFact {
@@ -188,7 +189,7 @@ fn collect_codex(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFac
             continue;
         };
         let value = dp.sum.unwrap_or(0.0) as i64;
-        if value == 0 {
+        if value <= 0 {
             continue;
         }
         out.push(TokenFact {
@@ -222,10 +223,13 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                     continue;
                 }
                 let a = &lr.attributes;
-                let input = int_attr(a, "input_token_count").unwrap_or(0);
-                let cached = int_attr(a, "cached_token_count").unwrap_or(0);
-                let output = int_attr(a, "output_token_count").unwrap_or(0);
-                let reasoning = int_attr(a, "reasoning_token_count").unwrap_or(0);
+                // An untrusted body (tsk925): a negative count is none, and
+                // the arithmetic below saturates rather than overflows.
+                let count = |key| int_attr(a, key).unwrap_or(0).max(0);
+                let input = count("input_token_count");
+                let cached = count("cached_token_count");
+                let output = count("output_token_count");
+                let reasoning = count("reasoning_token_count");
                 let model = model_attr(a, resource_attrs);
                 let at_unix_nano = if lr.time_unix_nano > 0 {
                     lr.time_unix_nano
@@ -234,8 +238,8 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                 };
                 // new (uncached) input this request; reasoning folded into
                 // output; the cached prefix is its own CacheRead fact (tsk73).
-                let new_input = (input - cached).max(0);
-                let out_total = output + reasoning;
+                let new_input = input.saturating_sub(cached).max(0);
+                let out_total = output.saturating_add(reasoning);
                 if new_input > 0 {
                     out.push(TokenFact {
                         model: model.clone(),
@@ -834,6 +838,56 @@ mod tests {
             .sum();
         assert_eq!(cache_read, 2432, "the cached prefix is a CacheRead fact");
         assert!(facts.iter().all(|f| f.model == "gpt-5.5"));
+    }
+
+    /// tsk925: the body is untrusted. Counts at the ends of i64 never
+    /// overflow (they saturate), and a negative count is no count.
+    #[test]
+    fn hostile_counts_saturate_and_negative_ones_are_dropped() {
+        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+        let record = |input: i64, cached: i64, output: i64, reasoning: i64| LogRecord {
+            attributes: vec![
+                kv("event.kind", "response.completed"),
+                kv_int("input_token_count", input),
+                kv_int("cached_token_count", cached),
+                kv_int("output_token_count", output),
+                kv_int("reasoning_token_count", reasoning),
+                kv("model", "m"),
+            ],
+            ..Default::default()
+        };
+        let req = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![
+                        record(i64::MIN, i64::MAX, i64::MAX, i64::MAX),
+                        record(-5, -5, -5, -5),
+                    ],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let facts: Vec<(TokenKind, i64)> = otlp_logs_to_token_facts(&req)
+            .into_iter()
+            .map(|f| (f.kind, f.value))
+            .collect();
+        assert_eq!(
+            facts,
+            vec![
+                (TokenKind::CacheRead, i64::MAX),
+                (TokenKind::Output, i64::MAX)
+            ]
+        );
+        // A negative counter point is no count either.
+        let mut negative = claude_request();
+        if let Some(metric::Data::Sum(sum)) =
+            &mut negative.resource_metrics[0].scope_metrics[0].metrics[0].data
+        {
+            sum.data_points = vec![point("input", "m", -5)];
+        }
+        assert!(otlp_metrics_to_token_facts(&negative).is_empty());
     }
 
     #[test]
