@@ -639,58 +639,80 @@ pub async fn auto_retry_due(
         .await?;
     let health = crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut sent = 0;
+    // One row's error is that row's (tsk932): logged, and the rest go on —
+    // it is tried again on the next tick.
     for (key, due_at) in due {
-        let late = oxplow_domain::Timestamp::parse(&due_at)
-            .is_ok_and(|at| now_ms - at.unix_ms() > MAX_RETRY_LATENESS.as_millis() as i64);
-        // At its newest version, as the pump, `effect.retry` and backfill
-        // hand it over (tsk911). The attempt sends what the failed one
-        // composed (tsk887), so an expired payload doesn't stop it.
-        let event = match svc
-            .event_log_store
-            .get(oxplow_domain::EventId(key.event_id.clone()))
-            .await?
-        {
-            // One that no longer upcasts can't be reacted to: its retry is
-            // dropped below, a person's.
-            Some(stored) => crate::event_pump::at_latest(&svc.vocabulary.current(), &stored).ok(),
-            None => None,
-        };
-        let effect = find_effect(svc, &key.effect);
-        let runnable = match (&effect, &event) {
-            (Some((ext, decl)), Some(_)) => {
-                matches!(health.disabled_reason(&plugin_key(decl)).await, Ok(None))
-                    && approved_now(svc, &effects::effect_program(ext, decl))
-            }
-            _ => false,
-        };
-        let (Some((ext, decl)), Some(event), true, false) = (effect.clone(), event, runnable, late)
-        else {
-            drop_retry(svc, &key).await?;
-            // Its failure, not counted while it waited, counts now.
-            if let Some((_, decl)) = effect {
-                let why = if late {
-                    "not sent again by itself: its retry was due more than an hour ago"
-                } else {
-                    "not sent again by itself: the effect can't run as it is"
-                };
-                count(
-                    &health,
-                    &decl,
-                    &Reacted::NotResent(why.into()),
-                    Duration::ZERO,
-                )
-                .await;
-            }
-            continue;
-        };
-        let started = std::time::Instant::now();
-        let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto).await?;
-        if !matches!(reacted, Reacted::Nothing | Reacted::NotResent(_)) {
-            sent += 1;
+        match retry_one(svc, &health, &key, &due_at, now_ms).await {
+            Ok(true) => sent += 1,
+            Ok(false) => {}
+            Err(error) => tracing::warn!(
+                effect = %key.effect,
+                event = %key.event_id,
+                %error,
+                "sending an effect attempt again failed; tried again next time"
+            ),
         }
-        count(&health, &decl, &reacted, started.elapsed()).await;
     }
     Ok(sent)
+}
+
+/// One due retry (`key`, due at `due_at`): whether it was sent.
+async fn retry_one(
+    svc: &Arc<Services>,
+    health: &crate::plugin_health::PluginHealth,
+    key: &EffectRunKey,
+    due_at: &str,
+    now_ms: i64,
+) -> Result<bool, DomainError> {
+    let late = oxplow_domain::Timestamp::parse(due_at)
+        .is_ok_and(|at| now_ms - at.unix_ms() > MAX_RETRY_LATENESS.as_millis() as i64);
+    // At its newest version, as the pump, `effect.retry` and backfill
+    // hand it over (tsk911). The attempt sends what the failed one
+    // composed (tsk887), so an expired payload doesn't stop it.
+    let event = match svc
+        .event_log_store
+        .get(oxplow_domain::EventId(key.event_id.clone()))
+        .await?
+    {
+        // One that no longer upcasts can't be reacted to: its retry is
+        // dropped below, a person's.
+        Some(stored) => crate::event_pump::at_latest(&svc.vocabulary.current(), &stored).ok(),
+        None => None,
+    };
+    let effect = find_effect(svc, &key.effect);
+    let runnable = match (&effect, &event) {
+        // Dropped only when it is disabled; one whose health can't be
+        // read is tried again next time.
+        (Some((ext, decl)), Some(_)) => {
+            health.disabled_reason(&plugin_key(decl)).await?.is_none()
+                && approved_now(svc, &effects::effect_program(ext, decl))
+        }
+        _ => false,
+    };
+    let (Some((ext, decl)), Some(event), true, false) = (effect.clone(), event, runnable, late)
+    else {
+        drop_retry(svc, key).await?;
+        // Its failure, not counted while it waited, counts now.
+        if let Some((_, decl)) = effect {
+            let why = if late {
+                "not sent again by itself: its retry was due more than an hour ago"
+            } else {
+                "not sent again by itself: the effect can't run as it is"
+            };
+            count(
+                health,
+                &decl,
+                &Reacted::NotResent(why.into()),
+                Duration::ZERO,
+            )
+            .await;
+        }
+        return Ok(false);
+    };
+    let started = std::time::Instant::now();
+    let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto).await?;
+    count(health, &decl, &reacted, started.elapsed()).await;
+    Ok(!matches!(reacted, Reacted::Nothing | Reacted::NotResent(_)))
 }
 
 /// A scheduled retry that can't run (the effect gone, disabled or no

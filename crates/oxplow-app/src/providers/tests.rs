@@ -4622,6 +4622,49 @@ async fn a_rate_limited_reaction_waits_as_asked() {
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
 }
 
+/// tsk932: a backfill against a provider that keeps failing in a way that
+/// may pass stops after three failures in a row — those will be sent again
+/// by themselves, but the run doesn't press on into the outage.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
+    use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    for _ in 0..5 {
+        let env = oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
+            "human",
+            &WorkItemTransitionedV1 {
+                work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
+                from: oxplow_domain::TaskStatus::InProgress,
+                to: oxplow_domain::TaskStatus::Done,
+                effort: None,
+            },
+        );
+        fx.svc.event_log_store.append(env).await.unwrap();
+    }
+    // Approved again past them: they are the past a backfill reacts to.
+    crate::effects::approved(&fx.svc.db, &format!("{EXT}/file"))
+        .await
+        .unwrap();
+    set_hooks(&fx, "fail-next:20").await;
+    let (ext, decl) =
+        crate::effect_triggers::find_effect(&fx.svc, &format!("{EXT}/file")).expect("its effect");
+    let out = crate::commands::effect::backfill(
+        &fx.svc,
+        &ext,
+        &decl,
+        &crate::commands::effect::Range {
+            from_seq: None,
+            since: None,
+            to_seq: None,
+        },
+        50,
+    )
+    .await
+    .unwrap();
+    assert_eq!((out.failed, out.remaining), (3, 2), "{out:?}");
+    assert!(out.stopped.unwrap().contains("in a row"));
+}
+
 /// tsk915: a retry overdue by more than an hour (oxplow was closed
 /// meanwhile) isn't sent by itself — what it would send is from another
 /// time — and the failure it waited on counts.

@@ -1774,7 +1774,8 @@ same on every attempt ([commands.md](./commands.md) `effect_step_key`), so
 a write that landed lands once. A person's **Retry** composes afresh from
 what the effect reads now — the person decides it should. A loop every 5 s (`spawn_auto_retry`, at boot — its first tick only
 after the provider registry's first reconcile, so the providers the
-config names are up; tsk915) runs what is
+config names are up; tsk915 — one row's error logged and the rest
+going on, tsk932) runs what is
 due as the next attempt, `origin: auto` (`effect.result@4`), on the event
 at its newest version (`at_latest`, as every runner hands it over; one that
 no longer upcasts drops the retry — tsk911), when the effect is still
@@ -1806,7 +1807,10 @@ event at once; a range past it is capped (tsk847) — each through
 backfill`, the same dedupe, loop guard, approval and health as a live
 reaction. So a second backfill finds nothing, the live consumer never
 reacts to a backfilled event again, and three failures in a row disable
-the effect and stop the run (`stopped`). A run makes at most
+the effect and stop the run (`stopped`) — three of the run's own in a row
+stop it too, counting ones that will be sent again by themselves (whose
+health waits for the retry; tsk932), so a backfill doesn't press on into
+an outage. A run makes at most
 `BACKFILL_BATCH` (200) reactions; the result `{ planned, ran, skipped,
 proposed, failed, remaining, stopped? }` says what is left for another
 run. The effect must be enabled and approved as it is now.

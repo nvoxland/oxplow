@@ -303,7 +303,9 @@ pub struct Backfilled {
 /// Have `decl` react to the events in `range` it never reacted to, oldest
 /// first, at most `batch` of them — each an attempt like a live one
 /// (deduped, loop-guarded, counted toward its health). It stops when the
-/// effect is disabled (three failures in a row).
+/// effect is disabled, or after three failures in a row of its own — one
+/// that will be sent again by itself counts here too, though its health
+/// waits for the retry (tsk932): a provider that's down stops the run.
 pub async fn backfill(
     svc: &Arc<Services>,
     ext: &Extension,
@@ -324,9 +326,17 @@ pub async fn backfill(
         ..Backfilled::default()
     };
     let mut attempted = 0;
+    let mut in_a_row = 0;
     for event in &planned.first {
         if let Some(why) = health.disabled_reason(&key).await? {
             out.stopped = Some(format!("the effect was disabled: {why}"));
+            break;
+        }
+        if in_a_row >= crate::plugin_health::FAILURES_TO_DISABLE {
+            out.stopped = Some(format!(
+                "{in_a_row} failures in a row; the rest wait (those that may pass are sent \
+                 again by themselves)"
+            ));
             break;
         }
         let started = std::time::Instant::now();
@@ -334,8 +344,14 @@ pub async fn backfill(
         effect_triggers::count(&health, decl, &reacted, started.elapsed()).await;
         attempted += 1;
         match reacted {
-            Reacted::Ran => out.ran += 1,
-            Reacted::Failed(_) | Reacted::Retrying(_) | Reacted::NotResent(_) => out.failed += 1,
+            Reacted::Ran => {
+                out.ran += 1;
+                in_a_row = 0;
+            }
+            Reacted::Failed(_) | Reacted::Retrying(_) | Reacted::NotResent(_) => {
+                out.failed += 1;
+                in_a_row += 1;
+            }
             Reacted::Proposed => out.proposed += 1,
             // Its own run's event, or one another delivery got to first.
             Reacted::Skipped(_) | Reacted::Nothing => out.skipped += 1,
