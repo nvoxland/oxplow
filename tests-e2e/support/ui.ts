@@ -20,9 +20,11 @@ export async function openNewTask(page: Page): Promise<void> {
 }
 
 /** Open a page through the launcher: search for `query`, take the first
- *  result. */
+ *  result — once it is the query's, since Enter takes whatever row is
+ *  first, and the results update after the typing. */
 export async function openFromLauncher(page: Page, query: string): Promise<void> {
   await page.getByTestId("rail-search").click();
   await page.keyboard.type(query);
+  await expect(page.locator('[data-row-index="0"]')).toContainText(query, { ignoreCase: true });
   await page.keyboard.press("Enter");
 }
