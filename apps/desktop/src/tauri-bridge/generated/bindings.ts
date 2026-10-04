@@ -4344,7 +4344,14 @@ export type ProgramKind =
  *  An extension's effect (`effects:`, P8.D9): a script that reacts to
  *  events by running commands, approved over its extension's folder.
  */
-"effect";
+"effect" | 
+/**
+ *  A custom component that declares `commands` (P11, tsk960): a bundle
+ *  that may run them with the viewer's rights, approved over its
+ *  bundle and the commands it names. One that declares none only shows
+ *  and queries, and needs no approval.
+ */
+"component";
 
 // A program the project's config would run.
 export type ProjectProgram = {
@@ -4363,6 +4370,8 @@ export type ProjectProgram = {
 	credentials: string[],
 	// Hosts it may reach (a provider).
 	network: string[],
+	// The commands it may run with the viewer's rights (a component).
+	commands: string[],
 	/**
 	 *  The project-relative folder whose every file the approval covers
 	 *  (a provider's extension, declarations included).

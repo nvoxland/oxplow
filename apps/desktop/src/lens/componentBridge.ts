@@ -17,7 +17,7 @@
 /// the frame. The daemon serves a client library wrapping this
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
-import { needsConfirmation } from "../ipc-error.js";
+import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -117,6 +117,13 @@ export interface BridgeDeps {
   /** Ask the person, in the host, to confirm `command`. */
   confirm(command: string): Promise<boolean>;
   onReady(): void;
+}
+
+/** Why an invoke was refused (`DENIED`: the component isn't approved, or a
+ *  policy said no), for the host to show beside the frame — the frame's
+ *  own code may not (tsk960). Any other failure is the frame's to show. */
+export function componentRefusal(e: unknown): string | null {
+  return e instanceof IpcCallError && e.code === "DENIED" ? e.message : null;
 }
 
 /** The page a component's `navigate` opens: an oxplow page for `ref`,

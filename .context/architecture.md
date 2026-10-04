@@ -89,7 +89,12 @@ None of these run until a person approves that program on their machine.
   - for an extension provider (`ProgramKind::Provider`, key
     `provider:<ext>/<id>`), the same tree — which holds its checked-in
     declarations — plus its entry, `args`, `env` names, `credentials`
-    and `network` ([providers.md](./providers.md)).
+    and `network` ([providers.md](./providers.md));
+  - for a custom component that declares `commands`
+    (`ProgramKind::Component`, key `component:<ext>/<id>`, P11), every
+    file of its bundle plus the commands it may run with the viewer's
+    rights; one that declares none only shows and queries, and isn't a
+    program ([extensions.md](./extensions.md) "Custom components").
 
   Any change needs approving again. A directory of more than 500 files
   or 16 MB can't be approved as a whole: give the program its own

@@ -235,6 +235,13 @@ If the component doesn't connect within 3 seconds, or navigates itself
 somewhere else, oxplow shows the lens's table instead. Agents always
 read the table.
 
+A component that declares `commands` runs them with your rights, so you
+approve it first, in Settings → Data → Programs. The approval covers its
+bundle's files and its command list, and a change to either needs
+approving again. Until then it still shows and queries its lenses, but
+`invoke` is refused, and oxplow says why under the frame. A component
+with no `commands` needs no approval.
+
 A command that needs confirmation is confirmed by you in oxplow, not
 inside the frame.
 

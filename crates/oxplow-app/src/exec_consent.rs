@@ -222,6 +222,11 @@ pub enum ProgramKind {
     /// An extension's effect (`effects:`, P8.D9): a script that reacts to
     /// events by running commands, approved over its extension's folder.
     Effect,
+    /// A custom component that declares `commands` (P11, tsk960): a bundle
+    /// that may run them with the viewer's rights, approved over its
+    /// bundle and the commands it names. One that declares none only shows
+    /// and queries, and needs no approval.
+    Component,
 }
 
 /// A program the project's config would run.
@@ -241,6 +246,8 @@ pub struct ProjectProgram {
     pub credentials: Vec<String>,
     /// Hosts it may reach (a provider).
     pub network: Vec<String>,
+    /// The commands it may run with the viewer's rights (a component).
+    pub commands: Vec<String>,
     /// The project-relative folder whose every file the approval covers
     /// (a provider's extension, declarations included).
     pub tree: Option<String>,
@@ -263,6 +270,7 @@ impl ProjectProgram {
             ProgramKind::Advisories => format!("advisories:{}", self.name),
             ProgramKind::Provider => format!("provider:{}", self.name),
             ProgramKind::Effect => format!("effect:{}", self.name),
+            ProgramKind::Component => format!("component:{}", self.name),
         }
     }
 
@@ -334,6 +342,17 @@ impl ProjectProgram {
                 h.update([2u8]);
                 h.update(files_hash(&*self.files(project_dir)?, &|_| false)?.as_bytes());
             }
+            // Its bundle — every file of it, the code the frame runs; the
+            // commands it may run are hashed below.
+            ProgramKind::Component => {
+                h.update(self.program.as_bytes());
+                h.update([2u8]);
+                let bundle = self.in_tree().unwrap_or_default();
+                h.update(
+                    files_hash(&*self.files(project_dir)?, &|rel| !rel.starts_with(bundle))?
+                        .as_bytes(),
+                );
+            }
             ProgramKind::AcpAgent => {
                 h.update(self.program.as_bytes());
                 if self.program.contains('/') && file.is_file() {
@@ -363,6 +382,10 @@ impl ProjectProgram {
             h.update([5u8]);
             h.update(n.as_bytes());
         }
+        for c in &self.commands {
+            h.update([7u8]);
+            h.update(c.as_bytes());
+        }
         Ok(hex::encode(h.finalize()))
     }
 }
@@ -385,15 +408,19 @@ impl ProjectProgram {
     /// Its entry's bytes: a file of its extension when it's under `tree`
     /// (a bundled one's is embedded), else a project file.
     fn entry_bytes(&self, project_dir: &Path) -> std::io::Result<Vec<u8>> {
-        let in_tree = self.tree.as_deref().and_then(|tree| {
-            self.program
-                .strip_prefix(tree.trim_end_matches('/'))
-                .and_then(|rest| rest.strip_prefix('/'))
-        });
-        match in_tree {
+        match self.in_tree() {
             Some(rel) => self.files(project_dir)?.bytes(rel),
             None => std::fs::read(project_dir.join(&self.program)),
         }
+    }
+
+    /// `program` relative to its extension's folder, when it's in it.
+    fn in_tree(&self) -> Option<&str> {
+        self.tree.as_deref().and_then(|tree| {
+            self.program
+                .strip_prefix(tree.trim_end_matches('/'))
+                .and_then(|rest| rest.strip_prefix('/'))
+        })
     }
 }
 
@@ -466,6 +493,7 @@ pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::
         env: Vec::new(),
         credentials: Vec::new(),
         network: Vec::new(),
+        commands: Vec::new(),
         tree: None,
         remote: false,
         approved: false,
@@ -492,12 +520,19 @@ pub fn may_run(
         env: Vec::new(),
         credentials: Vec::new(),
         network: Vec::new(),
+        commands: Vec::new(),
         tree: None,
         remote: false,
         approved: false,
         version: None,
     };
     approved_now(store, project_dir, &p)
+}
+
+/// Whether `program`, its files read under `root` (the project, or the
+/// stream's worktree it runs from), is what this machine approved.
+pub fn may_run_program(store: &ApprovalStore, root: &Path, program: &ProjectProgram) -> bool {
+    approved_now(store, root, program)
 }
 
 /// Whether `p` is approved on this machine as it is now.
@@ -522,6 +557,7 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
         env: agent.env.iter().map(|(k, v)| format!("{k}={v}")).collect(),
         credentials: Vec::new(),
         network: Vec::new(),
+        commands: Vec::new(),
         tree: None,
         remote: false,
         approved: false,
@@ -560,6 +596,7 @@ pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
         env: Vec::new(),
         credentials: Vec::new(),
         network: Vec::new(),
+        commands: Vec::new(),
         tree: None,
         remote: false,
         approved: false,
@@ -609,10 +646,38 @@ pub fn provider_program(
         env: spec.env.clone(),
         credentials: spec.credential_grants(),
         network: spec.network.clone(),
+        commands: Vec::new(),
         tree: Some(dir.to_string()),
         approved: false,
         version: None,
     }
+}
+
+/// A custom component as a program to approve: its bundle and the
+/// commands it may run. `None` for one that declares no commands — it
+/// only shows and queries, which needs no approval.
+pub fn component_program(
+    ext: &crate::extensions::Extension,
+    component: &crate::extensions::custom_components::CustomComponent,
+) -> Option<ProjectProgram> {
+    if component.commands.is_empty() {
+        return None;
+    }
+    let dir = ext.path.trim_end_matches('/');
+    Some(ProjectProgram {
+        kind: ProgramKind::Component,
+        name: format!("{}/{}", ext.name, component.id),
+        program: format!("{dir}/{}", component.bundle.trim_end_matches('/')),
+        args: Vec::new(),
+        env: Vec::new(),
+        credentials: Vec::new(),
+        network: Vec::new(),
+        commands: component.commands.clone(),
+        tree: Some(dir.to_string()),
+        remote: false,
+        approved: false,
+        version: None,
+    })
 }
 
 /// Whether an extension's provider may start: approved as it is now.
@@ -655,6 +720,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
         ProgramKind::Advisories => "extension advisories",
         ProgramKind::Provider => "provider",
         ProgramKind::Effect => "effect",
+        ProgramKind::Component => "component",
     };
     format!(
         "{what} `{name}` runs `{program}` from the project's config and needs a person's approval first \
@@ -681,6 +747,7 @@ pub fn list(
             env: Vec::new(),
             credentials: Vec::new(),
             network: Vec::new(),
+            commands: Vec::new(),
             tree: None,
             remote: false,
             approved: false,
@@ -703,6 +770,11 @@ pub fn list(
         e.effects
             .iter()
             .map(move |decl| crate::effects::effect_program(e, decl))
+    }));
+    out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
+        e.custom_components
+            .iter()
+            .filter_map(move |c| component_program(e, c))
     }));
     for p in &mut out {
         p.version = p.hash(project_dir).ok();
@@ -833,6 +905,7 @@ mod tests {
             env: Vec::new(),
             credentials: Vec::new(),
             network: Vec::new(),
+            commands: Vec::new(),
             tree: Some("bundled:oxplow-review".into()),
             remote: false,
             approved: false,
@@ -854,6 +927,7 @@ mod tests {
             env: Vec::new(),
             credentials: Vec::new(),
             network: Vec::new(),
+            commands: Vec::new(),
             tree: Some("bundled:oxplow-review".into()),
             remote: false,
             approved: false,

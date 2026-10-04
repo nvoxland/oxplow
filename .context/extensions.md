@@ -1210,15 +1210,32 @@ reloads after its own installs and updates.
 
 `custom_components:` (a private extension only, P6b.D1;
 `extensions/custom_components.rs`) are web bundles a `viz: custom` lens
-renders in a sandboxed frame. **The sandbox is the consent**: the frame
-has an opaque origin (the iframe's `sandbox="allow-scripts"` *and* the
-daemon's `sandbox allow-scripts` CSP directive), no daemon token and no
-way to send data — no fetch/XHR/WebSocket (`connect-src 'none'`), no
-forms, no storage. The one way out is navigating itself: the main
-window's `frame-src http://127.0.0.1:*` bounds that to this machine, and
-the host ends the component on its second `load`. So a bundle runs
-without a person's approval and reaches only the lenses it may query
-(`assets`) and the commands it may invoke (`commands`).
+renders in a sandboxed frame. **The sandbox bounds what it reaches**:
+the frame has an opaque origin (the iframe's `sandbox="allow-scripts"`
+*and* the daemon's `sandbox allow-scripts` CSP directive), no daemon
+token and no way to send data — no fetch/XHR/WebSocket (`connect-src
+'none'`), no forms, no storage. The one way out is navigating itself:
+the page's `frame-src http://127.0.0.1:*` bounds that to this machine —
+Tauri's CSP in the app, and a one-directive meta CSP in `index.html`
+for a plain browser, where whatever serves `dist/` sends no header
+(`lens/frameBound.test.ts` keeps them one value; only `frame-src`,
+since a fuller policy would bound what the page connects to, and a
+daemon over a tunnel isn't on loopback) — and the host ends the
+component on its second `load`. So it reaches only the lenses it may
+query (`assets`) and the commands it may invoke (`commands`).
+
+**A component that acts is a program a person approves** (P11,
+tsk960). `invoke` runs a command with the viewer's rights, so a
+component that declares `commands` is listed on Settings → Data →
+Programs (`ProgramKind::Component`, key `component:<ext>/<id>`,
+`exec_consent::component_program`): the approval covers every file of
+its bundle and the commands it may run, and either changing asks
+again. Unapproved, it still renders and queries; its `invoke` is
+`Denied` with the approval message, and the host shows that reason
+under the frame (`custom-component-refused`, `componentRefusal`) — the
+component's own code may not. A component that declares no commands
+only shows and reads, and isn't a program. The gate reads the bundle
+where it is served from (the stream's worktree).
 
 ```yaml
 custom_components:
@@ -1262,7 +1279,8 @@ component's extension — when it's one of the component's `assets`
 (`Invalid` naming them otherwise), through `run_lens`: the lens's own
 read-only, parameterised query, never SQL from the frame.
 `invoke_component_command { id, command, input, stream_id, confirmed }`
-runs `command` when it's one of the component's `commands`, as
+runs `command` when it's one of the component's `commands` and a person
+approved the component as it is now, as
 `Actor::Lens { lens_id: id, on_behalf_of: Human }`, so every policy
 applies as if the person ran it; the input is literal (no placeholders);
 a command that asks comes back `NEEDS_CONFIRMATION` and the **host**

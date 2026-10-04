@@ -105,6 +105,32 @@ test("programRow shows an effect as reacting to events from approval on (P8.D9)"
   expect(m.bundled).toBe(false);
 });
 
+// tsk960: a component that declares commands runs them with the viewer's
+// rights: the row names its bundle and those commands, and says what
+// stays off until it's approved.
+test("programRow shows a component with the commands it may run", () => {
+  const m = programRow({
+    kind: "component",
+    name: "github/pr-lifetimes",
+    program: "oxplow/extensions/github/components/pr-lifetimes",
+    args: [],
+    env: [],
+    credentials: [],
+    network: [],
+    commands: ["collector.sync"],
+    tree: "oxplow/extensions/github",
+    remote: false,
+    approved: false,
+    version: "abc",
+  });
+  expect(m.label).toBe("Component github/pr-lifetimes");
+  expect(m.command).toBe("oxplow/extensions/github/components/pr-lifetimes\nmay run: collector.sync");
+  expect(m.status).toBe("Not approved: it shows and reads, but can't act");
+  expect(m.approveTitle).toContain("with your rights");
+  expect(m.approveTitle).toContain("collector.sync");
+  expect(m.approveTitle).toContain("every file of its bundle");
+});
+
 // tsk953: a bundled extension's effect is approved like any other; its
 // files come with oxplow, so a new oxplow that changes them asks again.
 test("programRow says a bundled effect asks again when a new oxplow changes it", () => {

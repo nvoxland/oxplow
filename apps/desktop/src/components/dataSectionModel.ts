@@ -111,6 +111,20 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       bundled,
     };
   }
+  if (p.kind === "component") {
+    // Unapproved it still renders and queries its lenses; only acting —
+    // running its commands with the viewer's rights — waits (tsk960).
+    const commands = p.commands.join(", ");
+    return {
+      key: `${p.kind}:${p.name}`,
+      label: `Component ${p.name}`,
+      command: `${p.program}\nmay run: ${commands}`,
+      status: p.approved ? "Approved on this machine" : "Not approved: it shows and reads, but can't act",
+      approved: p.approved,
+      approveTitle: `Lets the custom component ${p.name} run ${commands} with your rights when you use it (a command that asks still asks you), approving every file of its bundle (${p.program}). Approve only if you trust this extension; a changed bundle or command list needs approval again.`,
+      bundled: false,
+    };
+  }
   const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
   const what = p.kind === "collector" ? "Collector" : "ACP agent";
   return {

@@ -234,7 +234,13 @@ fn component_of(
     svc: &crate::Services,
     lens_root: &Path,
     lens_id: &str,
-) -> Result<extensions::custom_components::CustomComponent, CommandError> {
+) -> Result<
+    (
+        extensions::Extension,
+        extensions::custom_components::CustomComponent,
+    ),
+    CommandError,
+> {
     // One catalog read: the lens and its extension's components together.
     let not_found = || CommandError::from(oxplow_domain::DomainError::NotFound);
     let (ext_name, slug) = lens_id.split_once('/').ok_or_else(not_found)?;
@@ -256,14 +262,16 @@ fn component_of(
             })
         }
     };
-    ext.custom_components
+    let component = ext
+        .custom_components
         .iter()
         .find(|c| c.id == component)
         .cloned()
         .ok_or_else(|| CommandError::Invalid {
             field: Some("/lens".into()),
             message: format!("`{lens_id}`'s component `{component}` isn't loaded"),
-        })
+        })?;
+    Ok((ext, component))
 }
 
 /// A custom component reads one of its declared lenses (`assets`; a bare
@@ -277,7 +285,7 @@ pub async fn run_component_query(
     params: BTreeMap<String, SqlCell>,
     ctx: &extensions::LensContext,
 ) -> Result<extensions::LensRun, CommandError> {
-    let component = component_of(svc, lens_root, lens_id)?;
+    let (_, component) = component_of(svc, lens_root, lens_id)?;
     let asset = if asset.contains('/') {
         asset.to_string()
     } else {
@@ -320,13 +328,15 @@ pub struct ComponentInvoke {
 
 /// Run `call`'s command as the lens acting for its viewer, so every
 /// policy applies as if they ran it — a component can offer an action but
-/// never grant a power — when the component declares it.
+/// never grant a power — when the component declares it, and a person
+/// approved the component as it is now (tsk960): its bundle runs that
+/// command with their rights.
 pub async fn invoke_component_command(
     svc: &crate::Services,
     lens_root: &Path,
     call: ComponentInvoke,
 ) -> Result<CommandOutcome, CommandError> {
-    let component = component_of(svc, lens_root, &call.lens_id)?;
+    let (ext, component) = component_of(svc, lens_root, &call.lens_id)?;
     if !component.commands.contains(&call.command) {
         return Err(CommandError::Invalid {
             field: Some("/command".into()),
@@ -337,6 +347,17 @@ pub async fn invoke_component_command(
                 component.commands.join(", ")
             ),
         });
+    }
+    if let Some(program) = crate::exec_consent::component_program(&ext, &component) {
+        if !crate::exec_consent::may_run_program(&svc.approvals, lens_root, &program) {
+            return Err(CommandError::Denied {
+                reason: crate::exec_consent::needs_approval(
+                    program.kind,
+                    &program.name,
+                    &program.program,
+                ),
+            });
+        }
     }
     svc.commands
         .run(
@@ -657,6 +678,118 @@ actions:
         (fx, root)
     }
 
+    /// Approve `acme/board` as it is now, as a person on Programs does.
+    fn approve_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) {
+        let ext = fx.svc.extension_catalog.named(root, "acme").unwrap();
+        let program =
+            crate::exec_consent::component_program(&ext, &ext.custom_components[0]).unwrap();
+        let config = fx.svc.config.read().unwrap().clone();
+        crate::exec_consent::approve_program(
+            &fx.svc.approvals,
+            root,
+            &config,
+            std::slice::from_ref(&ext),
+            crate::exec_consent::ProgramKind::Component,
+            &program.name,
+            &program.hash(root).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// The programs a person is asked to approve, as Programs lists them.
+    fn programs(
+        fx: &crate::test_fixtures::EffortFixture,
+        root: &Path,
+    ) -> Vec<crate::exec_consent::ProjectProgram> {
+        let config = fx.svc.config.read().unwrap().clone();
+        crate::exec_consent::list(
+            &fx.svc.approvals,
+            root,
+            &config,
+            fx.svc.extension_catalog.get(root).as_ref(),
+        )
+    }
+
+    /// P11 (tsk960): a component that declares commands acts with a
+    /// person's rights, so it is a program a person approves — its bundle
+    /// and the commands it may run. Until then its invoke is refused and
+    /// nothing runs; approved as it is now, it runs; a changed bundle asks
+    /// again.
+    #[tokio::test]
+    async fn an_unapproved_components_invoke_is_refused() {
+        let (fx, root) = component_fixture().await;
+        let invoke = || ComponentInvoke {
+            lens_id: "acme/view".into(),
+            command: "work_item.transition".into(),
+            input: serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
+            on_behalf_of: Actor::Human,
+            confirmed: false,
+        };
+        let listed = programs(&fx, &root);
+        let board = listed
+            .iter()
+            .find(|p| p.kind == crate::exec_consent::ProgramKind::Component)
+            .expect("listed on Programs");
+        assert_eq!(board.name, "acme/board");
+        assert_eq!(board.commands, vec!["work_item.transition".to_string()]);
+        assert!(!board.approved);
+        let refused = |err: CommandError| {
+            assert!(
+                matches!(&err, CommandError::Denied { reason }
+                    if reason.contains("component `acme/board`") && reason.contains("approval")),
+                "{err:?}"
+            );
+        };
+        refused(
+            invoke_component_command(&fx.svc, &root, invoke())
+                .await
+                .unwrap_err(),
+        );
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        approve_board(&fx, &root);
+        invoke_component_command(&fx.svc, &root, invoke())
+            .await
+            .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        std::fs::write(
+            root.join("oxplow/extensions/acme/components/board/index.html"),
+            "<!doctype html><script src=other.js></script>",
+        )
+        .unwrap();
+        refused(
+            invoke_component_command(&fx.svc, &root, invoke())
+                .await
+                .unwrap_err(),
+        );
+    }
+
+    /// P11 (tsk960): a component that declares no commands can only show
+    /// and query — nothing to approve, and it isn't listed.
+    #[tokio::test]
+    async fn a_component_without_commands_needs_no_approval() {
+        let (fx, root) = fixture().await;
+        let ext = root.join("oxplow/extensions/acme");
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks] }\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(ext.join("components/board")).unwrap();
+        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
+        std::fs::write(
+            ext.join("lenses/view.yaml"),
+            "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
+        )
+        .unwrap();
+        assert!(programs(&fx, &root)
+            .iter()
+            .all(|p| p.kind != crate::exec_consent::ProgramKind::Component));
+        let ctx = extensions::LensContext::default();
+        run_component_query(&fx.svc, &root, "acme/view", "tasks", BTreeMap::new(), &ctx)
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn a_component_queries_only_its_declared_lenses() {
         let (fx, root) = component_fixture().await;
@@ -706,6 +839,7 @@ actions:
                 .contains("isn't one of component `board`'s commands"),
             "{err}"
         );
+        approve_board(&fx, &root);
         let out = invoke_component_command(&fx.svc, &root, invoke("work_item.transition"))
             .await
             .unwrap();
@@ -730,6 +864,7 @@ actions:
     #[tokio::test(flavor = "multi_thread")]
     async fn a_component_invoke_with_a_non_object_input_is_invalid() {
         let (fx, root) = component_fixture().await;
+        approve_board(&fx, &root);
         for input in [
             serde_json::json!([1, 2]),
             serde_json::json!("done"),

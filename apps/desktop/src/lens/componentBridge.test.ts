@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { componentBundleUrl, componentNavigationTarget, createBridgeHost, kitCss, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
+import { componentBundleUrl, componentNavigationTarget, componentRefusal, createBridgeHost, kitCss, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
 
 // P6b.D4: a custom component talks to the host over a MessageChannel —
 // three requests (query, invoke, navigate) and a `ready`; everything else
@@ -162,4 +162,14 @@ test("a component navigates to app pages only", async () => {
     { id: "n2", ok: false, error: { code: "INVALID", message: "A component may open oxplow's pages only." } },
   ]);
   h.channel.port1.close();
+});
+
+// tsk960: a refused invoke — an unapproved component, or a policy saying
+// no — is shown by the host, beside the frame, whatever the component's
+// own code does with the reply; any other failure is the frame's to show.
+test("componentRefusal is a refused invoke's reason, and nothing else's", () => {
+  const reason = "component `x/burn` runs `…` and needs a person's approval first (Settings → Data → Programs).";
+  expect(componentRefusal(new IpcCallError(reason, "DENIED"))).toBe(reason);
+  expect(componentRefusal(new IpcCallError("bad input", "INVALID"))).toBeNull();
+  expect(componentRefusal(new Error("boom"))).toBeNull();
 });

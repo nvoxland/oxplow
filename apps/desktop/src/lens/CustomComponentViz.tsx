@@ -17,6 +17,7 @@ import type { LensRun } from "../tauri-bridge/generated/bindings.js";
 import {
   componentBundleUrl,
   componentNavigationTarget,
+  componentRefusal,
   createBridgeHost,
   initMessage,
   tokensFromStyle,
@@ -113,6 +114,8 @@ function ComponentFrame({
   onReady?(): void;
 }) {
   const [asking, setAsking] = useState<{ command: string; answer(ok: boolean): void } | null>(null);
+  // Why its last invoke was refused: shown here, not left to the frame.
+  const [refused, setRefused] = useState<string | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const hostRef = useRef<ReturnType<typeof createBridgeHost> | null>(null);
   const loadsRef = useRef(0);
@@ -152,8 +155,17 @@ function ComponentFrame({
       channel.port1,
       {
         query: (asset, params) => runComponentQuery(runRef.current.lens.id, asset, params, streamId),
-        invoke: (command, input, confirmed) =>
-          invokeComponentCommand(runRef.current.lens.id, command, input, streamId, confirmed),
+        invoke: async (command, input, confirmed) => {
+          try {
+            const out = await invokeComponentCommand(runRef.current.lens.id, command, input, streamId, confirmed);
+            setRefused(null);
+            return out;
+          } catch (e) {
+            const why = componentRefusal(e);
+            if (why !== null) setRefused(why);
+            throw e;
+          }
+        },
         navigate: (ref) => {
           const tab = componentNavigationTarget(ref);
           if (tab) onOpenPage?.(tab);
@@ -187,6 +199,11 @@ function ComponentFrame({
         onLoad={onLoad}
         style={frameStyle}
       />
+      {refused ? (
+        <div data-testid="custom-component-refused" style={noteStyle}>
+          {refused}
+        </div>
+      ) : null}
       {asking ? (
         <CommandConfirm
           label={run.lens.title}
