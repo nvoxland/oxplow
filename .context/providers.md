@@ -662,8 +662,11 @@ form; sign-in is a provider's.
   renew once; "since the call" counts from when the call had its process,
   so a read that started the process itself still renews — tsk907). **Only the refused credential is renewed** (tsk821,
   `Instance::renewable`): the one the `Auth` names, when the instance
-  signs in for it; with none named, its only signed-in credential — with
-  two or more it can't know which and renews none, so the refusal is the
+  signs in for it; with none named, its credential only when the process
+  is handed exactly one and it is signed in — with two or more (a pasted
+  key beside a sign-in counts, tsk908) it can't know which and renews
+  none, so a good sign-in is never lapsed for another's refusal and the
+  refusal is the
   call's failure. A named credential that is pasted, not signed in for,
   has nothing to renew. Another credential is never renewed, so a
   renewal its service refuses for good never lapses one it didn't name.

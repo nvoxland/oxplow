@@ -532,20 +532,20 @@ impl Instance {
 
     /// The signed-in credential a refusal points at (tsk821): the one an
     /// `Auth` names, when it signs in for that one; with none named, its
-    /// only signed-in credential — with two or more it can't know which,
-    /// and renews none. A named credential that isn't signed in for (a
-    /// pasted key) has nothing to renew.
+    /// credential when it is handed exactly one and signs in for it — with
+    /// two or more (signed in or pasted) it can't know which was refused,
+    /// and renews none, so a good sign-in is never lapsed for a pasted
+    /// key's refusal (tsk908). A named credential that isn't signed in for
+    /// (a pasted key) has nothing to renew.
     pub(super) fn renewable(&self, named: Option<&str>) -> Option<String> {
-        let mut signed_in = self
-            .spec
-            .credentials
-            .iter()
-            .filter(|c| c.oauth.is_some())
-            .map(|c| c.name.as_str());
+        let credentials = &self.spec.credentials;
         match named {
-            Some(name) => signed_in.find(|c| *c == name).map(str::to_string),
-            None => match (signed_in.next(), signed_in.next()) {
-                (Some(only), None) => Some(only.to_string()),
+            Some(name) => credentials
+                .iter()
+                .find(|c| c.oauth.is_some() && c.name == name)
+                .map(|c| c.name.clone()),
+            None => match credentials.as_slice() {
+                [only] if only.oauth.is_some() => Some(only.name.clone()),
                 _ => None,
             },
         }

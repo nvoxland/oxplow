@@ -3411,6 +3411,32 @@ fn refreshes(sim: &OAuthSim) -> usize {
         .count()
 }
 
+/// tsk908: an `Auth` that names nothing, from a provider handed a pasted
+/// key beside its sign-in, could be about either: it renews nothing, and
+/// the sign-in stays good — the refusal is the call's failure.
+#[tokio::test]
+async fn an_unnamed_auth_beside_a_pasted_key_renews_nothing() {
+    let (fx, sim) = signing_in("", "      - PLAIN\n").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc
+        .providers
+        .set_credential(INSTANCE, "PLAIN", Some("k3y"))
+        .unwrap();
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    first_read(&fx).await;
+    set_hooks(&fx, "refuse-auth").await;
+    let err = create_on_fake(&fx).await.unwrap_err().to_string();
+    assert!(err.contains("authentication failed"), "{err}");
+    assert_eq!(refreshes(&sim), 0, "{:?}", sim.grants());
+    assert!(
+        matches!(
+            sign_in_state(&fx.svc.providers.list().await, "FAKE_TOKEN").1,
+            Some(oauth::SignInState::SignedIn { .. })
+        ),
+        "the sign-in stays good"
+    );
+}
+
 /// tsk821: an `Auth` that names its credential renews that one alone.
 #[tokio::test]
 async fn an_auth_renews_only_the_credential_it_names() {
