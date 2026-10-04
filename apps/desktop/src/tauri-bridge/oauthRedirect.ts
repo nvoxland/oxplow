@@ -30,20 +30,31 @@ export function canCatchSignInRedirect(): boolean {
   return tauriHostAvailable();
 }
 
+/// A listener the shell opened for a sign-in: its id (what waits on,
+/// answers and stops it — never its port, which a newer sign-in may
+/// reuse) and the port the service sends the browser back to.
+export type SignInListener = { id: number; port: number };
+
 /// Listen for a sign-in's redirect on `port` (a service with its port
-/// registered), or any free port: the port.
-export async function listenForSignInRedirect(port: number | null): Promise<number> {
+/// registered), or any free port.
+export async function listenForSignInRedirect(port: number | null): Promise<SignInListener> {
   return unwrap(await commands.listenForOauthRedirect(port));
 }
 
-/// The next redirect to `port` (its path and query); rejects when the
-/// sign-in is stopped or not finished in time.
-export async function awaitSignInRedirect(port: number): Promise<string> {
-  return unwrap(await commands.awaitOauthRedirect(port));
+/// The next redirect to listener `id` (its path and query); rejects when
+/// the sign-in is stopped or not finished in time.
+export async function awaitSignInRedirect(id: number): Promise<string> {
+  return unwrap(await commands.awaitOauthRedirect(id));
 }
 
 /// Answer the browser with the core's verdict on its redirect; the
 /// listener stops unless the redirect wasn't the sign-in's.
-export async function answerSignInRedirect(port: number, outcome: SignInCompletion): Promise<void> {
-  unwrap(await commands.answerOauthRedirect(port, outcome));
+export async function answerSignInRedirect(id: number, outcome: SignInCompletion): Promise<void> {
+  unwrap(await commands.answerOauthRedirect(id, outcome));
+}
+
+/// Stop listener `id`: resolves once its socket is closed, so a new
+/// sign-in can listen on the same port.
+export async function stopSignInRedirect(id: number): Promise<void> {
+  unwrap(await commands.stopOauthRedirect(id));
 }

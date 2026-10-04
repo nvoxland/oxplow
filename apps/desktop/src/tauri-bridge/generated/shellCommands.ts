@@ -18,4 +18,5 @@ export const SHELL_COMMANDS = [
   "remove_recent_project",
   "set_native_menu",
   "setup_project",
+  "stop_oauth_redirect",
 ] as const;

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use oxplow_app::providers::oauth::SIGN_IN_WAIT;
 use oxplow_app::providers::SignInCompletion;
-use oxplow_oauth_redirect::{Ended, RedirectListeners};
+use oxplow_oauth_redirect::{Ended, ListenerId, RedirectListeners};
 
 use crate::error::IpcError;
 
@@ -24,49 +24,61 @@ impl Default for OAuthRedirects {
     }
 }
 
+/// A redirect listener: its id — what waits on it, answers it and stops
+/// it (tsk905), never its port — and the port to sign in on.
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub struct OAuthListener {
+    pub id: ListenerId,
+    pub port: u16,
+}
+
 /// Listen on loopback for a sign-in's redirect — on `port` when the
-/// service has one registered, any free port otherwise: the port.
+/// service has one registered, any free port otherwise.
 #[tauri::command]
 #[specta::specta]
 pub async fn listen_for_oauth_redirect(
     redirects: tauri::State<'_, OAuthRedirects>,
     port: Option<u16>,
-) -> Result<u16, IpcError> {
-    redirects.0.listen(port.unwrap_or(0)).await.map_err(|e| {
+) -> Result<OAuthListener, IpcError> {
+    let (id, port) = redirects.0.listen(port.unwrap_or(0)).await.map_err(|e| {
         IpcError::invalid(format!(
             "listening for the sign-in's redirect on port {}: {e}",
             port.map_or("any".to_string(), |p| p.to_string())
         ))
-    })
+    })?;
+    Ok(OAuthListener { id, port })
 }
 
-/// The next redirect to `port`: the path and query the browser asked
-/// for, to hand to the core. Its browser waits for
+/// The next redirect to listener `listener`: the path and query the
+/// browser asked for, to hand to the core. Its browser waits for
 /// [`answer_oauth_redirect`]. Ends when the sign-in is over (answered,
-/// replaced, or out of time).
+/// stopped, or out of time).
 #[tauri::command]
 #[specta::specta]
 pub async fn await_oauth_redirect(
     redirects: tauri::State<'_, OAuthRedirects>,
-    port: u16,
+    listener: ListenerId,
 ) -> Result<String, IpcError> {
-    redirects.0.next(port).await.map_err(|ended| match ended {
-        Ended::Unknown => IpcError::invalid(format!("nothing listens for a sign-in on {port}")),
-        Ended::Stopped => IpcError::invalid("the sign-in was stopped"),
-        Ended::Failed(e) => IpcError::internal(format!("the sign-in's redirect: {e}")),
-    })
+    redirects
+        .0
+        .next(listener)
+        .await
+        .map_err(|ended| match ended {
+            Ended::Unknown => IpcError::invalid("the sign-in isn't listening any more"),
+            Ended::Stopped => IpcError::invalid("the sign-in was stopped"),
+            Ended::Failed(e) => IpcError::internal(format!("the sign-in's redirect: {e}")),
+        })
 }
 
-/// Answer the browser waiting on `port` with how its redirect went (the
-/// core's answer): a redirect that wasn't the sign-in's is refused and
-/// the listener waits on; otherwise the sign-in is over and it stops
-/// listening — with no browser waiting (the renderer gave up), it just
-/// stops.
+/// Answer the browser waiting on listener `listener` with how its
+/// redirect went (the core's answer): a redirect that wasn't the
+/// sign-in's is refused and the listener waits on; otherwise the sign-in
+/// is over and it stops listening.
 #[tauri::command]
 #[specta::specta]
 pub async fn answer_oauth_redirect(
     redirects: tauri::State<'_, OAuthRedirects>,
-    port: u16,
+    listener: ListenerId,
     outcome: SignInCompletion,
 ) -> Result<(), IpcError> {
     let (ok, page, over) = match &outcome {
@@ -82,6 +94,20 @@ pub async fn answer_oauth_redirect(
         ),
         SignInCompletion::NotThisSignIn { reason } => (false, reason.clone(), false),
     };
-    redirects.0.answer(port, ok, &page, over).await;
+    redirects.0.answer(listener, ok, &page, over).await;
+    Ok(())
+}
+
+/// Stop listener `listener` (the sign-in was replaced, cancelled or
+/// left): a browser it holds is told, its wait ends, and when this
+/// returns its socket is closed — so the next sign-in can listen on the
+/// same port at once.
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_oauth_redirect(
+    redirects: tauri::State<'_, OAuthRedirects>,
+    listener: ListenerId,
+) -> Result<(), IpcError> {
+    redirects.0.stop(listener).await;
     Ok(())
 }

@@ -76,7 +76,8 @@ developer-facing mechanics.
   **Signing in to a provider works the same with a remote daemon** (P10):
   the service sends the browser back to a loopback port on the person's
   machine, so the shell listens there (`listen_for_oauth_redirect`,
-  `await_oauth_redirect`, `answer_oauth_redirect` — shell commands) and
+  `await_oauth_redirect`, `answer_oauth_redirect`, `stop_oauth_redirect` —
+  shell commands) and
   the renderer hands each redirect to the daemon
   (`complete_oauth_sign_in`). The core never listens for one. A plain
   browser on a daemon has no shell, so its Sign in is off with the

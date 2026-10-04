@@ -951,6 +951,8 @@ export {
   awaitSignInRedirect,
   canCatchSignInRedirect,
   listenForSignInRedirect,
+  stopSignInRedirect,
+  type SignInListener,
 } from "./tauri-bridge/oauthRedirect.js";
 
 /// The ACP agents this project can run (the new-thread picker).

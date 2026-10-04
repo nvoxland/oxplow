@@ -318,24 +318,30 @@ export const commands = {
 	completeOauthSignIn: (instance: string, name: string, redirect: string) => typedError<SignInCompletion, IpcError>(__TAURI_INVOKE("complete_oauth_sign_in", { instance, name, redirect })),
 	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
-	 *  service has one registered, any free port otherwise: the port.
+	 *  service has one registered, any free port otherwise.
 	 */
-	listenForOauthRedirect: (port: number | null) => typedError<number, IpcError>(__TAURI_INVOKE("listen_for_oauth_redirect", { port })),
+	listenForOauthRedirect: (port: number | null) => typedError<OAuthListener, IpcError>(__TAURI_INVOKE("listen_for_oauth_redirect", { port })),
 	/**
-	 *  The next redirect to `port`: the path and query the browser asked
-	 *  for, to hand to the core. Its browser waits for
+	 *  The next redirect to listener `listener`: the path and query the
+	 *  browser asked for, to hand to the core. Its browser waits for
 	 *  [`answer_oauth_redirect`]. Ends when the sign-in is over (answered,
-	 *  replaced, or out of time).
+	 *  stopped, or out of time).
 	 */
-	awaitOauthRedirect: (port: number) => typedError<string, IpcError>(__TAURI_INVOKE("await_oauth_redirect", { port })),
+	awaitOauthRedirect: (listener: number) => typedError<string, IpcError>(__TAURI_INVOKE("await_oauth_redirect", { listener })),
 	/**
-	 *  Answer the browser waiting on `port` with how its redirect went (the
-	 *  core's answer): a redirect that wasn't the sign-in's is refused and
-	 *  the listener waits on; otherwise the sign-in is over and it stops
-	 *  listening — with no browser waiting (the renderer gave up), it just
-	 *  stops.
+	 *  Answer the browser waiting on listener `listener` with how its
+	 *  redirect went (the core's answer): a redirect that wasn't the
+	 *  sign-in's is refused and the listener waits on; otherwise the sign-in
+	 *  is over and it stops listening.
 	 */
-	answerOauthRedirect: (port: number, outcome: SignInCompletion) => typedError<null, IpcError>(__TAURI_INVOKE("answer_oauth_redirect", { port, outcome })),
+	answerOauthRedirect: (listener: number, outcome: SignInCompletion) => typedError<null, IpcError>(__TAURI_INVOKE("answer_oauth_redirect", { listener, outcome })),
+	/**
+	 *  Stop listener `listener` (the sign-in was replaced, cancelled or
+	 *  left): a browser it holds is told, its wait ends, and when this
+	 *  returns its socket is closed — so the next sign-in can listen on the
+	 *  same port at once.
+	 */
+	stopOauthRedirect: (listener: number) => typedError<null, IpcError>(__TAURI_INVOKE("stop_oauth_redirect", { listener })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -3952,6 +3958,15 @@ export type OAuthDecl = {
 	 *  that).
 	 */
 	client_auth?: ClientAuth,
+};
+
+/**
+ *  A redirect listener: its id — what waits on it, answers it and stops
+ *  it (tsk905), never its port — and the port to sign in on.
+ */
+export type OAuthListener = {
+	id: number,
+	port: number,
 };
 
 /**

@@ -215,6 +215,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("listen_for_oauth_redirect"),
     ui("await_oauth_redirect"),
     ui("answer_oauth_redirect"),
+    ui("stop_oauth_redirect"),
     both("ensure_change"),
     both_named("ai.settings", "ai_settings", "list_ai_roles"),
     ui("save_ai_provider"),

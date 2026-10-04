@@ -703,13 +703,18 @@ form; sign-in is a provider's.
   (`tauri-bridge/systemBrowser.ts`, not the sandboxed external-URL
   window — their sessions live there and services refuse embedded
   webviews). The row runs it (`SignInRow`): the shell listens
-  (`listen_for_oauth_redirect { port? }`, shell-only — on the
-  credential's `redirectPort`, else any free port), the core begins on
+  (`listen_for_oauth_redirect { port? }` → `{ id, port }`, shell-only — on
+  the credential's `redirectPort`, else any free port), the core begins on
   that port, the browser opens the page, and each redirect the shell
-  catches (`await_oauth_redirect { port }`) goes to the core by IPC
+  catches (`await_oauth_redirect { listener }`) goes to the core by IPC
   `complete_oauth_sign_in { instance, name, redirect }` (UI-only), the
   shell answering the browser with the core's verdict
-  (`answer_oauth_redirect { port, outcome }`). `SignInCompletion` is
+  (`answer_oauth_redirect { listener, outcome }`). A listener is known by
+  its **id**, never its port (tsk905): a newer sign-in may listen on the
+  same port, and a late answer or stop for an old one must not touch it. A
+  replaced or left sign-in is stopped with `stop_oauth_redirect
+  { listener }`, which tells a browser still waiting and resolves once the
+  socket is closed — the row awaits it before listening again. `SignInCompletion` is
   `signed_in`, `failed { error }`, or `not_this_sign_in { reason }` —
   refused, nothing done, the wait goes on. A match ends the sign-in: the
   provider is re-checked as approved with the declaration it began with

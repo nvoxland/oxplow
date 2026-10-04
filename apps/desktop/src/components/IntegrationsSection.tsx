@@ -28,6 +28,7 @@ import {
   listExtensions,
   listProviderInstances,
   listenForSignInRedirect,
+  stopSignInRedirect,
   openInSystemBrowser,
   removeProviderInstance,
   turnOffProviderInstanceHere,
@@ -328,20 +329,22 @@ function SignInRow({
   // A sign-in is being started: a second click would start another.
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** The port the shell listens on for this row's sign-in under way. */
+  /** The shell's listener for this row's sign-in under way (its id, not
+   *  its port — a newer sign-in may listen on the same port). */
   const listening = useRef<number | null>(null);
   const shell = canCatchSignInRedirect();
   const id = `${instance}-${name}`;
   const line = signInLine(state);
 
-  /** The sign-in under way is over (`why`): the shell stops listening. */
-  function stopListening(why: string) {
-    const port = listening.current;
+  /** The sign-in under way is over: the shell stops listening — resolved
+   *  once its socket is closed (tsk905). */
+  async function stopListening() {
+    const id = listening.current;
     listening.current = null;
-    if (port !== null) void answerSignInRedirect(port, { outcome: "failed", error: why }).catch(() => {});
+    if (id !== null) await stopSignInRedirect(id).catch(() => {});
   }
   // Leaving the page ends it.
-  useEffect(() => () => stopListening("the sign-in was left"), []);
+  useEffect(() => () => void stopListening(), []);
 
   useEffect(
     () =>
@@ -357,16 +360,19 @@ function SignInRow({
     const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
     setError(null);
     setStarting(true);
-    // A newer sign-in replaces the one under way (the core abandons it too).
-    stopListening("a newer sign-in replaced it");
-    let port: number | null = null;
+    // A newer sign-in replaces the one under way (the core abandons it
+    // too) — its socket closed before this one listens, on a declared
+    // port the same one.
+    await stopListening();
+    let id: number;
     try {
-      port = await listenForSignInRedirect(redirectPort);
-      listening.current = port;
-      await openInSystemBrowser(await beginOauthSignIn(instance, name, port));
+      const listener = await listenForSignInRedirect(redirectPort);
+      id = listener.id;
+      listening.current = id;
+      await openInSystemBrowser(await beginOauthSignIn(instance, name, listener.port));
       setWaiting(true);
     } catch (e) {
-      stopListening(message(e));
+      await stopListening();
       setError(message(e));
       return;
     } finally {
@@ -377,19 +383,19 @@ function SignInRow({
     // wait goes on. How it ended arrives as `credentialChanged`.
     try {
       for (;;) {
-        const redirect = await awaitSignInRedirect(port);
+        const redirect = await awaitSignInRedirect(id);
         const outcome: SignInCompletion = await completeOauthSignIn(instance, name, redirect).catch(
           (e: unknown) => ({ outcome: "failed", error: message(e) }),
         );
-        await answerSignInRedirect(port, outcome);
+        await answerSignInRedirect(id, outcome);
         if (outcome.outcome === "not_this_sign_in") continue;
-        if (listening.current === port) listening.current = null;
+        if (listening.current === id) listening.current = null;
         return;
       }
     } catch (e) {
       // Stopped by a newer sign-in or by leaving (no longer this row's
       // concern), or never finished.
-      if (listening.current !== port) return;
+      if (listening.current !== id) return;
       listening.current = null;
       setWaiting(false);
       setError(message(e));

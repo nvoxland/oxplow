@@ -53,6 +53,7 @@ pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "remove_recent_project",
     "set_native_menu",
     "setup_project",
+    "stop_oauth_redirect",
 ];
 
 /// The generated TS module carrying [`SHELL_ONLY_COMMANDS`] to the
@@ -158,6 +159,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::oauth_redirect::listen_for_oauth_redirect,
             commands::oauth_redirect::await_oauth_redirect,
             commands::oauth_redirect::answer_oauth_redirect,
+            commands::oauth_redirect::stop_oauth_redirect,
             commands::generated::ensure_change,
             commands::generated::ai_settings,
             commands::generated::save_ai_provider,

@@ -29,6 +29,8 @@ const steps: string[] = [];
 let shellPresent = true;
 /** What each wait for a redirect returns, in turn (then none comes). */
 let redirects: string[] = [];
+/** How many listeners the shell opened: each one's id. */
+let listens = 0;
 const listeners = new Set<(event: Record<string, unknown>) => void>();
 const instance = {
   instance: "tracker/fake",
@@ -80,8 +82,12 @@ mock.module("../api.js", () => ({
   },
   canCatchSignInRedirect: () => shellPresent,
   listenForSignInRedirect: async (port: number | null) => {
+    listens += 1;
     steps.push(`listen ${port}`);
-    return 5555;
+    return { id: listens, port: 5555 };
+  },
+  stopSignInRedirect: async (id: number) => {
+    steps.push(`stop ${id}`);
   },
   beginOauthSignIn: async (inst: string, name: string, port: number) => {
     signIns.push([inst, name]);
@@ -93,8 +99,8 @@ mock.module("../api.js", () => ({
     browsed.push(url);
     steps.push(`open ${url}`);
   },
-  awaitSignInRedirect: (port: number) => {
-    steps.push(`await ${port}`);
+  awaitSignInRedirect: (id: number) => {
+    steps.push(`await ${id}`);
     const next = redirects.shift();
     return next === undefined ? new Promise<string>(() => {}) : Promise.resolve(next);
   },
@@ -104,8 +110,8 @@ mock.module("../api.js", () => ({
       ? { outcome: "not_this_sign_in", reason: "this isn't the sign-in oxplow started" }
       : { outcome: "signed_in" };
   },
-  answerSignInRedirect: async (port: number, outcome: { outcome: string }) => {
-    steps.push(`answer ${port} ${outcome.outcome}`);
+  answerSignInRedirect: async (id: number, outcome: { outcome: string }) => {
+    steps.push(`answer ${id} ${outcome.outcome}`);
   },
   setInstanceCredential: async (inst: string, name: string, value: string | null) => {
     credentialSaves.push([inst, name, value]);
@@ -121,7 +127,11 @@ mock.module("../api.js", () => ({
 }));
 const { IntegrationsSection } = await import("./IntegrationsSection.js");
 
-afterEach(() => {
+afterEach(async () => {
+  // Unmounted first: a row's sign-in under way stops as it goes, and that
+  // must land before the record is cleared.
+  cleanup();
+  await new Promise((r) => setTimeout(r, 0));
   ran.length = 0;
   credentialSaves.length = 0;
   signIns.length = 0;
@@ -131,13 +141,13 @@ afterEach(() => {
   more = [];
   browsed.length = 0;
   steps.length = 0;
+  listens = 0;
   redirects = [];
   shellPresent = true;
   instance.credentials = STATIC_CREDENTIALS;
   active = null;
   replacementsOff = [];
   replacements = [];
-  cleanup();
 });
 
 test("choosing a provider as active runs config.set as the person; oxplow unsets it", async () => {
@@ -222,17 +232,17 @@ test("a signed-in credential has a Sign in button and no value box", async () =>
   // Someone else's redirect comes first: refused, and the wait goes on.
   redirects = ["/callback?code=x&state=forged", "/callback?code=c&state=abc"];
   fireEvent.click(view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"));
-  await waitFor(() => expect(steps.at(-1)).toBe("answer 5555 signed_in"));
+  await waitFor(() => expect(steps.at(-1)).toBe("answer 1 signed_in"));
   expect(steps).toEqual([
     "listen null",
     "begin tracker/fake FAKE_TOKEN 5555",
     "open https://auth.example.com/authorize?state=abc",
-    "await 5555",
+    "await 1",
     "complete /callback?code=x&state=forged",
-    "answer 5555 not_this_sign_in",
-    "await 5555",
+    "answer 1 not_this_sign_in",
+    "await 1",
     "complete /callback?code=c&state=abc",
-    "answer 5555 signed_in",
+    "answer 1 signed_in",
   ]);
   await waitFor(() => expect(row.textContent).toContain("Finish signing in in your browser"));
 
@@ -318,6 +328,23 @@ test("Sign in is off without the desktop app", async () => {
   expect(button.title).toContain("desktop app");
   fireEvent.click(button);
   expect(steps).toEqual([]);
+});
+
+// tsk905: Sign in again while one is under way: the old listener is
+// stopped — and its socket closed — before the new one listens, and the
+// new one is known by its own id even on the same port.
+test("a new sign-in stops the old listener before it listens", async () => {
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: 8765 }];
+  const view = render(<IntegrationsSection />);
+  const button = await waitFor(() => view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"));
+  fireEvent.click(button);
+  await waitFor(() => expect(steps).toContain("await 1"));
+  fireEvent.click(button);
+  await waitFor(() => expect(steps).toContain("await 2"));
+  const stop = steps.indexOf("stop 1");
+  const second = steps.lastIndexOf("listen 8765");
+  expect(stop).toBeGreaterThan(-1);
+  expect(stop).toBeLessThan(second);
 });
 
 // A service with its redirect port registered is listened for there.
