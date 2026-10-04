@@ -367,9 +367,8 @@ replaced by four focused pages so each has one job:
   plus last-5 Done previews. The In Progress section is omitted
   because the rail HUD's "Active item" + "Up next" already surface
   it. Header link "View all done →" routes to Done Work; kebab
-  carries the legacy `hide-auto` filter and a "View backlog →"
+  carries the `hide-auto` filter and a "View backlog →"
   entry. PageKind is `"tasks"`; ref helper is `tasksRef()`.
-  `planWorkRef()` is kept as a deprecated alias for one release.
 - **Done work** (`page-done-work`) — full descending list of done +
   canceled items for the current thread. Excludes archived; header
   link "View archived →" routes to the Archived page.
@@ -396,8 +395,7 @@ consistent across IA.
 
 Named ref helpers — `tasksRef()`, `doneWorkRef()`,
 `backlogRef()`, `archivedRef()` — mirror the GitDashboard pattern
-(`gitDashboardRef`, `uncommittedChangesRef`). `planWorkRef()`
-remains as a deprecated alias of `tasksRef()`.
+(`gitDashboardRef`, `uncommittedChangesRef`).
 
 ## Browser-style tab navigation
 

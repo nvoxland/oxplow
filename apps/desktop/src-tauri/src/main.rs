@@ -35,7 +35,7 @@ fn hook_event_arg() -> Option<String> {
     }
 }
 
-/// `oxplow plugin <new|check|migrate> …`: the SDK CLI, handled before
+/// `oxplow plugin <new|check|test> …`: the SDK CLI, handled before
 /// Tauri boots (like `hook`). Everything after `plugin` is the
 /// subcommand's argv.
 fn plugin_args() -> Option<Vec<String>> {

@@ -3,10 +3,10 @@
 //! Agent CLIs (Claude Code, Codex) export token usage as OpenTelemetry metrics
 //! to oxplow's control-plane OTLP receiver. This module decodes the protobuf
 //! body and projects the token data points into the intermediate [`TokenFact`]
-//! grain the ingest service writes onto the `oxplow.tokens` measure — the
-//! successor to the transcript-parse producer (`token_usage.rs`), which
-//! overcounted because Claude repeats a message's cumulative `usage` on every
-//! content-block line.
+//! grain that `agent.tokens.reported` carries (`otlp_ingest.rs`), which the
+//! `token_usage.otlp` consumer writes as facts — the successor to the
+//! transcript-parse producer (`token_usage.rs`), which overcounted because
+//! Claude repeats a message's cumulative `usage` on every content-block line.
 //!
 //! Pure + no IO → fully unit-testable. Two agents, two shapes:
 //! - **Claude** — the `claude_code.token.usage` **metric** counter (tsk23).
@@ -16,7 +16,8 @@
 //!   `input − cached`; reasoning folds into output. (A `codex.turn.token_usage`
 //!   metric mapper also exists but is speculative — unemitted by Codex 0.142.0.)
 //!
-//! Both keep the `input`/`output` token kinds; cache is dropped.
+//! Both keep the `input`/`output` kinds and the prompt-cache ones
+//! (`cache_read`, `cache_creation`; tsk73), which land on their own measure.
 //! [`summarize_metrics_request`] is the opt-in wire-format diagnostic (tsk25),
 //! which also decodes logs.
 

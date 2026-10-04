@@ -1,4 +1,4 @@
-/// Decorators (P6b.C5, experimental): labels from an extension's model on
+/// Decorators (P6b.C5, stable since P10): labels from an extension's model on
 /// core refs — a chip on a page whose ref the model lists (`ref-chip`), a
 /// badge after a lens cell that links to one (`row-badge`). Additive: a
 /// page or row is complete without them.

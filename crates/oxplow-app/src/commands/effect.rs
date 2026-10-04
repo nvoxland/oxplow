@@ -15,11 +15,13 @@
 //! (`Confirm::Always`), because of what they can do outside oxplow. A
 //! failed attempt interrupted with an external step under way may have
 //! landed that step, and a retry sends it again; a backfill runs an
-//! effect that may call outside oxplow once per past event. No provider
-//! promises a write is safe to repeat, so nothing retries by itself
-//! (`.context/providers.md` "Idempotency").
+//! effect that may call outside oxplow once per past event. Only a
+//! reaction whose every step is a write to a provider keeping
+//! `idempotent_writes` is sent again by itself (`origin: auto`,
+//! `effect_triggers::auto_retry_due`; `.context/providers.md`
+//! "Idempotency"); anything else waits for a person.
 //!
-//! Each is an attempt recorded like any (`effect_run`, `effect.result@3 {
+//! Each is an attempt recorded like any (`effect_run`, `effect.result@4 {
 //! attempt, origin }`), run by [`run_reaction`] as the effect is **now**:
 //! it must be enabled and approved as it is, it composes afresh from the
 //! event, it passes the loop guard, and it counts toward the effect's

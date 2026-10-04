@@ -1,13 +1,14 @@
 //! Collection engine — effort-scoped observations (which tests ran +
 //! diff coverage on changed lines). See `.context/collection.md`.
 //!
-//! Hybrid by design:
-//! - **Passive**: `on_post_tool_use` is called from the control-plane's
-//!   PostToolUse branch. It detects a test-runner Bash command, records
-//!   a `test-run` observation (`observed`), and — if a coverage report
-//!   is configured — rides along to ingest coverage.
-//! - **Active**: `ingest_coverage` / `record_test_run` back the MCP
-//!   tools of the same name.
+//! Two ways in:
+//! - **A tool call**: the collection reactor runs `on_post_tool_use` for
+//!   each `agent.tool.finished` (`RunOrigin::Tool`). It detects a test or
+//!   analysis run, runs the report collectors whose `on_run` matches, and
+//!   records what they parsed (`observed`).
+//! - **A command**: `collector.sync` runs one report collector by hand
+//!   (`sync_report_collector`), and `test.record_run` records a run an
+//!   agent asserts (`record_test_run`) — `RunOrigin::Command`.
 //!
 //! Coverage numbers come **only** from oxplow parsing the report
 //! (`oxplow-coverage`), never from the agent — so `diff-coverage` is
@@ -1655,13 +1656,6 @@ impl CollectionService {
         dual
     }
 
-    /// OBSERVE-ALWAYS coverage (tsk270): record the **absolute** whole-report
-    /// coverage — per-file instrumented/covered line-sets, verbatim, in the
-    /// `coverage-detail` finding + an `oxplow.coverage.abs_pct` headline + the
-    /// run (pinned to the stream's current snapshot) — with NO effort baseline.
-    /// The effort-relative diff-coverage is derived from these line-sets with
-    /// the effort's evidence ([`diff_coverage_for_effort`]). Attribution rides the unified
-    /// `"run"` ledger (auto-claimed when unambiguous, else reconciled/claimed).
     /// The id of a coverage sub-measure (`oxplow.coverage.branch`/`.function`,
     /// tsk123) IFF an enabled spec consumes it — else `None` (the per-measure
     /// stop-collecting gate). Lookup errors read as "not active" so a
@@ -1683,6 +1677,14 @@ impl CollectionService {
             .map(|m| m.id)
     }
 
+    /// OBSERVE-ALWAYS coverage (tsk270): record the **absolute** whole-report
+    /// coverage — per-file instrumented/covered line-sets, verbatim, in the
+    /// capture's `coverage-detail` envelope + an `oxplow.coverage.abs_pct`
+    /// headline — pinned to a take of the code the report measured
+    /// (tsk883), with NO effort baseline. The effort-relative diff-coverage
+    /// is derived from these line-sets with the effort's evidence
+    /// ([`diff_coverage_for_effort`]). Attribution rides the unified `"run"`
+    /// ledger (auto-claimed when unambiguous, else reconciled/claimed).
     async fn observe_coverage(
         &self,
         thread: &ThreadId,
@@ -3440,15 +3442,6 @@ impl CollectionService {
     }
 }
 
-/// True when `path`'s mtime is at or before `effort_start` — i.e. the
-/// report wasn't (re)generated during this effort. Conservative: if the
-/// mtime can't be read, returns `false` (ingest rather than silently drop
-/// a report on a platform that won't surface mtimes).
-/// The PostToolUse nudge shown when a detected test run produced no
-/// report oxplow could parse for the effort. Tool-agnostic: it only
-/// echoes the project's own configured command (or routes to
-/// `/oxplow:configure`), so it works for any current/future test tool
-/// without the hook knowing anything tool-specific.
 /// The nudge shown when a test run lands with SEVERAL efforts open and nothing
 /// resolves which one owns it (tsk170).
 ///
@@ -3474,6 +3467,11 @@ fn unattributed_run_message(command: &str, open: &[Effort]) -> String {
     )
 }
 
+/// The PostToolUse nudge shown when a detected test run produced no
+/// report oxplow could parse for the effort. Tool-agnostic: it only
+/// echoes the project's own configured command (or routes to
+/// `/oxplow:configure`), so it works for any current/future test tool
+/// without the hook knowing anything tool-specific.
 fn report_nudge_message(
     cfg: &oxplow_config::TestingConfig,
     has_report_collectors: bool,
@@ -3662,8 +3660,6 @@ const REPORT_FRESH_SLACK_MS: i64 = 60 * 1000;
 /// in the run's first second still counts as the run's.
 const MTIME_GRANULARITY_MS: i64 = 1000;
 
-/// The report mtimes a run could have produced: after `from`, no later than
-/// `to`. A report outside it belongs to an earlier run (or a later one).
 /// Why a report collector's parser couldn't be made.
 enum ParserProblem {
     /// An `exec` parser nobody on this machine approved as it is now.
@@ -3789,6 +3785,8 @@ fn trust(observed: &str, exec: &[String]) -> String {
     }
 }
 
+/// The report mtimes a run could have produced: after `from`, no later than
+/// `to`. A report outside it belongs to an earlier run (or a later one).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FreshWindow {
     from_ms: i64,

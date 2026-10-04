@@ -78,7 +78,7 @@ or exact mechanics.
 | `TerminalPane`, xterm.js setup, file-path link provider | `.context/terminal.md` |
 | LSP (session manager, document mirror, Mason installer, lsp RPCs/events, server config, MCP lsp tools) | `.context/lsp.md` |
 | Code quality scans (in-process metrics + duplication detector + findings store + Code quality panel) | `.context/code-quality.md` |
-| Effort-scoped collection (test-run + diff-coverage observations, the coverage parser, the `collection:` profile, `/oxplow:configure`) | `.context/collection.md` |
+| Effort-scoped collection (test-run + diff-coverage observations, report collectors and their bundled parsers, the `testing:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Refs — the canonical `<kind>:<id>[@rev][#frag]` grammar, the kind registry, what replaces tab ids / `page_ref` kinds / `[[…]]` shapes | `.context/refs.md` |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
 | **Target architecture** — anchors/refs, event log, capabilities + providers, commands, reactors, models, plugin kinds, UI contribution points (P0 spec, epic tsk393; read before designing anything new) | `.context/target-architecture.md` |

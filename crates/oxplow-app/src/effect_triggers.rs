@@ -17,7 +17,7 @@
 //! 4. Its script composes, over the event and its `input` rows:
 //!    `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs as
 //!    `command.sequence` by `Actor::Effect` (`CommandBus::run_effect`),
-//!    whose `effect_run` row and `effect.result@3` land with the run, its
+//!    whose `effect_run` row and `effect.result@4` land with the run, its
 //!    proposal, or — when it failed before anything ran — here.
 //!
 //! An effect that fails is recorded, never dead-letters the event: one

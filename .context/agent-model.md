@@ -298,9 +298,9 @@ kinds (`cacheRead`/`cacheCreation`) are tracked too (tsk73) — on the separate
 `agent.tokens.cache_read`/`cache_creation`/`cache_hit_pct` and the per-close
 `task.tokens`; token-denominated only, never dollars. This
 replaced the transcript-parse token capture, which overcounted ~2–3× (Claude
-repeats a message's cumulative `usage` on every content-block line). The Stop
-hook's `on_stop` still records the per-turn `agent_token_usage` prompt rows +
-`oxplow.turn` facts. Details: `.context/metrics.md` → "OTEL token tracking".
+repeats a message's cumulative `usage` on every content-block line). The
+`token_usage.turns` reactor on `agent.turn.ended` (`TokenUsageService::on_stop`)
+records the per-turn `agent_token_usage` prompt rows + `oxplow.turn` facts. Details: `.context/metrics.md` → "OTEL token tracking".
 
 Each hook POSTs to the runtime's MCP server with bearer-token auth via the
 env-var-interpolated `OXPLOW_HOOK_TOKEN` header, plus `X-Oxplow-Stream`,
@@ -1087,7 +1087,8 @@ checkout — P2.9, tsk433);
 and `stream.*` commands, comments and notes the `knowledge.*` ones, all
 through `run_command`, P8.A3–A6); and **site-wide search** (`search` —
 BM25 over tasks/comments/notes/wiki/file-contents via the unified FTS index,
-fed by the `Indexer` service; optional `stream_id` scopes file hits).
+fed by the `search:<kind>` assets for tasks, comments, notes and wiki and the
+`search.index` consumer for files; optional `stream_id` scopes file hits).
 Still `AgentTodo` (see the backlog): composed snapshot DTOs, git
 mutations/extra reads, `checkout_stream_branch`.
 

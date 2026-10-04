@@ -584,9 +584,9 @@ pages: …  panels: …  # running (P6.G1/G2): see "Panels" and "Pages"
 commands:  [...]   # Starlark scripts composing core commands (see "Commands")
 config: …          # parsed as data
 ref_kinds: …        # kinds of thing a ref can name (stable since P10; see "Ref kinds")
+event_types: …      # its own namespace's event types (stable; see "Event types", P8)
 # experimental kinds — a PRIVATE extension only
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
-event_types: …      # its own namespace's event types (see "Event types", P8)
 effects: …          # scripts reacting to logged events by composing commands (see "Effects", P8)
 custom_components: …   # sandboxed components for `viz: custom` lenses (see "Custom components")
 # and ui.replacements above
@@ -1409,9 +1409,8 @@ model's drift warning), a new shape is a new version with an upcast, and
 a removed type's rows stay readable. `STABLE_KINDS` lists it;
 `EXPERIMENTAL_KINDS` keeps `effects` (its contract just changed —
 attempts, retry, backfill — and no first-party extension acts yet),
-`ref_kinds` (no shared extension needs a new kind), `providers`,
-`custom_components` and `ui.replacements` (`ui.decorators` was promoted
-in P10, "Decorators").
+`providers`, `custom_components` and `ui.replacements` (`ui.decorators`
+and `ref_kinds` were promoted in P10, "Decorators" and "Ref kinds").
 
 **Retention** (P8.D5) is the namespace's window for payloads and large
 content (data-model.md "event_log" retention): either omitted part is the
@@ -1742,8 +1741,8 @@ schema, shared (`Command::with_handler`) — over what the script composed
 `CommandBus::run_effect` as `Actor::Effect` with
 `RunOrigin::Effect(key)`: its `command.executed@2` is caused by the
 triggering event, and the reaction's `effect_run` row and
-`effect.result@2 { effect, event, outcome, reason?, proposal? }` (caused by
-that run) land **in the run's transaction**; with a step outside it, a
+`effect.result@4 { effect, event, outcome, reason?, proposal?, attempt,
+origin }` (caused by that run) land **in the run's transaction**; with a step outside it, a
 `started` claim commits first (`claim`) and the record finishes it; a
 command that asks becomes a proposal whose transaction records
 `proposed`. A failure before any command ran (the script, the input,

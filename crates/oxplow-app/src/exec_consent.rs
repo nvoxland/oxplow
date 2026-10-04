@@ -1,7 +1,7 @@
 //! Consent to run programs from the project (tsk331, [[tsk162]]).
 //!
 //! A repo's `.oxplow/project.yaml` can name a program to run: an `exec`
-//! collector or collection plugin, or (in an extension) an `exec` collector. A
+//! collector or report parser, or (in an extension) an `exec` collector. A
 //! cloned or pulled repo is untrusted, so none of these run until a person
 //! approves the program on this machine. An approval is bound to a hash of
 //! what runs (the program's content, plus its args or its network list), so
@@ -638,7 +638,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
     )
 }
 
-/// Every project-scope exec collector and collection plugin in `config`, with
+/// Every project-scope exec collector and report parser in `config`, with
 /// whether it's approved.
 pub fn list(
     store: &ApprovalStore,

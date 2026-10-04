@@ -18,7 +18,7 @@ use crate::{BackgroundTaskKind, Services};
 /// Run recovery + seed the primary stream, then spawn the standard
 /// background tasks (snapshot watchers + startup sweep + cleanup,
 /// comment cleanup, workspace + wiki + config watchers, diagnostics,
-/// page-ref backfill, commit indexer, search indexer).
+/// page-ref restate, commit indexer).
 ///
 /// The two awaited steps run synchronously on purpose: the first
 /// client must not observe pre-recovery agent state or a project with

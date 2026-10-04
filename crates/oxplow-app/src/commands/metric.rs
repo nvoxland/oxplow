@@ -199,7 +199,7 @@ fn record_tx(ctx: &TxCtx<'_>, input: &RecordInput, primary: StreamId) -> Result<
         return Err(invalid(
             "/key",
             "a `count` metric counts fact rows, so one asserted value can't represent it; \
-             run its collector instead (collector.sync, record_test_run, ingest_analysis)",
+             run its collector instead (`collector.sync`, or `test.record_run` for a test run)",
         ));
     }
     // Stamp the fact so the spec's own filter matches it (severity /

@@ -1045,8 +1045,8 @@ summed every assistant line) and was Claude-only + format-fragile.
   (`opentelemetry-proto` crate) and `otlp_metrics_to_token_facts` projects both
   agents' token metrics into `TokenFact`s (pure + unit-tested):
   - **Claude** — `claude_code.token.usage` **counter** (delta temporality → each
-    export is the increment), `type ∈ {input,output}` (cacheRead/cacheCreation
-    dropped);
+    export is the increment), `type ∈ {input,output,cacheRead,cacheCreation}`
+    (the cache kinds on their own measure, tsk73);
   - **Codex** — its `codex.sse_event` **log event** with
     `event.kind=response.completed` (tsk27, confirmed against Codex 0.142.0 via
     the tsk25 diagnostic — Codex points its single OTLP endpoint at us and sends

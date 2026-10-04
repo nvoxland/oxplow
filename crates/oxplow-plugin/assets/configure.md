@@ -14,20 +14,21 @@ A repo often has more than one — e.g. a Rust workspace **and** a
 JS/TS frontend, or a backend + a separate e2e suite. Find them all
 (look for `Cargo.toml`, `package.json`, `pyproject.toml`/`pytest.ini`,
 `go.mod`, `pom.xml`/`build.gradle`, etc.). You will wire **each** one
-to emit reports and list **all** their reports in the profile —
-oxplow merges whatever's freshest per effort, so every stack lights
-up.
+to emit reports and declare **each** report as a report collector in
+`.oxplow/project.yaml` — oxplow reads every collector a run's kind
+triggers and keeps what that run wrote, so every stack lights up.
 
 ## 1. Make each stack emit a coverage report
 
 For every stack, make a coverage report a **default of its normal test
 run**, at a stable repo-relative path in a standard format oxplow
-parses: `cobertura` (XML), `lcov` (`.info`), or `jacoco-xml`.
+parses with a bundled parser: `cobertura` (XML), `lcov` (`.info`), or
+`jacoco` (XML) — named `entry: oxplow:<name>`.
 
-- **Rust** — `cargo llvm-cov --lcov --output-path target/coverage/lcov.info`. Format `lcov`.
-- **Python (pytest)** — `--cov --cov-report=xml:coverage.xml` in `addopts`. Format `cobertura`.
+- **Rust** — `cargo llvm-cov --lcov --output-path target/coverage/lcov.info`. Parser `oxplow:lcov`.
+- **Python (pytest)** — `--cov --cov-report=xml:coverage.xml` in `addopts`. Parser `oxplow:cobertura`.
 - **JS/TS (jest / vitest / bun)** — enable the `cobertura`/`lcov` coverage reporter to a fixed path.
-- **Java / Kotlin** — JaCoCo plugin + XML report goal in `pom.xml`/`build.gradle`. Format `jacoco-xml`.
+- **Java / Kotlin** — JaCoCo plugin + XML report goal in `pom.xml`/`build.gradle`. Parser `oxplow:jacoco`.
 
 ## 2. Make each stack emit a JUnit report
 

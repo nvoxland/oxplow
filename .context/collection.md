@@ -260,10 +260,11 @@ hook + MCP wiring):
   `target/clippy.json` (plain `cargo clippy` prints human output), so the
   `oxplow.analysis.*` metrics only populate when clippy runs via the
   `lint:collect` script (JSON to the configured report path; also in
-  `analysisRunPatterns` so the `bun run` command string is detected).
-  **Staleness is the router:** a run only regenerates its own stack's/tool's
-  report(s), so the mtime guard (`report_is_stale`, floor = effort start)
-  naturally excludes the other stacks' stale reports — a `bun test` run
+  `testing.analysisPatterns` so the `bun run` command string is detected).
+  **Freshness is the router:** a run only regenerates its own stack's/tool's
+  report(s), so the mtime window (`FreshWindow::of_run`: written after the
+  run's own start, less a second of mtime granularity, and by a minute
+  after it ended — tsk888) naturally excludes the other stacks' reports — a `bun test` run
   picks up the frontend reports, a `cargo cov` run the Rust ones, a
   `cargo clippy` run the clippy findings, and all accrue within one effort.
   The UI builds a tech-natural tree by splitting each case's
@@ -327,8 +328,7 @@ thread's single open effort now. **Coverage** is
 effort-relative (diff vs the effort's start snapshot), so it can't store the diff
 at record: `observe_coverage` stores the **absolute** whole-report coverage
 (per-file coverage facts + the instrumented/covered line-sets in the capture's
-`coverage-detail` detail envelope — `metric_capture.detail_json`, T-E1; the
-legacy `coverage-detail` finding is still dual-written until T-E2), and the
+`coverage-detail` detail envelope — `metric_capture.detail_json`, T-E1), and the
 effort-relative diff is DERIVED with the effort's evidence
 (`diff_coverage_for_effort`) — so a coverage run claimed *after* the effort closed
 still produces a diff. The diff is between two **snapshots**, never a working
@@ -690,4 +690,4 @@ Don't run it via `bunx type-coverage@latest` — bunx auto-installs the newest
 `typescript` as the peer and it crashes on TS 7 (`ts.SyntaxKind` undefined).
 `trigger: { on: [snapshot.taken] }` re-reads the report each snapshot — there
 is no "report written" event, so a snapshot trigger (or `collector.sync`
-by hand) is how a report collector runs.
+by hand) is how this fact collector runs.
