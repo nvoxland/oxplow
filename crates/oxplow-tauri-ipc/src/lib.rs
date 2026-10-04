@@ -95,6 +95,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<oxplow_domain::work_items::WorkItemsFeatures>()
         // `collector.sync`'s result, read through `run_command`.
         .typ::<oxplow_app::collector_runner::CollectorRunReport>()
+        // What `lens.keep` keeps from Explore Data's Save as Lens.
+        .typ::<oxplow_app::extensions::LensSpec>()
         .commands(collect_commands![
             // app
             commands::generated::app_version,
@@ -137,7 +139,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::invoke_component_command,
             commands::generated::validate_extension,
             commands::generated::review_extension,
-            commands::generated::save_lens,
             commands::generated::report_open_page,
             commands::generated::set_extension_enabled,
             commands::generated::list_collectors,

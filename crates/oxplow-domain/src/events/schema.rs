@@ -199,6 +199,7 @@ impl EventSchemaRegistry {
         r.register::<PluginEnabled>().expect("core type registers");
         r.register::<PluginDisabled>().expect("core type registers");
         r.register::<LensShown>().expect("core type registers");
+        r.register::<LensKeptAtV1>().expect("core type registers");
         r.register::<LensKept>().expect("core type registers");
         r.register::<CommandProposedAtV1>()
             .expect("core type registers");
@@ -1804,11 +1805,40 @@ pub struct LensKeptV1 {
     pub lens: String,
 }
 
-pub struct LensKept;
-impl EventType for LensKept {
+/// The v1 shape of `lens.kept`, as a registry entry.
+pub struct LensKeptAtV1;
+impl EventType for LensKeptAtV1 {
     const TYPE: &'static str = "lens.kept";
     const V: u32 = 1;
     type Payload = LensKeptV1;
+}
+
+/// `lens.kept@2` (P11, tsk943): a lens was kept — an answer from a thread,
+/// or a spec (Explore Data's Save as Lens) — written as a private lens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LensKeptV2 {
+    /// `answer:<id>`, when it was an answer that was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    /// `lens:<extension>/<slug>`.
+    pub lens: String,
+}
+
+pub struct LensKept;
+impl EventType for LensKept {
+    const TYPE: &'static str = "lens.kept";
+    const V: u32 = 2;
+    type Payload = LensKeptV2;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            // v1 always named its answer; v2 may.
+            1 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "no upcast of lens.kept from v{from_v}"
+            ))),
+        }
+    }
 }
 
 /// `knowledge.page.deleted@1`: a knowledge page is gone, its row and
@@ -1988,6 +2018,7 @@ mod tests {
                 ("knowledge.page.deleted", 1),
                 ("knowledge.page.written", 1),
                 ("lens.kept", 1),
+                ("lens.kept", 2),
                 ("lens.shown", 1),
                 ("plugin.disabled", 1),
                 ("plugin.enabled", 1),

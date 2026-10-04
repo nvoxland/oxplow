@@ -193,7 +193,7 @@ export function limitRows(result: SqlQueryResult, max: number | undefined): SqlQ
 }
 
 /** A title as a lens slug: lowercase letters, digits and single dashes
- *  (what `save_lens` accepts). Falls back to `lens` when nothing's left. */
+ *  (what `lens.keep` accepts). Falls back to `lens` when nothing's left. */
 export function slugify(title: string): string {
   const slug = title
     .toLowerCase()

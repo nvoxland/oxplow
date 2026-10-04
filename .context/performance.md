@@ -361,7 +361,7 @@ any edit, add or delete — or a config change that disables an extension —
 misses and reloads on the next call. No watcher and no explicit
 invalidation, so there is no window in which an agent's freshly written
 lens is invisible, and worktrees the watcher doesn't cover behave the
-same. Write paths (install, update, save_lens) read the disk directly, and
+same. Write paths (install, update, `lens.keep`) read the disk directly, and
 consent hashing (`approval_hash`) always reads the bytes it approves.
 
 ## The dev loop: build and test time (tsk678, 2026-10-01)

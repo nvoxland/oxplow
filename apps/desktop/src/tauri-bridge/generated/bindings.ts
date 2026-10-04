@@ -230,11 +230,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	saveLens: (extension: string, slug: string, lens: LensSpec_Deserialize, streamId: string | null) => typedError<Lens_Serialize, IpcError>(__TAURI_INVOKE("save_lens", { extension, slug, lens, streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	reportOpenPage: (threadId: string, pageId: string | null, kind: string | null, detailJson: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("report_open_page", { threadId, pageId, kind, detailJson })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

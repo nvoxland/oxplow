@@ -181,7 +181,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("invoke_component_command"),
     both("validate_extension"),
     both("review_extension"),
-    ui("save_lens"),
     ui("report_open_page"),
     // Turning extensions on/off is the person's call.
     ui("set_extension_enabled"),

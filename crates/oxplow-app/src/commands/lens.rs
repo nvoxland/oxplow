@@ -1,6 +1,7 @@
 //! Answers in a thread (P6.C1, target §11.4's lens lifecycle): an agent
 //! shows the person something — an existing lens or its own lens spec —
-//! with `lens.show`; `lens.keep` writes an answer as a private lens;
+//! with `lens.show`; `lens.keep` writes an answer — or a spec, as Explore
+//! Data's Save as Lens does — as a private lens;
 //! `lens.share` moves a private lens into a shared extension once it
 //! passes the shared checks (committing it is the person's git commit).
 //! The rows live in `thread_answer` (`v_thread_answer`); `run_answer`
@@ -13,7 +14,7 @@ use std::sync::Arc;
 use oxplow_db::semantic_layer::check_query_on;
 use oxplow_db::thread_answer_store::{self as answers, AnswerShows};
 use oxplow_db::{SqlCell, SqlQuery};
-use oxplow_domain::events::schema::{LensKept, LensKeptV1, LensShown, LensShownV1};
+use oxplow_domain::events::schema::{LensKept, LensKeptV2, LensShown, LensShownV1};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{answer_ref, lens_ref, thread_ref};
 use oxplow_domain::{
@@ -57,12 +58,19 @@ pub struct ShowInput {
     pub thread: Option<String>,
 }
 
-/// `lens.keep`: write an answer as a private lens.
+/// `lens.keep`: write an answer, or a spec, as a private lens.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KeepInput {
-    /// The answer (`answer:12`).
-    pub answer: String,
+    /// The answer to keep (`answer:12`). Give this or `spec`.
+    pub answer: Option<String>,
+    /// A lens of its own to keep (title, query, viz and what its viz
+    /// needs), checked as `lens.show` checks one.
+    pub spec: Option<LensSpec>,
+    /// The stream whose worktree a `spec` goes in (`str2`): the caller's
+    /// thread's when omitted, else the primary's. An answer goes in its
+    /// own thread's.
+    pub stream: Option<String>,
     /// The extension it goes in; `my-lenses` when omitted.
     pub extension: Option<String>,
     /// Its slug; from its title when omitted.
@@ -140,6 +148,54 @@ fn thread_stream_tx(conn: &rusqlite::Connection, thread: i64) -> Option<i64> {
     .flatten()
 }
 
+/// The worktree of stream `raw` (`str2`); `Invalid` for one that isn't.
+fn stream_root_tx(
+    conn: &rusqlite::Connection,
+    project_dir: &Path,
+    raw: &str,
+) -> Result<(i64, PathBuf), DomainError> {
+    let stream: oxplow_domain::StreamId = raw
+        .parse()
+        .map_err(|_| DomainError::Invalid(format!("`{raw}` isn't a stream")))?;
+    let path: Option<String> = conn
+        .query_row(
+            "SELECT worktree_path FROM streams WHERE id = ?1",
+            [stream.value()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| DomainError::Storage(e.to_string()))?;
+    let path = path.ok_or_else(|| DomainError::Invalid(format!("no stream `{raw}`")))?;
+    Ok((
+        stream.value(),
+        crate::worktrees::workspace_path(project_dir, &path),
+    ))
+}
+
+/// A lens spec's check, `lens.show`'s and `lens.keep`'s: its shape, its
+/// params bound in `lens_ctx`, and its query through the authorizer
+/// `query_sql` uses — one read-only statement over the published models.
+fn check_spec_tx(
+    conn: &rusqlite::Connection,
+    spec: &LensSpec,
+    params: &BTreeMap<String, Value>,
+    lens_ctx: &LensContext,
+) -> Result<(), CommandError> {
+    if let Some(problem) = extensions::spec_problem(spec) {
+        return Err(invalid("/spec", problem));
+    }
+    let lens = extensions::Lens::from_spec("answer/new", spec);
+    let bound = extensions::resolve_params(&lens, &cells(params), lens_ctx).map_err(domain)?;
+    if !spec.query.trim().is_empty() {
+        check_query_on(
+            conn,
+            &SqlQuery::new(&spec.query).named(bound.into_iter().collect()),
+        )
+        .map_err(|e| invalid("/spec/query", e.to_string()))?;
+    }
+    Ok(())
+}
+
 fn cells(params: &BTreeMap<String, Value>) -> BTreeMap<String, SqlCell> {
     params
         .iter()
@@ -199,21 +255,7 @@ fn show(target: LensTarget) -> Command {
                 (lens.title.clone(), AnswerShows::Lens(id.clone()), Some(id))
             }
             (None, Some(spec)) => {
-                if let Some(problem) = extensions::spec_problem(&spec) {
-                    return Err(invalid("/spec", problem));
-                }
-                let lens = extensions::Lens::from_spec("answer/new", &spec);
-                let bound = extensions::resolve_params(&lens, &cells(&params), &lens_ctx)
-                    .map_err(domain)?;
-                if !spec.query.trim().is_empty() {
-                    // The same authorizer as `query_sql`: one read-only
-                    // statement over the published models.
-                    check_query_on(
-                        ctx.conn,
-                        &SqlQuery::new(&spec.query).named(bound.into_iter().collect()),
-                    )
-                    .map_err(|e| invalid("/spec/query", e.to_string()))?;
-                }
+                check_spec_tx(ctx.conn, &spec, &params, &lens_ctx)?;
                 let value = serde_json::to_value(&spec).expect("spec serializes");
                 (spec.title.clone(), AnswerShows::Spec(value), None)
             }
@@ -298,33 +340,124 @@ fn kept_lens_tx(
     Ok((spec, root, answer.thread_id))
 }
 
+/// What `lens.keep` writes, where, and what it keeps.
+struct Keeping {
+    spec: LensSpec,
+    root: PathBuf,
+    /// The thread it came from: the answer's, or the caller's.
+    thread: Option<i64>,
+    answer: Option<i64>,
+}
+
+/// What keeping the answer `raw` writes (see [`kept_lens_tx`]).
+async fn keeping_answer(target: &LensTarget, raw: &str) -> Result<Keeping, CommandError> {
+    let id = answer_id(raw)?;
+    let project_dir = target.project_dir.clone();
+    let (spec, root, thread) = target
+        .db
+        .read(move |tx| kept_lens_tx(tx, &project_dir, id))
+        .await
+        .map_err(|e| match e {
+            DomainError::NotFound => invalid("/answer", format!("no answer `answer:{id}`")),
+            DomainError::Invalid(m) => invalid("/answer", m),
+            other => CommandError::from(other),
+        })?;
+    Ok(Keeping {
+        spec,
+        root,
+        thread: Some(thread),
+        answer: Some(id),
+    })
+}
+
+/// What keeping `spec` writes: checked as `lens.show` checks it, in the
+/// worktree of `stream` — else of the caller's thread's stream, else the
+/// primary's.
+async fn keeping_spec(
+    target: &LensTarget,
+    spec: LensSpec,
+    stream: Option<String>,
+    thread: Option<ThreadId>,
+) -> Result<Keeping, CommandError> {
+    let project_dir = target.project_dir.clone();
+    let thread = thread.map(|t| t.value());
+    target
+        .db
+        .read(move |tx| {
+            let (stream_id, root) = match stream.as_deref() {
+                Some(raw) => match stream_root_tx(tx, &project_dir, raw) {
+                    Ok((id, root)) => (Some(id), root),
+                    Err(DomainError::Invalid(m)) => return Ok(Err(invalid("/stream", m))),
+                    Err(e) => return Err(e),
+                },
+                None => match thread {
+                    Some(t) => (
+                        thread_stream_tx(tx, t),
+                        thread_root_tx(tx, &project_dir, t)?,
+                    ),
+                    None => (None, project_dir.clone()),
+                },
+            };
+            let lens_ctx = LensContext {
+                stream_id,
+                thread_id: thread,
+            };
+            Ok(
+                check_spec_tx(tx, &spec, &BTreeMap::new(), &lens_ctx).map(|()| Keeping {
+                    spec,
+                    root,
+                    thread,
+                    answer: None,
+                }),
+            )
+        })
+        .await
+        .map_err(CommandError::from)?
+}
+
 /// `lens.keep` writes a file, so it's an `External` command: a `Tx`
 /// handler may run more than once (the bus retries on a busy database)
-/// and a retried file write strands the first. The answer is read in one
-/// transaction, the lens file written, the row marked kept in another;
-/// when that fails the file is removed again, so nothing is left half
-/// done. The bus records the run and its `lens.kept@1` after it returns.
+/// and a retried file write strands the first. What it keeps is read and
+/// checked in one transaction, the lens file written, and a kept answer's
+/// row marked kept in another; when that fails the file is removed again,
+/// so nothing is left half done. The bus records the run and its
+/// `lens.kept@2` after it returns.
 fn keep(target: LensTarget) -> Command {
     let handler = Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
         let target = target.clone();
         Box::pin(async move {
             let input: KeepInput = parse(input)?;
-            let id = answer_id(&input.answer)?;
-            let project_dir = target.project_dir.clone();
-            let (spec, root, thread) = target
-                .db
-                .read(move |tx| kept_lens_tx(tx, &project_dir, id))
-                .await
-                .map_err(|e| match e {
-                    DomainError::NotFound => invalid("/answer", format!("no answer `answer:{id}`")),
-                    DomainError::Invalid(m) => invalid("/answer", m),
-                    other => CommandError::from(other),
-                })?;
+            let keeping = match (input.answer, input.spec) {
+                (Some(raw), None) => {
+                    if input.stream.is_some() {
+                        return Err(invalid(
+                            "/stream",
+                            "an answer is kept in its own thread's worktree; `stream` goes with a `spec`",
+                        ));
+                    }
+                    keeping_answer(&target, &raw).await?
+                }
+                (None, Some(spec)) => {
+                    keeping_spec(&target, spec, input.stream, actor.thread_id()).await?
+                }
+                _ => {
+                    return Err(invalid(
+                        "",
+                        "give `answer` (an answer to keep) or `spec` (a lens of its own), not both",
+                    ))
+                }
+            };
+            let Keeping {
+                spec,
+                root,
+                thread,
+                answer,
+            } = keeping;
             let extension = input.extension.unwrap_or_else(|| "my-lenses".into());
             let slug = input
                 .slug
                 .unwrap_or_else(|| extensions::slug_of(&spec.title));
-            let origin = thread_ref(ThreadId::new(thread));
+            let origin = thread.map(|t| thread_ref(ThreadId::new(t)));
             let lens = extensions::save_lens(
                 &root,
                 &extension,
@@ -332,27 +465,34 @@ fn keep(target: LensTarget) -> Command {
                 &spec,
                 &LensOrigin {
                     purpose: &spec.title,
-                    origin: Some(&origin),
+                    origin: origin.as_deref(),
                 },
             )
             .map_err(domain)?;
-            let lens_id = lens.id.clone();
-            if let Err(e) = target
-                .db
-                .transaction(move |tx| answers::set_kept_tx(tx, id, &lens_id))
-                .await
-            {
-                let _ = std::fs::remove_file(root.join(&lens.path));
-                return Err(CommandError::from(e));
+            if let Some(id) = answer {
+                let lens_id = lens.id.clone();
+                if let Err(e) = target
+                    .db
+                    .transaction(move |tx| answers::set_kept_tx(tx, id, &lens_id))
+                    .await
+                {
+                    let _ = std::fs::remove_file(root.join(&lens.path));
+                    return Err(CommandError::from(e));
+                }
             }
+            let subject: Vec<String> = answer
+                .map(answer_ref)
+                .into_iter()
+                .chain([lens_ref(&lens.id)])
+                .collect();
             let event = Envelope::typed::<LensKept>(
                 actor.source(),
-                &LensKeptV1 {
-                    answer: answer_ref(id),
+                &LensKeptV2 {
+                    answer: answer.map(answer_ref),
                     lens: lens_ref(&lens.id),
                 },
             )
-            .with_subject([answer_ref(id), lens_ref(&lens.id)]);
+            .with_subject(subject);
             Ok(HandlerOutput {
                 result: json!({ "lens": lens.id, "path": lens.path }),
                 inverse: None,
@@ -365,8 +505,9 @@ fn keep(target: LensTarget) -> Command {
     Command::new(
         CommandSpec {
             name: KEEP.into(),
-            summary: "Keep an answer from a thread as a private lens (a page the person can \
-                      reopen, pin and share), recording where it came from."
+            summary: "Keep an answer from a thread, or a lens spec of your own, as a private \
+                      lens (a page the person can reopen, pin and share), recording where it \
+                      came from."
                 .into(),
             input_schema: serde_json::to_value(schemars::schema_for!(KeepInput))
                 .expect("schema serializes"),
@@ -390,34 +531,18 @@ fn share(target: LensTarget) -> Command {
         let target = target.clone();
         Box::pin(async move {
             let input: ShareInput = parse(input)?;
-            let root = match input.stream.as_deref() {
+            let root = match input.stream {
                 Some(raw) => {
-                    let stream: oxplow_domain::StreamId = raw
-                        .parse()
-                        .map_err(|_| invalid("/stream", format!("`{raw}` isn't a stream")))?;
                     let project_dir = target.project_dir.clone();
-                    let raw = raw.to_string();
                     target
                         .db
-                        .read(move |tx| {
-                            let path: Option<String> = tx
-                                .query_row(
-                                    "SELECT worktree_path FROM streams WHERE id = ?1",
-                                    [stream.value()],
-                                    |r| r.get(0),
-                                )
-                                .optional()
-                                .map_err(|e| DomainError::Storage(e.to_string()))?;
-                            let path = path.ok_or_else(|| {
-                                DomainError::Invalid(format!("no stream `{raw}`"))
-                            })?;
-                            Ok(crate::worktrees::workspace_path(&project_dir, &path))
-                        })
+                        .read(move |tx| stream_root_tx(tx, &project_dir, &raw))
                         .await
                         .map_err(|e| match e {
                             DomainError::Invalid(m) => invalid("/stream", m),
                             other => CommandError::from(other),
                         })?
+                        .1
                 }
                 None => target.project_dir.clone(),
             };
@@ -818,6 +943,123 @@ mod tests {
             .await
             .unwrap_err();
         assert!(again.to_string().contains("kept already"), "{again}");
+    }
+
+    /// tsk943: Explore Data's Save as Lens is `lens.keep` with a spec — the
+    /// lens file it writes is the one keeping an answer that showed the
+    /// same spec writes, and its `lens.kept` names no answer.
+    #[tokio::test]
+    async fn keep_takes_a_spec_and_writes_the_same_lens() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let stream = fx.svc.streams.list_streams().await.unwrap()[0].id;
+        let answer = fx
+            .svc
+            .commands
+            .run(&agent(&fx), SHOW, json!({ "spec": spec() }), false)
+            .await
+            .unwrap()
+            .result["answer"]
+            .clone();
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                KEEP,
+                json!({ "answer": answer, "extension": "kept" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let saved = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                KEEP,
+                json!({
+                    "spec": spec(),
+                    "stream": stream.to_string(),
+                    "extension": "saved",
+                    "slug": "busy-tasks"
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.result["lens"], "saved/busy-tasks");
+        let file = |ext: &str| {
+            std::fs::read_to_string(
+                root.join(format!("oxplow/extensions/{ext}/lenses/busy-tasks.yaml")),
+            )
+            .unwrap()
+        };
+        assert_eq!(file("saved"), file("kept"));
+        let kept = events_of(&fx, "lens.kept").await;
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[1], json!({ "lens": "lens:saved/busy-tasks" }));
+    }
+
+    /// A kept spec gets `lens.show`'s check: a query over a physical table
+    /// is refused, and nothing is written.
+    #[tokio::test]
+    async fn keep_refuses_a_spec_over_a_physical_table() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                KEEP,
+                json!({
+                    "spec": { "title": "Raw", "query": "SELECT kind FROM streams", "viz": "table" },
+                    "extension": "saved"
+                }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message }
+                if f == "/spec/query" && message.contains("`streams` is a physical table")),
+            "{err:?}"
+        );
+        assert!(!fx
+            .svc
+            .layout
+            .project_dir
+            .join("oxplow/extensions/saved")
+            .exists());
+        assert!(events_of(&fx, "lens.kept").await.is_empty());
+    }
+
+    /// `lens.keep` keeps an answer or a spec: neither, or both, is refused;
+    /// so is a stream beside an answer, which is kept in its own thread's
+    /// worktree.
+    #[tokio::test]
+    async fn keep_wants_an_answer_or_a_spec() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        for input in [
+            json!({}),
+            json!({ "answer": "answer:1", "spec": spec() }),
+            json!({ "answer": "answer:1", "stream": "str1" }),
+        ] {
+            let err = fx
+                .svc
+                .commands
+                .run(&Actor::Human, KEEP, input.clone(), false)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { .. }),
+                "{input}: {err:?}"
+            );
+            assert!(
+                err.to_string().contains("`answer`") && err.to_string().contains("`spec`")
+                    || err.to_string().contains("`stream`"),
+                "{input}: {err}"
+            );
+        }
     }
 
     /// Sharing moves a private lens into a shared extension — only when it

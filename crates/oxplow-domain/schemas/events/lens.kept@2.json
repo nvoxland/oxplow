@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`lens.kept@2` (P11, tsk943): a lens was kept — an answer from a thread,\nor a spec (Explore Data's Save as Lens) — written as a private lens.",
+  "properties": {
+    "answer": {
+      "description": "`answer:<id>`, when it was an answer that was kept.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lens": {
+      "description": "`lens:<extension>/<slug>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "lens"
+  ],
+  "title": "LensKeptV2",
+  "type": "object"
+}

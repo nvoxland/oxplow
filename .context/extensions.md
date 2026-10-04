@@ -290,8 +290,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       (`keepBlockedReason`): a lens or a tile reads only models.
     - **Pin to Dashboard** adds the query as a `query` tile shown with
       the chosen viz (`PinToDashboard.tsx`, shared with the lens page).
-    - **Save as Lens** writes the file through the UI-only `save_lens`
-      IPC, then opens the new lens. It creates the extension if missing
+    - **Save as Lens** runs `lens.keep` with the query as a `spec` (P11,
+      tsk943 — on the bus like Keep This, in the stream's worktree, its
+      query checked as `lens.show` checks one), then opens the new lens.
+      It creates the extension if missing
       (with the same v2 manifest `oxplow plugin new` writes —
       `extensions::scaffold_manifest`, so a saved lens starts as a
       checkable extension with an `intent` to fill in), refuses to
@@ -302,7 +304,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     runs `lens.show`, which stores a `thread_answer` (V124, model
     `v_thread_answer`, ref `answer:<id>`) and returns the text rendering.
     - **One lens shape, `LensSpec`**: what a lens file holds, what an
-      answer stores and what `save_lens` writes (`Lens::from_spec`,
+      answer stores and what `lens.keep` writes (`Lens::from_spec`,
       `Lens::spec`). `extensions::save_lens(root, ext, slug, &spec,
       &LensOrigin)` refuses a spec with a `spec_problem`, writes the YAML
       pruned of nulls and empties, and — when the file doesn't then load —
@@ -336,8 +338,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       Enter keeps via `lens.keep`, Escape cancels) or, once it is a lens
       (kept, or an existing lens shown), a link to it. The agent tab has
       no route context, so `AgentPage` takes `onOpenPage`.
-    - Explore Data's **Save as Lens** (`save_lens` RPC) uses the lens's
-      title as a new extension's `intent.purpose`.
+    - Explore Data's **Save as Lens** (`lens.keep { spec, stream }`) uses
+      the lens's title as a new extension's `intent.purpose`, and the
+      caller's thread, when it has one, as its `intent.origin`.
   - **Lens tiles.** A lens can be pinned to a dashboard: "Pin to
     Dashboard" on a lens page, or `dashboard.add_item { kind: "lens",
     lens_id }`.
@@ -364,7 +367,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - a project folder with that name is listed with an error and never
       shadows the bundled one;
     - `extension.install` refuses the name;
-    - `save_lens` refuses to write into a bundled extension.
+    - `extensions::save_lens` (the writer behind `lens.keep`) refuses to
+      write into a bundled extension.
 - **Slots (current: see "Slots" below).**
   - `extension.yaml` declares `ui: { slots: [{slot, lens}] }` (v1:
     top-level `slots`). `SLOTS` in

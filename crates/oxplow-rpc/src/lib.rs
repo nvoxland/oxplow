@@ -297,7 +297,6 @@ macro_rules! oxplow_command_table {
                 cancel_oauth_sign_in => $crate::commands::providers::cancel_oauth_sign_in { instance: String, name: String, sign_in: u32 } -> (),
                 complete_oauth_sign_in => $crate::commands::providers::complete_oauth_sign_in { instance: String, name: String, redirect: String } -> ::oxplow_app::providers::SignInCompletion,
                 report_open_page => $crate::commands::open_page::report_open_page { thread_id: String, page_id: Option<String>, kind: Option<String>, detail_json: Option<String> } -> (),
-                save_lens => $crate::commands::extensions::save_lens { extension: String, slug: String, lens: ::oxplow_app::extensions::LensSpec, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 // comments
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target_kind: String, target_id: String } -> Vec<::oxplow_domain::CommentThread>,
                 list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,

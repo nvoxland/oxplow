@@ -793,14 +793,19 @@ export async function testAiProvider(id: string, model: string): Promise<string>
   return unwrap(await commands.testAiProvider(id, model));
 }
 
-/// Save a query as a new lens file (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).
-export async function saveLens(
+/// Keep a lens spec as a private lens (`lens.keep`) in `extension`, in this
+/// stream's worktree (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).
+/// Returns the lens id.
+export async function keepLensSpec(
+  spec: LensSpec,
   extension: string,
   slug: string,
-  lens: LensSpec,
   streamId: string | null,
-): Promise<Lens> {
-  return unwrap(await commands.saveLens(extension, slug, lens, streamId));
+): Promise<string> {
+  const input: Record<string, unknown> = { spec, extension, slug };
+  if (streamId) input.stream = streamId;
+  const outcome = await runCommand("lens.keep", input);
+  return String((outcome.result as { lens?: unknown } | null)?.lens ?? "");
 }
 
 /// What installing (`gitUrl`) or updating (`name`) an extension would

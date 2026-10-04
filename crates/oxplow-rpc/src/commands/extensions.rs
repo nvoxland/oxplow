@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_app::extensions::{self, Extension, Lens, LensRun, LensSpec};
+use oxplow_app::extensions::{self, Extension, Lens, LensRun};
 use oxplow_app::Services;
 use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
@@ -303,31 +303,6 @@ pub async fn review_extension(
     })
 }
 
-/// Save a query from Explore Data as a new lens file in this stream's
-/// worktree. UI-only: agents write lens files with their Edit tool.
-pub async fn save_lens(
-    svc: &Services,
-    extension: String,
-    slug: String,
-    lens: LensSpec,
-    stream_id: Option<String>,
-) -> Result<Lens, IpcError> {
-    // A lens reads published models only: the explorer's raw mode can
-    // run a physical-table query, but it can't be saved as one.
-    svc.sql.check(&lens.query).await?;
-    let root = root(svc, stream_id.as_deref()).await;
-    Ok(extensions::save_lens(
-        &root,
-        &extension,
-        &slug,
-        &lens,
-        &extensions::LensOrigin {
-            purpose: &lens.title,
-            origin: None,
-        },
-    )?)
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -482,46 +457,6 @@ mod tests {
         .unwrap()
         .result;
         assert_eq!(ext["lenses"][0]["title"], "One v2");
-    }
-
-    #[tokio::test]
-    async fn save_lens_writes_a_runnable_lens() {
-        let (svc, _dir) = crate::test_support::services();
-        let lens = crate::dispatch(
-            "save_lens",
-            json!({
-                "extension": "mine",
-                "slug": "streams",
-                "lens": { "title": "Streams", "query": "SELECT kind FROM v_stream", "viz": "table" }
-            }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert_eq!(lens["id"], "mine/streams");
-        let run = crate::dispatch("run_lens", json!({ "id": "mine/streams" }), &svc)
-            .await
-            .unwrap();
-        assert_eq!(run["result"]["rows"], json!([["primary"]]));
-        // A query over a physical table (the explorer's raw mode) can't be
-        // saved as a lens.
-        let err = crate::dispatch(
-            "save_lens",
-            json!({
-                "extension": "mine",
-                "slug": "raw",
-                "lens": { "title": "Raw", "query": "SELECT kind FROM streams", "viz": "table" }
-            }),
-            &svc,
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code, "INVALID");
-        assert!(
-            err.message.contains("`streams` is a physical table"),
-            "{}",
-            err.message
-        );
     }
 
     #[tokio::test]

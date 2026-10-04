@@ -3,7 +3,7 @@ import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import { querySql, saveLens, type LensRun, type LensViz } from "../api.js";
+import { keepLensSpec, querySql, type LensRun, type LensViz } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { ModelLineage } from "./ModelLineage.js";
 import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
@@ -387,8 +387,8 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
   );
 }
 
-/** Inline "Save as Lens" strip: extension + title → a lens file in this
- *  stream's worktree, then opens it. Enter saves, Escape cancels. */
+/** Inline "Save as Lens" strip: extension + title → a lens kept in this
+ *  stream's worktree (`lens.keep` with a spec), then opens it. Enter saves, Escape cancels. */
 export function SaveAsLens({
   query,
   viz,
@@ -413,15 +413,15 @@ export function SaveAsLens({
   async function save() {
     if (!title.trim() || !extension.trim()) return;
     try {
-      const lens = await saveLens(
+      const lens = await keepLensSpec(
+        { title: title.trim(), description: "", query, viz, ...(chart ? { chart } : {}) },
         extension.trim(),
         slugify(title),
-        { title: title.trim(), description: "", query, viz, ...(chart ? { chart } : {}) },
         stream?.id ?? null,
       );
       setOpen(false);
       setTitle("");
-      onOpenPage(lensRef(lens.id));
+      onOpenPage(lensRef(lens));
     } catch (e) {
       recordOpError({ label: "Save lens", message: e instanceof Error ? e.message : String(e) });
     }

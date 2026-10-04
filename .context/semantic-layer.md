@@ -601,9 +601,9 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     a read, select, function or recursion is refused, save the
     `query_only` pragma the session itself runs. `SqlQuery::raw` switches
     to recording only: the person's explorer, through IPC `query_sql
-    { raw: true }` — the MCP tool has no such switch — and `save_lens`
-    checks its query through the enforced path, so a raw query can't
-    become a lens. A model's compile reads its sources in record mode. Installed before `prepare` in a `ReadSession`
+    { raw: true }` — the MCP tool has no such switch — and `lens.keep`
+    checks a spec's query through the enforced path (`check_query_on`, as
+    `lens.show` does), so a raw query can't become a lens. A model's compile reads its sources in record mode. Installed before `prepare` in a `ReadSession`
     that, when dropped — on every path, a panic included — clears it and
     `PRAGMA query_only`, so the pooled connection comes back writable. The
     result's `reads` is `{ models, tables }`: every view read, directly or
