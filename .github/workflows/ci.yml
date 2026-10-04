@@ -202,8 +202,9 @@ jobs:
       - name: Install JS deps
         run: bun install --frozen-lockfile
 
-      - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+      # WebKit for the custom component spec: the engine of the macOS window.
+      - name: Install Chromium and WebKit
+        run: bunx playwright install --with-deps chromium webkit
 
       # The suite's global setup builds these too; building them here keeps
       # the compile out of the suite's own timing.

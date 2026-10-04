@@ -331,7 +331,7 @@ pub struct ManifestV2 {
 }
 
 /// The kinds a shared extension may not use, with the key each rides on.
-pub const EXPERIMENTAL_KINDS: &[&str] = &["providers", "custom_components", "ui.replacements"];
+pub const EXPERIMENTAL_KINDS: &[&str] = &["providers", "ui.replacements"];
 
 /// The stable kinds (permanent API), by manifest key.
 pub const STABLE_KINDS: &[&str] = &[
@@ -353,23 +353,29 @@ pub const STABLE_KINDS: &[&str] = &[
     "advisories",
     "event_types",
     "effects",
+    "custom_components",
 ];
 
 impl ManifestV2 {
     /// The experimental kinds this manifest uses.
     pub fn experimental_kinds_used(&self) -> Vec<&'static str> {
-        let mut out = Vec::new();
-        let present = |v: &Option<Value>| v.is_some();
-        if present(&self.providers) {
-            out.push("providers");
+        EXPERIMENTAL_KINDS
+            .iter()
+            .copied()
+            .filter(|kind| self.writes(kind))
+            .collect()
+    }
+
+    /// Whether the manifest writes the experimental kind `kind`. Every
+    /// kind in [`EXPERIMENTAL_KINDS`] has its arm — the partition test
+    /// writes each and expects each back — so promoting one is moving it
+    /// between the tables, nothing more.
+    fn writes(&self, kind: &str) -> bool {
+        match kind {
+            "providers" => self.providers.is_some(),
+            "ui.replacements" => self.ui.replacements.is_some(),
+            _ => false,
         }
-        if present(&self.custom_components) {
-            out.push("custom_components");
-        }
-        if present(&self.ui.replacements) {
-            out.push("ui.replacements");
-        }
-        out
     }
 }
 
@@ -670,7 +676,7 @@ mod tests {
             "a kind is stable or experimental, not both"
         );
         // A manifest using every experimental kind uses exactly those.
-        let all = "manifest: 2\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\nproviders: []\nref_kinds: []\ncustom_components: []\nevent_types: { types: [] }\nui:\n  decorators: []\n  replacements: []\n";
+        let all = "manifest: 2\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\nproviders: []\nref_kinds: []\nevent_types: { types: [] }\nui:\n  decorators: []\n  replacements: []\n";
         let mut used = parse(all).experimental_kinds_used();
         used.sort();
         let mut experimental = EXPERIMENTAL_KINDS.to_vec();
@@ -689,6 +695,23 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert!(STABLE_KINDS.contains(&"effects"));
         assert!(!EXPERIMENTAL_KINDS.contains(&"effects"));
+        assert!(
+            !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
+            "a kind is stable or experimental, not both"
+        );
+    }
+
+    /// P11 (tsk962): `custom_components` is stable — the github example's
+    /// PR lifetimes is its shared use, a component that acts being a
+    /// program a person approves — so a shared extension may declare one;
+    /// the tables still partition the kinds.
+    #[test]
+    fn custom_components_is_stable_and_the_tables_partition_the_kinds() {
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\ncustom_components: []\n";
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(STABLE_KINDS.contains(&"custom_components"));
+        assert!(!EXPERIMENTAL_KINDS.contains(&"custom_components"));
         assert!(
             !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
             "a kind is stable or experimental, not both"

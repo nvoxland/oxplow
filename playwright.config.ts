@@ -21,7 +21,12 @@ export default defineConfig({
     baseURL: PREVIEW,
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // A custom component's frame is the one place the two engines are
+    // checked apart (macOS's window is WebKit): its sandbox and frame bound.
+    { name: "webkit", use: { ...devices["Desktop Safari"] }, testMatch: /specs\/components\// },
+  ],
   webServer: {
     // Built once per run, so a spec never meets a stale `dist/`.
     command:

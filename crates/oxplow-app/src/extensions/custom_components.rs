@@ -787,21 +787,21 @@ mod tests {
         }
     }
 
+    /// P11 (tsk962): `custom_components` is stable, so a shared extension
+    /// declares one like a private one, and its custom lens loads.
     #[test]
-    fn a_shared_extension_may_not_declare_components_and_its_custom_lens_drops() {
+    fn a_shared_extension_loads_a_component_and_its_lens() {
         let d = tempfile::tempdir().unwrap();
         let ext = load(d.path(), "shared", "  - { id: burndown }\n");
-        let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("`custom_components` is experimental"),
-            "{errs}"
+        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(
+            ext.custom_components
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>(),
+            ["burndown"]
         );
-        assert!(ext.custom_components.is_empty());
-        assert!(
-            errs.contains("`burndown` isn't one of this extension's `custom_components`"),
-            "{errs}"
-        );
-        assert!(ext.lenses.iter().all(|l| l.slug != "burn"));
+        assert!(ext.lenses.iter().any(|l| l.slug == "burn"));
     }
 
     #[test]

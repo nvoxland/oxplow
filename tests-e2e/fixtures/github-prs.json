@@ -1,0 +1,30 @@
+{
+  "entities": {
+    "pr": [
+      {
+        "number": 13,
+        "title": "Add the kit sheet",
+        "body": "",
+        "state": "open",
+        "author": "octocat",
+        "head_branch": "kit-sheet",
+        "draft": false,
+        "opened_at": "2026-09-28T00:00:00Z",
+        "merged_at": null,
+        "url": "https://github.com/o/r/pull/13"
+      },
+      {
+        "number": 12,
+        "title": "Fix the hover state",
+        "body": "The button flickered.",
+        "state": "closed",
+        "author": "octocat",
+        "head_branch": "fix-hover",
+        "draft": false,
+        "opened_at": "2026-09-20T00:00:00Z",
+        "merged_at": "2026-09-24T00:00:00Z",
+        "url": "https://github.com/o/r/pull/12"
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- oxplow's look: the kit's classes over the theme, which app.js applies. -->
+<link rel="stylesheet" href="/component-lib/oxplow-kit.css">
+<link rel="stylesheet" href="app.css">
+<div class="bar-tools">
+  <button type="button" class="ox-button ox-primary" data-state="all">All</button>
+  <button type="button" class="ox-button" data-state="open">Open</button>
+  <button type="button" class="ox-button" data-state="merged">Merged</button>
+  <span class="grow"></span>
+  <span id="status" class="ox-muted ox-small" role="status"></span>
+  <button type="button" class="ox-button" id="sync" title="Run the github/prs sync now">Sync</button>
+</div>
+<svg id="chart" role="list" aria-label="Pull request lifetimes"></svg>
+<p id="empty" class="ox-muted" hidden>No pull requests here.</p>
+<!-- oxplow's client library (it defines `oxplow`), then this bundle's own
+     script. Both are plain scripts: a sandboxed frame can't load modules. -->
+<script src="/component-lib/oxplow-component.js"></script>
+<script src="app.js"></script>

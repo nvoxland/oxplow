@@ -2,7 +2,8 @@
 
 Pulls your repo's 100 most recent pull requests into oxplow as `v_github_pr`,
 and adds a **Pull Requests by Task** lens that matches each PR to the oxplow
-task its title mentions (`tsk42`).
+task its title mentions (`tsk42`), and a **PR Lifetimes** lens that draws
+each one as a bar from when it was opened to when it was merged.
 
 A pull request is also something a ref can name: `github_pr:12`, or
 `[[pr:12]]` in a task, a comment or a wiki page. It shows the pull
@@ -17,7 +18,10 @@ request's title, opens its page, and is found by search.
    stored in your keychain).
 3. Settings → Data → **Approve & Run** on the `github/prs` source.
 
-It re-syncs every 15 minutes after that. The repo comes from `git remote get-url
+It re-syncs every 15 minutes after that. **PR Lifetimes** is a custom
+component: its Sync button runs that sync with your rights, so it works once
+you also approve **Component github/pr-lifetimes** in Settings → Data →
+Programs. Until then it still draws, filters and opens pull requests. The repo comes from `git remote get-url
 origin`, or set `GITHUB_REPOSITORY=owner/name`.
 
 ## Files
@@ -25,6 +29,8 @@ origin`, or set `GITHUB_REPOSITORY=owner/name`.
 - `extension.yaml`: the `prs` source and the `pr` entity's columns.
 - `sync.sh`: fetches from the GitHub API and reshapes the result with `jq`.
 - `lenses/prs-by-task.yaml`: the lens.
+- `lenses/pr-lifetimes.yaml`, `components/pr-lifetimes/`: the lifetimes lens
+  and the bundle it renders (`custom_components:` in `extension.yaml`).
 - `models/pull_request.sql`, `lenses/pr.yaml`: what a `github_pr` ref
   resolves to, and the page it opens (`ref_kinds:` in `extension.yaml`).
 - `fixtures/pr-link.yaml`: `oxplow plugin test`'s check that `[[pr:12]]`

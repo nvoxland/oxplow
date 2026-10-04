@@ -45,6 +45,18 @@ function installTestExtension(project: string, providerFake: string): void {
   chmodSync(script, 0o755);
 }
 
+/** Put the documented github example (`examples/extensions/github`) into
+ *  `project`, its `sync.sh` swapped for one that prints the suite's pull
+ *  requests (`fixtures/github-prs.json`) — no GitHub, the same entity. */
+function installGithubExample(project: string): void {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const dir = join(project, "oxplow", "extensions", "github");
+  cpSync(join(here, "..", "..", "examples", "extensions", "github"), dir, { recursive: true });
+  cpSync(join(here, "..", "fixtures", "github-prs.json"), join(dir, "prs.json"));
+  writeFileSync(join(dir, "sync.sh"), `#!/bin/sh\nexec cat "$(dirname "$0")/prs.json"\n`);
+  chmodSync(join(dir, "sync.sh"), 0o755);
+}
+
 export async function startDaemon(): Promise<Daemon> {
   const bin = process.env.OXPLOW_E2E_DAEMON;
   const acpFake = process.env.OXPLOW_E2E_ACP_FAKE;
@@ -57,6 +69,7 @@ export async function startDaemon(): Promise<Daemon> {
   for (const d of [project, home, tmux, join(project, ".oxplow")]) mkdirSync(d, { recursive: true });
   writeFileSync(join(project, ".oxplow", "project.yaml"), projectYaml(acpFake));
   installTestExtension(project, providerFake);
+  installGithubExample(project);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: project, stdio: "ignore" });
   git("init", "-q");
   git("-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "-q", "--allow-empty", "-m", "init");
@@ -191,6 +204,18 @@ export async function approveProgram(daemon: Daemon, kind: string, name: string)
   if (!program) throw new Error(`no program ${kind}:${name}`);
   if (program.approved) return;
   await ipc(daemon, "approve_project_program", { kind, name, version: program.version });
+}
+
+type Collector = { owner: string; spec: { id: string }; approved: boolean; version: string | null };
+
+/** Approve an extension's collector (`owner`/`id`) as a person does on
+ *  Settings → Data, at the version listed now. */
+export async function approveCollector(daemon: Daemon, owner: string, id: string): Promise<void> {
+  const collectors = await ipc<Collector[]>(daemon, "list_collectors");
+  const collector = collectors.find((c) => c.owner === owner && c.spec.id === id);
+  if (!collector?.version) throw new Error(`no collector ${owner}/${id} to approve`);
+  if (collector.approved) return;
+  await ipc(daemon, "approve_collector", { owner, id, version: collector.version });
 }
 
 type SearchHit = { kind: string; title: string };

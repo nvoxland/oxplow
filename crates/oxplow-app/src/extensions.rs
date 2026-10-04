@@ -1704,12 +1704,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.commands = commands;
             ext.errors.extend(errors);
         }
-        // An experimental kind: a shared manifest's is refused by `check`.
-        if let Some(v) = m
-            .custom_components
-            .as_ref()
-            .filter(|_| m.sharing == Sharing::Private)
-        {
+        if let Some(v) = &m.custom_components {
             let (components, errors) =
                 custom_components::parse_custom_components(name, v, &file, &manifest, &|rel| {
                     files.bundle_stat(rel)

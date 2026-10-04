@@ -121,6 +121,71 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     let shown = serde_json::to_string(&run.result.rows).unwrap();
     assert!(shown.contains("Fix the hover state"), "{shown}");
 
+    // P11 (tsk962): PR Lifetimes — the component made `custom_components`
+    // stable. Its lens filters by state; the component acts (it runs the
+    // sync), so it's a program on Programs, unapproved until a person
+    // approves it.
+    svc.db
+        .transaction(|tx| {
+            tx.execute(
+                "INSERT INTO ext__github__pr (number, title, body, state, author, head_branch, \
+                 draft, opened_at, merged_at, url) VALUES (11, 'Speed up search', '', 'closed', \
+                 'octocat', 'fast-search', 0, '2026-09-20T00:00:00Z', '2026-09-24T00:00:00Z', \
+                 'https://github.com/o/r/pull/11')",
+                [],
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+    let lifetimes = |state: &str| {
+        let params = [("state".to_string(), oxplow_db::SqlCell::Text(state.into()))]
+            .into_iter()
+            .collect();
+        let svc = &svc;
+        async move {
+            let run = oxplow_app::extensions::run_lens(
+                &svc.sql,
+                &svc.extension_catalog,
+                root,
+                "github/pr-lifetimes",
+                params,
+                &oxplow_app::extensions::LensContext::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                run.lens.custom.as_ref().unwrap().component.as_deref(),
+                Some("pr-lifetimes")
+            );
+            run.result
+                .rows
+                .iter()
+                .map(|r| serde_json::to_value(&r[0]).unwrap())
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(
+        lifetimes("all").await,
+        [serde_json::json!(12), serde_json::json!(11)]
+    );
+    assert_eq!(lifetimes("open").await, [serde_json::json!(12)]);
+    assert_eq!(lifetimes("merged").await, [serde_json::json!(11)]);
+    let config = svc.config.read().unwrap().clone();
+    let programs = oxplow_app::exec_consent::list(
+        &svc.approvals,
+        root,
+        &config,
+        svc.extension_catalog.get(root).as_ref(),
+    );
+    let component = programs
+        .iter()
+        .find(|p| p.kind == oxplow_app::exec_consent::ProgramKind::Component)
+        .expect("the component is on Programs");
+    assert_eq!(component.name, "github/pr-lifetimes");
+    assert_eq!(component.commands, ["collector.sync"]);
+    assert!(!component.approved);
+
     // tsk935: `searchable: pull_request` — site search finds the pull
     // request by its title, under its kind, the ref a hit opens.
     svc.assets.sync_search_kinds().await.unwrap();

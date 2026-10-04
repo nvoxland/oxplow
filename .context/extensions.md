@@ -1206,9 +1206,9 @@ decorators, rail panels, extension pages, the launcher), reloaded on
 mount loads afresh. Only Settings → Extensions lists them itself — it
 reloads after its own installs and updates.
 
-## Custom components (experimental)
+## Custom components
 
-`custom_components:` (a private extension only, P6b.D1;
+`custom_components:` (P6b.D1; **stable since P11**;
 `extensions/custom_components.rs`) are web bundles a `viz: custom` lens
 renders in a sandboxed frame. **The sandbox bounds what it reaches**:
 the frame has an opaque origin (the iframe's `sandbox="allow-scripts"`
@@ -1343,6 +1343,22 @@ component <name>` scaffolds a private extension — the component, its
 tests clean (`just_works.rs`). The reference is in
 `docs/guide/lenses.md`.
 
+**`custom_components` is stable** (P11, tsk962), on the evidence rule:
+a shared extension's component acts with it. The github example's **PR
+Lifetimes** (`lenses/pr-lifetimes.yaml`, `components/pr-lifetimes/`)
+draws each pull request as a bar from opened to merged — a range the
+kit's charts don't draw; its filters re-run its own lens (`query`), a
+bar opens `github_pr:<n>` (`navigate`), and Sync runs `collector.sync`
+(`invoke`) — refused until a person approves the component on
+Programs. The loader no longer limits components to private extensions
+(a bundled one is still an error: its bundle is never served). The
+browser suite's `specs/components/pr-lifetimes.spec.ts` runs it in
+Chromium **and WebKit** (the engines of browser mode and the macOS
+window; the suite's one WebKit project): the frame loads, the filters
+and navigation work, approval gates `invoke`, and a self-navigation off
+this machine sends no request in either engine — the blocked page's
+load then ends the component and its table shows.
+
 **The kit's stylesheet** (P11, tsk961). `/component-lib/oxplow-kit.css`
 (`assets/oxplow-kit.css`, served beside the library as `text/css`, and
 named in every bundle's CSP `style-src`) is a few `ox-` classes in
@@ -1449,9 +1465,11 @@ promise is already built: a published `type@v` is a contract
 (`event_type_contract` refuses a changed schema — stronger than a
 model's drift warning), a new shape is a new version with an upcast, and
 a removed type's rows stay readable. `STABLE_KINDS` lists it;
-`EXPERIMENTAL_KINDS` keeps `providers`, `custom_components` and
-`ui.replacements` (`ui.decorators` and `ref_kinds` were promoted in P10,
-"Decorators" and "Ref kinds"; `effects` in P11, below).
+`EXPERIMENTAL_KINDS` keeps `providers` and `ui.replacements`
+(`ui.decorators` and `ref_kinds` were promoted in P10, "Decorators" and
+"Ref kinds"; `effects` and `custom_components` in P11, below and
+"Custom components"). `ManifestV2::experimental_kinds_used` reads the
+table, so promoting a kind is moving it from one table to the other.
 
 **`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
 extension acts with one. oxplow-review's **`verify-unchecked`** reacts to

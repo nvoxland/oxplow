@@ -1,0 +1,7 @@
+body { padding: 8px; }
+.bar-tools { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.grow { flex: 1; }
+#chart { width: 100%; display: block; }
+.bar { cursor: pointer; }
+.bar:hover rect, .bar:focus rect { opacity: 0.8; }
+.bar text { fill: var(--text-primary); font-size: var(--text-xs); }

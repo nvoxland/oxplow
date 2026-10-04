@@ -1,0 +1,16 @@
+title: PR Lifetimes
+description: How long each recent pull request was open — a bar from when it was opened to when it was merged, or to now while it's open.
+params:
+  - { name: state, label: "State (open / merged / all)", default: all }
+query: |
+  SELECT pr.number, pr.title, pr.state, pr.author, pr.opened_at, pr.merged_at
+  FROM v_github_pr pr
+  WHERE :state = 'all'
+     OR (:state = 'open' AND pr.state = 'open')
+     OR (:state = 'merged' AND pr.merged_at IS NOT NULL)
+  ORDER BY pr.opened_at DESC
+  LIMIT 50
+viz: custom
+custom: { component: pr-lifetimes }
+empty: No pull requests synced yet. Approve & run the `github/prs` source in Settings → Data.
+launcher: { category: Work }
