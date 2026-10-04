@@ -360,9 +360,12 @@ test` checks each incremental model against a full refill (P8.B5).
 A query reads metrics as columns of a grid:
 
 ```sql
-SELECT bucket, zone, MEASURE('oxplow.coverage.abs_pct')
-FROM metric_grid('day', 'zone')
+SELECT bucket, "oxplow.language", MEASURE('oxplow.coverage.abs_pct')
+FROM metric_grid('day', 'oxplow.language')
 ```
+
+(The dimension's column is named by its key; a conformed key has a dot,
+so the query quotes it.)
 
 - `metric_grid('<day|week|month>'[, '<dimension>'])` — exactly one per
   query; its rows are `bucket` (the bucket's start date, `YYYY-MM-DD`),

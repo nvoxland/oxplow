@@ -47,11 +47,13 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
     // while nothing read these, then a dead breakdown option the moment tsk179
     // started surfacing them. A declared dimension is a promise the facts have
     // to keep: verify against `dims_json` before adding one.
-    const TOKEN_DIMS: &[&str] = &["model"];
-    const EFFORT_DIMS: &[&str] = &["branch", "effort"];
-    const NUDGE_DIMS: &[&str] = &["subject", "branch", "thread"];
-    const BRANCH_DIMS: &[&str] = &["branch"];
-    const TREE_DIMS: &[&str] = &["branch", "vcs_rev"];
+    // Conformed keys only (tsk945); `subject` is the raw-subject
+    // pseudo-dimension.
+    const TOKEN_DIMS: &[&str] = &["oxplow.model"];
+    const EFFORT_DIMS: &[&str] = &["oxplow.branch", "oxplow.effort"];
+    const NUDGE_DIMS: &[&str] = &["subject", "oxplow.branch", "oxplow.thread"];
+    const BRANCH_DIMS: &[&str] = &["oxplow.branch"];
+    const TREE_DIMS: &[&str] = &["oxplow.branch", "oxplow.vcs_rev"];
     &[
         // otel-tokens (token_usage.rs::record_reported, counting the OTLP
         // receiver's `agent.tokens.reported` — tsk22, P10.M2). The `producer` field is descriptor metadata; the
@@ -744,14 +746,14 @@ mod tests {
         ] {
             let d = dims(key);
             assert!(
-                d.contains(&"model".to_string()),
+                d.contains(&"oxplow.model".to_string()),
                 "{key} sliceable by model: {d:?}"
             );
             // NOT `agent` (tsk182): no producer emits it, so offering it in the
             // breakdown picker gave an empty result the user couldn't back out
             // of. A declared dimension is a promise the facts have to keep.
             assert!(
-                !d.contains(&"agent".to_string()),
+                !d.contains(&"oxplow.agent".to_string()),
                 "{key} must not claim a dimension nothing emits: {d:?}"
             );
         }

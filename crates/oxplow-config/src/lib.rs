@@ -2289,7 +2289,8 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
                 .into_iter()
                 .map(|d| d.trim().to_string())
                 .filter(|d| !d.is_empty())
-                .collect(),
+                .map(|d| dimension_key(&format!("metrics[{i}].sliceableDims"), d))
+                .collect::<Result<_, _>>()?,
             target: e.target,
             warn_at: e.warn_at,
             fail_at: e.fail_at,
@@ -2300,6 +2301,18 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
         });
     }
     Ok(out)
+}
+
+/// A dimension key a metric slices or filters by: its one, namespaced name
+/// (tsk945) — `subject`, the raw-subject pseudo-dimension, aside.
+fn dimension_key(at: &str, key: String) -> Result<String, ConfigError> {
+    if key == "subject" || key.contains('.') {
+        return Ok(key);
+    }
+    Err(ConfigError::Invalid(format!(
+        "{at}: dimension `{key}` isn't namespaced — a conformed dimension is `oxplow.{key}`, \
+         one of your own `<namespace>.{key}`"
+    )))
 }
 
 /// Validate a spec's `filter:` block. `dimEq`, if present, must be a two-element
@@ -2316,6 +2329,7 @@ fn validate_filter(i: usize, f: FilterConfig) -> Result<FilterConfig, ConfigErro
                     "metrics[{i}].filter.dimEq must be a [key, value] pair of non-empty strings"
                 )));
             }
+            dimension_key(&format!("metrics[{i}].filter.dimEq"), cleaned[0].clone())?;
             Some(cleaned)
         }
         None => None,
@@ -4086,6 +4100,33 @@ testing:
         let dir = tempdir().unwrap();
         std::fs::write(cfg_path(dir.path()), yaml).unwrap();
         load_project_config(dir.path())
+    }
+
+    /// tsk945: a dimension key has one name — its namespaced one. A metric
+    /// declaring a bare one to slice or filter by is refused, saying what
+    /// the key is called.
+    #[test]
+    fn a_metric_names_its_dimensions_by_their_namespaced_keys() {
+        let metric = |extra: &str| -> Result<Vec<MetricEntry>, ConfigError> {
+            let e: Vec<MetricEntry> = serde_yaml::from_str(&format!(
+                "[{{key: repo.x, title: X, sourceMeasure: acme.m, aggregation: sum, {extra}}}]"
+            ))
+            .unwrap();
+            validate_metrics(Some(e))
+        };
+        for (extra, bare) in [
+            ("sliceableDims: [language]", "language"),
+            ("filter: { dimEq: [branch, main] }", "branch"),
+        ] {
+            let err = metric(extra).unwrap_err().to_string();
+            assert!(
+                err.contains(&format!("`{bare}`")) && err.contains(&format!("`oxplow.{bare}`")),
+                "{err}"
+            );
+        }
+        // `subject` is the raw-subject pseudo-dimension, not a catalog key.
+        metric("sliceableDims: [subject, oxplow.language], filter: { dimEq: [acme.zone, api] }")
+            .unwrap();
     }
 
     #[test]

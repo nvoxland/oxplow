@@ -2506,7 +2506,6 @@ impl CollectionService {
                 let fact = NewFact {
                     subject_kind: Some("nudge".into()),
                     subject_ref: Some(kind.to_string()),
-                    dims_json: Some(format!("{{\"kind\":\"{kind}\"}}")),
                     ..NewFact::new(measure.id, 1.0)
                 };
                 // The nudge's effort, else the one its run was anchored to;

@@ -2846,7 +2846,7 @@ fn starter_collector_script(
                  if c > 0:\n            \
                      facts.append({{\"measure\": \"{measure}\", \"value\": c, \
              \"subject\": \"file:\" + f[\"path\"], \"path\": f[\"path\"], \
-             \"dims\": {{\"language\": \"{lang}\"}}}})\n    \
+             \"dims\": {{\"oxplow.language\": \"{lang}\"}}}})\n    \
              return {{\"facts\": facts}}\n"
     )
 }
@@ -3480,7 +3480,7 @@ def transform(input):
     for f in files("**/*.rs"):
         c = len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": "file:" + f["path"], "path": f["path"], "dims": {"language": "rust"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": "file:" + f["path"], "path": f["path"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 "#,
         )
@@ -3533,7 +3533,7 @@ def transform(input):
         assert_eq!(facts[0].source, "metric:repo.unsafe_blocks");
         assert_eq!(
             facts[0].dims_json.as_deref(),
-            Some("{\"language\":\"rust\"}")
+            Some("{\"oxplow.language\":\"rust\"}")
         );
     }
 
@@ -4276,7 +4276,7 @@ def transform(input):
     facts = []
     for f in files("**/*.rs"):
         for m in code_metrics(f["text"], "rust"):
-            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": "symbol:" + f["path"] + "::" + m["name"], "path": f["path"], "line": m["start_line"], "dims": {"language": "rust"}})
+            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": "symbol:" + f["path"] + "::" + m["name"], "path": f["path"], "line": m["start_line"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 "#,
         )
@@ -4698,8 +4698,8 @@ def transform(input):
     async fn gauge_facts_slice_by_the_conformed_language_dimension() {
         // The conformed catalog declares `oxplow.language` (V43) and
         // list_dimensions advertises it — the bundled gauges' facts must be
-        // sliceable by it (group_by / dim_eq), with bare `language` kept as a
-        // legacy alias for pre-rename facts and the Explorer's declared dims.
+        // sliceable by it (group_by / dim_eq). It is the key's one name
+        // (tsk945): a bare `language` request is no alias.
         let (svc, _dir) = fixture().await;
         svc.metrics.seed_catalog().await;
         let mut corpus = HashMap::new();
@@ -4759,8 +4759,7 @@ def transform(input):
             "one language group, got {by_language:?}"
         );
         assert_eq!(by_language[0].0.as_deref(), Some("rust"));
-        // The bare key still slices identically.
-        assert_eq!(groups("language").await, by_language);
+        assert!(groups("language").await.is_empty(), "no alias");
     }
 
     #[tokio::test]

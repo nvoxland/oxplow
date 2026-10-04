@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn a_jaq_fact_script_reads_its_report() {
         let raw = runtime::run_jaq(
-            r#"{ facts: [ { measure: "acme.loc", value: (.report.lines | length), dims: { language: "rust" } } ] }"#,
+            r#"{ facts: [ { measure: "acme.loc", value: (.report.lines | length), dims: { "oxplow.language": "rust" } } ] }"#,
             &serde_json::json!({ "report": { "lines": [1, 2, 3, 4] } }),
         )
         .expect("runs");
@@ -590,7 +590,7 @@ mod tests {
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].value, 4.0);
         assert_eq!(
-            facts[0].dims.as_ref().unwrap()["language"],
+            facts[0].dims.as_ref().unwrap()["oxplow.language"],
             serde_json::json!("rust")
         );
         // Anything but `facts` is refused.
@@ -636,7 +636,7 @@ def transform(input):
         c = len(markers(f["text"], lang))
         if c > 0:
             by_lang[lang] = by_lang.get(lang, 0) + c
-    return {"facts": [{"measure": "acme.todo", "value": by_lang[lang], "dims": {"language": lang}} for lang in sorted(by_lang)]}
+    return {"facts": [{"measure": "acme.todo", "value": by_lang[lang], "dims": {"oxplow.language": lang}} for lang in sorted(by_lang)]}
 "#;
         let mut map = std::collections::HashMap::new();
         map.insert(
@@ -657,7 +657,10 @@ def transform(input):
             .into_iter()
             .map(|f| {
                 (
-                    f.dims.unwrap()["language"].as_str().unwrap().to_string(),
+                    f.dims.unwrap()["oxplow.language"]
+                        .as_str()
+                        .unwrap()
+                        .to_string(),
                     f.value,
                 )
             })

@@ -1339,6 +1339,84 @@ mod tests {
         assert_eq!(kept[1], None);
     }
 
+    /// V166 (tsk945): a dimension key has one name. Stored facts' bare
+    /// `language` takes the conformed `oxplow.language`; a nudge's unread
+    /// bare `kind` (its subject says the same) goes; a spec's sliceable dims
+    /// and `dim_eq` filter take the conformed keys; and the cube, folded
+    /// over the old keys, is cleared to re-fold.
+    #[test]
+    fn bare_language_dims_are_renamed() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        migrate_to_for_tests(&mut conn, 165);
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO fact (id, capture_id, measure_id, value, dims_json) VALUES
+                 (1, 1, 999, 1, '{"language":"rust"}'),
+                 (2, 1, 999, 1, '{"language":"go","oxplow.language":"go"}'),
+                 (3, 1, (SELECT id FROM measure WHERE key = 'oxplow.nudge'), 1, '{"kind":"stuck"}'),
+                 (4, 1, 999, 1, '{"acme.zone":"api","language":"ts"}'),
+                 (5, 1, 999, 1, NULL);
+               INSERT INTO metric_spec (id, key, title, source_measure, sliceable_dims_json, filter_json, created_at, updated_at) VALUES
+                 (1, 'acme.a', 'A', 'acme.m', '["language","subject","branch","acme.zone"]', '{"dim_eq":["language","rust"]}', '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z'),
+                 (2, 'acme.b', 'B', 'acme.m', '["model","effort","thread","vcs_rev","package"]', '{"min_value":3}', '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
+               INSERT INTO metric_cube_state (measure_id, stream_id, branch, last_capture_id, last_captured_at)
+                 VALUES (999, 1, 'main', 1, '2026-01-01T00:00:00.000000Z');"#,
+        )
+        .unwrap();
+        migrate_and_compile(&mut conn).unwrap();
+        let dims: Vec<Option<serde_json::Value>> = conn
+            .prepare("SELECT dims_json FROM fact ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get::<_, Option<String>>(0))
+            .unwrap()
+            .map(|d| d.unwrap().map(|s| serde_json::from_str(&s).unwrap()))
+            .collect();
+        assert_eq!(
+            dims,
+            vec![
+                Some(serde_json::json!({"oxplow.language": "rust"})),
+                Some(serde_json::json!({"oxplow.language": "go"})),
+                None,
+                Some(serde_json::json!({"acme.zone": "api", "oxplow.language": "ts"})),
+                None,
+            ]
+        );
+        let specs: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT sliceable_dims_json, filter_json FROM metric_spec ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let json = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        assert_eq!(
+            json(&specs[0].0),
+            serde_json::json!(["oxplow.language", "subject", "oxplow.branch", "acme.zone"])
+        );
+        assert_eq!(
+            json(specs[0].1.as_deref().unwrap()),
+            serde_json::json!({"dim_eq": ["oxplow.language", "rust"]})
+        );
+        assert_eq!(
+            json(&specs[1].0),
+            serde_json::json!([
+                "oxplow.model",
+                "oxplow.effort",
+                "oxplow.thread",
+                "oxplow.vcs_rev",
+                "oxplow.package"
+            ])
+        );
+        assert_eq!(
+            json(specs[1].1.as_deref().unwrap()),
+            serde_json::json!({"min_value": 3})
+        );
+        let cube: i64 = conn
+            .query_row("SELECT count(*) FROM metric_cube_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cube, 0, "the cube re-folds over the renamed keys");
+    }
+
     /// V97 backfills one `legacy` op per existing snapshot, each pointing
     /// at the previous snapshot of its own stream.
     #[test]

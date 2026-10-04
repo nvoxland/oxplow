@@ -403,7 +403,7 @@ pub(crate) fn dim_value_cached(
     match dimension {
         "oxplow.severity" => f.severity.clone(),
         "oxplow.rule" => f.rule.clone(),
-        "oxplow.package" | "package" => {
+        "oxplow.package" => {
             let path = f.path.as_deref().or(f.subject_ref.as_deref())?;
             Some(package_of(path))
         }
@@ -411,20 +411,9 @@ pub(crate) fn dim_value_cached(
         // `group_by` is uniform server-side (tsk26): branch, the raw subject, and
         // the model (a `model:<id>` subject → the bare id, else the dims_json
         // `oxplow.model`).
-        "oxplow.branch" | "branch" => f.branch.clone(),
-        // The conformed key is `oxplow.language` (V43), but the Explorer's
-        // declared sliceable_dims request the bare form and facts recorded
-        // before the gauge scripts namespaced their dims carry bare
-        // `language` — both request forms read both fact vintages.
-        "oxplow.language" | "language" => {
-            // Read whichever key vintage is present (conformed `oxplow.language`
-            // V43, or the pre-rename bare `language`) off the one parse — this
-            // was two parses of the same string before tsk17.
-            let dims = dims.get(f)?;
-            dim_from_map(dims, "oxplow.language").or_else(|| dim_from_map(dims, "language"))
-        }
+        "oxplow.branch" => f.branch.clone(),
         "subject" => f.subject_ref.clone(),
-        "oxplow.model" | "model" => match &f.subject_ref {
+        "oxplow.model" => match &f.subject_ref {
             Some(s) if f.subject_kind.as_deref() == Some("model") => {
                 Some(s.strip_prefix("model:").unwrap_or(s).to_string())
             }
@@ -470,13 +459,7 @@ pub(crate) fn is_spine_dim(dimension: &str) -> bool {
 pub(crate) fn dim_is_slice_key(dimension: &str) -> bool {
     !matches!(
         dimension,
-        "oxplow.package"
-            | "package"
-            | "oxplow.branch"
-            | "branch"
-            | "subject"
-            | "oxplow.model"
-            | "model"
+        "oxplow.package" | "oxplow.branch" | "subject" | "oxplow.model"
     ) && !is_spine_dim(dimension)
 }
 
@@ -487,10 +470,6 @@ pub(crate) fn slice_dim_value(k: &FactSliceKey, dimension: &str) -> Option<Strin
     match dimension {
         "oxplow.severity" => k.severity.clone(),
         "oxplow.rule" => k.rule.clone(),
-        "oxplow.language" | "language" => {
-            let dims = parse_dims_str(k.dims_json.as_deref())?;
-            dim_from_map(&dims, "oxplow.language").or_else(|| dim_from_map(&dims, "language"))
-        }
         key => parse_dims_str(k.dims_json.as_deref()).and_then(|d| dim_from_map(&d, key)),
     }
 }
@@ -2533,7 +2512,6 @@ mod tests {
             "oxplow.severity",
             "oxplow.rule",
             "oxplow.language",
-            "language",
             // The long tail: any un-promoted `dims_json` key.
             "oxplow.status",
         ] {
@@ -2548,12 +2526,9 @@ mod tests {
         // NOT resolvable — each reads a column the slice key doesn't carry.
         for key in [
             "oxplow.package",
-            "package",
             "oxplow.branch",
-            "branch",
             "subject",
             "oxplow.model",
-            "model",
             "oxplow.stream",
             "oxplow.thread",
             "oxplow.effort",
@@ -2629,8 +2604,8 @@ mod tests {
         for j in [
             r#"{"min_value":11.0}"#,
             r#"{"max_value":0.0}"#,
-            r#"{"dim_eq":["package","src/a"]}"#,
-            r#"{"dim_eq":["branch","main"]}"#,
+            r#"{"dim_eq":["oxplow.package","src/a"]}"#,
+            r#"{"dim_eq":["oxplow.branch","main"]}"#,
             r#"{"dim_eq":["oxplow.model","opus"]}"#,
         ] {
             assert!(
@@ -3255,7 +3230,7 @@ mod tests {
         let spec = facts.get_spec("acme.h").await.unwrap().unwrap();
 
         let by_package = engine
-            .series_for_spec(&spec, Some("package"))
+            .series_for_spec(&spec, Some("oxplow.package"))
             .await
             .unwrap();
         let mut rows: Vec<(String, f64)> = by_package
@@ -3290,30 +3265,26 @@ mod tests {
         assert_eq!(engine.headline_for_spec(&spec).await.unwrap(), None);
     }
 
+    /// tsk945: a dimension is requested by its conformed key — the one
+    /// name it has. A bare request (`language`, `package`, `branch`,
+    /// `model`) is just an undeclared key, never an alias.
     #[test]
-    fn language_dim_reads_both_conformed_and_legacy_bare_keys() {
-        // The conformed catalog (V43) declares `oxplow.language`; the bundled
-        // gauge scripts emit it namespaced, but facts recorded before the
-        // rename carry bare `language` — and the Explorer's declared
-        // sliceable_dims still request the bare form. Both request forms must
-        // read both fact vintages.
-        let namespaced = FactRow {
+    fn a_dimension_is_requested_by_its_conformed_key() {
+        let f = FactRow {
             dims_json: Some("{\"oxplow.language\":\"rust\"}".into()),
+            path: Some("crates/a/src/lib.rs".into()),
+            branch: Some("main".into()),
+            subject_kind: Some("model".into()),
+            subject_ref: Some("model:opus".into()),
             ..fact(1, "2026-06-30T10:00:00Z", 1.0)
         };
-        let legacy = FactRow {
-            dims_json: Some("{\"language\":\"rust\"}".into()),
-            ..fact(1, "2026-06-30T10:00:00Z", 1.0)
-        };
-        for f in [&namespaced, &legacy] {
-            for key in ["oxplow.language", "language"] {
-                assert_eq!(
-                    dim_value(f, key).as_deref(),
-                    Some("rust"),
-                    "dims {:?} requested as {key}",
-                    f.dims_json
-                );
-            }
+        assert_eq!(dim_value(&f, "oxplow.language").as_deref(), Some("rust"));
+        assert!(dim_value(&f, "oxplow.package").is_some());
+        assert_eq!(dim_value(&f, "oxplow.branch").as_deref(), Some("main"));
+        assert_eq!(dim_value(&f, "oxplow.model").as_deref(), Some("opus"));
+        for bare in ["language", "package", "branch", "model"] {
+            assert_eq!(dim_value(&f, bare), None, "`{bare}` is no alias");
+            assert!(dim_is_slice_key(bare), "`{bare}` is an ordinary key");
         }
     }
 
@@ -3661,7 +3632,7 @@ mod tests {
             "headline on the percent scale, comparable to target/warn/fail"
         );
         let by_package = engine
-            .series_for_spec(&spec, Some("package"))
+            .series_for_spec(&spec, Some("oxplow.package"))
             .await
             .unwrap();
         assert_eq!(by_package.len(), 1);

@@ -584,6 +584,9 @@ pub fn record_facts_tx(
             return Ok(id);
         }
     }
+    for f in &facts {
+        check_dims_tx(conn, f.dims_json.as_deref())?;
+    }
     let capture_id = insert_capture(conn, capture).map_err(map_sql_err)?;
     for mut f in facts {
         f.capture_id = Some(capture_id);
@@ -594,6 +597,37 @@ pub fn record_facts_tx(
         crate::event_log_store::append_unique_tx(conn, &log.vocabulary.current(), &env)?;
     }
     Ok(capture_id)
+}
+
+/// A fact's dimension keys have one name each — the namespaced one (tsk945):
+/// a bare key is refused, naming the conformed `oxplow.<key>` when the
+/// catalog declares it.
+fn check_dims_tx(conn: &rusqlite::Connection, dims_json: Option<&str>) -> Result<(), DomainError> {
+    let Some(serde_json::Value::Object(dims)) =
+        dims_json.and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok())
+    else {
+        return Ok(());
+    };
+    if let Some(key) = dims.keys().find(|k| !k.contains('.')) {
+        let conformed = format!("oxplow.{key}");
+        let declared: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM dimension WHERE key = ?1",
+                params![conformed],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        return Err(DomainError::Invalid(match declared {
+            Some(_) => format!(
+                "dimension key `{key}` isn't namespaced: its conformed name is `{conformed}`"
+            ),
+            None => format!(
+                "dimension key `{key}` isn't namespaced: namespace it as yours (`<namespace>.{key}`)"
+            ),
+        }));
+    }
+    Ok(())
 }
 
 /// The summaries of `(stream, branch, producer)`, by subject.
@@ -3254,6 +3288,56 @@ mod tests {
         assert!(keys.contains(&"acme.todos".to_string()) && keys.contains(&"proj.x".to_string()));
         assert!(!keys.contains(&"acme.gone".to_string()));
         assert!(store.get_measure("acme.todo").await.unwrap().is_some());
+    }
+
+    /// tsk945: a dimension key has one name — its namespaced one. A fact
+    /// carrying a bare key is refused, naming the conformed key when the
+    /// catalog has one; nothing of the capture is written.
+    #[tokio::test]
+    async fn a_bare_dimension_key_is_refused_naming_the_conformed_one() {
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure::new("acme.lines", "Lines"))
+            .await
+            .unwrap();
+        let with_dims = |dims: &str| NewFact {
+            dims_json: Some(dims.into()),
+            ..NewFact::new(m, 1.0)
+        };
+        let err = store
+            .record_facts(
+                NewMetricCapture::done(1, "acme", "gauge"),
+                vec![with_dims(r#"{"language":"rust"}"#)],
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, DomainError::Invalid(m) if m.contains("`language`") && m.contains("`oxplow.language`")),
+            "{err:?}"
+        );
+        let err = store
+            .record_facts(
+                NewMetricCapture::done(1, "acme", "gauge"),
+                vec![with_dims(r#"{"zone":"api"}"#)],
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, DomainError::Invalid(m) if m.contains("`zone`") && m.contains("namespace")),
+            "{err:?}"
+        );
+        assert!(store
+            .captures_for_producers(vec!["acme".into()])
+            .await
+            .unwrap()
+            .is_empty());
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "acme", "gauge"),
+                vec![with_dims(r#"{"oxplow.language":"rust","acme.zone":"api"}"#)],
+            )
+            .await
+            .unwrap();
     }
 
     async fn fixture() -> SqliteFactStore {

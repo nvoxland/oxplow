@@ -84,7 +84,7 @@ metrics:
     direction: lower-better
     unit: count
     displayKind: gauge
-    sliceableDims: [language]
+    sliceableDims: [oxplow.language]
 ```
 
 Namespace every key `<vendor>.<id>` (e.g. `repo.todo_count`, `acme.bundle_size`).
@@ -144,6 +144,9 @@ shape** — one atomic fact per subject, NOT a pre-aggregated total:
 ```
 
 - `measure` (required) is the measure key — MUST be in the collector's `facts`.
+- `dims` keys are namespaced: a conformed dimension by its `oxplow.*` key
+  (`oxplow.language`), one of your own `<namespace>.<name>`. A bare key
+  (`language`) is refused, and the error names the conformed one.
 - `value` is the atomic number for this subject.
 - `subject` is a `"kind:ref"` string (`file:src/a.rs`, `symbol:src/a.rs::foo`).
 - `rule` is a conformed slice value read as the `oxplow.rule` dimension (so a spec
@@ -184,7 +187,7 @@ def transform(input):
         if c > 0:
             facts.append({"measure": "repo.todo_count", "value": c,
                           "subject": "file:" + f["path"], "path": f["path"],
-                          "dims": {"language": "rust"}})
+                          "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 ```
 

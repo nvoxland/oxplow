@@ -766,10 +766,16 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   current partition (per-worktree states, never merged within a subject);
   note the unscoped *headline* is narrower — the single newest worktree's
   value — a known asymmetry only visible with multiple active worktrees. `dim_value` reads the `severity`/`rule` columns and
-  `package`-from-path directly, else `dims_json[key]`; `oxplow.language` /
-  bare `language` alias each other (the collector scripts emit the conformed
-  namespaced key; pre-rename facts and the Explorer's declared sliceable_dims
-  use the bare form). `FactRow` carries the
+  `package`-from-path directly, else `dims_json[key]`. **A dimension has
+  one name, its namespaced key** (tsk945, V166): there are no bare aliases
+  (`language`, `package`, `branch`, `model`); the fact ingest
+  (`record_facts_tx` → `check_dims_tx`) refuses a fact whose `dims_json`
+  carries an un-namespaced key, naming the conformed `oxplow.<key>` when
+  the catalog declares it; project config refuses one in `sliceableDims` or
+  `filter.dimEq` (`subject`, the raw-subject pseudo-dimension, aside). V166
+  renamed stored bare `language` facts and specs' bare dims, dropped the
+  nudge's unread bare `kind` (its subject carries it) and cleared the cube
+  to re-fold. `FactRow` carries the
   capture's `producer` for exactly this scan-currency logic.
 - Async wrappers `MetricEngine::series(measure_key, agg, filter, group_by)` and
   `rollup(measure_key, dimension)` fetch a measure's facts and aggregate

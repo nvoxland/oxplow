@@ -2,9 +2,12 @@
 //! SQL"): a query reads metrics as columns of a grid —
 //!
 //! ```sql
-//! SELECT bucket, zone, MEASURE('oxplow.coverage.abs_pct')
-//! FROM metric_grid('day', 'zone')
+//! SELECT bucket, "oxplow.language", MEASURE('oxplow.coverage.abs_pct')
+//! FROM metric_grid('day', 'oxplow.language')
 //! ```
+//!
+//! The dimension's column is named by its key — a conformed key has a dot,
+//! so the query quotes it.
 //!
 //! The bucket `'capture'` keeps one row per capture instead: `bucket` is
 //! the capture's time and `capture_id` joins `v_capture` for its branch,
@@ -349,7 +352,7 @@ mod tests {
             let fs = [("api", values[0]), ("ui", values[1])]
                 .into_iter()
                 .map(|(zone, v)| NewFact {
-                    dims_json: Some(format!("{{\"zone\":\"{zone}\"}}")),
+                    dims_json: Some(format!("{{\"acme.zone\":\"{zone}\"}}")),
                     ..NewFact::new(m, v)
                 })
                 .collect();
@@ -390,7 +393,7 @@ mod tests {
         let (gateway, engine, facts) = fixture().await;
         for key in ["acme.size_sum", "acme.size_max", "acme.size_count"] {
             let spec = facts.get_spec(key).await.unwrap().unwrap();
-            for dim in [None, Some("zone")] {
+            for dim in [None, Some("acme.zone")] {
                 let expected: Vec<Vec<serde_json::Value>> = engine
                     .series_for_spec_read(
                         &spec,
@@ -415,7 +418,7 @@ mod tests {
                 let sql = match dim {
                     None => format!("SELECT bucket, MEASURE('{key}') FROM metric_grid('day') ORDER BY bucket"),
                     Some(d) => format!(
-                        "SELECT bucket, {d}, MEASURE('{key}') FROM metric_grid('day', '{d}') ORDER BY bucket, {d}"
+                        "SELECT bucket, \"{d}\", MEASURE('{key}') FROM metric_grid('day', '{d}') ORDER BY bucket, \"{d}\""
                     ),
                 };
                 let out = gateway.query_sql(&sql, vec![], None).await.unwrap();
