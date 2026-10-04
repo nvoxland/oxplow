@@ -133,8 +133,12 @@ and a task edit that changes no indexed text costs a read. A thread or
 stream delete, a move, a soft delete: the kind follows its model, so
 nothing is left behind (the old upsert-only boot backfill kept orphans).
 Archiving a stream purges only its files (`purge_stream_files`). A plugin
-kind is never `revisioned`: no plugin
-kind has a reader for a revision (extensions.md "Ref kinds").
+kind is never `revisioned` yet: no plugin kind has a reader for a
+revision. The design is recorded (extensions.md "Ref kinds" →
+"Revisioned plugin kinds"): `revisioned: true`, a `rev` column on the
+`resolve` model (NULL = current), a page lens taking `rev` (`?ref=…&rev=…`),
+`[[pr:12@git:abc1234]]` through this grammar, and search entries kept
+rev-less.
 
 A kind's index is re-registered — and recomputed whole — when anything
 that decides its rows changes (`SearchableKind`): its view, the view's

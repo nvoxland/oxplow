@@ -1599,12 +1599,31 @@ routed; the row shows the kind's icon and label).
   (a hit must be something that opens), with a warning in the log.
 - Entries are project-global (`stream_id` NULL): a model is.
 
-**`revisioned` isn't built for plugin kinds.** A revision is read by its
-reader (`git:`, `snap:` — the VCS and snapshot stores), and no plugin
-kind has one: there is nothing `acme_pr:12@…` could be read from. When a
-provider can read a revision of its own things, `resolve` gains a `rev`
-parameter and `KindSpec::revisioned` follows; until then a plugin kind's
-ref takes no `@rev`.
+**Revisioned plugin kinds: designed, not built** (deferred in P10 by
+decision — nothing first-party has revisions to read). Today a plugin
+kind's ref takes no `@rev`: a revision is read by its reader (`git:`,
+`snap:` — the VCS and snapshot stores), and no plugin kind has one. The
+design, so building it is filling in, not deciding:
+
+- **The declaration:** `revisioned: true` on the kind. The loader then
+  requires its `resolve` model to declare a **`rev`** column: one row per
+  revision of a thing, `rev` NULL for the current one (so an unrevisioned
+  ref keeps resolving as now: `WHERE ref = :ref AND rev IS NULL`).
+  `KindSpec::revisioned` follows from it.
+- **The page:** its lens declares a `rev` param, and the page opens as
+  `page:ext.<ext>.<page>?ref=<ref>&rev=<rev>` (`rev` omitted: current).
+- **Refs:** `[[pr:12@git:abc1234]]` and `github_pr:12@git:abc1234` parse
+  through the one ref grammar (refs.md); the registry's `validate`
+  accepts `@rev` only for a revisioned kind, as for core ones. A rev is
+  opaque to the kind — the kind's model decides what it matches.
+- **Search** entries stay rev-less: a hit is the thing, at its current
+  revision (`searchable:` reads the `rev IS NULL` rows).
+- **What would make it real:** the github collector keeping one row per
+  pull request **head commit** (`rev` = `git:<head sha>`, the latest
+  also stored with `rev` NULL), and a consumer that wants a pull request
+  as it stood — a review or an effort linking the PR at the commit it
+  reviewed. Until something reads it, building it would be an unproven
+  contract (target-architecture §15 "Left for P11").
 
 ## Effects (experimental)
 
