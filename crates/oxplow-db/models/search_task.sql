@@ -1,6 +1,6 @@
 -- Archived work leaves search, as its files do (tsk921): a task in an
 -- archived thread or stream isn't indexed; the backlog (no thread) is.
-SELECT CAST('task:tsk' || t.id AS TEXT) AS ref,
+SELECT CAST('work_item:oxplow:tsk' || t.id AS TEXT) AS ref,
        CAST(t.title AS TEXT) AS title,
        CAST('tsk' || t.id || char(10) || t.description AS TEXT) AS body,
        CAST(CASE WHEN th.stream_id IS NULL THEN NULL ELSE 'str' || th.stream_id END AS TEXT)

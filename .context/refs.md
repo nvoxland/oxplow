@@ -124,7 +124,12 @@ hits carry `{ kind, ref_id }` for plugin kinds as for core ones and the
 desktop routes them through `searchHitTarget`. Core's tasks, comments,
 thread notes and wiki pages are indexed the same way (tsk864): each an
 asset over its `v_search_<kind>` model (`kind_search::CORE_KINDS`),
-whose rows also carry their stream and aren't bounded; only files stay
+whose rows also carry their stream and aren't bounded. Like every
+published model, a feed's `ref` is the canonical ref a hit opens
+(`work_item:oxplow:tsk7`, `task_note:not5`, `comment:cmt3`,
+`wiki:<slug>`; tsk922) — `CORE_KINDS` names the prefix each search kind's
+rows carry before the id — and a refused read of a table names its own
+model first (`read v_task or …`). Only files stay
 on the `search.index` pump consumer, since their text comes from
 snapshot blobs. A restate writes only the entries that differ (tsk896):
 each `search_entry` keeps its title-and-body hash (`content_hash`, V164,

@@ -342,8 +342,9 @@ fn view_names(
 }
 
 /// Table → the models whose view reads it (`model_input`, sources; a
-/// materialized model's own table → that model). Empty before the
-/// registry exists.
+/// materialized model's own table → that model), the table's own model
+/// (`v_<table>`) first, then by name (tsk922). Empty before the registry
+/// exists.
 fn source_readers(
     conn: &rusqlite::Connection,
 ) -> Result<std::collections::HashMap<String, Vec<String>>, DomainError> {
@@ -381,6 +382,10 @@ fn source_readers(
     for row in rows {
         let (table, view) = row.map_err(crate::database::map_sql_err)?;
         out.entry(table).or_default().push(view);
+    }
+    for (table, views) in out.iter_mut() {
+        let own = format!("v_{table}");
+        views.sort_by_key(|v| *v != own);
     }
     Ok(out)
 }
@@ -1134,9 +1139,10 @@ mod tests {
             }
         };
         let msg = refused("SELECT * FROM task").await;
+        // The table's own model comes first, before the others that read
+        // it (an index feed, v_search_task — tsk922).
         assert!(
-            msg.contains("`task` is a physical table, not a published model; read")
-                && msg.contains("v_task"),
+            msg.contains("`task` is a physical table, not a published model; read v_task"),
             "{msg}"
         );
         assert!(!msg.contains("no such table"), "{msg}");

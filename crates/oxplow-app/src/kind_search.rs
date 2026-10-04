@@ -42,13 +42,15 @@ pub const MAX_ROWS: usize = 20_000;
 /// The most bytes of one row's body it indexes.
 pub const MAX_BODY: usize = 16 * 1024;
 
-/// Core's kinds indexed from a model: the kind, its view, and its id.
-/// The view's rows carry a `stream_id`.
-pub const CORE_KINDS: &[(&str, &str, &str)] = &[
-    ("task", "v_search_task", r"^tsk\d+$"),
-    ("comment", "v_search_comment", r"^cmt\d+$"),
-    ("note", "v_search_note", r"^not\d+$"),
-    ("wiki", "v_search_wiki", r"^.+$"),
+/// Core's kinds indexed from a model: the search kind, its view, the
+/// canonical ref its rows carry up to the id (tsk922: a published model's
+/// `ref` is a canonical ref, the one a hit opens), and the id. The view's
+/// rows carry a `stream_id`.
+pub const CORE_KINDS: &[(&str, &str, &str, &str)] = &[
+    ("task", "v_search_task", "work_item:oxplow:", r"^tsk\d+$"),
+    ("comment", "v_search_comment", "comment:", r"^cmt\d+$"),
+    ("note", "v_search_note", "task_note:", r"^not\d+$"),
+    ("wiki", "v_search_wiki", "wiki:", r"^.+$"),
 ];
 
 /// The asset of a kind's index: `search:<kind>`.
@@ -65,6 +67,9 @@ pub(crate) struct SearchableKind {
     /// The view's SQL as compiled: an edit of the model changes it — and
     /// what the index holds — without touching the tables (tsk851).
     sql: String,
+    /// What a row's `ref` is up to its id: `<kind>:` for a plugin kind,
+    /// the canonical ref's for core's (`work_item:oxplow:`).
+    ref_prefix: String,
     id_pattern: String,
     /// The tables behind the view.
     tables: Vec<String>,
@@ -92,6 +97,7 @@ impl Materializer for KindSearchIndex {
 
     async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
         let (kind, view, core) = (self.kind.clone(), self.spec.view.clone(), self.spec.core);
+        let spec_prefix = self.spec.ref_prefix.clone();
         let id = regex::Regex::new(&self.spec.id_pattern)
             .map_err(|e| DomainError::Invalid(format!("ref kind `{kind}`'s id pattern: {e}")))?;
         let indexed = self
@@ -118,7 +124,7 @@ impl Materializer for KindSearchIndex {
                 if rows.len() > bound {
                     tracing::warn!(%kind, %view, "more than {MAX_ROWS} rows; the rest aren't searchable");
                 }
-                let prefix = format!("{kind}:");
+                let prefix = spec_prefix.as_str();
                 let mut entries: BTreeMap<oxplow_db::search_store::EntryKey, (String, String)> =
                     BTreeMap::new();
                 let mut skipped = 0usize;
@@ -127,7 +133,7 @@ impl Materializer for KindSearchIndex {
                     // could open.
                     let Some(ref_id) = r
                         .as_deref()
-                        .and_then(|r| r.strip_prefix(&prefix))
+                        .and_then(|r| r.strip_prefix(prefix))
                         .filter(|id_text| id.is_match(id_text))
                     else {
                         skipped += 1;
@@ -173,7 +179,7 @@ struct Searchable {
 async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
     // Each kind with its view's compiled SQL (none while the view isn't
     // published).
-    let kinds: Vec<(String, String, String, Option<String>)> = db
+    let kinds: Vec<(String, String, String, String, Option<String>)> = db
         .read(|tx| {
             let mut st = tx
                 .prepare(
@@ -183,7 +189,10 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                 )
                 .map_err(oxplow_db::map_sql_err)?;
             let rows = st
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .query_map([], |r| {
+                    let kind: String = r.get(0)?;
+                    Ok((kind.clone(), r.get(1)?, format!("{kind}:"), r.get(2)?, r.get(3)?))
+                })
                 .map_err(oxplow_db::map_sql_err)?
                 .collect::<rusqlite::Result<_>>()
                 .map_err(oxplow_db::map_sql_err)?;
@@ -191,11 +200,11 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         })
         .await?;
     // Core's kinds, from their views as the registry has them.
-    let core: Vec<(String, String, String, Option<String>)> = db
+    let core: Vec<(String, String, String, String, Option<String>)> = db
         .read(|tx| {
             CORE_KINDS
                 .iter()
-                .map(|(kind, view, id)| {
+                .map(|(kind, view, prefix, id)| {
                     let sql: Option<String> = tx
                         .query_row(
                             "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
@@ -204,7 +213,13 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                         )
                         .optional()
                         .map_err(oxplow_db::map_sql_err)?;
-                    Ok((kind.to_string(), view.to_string(), id.to_string(), sql))
+                    Ok((
+                        kind.to_string(),
+                        view.to_string(),
+                        prefix.to_string(),
+                        id.to_string(),
+                        sql,
+                    ))
                 })
                 .collect()
         })
@@ -212,14 +227,14 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
     let core_kinds: std::collections::BTreeSet<String> =
         core.iter().map(|(kind, ..)| kind.clone()).collect();
     let kinds: Vec<_> = kinds.into_iter().chain(core).collect();
-    let views: Vec<String> = kinds.iter().map(|(_, view, _, _)| view.clone()).collect();
+    let views: Vec<String> = kinds.iter().map(|(_, view, ..)| view.clone()).collect();
     let tables = crate::assets::tables_behind(db, &views).await?;
     let declared = kinds.iter().map(|(kind, ..)| kind.clone()).collect();
     let ready = kinds
         .into_iter()
         // A view the compiler hasn't published (yet, or any more) has
         // nothing to index; it registers once the registry lists it.
-        .filter_map(|(kind, view, id_pattern, sql)| {
+        .filter_map(|(kind, view, ref_prefix, id_pattern, sql)| {
             let tables = tables.get(&view)?.clone();
             let core = core_kinds.contains(&kind);
             Some((
@@ -228,6 +243,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                     core,
                     view,
                     sql: sql?,
+                    ref_prefix,
                     id_pattern,
                     tables,
                 },
@@ -869,6 +885,46 @@ mod core_tests {
             entries(&svc, "task").await == vec![(stays.id.to_string(), Some(stream.id.to_string()))]
         })
         .await;
+    }
+
+    /// tsk922: a core feed model is published like any other, so its `ref`
+    /// is a canonical ref — the one a hit opens — and its rows still index
+    /// under the search kind.
+    #[tokio::test]
+    async fn core_feed_refs_are_canonical() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let t = task(&svc, thread.id, "Quux the sprocket").await;
+        eventually("indexed", || async {
+            entries(&svc, "task").await.len() == 1
+        })
+        .await;
+        let refs: Vec<String> = svc
+            .db
+            .read(|c| {
+                let mut s = c
+                    .prepare("SELECT ref FROM v_search_task")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = s
+                    .query_map([], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<String>>>()
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert_eq!(refs, vec![format!("work_item:oxplow:{}", t.id)]);
+        let kinds = oxplow_domain::refs::kind::core_kinds();
+        for r in &refs {
+            oxplow_domain::refs::validate_ref(&kinds, r).unwrap();
+        }
+        assert_eq!(
+            entries(&svc, "task").await,
+            vec![(t.id.to_string(), Some(stream.id.to_string()))]
+        );
     }
 
     /// tsk921: archived work leaves search as its files do — an archived
