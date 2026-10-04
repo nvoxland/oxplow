@@ -55,10 +55,23 @@ describe("an extension's ref kind (P8.D7)", () => {
     expect(preprocessWikilinks("see [[pr:12]]")).toContain("oxplow-invalid:");
   });
 
-  test("an over-long id never reaches the pattern (tsk797)", () => {
+  test("a long id matches as the backend's does (tsk917)", () => {
     setRefKinds([ACME_PR]);
-    expect(pluginWikilinkRef(`pr:${"1".repeat(300)}`)).toBeNull();
-    expect(pluginWikilinkRef(`pr:${"1".repeat(200)}`)).toBe(`acme_pr:${"1".repeat(200)}`);
+    expect(pluginWikilinkRef(`pr:${"1".repeat(300)}`)).toBe(`acme_pr:${"1".repeat(300)}`);
+  });
+
+  test("every character the backend spells is itself here (tsk917)", () => {
+    // The backend's spelling: these escaped, everything else as is.
+    const spell = (c: string) => ("\\.+*?()|[]{}^$-&~#".includes(c) ? `\\${c}` : c);
+    const printable = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i));
+    for (const c of printable) {
+      for (const pattern of [`^${spell(c)}$`, `^[${spell(c)}a]$`]) {
+        const re = new RegExp(pattern);
+        for (const d of printable) {
+          expect([c, d, re.test(d)]).toEqual([c, d, d === c || (pattern.includes("a]") && d === "a")]);
+        }
+      }
+    }
   });
 
   test("reads v_ref_kind rows", () => {

@@ -1542,10 +1542,20 @@ ref_kinds:
 **Loading** (after models and pages) refuses, at `extension.yaml:<line>`:
 a kind outside the extension's namespace, an unanchored, broken or
 non-portable id regex (the desktop runs it in JS's backtracking engine,
-so it's held to a subset both engines read alike and neither backtracks
-on — characters, classes, `.`, `\d \w \s`, escaped punctuation and
-quantifiers; no groups, alternation or other escapes — and the renderer
-never matches an id over 256 characters; tsk797), a `resolve` that isn't one of its models with `ref` and `title`, a
+so it's held to a subset both engines read alike and JS can't be made
+to hang on — tsk797, tsk917 — parsed by `id_pattern`: printable ASCII,
+at most 256 characters, anchored `^…$` (an escaped `\$` isn't the
+anchor); characters, classes (not negated, no `[` inside, no `&&` `--`
+`~~` set operations), `\d`, `\w` and escaped punctuation (not `\<`
+`\>`, word boundaries in Rust), each with at most one quantifier (`? *
++ {n} {n,} {n,m}`, at most 256; no lazy `?`, no `{,m}`); no groups,
+alternation, `.` or other escapes. Two repeats of varying length must be
+fenced by a character the first can't match — `^[A-Z]+-\d+$` loads,
+`^\w+_\w+$` doesn't — so a failing match gives each back at most once,
+and no id length needs capping. What is kept, and what both the registry
+and `v_ref_kind.id_pattern` carry, spells every set out — `\d` is
+`[0-9]`, never Rust's Unicode digits — escaping exactly what either
+engine reads as syntax), a `resolve` that isn't one of its models with `ref` and `title`, a
 `page` that isn't one of its pages, a `wikilink` core already reads
 (a core kind, `git`, `dir`, `finding`, `tsk`), an icon not in
 `REF_KIND_ICONS` (lucide names the desktop maps), a duplicate.

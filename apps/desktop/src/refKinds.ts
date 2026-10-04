@@ -73,9 +73,6 @@ export const REF_KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
   "zap": Zap,
 };
 
-/** The longest id a `[[…]]` may name through an extension's kind. */
-export const MAX_PLUGIN_ID = 256;
-
 /** One extension's ref kind, as `v_ref_kind` lists it. */
 export interface RefKind {
   kind: string;
@@ -149,9 +146,10 @@ export function pluginWikilinkRef(interior: string): string | null {
   const id = interior.slice(colon + 1).trim();
   const kind = current.get(head) ?? [...current.values()].find((k) => k.wikilinks.includes(head));
   // The pattern runs in JS's backtracking engine: the load check keeps it
-  // to a portable, group-free subset, and a long id never reaches it
-  // (tsk797).
-  if (!kind || !id || id.length > MAX_PLUGIN_ID) return null;
+  // in one explicit ASCII form both engines read alike, with no repeats
+  // that could share characters unfenced, so no id makes it backtrack
+  // (tsk797, tsk917).
+  if (!kind || !id) return null;
   let matches = false;
   try {
     matches = new RegExp(kind.idPattern).test(id);
