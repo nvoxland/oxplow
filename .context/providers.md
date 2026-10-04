@@ -1004,11 +1004,12 @@ gone have **Remove** (`InlineConfirm`, `remove_provider_instance`:
 `canRemoveInstance`) — a global one whose provider is gone included: a
 global instance is left out of the list only where the project doesn't
 have its extension enabled; a provider's own instance is turned off, not
-removed. There is no automated browser test of this page — the repo's
-Playwright scripts (`tests-e2e/`) are run by hand against a daemon — so
-the page is covered by `IntegrationsSection.test.tsx` and
+removed. The page is covered by `IntegrationsSection.test.tsx` and
 `integrationsModel.test.ts`, the core by `providers/tests.rs`, and the
-whole by the in-app walk (tsk469). Approving the
+whole in a browser by the suite's `integrations/fake-provider` spec
+(`tests-e2e/`, P11): a person fills the fake's Team, presses Check and
+Enable, makes it the active provider; an item created on it reaches the
+fake's service, and after Sync Now it is on the Board. Approving the
 program stays in Data → Programs; approving a provider restarts its
 running instance on what was approved (`ProviderRegistry::approved`,
 called by `approve_project_program`), so updated declarations take

@@ -16,6 +16,8 @@ export type Daemon = {
   token: string;
   /** The project's worktree. */
   project: string;
+  /** Its `TMUX_TMPDIR`: where its tmux server's socket is. */
+  tmux: string;
   stop(): Promise<void>;
 };
 
@@ -60,8 +62,13 @@ export async function startDaemon(): Promise<Daemon> {
   git("-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "-q", "--allow-empty", "-m", "init");
 
   const token = randomUUID();
+  // A tmux client finds its server by `$TMUX` before `TMUX_TMPDIR`: run from
+  // inside tmux, the daemon would otherwise reach the person's own server.
+  const env: NodeJS.ProcessEnv = { ...process.env, OXPLOW_HOME: home, TMUX_TMPDIR: tmux, RUST_LOG: process.env.RUST_LOG ?? "warn" };
+  delete env.TMUX;
+  delete env.TMUX_PANE;
   const child: ChildProcess = spawn(bin, ["--project", project, "--bind", "127.0.0.1:0", "--token-stdin"], {
-    env: { ...process.env, OXPLOW_HOME: home, TMUX_TMPDIR: tmux, RUST_LOG: process.env.RUST_LOG ?? "warn" },
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   const stderr: string[] = [];
@@ -86,11 +93,19 @@ export async function startDaemon(): Promise<Daemon> {
     base,
     token,
     project,
+    tmux,
     async stop() {
       if (child.exitCode === null) {
         const exited = new Promise((r) => child.once("exit", r));
         child.kill("SIGTERM");
         await exited;
+      }
+      // Its terminals' tmux server outlives it; with none started, there is
+      // nothing to kill.
+      try {
+        execFileSync("tmux", ["kill-server"], { env, stdio: "ignore" });
+      } catch {
+        // no server
       }
       rmSync(dir, { recursive: true, force: true });
     },

@@ -16,9 +16,15 @@ providers:
     declarations: provider.json
 effects:
   - id: note-created
-    summary: Looks at each created work item.
+    summary: >-
+      Comments on each created oxplow task; one titled "[fail]" fails, one
+      titled "[delete]" asks to delete it.
     on: [work_item.created]
     entry: effects/note.star
+    # The item as it reads now: a person's retry composes from this afresh.
+    input: |
+      SELECT CAST(ref AS TEXT) AS ref, CAST(title AS TEXT) AS title
+        FROM v_work_item WHERE ref = :work_item
 models:
   - name: item
     version: 1
