@@ -1909,7 +1909,9 @@ fn record_tx(
         let mut event = event.clone().with_cause(executed.id.clone());
         event.anchors.thread_id = event.anchors.thread_id.or(fallback.thread_id);
         event.anchors.stream_id = event.anchors.stream_id.or(fallback.stream_id);
-        append_tx(tx, vocabulary, &event)?;
+        // One already logged under its dedupe key is that same fact (a
+        // re-sent step's answer, tsk912): logged once.
+        oxplow_db::event_log_store::append_unique_tx(tx, vocabulary, &event)?;
     }
     set_event_id_tx(tx, audit_id, &executed.id)?;
     Ok(Recorded {

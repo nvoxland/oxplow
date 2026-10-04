@@ -166,6 +166,22 @@ fn route(
     })
 }
 
+/// A step sent with an idempotency key is the same write on every
+/// attempt, and its system answers a re-send with the same answer, events
+/// included: each event without a dedupe key of its own takes one from
+/// the key, so a re-sent step that had landed logs its events once
+/// (tsk912; `record_tx` skips an event already logged under its key).
+fn same_events_once(mut out: HandlerOutput, key: Option<&str>) -> HandlerOutput {
+    if let Some(key) = key {
+        for (i, event) in out.events.iter_mut().enumerate() {
+            if event.dedupe_key.is_none() {
+                event.dedupe_key = Some(format!("{key}:event:{i}"));
+            }
+        }
+    }
+    out
+}
+
 /// A step's failure as the run reports it: the step that failed and the
 /// ones that landed before it, which stand.
 fn stopped(failed: &str, landed: &[NestedChild], err: &CommandError) -> CommandError {
@@ -294,7 +310,10 @@ impl CommandBus {
                 StepRun::External(handler) => {
                     let invocation =
                         origin.invocation(actor, index, &step.call.name, &step.call.input);
-                    handler(invocation, step.call.input.clone()).await
+                    let key = invocation.idempotency_key.clone();
+                    handler(invocation, step.call.input.clone())
+                        .await
+                        .map(|out| same_events_once(out, key.as_deref()))
                 }
             };
             match ran {

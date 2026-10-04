@@ -1116,6 +1116,78 @@ mod tests {
         assert_eq!(keys.lock().last(), Some(&None));
     }
 
+    /// tsk912: a step that landed before a later one failed is sent again
+    /// on the retry (its key the same), and its system answers it again —
+    /// but its events are logged once, not again under new ids.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_landed_steps_events_are_logged_once_across_a_retry() {
+        use crate::commands::{Command, Handler, HandlerOutput, Invocation};
+        use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
+        use oxplow_domain::{Atomicity, CommandEffect, CommandSpec, Confirm, Invokers, Lifecycle};
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"probe.write\", \"input\": {\"n\": 2}}]}\n";
+        extension(
+            &svc.layout.project_dir,
+            MARK_DONE,
+            &[("mark.star", TWO_STEPS)],
+        );
+        approve(svc).await;
+        register(svc);
+        let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
+        let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        register_probe(svc, keys.clone(), fail.clone());
+        // A write outside oxplow that always lands, answering with an event.
+        let note = Command::new(
+            CommandSpec {
+                name: "probe.note".into(),
+                summary: "Note something outside oxplow (a test probe).".into(),
+                input_schema: json!({ "type": "object" }),
+                invokers: Invokers::ALL,
+                confirm: Confirm::Never,
+                undoable: false,
+                lifecycle: Lifecycle::Stable,
+                atomicity: Atomicity::External,
+                effect: CommandEffect::Write,
+            },
+            Handler::External(Arc::new(move |_invocation: Invocation, _input| {
+                Box::pin(async move {
+                    Ok(HandlerOutput {
+                        events: vec![Envelope::typed::<ConfigChanged>(
+                            "probe",
+                            &ConfigChangedV1 {
+                                key: "probe.noted".into(),
+                                before: Value::Null,
+                                after: json!(1),
+                            },
+                        )],
+                        ..HandlerOutput::default()
+                    })
+                })
+            })),
+        )
+        .unwrap();
+        svc.commands.register(note).unwrap();
+        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        EffectTriggers::new(Arc::downgrade(svc))
+            .handle(&ev)
+            .await
+            .unwrap();
+        fail.store(false, std::sync::atomic::Ordering::SeqCst);
+        let human = oxplow_domain::Actor::Human;
+        let retried = retry(svc, &human, &ev, true).await.unwrap();
+        assert_eq!(retried.result["outcome"], json!("ok"));
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT count(*) FROM v_event WHERE type = 'config.changed' \
+                 AND json_extract(payload, '$.key') = 'probe.noted'"
+            )
+            .await,
+            json!([[1]])
+        );
+    }
+
     async fn retry(
         svc: &Services,
         actor: &oxplow_domain::Actor,

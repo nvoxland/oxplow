@@ -365,7 +365,10 @@ set for a step of an effect's reaction (`effect_step_key`:
 `effect:<effect>:<event id>:<index>:<hash of the call>`, the same on
 every attempt at it — P10) and `None` otherwise; a provider's handlers
 pass it to the provider ([providers.md](./providers.md)
-"Idempotency"). It is the right
+"Idempotency"). A keyed step's events take dedupe keys from it
+(`<key>:event:<i>`, `same_events_once`) and `record_tx` appends handler
+events uniquely, so a step that landed and is re-sent on a retry — its
+system answering again, events included — logs them once (tsk912). It is the right
 kind for exactly those commands, not a shortcut: `CommandBus::
 external_commands()` is pinned by `the_external_commands_are_the_reviewed_ones`,
 and adding one means naming its system in the summary. A
