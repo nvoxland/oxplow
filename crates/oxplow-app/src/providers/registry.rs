@@ -2380,14 +2380,23 @@ impl ProviderRegistry {
 
     /// A sign-in being finished may send its code, verifier and client
     /// secret only where it was approved to: its provider is approved as
-    /// it is now, and still declares the sign-in it began with.
+    /// it is now, still declares the sign-in it began with, and the
+    /// instance still keeps its credentials where it did — a global one
+    /// turned off here, or a project entry of its name arriving, moves
+    /// them, and the token mustn't go to the old place (tsk909).
     fn still_approved(
         &self,
         instance: &str,
         name: &str,
         under_way: &SignInUnderWay,
     ) -> Result<(), String> {
-        let (_, decl, resolved) = self.credential(instance, name).map_err(|e| e.to_string())?;
+        let (account, decl, resolved) =
+            self.credential(instance, name).map_err(|e| e.to_string())?;
+        if account != under_way.account {
+            return Err(format!(
+                "`{instance}` keeps its credentials elsewhere since the sign-in began; sign in again"
+            ));
+        }
         self.approved_for_sign_in(&resolved, name)
             .map_err(|e| e.to_string())?;
         if decl.oauth.as_ref() != Some(under_way.pending.decl()) {

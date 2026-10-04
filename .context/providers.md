@@ -712,7 +712,10 @@ form; sign-in is a provider's.
   `signed_in`, `failed { error }`, or `not_this_sign_in { reason }` —
   refused, nothing done, the wait goes on. A match ends the sign-in: the
   provider is re-checked as approved with the declaration it began with
-  (an endpoint edited meanwhile gets nothing), the code is exchanged, the
+  (an endpoint edited meanwhile gets nothing) and with its credentials
+  where they were (a global instance turned off here, or a project entry of
+  its name arriving, moves them: `failed`, sign in again — tsk909), the
+  code is exchanged, the
   token stored, `credential_changed` restarts the instance on it, and
   the renderer hears `CredentialChanged { instance, name, error }` — the
   keychain is no model, so this is one of the bus's UI-only signals. A

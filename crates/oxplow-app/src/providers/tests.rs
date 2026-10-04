@@ -3171,6 +3171,41 @@ async fn complete(
         .await
 }
 
+/// tsk909: a sign-in stores its token to the account it began for. When
+/// the instance's entry changes under it — a global one turned off here,
+/// so the project's own entry replaces it — the redirect is refused and
+/// nothing is stored to the old account.
+#[tokio::test]
+async fn a_sign_in_whose_account_changed_meanwhile_is_refused() {
+    let (fx, sim) = signing_in("", "").await;
+    let providers = &fx.svc.providers;
+    providers
+        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
+        .await
+        .unwrap();
+    let page = providers
+        .begin_sign_in(SHARED, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    providers.off_here(&Actor::Human, SHARED).await.unwrap();
+    let redirect = browse(&page).await;
+    let done = providers
+        .complete_sign_in(SHARED, "FAKE_TOKEN", &redirect)
+        .await;
+    assert!(
+        matches!(
+            &done,
+            Ok(SignInCompletion::Failed { error }) if error.contains("sign in again")
+        ),
+        "{done:?}"
+    );
+    assert!(
+        !sim.grants().contains(&"authorization_code".to_string()),
+        "no code was exchanged: {:?}",
+        sim.grants()
+    );
+}
+
 /// Start a sign-in, do what the person's browser does, and hand the
 /// redirect over as the shell does. What the renderer then hears.
 async fn sign_in(fx: &EffortFixture, name: &str) -> Option<String> {
