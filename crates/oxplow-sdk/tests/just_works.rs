@@ -283,6 +283,41 @@ fn fake_bin() -> PathBuf {
     bin
 }
 
+/// A provider script running the fake with `hooks`; its service's state
+/// outlives its process, as a real service's does — what the kit's
+/// restart re-sends against. The state sits outside the extension folder,
+/// whose contents its consent covers.
+fn fake_script(project: &Path, hooks: &str) -> String {
+    format!(
+        "#!/bin/sh\nOXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
+        project.join(".oxplow").display(),
+        fake_bin().display()
+    )
+}
+
+/// The kit run against a service with nothing in it: the golden
+/// transcript records the refs it hands out.
+async fn kit_on_a_fresh_service(
+    project: &Path,
+    bless: bool,
+) -> oxplow_sdk::plugin_test::TestReport {
+    let kept = project.join(".oxplow");
+    let entries = match std::fs::read_dir(&kept) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        read => read.unwrap().collect(),
+    };
+    for entry in entries {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("fake-state-"))
+        {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    test_extension(project, "fake", bless).await.unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     let dir = project().await;
@@ -294,11 +329,7 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
         report.errors
     );
     let ext = dir.path().join("oxplow/extensions/fake");
-    std::fs::write(
-        ext.join("bin/provider"),
-        format!("#!/bin/sh\nexec '{}' \"$@\"\n", fake_bin().display()),
-    )
-    .unwrap();
+    std::fs::write(ext.join("bin/provider"), fake_script(dir.path(), "")).unwrap();
     std::fs::write(
         ext.join("provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
@@ -314,9 +345,9 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
         "input: { command: create, input: { title: First } }\nexpect: { ref: $any }\n",
     )
     .unwrap();
-    let blessed = test_extension(dir.path(), "fake", true).await.unwrap();
+    let blessed = kit_on_a_fresh_service(dir.path(), true).await;
     assert_eq!(blessed.errors, Vec::<String>::new());
-    let report = test_extension(dir.path(), "fake", false).await.unwrap();
+    let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert_eq!(report.errors, Vec::<String>::new());
     for ran in ["work_items suite", "read work_items", "discover"] {
         assert!(
@@ -330,13 +361,10 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     // checkpoint streams everything again — fails the kit.
     std::fs::write(
         ext.join("bin/provider"),
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_HOOKS=stuck-cursor exec '{}' \"$@\"\n",
-            fake_bin().display()
-        ),
+        fake_script(dir.path(), "stuck-cursor"),
     )
     .unwrap();
-    let report = test_extension(dir.path(), "fake", false).await.unwrap();
+    let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert!(
         report
             .errors

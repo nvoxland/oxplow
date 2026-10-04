@@ -110,6 +110,17 @@ declares no `idempotent_writes` — `plain_declarations()` — and ignores
 keys). **It keeps `idempotent_writes`:** an `invoke` sent again with its
 `idempotency_key` is done once and answered as the first was; the key
 sent with another write is `InvalidInput` at `/idempotency_key`.
+**Its service outlives its process** when `OXPLOW_FAKE_STATE` names a
+file: items, revisions and answered keys are restored at start and kept
+after every invoke, as a real service's are — what the kit's restart
+re-sends against (tsk916). Fixtures that launch it through an
+extension (`providers/tests.rs` `write_extension`, the SDK's
+`just_works.rs`, the desktop `plugin_cli.rs`) set it to
+`<project>/.oxplow/fake-state-$OXPLOW_PROVIDER_ID.json` — outside the
+extension folder, whose contents its consent covers — and the kit tests
+clear it before each run, since the golden transcript records the refs
+handed out. Without it the fake forgets on exit, and a declared
+`idempotent_writes` fails the kit's restart check.
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 

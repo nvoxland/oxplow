@@ -711,6 +711,11 @@ impl Instance {
             .expect("the hooks reach it");
     }
 
+    /// End its process; the next call starts a new one.
+    pub(crate) async fn end_process(&self) {
+        self.live.lock().await.take();
+    }
+
     /// Forget the process `peer` talks to when it died under a call, so
     /// the next call restarts it.
     pub(super) async fn forget_if_closed(&self, peer: &oxplow_provider_protocol::Peer) {

@@ -19,6 +19,11 @@
 //! `deleted`), in revision order, as `$/record` followed by a `$/state`
 //! checkpoint `{ cursor, seen }` — opaque to the host.
 //!
+//! With `OXPLOW_FAKE_STATE` (a file) its service's state — the items and
+//! each idempotency key's answer — is kept there and read back at start,
+//! so it outlives the process as a real service's does; without, it lives
+//! in memory.
+//!
 //! **Hooks**, from `OXPLOW_FAKE_HOOKS` at start or a `fake/hooks { hooks }`
 //! notification later (comma-separated):
 //! - `fail-next:<n>` — the next `n` `check` / `invoke` / `read` calls fail
@@ -294,6 +299,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
     }
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Item {
     record: WorkItemRecord,
     /// The world's revision when it last changed: a read streams the
@@ -315,6 +321,57 @@ struct World {
     /// Each idempotency key's write — its command and input — and answer.
     answered: HashMap<String, (String, Value, Value)>,
     in_flight: HashMap<Id, oneshot::Sender<()>>,
+    /// Where its service's state is kept (`OXPLOW_FAKE_STATE`), so it
+    /// outlives the process as a real service's does — what a re-send
+    /// after a restart is checked against (tsk916). In memory without.
+    state: Option<std::path::PathBuf>,
+}
+
+/// What of the world is its service's — kept across restarts.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Saved {
+    items: BTreeMap<u64, Item>,
+    next: u64,
+    rev: u64,
+    answered: HashMap<String, (String, Value, Value)>,
+}
+
+impl World {
+    /// Keep the service's state, when it has somewhere to.
+    fn save(&self) {
+        let Some(path) = &self.state else {
+            return;
+        };
+        let saved = Saved {
+            items: self.items.clone(),
+            next: self.next,
+            rev: self.rev,
+            answered: self.answered.clone(),
+        };
+        let kept = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(path, serde_json::to_vec(&saved)?));
+        if let Err(e) = kept {
+            eprintln!("fake: can't keep its state at {}: {e}", path.display());
+        }
+    }
+
+    /// The service's state as last kept, if any.
+    fn restore(&mut self) {
+        let Some(saved) = self
+            .state
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|text| serde_json::from_str::<Saved>(&text).ok())
+        else {
+            return;
+        };
+        self.items = saved.items;
+        self.next = saved.next;
+        self.rev = saved.rev;
+        self.answered = saved.answered;
+    }
 }
 
 type Shared = Arc<Mutex<World>>;
@@ -331,18 +388,27 @@ pub enum Served {
 
 /// Serve the protocol on `reader` / `writer` as instance `id` until the
 /// stream ends, a `shutdown`, or a `crash` hook.
-pub async fn serve<R, W>(reader: R, writer: W, hooks: &str, id: &str) -> Served
+pub async fn serve<R, W>(
+    reader: R,
+    writer: W,
+    hooks: &str,
+    id: &str,
+    state: Option<std::path::PathBuf>,
+) -> Served
 where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
     let (peer, mut incoming) = Peer::spawn(reader, writer);
-    let world: Shared = Arc::new(Mutex::new(World {
+    let mut world = World {
         id: id.to_string(),
         hooks: Hooks::parse(hooks),
         next: 1,
+        state,
         ..World::default()
-    }));
+    };
+    world.restore();
+    let world: Shared = Arc::new(Mutex::new(world));
     while let Some(message) = incoming.recv().await {
         match message {
             Incoming::Notification { method, params } if method == notify::CANCEL => {
@@ -564,6 +630,7 @@ async fn handle(
             if let Some(key) = key {
                 w.answered.insert(key, (p.command, p.input, answer.clone()));
             }
+            w.save();
             if std::mem::take(&mut w.hooks.lose_reply) {
                 drop(w);
                 // Landed, and never answered.

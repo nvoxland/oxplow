@@ -8,8 +8,10 @@
 async fn main() {
     let hooks = std::env::var("OXPLOW_FAKE_HOOKS").unwrap_or_default();
     let id = std::env::var("OXPLOW_PROVIDER_ID").unwrap_or_else(|_| "fake".into());
+    let state = std::env::var_os("OXPLOW_FAKE_STATE").map(std::path::PathBuf::from);
     let served =
-        oxplow_provider_fake::serve(tokio::io::stdin(), tokio::io::stdout(), &hooks, &id).await;
+        oxplow_provider_fake::serve(tokio::io::stdin(), tokio::io::stdout(), &hooks, &id, state)
+            .await;
     std::process::exit(match served {
         oxplow_provider_fake::Served::Ended => 0,
         oxplow_provider_fake::Served::Crashed => 3,

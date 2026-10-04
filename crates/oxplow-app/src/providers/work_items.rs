@@ -70,6 +70,10 @@ impl ExternalWorkItems {
 
 #[async_trait]
 impl ExternalVerbs for ExternalWorkItems {
+    async fn restart(&self) {
+        self.instance.end_process().await;
+    }
+
     async fn invoke(
         &self,
         actor: &Actor,

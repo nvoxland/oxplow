@@ -155,6 +155,11 @@ pub trait ExternalVerbs: Send + Sync {
         input: Value,
         idempotency_key: Option<String>,
     ) -> Result<VerbOutcome, CommandError>;
+
+    /// End the provider's process: the next call starts a new one. What
+    /// the conformance kit re-sends a keyed write across (tsk916) — a
+    /// provider that keeps its keys only in memory would do it again.
+    async fn restart(&self);
 }
 
 /// One source of work items: its ref segment (`oxplow`, `linear`), what

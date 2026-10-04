@@ -389,6 +389,27 @@ mod tests {
         bin
     }
 
+    /// `plugin test` against a fake service with nothing in it: its
+    /// state outlives each process (what the kit's restart re-sends
+    /// against), and the golden transcript records the refs it hands out.
+    fn test_on_a_fresh_service(project: &Path, args: &[&str]) -> (i32, String, String) {
+        let kept = project.join(".oxplow");
+        let entries = match std::fs::read_dir(&kept) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            read => read.unwrap().collect(),
+        };
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("fake-state-"))
+            {
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+        cli(args)
+    }
+
     /// P5.D5's red: `plugin test` on a scaffolded provider — the stub
     /// fails, the fake behind it passes once blessed, and a changed
     /// golden transcript fails naming the file and line.
@@ -409,7 +430,7 @@ mod tests {
         let ext = dir.path().join("oxplow/extensions/fake");
 
         // The stub doesn't speak the protocol.
-        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(
             out.contains("error: oxplow/extensions/fake/provider.json:1: initialize failed"),
@@ -419,7 +440,11 @@ mod tests {
         // The fake does: its declarations, a config its check accepts.
         std::fs::write(
             ext.join("bin/provider"),
-            format!("#!/bin/sh\nexec '{}' \"$@\"\n", fake_bin().display()),
+            format!(
+                "#!/bin/sh\nOXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
+                dir.path().join(".oxplow").display(),
+                fake_bin().display()
+            ),
         )
         .unwrap();
         std::fs::write(
@@ -427,7 +452,7 @@ mod tests {
             serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
         )
         .unwrap();
-        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(
             out.contains(
@@ -440,14 +465,15 @@ mod tests {
             "config: { team: core }\n",
         )
         .unwrap();
-        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(
             out.contains("fixtures/transcripts/fake.jsonl:1: no golden transcript"),
             "{out}"
         );
 
-        let (code, out, err) = cli(&["test", "fake", "--bless", "--root", root]);
+        let (code, out, err) =
+            test_on_a_fresh_service(dir.path(), &["test", "fake", "--bless", "--root", root]);
         assert_eq!(code, 0, "{out}{err}");
         assert!(
             out.contains("blessed: oxplow/extensions/fake/fixtures/transcripts/fake.jsonl"),
@@ -457,7 +483,7 @@ mod tests {
             out.contains("ran check, provider fake, discover, read work_items, work_items suite"),
             "{out}"
         );
-        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 0, "a blessed transcript matches: {out}");
 
         // Its own questions: the skill file must name what they reach.
@@ -467,7 +493,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(ext.join("README.md"), "# Fake tracker\n").unwrap();
-        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(out.contains("oxplow/extensions/fake/questions.yaml: question 1 (\"File a ticket.\"): skill `README.md` never names `fake.create`"), "{out}");
         std::fs::write(
@@ -475,7 +501,7 @@ mod tests {
             "# Fake tracker\n\nFile one with `fake.create`.\n",
         )
         .unwrap();
-        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 0, "{out}");
         assert!(
             out.contains(
@@ -489,7 +515,8 @@ mod tests {
         let text = std::fs::read_to_string(&golden).unwrap();
         let line = text.lines().position(|l| l.contains("\"First\"")).unwrap() + 1;
         std::fs::write(&golden, text.replace("\"First\"", "\"Second\"")).unwrap();
-        let (code, out, _) = cli(&["test", "fake", "--json", "--root", root]);
+        let (code, out, _) =
+            test_on_a_fresh_service(dir.path(), &["test", "fake", "--json", "--root", root]);
         assert_eq!(code, 1, "{out}");
         let report: serde_json::Value = serde_json::from_str(&out).unwrap();
         let errors = report["errors"].as_array().unwrap();

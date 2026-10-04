@@ -237,9 +237,15 @@ was (P7.A7; the fake's `stale-read` hook is the red); a provider that
 declares `idempotent_writes` keeps it — a create sent twice with one key
 (through `WorkItemsProbe::verbs`, the host's `ExternalVerbs`, since the
 bus never re-sends a key itself) answers alike, another key is another
-item, and after a read back two items carry the keyed title
-(`WorkItemsProbe::titled`; P10, the fake's `forget-keys` hook is the
-red); and delete follows its feature, cleaning up what the suite filed
+item, the first key sent again **after the provider's process restarts**
+(`ExternalVerbs::restart`) still answers alike — the promise outlives the
+process, which is when the host re-sends — and after a read back two
+items carry the run's own keyed title (`conformance keyed item <8 hex>`,
+so a leftover from an earlier run against a real service never counts;
+`WorkItemsProbe::titled`). Every item it files, re-sends included, is
+in the cleanup list before it is checked (tsk916). The fake's
+`forget-keys` hook, and the fake without `OXPLOW_FAKE_STATE`, are the
+red; and delete follows its feature, cleaning up what the suite filed
 when the provider can. `native` is the provider's own fields for the items it files
 (oxplow's test passes the actor's thread, so `in_progress` claims). A
 `WorkItemsProbe` reads back what the host recorded (`ServicesProbe` over

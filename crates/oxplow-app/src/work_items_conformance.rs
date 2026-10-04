@@ -293,7 +293,12 @@ pub async fn suite(
                 "declared, but the host has no verbs to send a key to".into(),
             ),
             Some(verbs) => {
-                let title = "conformance keyed item";
+                // Its own title, so a provider's leftovers from another run
+                // (one without `delete`, a run that failed) don't count.
+                let title = format!(
+                    "conformance keyed item {}",
+                    &uuid::Uuid::new_v4().simple().to_string()[..8]
+                );
                 let mut input = serde_json::json!({
                     "title": title,
                     "body": "made by the conformance suite",
@@ -307,20 +312,27 @@ pub async fn suite(
                     .invoke(actor, "create", input.clone(), Some(key.clone()))
                     .await;
                 let again = verbs
-                    .invoke(actor, "create", input.clone(), Some(key))
+                    .invoke(actor, "create", input.clone(), Some(key.clone()))
                     .await;
-                let other = verbs.invoke(actor, "create", input, Some(other_key)).await;
+                let other = verbs
+                    .invoke(actor, "create", input.clone(), Some(other_key))
+                    .await;
+                // Across a restart of its process: a provider that keeps its
+                // keys only in memory would make it again (tsk916).
+                verbs.restart().await;
+                let restarted = verbs.invoke(actor, "create", input, Some(key)).await;
                 let item_of = |r: &serde_json::Value| r["ref"].as_str().map(str::to_string);
-                match (first, again, other) {
-                    (Ok(first), Ok(again), Ok(other)) => {
-                        for r in [&first, &again, &other]
-                            .into_iter()
-                            .filter_map(|o| item_of(&o.result))
-                        {
-                            if !created.contains(&r) {
-                                created.push(r);
-                            }
-                        }
+                // Whatever was made is cleaned up below, however it went.
+                for r in [&first, &again, &other, &restarted]
+                    .into_iter()
+                    .filter_map(|o| o.as_ref().ok().and_then(|o| item_of(&o.result)))
+                {
+                    if !created.contains(&r) {
+                        created.push(r);
+                    }
+                }
+                match (first, again, other, restarted) {
+                    (Ok(first), Ok(again), Ok(other), Ok(restarted)) => {
                         if first.result != again.result {
                             fail(
                                 "idempotent_writes",
@@ -330,26 +342,39 @@ pub async fn suite(
                                 ),
                             );
                         }
+                        if first.result != restarted.result {
+                            fail(
+                                "idempotent_writes",
+                                format!(
+                                    "one key sent again after a restart answered {} then {}",
+                                    first.result, restarted.result
+                                ),
+                            );
+                        }
                         if item_of(&first.result) == item_of(&other.result) {
                             fail("idempotent_writes", "another key gave the same item".into());
                         }
                         if let Ok(true) = probe.sync(provider).await {
                             probe.settle().await;
-                            let rows = probe.titled(provider, title).await;
+                            let rows = probe.titled(provider, &title).await;
                             if rows.len() != 2 {
                                 fail(
                                     "idempotent_writes",
                                     format!(
-                                        "after two keys (one sent twice) it has {} items: {rows:?}",
+                                        "after two keys (one sent three times) it has {} items: \
+                                         {rows:?}",
                                         rows.len()
                                     ),
                                 );
                             }
                         }
                     }
-                    (first, again, other) => fail(
+                    (first, again, other, restarted) => fail(
                         "idempotent_writes",
-                        format!("a keyed create failed: {first:?} / {again:?} / {other:?}"),
+                        format!(
+                            "a keyed create failed: {first:?} / {again:?} / {other:?} / \
+                             {restarted:?}"
+                        ),
                     ),
                 }
             }

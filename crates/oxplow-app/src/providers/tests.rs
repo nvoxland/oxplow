@@ -44,10 +44,14 @@ fn write_extension(project: &Path, hooks: &str) {
     )
     .unwrap();
     let script = dir.join("bin/provider");
+    // Its service's state outlives its process, as a real service's does
+    // (each instance its own file): what a restart re-sends against.
+    let state = project.join(".oxplow");
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nOXPLOW_FAKE_HOOKS='{hooks}' exec '{}' \"$@\"\n",
+            "#!/bin/sh\nOXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
+            state.display(),
             fake_bin().display()
         ),
     )
