@@ -598,8 +598,8 @@ the Stop hook decides whether to fire the file-review directive,
 so a successful amend reconciles in one round-trip instead of
 relying on the hook's one-fire silent-agreement grace.
 
-`effort_unattributed_file` (V34) records the **unattributed/unreviewed**
-audit residue of an effort close: the `changed_but_not_claimed` paths the
+`effort_unattributed_file` (V34; model `v_effort_unattributed_file`)
+records the **unattributed/unreviewed** audit residue of an effort close: the `changed_but_not_claimed` paths the
 snapshot diff saw change during the effort that nothing claimed. Columns:
 `effort_id`, `path`, `recorded_at`, primary key `(effort_id, path)`,
 CASCADE on the effort. Written by `attribution::reconcile_close` (called

@@ -3511,7 +3511,7 @@ mod tests {
     async fn snapshot_capture_then_list() {
         let db = Database::in_memory();
         seed_stream(&db, 1);
-        let store = SqliteSnapshotStore::new(db);
+        let store = SqliteSnapshotStore::new(db.clone());
         store
             .capture(FileSnapshot {
                 id: 0,
@@ -3530,6 +3530,25 @@ mod tests {
         let list = store.list_for_path("src/foo.rs").await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].size_bytes, 42);
+        // The same row, published as `v_snapshot_file` (tsk944).
+        let published = db
+            .read(|tx| {
+                let rows = || -> rusqlite::Result<Vec<(String, String, i64)>> {
+                    let mut st =
+                        tx.prepare("SELECT path, storage, size_bytes FROM v_snapshot_file")?;
+                    let rows = st
+                        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    Ok(rows)
+                };
+                rows().map_err(|e| DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            published,
+            vec![("src/foo.rs".to_string(), "oxplow".to_string(), 42)]
+        );
     }
 
     #[tokio::test]

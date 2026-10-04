@@ -14,31 +14,33 @@
 //!
 //! ## The four exposures
 //! - [`Exposure::Both`] — present on IPC and MCP (names may diverge per surface).
-//! - [`Exposure::UiOnly`] — intentionally UI-only (Tauri/runtime infra:
-//!   menus, terminals, LSP-client lifecycle, telemetry, background tasks,
-//!   launcher, workspace file I/O the agent does via its own Read/Write tools).
+//! - [`Exposure::UiOnly`] — intentionally UI-only, saying why an agent has
+//!   no tool for it: a person's consent or setting, the person's own
+//!   selection or input, live state pushed to the UI, runtime infra (menus,
+//!   terminals, the LSP client, windows), an ancestry walk the VCS answers,
+//!   or workspace file I/O the agent does with its own Read/Write tools.
+//! - [`Exposure::Model`] — a UI read whose agent counterpart is published
+//!   models: an agent reads the same rows with `query_sql`. Each model
+//!   named must be published (`tests/parity.rs`).
 //! - [`Exposure::AgentOnly`] — intentionally agent-only (dispatch, await_user,
 //!   batch/orchestration affordances).
-//! - [`Exposure::AgentTodo`] — *should* be on both; the MCP tool is not built
-//!   yet. A tracked, reviewed gap. `ipc` is set, `mcp` is `None`.
 //!
-//! ## The ratchet (closing a gap)
-//! When you build the MCP tool for an `AgentTodo` row, flip its `exposure` to
-//! `Both` and fill in `mcp: Some("<new_tool>")`. If you forget, the parity
-//! test's "every registered tool is classified" check fails on the new
-//! unclaimed tool — so drift is caught from both directions, in one diff.
+//! Every row is decided: there is no "build the MCP tool later" exposure.
+//! An agent's way to an IPC read is a tool (`Both`), a model (`Model`), or
+//! none, with the reason (`UiOnly`).
 
 /// Which adapter surface(s) a capability is expected to live on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exposure {
     /// Live on both the IPC (UI) and MCP (agent) surfaces.
     Both,
-    /// Intentionally UI-only.
-    UiOnly,
+    /// Intentionally UI-only: `why` an agent has no tool for it.
+    UiOnly { why: &'static str },
+    /// A UI read an agent makes through these published models instead
+    /// (`query_sql`).
+    Model { models: &'static [&'static str] },
     /// Intentionally agent-only.
     AgentOnly,
-    /// Intended for both; MCP tool not built yet. Tracked gap.
-    AgentTodo,
 }
 
 /// One domain capability and the name it carries on each surface.
@@ -49,7 +51,7 @@ pub struct Capability {
     pub exposure: Exposure,
     /// IPC command name, or `None` when the capability is agent-only.
     pub ipc: Option<&'static str>,
-    /// MCP tool name, or `None` when ui-only or not-yet-built (`AgentTodo`).
+    /// MCP tool name, or `None` when UI-only or read through models.
     pub mcp: Option<&'static str>,
 }
 
@@ -73,11 +75,20 @@ const fn both_named(capability: &'static str, ipc: &'static str, mcp: &'static s
         mcp: Some(mcp),
     }
 }
-/// Helper for an intentionally UI-only command.
-const fn ui(name: &'static str) -> Capability {
+/// Helper for an intentionally UI-only command, and why.
+const fn ui(name: &'static str, why: &'static str) -> Capability {
     Capability {
         capability: name,
-        exposure: UiOnly,
+        exposure: UiOnly { why },
+        ipc: Some(name),
+        mcp: None,
+    }
+}
+/// Helper for a UI read whose agent counterpart is published models.
+const fn model(name: &'static str, models: &'static [&'static str]) -> Capability {
+    Capability {
+        capability: name,
+        exposure: Model { models },
         ipc: Some(name),
         mcp: None,
     }
@@ -89,15 +100,6 @@ const fn agent(name: &'static str) -> Capability {
         exposure: AgentOnly,
         ipc: None,
         mcp: Some(name),
-    }
-}
-/// Helper for a tracked gap: IPC exists, MCP tool not built yet.
-const fn todo(name: &'static str) -> Capability {
-    Capability {
-        capability: name,
-        exposure: AgentTodo,
-        ipc: Some(name),
-        mcp: None,
     }
 }
 
@@ -114,17 +116,17 @@ pub const MANIFEST: &[Capability] = &[
     agent("get_task"),
     both("list_thread_notes"),
     agent("list_effort_observations"),
-    // Per-effort metric roll-up for the task-page panel (tsk250) — UI-only; the
+    // Per-effort metric roll-up for the task-page panel (tsk250): the
     // agent gets the same numbers as prompt text via oxplow-analytics'
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
-    // Effort bands on the Metrics Explorer time axis (tsk233) — UI-only overlay.
-    ui("list_efforts_in_window"),
+    model("list_efforts_in_window", &["v_effort"]),
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
     // on both surfaces, and change through the `metric.*` commands
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).
-    // The catalog toggle (tsk219): the person's typed call into the
-    // `metric.enable` command; an agent runs the command itself.
-    ui("enable_metrics"),
+    ui(
+        "enable_metrics",
+        "the Catalog toggle, a person's typed call into `metric.enable`; an agent runs the command itself",
+    ),
     // Architectural zones (tsk251) — agent-only: the agent reads the table
     // here and writes it with `config.set` (tsk411); the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
@@ -138,90 +140,177 @@ pub const MANIFEST: &[Capability] = &[
     // lenses, the launcher and menus) ----
     agent("list_commands"),
     // The bus itself: an agent through MCP (as its verified thread), the
-    // person through IPC (`Actor::Human`, confirming where asked). Undo is
-    // the person's (P5.A1).
+    // person through IPC (`Actor::Human`, confirming where asked).
     both("run_command"),
-    // One command's spec, for a form or a confirmation; agents list them
-    // with list_commands.
-    ui("get_command"),
-    ui("undo_command"),
-    // Approving or declining an agent's proposal is a person's (P6b).
-    ui("decide_proposal"),
+    ui(
+        "get_command",
+        "one command's spec, for a form or a confirmation; an agent lists them with `list_commands`",
+    ),
+    ui("undo_command", "undo is a person's (P5.A1)"),
+    ui(
+        "decide_proposal",
+        "approving or declining an agent's proposal is a person's (P6b)",
+    ),
     // ---- the event log's dead-letter queue ----
     both("list_dead_letters"),
-    // A person decides a dead letter's fate (V93): agents can list them.
-    ui("retry_dead_letter"),
-    ui("discard_dead_letter"),
+    ui(
+        "retry_dead_letter",
+        "a dead letter's fate is a person's (V93); an agent lists them",
+    ),
+    ui(
+        "discard_dead_letter",
+        "a dead letter's fate is a person's (V93); an agent lists them",
+    ),
     both("search"),
     both("query_sql"),
-    // Settings → Data (models with counts, unsynced entities); an agent
-    // reads v_model and counts with query_sql.
-    ui("list_data_entities"),
-    ui("prompt_catalog"),
-    ui("effective_config"),
-    ui("get_panel_layout"),
-    ui("set_panel_layout"),
+    // Settings → Data: models with counts, and entities not yet synced.
+    model("list_data_entities", &["v_model"]),
+    ui(
+        "prompt_catalog",
+        "what the person can ask oxplow's agent; the agent is who gets asked",
+    ),
+    ui(
+        "effective_config",
+        "the Settings view of every setting and its origin; an agent reads `config.list_keys`",
+    ),
+    ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
+    ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
     both("list_extensions"),
     both("get_lens"),
     both("run_lens"),
     // A lens's actions: commands run as the lens, for whoever pressed.
     both("run_lens_action"),
-    // Copy on every lens; an agent reads the same text through run_lens.
-    ui("lens_text"),
-    // An agent's answers: it shows one (the `lens.show` command); the UI
-    // runs each for the Answers strip.
+    ui(
+        "lens_text",
+        "Copy's text on every lens; an agent reads the same text through `run_lens`",
+    ),
+    // An agent's answers: it shows one (the `lens.show` command).
     agent("show_lens"),
-    ui("run_answer"),
-    // A form lens: agents run the command itself.
-    ui("lens_form"),
-    ui("submit_lens_form"),
-    // A custom component's bridged calls, from its sandboxed frame through
-    // the host (P6b.D2).
-    ui("run_component_query"),
-    ui("invoke_component_command"),
+    ui(
+        "run_answer",
+        "runs an answer for the Answers strip; `show_lens` gives the agent its text",
+    ),
+    ui(
+        "lens_form",
+        "a form lens is the person's form; an agent runs the command itself",
+    ),
+    ui(
+        "submit_lens_form",
+        "a form lens is the person's form; an agent runs the command itself",
+    ),
+    ui(
+        "run_component_query",
+        "a custom component's bridged read, from its sandboxed frame through the host (P6b.D2)",
+    ),
+    ui(
+        "invoke_component_command",
+        "a custom component's bridged command, from its sandboxed frame through the host (P6b.D2)",
+    ),
     both("validate_extension"),
     both("review_extension"),
-    ui("report_open_page"),
-    // Turning extensions on/off is the person's call.
-    ui("set_extension_enabled"),
+    ui(
+        "report_open_page",
+        "the person's open page, which an agent reads with `get_open_page`",
+    ),
+    ui(
+        "set_extension_enabled",
+        "turning extensions on or off is a person's call",
+    ),
     both("list_collectors"),
     // The `collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
     agent("run_collector"),
-    // Consent to run a collector's program is a person's.
-    ui("approve_collector"),
-    // Secrets are the person's to set; agents only see whether one is set.
-    ui("set_credential"),
-    // Consent to run a program from the repo is a person's (tsk331); an
-    // agent learns an unapproved one from the run's error.
-    ui("list_project_programs"),
-    ui("approve_project_program"),
-    // What a provider's approval would change, shown before Approve (P6b.E3).
-    ui("provider_declaration_effects"),
-    // Enabling a provider instance runs a program: a person's (P5.D4).
-    ui("list_provider_instances"),
-    ui("check_provider_instance"),
-    ui("set_provider_instance"),
-    // Instances and their credentials are a person's too (P9.B1).
-    ui("add_provider_instance"),
-    ui("remove_provider_instance"),
-    ui("turn_off_provider_instance_here"),
-    ui("set_instance_credential"),
-    // Signing in is a person's, in their browser (P9.B3); the shell hands
-    // the redirect it caught to the core (P10).
-    ui("begin_oauth_sign_in"),
-    ui("cancel_oauth_sign_in"),
-    ui("complete_oauth_sign_in"),
-    ui("listen_for_oauth_redirect"),
-    ui("await_oauth_redirect"),
-    ui("answer_oauth_redirect"),
-    ui("stop_oauth_redirect"),
+    ui(
+        "approve_collector",
+        "consent to run a collector's program is a person's",
+    ),
+    ui(
+        "set_credential",
+        "secrets are a person's to set; an agent only sees whether one is set",
+    ),
+    ui(
+        "list_project_programs",
+        "the programs waiting on a person's consent (tsk331); an agent learns of an unapproved one from the run's error",
+    ),
+    ui(
+        "approve_project_program",
+        "consent to run a program from the repo is a person's (tsk331)",
+    ),
+    ui(
+        "provider_declaration_effects",
+        "what a provider's approval would change, shown before a person approves it (P6b.E3)",
+    ),
+    ui(
+        "list_provider_instances",
+        "Settings → Integrations, where a person configures instances (P5.D4, P9.B1)",
+    ),
+    ui(
+        "check_provider_instance",
+        "enabling a provider instance runs a program: a person's (P5.D4)",
+    ),
+    ui(
+        "set_provider_instance",
+        "enabling a provider instance runs a program: a person's (P5.D4)",
+    ),
+    ui(
+        "add_provider_instance",
+        "instances and their credentials are a person's (P9.B1)",
+    ),
+    ui(
+        "remove_provider_instance",
+        "instances and their credentials are a person's (P9.B1)",
+    ),
+    ui(
+        "turn_off_provider_instance_here",
+        "instances and their credentials are a person's (P9.B1)",
+    ),
+    ui(
+        "set_instance_credential",
+        "instances and their credentials are a person's (P9.B1)",
+    ),
+    ui(
+        "begin_oauth_sign_in",
+        "signing in is a person's, in their browser (P9.B3)",
+    ),
+    ui(
+        "cancel_oauth_sign_in",
+        "signing in is a person's, in their browser (P9.B3)",
+    ),
+    ui(
+        "complete_oauth_sign_in",
+        "signing in is a person's: the shell hands the core the redirect it caught (P10)",
+    ),
+    ui(
+        "listen_for_oauth_redirect",
+        "the desktop shell's loopback listener for a person's sign-in (P10)",
+    ),
+    ui(
+        "await_oauth_redirect",
+        "the desktop shell's loopback listener for a person's sign-in (P10)",
+    ),
+    ui(
+        "answer_oauth_redirect",
+        "the desktop shell's loopback listener for a person's sign-in (P10)",
+    ),
+    ui(
+        "stop_oauth_redirect",
+        "the desktop shell's loopback listener for a person's sign-in (P10)",
+    ),
     both("ensure_change"),
     both_named("ai.settings", "ai_settings", "list_ai_roles"),
-    ui("save_ai_provider"),
-    ui("remove_ai_provider"),
-    ui("set_ai_role"),
-    ui("test_ai_provider"),
+    ui(
+        "save_ai_provider",
+        "AI providers and their keys are a person's to set",
+    ),
+    ui(
+        "remove_ai_provider",
+        "AI providers and their keys are a person's to set",
+    ),
+    ui("set_ai_role", "AI settings are a person's to set"),
+    ui(
+        "test_ai_provider",
+        "checks a person's AI provider settings before they save them",
+    ),
     agent("ai_decide"),
     agent("ai_summarize"),
     agent("get_open_page"),
@@ -248,16 +337,18 @@ pub const MANIFEST: &[Capability] = &[
     agent("lsp_list_servers"),
     // ---- code analysis: generic per-language unit listing (tree-sitter) ----
     agent("list_code_units"),
-    // ---- git: read tools mirrored to MCP (Child 2) ----
+    // ---- git: read tools mirrored to MCP ----
     both_named("git.status", "git_change_scopes", "git_status"),
     both("diff"),
     both("vcs_log"),
     both("vcs_blame"),
     both("read_at"),
     both("vcs_branches"),
-    // ---- agent_todo: git reads/mutations still on Bash (deferred) ----
-    todo("search_workspace_text"),
-    // ---- snapshots / local history: reads + restore mirrored to MCP (Child 3) ----
+    ui(
+        "search_workspace_text",
+        "an agent searches its worktree with its own Grep tool",
+    ),
+    // ---- snapshots / local history: reads + restore mirrored to MCP ----
     both("list_snapshots_for_stream"),
     both("list_snapshot_ops"),
     both("list_files_for_snapshot"),
@@ -267,143 +358,307 @@ pub const MANIFEST: &[Capability] = &[
     agent("read_file_snapshot"),
     agent("read_file_at_snapshot"),
     both("read_event_content"),
-    // Endpoint diff for the diff view page (effort / local-history) — UI-only.
-    // Per-file content at an endpoint, feeding the diff view's function
-    // analysis (base + head). UI-only.
-    // ---- agent_todo: composed dashboard DTOs / generated-filtered (deferred) ----
-    todo("list_file_snapshots"),
-    // ---- code quality: duplication findings mirrored to MCP (metrics scan
-    //      retired in tsk229; signals moved to the metric substrate) ----
+    model("list_file_snapshots", &["v_snapshot_file"]),
+    // ---- code quality: duplication findings mirrored to MCP ----
     agent("list_code_quality_findings"),
     // ---- UI selection mirrored to MCP ----
     both("select_thread"),
     both("switch_stream"),
-    // checkout stays on Bash — subprocess logic lives in the IPC command layer.
-    // ---- ui-only: app / misc ----
-    ui("log_ui"),
-    // ---- ui-only: streams ----
-    ui("get_primary_stream"),
-    ui("get_current_stream"),
-    // ---- ui-only: threads ----
-    // The thread picker's ACP agents (tsk335).
-    ui("list_acp_agents"),
+    // ---- app / misc ----
+    ui(
+        "log_ui",
+        "the renderer's console, forwarded to the daemon's log",
+    ),
+    // ---- streams ----
+    model("get_primary_stream", &["v_stream"]),
+    ui(
+        "get_current_stream",
+        "the stream the person has selected; an agent works in its own",
+    ),
+    // ---- threads ----
+    ui(
+        "list_acp_agents",
+        "the thread picker's ACP agents (tsk335): an agent never starts an agent",
+    ),
     // ACP sessions: the prompt box, permission cards and banners. Never
     // agent tools — an agent must not prompt an agent (tsk281).
-    ui("acp_open_session"),
-    ui("acp_prompt"),
-    ui("acp_cancel"),
-    ui("acp_respond_permission"),
-    ui("acp_transcript"),
-    ui("acp_dismiss_directive"),
-    ui("acp_close_session"),
-    ui("set_agents"),
-    ui("list_closed_threads"),
-    ui("get_thread_state"),
-    // ---- ui-only: tasks / backlog ----
-    // ---- dashboards (tsk138) — reads + create/add-tile are agent-authorable
-    // (both); the rest are pure-UI edits (tsk140). ----
+    ui(
+        "acp_open_session",
+        "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
+    ),
+    ui(
+        "acp_prompt",
+        "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
+    ),
+    ui(
+        "acp_cancel",
+        "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
+    ),
+    ui(
+        "acp_respond_permission",
+        "an ACP permission card is answered by a person, never an agent (tsk281)",
+    ),
+    ui(
+        "acp_transcript",
+        "an ACP session's transcript, rendered for the person (tsk281)",
+    ),
+    ui(
+        "acp_dismiss_directive",
+        "the person dismisses the turn-end banner (tsk281)",
+    ),
+    ui(
+        "acp_close_session",
+        "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
+    ),
+    ui(
+        "set_agents",
+        "which agents a thread can run is a person's choice",
+    ),
+    model("list_closed_threads", &["v_thread"]),
+    ui(
+        "get_thread_state",
+        "the person's selected and active thread; an agent reads threads in `v_thread` and has no selection",
+    ),
+    // ---- dashboards: reads + create/add-tile are agent-authorable ----
     both("list_dashboards"),
     both("get_dashboard"),
-    // ---- ui-only: comments (reads; writes are knowledge.*) ----
-    ui("list_comments_for_target"),
-    // ---- ui-only: wiki (writes are the knowledge.* commands) ----
-    // ---- ui-only: wiki freshness ----
-    // ---- ui-only: page visits ----
-    ui("record_page_visit"),
-    ui("list_recent_page_visits"),
-    ui("top_visited_pages"),
-    ui("forget_page"),
-    // ---- ui-only: usage ----
-    ui("record_usage"),
-    ui("list_recent_usage_rollup"),
-    // ---- ui-only: code quality (UI-internal analysis helpers) ----
-    // ---- ui-only: snapshots (UI presentation helpers) ----
-    ui("list_wiki_slugs_for_snapshots"),
-    ui("get_blob_storage_bytes"),
-    // ---- ui-only: branches (remote/ref presentation) ----
-    // ---- ui-only: git (presentation / worktree / remote helpers) ----
-    ui("git_resolve_commit_ref_labels"),
-    ui("git_list_recent_remote_branches"),
-    ui("vcs_list_adoptable_workspaces"),
-    ui("vcs_divergence"),
-    ui("vcs_revisions_between"),
-    ui("vcs_file_history"),
-    // ---- ui-only: hooks / agent lifecycle ----
-    ui("ingest_hook_event"),
-    ui("list_agent_events"),
-    ui("list_agent_statuses"),
-    ui("list_open_agent_turns"),
-    ui("get_agent_turn"),
-    // ---- ui-only: config ----
-    ui("get_config"),
-    ui("set_agent_prompt_append"),
-    ui("set_generated"),
-    ui("set_agent_model"),
-    ui("get_workspace_context"),
-    // ---- ui-only: efforts ----
-    ui("get_effort_files"),
-    ui("get_effort"),
-    ui("list_efforts_at_snapshots"),
-    ui("list_efforts_overlapping_range"),
-    ui("list_changed_paths_for_effort"),
-    // ---- ui-only: git log (presentation) ----
-    // ---- ui-only: workspace file I/O (agent uses Read/Write tools) ----
-    ui("list_workspace_entries"),
-    ui("list_workspace_files"),
-    ui("read_workspace_file"),
-    ui("files_at"),
-    // An effort review's "Extension Changes" (P8.C7); agents run
-    // `plugin check --effects`.
-    ui("extension_effects_between"),
-    ui("vcs_head"),
-    ui("vcs_status"),
-    ui("vcs_revision"),
-    ui("vcs_merge_base"),
-    ui("write_workspace_file"),
-    ui("create_workspace_file"),
-    ui("create_workspace_directory"),
-    ui("rename_workspace_path"),
-    ui("delete_workspace_path"),
-    // ---- ui-only: background tasks ----
-    ui("list_background_tasks"),
-    ui("get_background_task"),
-    ui("start_background_task"),
-    ui("complete_background_task"),
-    ui("fail_background_task"),
-    ui("update_background_task"),
-    // ---- ui-only: webview ----
-    ui("open_external_url"),
-    ui("clipboard_read_text"),
-    // ---- ui-only: lsp (shared sessions + installer) ----
-    ui("list_installed_lsp_packages"),
-    ui("lsp_request"),
-    ui("lsp_notify"),
-    ui("list_lsp_servers"),
-    ui("restart_lsp_server"),
-    ui("respond_lsp_apply_edit"),
-    // ---- ui-only: terminal ----
+    // ---- comments (writes are knowledge.*) ----
+    model("list_comments_for_target", &["v_comment"]),
+    // ---- page visits ----
+    ui(
+        "record_page_visit",
+        "records the pages the person opens, as they browse",
+    ),
+    model("list_recent_page_visits", &["v_page_visit"]),
+    model("top_visited_pages", &["v_page_visit"]),
+    ui(
+        "forget_page",
+        "forgetting a page they visited is the person's",
+    ),
+    // ---- usage ----
+    ui(
+        "record_usage",
+        "records the person's use of oxplow, as they work",
+    ),
+    model("list_recent_usage_rollup", &["v_usage_event"]),
+    // ---- snapshots (UI presentation helpers) ----
+    model("list_wiki_slugs_for_snapshots", &["v_snapshot_file"]),
+    ui(
+        "get_blob_storage_bytes",
+        "the blob store's size on disk, for Local History's storage card",
+    ),
+    // ---- git (presentation / worktree / remote helpers) ----
+    model("git_resolve_commit_ref_labels", &["v_branch", "v_tag"]),
+    model("git_list_recent_remote_branches", &["v_branch"]),
+    ui(
+        "vcs_list_adoptable_workspaces",
+        "worktrees on disk a person may adopt as streams",
+    ),
+    ui(
+        "vcs_divergence",
+        "an ancestry walk the VCS answers; an agent runs git in its worktree",
+    ),
+    ui(
+        "vcs_revisions_between",
+        "an ancestry walk the VCS answers; an agent has `vcs_log`",
+    ),
+    model("vcs_file_history", &["v_commit_file"]),
+    // ---- hooks / agent lifecycle ----
+    ui(
+        "ingest_hook_event",
+        "the hook subprocess's transport into the core, not an agent's call",
+    ),
+    model("list_agent_events", &["v_event"]),
+    ui(
+        "list_agent_statuses",
+        "agents' live status, shown to the person; an agent is the one with the status",
+    ),
+    model("list_open_agent_turns", &["v_agent_turn"]),
+    model("get_agent_turn", &["v_agent_turn"]),
+    // ---- config ----
+    ui(
+        "get_config",
+        "the renderer's whole config; an agent reads keys with `config.list_keys`",
+    ),
+    ui(
+        "set_agent_prompt_append",
+        "the Settings form; an agent sets config with `config.set`",
+    ),
+    ui(
+        "set_generated",
+        "the Settings form; an agent sets config with `config.set`",
+    ),
+    ui(
+        "set_agent_model",
+        "the Settings form; an agent sets config with `config.set`",
+    ),
+    ui(
+        "get_workspace_context",
+        "the window's project path and VCS state, for the shell",
+    ),
+    // ---- efforts ----
+    model("get_effort_files", &["v_effort_file"]),
+    model("get_effort", &["v_effort"]),
+    model("list_efforts_at_snapshots", &["v_effort"]),
+    model("list_efforts_overlapping_range", &["v_effort"]),
+    model(
+        "list_changed_paths_for_effort",
+        &["v_effort_file", "v_effort_unattributed_file"],
+    ),
+    // ---- workspace file I/O (agent uses Read/Write tools) ----
+    ui(
+        "list_workspace_entries",
+        "workspace file I/O: an agent uses its own Read/Write tools",
+    ),
+    ui(
+        "list_workspace_files",
+        "workspace file I/O: an agent uses its own Read/Write tools",
+    ),
+    ui(
+        "read_workspace_file",
+        "workspace file I/O: an agent uses its own Read/Write tools",
+    ),
+    ui(
+        "files_at",
+        "a revision's file list, for the editor; an agent reads a revision with `read_at`",
+    ),
+    ui(
+        "extension_effects_between",
+        "an effort review's Extension Changes (P8.C7); an agent runs `oxplow plugin check --effects`",
+    ),
+    ui(
+        "vcs_head",
+        "the UI's live VCS state; an agent has `git_status`",
+    ),
+    ui(
+        "vcs_status",
+        "the UI's live VCS state; an agent has `git_status`",
+    ),
+    ui(
+        "vcs_revision",
+        "one revision's detail for the history view; an agent has `vcs_log`",
+    ),
+    ui(
+        "vcs_merge_base",
+        "an ancestry walk the VCS answers; an agent runs git in its worktree",
+    ),
+    ui(
+        "write_workspace_file",
+        "workspace file I/O: an agent uses its own Read/Write tools",
+    ),
+    ui(
+        "create_workspace_file",
+        "workspace file I/O: an agent uses its own Read/Write tools",
+    ),
+    ui(
+        "create_workspace_directory",
+        "workspace file I/O: an agent uses its own Read/Write tools",
+    ),
+    ui(
+        "rename_workspace_path",
+        "workspace file I/O: an agent uses its own Read/Write tools",
+    ),
+    ui(
+        "delete_workspace_path",
+        "workspace file I/O: an agent uses its own Read/Write tools",
+    ),
+    // ---- background tasks ----
+    ui(
+        "list_background_tasks",
+        "the UI's tray of live background work",
+    ),
+    ui(
+        "get_background_task",
+        "the UI's tray of live background work",
+    ),
+    ui(
+        "start_background_task",
+        "the UI's tray of live background work",
+    ),
+    ui(
+        "complete_background_task",
+        "the UI's tray of live background work",
+    ),
+    ui(
+        "fail_background_task",
+        "the UI's tray of live background work",
+    ),
+    ui(
+        "update_background_task",
+        "the UI's tray of live background work",
+    ),
+    // ---- webview ----
+    ui(
+        "open_external_url",
+        "a sandboxed native window: the shell's, never an agent's",
+    ),
+    ui(
+        "clipboard_read_text",
+        "the OS clipboard, for the person's paste",
+    ),
+    // ---- lsp (shared sessions + installer) ----
+    ui(
+        "list_installed_lsp_packages",
+        "Settings' language servers; an agent has `lsp_list_servers`",
+    ),
+    ui(
+        "lsp_request",
+        "the editor's language-server client; an agent has the `code_*` tools",
+    ),
+    ui(
+        "lsp_notify",
+        "the editor's language-server client; an agent has the `code_*` tools",
+    ),
+    ui(
+        "list_lsp_servers",
+        "Settings' language servers; an agent has `lsp_list_servers`",
+    ),
+    ui(
+        "restart_lsp_server",
+        "Settings' language servers: restarting one is the person's",
+    ),
+    ui(
+        "respond_lsp_apply_edit",
+        "the editor answers a server's edit request",
+    ),
+    // ---- terminal ----
     // `forward_terminal_input` is UI-ONLY by design and must never reach
     // the MCP (agent) surface: it is the human keystroke/paste transport,
-    // not an automation API. Keeping it `ui(...)` here is part of the
-    // no-automation guard (see `.context/agent-model.md`).
-    ui("open_terminal_session"),
-    ui("forward_terminal_input"),
-    ui("close_terminal_session"),
-    ui("terminate_terminal_session"),
-    ui("terminal_session_cwd"),
-    // Read-only sessionId lookup (no spawn). UI/second-client only —
-    // it feeds `forward_terminal_input`, which is itself UI-only by the
-    // no-automation guard, so the agent has no use for it either.
-    ui("lookup_terminal_session"),
-    // ---- ui-only: menu ----
-    ui("set_native_menu"),
-    // ---- ui-only: launcher / multi-window ----
-    ui("list_recent_projects"),
-    ui("remove_recent_project"),
-    ui("open_project"),
-    ui("create_project"),
-    ui("setup_project"),
-    ui("abort_setup"),
+    // not an automation API — part of the no-automation guard (see
+    // `.context/agent-model.md`).
+    ui(
+        "open_terminal_session",
+        "the person's terminal: never an automation API",
+    ),
+    ui(
+        "forward_terminal_input",
+        "the human's keystroke and paste transport: oxplow never synthesizes agent input",
+    ),
+    ui(
+        "close_terminal_session",
+        "the person's terminal: never an automation API",
+    ),
+    ui(
+        "terminate_terminal_session",
+        "the person's terminal: never an automation API",
+    ),
+    ui(
+        "terminal_session_cwd",
+        "the person's terminal: never an automation API",
+    ),
+    ui(
+        "lookup_terminal_session",
+        "feeds `forward_terminal_input`, which is the human's alone",
+    ),
+    // ---- menu ----
+    ui("set_native_menu", "the native menu bar"),
+    // ---- launcher / multi-window ----
+    ui("list_recent_projects", "the launcher's recent projects"),
+    ui("remove_recent_project", "the launcher's recent projects"),
+    ui("open_project", "the launcher opens a project window"),
+    ui("create_project", "the launcher creates a project window"),
+    ui("setup_project", "a person confirms a project's first-run setup"),
+    ui("abort_setup", "a person declines a project's first-run setup"),
 ];
 
 /// Validate the manifest's internal shape independent of the real surfaces:
@@ -431,9 +686,8 @@ pub fn manifest_shape_errors() -> Vec<String> {
         }
         let ok = match c.exposure {
             Both => c.ipc.is_some() && c.mcp.is_some(),
-            UiOnly => c.ipc.is_some() && c.mcp.is_none(),
+            UiOnly { .. } | Model { .. } => c.ipc.is_some() && c.mcp.is_none(),
             AgentOnly => c.ipc.is_none() && c.mcp.is_some(),
-            AgentTodo => c.ipc.is_some() && c.mcp.is_none(),
         };
         if !ok {
             errs.push(format!(
@@ -456,6 +710,20 @@ mod tests {
             errs.is_empty(),
             "manifest shape errors:\n{}",
             errs.join("\n")
+        );
+    }
+
+    /// P11 (tsk944): a UI-only row says why an agent has no tool for it.
+    #[test]
+    fn every_ui_only_row_says_why() {
+        let silent: Vec<&str> = MANIFEST
+            .iter()
+            .filter(|c| matches!(c.exposure, UiOnly { why } if why.trim().len() < 12))
+            .map(|c| c.capability)
+            .collect();
+        assert!(
+            silent.is_empty(),
+            "UI-only rows that don't say why: {silent:?}"
         );
     }
 

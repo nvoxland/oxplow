@@ -515,11 +515,13 @@ and `v_model_test` are the catalog of all of them:
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
 | `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |
+| `v_snapshot_file` | every captured version of a file (`file_snapshot`): its snapshot, stream, path, storage class, size and `content_hash`. A snapshot records only what changed since the stream's previous one, so a file's history is its rows (P11, tsk944) |
 | `v_snapshot_op` | the snapshot operation log: one row per take (a new snapshot or an unchanged tree) with `parent_snapshot_id`, `trigger`, thread / turn / effort anchors, `elapsed_ms`, `budget_ms`, `over_budget` (V97) |
 | `v_measure` | fact-type catalog |
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
 | `v_effort_file` | files each effort touched, with change kind and the effort's `work_item` (V74, V100) |
+| `v_effort_unattributed_file` | files that changed during an effort that nothing claimed — the residue its close reconciled out of its snapshot bracket; a path is here or in `v_effort_file`, never both (P11, tsk944) |
 | `v_task_note` | task / thread notes (V74) |
 | `v_task_link` | typed links between tasks (V74) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |

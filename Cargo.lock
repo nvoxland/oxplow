@@ -4983,6 +4983,7 @@ name = "oxplow-surface-parity"
 version = "0.7.0"
 dependencies = [
  "oxplow-app",
+ "oxplow-db",
  "oxplow-mcp",
  "oxplow-rpc",
  "oxplow-tauri-ipc",

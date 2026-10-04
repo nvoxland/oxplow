@@ -14,6 +14,7 @@ workspace = true
 
 [dev-dependencies]
 oxplow-app = { workspace = true }
+oxplow-db = { workspace = true }
 oxplow-tauri-ipc = { workspace = true }
 oxplow-rpc = { workspace = true }
 oxplow-mcp = { workspace = true }

@@ -420,6 +420,18 @@
     - { name: "payload_json", type: "TEXT", doc: "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines)." }
     - { name: "local_snapshot_id", type: "INTEGER", doc: "Snapshot it was captured against." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+- name: effort_unattributed_file
+  version: 1
+  description: "Files that changed during an effort that nothing claimed: the residue its close reconciled out of its snapshot bracket. A path is claimed (v_effort_file) or here, never both."
+  columns:
+    - { name: "effort_id", type: "INTEGER", doc: "The effort (v_effort.id)." }
+    - { name: "work_item", type: "TEXT", doc: "That effort's work item ref." }
+    - { name: "task_id", type: "", doc: "That effort's oxplow task (v_task.id); NULL for another provider's work item." }
+    - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
+    - { name: "recorded_at", type: "TEXT", doc: "When the close recorded it (RFC 3339)." }
+  tests:
+    - { not_null: effort_id }
+    - { not_null: path }
 - name: event
   version: 1
   description: "The event log: every activity and state change, oldest first by `seq`, written in the same transaction as the change it records (.context/data-model.md \"event_log\")."
@@ -680,6 +692,22 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: snapshot_file
+  version: 1
+  description: "Every captured version of a file. A snapshot records only the files that changed since the stream's previous one, so a file's history is its rows by `captured_at`, and what a snapshot changed is its rows."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "The captured file's id (a `file_snapshot` id, as `get_file_snapshot` takes)." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot that captured it (v_snapshot.id)." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream whose worktree it was captured in." }
+    - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
+    - { name: "storage", type: "TEXT", doc: "`oxplow` (bytes in oxplow's blob store), `git` (a clean file, read from git), `oversize` (too large to keep) or `deleted` (the file was removed)." }
+    - { name: "size_bytes", type: "INTEGER", doc: "Its size in bytes." }
+    - { name: "content_hash", type: "TEXT", doc: "The identity of its bytes: two rows with the same hash hold the same content. NULL when oversize or deleted, and for a `git` row not yet compared." }
+    - { name: "captured_at", type: "TEXT", doc: "When it was captured (RFC 3339)." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+    - { not_null: path }
 - name: snapshot_op
   version: 1
   description: "The snapshot operation log: one row per take (why it ran, what it is anchored to, the snapshot it left the worktree at and its parent). A take that changed nothing points at its parent."

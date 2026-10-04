@@ -1,6 +1,6 @@
 //! Enforces that the Tauri IPC surface (UI) and the MCP surface (agent) stay
 //! in sync with the manifest in `oxplow_surface_parity`. See that crate's
-//! module docs for the four exposures and the `AgentTodo → Both` ratchet.
+//! module docs for the four exposures.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -70,7 +70,7 @@ fn surface_parity() {
     if !unclassified_ipc.is_empty() {
         problems.push(format!(
             "IPC commands with no manifest row — classify each in MANIFEST \
-             (Both/UiOnly/AgentTodo): {unclassified_ipc:?}"
+             (Both/UiOnly/Model): {unclassified_ipc:?}"
         ));
     }
     let unclassified_mcp: Vec<&str> = mcp
@@ -81,7 +81,7 @@ fn surface_parity() {
     if !unclassified_mcp.is_empty() {
         problems.push(format!(
             "MCP tools with no manifest row — classify each in MANIFEST \
-             (Both/AgentOnly, or flip an AgentTodo row): {unclassified_mcp:?}"
+             (Both/AgentOnly): {unclassified_mcp:?}"
         ));
     }
     let dangling_ipc: Vec<&str> = ipc_in_manifest
@@ -117,7 +117,7 @@ fn surface_parity() {
                     problems.push(format!("Both `{}` missing MCP tool `{m}`", c.capability));
                 }
             }
-            Exposure::UiOnly => {
+            Exposure::UiOnly { .. } | Exposure::Model { .. } => {
                 // A leak is a tool that shares this command's name AND isn't
                 // already claimed by another row's `mcp` — the latter guards
                 // legitimate cross-surface name collisions.
@@ -138,33 +138,8 @@ fn surface_parity() {
                     ));
                 }
             }
-            Exposure::AgentTodo => {
-                let i = c.ipc.unwrap();
-                if !ipc.contains(i) {
-                    problems.push(format!(
-                        "AgentTodo `{}` names IPC command `{i}` that isn't registered",
-                        c.capability
-                    ));
-                }
-            }
         }
     }
-
-    // (d) Print the tracked gap backlog (visible under `--nocapture` / CI logs).
-    let mut backlog: Vec<&str> = MANIFEST
-        .iter()
-        .filter(|c| c.exposure == Exposure::AgentTodo)
-        .filter_map(|c| c.ipc)
-        .collect();
-    backlog.sort_unstable();
-    println!(
-        "\n=== MCP parity backlog: {} AgentTodo gaps ===",
-        backlog.len()
-    );
-    for name in &backlog {
-        println!("  {name}");
-    }
-    println!("=== end MCP parity backlog ===\n");
 
     assert!(
         problems.is_empty(),
@@ -173,6 +148,32 @@ fn surface_parity() {
         mcp.len(),
         problems.join("\n")
     );
+}
+
+/// P11 (tsk944): a row whose agent counterpart is a model names models the
+/// core publishes — an agent reads them with `query_sql`.
+#[test]
+fn every_model_counterpart_is_published() {
+    let published: BTreeSet<String> = oxplow_db::models::core_sources()
+        .expect("the core models load")
+        .into_iter()
+        .filter(|m| m.twin.is_none())
+        .map(|m| oxplow_db::models::core_view(&m.decl.name))
+        .collect();
+    let mut missing = Vec::new();
+    for c in MANIFEST {
+        if let Exposure::Model { models } = c.exposure {
+            if models.is_empty() {
+                missing.push(format!("`{}` names no model", c.capability));
+            }
+            for m in models {
+                if !published.contains(*m) {
+                    missing.push(format!("`{}`: `{m}` isn't a published model", c.capability));
+                }
+            }
+        }
+    }
+    assert!(missing.is_empty(), "\n{}", missing.join("\n"));
 }
 
 /// The shell surface — commands that exist only as Tauri adapters. Defined in

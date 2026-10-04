@@ -5251,5 +5251,84 @@
       ],
       "key": []
     }
+  },
+  "effort_unattributed_file": {
+    "1": {
+      "columns": [
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort (v_effort.id)."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "That effort's work item ref."
+        },
+        {
+          "name": "task_id",
+          "type": "",
+          "doc": "That effort's oxplow task (v_task.id); NULL for another provider's work item."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative file path."
+        },
+        {
+          "name": "recorded_at",
+          "type": "TEXT",
+          "doc": "When the close recorded it (RFC 3339)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "snapshot_file": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "The captured file's id (a `file_snapshot` id, as `get_file_snapshot` takes)."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot that captured it (v_snapshot.id)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose worktree it was captured in."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative file path."
+        },
+        {
+          "name": "storage",
+          "type": "TEXT",
+          "doc": "`oxplow` (bytes in oxplow's blob store), `git` (a clean file, read from git), `oversize` (too large to keep) or `deleted` (the file was removed)."
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "doc": "Its size in bytes."
+        },
+        {
+          "name": "content_hash",
+          "type": "TEXT",
+          "doc": "The identity of its bytes: two rows with the same hash hold the same content. NULL when oversize or deleted, and for a `git` row not yet compared."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When it was captured (RFC 3339)."
+        }
+      ],
+      "key": []
+    }
   }
 }

@@ -2317,7 +2317,7 @@ mod tests {
         // replace_unattributed_files records the audit residue; list reads
         // it back; deleting the effort cascades it away.
         let (_, db, tid, t) = fixture_with_db().await;
-        let store = SqliteEffortStore::new(db);
+        let store = SqliteEffortStore::new(db.clone());
         let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         store
             .replace_unattributed_files(&eff.id, &["a.rs".into(), "b.rs".into()])
@@ -2326,6 +2326,31 @@ mod tests {
         let mut got = store.list_unattributed_files(&eff.id).await.unwrap();
         got.sort();
         assert_eq!(got, vec!["a.rs".to_string(), "b.rs".to_string()]);
+        // Published as `v_effort_unattributed_file`, with the effort's task
+        // (tsk944).
+        let published = db
+            .read(|tx| {
+                let rows = || -> rusqlite::Result<Vec<(i64, i64, String)>> {
+                    let mut st = tx.prepare(
+                        "SELECT effort_id, task_id, path FROM v_effort_unattributed_file ORDER BY path",
+                    )?;
+                    let rows = st
+                        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    Ok(rows)
+                };
+                rows().map_err(|e| DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        let (effort, task) = (eff.id.value(), tid.value());
+        assert_eq!(
+            published,
+            vec![
+                (effort, task, "a.rs".to_string()),
+                (effort, task, "b.rs".to_string())
+            ]
+        );
         // Replace is idempotent / overwrites the whole set.
         store
             .replace_unattributed_files(&eff.id, &["c.rs".into()])

@@ -1049,9 +1049,14 @@ The MCP tool surface (agent) and the Tauri IPC command surface (UI,
 `oxplow_app::Services`. They drifted silently — many user-meaningful
 ops lived on IPC but not MCP. The `oxplow-surface-parity` crate
 (`crates/oxplow-surface-parity/`) now guards this: a checked-in
-`MANIFEST` classifies every op as `Both` / `UiOnly` / `AgentOnly` /
-`AgentTodo` (the last = "should be on both, MCP tool not built yet"),
-and `tests/parity.rs` enumerates the *actual* registered names on each
+`MANIFEST` classifies every op as `Both`, `AgentOnly`, `UiOnly { why }`
+(the reason an agent has no tool: a person's consent or setting, their
+selection or input, live status pushed to the UI, runtime infra, an
+ancestry walk the VCS answers, file I/O the agent does with its own
+tools) or `Model { models }` (a UI read an agent makes through those
+published models with `query_sql`). Every row is decided — there is no
+"tool not built yet" exposure (P11, tsk944) — and `tests/parity.rs`
+enumerates the *actual* registered names on each
 surface (MCP via `oxplow_mcp::registered_tool_names()`, IPC via a
 capturing `tauri_specta::LanguageExt` over `specta_builder()`) and
 fails if anything is unclassified, dangling, or a `Both` row is missing
@@ -1060,10 +1065,9 @@ a side. Names may diverge per surface (e.g. IPC `list_comments_for_stream`
 
 **Consequence for new work:** adding a `#[tool]` (or a
 `#[tauri::command]`) requires a `MANIFEST` row or the parity test
-fails. To close an `AgentTodo` gap, build the tool and flip the row to
-`Both` with `mcp: Some("…")` — the test's "every tool is classified"
-check catches you if you forget. Run `cargo test -p
-oxplow-surface-parity -- --nocapture` to see the current gap backlog.
+fails. A UI-only row must say why (`every_ui_only_row_says_why`), and a
+model row must name published core models
+(`every_model_counterpart_is_published`).
 
 Domains mirrored onto MCP so far (beyond the original task/wiki/comment
 surface): **VCS reads** (`git_status`, `vcs_log`, `vcs_blame`, `diff`
@@ -1089,8 +1093,9 @@ through `run_command`, P8.A3–A6); and **site-wide search** (`search` —
 BM25 over tasks/comments/notes/wiki/file-contents via the unified FTS index,
 fed by the `search:<kind>` assets for tasks, comments, notes and wiki and the
 `search.index` consumer for files; optional `stream_id` scopes file hits).
-Still `AgentTodo` (see the backlog): composed snapshot DTOs, git
-mutations/extra reads, `checkout_stream_branch`.
+A file's captured history is the model `v_snapshot_file`, and an
+effort's unclaimed residue `v_effort_unattributed_file`; git mutations
+stay on the agent's own git.
 
 The `kind` discriminator (`epic`/`task`/`subtask`/`bug`/`note`) was
 removed end-to-end — `work_item.create` takes none and a task row no
