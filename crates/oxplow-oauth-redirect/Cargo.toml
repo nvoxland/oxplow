@@ -1,0 +1,24 @@
+[package]
+name = "oxplow-oauth-redirect"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The loopback listener a sign-in's redirect comes back to — the desktop shell's"
+publish = false
+
+# The desktop shell catches a sign-in's redirect where the person's
+# browser is, never the core (`.context/providers.md` → "Signing in"):
+# its own crate, so the core's crates hold no listener at all, and a
+# provider's test can sign in as the shell does without the shell.
+[dependencies]
+parking_lot = "0.12"
+tokio = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+
+[lints]
+workspace = true

@@ -3,7 +3,7 @@
 //! (OAuth 2.1; RFC 6749 §4.1, RFC 7636) and a loopback redirect (RFC
 //! 8252 §7.3), run by oxplow for a credential a provider declares with
 //! `oauth:`. The core starts a sign-in and finishes it; the redirect is
-//! caught by the desktop shell ([`crate::oauth_redirect`]) and handed over,
+//! caught by the desktop shell (`oxplow-oauth-redirect`) and handed over,
 //! so the core never listens. The token — access, refresh, expiry — is one keychain
 //! secret; the provider is handed the access token alone, by the
 //! credential's name.
@@ -280,7 +280,7 @@ pub enum Redirected {
 
 /// Start a sign-in for `decl` whose redirect comes back to
 /// `127.0.0.1:<redirect_port>`, where the desktop shell listens
-/// ([`crate::oauth_redirect`]): where the person signs in, and what
+/// (`oxplow-oauth-redirect`): where the person signs in, and what
 /// finishing it needs. `client_secret` is the value of the credential
 /// `decl.client_secret` names, when it names one. A provider that
 /// declares its `redirect_port` (a service with the port registered) is

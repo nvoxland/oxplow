@@ -324,9 +324,8 @@ export const commands = {
 	/**
 	 *  The next redirect to `port`: the path and query the browser asked
 	 *  for, to hand to the core. Its browser waits for
-	 *  [`answer_oauth_redirect`]. It stops listening when the sign-in is
-	 *  over (answered, or replaced) or not finished within
-	 *  [`SIGN_IN_WAIT`].
+	 *  [`answer_oauth_redirect`]. Ends when the sign-in is over (answered,
+	 *  replaced, or out of time).
 	 */
 	awaitOauthRedirect: (port: number) => typedError<string, IpcError>(__TAURI_INVOKE("await_oauth_redirect", { port })),
 	/**

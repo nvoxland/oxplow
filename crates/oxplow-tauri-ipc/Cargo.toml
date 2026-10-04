@@ -7,6 +7,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+oxplow-oauth-redirect = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-session = { workspace = true }
 oxplow-app = { workspace = true }

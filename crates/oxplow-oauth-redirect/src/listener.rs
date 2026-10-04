@@ -1,11 +1,6 @@
-//! The loopback listener a sign-in's redirect comes back to (RFC 8252
-//! §7.3) — the **desktop shell's**, never the core's (P10,
-//! `.context/providers.md` → "Signing in"). The shell listens where the
-//! person's browser is, hands what came back to the core
-//! (`complete_oauth_sign_in`, which checks it is that sign-in's and
-//! exchanges the code), and answers the browser with how it went. So a
-//! sign-in works the same whether the core runs here or on a remote
-//! daemon. Guard: `the_core_never_binds_a_socket_for_a_sign_in`.
+//! One loopback socket a sign-in's redirect comes back to (RFC 8252
+//! §7.3): it reads requests, hands over `GET /callback`, and answers the
+//! browser.
 
 use std::time::Duration;
 
@@ -150,10 +145,13 @@ async fn read_request(conn: &mut TcpStream) -> std::io::Result<HttpRequest> {
     Ok(HttpRequest { method, target })
 }
 
-/// A plain-text page for the person's browser.
+/// A plain-text page for the person's browser — never sniffed as
+/// anything else, never cached (tsk904).
 async fn respond(conn: &mut TcpStream, status: &str, text: &str) -> std::io::Result<()> {
     let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\n\
+         X-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n",
         text.len()
     );
     conn.write_all(head.as_bytes()).await?;
@@ -189,6 +187,28 @@ mod tests {
         let (other, callback) = browser.await.unwrap();
         assert_eq!(other.0, 404);
         assert_eq!(callback, (200, "Signed in.".to_string()));
+    }
+
+    /// tsk904: the page is plain text the browser neither sniffs nor
+    /// keeps.
+    #[tokio::test]
+    async fn the_page_is_never_sniffed_or_cached() {
+        let mut listener = RedirectListener::bind(0).await.unwrap();
+        let port = listener.port();
+        let browser = tokio::spawn(async move {
+            reqwest::get(format!("http://127.0.0.1:{port}/callback?state=s"))
+                .await
+                .unwrap()
+        });
+        listener
+            .next()
+            .await
+            .unwrap()
+            .answer(true, "Signed in.")
+            .await;
+        let resp = browser.await.unwrap();
+        assert_eq!(resp.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(resp.headers()["cache-control"], "no-store");
     }
 
     /// tsk825: a connection that sends nothing (another process, a

@@ -121,7 +121,7 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
     // the person's browser opens the page and comes back to it, and the
     // shell hands the redirect to the core and answers the browser.
     let mut ui = svc.events.subscribe_ui();
-    let mut listener = oxplow_app::oauth_redirect::RedirectListener::bind(0)
+    let mut listener = oxplow_oauth_redirect::RedirectListener::bind(0)
         .await
         .unwrap();
     let page = svc

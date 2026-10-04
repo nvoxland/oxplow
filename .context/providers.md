@@ -632,9 +632,10 @@ form; sign-in is a provider's.
   the shell caught: only `/callback` with this sign-in's `state` is its —
   anything else does nothing and the sign-in waits on — and
   `PendingSignIn::exchange` trades the code. It is hand-rolled (two form
-  POSTs over reqwest), one mechanism for every provider. The listener
-  (`oauth_redirect::RedirectListener`, used only by the shell) answers
-  anything but `GET /callback` itself, reads each connection on its own
+  POSTs over reqwest), one mechanism for every provider. The listener is
+  its own crate, `oxplow-oauth-redirect` (the shell's; no core crate uses
+  it — tsk904), and answers anything but `GET /callback` itself — with a
+  plain-text page marked `nosniff` and `no-store` — reads each connection on its own
   task with a deadline (10 s) and a 16 KiB head cap, and never reads a
   body, so an idle or oversized connection never holds up the real
   redirect (tsk825).
@@ -723,7 +724,10 @@ form; sign-in is a provider's.
   instance and credential (`sign_ins`, each with a sequence number and
   an expiry timer): one not finished within five minutes
   (`oauth::SIGN_IN_WAIT`) ends, and the renderer hears why; the shell's
-  listener stops by then too. A second sign-in for the same credential
+  listener stops by then too, by itself (`RedirectListeners`, a deadline
+  task per listener — whether or not anyone still waits on it: a redirect
+  it holds is answered and the socket closed, so a declared port is free
+  again; tsk904). A stop returns once the socket is closed. A second sign-in for the same credential
   abandons the first (its redirect is no longer the sign-in's; the row
   stops its listener). Each `(instance, credential)` has its own gate
   (`sign_in_gate`), held while its sign-in begins, finishes — across the

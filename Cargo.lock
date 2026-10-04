@@ -4769,6 +4769,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-oauth-redirect"
+version = "0.7.0"
+dependencies = [
+ "oxplow-workspace-hack",
+ "parking_lot",
+ "reqwest",
+ "tokio",
+]
+
+[[package]]
 name = "oxplow-oauth-sim"
 version = "0.7.0"
 dependencies = [
@@ -4836,6 +4846,7 @@ dependencies = [
  "oxplow-collect-plugin",
  "oxplow-config",
  "oxplow-domain",
+ "oxplow-oauth-redirect",
  "oxplow-oauth-sim",
  "oxplow-provider-protocol",
  "oxplow-sdk",
@@ -4990,6 +5001,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-fs-watch",
  "oxplow-git",
+ "oxplow-oauth-redirect",
  "oxplow-plugin",
  "oxplow-rpc",
  "oxplow-sdk",

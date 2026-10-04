@@ -610,9 +610,9 @@ fn the_oauth_sim_is_never_a_production_dependency() {
 
 /// P10: a sign-in's redirect is caught by the desktop shell, never the
 /// core — so it lands where the person's browser is, with a remote daemon
-/// too. In the core's crates only `oauth_redirect.rs` (the shell's
-/// listener) knows how to listen for one and nothing uses it; the
-/// providers bind no socket at all.
+/// too. The listener is its own crate (`oxplow-oauth-redirect`, the
+/// shell's), which no core crate uses; the providers bind no socket at
+/// all.
 #[test]
 fn the_core_never_binds_a_socket_for_a_sign_in() {
     const CORE: &[&str] = &[
@@ -624,12 +624,10 @@ fn the_core_never_binds_a_socket_for_a_sign_in() {
     ];
     let offenders: Vec<String> = production_sources()
         .into_iter()
-        .filter(|(path, _)| {
-            CORE.iter().any(|c| path.starts_with(c))
-                && path != "crates/oxplow-app/src/oauth_redirect.rs"
-        })
+        .filter(|(path, _)| CORE.iter().any(|c| path.starts_with(c)))
         .filter(|(path, text)| {
             text.contains("RedirectListener")
+                || text.contains("oxplow_oauth_redirect")
                 || (path.starts_with("crates/oxplow-app/src/providers/")
                     && text.contains("TcpListener"))
         })
