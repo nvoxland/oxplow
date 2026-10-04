@@ -29,10 +29,8 @@ import { SelectionCommentToolbar } from "../Comments/SelectionCommentToolbar.js"
 import { selectionToolbarVisible } from "./selectionToolbar.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
-import { parseMarkdownLink } from "../Wiki/MarkdownView.js";
+import { linkTarget, parseMarkdownLink } from "../Wiki/MarkdownView.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
-import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
-import { WORKING } from "../../revision.js";
 
 /// Comment integration bundle. When provided, the field highlights
 /// anchored ranges and exposes "Add comment" via both the floating
@@ -558,24 +556,13 @@ export function RichTextField({
       window.open(href, "_blank", "noopener,noreferrer");
       return true;
     }
-    if (parsed.kind === "file") {
-      const version = parsed.version ?? WORKING;
-      ctxNav?.navigate(fileRef(parsed.path, version), { newTab });
-      return true;
-    }
-    if (parsed.kind === "directory") {
-      ctxNav?.navigate(directoryRef(parsed.path), { newTab });
-      return true;
-    }
-    if (parsed.kind === "commit") {
-      ctxNav?.navigate(gitCommitRef(parsed.sha), { newTab });
-      return true;
-    }
-    if (parsed.kind === "internal") {
-      ctxNav?.navigate(wikiPageRef(parsed.slug), { newTab });
-      return true;
-    }
-    return false;
+    // Every page a link can name — a task, an extension's ref, a file —
+    // resolves through the one `linkTarget`, as `MarkdownView` does
+    // (tsk976).
+    const page = linkTarget(parsed);
+    if (!page) return false;
+    ctxNav?.navigate(page, { newTab });
+    return true;
   };
 
   return (
