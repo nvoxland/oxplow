@@ -1101,6 +1101,25 @@ pub struct SqliteFactStore {
 }
 
 impl SqliteFactStore {
+    /// Why the ingest would refuse facts with these dimensions, if it
+    /// would: the first bare key, named with its conformed one (tsk986). A
+    /// producer asks before it records, so a refused run is a failed run
+    /// rather than a capture rolled back behind one reported as recorded.
+    pub async fn refused_dims(&self, dims: Vec<String>) -> Result<Option<String>, DomainError> {
+        self.db
+            .read(move |conn| {
+                for d in &dims {
+                    match check_dims_tx(conn, Some(d)) {
+                        Ok(()) => {}
+                        Err(DomainError::Invalid(why)) => return Ok(Some(why)),
+                        Err(e) => return Err(e),
+                    }
+                }
+                Ok(None)
+            })
+            .await
+    }
+
     /// The database this store reads, for reads that go through the
     /// semantic layer instead (entity metrics, tsk322).
     pub fn database(&self) -> Database {

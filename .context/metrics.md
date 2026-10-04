@@ -771,7 +771,12 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   (`language`, `package`, `branch`, `model`); the fact ingest
   (`record_facts_tx` → `check_dims_tx`) refuses a fact whose `dims_json`
   carries an un-namespaced key, naming the conformed `oxplow.<key>` when
-  the catalog declares it; project config refuses one in `sliceableDims` or
+  the catalog declares it. A fact collector asks first
+  (`SqliteFactStore::refused_dims`, tsk986): a run whose facts would be
+  refused is a **failed run** — its `collector_run` row and a failed
+  capture say why, health counts it, a `collector.sync` errors — never a
+  capture rolled back behind a run reported as recorded. Project config
+  refuses one in `sliceableDims` or
   `filter.dimEq` (`subject`, the raw-subject pseudo-dimension, aside). V166
   renamed stored bare `language` facts and specs' bare dims, dropped the
   nudge's unread bare `kind` (its subject carries it) and cleared the cube

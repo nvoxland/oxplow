@@ -2040,6 +2040,14 @@ impl MetricsService {
                     .unwrap_or_else(|e| Err(format!("task failed: {e}")))
             }
         };
+        // Facts the ingest would refuse fail the run here, with why (tsk986).
+        let outcome = match outcome {
+            Ok(gauge_facts) => match self.refused_facts(&gauge_facts).await {
+                Some(why) => Err(why),
+                None => Ok(gauge_facts),
+            },
+            failed => failed,
+        };
         let (run, capture) = match outcome {
             Ok(gauge_facts) => {
                 tracing::debug!(
@@ -2247,6 +2255,23 @@ impl MetricsService {
     /// after the last offender is fixed; the engine zero-fills the series from
     /// the producer's captures (tsk44). Builds the capture and its facts;
     /// [`Self::log_run`] writes them with the run's record.
+    /// Why the ingest would refuse `gauge_facts`, if it would: a bare
+    /// dimension key, which would roll the whole capture back (tsk986).
+    async fn refused_facts(&self, gauge_facts: &[CollectedFact]) -> Option<String> {
+        let store = self.fact_store.as_ref()?;
+        let dims: Vec<String> = gauge_facts
+            .iter()
+            .filter_map(|f| f.dims.as_ref())
+            .map(|d| serde_json::Value::Object(d.clone()).to_string())
+            .collect();
+        match store.refused_dims(dims).await {
+            Ok(Some(why)) => Some(format!("a fact the ingest refuses: {why}")),
+            Ok(None) => None,
+            // The catalog couldn't be read: the record itself will say.
+            Err(_) => None,
+        }
+    }
+
     async fn collector_capture(
         &self,
         gauge: &FactCollector,
@@ -3441,6 +3466,70 @@ mod tests {
             count("SELECT count(*) FROM metric_capture WHERE producer = 'repo.once'").await,
             1
         );
+    }
+
+    /// tsk986: a collector whose facts the ingest refuses (a bare
+    /// dimension key) is a failed run, said where a person looks — its run
+    /// record and a failed capture name the conformed key — not a capture
+    /// rolled back behind a run reported as recorded.
+    #[tokio::test]
+    async fn a_run_whose_facts_are_refused_is_a_failed_run() {
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            dir.path().join("bare.star"),
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"bare\", \"subject\": \"tree:.\", \"dims\": {\"language\": \"rust\"}}]}\n",
+        )
+        .unwrap();
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            oxplow_config::collectors::PROJECT,
+            &serde_yaml::from_str(
+                "- { id: repo.bare, runtime: starlark, entry: bare.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
+            )
+            .unwrap(),
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        svc.config.write().unwrap().collectors = specs;
+        let snap =
+            snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let event = log_take(&svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
+        let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
+        use crate::event_pump::AsyncEventConsumer as _;
+        let _ = consumer.handle(&event).await;
+        let (status, error): (String, Option<String>) = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT status, error FROM collector_run WHERE id = 'repo.bare'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(status, "error");
+        assert!(
+            error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("oxplow.language"),
+            "{error:?}"
+        );
+        let failed: (String, Option<String>) = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT status, error FROM metric_capture WHERE producer = 'repo.bare'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(failed.0, "failed");
+        assert!(failed.1.unwrap_or_default().contains("oxplow.language"));
     }
 
     fn starlark_gauge(key: &str, entry_file: &str) -> FactCollector {
