@@ -211,6 +211,9 @@ pub struct InstanceCredential {
     pub redirect_port: Option<u16>,
 }
 
+/// One `(instance, credential)`'s sign-in gate.
+type SignInGate = Arc<tokio::sync::Mutex<()>>;
+
 /// A sign-in waiting for its redirect.
 struct SignInUnderWay {
     /// Which start it was ([`ProviderRegistry`]'s `sign_in_seq`).
@@ -916,7 +919,7 @@ pub struct ProviderRegistry {
     /// exchange, so an abandon (a removed instance) waits for it and
     /// nothing is kept for what's gone (tsk826) — and only for it: a slow
     /// token endpoint holds up no other sign-in (tsk910).
-    sign_in_gates: parking_lot::Mutex<BTreeMap<(String, String), Arc<tokio::sync::Mutex<()>>>>,
+    sign_in_gates: parking_lot::Mutex<BTreeMap<(String, String), SignInGate>>,
     /// One change to a person's instances at a time in this process: each
     /// reads them as they are and writes them back before another reads
     /// (tsk837). Never held across a check or a reconcile.
@@ -2456,7 +2459,7 @@ impl ProviderRegistry {
     }
 
     /// The gate of the sign-in for `key` (`(instance, credential)`).
-    fn sign_in_gate(&self, key: &(String, String)) -> Arc<tokio::sync::Mutex<()>> {
+    fn sign_in_gate(&self, key: &(String, String)) -> SignInGate {
         self.sign_in_gates
             .lock()
             .entry(key.clone())
