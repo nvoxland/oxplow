@@ -3961,6 +3961,87 @@ async fn a_sign_in_whose_endpoints_changed_meanwhile_sends_nothing() {
     );
 }
 
+/// tsk935: two sign-ins under way at once — another instance's — each
+/// takes only its own redirect: one handed the other's is refused and
+/// waits on, and nothing is exchanged for the wrong one.
+#[tokio::test]
+async fn one_sign_ins_redirect_is_never_anothers() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    const OTHER: &str = "tracker/other";
+    fx.svc.config.write().unwrap().extension_instances.insert(
+        OTHER.into(),
+        oxplow_config::ExtensionInstanceConfig {
+            enabled: true,
+            config: json!({ "team": "core" }),
+            sync_minutes: None,
+            provider: Some("fake".into()),
+        },
+    );
+    let providers = &fx.svc.providers;
+    let mine = providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let theirs = providers
+        .begin_sign_in(OTHER, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let (my_redirect, their_redirect) = (browse(&mine).await, browse(&theirs).await);
+    let crossed = providers
+        .complete_sign_in(OTHER, "FAKE_TOKEN", &my_redirect)
+        .await
+        .unwrap();
+    assert!(
+        matches!(crossed, SignInCompletion::NotThisSignIn { .. }),
+        "{crossed:?}"
+    );
+    assert!(sim.grants().is_empty(), "nothing exchanged");
+    // Both still wait for their own.
+    for (instance, redirect) in [(OTHER, &their_redirect), (INSTANCE, &my_redirect)] {
+        assert!(matches!(
+            providers
+                .complete_sign_in(instance, "FAKE_TOKEN", redirect)
+                .await
+                .unwrap(),
+            SignInCompletion::SignedIn
+        ));
+    }
+}
+
+/// tsk935: a sign-in finished after its new endpoints were approved
+/// meanwhile still sends its code nowhere: it began against the old ones,
+/// and only the comparison with the declaration it began with catches it
+/// (the approval check passes).
+#[tokio::test]
+async fn a_sign_in_whose_approved_endpoints_changed_meanwhile_sends_nothing() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let page = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let redirect = browse(&page).await;
+    let elsewhere = OAuthSim::start().await;
+    write_oauth_extension(
+        &fx.svc.layout.project_dir,
+        "",
+        &sim.authorize_url,
+        &elsewhere.token_url,
+        "",
+    );
+    // A person approves the new endpoints before the redirect comes back.
+    approve(&fx, &extension(&fx.svc.layout.project_dir));
+    let failed = complete(&fx, "FAKE_TOKEN", &redirect).await.unwrap();
+    assert!(
+        matches!(&failed, SignInCompletion::Failed { error } if error.contains("signs in changed")),
+        "{failed:?}"
+    );
+    assert!(sim.grants().is_empty() && elsewhere.grants().is_empty());
+}
+
 /// P10: a sign-in never finished ends after its wait: the renderer hears
 /// why, and its redirect, coming late, finds none under way.
 #[tokio::test]

@@ -29,6 +29,9 @@ const steps: string[] = [];
 let shellPresent = true;
 /** What each wait for a redirect returns, in turn (then none comes). */
 let redirects: string[] = [];
+/** When set, a wait for a redirect fails with this (the shell's listener
+ *  broke). */
+let awaitFails: string | null = null;
 /** How many listeners the shell opened: each one's id. */
 let listens = 0;
 const listeners = new Set<(event: Record<string, unknown>) => void>();
@@ -104,6 +107,7 @@ mock.module("../api.js", () => ({
   },
   awaitSignInRedirect: (id: number) => {
     steps.push(`await ${id}`);
+    if (awaitFails !== null) return Promise.reject(new Error(awaitFails));
     const next = redirects.shift();
     return next === undefined ? new Promise<string>(() => {}) : Promise.resolve(next);
   },
@@ -147,6 +151,7 @@ afterEach(async () => {
   steps.length = 0;
   listens = 0;
   redirects = [];
+  awaitFails = null;
   shellPresent = true;
   instance.credentials = STATIC_CREDENTIALS;
   active = null;
@@ -347,6 +352,19 @@ test("a failed completion shows on its row", async () => {
   await waitFor(() => expect(steps.at(-1)).toBe("answer 1 failed"));
   await waitFor(() => expect(row.textContent).toContain("the connection to the daemon was lost"));
   expect(row.textContent).not.toContain("Finish signing in in your browser");
+});
+
+// tsk935: the shell's wait for the redirect failing (its listener broke)
+// ends the row's sign-in: it says why and stops waiting.
+test("a wait for the redirect that fails shows on its row", async () => {
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: null }];
+  awaitFails = "the redirect listener stopped";
+  const view = render(<IntegrationsSection />);
+  const row = await waitFor(() => view.getByTestId("sign-in-tracker/fake-FAKE_TOKEN"));
+  fireEvent.click(view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"));
+  await waitFor(() => expect(row.textContent).toContain("the redirect listener stopped"));
+  expect(row.textContent).not.toContain("Finish signing in in your browser");
+  expect(steps.some((s) => s.startsWith("complete"))).toBe(false);
 });
 
 // tsk929: leaving the row cancels its sign-in in the core (nothing of it
