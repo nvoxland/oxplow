@@ -704,7 +704,7 @@ fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             })?;
         let mut result = serde_json::to_value(&row).expect("Task serializes");
         result["ref"] = Value::String(work_item_ref(id));
-        result["link_warnings"] = json!(links.warnings(ctx, &row.description));
+        result["link_warnings"] = json!(links.warnings(ctx, &row.description, row.thread_id));
         Ok(HandlerOutput {
             result,
             inverse: None,
@@ -832,7 +832,7 @@ fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
                 .map(|_| json!({ "priority": before.priority })),
         };
         let mut result = serde_json::to_value(&after).expect("Task serializes");
-        result["link_warnings"] = json!(links.warnings(ctx, &after.description));
+        result["link_warnings"] = json!(links.warnings(ctx, &after.description, after.thread_id));
         Ok(HandlerOutput {
             result,
             inverse: Some(CommandCall {

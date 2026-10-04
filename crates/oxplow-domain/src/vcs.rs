@@ -302,6 +302,9 @@ pub trait RevisionGraph: Send {
     fn is_ancestor_or_equal(&self, ancestor: &str, descendant: &str) -> Option<bool>;
     /// When `rev` was made.
     fn time_of(&self, rev: &str) -> Option<crate::Timestamp>;
+    /// Whether `path` (repo-relative) is a file at `rev`; `None` when `rev`
+    /// names nothing.
+    fn has_file(&self, rev: &str, path: &str) -> Option<bool>;
 }
 
 /// The VCS capability. See the module docs.

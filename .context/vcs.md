@@ -48,7 +48,8 @@ provider stays testable against a tempdir.
   moved — and does its idempotent work as if its stream(s) did (the
   git-refs take takes, the reconciler reconciles every stream, the commit
   indexer refreshes; tsk724). `revision_graph(ws)` is a
-  synchronous `RevisionGraph` (ancestry, a revision's time) that metric
+  synchronous `RevisionGraph` (ancestry, a revision's time, whether a file
+  is at a revision — the link check's `has_file`, tsk895) that metric
   visibility caches over.
 
 `rev_kind()` names the provider's revisions in a ref's `@<kind>:<rev>`

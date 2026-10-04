@@ -94,20 +94,48 @@ pub struct LinkDeps {
 
 impl LinkDeps {
     /// The links in `body` that don't resolve, checked in the command's
-    /// transaction.
-    pub fn warnings(&self, ctx: &crate::commands::TxCtx<'_>, body: &str) -> Vec<LinkWarning> {
-        let graph = self.vcs.revision_graph(&self.project_dir);
+    /// transaction — files in `thread`'s worktree (tsk895), the primary
+    /// checkout when it has none.
+    pub fn warnings(
+        &self,
+        ctx: &crate::commands::TxCtx<'_>,
+        body: &str,
+        thread: Option<oxplow_domain::ThreadId>,
+    ) -> Vec<LinkWarning> {
+        let root = thread
+            .and_then(|t| worktree_of_tx(ctx.conn, t))
+            .unwrap_or_else(|| self.project_dir.clone());
+        let graph = self.vcs.revision_graph(&root);
         check_links_in(
             &LinkWorld {
                 conn: ctx.conn,
                 kinds: &ctx.events.vocabulary.kinds,
-                project_dir: &self.project_dir,
+                project_dir: &root,
                 graph: &*graph,
                 this_page: None,
             },
             body,
         )
     }
+}
+
+/// `thread`'s stream's worktree, when it has one on disk.
+pub(crate) fn worktree_of_tx(
+    conn: &rusqlite::Connection,
+    thread: oxplow_domain::ThreadId,
+) -> Option<std::path::PathBuf> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT s.worktree_path FROM threads t JOIN streams s ON s.id = t.stream_id
+          WHERE t.id = ?1",
+        [thread.value()],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .map(std::path::PathBuf::from)
+    .filter(|p| p.is_dir())
 }
 
 /// [`check_links_in`] over the app's services, for the tools that report
@@ -213,8 +241,23 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
             .resolve(sha)
             .is_none()
             .then(|| format!("commit `{sha}` was not found")),
-        Reference::File(detail) => (!world.project_dir.join(&detail.path).is_file())
-            .then(|| format!("file `{}` does not exist", detail.path)),
+        // A file at a revision is looked for there (tsk895); one on disk in
+        // the worktree.
+        Reference::File(detail) => match &detail.version {
+            oxplow_domain::refs::RefVersion::Ref(rev) => {
+                match world.graph.has_file(rev, &detail.path) {
+                    Some(true) => None,
+                    Some(false) => {
+                        Some(format!("file `{}` does not exist at `{rev}`", detail.path))
+                    }
+                    None => Some(format!("revision `{rev}` was not found")),
+                }
+            }
+            oxplow_domain::refs::RefVersion::Disk => {
+                (!world.project_dir.join(&detail.path).is_file())
+                    .then(|| format!("file `{}` does not exist", detail.path))
+            }
+        },
         Reference::Dir(dir) => (!world.project_dir.join(dir).is_dir())
             .then(|| format!("directory `{dir}` does not exist")),
         Reference::Finding(id) => match id.parse::<i64>() {
@@ -322,5 +365,34 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].target, "src/gone.rs");
         assert!(warnings[0].reason.contains("does not exist"));
+    }
+
+    /// tsk895: a file pinned to a revision is looked for at that revision,
+    /// not on disk — one since deleted is still a good link.
+    #[tokio::test]
+    async fn a_pinned_file_is_checked_at_its_revision() {
+        let dir = git_repo();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() {}\n").unwrap();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("src/a.rs")).unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "a", &tree, &[])
+            .unwrap();
+        std::fs::remove_file(dir.path().join("src/a.rs")).unwrap();
+        let services = Services::in_memory(dir.path()).unwrap();
+        let warnings =
+            check_links(&services, "Was [[src/a.rs@HEAD]], never [[src/b.rs@HEAD]].").await;
+        assert_eq!(
+            warnings
+                .iter()
+                .map(|w| w.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/b.rs@HEAD"],
+            "{warnings:?}"
+        );
+        assert!(warnings[0].reason.contains("at `HEAD`"), "{warnings:?}");
     }
 }

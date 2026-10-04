@@ -159,6 +159,21 @@ impl RevisionGraph for GitGraph {
             commit.time().seconds() * 1000,
         ))
     }
+
+    fn has_file(&self, rev: &str, path: &str) -> Option<bool> {
+        let repo = self.0.as_ref()?;
+        let tree = repo
+            .revparse_single(rev)
+            .ok()?
+            .peel_to_commit()
+            .ok()?
+            .tree()
+            .ok()?;
+        Some(
+            tree.get_path(Path::new(path))
+                .is_ok_and(|entry| entry.kind() == Some(git2::ObjectType::Blob)),
+        )
+    }
 }
 
 /// The object database of the repository at `.0` (any of its worktrees).

@@ -64,8 +64,14 @@ fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError
 }
 
 /// The note and the links in its body that don't resolve.
-fn with_warnings(deps: &LinkDeps, ctx: &TxCtx<'_>, note: Value, body: &str) -> Value {
-    json!({ "note": note, "link_warnings": deps.warnings(ctx, body) })
+fn with_warnings(
+    deps: &LinkDeps,
+    ctx: &TxCtx<'_>,
+    note: Value,
+    body: &str,
+    thread: Option<oxplow_domain::ThreadId>,
+) -> Value {
+    json!({ "note": note, "link_warnings": deps.warnings(ctx, body, thread) })
 }
 
 fn schema<T: JsonSchema>() -> Value {
@@ -110,7 +116,7 @@ pub fn add_command(deps: LinkDeps) -> Command {
             )?;
             let note = serde_json::to_value(note).expect("a note serializes");
             Ok(HandlerOutput {
-                result: with_warnings(&deps, ctx, note, &input.body),
+                result: with_warnings(&deps, ctx, note, &input.body, Some(thread)),
                 events: vec![event],
                 ..HandlerOutput::default()
             })
@@ -150,7 +156,7 @@ pub fn update_command(deps: LinkDeps) -> Command {
             let event = update_note_tx(ctx.conn, &ctx.events.vocabulary.kinds, id, &input.body)?;
             let note = serde_json::to_value(note_tx(ctx.conn, id)?).expect("a note serializes");
             Ok(HandlerOutput {
-                result: with_warnings(&deps, ctx, note, &input.body),
+                result: with_warnings(&deps, ctx, note, &input.body, before.thread_id),
                 inverse: Some(CommandCall {
                     name: UPDATE.into(),
                     input: json!({ "note": input.note, "body": before.body }),
@@ -180,6 +186,57 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         }
+    }
+
+    /// tsk895: a note's file links are checked in its thread's worktree —
+    /// a file only there is a good link, one only in the primary checkout
+    /// isn't.
+    #[tokio::test]
+    async fn a_worktree_threads_links_are_checked_in_its_worktree() {
+        let fx = services_with_effort().await;
+        let worktree = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(worktree.path().join("src")).unwrap();
+        std::fs::write(worktree.path().join("src/only_here.rs"), "").unwrap();
+        std::fs::create_dir_all(fx.svc.layout.project_dir.join("src")).unwrap();
+        std::fs::write(fx.svc.layout.project_dir.join("src/only_primary.rs"), "").unwrap();
+        let path = worktree.path().to_string_lossy().into_owned();
+        fx.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                       worktree_path, created_at, updated_at)
+                     VALUES (2, 'worktree', 'w', 'w', 'refs/heads/w', 'main', ?1,
+                       '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                    [&path],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let thread =
+            crate::test_fixtures::new_thread(&fx.svc, oxplow_domain::StreamId::new(2), "w").await;
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Agent {
+                    thread_id: Some(thread.id),
+                    stream_id: None,
+                },
+                ADD,
+                json!({ "body": "see [[src/only_here.rs]] not [[src/only_primary.rs]]" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let targets: Vec<&str> = out.result["link_warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|w| w["target"].as_str())
+            .collect();
+        assert_eq!(targets, vec!["src/only_primary.rs"]);
     }
 
     /// A queued agent — one that may not write the worktree — still takes

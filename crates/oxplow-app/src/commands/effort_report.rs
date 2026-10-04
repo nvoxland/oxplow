@@ -28,7 +28,6 @@ use oxplow_domain::{
     Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, EffortId, Invokers,
     Lifecycle, TaskImpact, ThreadId,
 };
-use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -147,20 +146,10 @@ fn agents_thread(actor: &Actor, named: Option<ThreadId>) -> Result<Option<Thread
 
 /// The thread's stream's worktree, where touched files are looked for.
 async fn worktree_of(db: &Database, thread: ThreadId) -> Option<PathBuf> {
-    db.read(move |c| {
-        c.query_row(
-            "SELECT s.worktree_path FROM threads t JOIN streams s ON s.id = t.stream_id
-             WHERE t.id = ?1",
-            [thread.value()],
-            |r| r.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(oxplow_db::map_sql_err)
-    })
-    .await
-    .ok()
-    .flatten()
-    .map(PathBuf::from)
+    db.read(move |c| Ok(crate::link_check::worktree_of_tx(c, thread)))
+        .await
+        .ok()
+        .flatten()
 }
 
 /// Claim and disclaim test runs on an effort's attribution ledger.
@@ -284,14 +273,12 @@ async fn report(
     }
     let link_warnings = match &summary {
         Some(body) => {
-            crate::link_check::check_links_at(
-                &deps.db,
-                &deps.vocabulary,
-                &deps.project_dir,
-                &*deps.vcs,
-                body,
-            )
-            .await
+            // Files in the thread's worktree (tsk895).
+            let root = worktree_of(&deps.db, thread)
+                .await
+                .unwrap_or_else(|| deps.project_dir.clone());
+            crate::link_check::check_links_at(&deps.db, &deps.vocabulary, &root, &*deps.vcs, body)
+                .await
         }
         None => Vec::new(),
     };

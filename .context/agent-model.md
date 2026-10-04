@@ -1464,7 +1464,10 @@ probed for existence; another known kind (an effort, another provider's
 work item, a run) is valid as it stands; a plugin kind with a `resolve`
 model (`v_ref_kind.resolve`) is valid when that model has its `ref`
 (`[[pr:12]]` → `github_pr:12`). Only an interior matching no kind is
-"not a recognized reference". The shared classifier is `oxplow_domain::refs::classify_wikilinks`
+"not a recognized reference". A file is looked for in the **thread's
+worktree** (the note's or work item's thread; the primary checkout when it
+has none), and a file pinned to a revision (`[[src/a.rs@HEAD]]`) at that
+revision (`RevisionGraph::has_file`), not on disk (tsk895). The shared classifier is `oxplow_domain::refs::classify_wikilinks`
 (the single source of truth for "is this interior a real ref"), and
 existence probes reuse the `ref_resolver` store/git/fs surfaces. The
 `<wiki-capture-hint>` block injected on exploration UserPromptSubmits
