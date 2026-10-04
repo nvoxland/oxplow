@@ -390,15 +390,28 @@ async fn keeping_spec(
     target: &LensTarget,
     spec: LensSpec,
     stream: Option<String>,
-    thread: Option<ThreadId>,
+    actor: &oxplow_domain::Actor,
 ) -> Result<Keeping, CommandError> {
     let project_dir = target.project_dir.clone();
-    let thread = thread.map(|t| t.value());
+    let thread = actor.thread_id().map(|t| t.value());
+    let agent = actor.is_agent_driven();
     let keeping = target
         .db
         .read(move |tx| {
             let (stream_id, root) = match stream.as_deref() {
                 Some(raw) => match stream_root_tx(tx, &project_dir, raw) {
+                    // An agent writes in its own thread's stream only, as
+                    // the agent policy keeps its edits there (tsk988).
+                    Ok((id, _))
+                        if agent && thread.and_then(|t| thread_stream_tx(tx, t)) != Some(id) =>
+                    {
+                        return Ok(Err(invalid(
+                            "/stream",
+                            format!(
+                                "an agent keeps a lens in its own thread's stream, not `{raw}`"
+                            ),
+                        )))
+                    }
                     Ok((id, root)) => (Some(id), root),
                     Err(DomainError::Invalid(m)) => return Ok(Err(invalid("/stream", m))),
                     Err(e) => return Err(e),
@@ -461,9 +474,7 @@ fn keep(target: LensTarget) -> Command {
                     }
                     keeping_answer(&target, &raw).await?
                 }
-                (None, Some(spec)) => {
-                    keeping_spec(&target, spec, input.stream, actor.thread_id()).await?
-                }
+                (None, Some(spec)) => keeping_spec(&target, spec, input.stream, &actor).await?,
                 _ => {
                     return Err(invalid(
                         "",
@@ -1098,6 +1109,90 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(saved.result["lens"], "saved/weekly-todos");
+    }
+
+    /// tsk988: an agent keeps a lens only in its own thread's stream — the
+    /// agent policy keeps it out of other streams' worktrees — while a
+    /// person may name any stream.
+    #[tokio::test]
+    async fn an_agent_keeps_a_lens_only_in_its_own_stream() {
+        use oxplow_domain::stores::StreamStore as _;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let wt = tempfile::tempdir().unwrap();
+        let ts = oxplow_domain::Timestamp::from_unix_ms(1_700_000_000_000);
+        fx.svc
+            .stream_store
+            .upsert(&oxplow_domain::Stream {
+                id: oxplow_domain::StreamId::new(2),
+                kind: oxplow_domain::StreamKind::Worktree,
+                title: "other".into(),
+                branch: "other".into(),
+                branch_ref: "refs/heads/other".into(),
+                branch_source: "main".into(),
+                worktree_path: wt.path().to_string_lossy().into(),
+                working_pane: String::new(),
+                talking_pane: String::new(),
+                working_session_id: String::new(),
+                talking_session_id: String::new(),
+                custom_prompt: None,
+                created_at: ts,
+                updated_at: ts,
+                archived_at: None,
+            })
+            .await
+            .unwrap();
+        let keep = |actor: Actor, stream: &str, slug: &str| {
+            let svc = fx.svc.clone();
+            let input =
+                json!({ "spec": spec(), "stream": stream, "extension": "kept", "slug": slug });
+            async move { svc.commands.run(&actor, KEEP, input, false).await }
+        };
+        let err = keep(agent(&fx), "str2", "theirs").await.unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message }
+                if f == "/stream" && message.contains("its own thread's stream")),
+            "{err:?}"
+        );
+        assert!(!wt.path().join("oxplow/extensions/kept").exists());
+        let own = fx.svc.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string();
+        keep(agent(&fx), &own, "mine").await.unwrap();
+        keep(Actor::Human, "str2", "theirs").await.unwrap();
+        assert!(wt
+            .path()
+            .join("oxplow/extensions/kept/lenses/theirs.yaml")
+            .exists());
+    }
+
+    /// tsk988: a kept lens goes to a private extension — moving one into a
+    /// shared extension is `lens.share`, a person's.
+    #[tokio::test]
+    async fn a_lens_isnt_kept_into_a_shared_extension() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let team = fx.svc.layout.project_dir.join("oxplow/extensions/team");
+        std::fs::create_dir_all(&team).unwrap();
+        std::fs::write(
+            team.join("extension.yaml"),
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: p\n  examples: [{ name: a }]\n",
+        )
+        .unwrap();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                KEEP,
+                json!({ "spec": spec(), "extension": "team" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("`team` is shared") && err.to_string().contains("lens.share"),
+            "{err}"
+        );
+        assert!(!team.join("lenses").exists());
     }
 
     /// `lens.keep` keeps an answer or a spec: neither, or both, is refused;

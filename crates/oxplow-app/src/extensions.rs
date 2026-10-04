@@ -3583,8 +3583,15 @@ pub fn save_lens(
     if file.exists() {
         return Err(invalid(format!("lens `{extension}/{slug}` already exists")));
     }
-    std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
     let manifest = dir.join("extension.yaml");
+    // A kept lens goes to a private extension; moving one into a shared
+    // extension is `lens.share`, a person's (tsk988).
+    if manifest.exists() && load_fresh(root, extension)?.sharing == Sharing::Shared {
+        return Err(invalid(format!(
+            "`{extension}` is shared: keep the lens in a private extension, then a person moves it with `lens.share`"
+        )));
+    }
+    std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
     if !manifest.exists() {
         // The same v2 manifest `oxplow plugin new` writes, so a lens saved
         // from Explore Data starts as a checkable extension with an intent.
