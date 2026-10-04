@@ -36,6 +36,19 @@ fn now() -> String {
         .unwrap_or_default()
 }
 
+/// An effort's claims, as a signature: how many, and the newest's time.
+const SIG: &str = "SELECT count(*) || '|' || coalesce(max(a.recorded_at), '') \
+                   FROM effort_attribution a WHERE a.effort_id = e.id";
+
+fn attribution_sig_tx(tx: &rusqlite::Connection, effort_id: i64) -> Result<String, DomainError> {
+    tx.query_row(
+        &format!("SELECT ({SIG}) FROM effort e WHERE e.id = ?1"),
+        [effort_id],
+        |r| r.get(0),
+    )
+    .map_err(map_sql_err)
+}
+
 #[derive(Clone)]
 pub struct SqliteEffortEvidenceStore {
     db: Database,
@@ -46,11 +59,46 @@ impl SqliteEffortEvidenceStore {
         Self { db }
     }
 
-    /// Replace `effort_id`'s metric deltas.
-    pub async fn replace_metric_deltas(
+    /// What `effort_id`'s evidence is computed from, as a signature of its
+    /// claims: how many, and the newest's time (tsk889). A claim added,
+    /// moved away or changed moves it. Read it before computing the
+    /// evidence, and store it with [`Self::replace`].
+    pub async fn attribution_sig(&self, effort_id: i64) -> Result<String, DomainError> {
+        self.db
+            .read(move |tx| attribution_sig_tx(tx, effort_id))
+            .await
+    }
+
+    /// Closed efforts whose claims moved since their evidence was stored.
+    pub async fn stale_closed(&self) -> Result<Vec<i64>, DomainError> {
+        self.db
+            .read(|tx| {
+                let mut st = tx
+                    .prepare(&format!(
+                        "SELECT e.id FROM effort e
+                          LEFT JOIN effort_evidence_state s ON s.effort_id = e.id
+                          WHERE e.ended_at IS NOT NULL
+                            AND s.attribution_sig IS NOT ({SIG})"
+                    ))
+                    .map_err(map_sql_err)?;
+                let ids = st
+                    .query_map([], |r| r.get(0))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<i64>>>())
+                    .map_err(map_sql_err)?;
+                Ok(ids)
+            })
+            .await
+    }
+
+    /// Replace `effort_id`'s evidence — its metric deltas and observations —
+    /// and record `sig`, the claims it was computed from, in one
+    /// transaction.
+    pub async fn replace(
         &self,
         effort_id: i64,
         deltas: Vec<EffortMetricDelta>,
+        observations: Vec<EffortObservation>,
+        sig: String,
     ) -> Result<(), DomainError> {
         let at = now();
         self.db
@@ -71,6 +119,33 @@ impl SqliteEffortEvidenceStore {
                     )
                     .map_err(map_sql_err)?;
                 }
+                tx.execute("DELETE FROM effort_observation_row WHERE effort_id = ?1", [effort_id])
+                    .map_err(map_sql_err)?;
+                for (seq, o) in observations.iter().enumerate() {
+                    let created = serde_json::to_value(o.created_at)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_default();
+                    tx.execute(
+                        "INSERT INTO effort_observation_row (effort_id, seq, kind, provenance, source, metric_value,
+                           payload_json, local_snapshot_id, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        rusqlite::params![
+                            effort_id, seq as i64, o.kind, o.provenance, o.source, o.metric_value,
+                            o.payload_json, o.local_snapshot_id, created
+                        ],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                tx.execute(
+                    "INSERT INTO effort_evidence_state (effort_id, attribution_sig, refreshed_at)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT (effort_id) DO UPDATE SET
+                         attribution_sig = excluded.attribution_sig,
+                         refreshed_at = excluded.refreshed_at",
+                    rusqlite::params![effort_id, sig, at],
+                )
+                .map_err(map_sql_err)?;
                 Ok(())
             })
             .await
@@ -120,37 +195,6 @@ impl SqliteEffortEvidenceStore {
                         })
                     })
                     .collect()
-            })
-            .await
-    }
-
-    /// Replace `effort_id`'s observations.
-    pub async fn replace_observations(
-        &self,
-        effort_id: i64,
-        observations: Vec<EffortObservation>,
-    ) -> Result<(), DomainError> {
-        self.db
-            .transaction(move |tx| {
-                tx.execute("DELETE FROM effort_observation_row WHERE effort_id = ?1", [effort_id])
-                    .map_err(map_sql_err)?;
-                for (seq, o) in observations.iter().enumerate() {
-                    let created = serde_json::to_value(o.created_at)
-                        .ok()
-                        .and_then(|v| v.as_str().map(str::to_string))
-                        .unwrap_or_default();
-                    tx.execute(
-                        "INSERT INTO effort_observation_row (effort_id, seq, kind, provenance, source, metric_value,
-                           payload_json, local_snapshot_id, created_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                        rusqlite::params![
-                            effort_id, seq as i64, o.kind, o.provenance, o.source, o.metric_value,
-                            o.payload_json, o.local_snapshot_id, created
-                        ],
-                    )
-                    .map_err(map_sql_err)?;
-                }
-                Ok(())
             })
             .await
     }
@@ -209,23 +253,23 @@ mod tests {
         let db = seeded().await;
         let store = SqliteEffortEvidenceStore::new(db.clone());
         store
-            .replace_metric_deltas(
+            .replace(
                 1,
                 vec![delta("a", 3.0, Some("warn")), delta("b", 1.0, None)],
+                Vec::new(),
+                String::new(),
             )
             .await
             .unwrap();
         store
-            .replace_metric_deltas(1, vec![delta("a", 4.0, Some("warn"))])
-            .await
-            .unwrap();
-        store
-            .replace_observations(
+            .replace(
                 1,
+                vec![delta("a", 4.0, Some("warn"))],
                 vec![
                     observation("diff-coverage", 72.5),
                     observation("test-run", 1.0),
                 ],
+                String::new(),
             )
             .await
             .unwrap();

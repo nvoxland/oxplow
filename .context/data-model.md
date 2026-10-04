@@ -1565,7 +1565,10 @@ per-file line-sets, analysis payload) rides verbatim in
 The `effort_evidence` asset rebuilds each effort's rows from its ledger-claimed
 captures (`CollectionService::effort_observations_from_metrics`) and stores them
 in `effort_observation_row` (V80, read as `v_effort_observation`); the panel and
-MCP `list_effort_observations` read those. `EffortObservation`
+MCP `list_effort_observations` read those. `effort_evidence_state` records the
+claim signature each effort's rows were computed from — the count and newest
+`recorded_at` of its `effort_attribution` rows — so a closed effort whose claims
+move is recomputed (V163, tsk889). `EffortObservation`
 (`effort_evidence_store.rs`) is that row (tsk862). The `provenance`/`source` trust spine and the `observed`/`asserted`
 distinction carry on every capture (see `.context/metrics.md`).
 

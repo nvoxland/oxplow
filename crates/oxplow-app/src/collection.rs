@@ -2734,10 +2734,12 @@ impl CollectionService {
         let row_id = EffortId::try_from_str(effort_id)
             .ok_or_else(|| DomainError::Invalid(format!("not an effort id: {effort_id}")))?
             .value();
+        // The claims it's computed from, read first: one that lands while
+        // it computes leaves it stale, so it's computed again (tsk889).
+        let sig = store.attribution_sig(row_id).await?;
         let deltas = self.effort_metric_deltas(effort_id).await;
         let observations = self.effort_observations_from_metrics(effort_id, None).await;
-        store.replace_metric_deltas(row_id, deltas).await?;
-        store.replace_observations(row_id, observations).await
+        store.replace(row_id, deltas, observations, sig).await
     }
 
     pub async fn effort_metric_deltas(&self, effort_id: &str) -> Vec<oxplow_db::EffortMetricDelta> {

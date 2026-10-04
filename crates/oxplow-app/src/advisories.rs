@@ -439,7 +439,7 @@ mod tests {
         let effort = f.effort.value();
         f.svc
             .effort_evidence_store
-            .replace_metric_deltas(
+            .replace(
                 effort,
                 vec![
                     delta(
@@ -453,6 +453,8 @@ mod tests {
                     delta("agent.tokens.total", "tokens", 100.0, 5000.0, None),
                     delta("test.ratio", "ratio", 1.5, 1.0, None),
                 ],
+                Vec::new(),
+                String::new(),
             )
             .await
             .unwrap();
@@ -493,7 +495,7 @@ mod tests {
         };
         f.svc
             .effort_evidence_store
-            .replace_observations(f.effort.value(), vec![obs(91.0)])
+            .replace(f.effort.value(), Vec::new(), vec![obs(91.0)], String::new())
             .await
             .unwrap();
         assert!(for_thread(
@@ -506,7 +508,7 @@ mod tests {
         .is_empty());
         f.svc
             .effort_evidence_store
-            .replace_observations(f.effort.value(), vec![obs(42.4)])
+            .replace(f.effort.value(), Vec::new(), vec![obs(42.4)], String::new())
             .await
             .unwrap();
         let hits = for_thread(

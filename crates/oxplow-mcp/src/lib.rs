@@ -4619,9 +4619,11 @@ mod tests {
         };
         services
             .effort_evidence_store
-            .replace_observations(
+            .replace(
                 effort.id.value(),
+                Vec::new(),
                 vec![row("diff-coverage", 72.5), row("test-run", 1.0)],
+                String::new(),
             )
             .await
             .unwrap();

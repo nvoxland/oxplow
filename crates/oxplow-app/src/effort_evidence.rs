@@ -4,7 +4,9 @@
 //! to `effort.finished`), and for every open effort as an **asset** over
 //! the tables the evidence reads ([`OpenEffortEvidence`], P7.B6) — a commit
 //! to a capture, a fact, a run claim or a token row recomputes it once its
-//! inputs go quiet. Its own tables aren't inputs, so it can't loop. The
+//! inputs go quiet. The same asset recomputes a **closed** effort whose
+//! claims moved since its evidence was stored (`effort_evidence_state`,
+//! tsk889): a run claimed after the close lands. Its own tables aren't inputs, so it can't loop. The
 //! renderer hears the rows move as `ModelsChanged`. See
 //! `.context/semantic-layer.md`.
 
@@ -57,6 +59,12 @@ impl Materializer for OpenEffortEvidence {
         };
         for e in svc.effort_store.list_all_open().await? {
             refresh(&svc, e.id.value()).await;
+        }
+        // A closed effort whose claims moved since its evidence was stored —
+        // a run claimed after the close, `effort.amend`, a claim moved to
+        // another effort (tsk889).
+        for id in svc.effort_evidence_store.stale_closed().await? {
+            refresh(&svc, id).await;
         }
         Ok(Recomputed::default())
     }
@@ -111,5 +119,66 @@ mod tests {
         .await
         .expect("the evidence recomputed after its input moved");
         assert!(computed.is_some());
+    }
+
+    /// tsk889: a run claimed for an effort after it closed (a late
+    /// collection, `effort.amend { claim_runs }`) lands in its evidence:
+    /// the asset recomputes every closed effort whose claims moved.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_run_claimed_after_the_close_lands_in_the_closed_efforts_evidence() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let effort = f.effort.value();
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE effort SET ended_at = ?2 WHERE id = ?1",
+                    rusqlite::params![effort, oxplow_domain::Timestamp::now().to_string()],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        refresh(&f.svc, effort).await;
+        let runs = || async {
+            f.svc
+                .effort_evidence_store
+                .list_observations(effort, Some("test-run".into()))
+                .await
+                .unwrap()
+                .len()
+        };
+        assert_eq!(runs().await, 0);
+        let run = f
+            .svc
+            .collection
+            .record_test_run(
+                &f.thread,
+                "cargo test",
+                Some(0),
+                Some(10),
+                Some(1),
+                Some(0),
+                Some(1),
+                "asserted",
+                "test.record_run",
+                None,
+                None,
+            )
+            .await
+            .unwrap()
+            .expect("a run");
+        f.svc
+            .attribution_store
+            .set_state(&f.effort, "run", &format!("run:{run}"), "claimed", None)
+            .await
+            .unwrap();
+        OpenEffortEvidence {
+            svc: Arc::downgrade(&f.svc),
+        }
+        .recompute(false)
+        .await
+        .unwrap();
+        assert_eq!(runs().await, 1);
     }
 }

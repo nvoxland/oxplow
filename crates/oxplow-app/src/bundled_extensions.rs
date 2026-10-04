@@ -199,8 +199,9 @@ mod tests {
         };
         f.svc
             .effort_evidence_store
-            .replace_observations(
+            .replace(
                 f.effort.value(),
+                Vec::new(),
                 vec![
                     obs("test-run", None, run("failed")),
                     obs("test-run", None, run("passed")),
@@ -217,6 +218,7 @@ mod tests {
                         }),
                     ),
                 ],
+                String::new(),
             )
             .await
             .unwrap();
