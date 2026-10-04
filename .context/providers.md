@@ -172,7 +172,9 @@ overriding `https://api.linear.app/graphql`). Its example extension is
   create refused whose id already names what it would make was sent
   before and landed, so the provider looks it up (`issue` / `comment` /
   `issueRelation` by id) and answers with it. When the lookup finds
-  nothing the refusal was the create's own; when the lookup itself fails
+  nothing the refusal was the create's own — answered as Linear said it,
+  at no field when Linear names none (the parent was resolved before the
+  create was sent; `LinearSim::refuse_next_of`, tsk946); when the lookup itself fails
   (rate limited, unreachable) that is the answer, since only it could say
   whether the write landed (`LinearSim::rate_limit_next_of`). It
   does **not** declare `idempotent_writes` until a live run confirms

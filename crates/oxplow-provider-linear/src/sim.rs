@@ -56,6 +56,9 @@ struct World {
     rate_limit_secs: Option<u64>,
     /// Refuse the next request of this operation as rate limited.
     rate_limit_op: Option<(String, u64)>,
+    /// Refuse the next request of this operation as invalid input, with
+    /// this message — a refusal Linear doesn't attribute to a field.
+    refuse_op: Option<(String, String)>,
     requests: Vec<Request>,
     /// Issues answered with this state type instead of their own (a
     /// workflow the provider can't map).
@@ -116,6 +119,7 @@ impl LinearSim {
             max_page: 50,
             rate_limit_secs: None,
             rate_limit_op: None,
+            refuse_op: None,
             requests: Vec::new(),
             odd_state_types: std::collections::HashMap::new(),
         }));
@@ -159,6 +163,13 @@ impl LinearSim {
     /// retrying after `secs`; other requests go through.
     pub fn rate_limit_next_of(&self, operation: &str, secs: u64) {
         self.lock().rate_limit_op = Some((operation.to_string(), secs));
+    }
+
+    /// Refuse the next `operation` request (`IssueCreate`) as invalid
+    /// input saying `message`, as Linear refuses a write it won't take;
+    /// other requests go through.
+    pub fn refuse_next_of(&self, operation: &str, message: &str) {
+        self.lock().refuse_op = Some((operation.to_string(), message.to_string()));
     }
 
     /// Answer `identifier` with workflow state type `kind`, whatever its
@@ -294,6 +305,9 @@ fn answer(w: &mut World, key: &str, request: &Value) -> (u16, Vec<(String, Strin
         operation: operation.clone(),
         variables: vars.clone(),
     });
+    if let Some((_, message)) = w.refuse_op.take_if(|(name, _)| *name == operation) {
+        return (200, Vec::new(), error("INVALID_INPUT", &message));
+    }
     match op(w, &operation, &vars) {
         Ok(data) => (200, Vec::new(), json!({ "data": data })),
         Err(message) => (200, Vec::new(), error("INVALID_INPUT", &message)),

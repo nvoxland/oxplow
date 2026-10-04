@@ -667,9 +667,9 @@ async fn invoke(
             if let Some(project) = &instance.project {
                 fields.insert("projectId".into(), json!(project));
             }
-            let data = create(client, issue::ISSUE_CREATE, fields, id, issue::ISSUE)
-                .await
-                .map_err(at("/parent_ref"))?;
+            // A refusal Linear attributes to no field stays field-less: the
+            // parent was resolved before the create was sent (tsk946).
+            let data = create(client, issue::ISSUE_CREATE, fields, id, issue::ISSUE).await?;
             // A fresh create answers `issueCreate.issue`; a repeated one,
             // looked up, `issue`.
             let issue = data["issueCreate"]["issue"]

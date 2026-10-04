@@ -623,6 +623,29 @@ async fn a_repeated_create_is_one_issue() {
     assert_eq!(sim.relations().len(), 1);
 }
 
+/// tsk946: Linear refusing a create (for a reason it attributes to no
+/// field) is the caller's refusal as Linear said it — not blamed on the
+/// parent, which was resolved before the create was sent.
+#[tokio::test]
+async fn a_create_refusal_isnt_blamed_on_the_parent() {
+    let sim = LinearSim::start(KEY).await.unwrap();
+    let (_child, peer) = spawn(&sim, Some(KEY));
+    initialize(&peer).await;
+    let handle = checked(&peer).await;
+    for key in [None, Some("k-refused")] {
+        sim.refuse_next_of("IssueCreate", "Title is too long");
+        let err = keyed(&peer, &handle, "create", json!({ "title": "Long" }), key)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, ProtocolError::InvalidInput { field, message }
+                if field.is_empty() && message.contains("Title is too long")),
+            "{key:?}: {err:?}"
+        );
+    }
+    assert!(sim.live_issues().is_empty());
+}
+
 /// tsk931: a create sent again is refused as taken, and the lookup of what
 /// it made is rate limited: the caller is told it is rate limited — the
 /// write may well have landed — not the refusal of the repeat.
