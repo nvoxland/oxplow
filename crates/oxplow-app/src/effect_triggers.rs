@@ -621,10 +621,19 @@ pub async fn auto_retry_due(
     let health = crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut sent = 0;
     for key in due {
-        let event = svc
+        // At its newest version, as the pump, `effect.retry` and backfill
+        // hand it over (tsk911). The attempt sends what the failed one
+        // composed (tsk887), so an expired payload doesn't stop it.
+        let event = match svc
             .event_log_store
             .get(oxplow_domain::EventId(key.event_id.clone()))
-            .await?;
+            .await?
+        {
+            // One that no longer upcasts can't be reacted to: its retry is
+            // dropped below, a person's.
+            Some(stored) => crate::event_pump::at_latest(&svc.vocabulary.current(), &stored).ok(),
+            None => None,
+        };
         let effect = find_effect(svc, &key.effect);
         let runnable = match (&effect, &event) {
             (Some((ext, decl)), Some(_)) => {

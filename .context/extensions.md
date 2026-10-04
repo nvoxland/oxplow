@@ -1768,8 +1768,10 @@ failure counts, a person's. Each step carries its idempotency key, the
 same on every attempt ([commands.md](./commands.md) `effect_step_key`), so
 a write that landed lands once. A person's **Retry** composes afresh from
 what the effect reads now — the person decides it should. A loop every 5 s (`spawn_auto_retry`, at boot) runs what is
-due as the next attempt, `origin: auto` (`effect.result@4`), when the
-effect is still there, enabled and approved as it is now — otherwise the
+due as the next attempt, `origin: auto` (`effect.result@4`), on the event
+at its newest version (`at_latest`, as every runner hands it over; one that
+no longer upcasts drops the retry — tsk911), when the effect is still
+there, enabled and approved as it is now — otherwise the
 retry is dropped and the failure is a person's. An attempt awaiting its
 retry isn't counted against the effect's health (`Reacted::Retrying`);
 the attempt that exhausts the retries counts once. A step inside oxplow,
