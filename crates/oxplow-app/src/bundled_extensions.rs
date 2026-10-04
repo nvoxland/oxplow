@@ -72,7 +72,8 @@ pub const BUNDLED: &[BundledExtension] = &[
         files: &[
             ext_file!("oxplow-review", "README.md"),
             ext_file!("oxplow-review", "extension.yaml"),
-            ext_file!("oxplow-review", "event_types/verdict.v1.json"),
+            ext_file!("oxplow-review", "event_types/accepted.v1.json"),
+            ext_file!("oxplow-review", "event_types/changes_requested.v1.json"),
             ext_file!("oxplow-review", "handlers/accept.star"),
             ext_file!("oxplow-review", "handlers/request_changes.star"),
             ext_file!("oxplow-review", "models/deviation.sql"),
@@ -1327,11 +1328,14 @@ mod tests {
         );
     }
 
-    /// P9.D6: a verdict is a typed event, not only a comment's text. Both
-    /// review verbs log `oxplow_review.verdict@1` with their run — caused
-    /// by its `command.executed`, about the effort and its work item — so
-    /// the effort's timeline carries who decided what, and other
-    /// extensions can react to it.
+    /// P9.D6: a verdict is a typed event, not only a comment's text. Each
+    /// review verb logs its own type (`oxplow_review.accepted@1`,
+    /// `.changes_requested@1`) with its run — caused by its
+    /// `command.executed`, about the effort and its work item — so the
+    /// effort's timeline carries who decided what, and other extensions
+    /// can react to it. The verdict is in the envelope, which retention
+    /// keeps (tsk886): an acceptance's subject also names each claim and
+    /// decision it accepted unchecked.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_review_verbs_log_a_typed_verdict() {
         let f = review_fixture().await;
@@ -1350,7 +1354,10 @@ mod tests {
                 .iter()
                 .map(|t| (t.event_type.as_str(), t.v))
                 .collect::<Vec<_>>(),
-            vec![("oxplow_review.verdict", 1)],
+            vec![
+                ("oxplow_review.accepted", 1),
+                ("oxplow_review.changes_requested", 1)
+            ],
             "a shared extension's event types load"
         );
         let human = oxplow_domain::Actor::Human;
@@ -1360,8 +1367,8 @@ mod tests {
                 .sql
                 .query_sql(
                     "SELECT v.payload, v.source, v.subject, \
-                            (SELECT c.type FROM v_event c WHERE c.id = v.cause) \
-                       FROM v_event v WHERE v.type = 'oxplow_review.verdict' ORDER BY v.seq",
+                            (SELECT c.type FROM v_event c WHERE c.id = v.cause), v.type \
+                       FROM v_event v WHERE v.type LIKE 'oxplow_review.%' ORDER BY v.seq",
                     vec![],
                     None,
                 )
@@ -1384,11 +1391,11 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[0][0].as_str().unwrap()).unwrap(),
             serde_json::json!({
-                "effort": effort_ref(&f), "work_item": item, "verdict": "changes_requested",
-                "forced": false, "unverified": 1, "inferred": 1, "deviated": 1,
+                "unverified": 1, "inferred": 1, "deviated": 1,
                 "note": "Keep it to the UI."
             })
         );
+        assert_eq!(logged[0][4], "oxplow_review.changes_requested");
         assert_eq!(
             logged[0][1],
             "extension:oxplow-review/oxplow_review.request_changes"
@@ -1411,12 +1418,17 @@ mod tests {
         assert_eq!(logged.as_array().unwrap().len(), 2, "{logged}");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[1][0].as_str().unwrap()).unwrap(),
-            serde_json::json!({
-                "effort": effort_ref(&f), "work_item": item, "verdict": "accepted",
-                "forced": true, "unverified": 1, "inferred": 1, "deviated": 1
-            })
+            serde_json::json!({ "unverified": 1, "inferred": 1, "deviated": 1 })
         );
         assert_eq!(logged[1][1], "extension:oxplow-review/oxplow_review.accept");
+        assert_eq!(logged[1][4], "oxplow_review.accepted");
+        let subject: Vec<String> = serde_json::from_str(logged[1][2].as_str().unwrap()).unwrap();
+        assert_eq!(subject[..2], [effort_ref(&f), item.clone()]);
+        assert!(
+            subject[2..].iter().any(|r| r.starts_with("claim:"))
+                && subject[2..].iter().any(|r| r.starts_with("decision:")),
+            "a forced acceptance names what it accepted unchecked: {subject:?}"
+        );
         // A refused review decides nothing: no verdict.
         let again = review(
             &f,
@@ -1530,5 +1542,44 @@ mod tests {
             "orange"
         ]]))
         .await;
+        // tsk886: the verdict is state. Its payload expires with the
+        // plugin's 30 days, but what the chip shows is in the envelope
+        // (type and subject), which is kept.
+        let later = oxplow_domain::Timestamp::from_unix_ms(
+            oxplow_domain::Timestamp::now().unix_ms() + 31 * oxplow_db::event_retention::DAY_MS,
+        );
+        let swept = oxplow_db::event_retention::sweep(&f.svc.db, later)
+            .await
+            .unwrap();
+        assert!(swept.payloads_expired >= 2, "{swept:?}");
+        // Refilled whole, as a restart or a rewrite of the log does.
+        let computed = || async {
+            f.svc
+                .db
+                .transaction(|tx| {
+                    tx.query_row(
+                        "SELECT computed_at FROM asset_state \
+                         WHERE asset = 'v_oxplow_review_verdicts'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        let before = computed().await;
+        f.svc.assets.all_changed();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while computed().await == before {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the verdicts refilled");
+        assert_eq!(
+            shown().await,
+            serde_json::json!([[effort_ref(&f), "Accepted (forced)", "orange"]])
+        );
     }
 }

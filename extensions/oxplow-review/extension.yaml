@@ -50,12 +50,12 @@ models:
     version: 1
     key: [seq]
     materialize: { incremental: seq }
-    description: "Every verdict a reviewer gave (`oxplow_review.verdict`), oldest first — appended as each lands, so reading the latest never scans the log."
+    description: "Every verdict a reviewer gave (`oxplow_review.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
     columns:
       - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
       - { name: ref, type: TEXT, doc: "The effort reviewed (`effort:eff<id>`)." }
       - { name: verdict, type: TEXT, doc: "`accepted` or `changes_requested`." }
-      - { name: forced, type: "", doc: "1 when accepted although claims were unverified or decisions unreviewed." }
+      - { name: forced, type: "", doc: "1 when accepted although claims were unverified or decisions unreviewed (the event names them)." }
   - name: verdict
     version: 1
     key: [ref]
@@ -66,10 +66,14 @@ models:
       - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
 event_types:
   types:
-    - type: oxplow_review.verdict
+    - type: oxplow_review.accepted
       v: 1
-      schema: event_types/verdict.v1.json
-      summary: A person's verdict on an effort's work — accepted, or changes requested.
+      schema: event_types/accepted.v1.json
+      summary: A person accepted an effort's work. Subject — the effort, its work item and any claim or decision accepted unchecked.
+    - type: oxplow_review.changes_requested
+      v: 1
+      schema: event_types/changes_requested.v1.json
+      summary: A person sent an effort's work back with changes requested. Subject — the effort and its work item.
 commands:
   - name: accept
     summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.

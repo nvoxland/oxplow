@@ -1342,9 +1342,16 @@ additive: a decorator whose query fails shows nothing.
 shows each effort's latest verdict on the effort — a `ref-chip` on its
 page and a `row-badge` where a lens row links to it. Its model `verdict`
 (`Accepted`, `Accepted (forced)` or `Changes requested`; green, orange,
-red) reads `verdicts`, which keeps every `oxplow_review.verdict@1`
-(`materialize: { incremental: seq }`, appended as each lands — so the
-decorator never re-reads the event log). It shows; it never acts.
+red) reads `verdicts`, which keeps every verdict event
+(`materialize: { incremental: seq }`, appended as each lands; a rewrite of
+the log — retention's payload expiry, a restart's refill — refills it
+whole). It reads only the events' **envelopes** (tsk886): the type says
+the verdict (`oxplow_review.accepted` / `.changes_requested`) and the
+subject what it was about — the effort first, then its work item, then
+each claim and decision an acceptance took unchecked (any makes it
+forced). Retention keeps envelopes and a plugin's payloads go after 30
+days at most, so a verdict a decorator shows must not live in its
+payload. It shows; it never acts.
 `STABLE_KINDS` lists `ui.decorators`; a shared extension may declare
 them.
 
@@ -1373,11 +1380,14 @@ event_types:
 
 **Promoted to stable (P9.D6)** on the evidence rule every kind is held to
 — a first-party, shared extension depending on it: oxplow-review's
-`oxplow_review.verdict@1 { effort, work_item, verdict: accepted |
-changes_requested, forced, unverified, inferred, deviated, note? }`, which
-`accept.star` and `request_changes.star` return in `events:` (subjects:
-the effort and its work item; caused by the run's `command.executed`).
-Before it, a verdict lived only in a comment's text; now the effort's
+`oxplow_review.accepted@1 { unverified, inferred, deviated }` and
+`oxplow_review.changes_requested@1 { unverified, inferred, deviated,
+note? }`, which `accept.star` and `request_changes.star` return in
+`events:` (subjects: the effort, its work item and, for an acceptance, the
+claims and decisions it took unchecked; caused by the run's
+`command.executed`). They replaced `oxplow_review.verdict@1`, whose
+verdict lived in an expiring payload (tsk886).
+Before them, a verdict lived only in a comment's text; now the effort's
 timeline carries who decided what, and another extension can react to it
 ("Reacting to another extension's types"). What makes the kind safe to
 promise is already built: a published `type@v` is a contract

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oxplow_review.accepted",
+  "description": "A person accepted an effort's work. The envelope carries what the verdict is about and is kept: its subject is the effort (first), its work item, and every claim left unverified and decision left inferred at the verdict (an acceptance that names any was forced).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["unverified", "inferred", "deviated"],
+  "properties": {
+    "unverified": { "type": "integer", "minimum": 0, "description": "Claims unverified at the verdict." },
+    "inferred": { "type": "integer", "minimum": 0, "description": "Inferred decisions unreviewed at the verdict." },
+    "deviated": { "type": "integer", "minimum": 0, "description": "Files changed outside the work item's area." }
+  }
+}

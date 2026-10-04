@@ -2,7 +2,8 @@
 # what to fix on the effort's work item — each unverified claim, each
 # inferred decision, each file outside the item's area — and move it back
 # to todo (oxplow: ready). The verdict is logged as
-# `oxplow_review.verdict` with the run.
+# `oxplow_review.changes_requested` with the run, about the effort and
+# the item.
 
 def _list(text):
     return json.decode(text) if text else []
@@ -30,10 +31,6 @@ def transform(x):
         lines.extend(checklist)
     item = row["work_item"]
     payload = {
-        "effort": ref,
-        "work_item": item,
-        "verdict": "changes_requested",
-        "forced": False,
         "unverified": len(_list(row["unverified"])),
         "inferred": len(_list(row["inferred"])),
         "deviated": len(_list(row["deviated"])),
@@ -45,6 +42,6 @@ def transform(x):
             {"name": "work_item.comment", "input": {"ref": item, "body": "\n".join(lines)}},
             {"name": "work_item.transition", "input": {"ref": item, "to": "todo"}},
         ],
-        "events": [{"type": "oxplow_review.verdict", "subject": [ref, item], "payload": payload}],
+        "events": [{"type": "oxplow_review.changes_requested", "subject": [ref, item], "payload": payload}],
         "result": {"work_item": item},
     }

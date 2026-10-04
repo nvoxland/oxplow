@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oxplow_review.changes_requested",
+  "description": "A person sent an effort's work back with changes requested. Its subject (kept with the envelope) is the effort (first) and its work item.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["unverified", "inferred", "deviated"],
+  "properties": {
+    "unverified": { "type": "integer", "minimum": 0, "description": "Claims unverified at the verdict." },
+    "inferred": { "type": "integer", "minimum": 0, "description": "Inferred decisions unreviewed at the verdict." },
+    "deviated": { "type": "integer", "minimum": 0, "description": "Files changed outside the work item's area." },
+    "note": { "type": "string", "description": "What the reviewer asked for." }
+  }
+}

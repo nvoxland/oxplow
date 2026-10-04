@@ -1,7 +1,9 @@
 # oxplow_review.accept { ref, force? }: comment the review on the effort's
 # work item, then mark it done. Refuses while a claim is unverified or an
 # inferred decision unreviewed, unless forced. The verdict is logged as
-# `oxplow_review.verdict` with the run.
+# `oxplow_review.accepted` with the run: its subject — kept when the
+# payload expires — names the effort, the item, and every claim and
+# decision accepted unchecked.
 
 def _list(text):
     return json.decode(text) if text else []
@@ -39,13 +41,9 @@ def transform(x):
             {"name": "work_item.transition", "input": {"ref": item, "to": "done"}},
         ],
         "events": [{
-            "type": "oxplow_review.verdict",
-            "subject": [ref, item],
+            "type": "oxplow_review.accepted",
+            "subject": [ref, item] + [c["claim"] for c in claims] + [d["decision"] for d in decisions],
             "payload": {
-                "effort": ref,
-                "work_item": item,
-                "verdict": "accepted",
-                "forced": bool(claims or decisions),
                 "unverified": len(claims),
                 "inferred": len(decisions),
                 "deviated": len(_list(row["deviated"])),
