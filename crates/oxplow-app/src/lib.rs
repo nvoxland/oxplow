@@ -1199,6 +1199,7 @@ impl Services {
             thread_store.clone(),
             snapshot_store.clone(),
             snapshot_captures.clone(),
+            worktrees.clone(),
             snapshot_content.clone(),
             vcs.clone(),
             config_arc.clone(),

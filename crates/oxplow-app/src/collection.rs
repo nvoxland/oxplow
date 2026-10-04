@@ -406,10 +406,12 @@ pub struct CollectionService {
     /// Each stream's snapshot taker: a run's coverage is pinned to a take
     /// of the code it measured (tsk883).
     captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
+    /// Each stream's checkout: a thread's reports, report parsers and
+    /// commits are its own worktree's (tsk890).
+    worktrees: Arc<crate::worktrees::WorktreeRouter>,
     content: crate::snapshot_content::SnapshotContent,
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
-    project_dir: PathBuf,
     /// This machine's program approvals (`exec_consent`).
     approvals: Arc<crate::exec_consent::ApprovalStore>,
     /// Where a report collector's run is recorded (`collector_run`,
@@ -468,14 +470,16 @@ impl CollectionService {
             .and_then(|open| open.first().map(|t| t.value()))
     }
 
-    /// The branch the project checkout has checked out (`None` when
+    /// The branch the checkout at `root` has checked out (`None` when
     /// detached or unreadable).
-    async fn current_branch(&self) -> Option<String> {
-        self.vcs
-            .head(&self.project_dir)
-            .await
-            .ok()
-            .and_then(|h| h.branch)
+    async fn current_branch(&self, root: &std::path::Path) -> Option<String> {
+        self.vcs.head(root).await.ok().and_then(|h| h.branch)
+    }
+
+    /// The checkout `thread` works in: its stream's worktree (tsk890).
+    async fn worktree(&self, thread: &ThreadId) -> PathBuf {
+        let stream = self.stream_id_for(thread).await.ok().flatten();
+        self.worktrees.resolve(stream.as_deref()).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -487,6 +491,7 @@ impl CollectionService {
         threads: Arc<SqliteThreadStore>,
         snapshots: Arc<SqliteSnapshotStore>,
         captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
+        worktrees: Arc<crate::worktrees::WorktreeRouter>,
         content: crate::snapshot_content::SnapshotContent,
         vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
@@ -505,10 +510,10 @@ impl CollectionService {
             threads,
             snapshots,
             captures,
+            worktrees,
             content,
             vcs,
             config,
-            project_dir,
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             run_log: None,
             attribution,
@@ -579,7 +584,11 @@ impl CollectionService {
     /// The parser a report collector names: a bundled one, or its own jaq /
     /// Starlark script or program — a program only once a person approved
     /// it on this machine, as it is now (tsk331).
-    fn report_parser(&self, spec: &CollectorSpec) -> Result<Collector, ParserProblem> {
+    fn report_parser(
+        &self,
+        spec: &CollectorSpec,
+        root: &std::path::Path,
+    ) -> Result<Collector, ParserProblem> {
         let records = spec
             .records
             .ok_or_else(|| ParserProblem::Broken(format!("`{}` records nothing", spec.id)))?;
@@ -594,12 +603,12 @@ impl CollectionService {
             Records::Analysis => CollectorKind::Analysis,
         };
         let entry = spec.entry.as_deref().unwrap_or_default();
-        let abs = self.project_dir.join(entry);
+        let abs = root.join(entry);
         if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
             use crate::exec_consent::{may_run, needs_approval, ProgramKind};
             if !may_run(
                 &self.approvals,
-                &self.project_dir,
+                root,
                 ProgramKind::Collector,
                 &spec.id,
                 entry,
@@ -638,16 +647,19 @@ impl CollectionService {
     /// nothing; anything that ran is recorded as the collector's run
     /// (`collector_run`, `collector.synced`) and counts toward its health —
     /// the third failure in a row disables it (P7.C2).
+    /// Report paths, parser entries and the paths a report names are
+    /// `root`'s: the checkout the run ran in (tsk890).
     async fn read_report(
         &self,
         spec: &CollectorSpec,
         window: Option<FreshWindow>,
         how: &ReportRun<'_>,
+        root: &std::path::Path,
     ) -> ReportRead {
         let Some(report) = spec.report.as_ref() else {
             return ReportRead::Missing(String::new());
         };
-        let abs = self.project_dir.join(&report.path);
+        let abs = root.join(&report.path);
         if window.is_some_and(|w| !w.holds(&abs)) {
             return ReportRead::NotFresh;
         }
@@ -671,7 +683,7 @@ impl CollectionService {
             }
         }
         let started = std::time::Instant::now();
-        let parsed = match self.report_parser(spec) {
+        let parsed = match self.report_parser(spec, root) {
             Err(ParserProblem::NeedsApproval(reason)) => {
                 if let Some(log) = &self.run_log {
                     if let Err(e) = log
@@ -700,7 +712,7 @@ impl CollectionService {
                     .unwrap_or(parser.name())
                     .to_string();
                 // Paths as the checkout the report came from names them.
-                let root = self.project_dir.clone();
+                let root = root.to_path_buf();
                 tokio::task::spawn_blocking(move || {
                     parser.run(&content).map(|output| output.relative_to(&root))
                 })
@@ -790,6 +802,7 @@ impl CollectionService {
         run: RunKind,
         window: FreshWindow,
         cause: Option<&RunCause>,
+        root: &std::path::Path,
     ) -> RunReports {
         let source = oxplow_domain::Actor::System.source();
         let how = ReportRun {
@@ -802,7 +815,7 @@ impl CollectionService {
             if spec.trigger != (Trigger::OnRun { run }) {
                 continue;
             }
-            match self.read_report(&spec, Some(window), &how).await {
+            match self.read_report(&spec, Some(window), &how, root).await {
                 ReportRead::Parsed {
                     output,
                     exec,
@@ -1026,7 +1039,8 @@ impl CollectionService {
                         }
                     }
                 }
-                let branch = self.current_branch().await;
+                let root = self.worktree(thread).await;
+                let branch = self.current_branch(&root).await;
                 let snapshot_id = self
                     .snapshots
                     .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
@@ -1054,7 +1068,7 @@ impl CollectionService {
                 let version = crate::file_ref_version::resolve(
                     &self.snapshots,
                     &*self.vcs,
-                    &self.project_dir,
+                    &root,
                     snapshot_id.unwrap_or(0),
                 )
                 .await
@@ -1320,7 +1334,8 @@ impl CollectionService {
             cause: None,
         };
         let mut reads = RunReports::default();
-        match self.read_report(&spec, None, &how).await {
+        let root = self.worktree(thread).await;
+        match self.read_report(&spec, None, &how, &root).await {
             ReportRead::Parsed {
                 output,
                 exec,
@@ -1466,7 +1481,9 @@ impl CollectionService {
         turn: Option<i64>,
     ) -> Option<i64> {
         let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
-        let branch = self.current_branch().await;
+        let branch = self
+            .current_branch(&self.worktrees.resolve(Some(stream_id)).await)
+            .await;
         let analyzer = analyzers
             .first()
             .cloned()
@@ -1620,10 +1637,9 @@ impl CollectionService {
                 cause,
             )
             .await;
+        let root = self.worktrees.resolve(Some(stream_id)).await;
         let version = match pin {
-            Some(p) => {
-                file_ref_version::resolve(&self.snapshots, &*self.vcs, &self.project_dir, p).await?
-            }
+            Some(p) => file_ref_version::resolve(&self.snapshots, &*self.vcs, &root, p).await?,
             None => file_ref_version::ResolvedFileVersion {
                 local_snapshot_id: 0,
                 closest_vcs_rev: None,
@@ -1690,7 +1706,7 @@ impl CollectionService {
                         ..NewFact::new(measure.id, pct)
                     });
                 }
-                let branch = self.current_branch().await;
+                let branch = self.current_branch(&root).await;
                 let snapshot_id =
                     (version.local_snapshot_id != 0).then_some(version.local_snapshot_id);
                 let mut capture = NewMetricCapture::done(stream_val, "coverage", source);
@@ -2030,16 +2046,11 @@ impl CollectionService {
             return Ok(());
         };
         // HEAD is the just-landed (revert) commit; its body carries the trailers.
-        let Some(head_sha) = self
-            .vcs
-            .head(&self.project_dir)
-            .await
-            .ok()
-            .and_then(|h| h.revision)
-        else {
+        let root = self.worktree(thread).await;
+        let Some(head_sha) = self.vcs.head(&root).await.ok().and_then(|h| h.revision) else {
             return Ok(());
         };
-        let Ok(Some(head)) = self.vcs.revision(&self.project_dir, &head_sha).await else {
+        let Ok(Some(head)) = self.vcs.revision(&root, &head_sha).await else {
             return Ok(());
         };
         let shas = parse_reverted_shas(&head.body);
@@ -2051,7 +2062,7 @@ impl CollectionService {
         };
         let stream_val = thread_row.stream_id.value();
         for sha in shas {
-            let Ok(Some(reverted)) = self.vcs.revision(&self.project_dir, &sha).await else {
+            let Ok(Some(reverted)) = self.vcs.revision(&root, &sha).await else {
                 continue;
             };
             // git timestamps are SECONDS-granular — the commit happened
@@ -2167,6 +2178,8 @@ impl CollectionService {
         let window = cause.map_or_else(FreshWindow::ending_now, |c| {
             FreshWindow::of_run(c.started, c.at)
         });
+        // The run's reports are its own checkout's (tsk890).
+        let root = self.worktree(thread).await;
 
         // Static-analysis ride-along (OBSERVE-ALWAYS): when an analyzer ran,
         // record a static-analysis observation — command-only (the ran-record)
@@ -2174,7 +2187,7 @@ impl CollectionService {
         // carrying their merged findings.
         if is_analysis {
             let reads = self
-                .read_run_reports(RunKind::Analysis, window, cause)
+                .read_run_reports(RunKind::Analysis, window, cause, &root)
                 .await;
             let (report, source) = match reads.analysis() {
                 Some((r, source)) => (Some(r.clone()), source),
@@ -2207,7 +2220,9 @@ impl CollectionService {
         // The test run's report collectors, each reading the report it wrote
         // (each test stack writes its own; the freshness window leaves out
         // stale ones from prior runs or other stacks), merged by kind.
-        let reads = self.read_run_reports(RunKind::Test, window, cause).await;
+        let reads = self
+            .read_run_reports(RunKind::Test, window, cause, &root)
+            .await;
         // Trust tier rides in `source`: "post-tool-bash" for the plain hook /
         // in-process parsers, "plugin-exec:<ids>" when a lower-trust program
         // parser produced the suites (mirrors the coverage path).
@@ -2378,7 +2393,7 @@ impl CollectionService {
             Ok(Some(t)) => t.stream_id.value(),
             _ => return,
         };
-        let branch = self.current_branch().await;
+        let branch = self.current_branch(&self.worktree(thread).await).await;
         let result = async {
             // Stop-collecting gate (tsk31): skip when the `agent.nudges.fired`
             // metric is disabled (nothing consumes `oxplow.nudge`). The nudge
@@ -2518,9 +2533,8 @@ impl CollectionService {
         };
         let (local_snapshot_id, closest_vcs_rev, vcs_rev_exact) = match pin {
             Some(p) => {
-                let v =
-                    file_ref_version::resolve(&self.snapshots, &*self.vcs, &self.project_dir, p)
-                        .await?;
+                let root = self.worktrees.resolve(Some(&stream_id)).await;
+                let v = file_ref_version::resolve(&self.snapshots, &*self.vcs, &root, p).await?;
                 (
                     Some(v.local_snapshot_id),
                     v.closest_vcs_rev,
@@ -4118,7 +4132,7 @@ mod tests {
         /// What a run of `kind` that ended just now reads.
         async fn run_reads(h: &Harness, kind: RunKind) -> RunReports {
             h.service
-                .read_run_reports(kind, FreshWindow::ending_now(), None)
+                .read_run_reports(kind, FreshWindow::ending_now(), None, h.tmp.path())
                 .await
         }
 
@@ -4295,6 +4309,10 @@ mod tests {
                 Arc::new(SqliteThreadStore::new(db.clone())),
                 snapshots,
                 captures,
+                Arc::new(crate::worktrees::WorktreeRouter::new(
+                    project_dir.clone(),
+                    Arc::new(SqliteStreamStore::new(db.clone())),
+                )),
                 crate::snapshot_content::SnapshotContent::new(
                     blobs,
                     oxplow_domain::vcs::Vcs::object_store(&crate::vcs::GitProvider, &project_dir),
@@ -4398,6 +4416,70 @@ mod tests {
             std::fs::remove_file(h.tmp.path().join("src/foo.rs")).unwrap();
             let pct = diff_pct(&h).await.expect("a diff from snapshots alone");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
+        }
+
+        /// tsk890: a thread in a worktree stream reads its reports from its
+        /// own worktree, never the primary checkout.
+        #[tokio::test]
+        async fn a_worktree_threads_report_is_read_from_its_worktree() {
+            let h = build(Some(COBERTURA_50PCT)).await;
+            std::fs::remove_file(h.tmp.path().join("coverage.xml")).unwrap();
+            let worktree = tempfile::tempdir().unwrap();
+            std::fs::write(worktree.path().join("coverage.xml"), COBERTURA_50PCT).unwrap();
+            let now = Timestamp::now();
+            let stream = Stream {
+                id: StreamId::new(2),
+                kind: StreamKind::Worktree,
+                title: "w".into(),
+                branch: "feature".into(),
+                branch_ref: "refs/heads/feature".into(),
+                branch_source: "main".into(),
+                worktree_path: worktree.path().to_string_lossy().into_owned(),
+                working_pane: String::new(),
+                talking_pane: String::new(),
+                working_session_id: String::new(),
+                talking_session_id: String::new(),
+                custom_prompt: None,
+                created_at: now,
+                updated_at: now,
+                archived_at: None,
+            };
+            SqliteStreamStore::new(h.db.clone())
+                .upsert(&stream)
+                .await
+                .unwrap();
+            let thread = Thread {
+                id: ThreadId::new(2),
+                stream_id: stream.id,
+                title: "w".into(),
+                status: ThreadStatus::Active,
+                sort_index: 0,
+                pane_target: "working".into(),
+                agent: oxplow_domain::AgentKind::Claude,
+                acp_agent: None,
+                resume_session_id: String::new(),
+                summary: String::new(),
+                summary_updated_at: None,
+                closed_at: None,
+                custom_prompt: None,
+                created_at: now,
+                updated_at: now,
+                archived_at: None,
+            };
+            SqliteThreadStore::new(h.db.clone())
+                .upsert(&thread)
+                .await
+                .unwrap();
+            match h
+                .service
+                .sync_report_collector(&thread.id, "tests.coverage", "human")
+                .await
+            {
+                Ok(ReportSync::Coverage(CoverageIngest::Stored { summary_pct, .. })) => {
+                    assert!((summary_pct - 66.666).abs() < 0.01, "{summary_pct}")
+                }
+                other => panic!("{other:?}"),
+            }
         }
 
         /// tsk883: a run delivered after an edit landed can't know what it
@@ -7039,7 +7121,12 @@ mod tests {
             };
             for _ in 0..2 {
                 h.service
-                    .read_run_reports(RunKind::Test, FreshWindow::around(cause.at), Some(&cause))
+                    .read_run_reports(
+                        RunKind::Test,
+                        FreshWindow::around(cause.at),
+                        Some(&cause),
+                        h.tmp.path(),
+                    )
                     .await;
             }
             assert_eq!(
@@ -7097,10 +7184,14 @@ mod tests {
             declare(&h, specs);
             let approvals = Arc::new(crate::exec_consent::ApprovalStore::for_tests(dir));
             let service = h.service.clone().with_approvals(approvals.clone());
-            let read = |service: CollectionService| async move {
-                service
-                    .read_run_reports(RunKind::Test, FreshWindow::ending_now(), None)
-                    .await
+            let root = h.tmp.path().to_path_buf();
+            let read = |service: CollectionService| {
+                let root = root.clone();
+                async move {
+                    service
+                        .read_run_reports(RunKind::Test, FreshWindow::ending_now(), None, &root)
+                        .await
+                }
             };
 
             assert!(read(service.clone()).await.tests().is_none());

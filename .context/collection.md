@@ -84,6 +84,10 @@ section for the column.
   repo-relative against the checkout the report came from
   (`CollectorOutput::relative_to`, `oxplow_coverage::repo_relative`; tsk884)
   and drops files outside it, so diffs and facts always name repo files.
+  That checkout is the **thread's own worktree** (`WorktreeRouter`, tsk890):
+  a worktree stream's report paths, parser entries (and their approval
+  hashes), branch and commits are read there, never in the primary
+  checkout.
   The UI builds the test tree from `classname`+`name`.
 - **`testing:` block** (`TestingConfig`, `crates/oxplow-config/src/lib.rs`):
   `command`, `fastCommand`, `runPatterns`, `analysisPatterns`,
