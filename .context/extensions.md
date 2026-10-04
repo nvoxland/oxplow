@@ -1501,11 +1501,16 @@ extension acts with one. oxplow-review's **`verify-unchecked`** reacts to
 `oxplow_review.accepted`: its `input` reads the acceptance's subject
 (`:event_id`, tsk955) — the effort, its item, and each claim and decision
 accepted unchecked, still unverified or inferred now — and is empty when
-an earlier forced acceptance of the same effort came first (read from
-`v_event`, always current, rather than the materialized verdict model).
-With nothing unchecked it skips; otherwise it files **one** item on the
+the effect already filed (or proposed) a follow-up for an earlier
+acceptance of the same effort (its `v_effect_run` reaction to that event
+is `ok` or `proposed`, tsk991; an earlier acceptance from before its
+approval, or whose reaction skipped or failed, doesn't count). With
+nothing unchecked it skips; otherwise it files **one** item on the
 reviewed item's provider — "Verify what the review of <effort> accepted
-unchecked", a checklist naming each claim and decision. A bundled effect
+unchecked", a checklist naming each claim and decision. Each line is
+text, not markdown: whitespace becomes one space, markdown's punctuation
+is escaped and a long one is cut at 300 characters, and the list stops
+at 50 items, saying how many more the review has. A bundled effect
 is approved like any (K1, tsk953: its embedded files are hashed alike),
 so it runs only once a person approves it. A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its

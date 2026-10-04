@@ -81,8 +81,9 @@ effects:
     entry: effects/verify_unchecked.star
     # The acceptance's subject: the effort, its item, and each claim and
     # decision accepted unchecked — still unverified or inferred now. None
-    # when an earlier forced acceptance of the effort came first: it was
-    # followed up then.
+    # when this effect already filed (or proposed) a follow-up for an
+    # earlier acceptance of the effort; an earlier one it never reacted to
+    # (before its approval) or that skipped or failed doesn't count.
     input: |
       SELECT CAST(json_extract(e.subject, '$[0]') AS TEXT) AS effort,
              CAST(json_extract(e.subject, '$[1]') AS TEXT) AS work_item,
@@ -96,9 +97,11 @@ effects:
       WHERE e.id = :event_id
         AND NOT EXISTS (
           SELECT 1 FROM v_event p
+            JOIN v_effect_run r ON r.event_id = p.id
            WHERE p.type = 'oxplow_review.accepted' AND p.seq < :event_seq
              AND json_extract(p.subject, '$[0]') = json_extract(e.subject, '$[0]')
-             AND (instr(p.subject, '"claim:') > 0 OR instr(p.subject, '"decision:') > 0))
+             AND r.effect = 'oxplow-review/verify-unchecked' AND r.latest = 1
+             AND r.state IN ('ok', 'proposed'))
 commands:
   - name: accept
     summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.

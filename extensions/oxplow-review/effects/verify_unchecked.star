@@ -2,11 +2,25 @@
 # unverified or decisions inferred (a forced one), file one item to verify
 # them, on the reviewed item's provider — a checklist naming each. Its
 # `input` reads the acceptance's subject (the effort, its item, what was
-# accepted unchecked) and is empty when nothing was, or when an earlier
-# forced acceptance of the same effort was followed up already.
+# accepted unchecked) and is empty when nothing was, or when this effect
+# already followed up an earlier acceptance of the same effort.
 
 def _list(text):
     return json.decode(text) if text else []
+
+# A checklist line holds text, not markdown: whitespace (newlines too)
+# becomes one space, markdown's punctuation is escaped, and a long one is
+# cut — so a claim can't add items, links or headings to the body.
+_LINE = 300
+_ITEMS = 50
+
+def _text(value):
+    s = " ".join(str(value).split())
+    for ch in ["\\", "`", "*", "_", "[", "]", "<", ">", "#", "|"]:
+        s = s.replace(ch, "\\" + ch)
+    if len(s) > _LINE:
+        s = s[:_LINE].rstrip("\\") + "…"
+    return s
 
 def transform(x):
     if not x["rows"]:
@@ -20,9 +34,12 @@ def transform(x):
     item = row["work_item"]
     # `work_item:<provider>:<id>`: file on the same tracker.
     provider = item.split(":")[1]
+    items = ["- [ ] %s: %s" % (c["claim"], _text(c["statement"])) for c in claims]
+    items.extend(["- [ ] %s: %s → %s" % (d["decision"], _text(d["question"]), _text(d["choice"])) for d in decisions])
     lines = ["The review of %s (%s) accepted these unchecked:" % (effort, item), ""]
-    lines.extend(["- [ ] %s: %s" % (c["claim"], c["statement"]) for c in claims])
-    lines.extend(["- [ ] %s: %s → %s" % (d["decision"], d["question"], d["choice"]) for d in decisions])
+    lines.extend(items[:_ITEMS])
+    if len(items) > _ITEMS:
+        lines.append("… and %d more; the review lists them all." % (len(items) - _ITEMS))
     return {
         "commands": [{
             "name": "work_item.create",

@@ -1191,10 +1191,91 @@ mod tests {
         );
         assert!(body.contains("- [ ] "), "a checklist: {body}");
         assert_eq!(author, &None, "the effect's, not the person's");
-        // Accepted again, forced: it was followed up already.
+        // Accepted again, forced: it was followed up already — the effect
+        // skips (tsk991: a reaction that skipped, not one that failed).
         accept().await.unwrap();
         deliver_acceptance(&f).await;
         assert_eq!(follow_ups(&f).await.len(), 1);
+        assert_eq!(last_reaction(&f).await, "skipped");
+    }
+
+    /// The state of the follow-up effect's latest reaction.
+    async fn last_reaction(f: &crate::test_fixtures::EffortFixture) -> String {
+        f.svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT state FROM effect_run WHERE effect = ?1 ORDER BY id DESC LIMIT 1",
+                    [VERIFY],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// tsk991: an earlier forced acceptance stops a second follow-up only
+    /// when the effect filed one for it — not one from before the effect was
+    /// approved (it never reacted), which would leave the second unfollowed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_acceptance_from_before_approval_doesnt_stop_the_follow_up() {
+        let f = review_fixture().await;
+        let accept = || {
+            review(
+                &f,
+                &oxplow_domain::Actor::Human,
+                "oxplow_review.accept",
+                serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+            )
+        };
+        accept().await.unwrap();
+        approve_follow_up(&f).await;
+        accept().await.unwrap();
+        deliver_acceptance(&f).await;
+        assert_eq!(follow_ups(&f).await.len(), 1);
+    }
+
+    /// tsk991: what the checklist names is text: a claim statement can't
+    /// add items or reshape the body, and a long one is cut.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_claim_statement_stays_one_checklist_line() {
+        let f = review_fixture().await;
+        f.svc
+            .db
+            .transaction(move |tx| {
+                oxplow_db::record_claim_tx(
+                    tx,
+                    &oxplow_db::NewClaim {
+                        thread_id: f.thread.value(),
+                        task_id: Some(f.task.value()),
+                        effort_id: Some(f.effort.value()),
+                        statement: format!(
+                            "first line\n- [x] forged item [link](https://evil.example) {}",
+                            "z".repeat(600)
+                        ),
+                        kind: "tests_pass".into(),
+                        evidence_ref: None,
+                    },
+                )
+            })
+            .await
+            .unwrap();
+        approve_follow_up(&f).await;
+        review(
+            &f,
+            &oxplow_domain::Actor::Human,
+            "oxplow_review.accept",
+            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+        )
+        .await
+        .unwrap();
+        deliver_acceptance(&f).await;
+        let filed = follow_ups(&f).await;
+        let body = &filed[0].1;
+        assert!(!body.contains("\n- [x]"), "{body}");
+        assert!(!body.contains("[link](https://evil.example)"), "{body}");
+        assert!(body.lines().all(|l| l.chars().count() <= 400), "{body}");
     }
 
     /// P11 (tsk956): an acceptance that left nothing unchecked files
