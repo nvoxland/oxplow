@@ -239,6 +239,19 @@ fn record_tx(ctx: &TxCtx<'_>, input: &RecordInput, primary: StreamId) -> Result<
     capture.snapshot_id =
         oxplow_db::analytics_stores::latest_snapshot_id_for_stream_tx(ctx.conn, stream)
             .map_err(storage)?;
+    // An agent's assertion is its thread's, made in its open turn
+    // (tsk923); anyone else's is no turn's.
+    if let Actor::Agent {
+        thread_id: Some(thread),
+        ..
+    } = ctx.actor
+    {
+        capture.thread_id = Some(thread.value());
+        capture.turn_id = oxplow_db::agent_stores::open_turn_ids_tx(ctx.conn, *thread)
+            .map_err(CommandError::from)?
+            .first()
+            .map(|t| t.value());
+    }
     let fact = NewFact {
         subject_kind,
         subject_ref,
@@ -491,6 +504,84 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(audited, 1);
+    }
+
+    /// tsk923: an agent's assertion is its thread's, made in its open
+    /// turn — the capture carries both; a person's carries neither.
+    #[tokio::test]
+    async fn an_agents_assertion_carries_its_thread_and_turn() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        fx.svc.metrics.seed_catalog().await;
+        fx.svc
+            .fact_store
+            .upsert_spec(oxplow_db::NewMetricSpec::base(
+                "ci.flaky_rate",
+                "Flaky rate",
+                "oxplow.ast_hit",
+                "last",
+            ))
+            .await
+            .unwrap();
+        fx.svc
+            .hook_ingest
+            .ingest(crate::hook_ingest::HookEnvelope {
+                kind: oxplow_domain::HookKind::UserPromptSubmit,
+                thread_id: Some(fx.thread),
+                stream_id: None,
+                session_id: Some("s".into()),
+                payload_json: "{}".into(),
+                prompt: Some("go".into()),
+                decision: None,
+            })
+            .await
+            .unwrap();
+        let agent = Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        for actor in [&agent, &Actor::Human] {
+            fx.svc
+                .commands
+                .run(
+                    actor,
+                    RECORD,
+                    json!({ "key": "ci.flaky_rate", "value": 0.12 }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        type Row = (Option<i64>, Option<i64>);
+        let (open, rows): (i64, Vec<Row>) = fx
+            .svc
+            .db
+            .read(|c| {
+                let open = c
+                    .query_row(
+                        "SELECT id FROM agent_turn WHERE ended_at IS NULL",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let mut st = c
+                    .prepare(
+                        "SELECT thread_id, turn_id FROM metric_capture
+                         WHERE producer = 'ci.flaky_rate' ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?
+                    .collect::<rusqlite::Result<_>>()
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok((open, rows))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![(Some(fx.thread.value()), Some(open)), (None, None)]
+        );
     }
 
     /// The fact is stamped to match the metric's own filter (a rule-filtered

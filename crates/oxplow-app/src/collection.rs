@@ -459,22 +459,61 @@ pub struct RunCause {
     pub started: Option<oxplow_domain::Timestamp>,
 }
 
-impl CollectionService {
-    /// The agent turn a run on `thread` was made in (tsk483): its causing
-    /// tool event's — however late that event is delivered, and none when
-    /// the event had none — else, for a run reported by command, the
-    /// thread's open turn.
-    async fn turn_of(&self, thread: &ThreadId, cause: Option<&RunCause>) -> Option<i64> {
-        if let Some(cause) = cause {
-            return cause.anchors.turn_id;
+/// Where a run's report came from: the agent's tool call, or a command
+/// (tsk923). What it records is stamped with what that origin knows, never
+/// a guess.
+#[derive(Debug, Clone, Copy)]
+pub enum RunOrigin<'a> {
+    /// The `agent.tool.finished` event the collection reactor saw.
+    Tool(&'a RunCause),
+    /// A command (`collector.sync`, `test.run.record`): `turn` is its
+    /// actor's open turn when that actor is the thread's own agent, and
+    /// none for anyone else — a person's sync during an agent's turn isn't
+    /// the agent's.
+    Command { turn: Option<i64> },
+}
+
+impl<'a> RunOrigin<'a> {
+    /// The tool event, for a run the reactor saw.
+    pub fn cause(self) -> Option<&'a RunCause> {
+        match self {
+            RunOrigin::Tool(cause) => Some(cause),
+            RunOrigin::Command { .. } => None,
         }
-        let thread = *thread;
-        self.facts
-            .database()
-            .read(move |tx| oxplow_db::agent_stores::open_turn_ids_tx(tx, thread))
-            .await
-            .ok()
-            .and_then(|open| open.first().map(|t| t.value()))
+    }
+
+    /// The agent turn the run was made in (tsk483): its tool event's —
+    /// however late that event is delivered, and none when the event had
+    /// none — or its command's.
+    pub fn turn(self) -> Option<i64> {
+        match self {
+            RunOrigin::Tool(cause) => cause.anchors.turn_id,
+            RunOrigin::Command { turn } => turn,
+        }
+    }
+}
+
+impl CollectionService {
+    /// The turn a command `actor` ran in on `thread` (tsk923): its open
+    /// turn when it is that thread's own agent; none for anyone else — a
+    /// person's sync while the agent is mid-turn isn't the agent's.
+    pub async fn command_turn(
+        &self,
+        actor: &oxplow_domain::Actor,
+        thread: ThreadId,
+    ) -> Option<i64> {
+        match actor {
+            oxplow_domain::Actor::Agent {
+                thread_id: Some(t), ..
+            } if *t == thread => self
+                .facts
+                .database()
+                .read(move |tx| oxplow_db::agent_stores::open_turn_ids_tx(tx, thread))
+                .await
+                .ok()
+                .and_then(|open| open.first().map(|t| t.value())),
+            _ => None,
+        }
     }
 
     /// The branch the checkout at `root` has checked out (`None` when
@@ -808,9 +847,10 @@ impl CollectionService {
         &self,
         run: RunKind,
         window: FreshWindow,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
         root: &std::path::Path,
     ) -> RunReports {
+        let cause = origin.cause();
         let source = oxplow_domain::Actor::System.source();
         let how = ReportRun {
             trigger: "on",
@@ -864,6 +904,7 @@ impl CollectionService {
         source: &str,
         report: Option<&oxplow_coverage::TestReport>,
         task: Option<TaskId>,
+        turn: Option<i64>,
     ) -> Result<Option<i64>, DomainError> {
         self.record_test_run_caused(
             thread,
@@ -874,7 +915,7 @@ impl CollectionService {
             source,
             report,
             task,
-            None,
+            RunOrigin::Command { turn },
         )
         .await
     }
@@ -894,8 +935,9 @@ impl CollectionService {
         source: &str,
         report: Option<&oxplow_coverage::TestReport>,
         task: Option<TaskId>,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) -> Result<Option<i64>, DomainError> {
+        let cause = origin.cause();
         // OBSERVE: record the run regardless of effort; attribution is separate
         // (tsk263). We only need the stream to record into the substrate.
         let Some(stream_id) = self.stream_id_for(thread).await? else {
@@ -1094,7 +1136,7 @@ impl CollectionService {
                 capture.closest_vcs_rev = version.as_ref().and_then(|v| v.closest_vcs_rev.clone());
                 capture.vcs_rev_exact = version.as_ref().map(|v| v.vcs_rev_exact).unwrap_or(false);
                 capture.effort_id = owning_val;
-                let turn = self.turn_of(thread, cause).await;
+                let turn = origin.turn();
                 capture.turn_id = turn;
                 capture.detail_json = Self::capture_detail(
                     "test-detail",
@@ -1106,7 +1148,7 @@ impl CollectionService {
                     stream_val,
                     owning_val,
                     turn,
-                    cause,
+                    origin,
                     oxplow_domain::events::schema::TestRunRecordedV1 {
                         run: String::new(), // filled with the capture id
                         command: command.to_string(),
@@ -1160,9 +1202,10 @@ impl CollectionService {
         stream_val: i64,
         owning: Option<i64>,
         turn: Option<i64>,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
         payload: oxplow_domain::events::schema::TestRunRecordedV1,
     ) -> oxplow_db::fact_store::CaptureEvent {
+        let cause = origin.cause();
         use oxplow_domain::events::schema::TestRunRecorded;
         let anchors = match cause {
             Some(c) => oxplow_domain::Anchors {
@@ -1219,8 +1262,9 @@ impl CollectionService {
     async fn run_effort(
         &self,
         thread: &ThreadId,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) -> Result<Option<Effort>, DomainError> {
+        let cause = origin.cause();
         match anchored_effort(cause) {
             Some(id) => self.efforts.get_effort(&id).await,
             None if cause.is_some() => Ok(None),
@@ -1333,6 +1377,7 @@ impl CollectionService {
         thread: &ThreadId,
         id: &str,
         source: &str,
+        turn: Option<i64>,
     ) -> Result<ReportSync, crate::collector_runner::RunCollectorError> {
         use crate::collector_runner::RunCollectorError;
         let spec = self
@@ -1383,6 +1428,7 @@ impl CollectionService {
                         &source,
                         Some(report),
                         None,
+                        None,
                     )
                     .await
                     .map_err(storage)?;
@@ -1396,9 +1442,15 @@ impl CollectionService {
                     return Ok(ReportSync::Coverage(CoverageIngest::NoChangedCoverage));
                 };
                 ReportSync::Coverage(
-                    self.observe_coverage(thread, &stream_id, report, &source, None)
-                        .await
-                        .map_err(storage)?,
+                    self.observe_coverage(
+                        thread,
+                        &stream_id,
+                        report,
+                        &source,
+                        RunOrigin::Command { turn },
+                    )
+                    .await
+                    .map_err(storage)?,
                 )
             }
             Some(Records::Analysis) | None => {
@@ -1429,6 +1481,7 @@ impl CollectionService {
                             Some(report),
                             &reads.analyzers,
                             &source,
+                            None,
                         )
                         .await
                         .map_err(storage)?
@@ -1615,8 +1668,9 @@ impl CollectionService {
         stream_id: &str,
         report: &oxplow_coverage::CoverageReport,
         source: &str,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) -> Result<CoverageIngest, DomainError> {
+        let cause = origin.cause();
         // Stop-collecting gate (tsk31): with the coverage metric disabled, no
         // enabled spec consumes `oxplow.coverage` — record nothing (no capture, no
         // diff-coverage). Reads/effort-review see it turned off.
@@ -1638,7 +1692,7 @@ impl CollectionService {
             .resolve_owner(thread, None, anchored_effort(cause), None)
             .await;
         let owning_val = attribute_to.as_ref().map(|e| e.id.value());
-        let turn = self.turn_of(thread, cause).await;
+        let turn = origin.turn();
         // Pin to a take of the code the report measured (tsk883),
         // independent of any effort (observe-always).
         let pin = self
@@ -1646,7 +1700,7 @@ impl CollectionService {
                 thread,
                 stream_id,
                 (turn, attribute_to.as_ref().map(|e| e.id)),
-                cause,
+                origin,
             )
             .await;
         let root = self.worktrees.resolve(Some(stream_id)).await;
@@ -1742,7 +1796,7 @@ impl CollectionService {
                     thread,
                     stream_val,
                     (owning_val, turn),
-                    cause,
+                    origin,
                     abs_pct,
                     source,
                 );
@@ -1786,8 +1840,9 @@ impl CollectionService {
         thread: &ThreadId,
         stream_id: &str,
         (turn, effort): (Option<i64>, Option<EffortId>),
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) -> Option<i64> {
+        let cause = origin.cause();
         let stream = oxplow_domain::StreamId::try_from_str(stream_id)?;
         let capture = self.captures.get(&stream)?;
         capture.await_initial_ready().await;
@@ -1905,10 +1960,10 @@ impl CollectionService {
         thread: &ThreadId,
         report: &oxplow_coverage::CoverageReport,
         source: &str,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) -> Result<(), DomainError> {
         if let Some(stream_id) = self.stream_id_for(thread).await? {
-            self.observe_coverage(thread, &stream_id, report, source, cause)
+            self.observe_coverage(thread, &stream_id, report, source, origin)
                 .await?;
         }
         Ok(())
@@ -1920,10 +1975,11 @@ impl CollectionService {
         thread: &ThreadId,
         stream_val: i64,
         (owning, turn): (Option<i64>, Option<i64>),
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
         lines_pct: f64,
         source: &str,
     ) -> oxplow_db::fact_store::CaptureEvent {
+        let cause = origin.cause();
         use oxplow_domain::events::schema::{TestCoverageRecorded, TestCoverageRecordedV1};
         let anchors = match cause {
             Some(c) => oxplow_domain::Anchors {
@@ -1980,10 +2036,10 @@ impl CollectionService {
         thread: &ThreadId,
         report: &oxplow_coverage::CoverageReport,
         source: &str,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) {
         let first = match self
-            .try_observe_coverage(thread, report, source, cause)
+            .try_observe_coverage(thread, report, source, origin)
             .await
         {
             Ok(()) => return,
@@ -1992,11 +2048,11 @@ impl CollectionService {
         tracing::warn!(error = %first, "coverage ride-along failed; retrying once");
         tokio::time::sleep(COVERAGE_RETRY_DELAY).await;
         if let Err(e) = self
-            .try_observe_coverage(thread, report, source, cause)
+            .try_observe_coverage(thread, report, source, origin)
             .await
         {
             tracing::warn!(error = %e, "coverage ride-along failed after retry");
-            self.record_coverage_failure(thread, &format!("{first}; retry: {e}"), cause)
+            self.record_coverage_failure(thread, &format!("{first}; retry: {e}"), origin)
                 .await;
         }
     }
@@ -2005,12 +2061,8 @@ impl CollectionService {
     /// `status = failed` coverage capture carrying the error — the same
     /// convention as gauge failures — so the miss is queryable in the
     /// substrate instead of living only in a tty warn. Best-effort.
-    async fn record_coverage_failure(
-        &self,
-        thread: &ThreadId,
-        error: &str,
-        cause: Option<&RunCause>,
-    ) {
+    async fn record_coverage_failure(&self, thread: &ThreadId, error: &str, origin: RunOrigin<'_>) {
+        let cause = origin.cause();
         let stream_val = match self.stream_id_for(thread).await {
             Ok(Some(sid)) => match oxplow_domain::StreamId::try_from_str(&sid) {
                 Some(s) => s.value(),
@@ -2024,7 +2076,7 @@ impl CollectionService {
         capture.error = Some(error.to_string());
         capture.thread_id = Some(thread.value());
         capture.trigger = Some("on-report".into());
-        capture.turn_id = self.turn_of(thread, cause).await;
+        capture.turn_id = origin.turn();
         capture.idempotency_key = cause.map(|c| format!("coverage-failure:{}", c.event_id));
         if let Err(e) = self.facts.record_facts(capture, Vec::new()).await {
             tracing::warn!(error = %e, "coverage failure record write failed");
@@ -2139,8 +2191,9 @@ impl CollectionService {
         &self,
         thread: &ThreadId,
         payload_json: &str,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) -> Result<Option<String>, DomainError> {
+        let cause = origin.cause();
         let Some(bash) = parse_bash_post_tool(payload_json) else {
             return Ok(None);
         };
@@ -2165,7 +2218,7 @@ impl CollectionService {
         // precondition for recording. The single open effort (if any) is resolved
         // here only for the effort-RELATIVE advisories (coverage, nudges),
         // which legitimately no-op when ambiguous.
-        let effort_opt = self.run_effort(thread, cause).await?;
+        let effort_opt = self.run_effort(thread, origin).await?;
 
         // Wasted-token leg (tsk77): any LANDED commit — including `git revert`,
         // which never says "commit" — may carry "This reverts commit <sha>"
@@ -2200,7 +2253,7 @@ impl CollectionService {
         // carrying their merged findings.
         if is_analysis {
             let reads = self
-                .read_run_reports(RunKind::Analysis, window, cause, &root)
+                .read_run_reports(RunKind::Analysis, window, origin, &root)
                 .await;
             let (report, source) = match reads.analysis() {
                 Some((r, source)) => (Some(r.clone()), source),
@@ -2217,7 +2270,7 @@ impl CollectionService {
                     report.as_ref(),
                     &analyzers,
                     &source,
-                    cause,
+                    origin,
                 )
                 .await
             {
@@ -2234,7 +2287,7 @@ impl CollectionService {
         // (each test stack writes its own; the freshness window leaves out
         // stale ones from prior runs or other stacks), merged by kind.
         let reads = self
-            .read_run_reports(RunKind::Test, window, cause, &root)
+            .read_run_reports(RunKind::Test, window, origin, &root)
             .await;
         // Trust tier rides in `source`: "post-tool-bash" for the plain hook /
         // in-process parsers, "plugin-exec:<ids>" when a lower-trust program
@@ -2259,7 +2312,7 @@ impl CollectionService {
                 // effort the command ran in; otherwise the single-open auto
                 // rule attributes it (tsk265/tsk271).
                 parse_task_token(&bash.command),
-                cause,
+                origin,
             )
             .await
         {
@@ -2275,10 +2328,10 @@ impl CollectionService {
         let coverage = reads.coverage();
         if let Some((merged, source)) = &coverage {
             // The label says whether a lower-trust program parser produced it.
-            self.coverage_ride_along_with_retry(thread, merged, source, cause)
+            self.coverage_ride_along_with_retry(thread, merged, source, origin)
                 .await;
         } else if !reads.coverage_errors.is_empty() {
-            self.record_coverage_failure(thread, &reads.coverage_errors.join("; "), cause)
+            self.record_coverage_failure(thread, &reads.coverage_errors.join("; "), origin)
                 .await;
         }
         // A run delivered after its freshness window can't be judged: the
@@ -2319,7 +2372,7 @@ impl CollectionService {
                             "unattributed-run",
                             &msg,
                             &bash.command,
-                            cause,
+                            origin,
                         )
                         .await;
                         return Ok(Some(msg));
@@ -2348,7 +2401,7 @@ impl CollectionService {
                 "report-less-run",
                 &msg,
                 &bash.command,
-                cause,
+                origin,
             )
             .await;
             return Ok(Some(msg));
@@ -2368,15 +2421,16 @@ impl CollectionService {
         kind: &str,
         message: &str,
         trigger: &str,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) {
+        let cause = origin.cause();
         let new = NewAgentNudge {
             thread_id: thread.to_string(),
             effort_id: effort.map(|e| e.id.to_string()),
             kind: kind.to_string(),
             message: message.to_string(),
             trigger: Some(trigger.to_string()),
-            turn_id: cause.and_then(|c| c.anchors.turn_id),
+            turn_id: origin.turn(),
             cause: cause.map(|c| c.event_id.clone()),
         };
         match self.nudges.record(new).await {
@@ -2386,7 +2440,7 @@ impl CollectionService {
                 // Project the fired nudge into the metric substrate (tsk216):
                 // `agent.nudges.fired` is an agent-activity signal — the agent
                 // drifted off-task often enough to be corrected.
-                self.project_nudge_metric(thread, effort.map(|e| e.id), kind, cause)
+                self.project_nudge_metric(thread, effort.map(|e| e.id), kind, origin)
                     .await;
             }
             Err(err) => tracing::warn!(?err, "persisting agent nudge failed"),
@@ -2403,8 +2457,9 @@ impl CollectionService {
         thread: &ThreadId,
         effort: Option<EffortId>,
         kind: &str,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) {
+        let cause = origin.cause();
         let stream_val = match self.threads.get(thread).await {
             Ok(Some(t)) => t.stream_id.value(),
             _ => return,
@@ -2444,7 +2499,7 @@ impl CollectionService {
                 capture.trigger = Some("continuous".into());
                 capture.branch = branch;
                 capture.effort_id = owning_val;
-                capture.turn_id = self.turn_of(thread, cause).await;
+                capture.turn_id = origin.turn();
                 self.facts.record_facts(capture, vec![fact]).await?;
             }
             Ok::<(), DomainError>(())
@@ -2482,9 +2537,17 @@ impl CollectionService {
         report: Option<&oxplow_coverage::AnalysisReport>,
         analyzers: &[String],
         source: &str,
+        turn: Option<i64>,
     ) -> Result<Option<i64>, DomainError> {
-        self.record_static_analysis_caused(thread, command, report, analyzers, source, None)
-            .await
+        self.record_static_analysis_caused(
+            thread,
+            command,
+            report,
+            analyzers,
+            source,
+            RunOrigin::Command { turn },
+        )
+        .await
     }
 
     /// [`Self::record_static_analysis`] for a run the reactor saw: the effort
@@ -2497,14 +2560,15 @@ impl CollectionService {
         report: Option<&oxplow_coverage::AnalysisReport>,
         analyzers: &[String],
         source: &str,
-        cause: Option<&RunCause>,
+        origin: RunOrigin<'_>,
     ) -> Result<Option<i64>, DomainError> {
+        let cause = origin.cause();
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
         // The run's effort — for the snapshot pin + panel refresh only;
         // attribution rides the ledger (auto-claimed below when unambiguous).
-        let effort = self.run_effort(thread, cause).await?;
+        let effort = self.run_effort(thread, origin).await?;
         let mut payload = serde_json::Map::new();
         payload.insert("command".into(), json!(command));
         if !analyzers.is_empty() {
@@ -2537,12 +2601,12 @@ impl CollectionService {
         // records no capture, so takes nothing.
         let pin = match report {
             Some(_) => {
-                let turn = self.turn_of(thread, cause).await;
+                let turn = origin.turn();
                 self.measured_snapshot(
                     thread,
                     &stream_id,
                     (turn, effort.as_ref().map(|e| e.id)),
-                    cause,
+                    origin,
                 )
                 .await
             }
@@ -2574,7 +2638,7 @@ impl CollectionService {
                 closest_vcs_rev.clone(),
                 vcs_rev_exact,
                 Some(serde_json::Value::Object(payload.clone())),
-                self.turn_of(thread, cause).await,
+                origin.turn(),
             )
             .await?
         } else {
@@ -4166,7 +4230,12 @@ mod tests {
         /// What a run of `kind` that ended just now reads.
         async fn run_reads(h: &Harness, kind: RunKind) -> RunReports {
             h.service
-                .read_run_reports(kind, FreshWindow::ending_now(), None, h.tmp.path())
+                .read_run_reports(
+                    kind,
+                    FreshWindow::ending_now(),
+                    crate::collection::RunOrigin::Command { turn: None },
+                    h.tmp.path(),
+                )
                 .await
         }
 
@@ -4174,7 +4243,7 @@ mod tests {
         async fn ingest_coverage(h: &Harness) -> CoverageIngest {
             match h
                 .service
-                .sync_report_collector(&h.thread, "tests.coverage", "human")
+                .sync_report_collector(&h.thread, "tests.coverage", "human", None)
                 .await
                 .unwrap()
             {
@@ -4509,7 +4578,7 @@ mod tests {
                 .unwrap();
             match h
                 .service
-                .sync_report_collector(&thread.id, "tests.coverage", "human")
+                .sync_report_collector(&thread.id, "tests.coverage", "human", None)
                 .await
             {
                 Ok(ReportSync::Coverage(CoverageIngest::Stored { summary_pct, .. })) => {
@@ -4538,7 +4607,11 @@ mod tests {
                 started: None,
             };
             h.service
-                .on_post_tool_use(&h.thread, &bash_payload("bun test", 0), Some(&cause))
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("bun test", 0),
+                    crate::collection::RunOrigin::Tool(&cause),
+                )
                 .await
                 .unwrap();
             let pinned: Vec<Option<i64>> =
@@ -4953,7 +5026,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload(&format!("git revert {bad_sha}"), 0),
-                    None,
+                    crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
                 .unwrap();
@@ -4978,7 +5051,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload(&format!("git revert {bad_sha}"), 0),
-                    None,
+                    crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
                 .unwrap();
@@ -4995,7 +5068,11 @@ mod tests {
             let h = build(Some("<coverage this is not xml")).await;
             let out = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("bun test --watch false", 0), None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("bun test --watch false", 0),
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap();
             // The failure is recorded, not returned — the hook never fails.
@@ -5049,6 +5126,7 @@ mod tests {
                     "post-tool-bash",
                     None,
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -5079,6 +5157,7 @@ mod tests {
                     Some(6),
                     "observed",
                     "post-tool-bash",
+                    None,
                     None,
                     None,
                 )
@@ -5144,6 +5223,7 @@ mod tests {
                     "post-tool-bash",
                     Some(&report),
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -5158,6 +5238,7 @@ mod tests {
                     None,
                     "observed",
                     "post-tool-bash",
+                    None,
                     None,
                     None,
                 )
@@ -5211,6 +5292,7 @@ mod tests {
                     Some(4),
                     "asserted",
                     "agent",
+                    None,
                     None,
                     None,
                 )
@@ -5269,6 +5351,7 @@ mod tests {
                     "post-tool-bash",
                     None,
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -5309,6 +5392,7 @@ mod tests {
                     Some(3),
                     "observed",
                     "post-tool-bash",
+                    None,
                     None,
                     None,
                 )
@@ -5364,6 +5448,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
+                    None,
                     None,
                 )
                 .await
@@ -5476,6 +5561,7 @@ mod tests {
                         "post-tool-bash",
                         Some(&r),
                         None,
+                        None,
                     )
                     .await
                     .unwrap();
@@ -5531,6 +5617,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
+                    None,
                     None,
                 )
                 .await
@@ -5590,6 +5677,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
+                    None,
                     None,
                 )
                 .await
@@ -6290,7 +6378,14 @@ mod tests {
             };
             h.efforts.finish(&eid, None, None).await.unwrap();
             h.service
-                .persist_nudge(&h.thread, None, "report-less-run", "m", "cmd", Some(&cause))
+                .persist_nudge(
+                    &h.thread,
+                    None,
+                    "report-less-run",
+                    "m",
+                    "cmd",
+                    crate::collection::RunOrigin::Tool(&cause),
+                )
                 .await;
             let owner: Option<i64> =
                 h.db.read(|c| {
@@ -6343,7 +6438,11 @@ mod tests {
             // Names no crate and no path, so target overlap can't resolve it.
             let msg = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("cargo test --workspace", 0), None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("cargo test --workspace", 0),
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap()
                 .expect("an unattributable run must nudge");
@@ -6413,7 +6512,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload("cargo test -p oxplow-git", 0),
-                    None,
+                    crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
                 .unwrap();
@@ -6699,6 +6798,7 @@ mod tests {
                     "post-tool-bash",
                     None,
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -6819,6 +6919,7 @@ mod tests {
                     "post-tool-bash",
                     None,
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -6894,6 +6995,7 @@ mod tests {
                     "agent",
                     None,
                     Some(task2),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -6966,6 +7068,7 @@ mod tests {
                     "agent",
                     None,
                     Some(task2),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -7048,6 +7151,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&junit),
+                    None,
                     None,
                 )
                 .await
@@ -7161,7 +7265,7 @@ mod tests {
                     .read_run_reports(
                         RunKind::Test,
                         FreshWindow::around(cause.at),
-                        Some(&cause),
+                        crate::collection::RunOrigin::Tool(&cause),
                         h.tmp.path(),
                     )
                     .await;
@@ -7226,7 +7330,12 @@ mod tests {
                 let root = root.clone();
                 async move {
                     service
-                        .read_run_reports(RunKind::Test, FreshWindow::ending_now(), None, &root)
+                        .read_run_reports(
+                            RunKind::Test,
+                            FreshWindow::ending_now(),
+                            crate::collection::RunOrigin::Command { turn: None },
+                            &root,
+                        )
                         .await
                 }
             };
@@ -7301,7 +7410,7 @@ mod tests {
             assert!(run_reads(&h, RunKind::Test).await.tests().is_none());
             assert!(matches!(
                 h.service
-                    .sync_report_collector(&h.thread, "tests.junit", "human")
+                    .sync_report_collector(&h.thread, "tests.junit", "human", None)
                     .await,
                 Err(crate::collector_runner::RunCollectorError::Disabled(_))
             ));
@@ -7313,7 +7422,7 @@ mod tests {
             let h = build(None).await;
             assert!(matches!(
                 h.service
-                    .sync_report_collector(&h.thread, "tests.coverage", "human")
+                    .sync_report_collector(&h.thread, "tests.coverage", "human", None)
                     .await,
                 Err(crate::collector_runner::RunCollectorError::NotFound)
             ));
@@ -7394,7 +7503,11 @@ mod tests {
             }
             let result = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("bun test --watch false", 0), None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("bun test --watch false", 0),
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap();
             let nudge = result.expect("nudge returned for report-less run");
@@ -7521,7 +7634,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload("bun test --watch false", 0),
-                    Some(&cause),
+                    crate::collection::RunOrigin::Tool(&cause),
                 )
                 .await
                 .unwrap();
@@ -7558,7 +7671,11 @@ mod tests {
             );
             let msg = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("bun test", 0), None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("bun test", 0),
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap()
                 .expect("a nudge");
@@ -7592,13 +7709,21 @@ mod tests {
             let payload = bash_payload("bun test", 0);
             let first = h
                 .service
-                .on_post_tool_use(&h.thread, &payload, None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &payload,
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap();
             assert!(first.is_some(), "first report-less run should nudge");
             let second = h
                 .service
-                .on_post_tool_use(&h.thread, &payload, None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &payload,
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap();
             assert!(
@@ -7619,7 +7744,11 @@ mod tests {
             }
             let payload = bash_payload("bun test --watch false", 0);
             h.service
-                .on_post_tool_use(&h.thread, &payload, None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &payload,
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap()
                 .expect("first run nudges");
@@ -7650,7 +7779,11 @@ mod tests {
             // Second run is deduped (returns None) and stores nothing more.
             let second = h
                 .service
-                .on_post_tool_use(&h.thread, &payload, None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &payload,
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap();
             assert!(second.is_none(), "second run deduped");
@@ -7664,7 +7797,11 @@ mod tests {
             let h = build(None).await;
             let result = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("cargo build", 0), None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("cargo build", 0),
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap();
             assert!(result.is_none());
@@ -7682,7 +7819,11 @@ mod tests {
             // No test command and no report collectors by default.
             let result = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("bun test", 0), None)
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("bun test", 0),
+                    crate::collection::RunOrigin::Command { turn: None },
+                )
                 .await
                 .unwrap();
             let nudge = result.expect("nudge returned even without report collectors");
@@ -7758,6 +7899,7 @@ mod tests {
                     Some(&report),
                     &["clippy".to_string()],
                     "analysis-report",
+                    None,
                 )
                 .await
                 .unwrap();
@@ -7810,6 +7952,7 @@ mod tests {
                     Some(&report),
                     &["clippy".to_string()],
                     "analysis-report",
+                    None,
                 )
                 .await
                 .unwrap();
@@ -7865,7 +8008,14 @@ mod tests {
             let h = build(None).await;
             let recorded = h
                 .service
-                .record_static_analysis(&h.thread, "cargo clippy", None, &[], "analysis-report")
+                .record_static_analysis(
+                    &h.thread,
+                    "cargo clippy",
+                    None,
+                    &[],
+                    "analysis-report",
+                    None,
+                )
                 .await
                 .unwrap();
             // tsk891: nothing was recorded, so there's no run to claim.
@@ -7932,7 +8082,7 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "lint.eslint", "human")
+                .sync_report_collector(&h.thread, "lint.eslint", "human", None)
                 .await
                 .unwrap()
             {
@@ -8017,7 +8167,7 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "lint.eslint", "human")
+                .sync_report_collector(&h.thread, "lint.eslint", "human", None)
                 .await
                 .unwrap()
             {
@@ -8061,7 +8211,7 @@ mod tests {
             );
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "lint.eslint", "human")
+                .sync_report_collector(&h.thread, "lint.eslint", "human", None)
                 .await
                 .unwrap_err();
             assert!(
@@ -8082,7 +8232,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload("cargo clippy --workspace --all-targets", 0),
-                    None,
+                    crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
                 .unwrap();

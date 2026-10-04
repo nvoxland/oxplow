@@ -94,7 +94,7 @@ impl AsyncEventConsumer for CollectionConsumer {
             .on_post_tool_use(
                 &thread,
                 &payload.to_string(),
-                Some(&cause_of(&self.db, event).await?),
+                crate::collection::RunOrigin::Tool(&cause_of(&self.db, event).await?),
             )
             .await
             .map(|_| ())
@@ -320,7 +320,14 @@ mod tests {
         );
         // A nudge written after its hook answered goes out on the next hook.
         svc.collection
-            .persist_nudge(&f.thread, None, "late", "a late nudge", "cmd", None)
+            .persist_nudge(
+                &f.thread,
+                None,
+                "late",
+                "a late nudge",
+                "cmd",
+                crate::collection::RunOrigin::Command { turn: None },
+            )
             .await;
         assert_eq!(
             svc.agent_context

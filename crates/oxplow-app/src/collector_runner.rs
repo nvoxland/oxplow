@@ -1793,7 +1793,12 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
                         )?;
                         let recorded = sync
                             .collection
-                            .sync_report_collector(&thread, &input.id, &source)
+                            .sync_report_collector(
+                                &thread,
+                                &input.id,
+                                &source,
+                                sync.collection.command_turn(&acting, thread).await,
+                            )
                             .await
                             .map_err(failed)?;
                         return Ok(HandlerOutput {

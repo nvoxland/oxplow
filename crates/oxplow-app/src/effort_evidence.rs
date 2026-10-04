@@ -164,6 +164,7 @@ mod tests {
                 "test.record_run",
                 None,
                 None,
+                None,
             )
             .await
             .unwrap()

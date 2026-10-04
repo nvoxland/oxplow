@@ -97,6 +97,7 @@ pub fn record_run_command(collection: CollectionService) -> Command {
                     }
                     None => None,
                 };
+                let turn = collection.command_turn(&actor, thread).await;
                 let id = collection
                     .record_test_run(
                         &thread,
@@ -110,6 +111,7 @@ pub fn record_run_command(collection: CollectionService) -> Command {
                         author_of(&actor),
                         None,
                         task,
+                        turn,
                     )
                     .await?;
                 Ok(HandlerOutput {
@@ -130,7 +132,7 @@ pub fn commands(collection: CollectionService) -> Vec<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_domain::Actor;
 
     const COBERTURA: &str = r#"<?xml version="1.0"?>
@@ -224,6 +226,71 @@ mod tests {
             .find(|e| e.envelope.event_type == "test.run.recorded")
             .expect("the run is logged");
         assert_eq!(run.envelope.anchors.thread_id, Some(fx.thread));
+    }
+
+    /// tsk923: a run a person reports on a thread whose agent is mid-turn
+    /// isn't the agent's: no turn, on the capture or on its event.
+    #[tokio::test]
+    async fn a_persons_reported_run_carries_no_turn() {
+        let fx = services_with_effort().await;
+        open_turn(&fx).await;
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                RECORD_RUN,
+                json!({
+                    "command": "cargo test",
+                    "thread": format!("thread:{}", fx.thread),
+                    "passed": 1, "failed": 0, "total": 1,
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        let (open, on_capture) = turns(&fx).await;
+        assert!(open.is_some(), "the agent is mid-turn");
+        assert_eq!(on_capture, None);
+        let events = fx.svc.event_log_store.read_after(0, 1000).await.unwrap();
+        let run = events
+            .iter()
+            .find(|e| e.envelope.event_type == "test.run.recorded")
+            .unwrap();
+        assert_eq!(run.envelope.anchors.turn_id, None);
+    }
+
+    /// The agent's turn opened by a prompt on `fx`'s thread.
+    async fn open_turn(fx: &EffortFixture) {
+        fx.svc
+            .hook_ingest
+            .ingest(crate::hook_ingest::HookEnvelope {
+                kind: oxplow_domain::HookKind::UserPromptSubmit,
+                thread_id: Some(fx.thread),
+                stream_id: None,
+                session_id: Some("s".into()),
+                payload_json: "{}".into(),
+                prompt: Some("go".into()),
+                decision: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    /// The open turn, and the turn the run's capture carries.
+    async fn turns(fx: &EffortFixture) -> (Option<i64>, Option<i64>) {
+        fx.svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT (SELECT id FROM agent_turn WHERE ended_at IS NULL), \
+                            (SELECT turn_id FROM metric_capture WHERE producer IN ('tests', 'test-run'))",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
     }
 
     /// tsk483: a run an agent reports by command is in the turn open on

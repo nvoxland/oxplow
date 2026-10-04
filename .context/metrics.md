@@ -1371,11 +1371,17 @@ the deferred backfill (tsk38). The now-orphaned legacy reads
 > **P10 (tsk483):** the capture carries that turn too —
 > `metric_capture.turn_id` (V157, SET NULL when the turn goes), exposed as
 > `v_capture.turn_id` and `v_test_run.turn_id`. A producer stamps what it
-> knows, never a guess: a run, coverage, analysis or nudge capture takes
-> its causing tool event's turn anchor however late the reactor records it
-> (`CollectionService::turn_of` — none when the event had none), a run
-> reported by command (`test.record_run`) takes the thread's open turn
-> (and its `test.run.recorded` is anchored to it), and the per-turn
+> knows, never a guess, by **where the run came from** (`RunOrigin`,
+> tsk923): a run, coverage, analysis or nudge capture the reactor saw
+> takes its causing tool event's turn anchor however late it is recorded
+> (`RunOrigin::Tool` — none when the event had none); one reported by a
+> command (`test.record_run`, `collector.sync`) takes its actor's open
+> turn **only when that actor is the thread's own agent**
+> (`CollectionService::command_turn`) — a person's sync while the agent
+> is mid-turn has none — and its `test.run.recorded` is anchored alike.
+> A nudge row and its capture take the same turn (`RunOrigin::turn`). An
+> agent's `metric.record` capture carries its thread and open turn; a
+> person's, neither. The per-turn
 > `oxplow.turn` facts' capture takes the turn whose `agent.turn.ended`
 > counted them. A capture no turn produced (a scheduled collector, a
 > baseline scan) has none.

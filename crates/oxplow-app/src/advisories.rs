@@ -162,7 +162,17 @@ pub async fn for_thread(
     if on == AdvisoryOn::PostToolUse {
         for hit in &hits {
             svc.collection
-                .persist_nudge(thread, Some(&effort), &hit.id, &hit.text, "advisory", cause)
+                .persist_nudge(
+                    thread,
+                    Some(&effort),
+                    &hit.id,
+                    &hit.text,
+                    "advisory",
+                    cause.map_or(
+                        crate::collection::RunOrigin::Command { turn: None },
+                        crate::collection::RunOrigin::Tool,
+                    ),
+                )
                 .await;
         }
     }
