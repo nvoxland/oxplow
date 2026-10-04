@@ -2,9 +2,10 @@
 // own global config (`OXPLOW_HOME`) and tmux socket dir, so nothing reaches
 // the person's real config, keychain or tmux server.
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 
@@ -24,16 +25,36 @@ function projectYaml(acpFake: string): string {
   return `agents: [acp]\nacpAgents:\n  - { name: fake, command: ${JSON.stringify(acpFake)} }\n`;
 }
 
+/** Put the suite's test extension (`tests-e2e/fixtures/extension`) into
+ *  `project`, with the wrapper that runs the fake provider this checkout
+ *  built: its service's state in the project's `.oxplow/`, one file per
+ *  instance, as the provider tests keep it. */
+function installTestExtension(project: string, providerFake: string): void {
+  const fixture = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "extension");
+  const dir = join(project, "oxplow", "extensions", "e2e");
+  cpSync(fixture, dir, { recursive: true });
+  mkdirSync(join(dir, "bin"), { recursive: true });
+  const state = join(project, ".oxplow");
+  const script = join(dir, "bin", "provider");
+  writeFileSync(
+    script,
+    `#!/bin/sh\nOXPLOW_FAKE_STATE="${state}/fake-state-$OXPLOW_PROVIDER_ID.json" exec ${JSON.stringify(providerFake)} "$@"\n`,
+  );
+  chmodSync(script, 0o755);
+}
+
 export async function startDaemon(): Promise<Daemon> {
   const bin = process.env.OXPLOW_E2E_DAEMON;
   const acpFake = process.env.OXPLOW_E2E_ACP_FAKE;
-  if (!bin || !acpFake) throw new Error("global setup didn't build the daemon (OXPLOW_E2E_DAEMON)");
+  const providerFake = process.env.OXPLOW_E2E_PROVIDER_FAKE;
+  if (!bin || !acpFake || !providerFake) throw new Error("global setup didn't build the suite's binaries");
   const dir = mkdtempSync(join(tmpdir(), "oxplow-e2e-"));
   const project = join(dir, "project");
   const home = join(dir, "home");
   const tmux = join(dir, "tmux");
   for (const d of [project, home, tmux, join(project, ".oxplow")]) mkdirSync(d, { recursive: true });
   writeFileSync(join(project, ".oxplow", "project.yaml"), projectYaml(acpFake));
+  installTestExtension(project, providerFake);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: project, stdio: "ignore" });
   git("init", "-q");
   git("-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "-q", "--allow-empty", "-m", "init");
@@ -140,4 +161,16 @@ export async function waitForModels<T>(daemon: Daemon, models: string[], write: 
   } finally {
     socket.close();
   }
+}
+
+type Program = { kind: string; name: string; version: string | null; approved: boolean };
+
+/** Approve one of the project's programs (`<kind>`, `<name>`: `provider`,
+ *  `e2e/fake`) as a person does, at the version it is now. */
+export async function approveProgram(daemon: Daemon, kind: string, name: string): Promise<void> {
+  const programs = await ipc<Program[]>(daemon, "list_project_programs");
+  const program = programs.find((p) => p.kind === kind && p.name === name);
+  if (!program) throw new Error(`no program ${kind}:${name}`);
+  if (program.approved) return;
+  await ipc(daemon, "approve_project_program", { kind, name, version: program.version });
 }

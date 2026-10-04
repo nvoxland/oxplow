@@ -11,16 +11,26 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 - **`playwright.config.ts`** (repo root). Its `webServer` builds the frontend
   once (`vite build`) and serves it with `vite preview` on 127.0.0.1:4173, so a
   spec never meets a stale `dist/`.
-- **`support/global-setup.ts`** builds `oxplow-daemon-sim` and
-  `oxplow-acp-fake` and hands their paths to the workers
-  (`OXPLOW_E2E_DAEMON`, `OXPLOW_E2E_ACP_FAKE`).
+- **`support/global-setup.ts`** builds `oxplow-daemon-sim`,
+  `oxplow-acp-fake` and `oxplow-provider-fake` and hands their paths to the
+  workers (`OXPLOW_E2E_DAEMON`, `OXPLOW_E2E_ACP_FAKE`,
+  `OXPLOW_E2E_PROVIDER_FAKE`).
+- **`fixtures/extension/`** — the test extension `e2e`, copied into every
+  project before boot: a fake work-item provider (`bin/provider`, written
+  then, runs the fake this checkout built; its `provider.json` is checked
+  in and kept equal to the fake's declarations by
+  `the_suite_fixture_declares_what_the_fake_does`), an effect, a model, a
+  lens with its page, and a ref kind. Private, so it may use experimental
+  kinds. Nothing in it is approved until a spec approves it.
 - **`support/daemon.ts`** starts one daemon: `oxplow-daemon-sim` (the daemon
   with its secrets in memory — nothing reaches the keychain) over a throwaway
   git project, with its own `OXPLOW_HOME` and `TMUX_TMPDIR`. `ipc()` calls
   `/ipc/<name>` as the person; `run()` runs a bus command, confirmed;
   `settle()` waits until boot's background tasks are done; `waitForModels()`
   opens `/events` first, does a write, and resolves once the daemon says
-  each named model changed — so a seeding write is never raced.
+  each named model changed — so a seeding write is never raced;
+  `approveProgram()` approves one of the project's programs as a person
+  does.
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
   - `daemon`, one per worker. Before any page opens it selects an ACP thread
     on the fake agent: the boot thread is a terminal agent's, and the suite
@@ -30,7 +40,10 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   - `storageState` points the page at that daemon (`connectedTo()` builds one
     for a context of a spec's own, e.g. with another token).
   - `pageErrors` fails any spec whose page threw.
-- **`support/ui.ts`** — a person's moves (`expandRailSection`, `openNewTask`).
+  - `fresh` — a daemon and page of the spec's own, for a spec whose state
+    no other may touch first (nothing approved, an empty project).
+- **`support/ui.ts`** — a person's moves (`expandRailSection`, `openNewTask`,
+  `openFromLauncher`).
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect` or
   `waitForModels`, never a sleep: global setup refuses a spec that calls
   `waitForTimeout`.

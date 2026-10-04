@@ -1,0 +1,39 @@
+manifest: 2
+name: e2e
+sharing: private
+intent:
+  purpose: >-
+    The browser suite's extension: a fake work-item tracker, an effect, a
+    lens with its page, and a ref kind, so specs drive each through the UI.
+  origin: null
+  examples: []
+# `bin/provider` is written when a suite daemon starts: it runs the
+# oxplow-provider-fake binary this checkout built.
+providers:
+  - id: fake
+    capability: work_items
+    entry: bin/provider
+    declarations: provider.json
+effects:
+  - id: note-created
+    summary: Looks at each created work item.
+    on: [work_item.created]
+    entry: effects/note.star
+models:
+  - name: item
+    version: 1
+    key: [ref]
+    description: "Each oxplow task as an `e2e_item:<id>` ref: what the ref kind resolves."
+    columns:
+      - { name: ref, type: TEXT, doc: "`e2e_item:<id>`." }
+      - { name: title, type: TEXT, doc: "The task's title." }
+pages:
+  - { id: item, title: Item, category: Work, lens: item }
+ref_kinds:
+  - kind: e2e_item
+    label: Item
+    id: '^\d+$'
+    resolve: item
+    page: item
+    wikilink: item
+    icon: box

@@ -15,3 +15,11 @@ export async function openNewTask(page: Page): Promise<void> {
   await page.keyboard.press("ControlOrMeta+Shift+N");
   await expect(page.getByTestId("tasks-title")).toBeVisible();
 }
+
+/** Open a page through the launcher: search for `query`, take the first
+ *  result. */
+export async function openFromLauncher(page: Page, query: string): Promise<void> {
+  await page.getByTestId("rail-search").click();
+  await page.keyboard.type(query);
+  await page.keyboard.press("Enter");
+}

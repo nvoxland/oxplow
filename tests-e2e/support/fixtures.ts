@@ -1,6 +1,6 @@
 // The suite's fixtures: a daemon per worker, a page that talks to it, and a
 // guard that fails any spec whose page threw.
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 
 import { ipc, run, settle, startDaemon, type Daemon } from "./daemon.js";
 
@@ -26,6 +26,13 @@ async function selectFakeAgentThread(daemon: Daemon): Promise<{ stream: string; 
 /** A worker's daemon, and the stream and thread its pages open on. */
 export type Workspace = Daemon & { stream: string; thread: string };
 
+/** A daemon booted, settled and pointed at the fake agent's thread. */
+async function workspace(): Promise<Workspace> {
+  const daemon = await startDaemon();
+  await settle(daemon);
+  return { ...daemon, ...(await selectFakeAgentThread(daemon)) };
+}
+
 /** A page's storage pointing its transport at `base` with `token`. */
 export function connectedTo(baseURL: string, base: string, token: string) {
   return {
@@ -42,16 +49,33 @@ export function connectedTo(baseURL: string, base: string, token: string) {
   };
 }
 
-export const test = base.extend<{ pageErrors: string[] }, { daemon: Workspace }>({
+export const test = base.extend<
+  { pageErrors: string[]; fresh: { daemon: Workspace; page: Page } },
+  { daemon: Workspace }
+>({
   daemon: [
     async ({}, use) => {
-      const daemon = await startDaemon();
-      await settle(daemon);
-      const selected = await selectFakeAgentThread(daemon);
-      await use({ ...daemon, ...selected });
+      const daemon = await workspace();
+      await use(daemon);
       await daemon.stop();
     },
     { scope: "worker", timeout: 180_000 },
+  ],
+  // A daemon of the spec's own, for one whose state no other spec may
+  // touch first (nothing approved yet, an empty project), and a page on it.
+  fresh: [
+    async ({ browser, baseURL }, use) => {
+      const daemon = await workspace();
+      const context = await browser.newContext({ storageState: connectedTo(baseURL!, daemon.base, daemon.token) });
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await use({ daemon, page });
+      await context.close();
+      await daemon.stop();
+      expect(errors, "the page threw").toEqual([]);
+    },
+    { timeout: 180_000 },
   ],
   // The transport reads its daemon from localStorage at load.
   storageState: async ({ daemon, baseURL }, use) => {

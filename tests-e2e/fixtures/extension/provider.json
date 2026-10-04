@@ -1,0 +1,341 @@
+{
+  "protocol_version": "2",
+  "provider": {
+    "name": "fake",
+    "version": "1"
+  },
+  "capabilities": [
+    {
+      "capability": "work_items",
+      "features": {
+        "comments": true,
+        "delete": true,
+        "hierarchy": true,
+        "idempotent_writes": true,
+        "in_progress_opens_effort": false,
+        "links": true
+      }
+    }
+  ],
+  "commands": [
+    {
+      "name": "create",
+      "summary": "Create a work item.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "native": {
+            "additionalProperties": false,
+            "properties": {
+              "points": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "native_state": {
+            "type": "string"
+          },
+          "parent_ref": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "todo",
+              "in_progress",
+              "blocked",
+              "done",
+              "canceled"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "confirm": "never",
+      "effect": "record",
+      "undoable": false
+    },
+    {
+      "name": "update",
+      "summary": "Edit a work item's title, body, parent, state or points.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "native": {
+            "additionalProperties": false,
+            "properties": {
+              "points": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "native_state": {
+            "type": "string"
+          },
+          "parent_ref": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "todo",
+              "in_progress",
+              "blocked",
+              "done",
+              "canceled"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "confirm": "never",
+      "effect": "record",
+      "undoable": false
+    },
+    {
+      "name": "transition",
+      "summary": "Move a work item to a canonical state, optionally naming a fake state.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "native_state": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "to": {
+            "enum": [
+              "todo",
+              "in_progress",
+              "blocked",
+              "done",
+              "canceled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "to"
+        ],
+        "type": "object"
+      },
+      "confirm": "never",
+      "effect": "record",
+      "undoable": true
+    },
+    {
+      "name": "link",
+      "summary": "Link one work item to another.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "link_type": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "target",
+          "link_type"
+        ],
+        "type": "object"
+      },
+      "confirm": "never",
+      "effect": "record",
+      "undoable": false
+    },
+    {
+      "name": "comment",
+      "summary": "Comment on a work item.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "body"
+        ],
+        "type": "object"
+      },
+      "confirm": "never",
+      "effect": "record",
+      "undoable": false
+    },
+    {
+      "name": "delete",
+      "summary": "Delete a work item.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "confirm": "never",
+      "effect": "record",
+      "undoable": false
+    },
+    {
+      "name": "estimate",
+      "summary": "Set a work item's points (a fake-only command).",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "points": {
+            "type": "integer"
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "points"
+        ],
+        "type": "object"
+      },
+      "confirm": "never",
+      "effect": "record",
+      "undoable": false
+    }
+  ],
+  "event_types": [
+    {
+      "type": "work_item.recorded",
+      "v": 1,
+      "schema": {
+        "$defs": {
+          "CanonicalState": {
+            "description": "The states every provider maps its own to.",
+            "enum": [
+              "todo",
+              "in_progress",
+              "blocked",
+              "done",
+              "canceled"
+            ],
+            "type": "string"
+          },
+          "WorkItemRecord": {
+            "additionalProperties": false,
+            "description": "An item as its provider now has it — what `v_work_item` holds, and\nwhat a provider's `work_item.recorded` event carries.",
+            "properties": {
+              "body": {
+                "default": "",
+                "type": "string"
+              },
+              "deleted": {
+                "default": false,
+                "description": "Gone at the provider.",
+                "type": "boolean"
+              },
+              "native": {
+                "default": null,
+                "description": "Provider-specific fields."
+              },
+              "native_state": {
+                "type": "string"
+              },
+              "parent_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ref": {
+                "description": "`work_item:<provider>:<id>`.",
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/$defs/CanonicalState"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ref",
+              "title",
+              "state",
+              "native_state"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "description": "`work_item.recorded@1`: a provider's item as it now stands — how an\nexternal provider's items reach `work_item` (the `work_items.project`\nconsumer upserts it by ref). oxplow's own tasks don't log it: their\nrows are written with the task, in the same transaction.",
+        "properties": {
+          "item": {
+            "$ref": "#/$defs/WorkItemRecord"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "title": "WorkItemRecordedV1",
+        "type": "object"
+      }
+    }
+  ],
+  "collectors": [
+    {
+      "name": "work_items",
+      "entity": "work_item",
+      "description": "Every work item, after the cursor."
+    }
+  ],
+  "config_schema": {
+    "properties": {
+      "team": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "team"
+    ],
+    "type": "object"
+  }
+}

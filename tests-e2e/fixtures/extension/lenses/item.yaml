@@ -1,0 +1,7 @@
+title: Item
+description: One item — what an `e2e_item:<id>` ref opens.
+params: [{ name: ref }]
+query: SELECT title FROM v_e2e_item WHERE ref = :ref
+viz: table
+empty: No such item.
+hidden: true
