@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { CORE_PANELS, hidePanel, movePanel, resolveLayout, revealPanel, showPanel, toggleCollapsed } from "./panelLayout.js";
+import { CORE_PANELS, hidePanel, movePanel, resolveLayout, revealPanel, setCollapsed, showPanel } from "./panelLayout.js";
 
 const core = CORE_PANELS.map((p) => p.id);
 
@@ -31,7 +31,7 @@ test("moving, hiding, showing and collapsing produce the next stored layout", ()
   expect(resolveLayout(avail, layout).hidden).toEqual(["core:alerts"]);
   layout = showPanel(avail, layout, "core:alerts");
   expect(resolveLayout(avail, layout).order).toEqual(["ext:gh/prs", "core:work", "core:alerts"]);
-  layout = toggleCollapsed(avail, layout, "core:work");
+  layout = setCollapsed(avail, layout, "core:work", false);
   expect(resolveLayout(avail, layout).collapsed.has("core:work")).toBe(false);
 });
 
@@ -49,7 +49,7 @@ test("Approvals is a core panel after Alerts, appended to a layout stored before
 test("revealing a panel shows it when hidden and expands it when collapsed", () => {
   const avail = ["core:alerts", "core:approvals"];
   let layout = hidePanel(avail, [], "core:approvals");
-  layout = toggleCollapsed(avail, layout, "core:approvals");
+  layout = setCollapsed(avail, layout, "core:approvals", true);
   const out = resolveLayout(avail, revealPanel(avail, layout, "core:approvals"));
   expect(out.order).toContain("core:approvals");
   expect(out.collapsed.has("core:approvals")).toBe(false);

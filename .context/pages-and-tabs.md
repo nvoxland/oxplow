@@ -202,7 +202,12 @@ never the repo), read and written through the UI RPCs `get_panel_layout`
 / `set_panel_layout`. `resolveLayout` reconciles it with the panels
 available now: stored order first, ids that are gone dropped, new panels
 appended expanded (Work starts collapsed). The old `oxplow.rail.*`
-localStorage order and expanded keys are gone.
+localStorage order and expanded keys are gone. The stored layout loads
+after the first render: an edit made before it arrives (a chevron, a
+drag) shows at once and is queued, then replayed on the loaded layout and
+saved — nothing is written over a layout not read yet, and a late load
+never undoes an edit (tsk972). So every edit is absolute where it can be
+(`setCollapsed(panel, collapsed)`, not a toggle).
 
 ## Body layouts
 

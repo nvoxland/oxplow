@@ -82,12 +82,20 @@ export function showPanel(available: string[], stored: PanelPlacement[], panel: 
   return store({ ...layout, order: [...layout.order, panel], hidden: layout.hidden.filter((id) => id !== panel) });
 }
 
-export function toggleCollapsed(available: string[], stored: PanelPlacement[], panel: string): PanelPlacement[] {
+/** Collapse or expand `panel`. Absolute, not a toggle: an edit made
+ *  before the stored layout loads is replayed on it, and must mean the
+ *  same there (tsk972). */
+export function setCollapsed(
+  available: string[],
+  stored: PanelPlacement[],
+  panel: string,
+  collapsed: boolean,
+): PanelPlacement[] {
   const layout = resolveLayout(available, stored);
-  const collapsed = new Set(layout.collapsed);
-  if (collapsed.has(panel)) collapsed.delete(panel);
-  else collapsed.add(panel);
-  return store({ ...layout, collapsed });
+  const next = new Set(layout.collapsed);
+  if (collapsed) next.add(panel);
+  else next.delete(panel);
+  return store({ ...layout, collapsed: next });
 }
 
 /** Make `panel` visible and expanded: shown at the bottom if hidden, and

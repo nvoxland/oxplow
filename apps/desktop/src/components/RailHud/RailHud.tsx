@@ -20,8 +20,8 @@ import {
   movePanel,
   resolveLayout,
   revealPanel,
+  setCollapsed,
   showPanel,
-  toggleCollapsed,
 } from "../Panels/panelLayout.js";
 import { decide, useProposals, type Proposal } from "../../proposals.js";
 import { deliveryAlert, useUndelivered } from "../../delivery.js";
@@ -93,7 +93,7 @@ type RailSectionId = string;
 
 interface RailSectionsValue {
   isExpanded(id: RailSectionId): boolean;
-  toggle(id: RailSectionId): void;
+  setCollapsed(id: RailSectionId, collapsed: boolean): void;
   dragHandle(id: RailSectionId): {
     draggable: true;
     onDragStart(e: React.DragEvent): void;
@@ -124,38 +124,70 @@ function useRailSections(available: string[]): {
   show(id: RailSectionId): void;
   reveal(id: RailSectionId): void;
 } {
-  const [stored, setStored] = useState<PanelPlacement[]>([]);
+  const [stored, setStoredState] = useState<PanelPlacement[]>([]);
+  // The layout as last set, for an edit to build on without waiting for a
+  // render.
+  const current = useRef<PanelPlacement[]>([]);
+  const setStored = useCallback((next: PanelPlacement[]) => {
+    current.current = next;
+    setStoredState(next);
+  }, []);
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
+  // Until the stored layout has loaded, the person's edits are shown at once
+  // and kept here; once it arrives they're replayed on it and saved — never
+  // a write over a layout not read yet, never a load undoing an edit
+  // (tsk972).
+  const loaded = useRef(false);
+  const pending = useRef<Array<(base: PanelPlacement[]) => PanelPlacement[]>>([]);
   useEffect(() => {
     let live = true;
+    const arrive = (base: PanelPlacement[]) => {
+      if (!live) return;
+      loaded.current = true;
+      const edits = pending.current.splice(0);
+      if (edits.length === 0) {
+        setStored(base);
+        return;
+      }
+      const next = edits.reduce((acc, edit) => edit(acc), base);
+      setStored(next);
+      void setPanelLayout(next).catch((e: unknown) =>
+        recordOpError({ label: "Save the panel layout", message: e instanceof Error ? e.message : String(e) }),
+      );
+    };
     void getPanelLayout()
-      .then((l) => {
-        if (live) setStored(l);
-      })
-      .catch(() => {
-        // No stored layout: the defaults.
-      });
+      .then(arrive)
+      // No stored layout: the defaults.
+      .catch(() => arrive([]));
     return () => {
       live = false;
     };
-  }, []);
+  }, [setStored]);
   const layout = useMemo(() => resolveLayout(available, stored), [available, stored]);
 
-  const persist = useCallback((next: PanelPlacement[]) => {
+  const edit = useCallback((change: (base: PanelPlacement[]) => PanelPlacement[]) => {
+    const next = change(current.current);
     setStored(next);
+    if (!loaded.current) {
+      pending.current.push(change);
+      return;
+    }
     void setPanelLayout(next).catch((e: unknown) =>
       recordOpError({ label: "Save the panel layout", message: e instanceof Error ? e.message : String(e) }),
     );
-  }, []);
+  }, [setStored]);
 
   const isExpanded = useCallback((id: RailSectionId) => !layout.collapsed.has(id), [layout]);
-  const toggle = useCallback((id: RailSectionId) => persist(toggleCollapsed(available, stored, id)), [available, stored, persist]);
-  const hide = useCallback((id: RailSectionId) => persist(hidePanel(available, stored, id)), [available, stored, persist]);
-  const show = useCallback((id: RailSectionId) => persist(showPanel(available, stored, id)), [available, stored, persist]);
+  const collapse = useCallback(
+    (id: RailSectionId, collapsed: boolean) => edit((base) => setCollapsed(available, base, id, collapsed)),
+    [available, edit],
+  );
+  const hide = useCallback((id: RailSectionId) => edit((base) => hidePanel(available, base, id)), [available, edit]);
+  const show = useCallback((id: RailSectionId) => edit((base) => showPanel(available, base, id)), [available, edit]);
   const reveal = useCallback(
-    (id: RailSectionId) => persist(revealPanel(available, stored, id)),
-    [available, stored, persist],
+    (id: RailSectionId) => edit((base) => revealPanel(available, base, id)),
+    [available, edit],
   );
 
   const dragHandle = useCallback((id: RailSectionId) => ({
@@ -198,9 +230,9 @@ function useRailSections(available: string[]): {
       const without = layout.order.filter((o) => o !== sourceId);
       const targetIdx = without.indexOf(id);
       if (targetIdx < 0) return;
-      persist(movePanel(available, stored, sourceId, after ? targetIdx + 1 : targetIdx));
+      edit((base) => movePanel(available, base, sourceId, after ? targetIdx + 1 : targetIdx));
     },
-  }), [draggingId, dropTarget, layout, available, stored, persist]);
+  }), [draggingId, dropTarget, layout, available, edit]);
 
   const dropSide = useCallback(
     (id: RailSectionId): "before" | "after" | null =>
@@ -209,8 +241,8 @@ function useRailSections(available: string[]): {
   );
 
   const value = useMemo<RailSectionsValue>(
-    () => ({ isExpanded, toggle, dragHandle, dropZone, dropSide, hide }),
-    [isExpanded, toggle, dragHandle, dropZone, dropSide, hide],
+    () => ({ isExpanded, setCollapsed: collapse, dragHandle, dropZone, dropSide, hide }),
+    [isExpanded, collapse, dragHandle, dropZone, dropSide, hide],
   );
   return { value, order: layout.order, hidden: layout.hidden, show, reveal };
 }
@@ -326,7 +358,7 @@ function RailSection({
         <button
           type="button"
           data-testid={`rail-section-toggle-${id}`}
-          onClick={() => ctx?.toggle(id)}
+          onClick={() => ctx?.setCollapsed(id, expanded)}
           aria-expanded={expanded}
           title={expanded ? "Collapse" : "Expand"}
           style={{
