@@ -377,7 +377,7 @@ impl Database {
         &self,
         extensions: Vec<crate::models::ExtensionModels>,
     ) -> Result<std::collections::BTreeMap<String, Vec<String>>, oxplow_domain::DomainError> {
-        self.call_mut(move |conn| crate::models::compile_extensions(conn, &extensions))
+        self.transaction(move |tx| crate::models::compile_extensions(tx, &extensions))
             .await
     }
 

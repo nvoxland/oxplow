@@ -202,7 +202,11 @@ synced, and hands back what it created for the check's other queries to
 read (`SqlQuery::temp_views`) — see extensions.md "The SDK".
 
 `models::compile_extensions` compiles every enabled extension's models in
-one pass after the core ones: the last pass's extension views go, the
+one pass after the core ones — in `Database::transaction`, which takes the
+write lock up front and retries `Busy` (tsk977: run on a raw connection,
+the boot pass read first and failed with "database is locked" when
+another boot writer committed meanwhile, and a fresh project never got
+its extensions' models until an extension changed): the last pass's extension views go, the
 rest publish in dependency order, each in a savepoint — a model that
 fails (resolution, lineage, contract, a name that belongs to core or an
 entity), and every model reading it, is left out and reported for its

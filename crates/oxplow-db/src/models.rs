@@ -1499,12 +1499,14 @@ pub fn extension_view(extension: &str, name: &str) -> String {
 /// Compile every enabled extension's models in one pass (P4.9), after the
 /// core models: returns each extension's errors, empty when all of its
 /// models compiled. A model that fails — and every model reading it —
-/// is left out and reported; the others are published.
+/// is left out and reported; the others are published. In `tx`, which
+/// takes the write lock up front (`Database::transaction`): a pass that
+/// read first and wrote after another connection's commit failed
+/// (tsk977).
 pub fn compile_extensions(
-    conn: &mut Connection,
+    tx: &rusqlite::Transaction<'_>,
     extensions: &[ExtensionModels],
 ) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
-    let tx = conn.transaction().map_err(map_sql_err)?;
     // The last pass's views go first: the set is recompiled whole.
     let previous: Vec<String> = {
         let mut st = tx
@@ -1526,11 +1528,10 @@ pub fn compile_extensions(
         [CORE],
     )
     .map_err(map_sql_err)?;
-    let errors = pass(&tx, extensions, &[], Pass::Publish)?.errors;
+    let errors = pass(tx, extensions, &[], Pass::Publish)?.errors;
     // Every model is registered now (core's compiled at the open): a
     // materialized table no published model reads goes.
-    drop_orphaned_tables(&tx)?;
-    tx.commit().map_err(map_sql_err)?;
+    drop_orphaned_tables(tx)?;
     Ok(errors)
 }
 
@@ -2449,6 +2450,17 @@ mod tests {
         }
     }
 
+    /// One extensions' pass on `conn`, committed.
+    fn publish(
+        conn: &mut Connection,
+        extensions: &[ExtensionModels],
+    ) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
+        let tx = conn.transaction().map_err(map_sql_err)?;
+        let errors = compile_extensions(&tx, extensions)?;
+        tx.commit().map_err(map_sql_err)?;
+        Ok(errors)
+    }
+
     fn ext(extension: &str, models: Vec<ModelSource>) -> ExtensionModels {
         ExtensionModels {
             extension: extension.into(),
@@ -2597,6 +2609,46 @@ mod tests {
         assert!(err.contains("may not read itself"), "{err}");
     }
 
+    /// tsk977: the extensions' pass publishes even when another connection
+    /// is mid-write as it starts and commits while it waits — a pass that
+    /// read first and wrote second failed then (`SQLITE_BUSY_SNAPSHOT`,
+    /// which no wait fixes), and a fresh project's boot pass never
+    /// published its extensions' models.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_extensions_pass_waits_out_another_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("local.sqlite");
+        let db = crate::Database::open(&path).unwrap();
+        let other = Connection::open(&path).unwrap();
+        other
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        other
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+                 INSERT INTO event_content (hash, namespace, bytes, size, created_at)
+                   VALUES ('h', 'agent', x'00', 1, 't');",
+            )
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            other.execute_batch("COMMIT").unwrap();
+        });
+        let errors = db
+            .compile_extension_models(vec![ext(
+                "acme",
+                vec![source(
+                    "busy",
+                    "SELECT id FROM ref('task')",
+                    &["id INTEGER"],
+                )],
+            )])
+            .await
+            .unwrap();
+        release.join().unwrap();
+        assert_eq!(errors["acme"], Vec::<String>::new());
+    }
+
     /// P7.B2: checking an extension's on-change model (what `plugin check`
     /// runs, read-only) creates no table; publishing does, and a table no
     /// published model reads goes with the next extensions' pass.
@@ -2616,10 +2668,10 @@ mod tests {
         assert_eq!(errors["acme"], Vec::<String>::new());
         assert!(!table_exists(&tx, "m_v_acme_busy"));
         drop(tx);
-        let errors = compile_extensions(&mut conn, &models).unwrap();
+        let errors = publish(&mut conn, &models).unwrap();
         assert_eq!(errors["acme"], Vec::<String>::new());
         assert!(table_exists(&conn, "m_v_acme_busy"));
-        compile_extensions(&mut conn, &[]).unwrap();
+        publish(&mut conn, &[]).unwrap();
         assert!(!table_exists(&conn, "m_v_acme_busy"));
     }
 
@@ -2630,7 +2682,7 @@ mod tests {
     #[test]
     fn extension_models_publish_views_over_core_and_each_other() {
         let mut conn = fresh();
-        let errors = compile_extensions(
+        let errors = publish(
             &mut conn,
             &[
                 ext(
@@ -2685,7 +2737,7 @@ mod tests {
         })
         .unwrap();
         // Recompiled without `digest`: its view goes.
-        compile_extensions(
+        publish(
             &mut conn,
             &[ext(
                 "late-work",
@@ -2713,7 +2765,7 @@ mod tests {
     #[test]
     fn a_broken_extension_model_fails_alone() {
         let mut conn = fresh();
-        let errors = compile_extensions(
+        let errors = publish(
             &mut conn,
             &[
                 ext(
@@ -2784,7 +2836,7 @@ mod tests {
             serde_yaml::from_str("{ relationships: { column: id, to: stream, field: id } }")
                 .unwrap(),
         ];
-        let errors = compile_extensions(&mut conn, &[ext("checks", vec![m])]).unwrap();
+        let errors = publish(&mut conn, &[ext("checks", vec![m])]).unwrap();
         let joined = errors["checks"].join("\n");
         assert!(
             joined.contains("not_null(owner) failed: 1 row(s) break it"),
@@ -2821,7 +2873,7 @@ mod tests {
     fn a_deprecated_version_is_kept_beside_the_new_one_until_its_date() {
         let mut conn = fresh();
         let v1 = source("late", "SELECT id FROM ref('task')", &["id INTEGER"]);
-        compile_extensions(&mut conn, &[ext("late-work", vec![v1])]).unwrap();
+        publish(&mut conn, &[ext("late-work", vec![v1])]).unwrap();
 
         let twin = |until: &str, sql: &str| {
             let mut v2 = source(
@@ -2852,7 +2904,7 @@ mod tests {
                 .unwrap(),
             )
         };
-        let errors = compile_extensions(
+        let errors = publish(
             &mut conn,
             &[twin("2999-01-01", "SELECT id FROM ref('task')")],
         )
@@ -2865,7 +2917,7 @@ mod tests {
         assert_eq!(view_columns(&conn, "v_late_work_late").unwrap().len(), 2);
 
         // Its SQL must still keep v1's promise.
-        let errors = compile_extensions(
+        let errors = publish(
             &mut conn,
             &[twin("2999-01-01", "SELECT title FROM ref('task')")],
         )
@@ -2875,7 +2927,7 @@ mod tests {
             "{errors:?}"
         );
         // Past its date: gone, and said so.
-        let errors = compile_extensions(
+        let errors = publish(
             &mut conn,
             &[twin("2020-01-01", "SELECT id FROM ref('task')")],
         )
@@ -2908,7 +2960,7 @@ mod tests {
             || vec!["fresh".into()],
         )
         .unwrap();
-        let errors = compile_extensions(&mut conn, &[ext("late-work", sources)]).unwrap();
+        let errors = publish(&mut conn, &[ext("late-work", sources)]).unwrap();
         assert!(
             errors["late-work"]
                 .join("\n")
