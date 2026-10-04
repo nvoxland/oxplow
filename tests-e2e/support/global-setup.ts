@@ -1,6 +1,8 @@
 // Build the binaries the suite runs, once, and hand their paths to the
 // workers through the environment.
 import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 /** The executable cargo built for `bin` (`--message-format=json`). */
 function built(output: string, bin: string): string {
@@ -12,7 +14,20 @@ function built(output: string, bin: string): string {
   throw new Error(`cargo built no ${bin}`);
 }
 
+/** Specs wait on what they expect (web-first `expect`, `waitForModels`),
+ *  never on time: a sleep is either too short (flaky) or too long. */
+function refuseSleeps(dir: string): void {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) refuseSleeps(path);
+    else if (/\.ts$/.test(name) && readFileSync(path, "utf8").includes("waitForTimeout(")) {
+      throw new Error(`${path} sleeps (waitForTimeout); wait on what it expects instead`);
+    }
+  }
+}
+
 export default function globalSetup(): void {
+  refuseSleeps(join(import.meta.dirname, "..", "specs"));
   const output = execFileSync(
     "cargo",
     ["build", "-p", "oxplow-daemon-sim", "-p", "oxplow-acp-fake", "--message-format=json"],

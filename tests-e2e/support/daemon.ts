@@ -92,3 +92,52 @@ export async function ipc<T = unknown>(daemon: Daemon, name: string, args: Recor
 export function run<T = unknown>(daemon: Daemon, name: string, input: Record<string, unknown>): Promise<T> {
   return ipc<T>(daemon, "run_command", { name, input, confirmed: true });
 }
+
+/** Poll `check` every 200 ms until it holds; throw `what` after `ms`. */
+async function until(what: string, ms: number, check: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting: ${what}`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+/** Wait until the daemon's boot work is done: no background task left. */
+export async function settle(daemon: Daemon): Promise<void> {
+  await until("background tasks to finish", 120_000, async () => {
+    const tasks = await ipc<unknown[]>(daemon, "list_background_tasks");
+    return tasks.length === 0;
+  });
+}
+
+/** Do `write`, and resolve with its result once the daemon has said every
+ *  model in `models` changed (`modelsChanged`). The socket is open before
+ *  the write, so the event can't be missed. */
+export async function waitForModels<T>(daemon: Daemon, models: string[], write: () => Promise<T>): Promise<T> {
+  const url = `${daemon.base.replace(/^http/, "ws")}/events?token=${encodeURIComponent(daemon.token)}`;
+  const socket = new WebSocket(url);
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener("open", () => resolve(), { once: true });
+    socket.addEventListener("error", () => reject(new Error(`couldn't open ${url}`)), { once: true });
+  });
+  const pending = new Set(models);
+  const changed = new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no modelsChanged for ${[...pending].join(", ")}`)), 30_000);
+    socket.addEventListener("message", (msg) => {
+      const frame = JSON.parse(String(msg.data)) as { channel?: string; payload?: { kind?: string; models?: string[] } };
+      if (frame.channel !== "oxplow" || frame.payload?.kind !== "modelsChanged") return;
+      for (const m of frame.payload.models ?? []) pending.delete(m);
+      if (pending.size === 0) {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  });
+  try {
+    const result = await write();
+    await changed;
+    return result;
+  } finally {
+    socket.close();
+  }
+}

@@ -17,15 +17,23 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 - **`support/daemon.ts`** starts one daemon: `oxplow-daemon-sim` (the daemon
   with its secrets in memory — nothing reaches the keychain) over a throwaway
   git project, with its own `OXPLOW_HOME` and `TMUX_TMPDIR`. `ipc()` calls
-  `/ipc/<name>` as the person; `run()` runs a bus command, confirmed.
+  `/ipc/<name>` as the person; `run()` runs a bus command, confirmed;
+  `settle()` waits until boot's background tasks are done; `waitForModels()`
+  opens `/events` first, does a write, and resolves once the daemon says
+  each named model changed — so a seeding write is never raced.
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
   - `daemon`, one per worker. Before any page opens it selects an ACP thread
     on the fake agent: the boot thread is a terminal agent's, and the suite
     never starts a real agent CLI.
-  - `storageState` points the page at that daemon.
+  - `daemon` is settled before any page opens, and carries the `stream` and
+    `thread` its pages open on.
+  - `storageState` points the page at that daemon (`connectedTo()` builds one
+    for a context of a spec's own, e.g. with another token).
   - `pageErrors` fails any spec whose page threw.
-- **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`, never
-  a sleep.
+- **`support/ui.ts`** — a person's moves (`expandRailSection`, `openNewTask`).
+- **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect` or
+  `waitForModels`, never a sleep: global setup refuses a spec that calls
+  `waitForTimeout`.
 - **Reports**: a JUnit report at `tests-e2e/.output/junit.xml` and, for a
   failed spec, its trace under `tests-e2e/.output/results` (both gitignored).
 - **CI**: the `e2e` job in `.github/workflows/ci.yml` — two workers, one
