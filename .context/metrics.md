@@ -964,7 +964,7 @@ Landed:
 
 | producer | where | facts |
 |---|---|---|
-| tokens — OTEL (tsk22, P10.M2) | the `token_usage.otlp` consumer (`token_usage.rs::record_reported`) over `agent.tokens.reported`, which the control-plane `POST /v1/metrics` OTLP receiver logs (`otlp_ingest.rs`) | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim), producer `otel-tokens`, one capture per export keyed by its event (`otel-tokens:<event id>`; a retransmit logs no second event). The capture carries the event's anchors: the thread (the `X-Oxplow-Thread` OTLP header), its stream, its single open effort, and the turn the export measured. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind`. **Source of the token facts** — see [OTEL token tracking](#otel-token-tracking-tsk22) |
+| tokens — OTEL (tsk22, P10.M2) | the `token_usage.otlp` consumer (`token_usage.rs::record_reported`) over `agent.tokens.reported`, which the control-plane `POST /v1/metrics` OTLP receiver logs (`otlp_ingest.rs`) | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim), producer `otel-tokens`, one capture per export keyed by its event (`otel-tokens:<event id>`; a retransmit logs no second event). The capture carries the event's anchors: the thread (the `X-Oxplow-Thread` OTLP header), its stream, the turn the export measured and the effort open during it. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind`. **Source of the token facts** — see [OTEL token tracking](#otel-token-tracking-tsk22) |
 | prompt-cache tokens (tsk73) | same ingest, same capture | Cache kinds (Claude `cacheRead`/`cacheCreation`, Codex `cached_input` → cache_read) land on **`oxplow.cache_tokens`** — a SEPARATE measure, because `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` and cache facts there would silently change its meaning. Plus one per-model **`oxplow.cache_usage`** ratio fact per export: `num = cache_read`, `den = input + cache_read + cache_creation` (prompt-side; output can't be cached) — non-additive, so the cross-time collapse is the cumulative Σn/Σd hit ratio (`agent.tokens.cache_hit_pct`). An export with NO cache telemetry emits no ratio fact (an agent that doesn't report cache reads as "no data", not 0%). **Token-denominated only — never dollars**: the API returns token counts; a locally maintained price table is invalid by construction (Claude Code's OTEL `cost.usage` *estimate* would be the only defensible future dollar source, not ingested today) |
 | effort token spend (tsk73) | `task_service.rs::project_effort_lifecycle_metrics` (the close-time sub-producer beside effort_test_outcome) | one **`oxplow.effort_tokens`** fact per closed effort: Σ of ALL token kinds from its effort-stamped otel captures (num=value/den=1, non-additive → `task.tokens` reads the MEAN tokens per close — the cost of a unit of work, in tokens). No fact when the effort has no token captures (unmetered ≠ zero) |
 | wasted tokens (tsk77) | close-time producer + `collection.rs::record_token_waste_for_reverts` (fires on any landed commit incl. `git revert`, via `detect_git_revert` — revert never says "commit") | **`oxplow.token_waste`** is an append-only ratio measure with two writers: a metered CLOSE emits (num 0, den = the effort's spend, value 0) — rides inside the effort_tokens gate since the denominator IS that spend — and a detected revert emits (num = spend, den 0, value = spend) for the ONE closed effort whose window contains the reverted commit (`This reverts commit <sha>` trailers in HEAD; 0/ambiguous candidates → no attribution; idempotency key `token-waste:<effort>` → one waste fact per effort ever; commit times are seconds-granular so containment spans the whole second). `task.tokens.wasted` = SUM over values (closes are 0); `task.tokens.wasted_pct` = ratio Σn/Σd = wasted ÷ all metered spend. V1 is coarse: one reverted commit flags the effort's FULL spend. Pre-V61 closes never entered the denominator |
@@ -1021,11 +1021,18 @@ summed every assistant line) and was Claude-only + format-fragile.
   (`otlp_tokens::decode_token_export`) and logs **one
   `agent.tokens.reported@1 { thread, counts: [{model, kind, value}],
   window_end? }`** in one transaction — deduped by a hash of the body, so an
-  SDK retransmit logs nothing — anchored to the thread, its stream, its single
-  open effort, and **the turn the export measured**: the newest turn started
-  at or before the export's `window_end` (the latest of its points' times),
-  not the one open as it arrives — an export lands after its turn's Stop
-  (`agent_stores::turn_at_tx`); one that doesn't say when is the open turn's.
+  SDK retransmit logs nothing — anchored to the thread, its stream, **the
+  turn the export measured**, and the effort open during that turn (tsk900).
+  A Claude export is stamped with when it was *collected* (delta
+  temporality: its points cover `start_time_unix_nano..time_unix_nano`, since
+  the last collection), so its window can reach into the turn after the one
+  that spent the tokens: the export goes to the turn whose span overlaps the
+  window most, the earlier on a tie (`agent_stores::turn_for_window_tx`); with
+  none overlapping, the newest started before the window's end
+  (`turn_at_tx`). A Codex log record's window is its own time. The effort is
+  the one whose span overlaps that turn's, when exactly one does
+  (`effort_during_turn_tx`) — not the one open as the export arrives. An
+  export that doesn't say when is the open turn's and the open effort's.
   The async `token_usage.otlp` consumer
   (`TokenUsageService::record_reported`) is the only writer of the token facts:
   one `otel-tokens` capture per event carrying its turn and effort, keyed

@@ -85,6 +85,86 @@ pub fn turn_at_tx(
     .map_err(map_sql_err)
 }
 
+/// The turn on `thread` a report covering `from..to` measured (tsk900):
+/// the one whose span (an open turn's runs to `to`) overlaps the window
+/// most, the earlier on a tie; when none overlaps, [`turn_at_tx`] at `to`.
+/// A telemetry export is stamped with when it was collected, so its window
+/// can reach into the turn after the one that used the tokens.
+pub fn turn_for_window_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    from: Timestamp,
+    to: Timestamp,
+) -> Result<Option<AgentTurnId>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, started_at, ended_at FROM agent_turn
+              WHERE thread_id = ?1 AND started_at <= ?3
+                AND (ended_at IS NULL OR ended_at >= ?2)
+              ORDER BY started_at, id",
+        )
+        .map_err(map_sql_err)?;
+    let spans = stmt
+        .query_map(
+            params![thread.value(), ts_to_string(from), ts_to_string(to)],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+        .map_err(map_sql_err)?;
+    let mut best: Option<(i64, i64)> = None;
+    for (id, started, ended) in spans {
+        let start = crate::database::string_to_ts(&started)?
+            .unix_ms()
+            .max(from.unix_ms());
+        let end = match ended {
+            Some(e) => crate::database::string_to_ts(&e)?.unix_ms(),
+            None => to.unix_ms(),
+        }
+        .min(to.unix_ms());
+        let overlap = end - start;
+        if best.is_none_or(|(_, most)| overlap > most) {
+            best = Some((id, overlap));
+        }
+    }
+    match best {
+        Some((id, _)) => Ok(Some(AgentTurnId::new(id))),
+        None => turn_at_tx(conn, thread, to),
+    }
+}
+
+/// The effort open on `thread` during `turn`: the one whose span overlaps
+/// the turn's, when exactly one does (tsk900).
+pub fn effort_during_turn_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    turn: AgentTurnId,
+) -> Result<Option<i64>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.id FROM effort e JOIN agent_turn t ON t.id = ?2
+              WHERE e.thread_id = ?1
+                AND (t.ended_at IS NULL OR e.started_at <= t.ended_at)
+                AND (e.ended_at IS NULL OR e.ended_at >= t.started_at)",
+        )
+        .map_err(map_sql_err)?;
+    let ids = stmt
+        .query_map(params![thread.value(), turn.value()], |r| {
+            r.get::<_, i64>(0)
+        })
+        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+        .map_err(map_sql_err)?;
+    Ok(match ids.as_slice() {
+        [one] => Some(*one),
+        _ => None,
+    })
+}
+
 /// The thread's open turns, newest first.
 pub fn open_turn_ids_tx(
     conn: &Connection,

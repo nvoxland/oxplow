@@ -62,6 +62,9 @@ pub struct TokenFact {
     pub value: i64,
     /// When the data point or log record was measured (0: it didn't say).
     pub at_unix_nano: u64,
+    /// Where its window starts: a delta point's `start_time_unix_nano` (the
+    /// previous collection); a log record's own time (0: it didn't say).
+    pub from_unix_nano: u64,
 }
 
 /// What one OTLP export reported: its token counts, and the end of the
@@ -70,6 +73,8 @@ pub struct TokenFact {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TokenExport {
     pub counts: Vec<TokenFact>,
+    /// The earliest its counts cover, when they say (tsk900).
+    pub window_start: Option<oxplow_domain::Timestamp>,
     pub window_end: Option<oxplow_domain::Timestamp>,
 }
 
@@ -94,7 +99,17 @@ pub fn decode_token_export(body: &[u8]) -> Option<TokenExport> {
         .max()
         .filter(|n| *n > 0)
         .and_then(|n| oxplow_domain::Timestamp::from_unix_nanos(n as i128));
-    Some(TokenExport { counts, window_end })
+    let window_start = counts
+        .iter()
+        .map(|c| c.from_unix_nano)
+        .filter(|n| *n > 0)
+        .min()
+        .and_then(|n| oxplow_domain::Timestamp::from_unix_nanos(n as i128));
+    Some(TokenExport {
+        counts,
+        window_start,
+        window_end,
+    })
 }
 
 /// Decode an OTLP/HTTP protobuf metrics export body.
@@ -157,6 +172,7 @@ fn collect_claude(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFa
             kind,
             value,
             at_unix_nano: dp.time_unix_nano,
+            from_unix_nano: dp.start_time_unix_nano,
         });
     }
 }
@@ -180,6 +196,7 @@ fn collect_codex(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFac
             kind,
             value,
             at_unix_nano: dp.time_unix_nano,
+            from_unix_nano: dp.start_time_unix_nano,
         });
     }
 }
@@ -225,6 +242,7 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                         kind: TokenKind::Input,
                         value: new_input,
                         at_unix_nano,
+                        from_unix_nano: at_unix_nano,
                     });
                 }
                 if cached > 0 {
@@ -233,6 +251,7 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                         kind: TokenKind::CacheRead,
                         value: cached,
                         at_unix_nano,
+                        from_unix_nano: at_unix_nano,
                     });
                 }
                 if out_total > 0 {
@@ -241,6 +260,7 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                         kind: TokenKind::Output,
                         value: out_total,
                         at_unix_nano,
+                        from_unix_nano: at_unix_nano,
                     });
                 }
             }
@@ -470,6 +490,34 @@ pub(crate) fn encoded_claude_export(model: &str, input: i64, output: i64) -> Vec
     encoded_claude_export_at(model, input, output, None)
 }
 
+/// [`encoded_claude_export`] whose points cover the window `start..end`
+/// (delta temporality: since the last export, collected at `end`).
+#[cfg(test)]
+pub(crate) fn encoded_claude_export_over(
+    model: &str,
+    input: i64,
+    output: i64,
+    start: oxplow_domain::Timestamp,
+    end: oxplow_domain::Timestamp,
+) -> Vec<u8> {
+    let mut req = ExportMetricsServiceRequest::decode(
+        encoded_claude_export_at(model, input, output, Some(end)).as_slice(),
+    )
+    .expect("our own export decodes");
+    for rm in &mut req.resource_metrics {
+        for sm in &mut rm.scope_metrics {
+            for m in &mut sm.metrics {
+                if let Some(metric::Data::Sum(sum)) = &mut m.data {
+                    for dp in &mut sum.data_points {
+                        dp.start_time_unix_nano = start.unix_nanos() as u64;
+                    }
+                }
+            }
+        }
+    }
+    req.encode_to_vec()
+}
+
 /// [`encoded_claude_export`] whose points say they were measured `at`.
 #[cfg(test)]
 pub(crate) fn encoded_claude_export_at(
@@ -643,24 +691,28 @@ mod tests {
             kind: TokenKind::Input,
             value: 100,
             at_unix_nano: 0,
+            from_unix_nano: 0,
         }));
         assert!(facts.contains(&TokenFact {
             model: "claude-opus-4-8".into(),
             kind: TokenKind::Output,
             value: 20,
             at_unix_nano: 0,
+            from_unix_nano: 0,
         }));
         assert!(facts.contains(&TokenFact {
             model: "claude-opus-4-8".into(),
             kind: TokenKind::CacheRead,
             value: 5000,
             at_unix_nano: 0,
+            from_unix_nano: 0,
         }));
         assert!(facts.contains(&TokenFact {
             model: "claude-opus-4-8".into(),
             kind: TokenKind::CacheCreation,
             value: 700,
             at_unix_nano: 0,
+            from_unix_nano: 0,
         }));
     }
 
