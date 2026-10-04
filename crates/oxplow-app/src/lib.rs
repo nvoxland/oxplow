@@ -39,6 +39,7 @@ pub mod collector_runner;
 pub mod collector_triggers;
 pub mod commands;
 pub mod commit_indexer;
+pub mod component_bundles;
 pub mod config_reactors;
 pub mod config_service;
 pub mod config_watch;
@@ -483,6 +484,9 @@ pub struct Services {
     /// Loaded extensions per worktree root, reloaded when a file under
     /// `oxplow/extensions/` or the project config changes.
     pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
+    /// Custom components' bundles as their frames loaded them, by version
+    /// (tsk984): what the daemon serves a frame, and what its invoke names.
+    pub component_bundles: Arc<component_bundles::ComponentBundles>,
     /// The primary worktree's extensions' SQL models, and their errors (P4.9).
     pub extension_models: Arc<extension_models::ExtensionModelsService>,
     /// Rebuilds `vocabulary` from the primary worktree's extensions, and
@@ -1366,6 +1370,7 @@ impl Services {
             extension_models,
             vocabulary_service,
             extension_catalog,
+            component_bundles: Arc::new(component_bundles::ComponentBundles::new()),
             extension_commands,
             commands,
             work_items,

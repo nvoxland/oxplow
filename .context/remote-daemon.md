@@ -174,25 +174,22 @@ token**; only the person's renderer holds it.
 
 **Ungated: `/health` and custom component bundles** (P6b.D3,
 `oxplow-daemon/src/components.rs`). `GET
-/components/{stream}/{ext}/{component}/{*path}` (the stream id, or
-`primary` outside any stream, is a path segment — not a query — so the
-bundle's relative URLs stay in the same worktree; an unknown stream is a
-404; the bare folder URL redirects to the raw path plus `/`, so its
-relative URLs resolve inside it) serves a private, enabled
-extension's declared component bundle for the sandboxed frame a
-`viz: custom` lens renders. It can't take the token — a frame can't
-carry it — and needn't: it serves the extension's own files, never
-project data (the frame reaches that only through the host's bridged
-RPCs). It is mounted **outside the permissive CORS layer**, so a web
-page can't read a bundle with `fetch`, and it answers only a loopback
-`Host` (`127.0.0.1`, `localhost` or `[::1]`, optional port —
-`loopback_host`): without that, DNS rebinding (a page whose name flips
-to 127.0.0.1) would read bundles same-origin; the CSP's bundle-folder
-source is built from that validated `Host`. 404 for a foreign `Host`, a missing, disabled or
-bundled extension, an undeclared component, or anything but a plain file
-inside the bundle (`safe_bundle_path`: no `..`, `.`, empty, backslash or
-NUL segment, no absolute path, no symlink or directory, and resolved
-inside the bundle); 413 past the size cap. Every 200 has `Content-Type`
+/components/v/{version}/{*path}` serves a custom component's bundle as
+its host loaded it (`load_component`, tsk984): a snapshot of the
+bundle's files held in `Services::component_bundles`, keyed by its
+version (the component's approval hash), so the frame runs exactly what
+was hashed. The version is a path segment, so the bundle's relative URLs
+stay in it; the bare folder URL redirects to the raw path plus `/`. It
+can't take the token — a frame can't carry it — and needn't: it serves
+an extension's own files, never project data (the frame reaches that
+only through the host's bridged RPCs). It is mounted **outside the
+permissive CORS layer**, so a web page can't read a bundle with `fetch`,
+and it answers only a loopback `Host` (`127.0.0.1`, `localhost` or
+`[::1]`, optional port — `loopback_host`): without that, DNS rebinding (a
+page whose name flips to 127.0.0.1) would read bundles same-origin; the
+CSP's bundle-folder source is built from that validated `Host`. 404 for a
+foreign `Host`, a version that isn't loaded, or anything but exactly one
+of the snapshot's files (a map lookup). Every 200 has `Content-Type`
 from a small table (`content_type_for`), `X-Content-Type-Options:
 nosniff`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer` and
 a CSP that sandboxes the document itself (`sandbox allow-scripts`, so

@@ -35,11 +35,11 @@ test("frame messages parse into the three requests and ready; anything else is r
   }
 });
 
-test("the bundle URL carries the stream as its first segment, so relative URLs stay in its worktree", () => {
-  expect(componentBundleUrl("http://127.0.0.1:7420", "my ext", "burn/down", "str 2")).toBe(
-    "http://127.0.0.1:7420/components/str%202/my%20ext/burn%2Fdown/",
-  );
-  expect(componentBundleUrl("http://127.0.0.1:7420", "x", "c", null)).toBe("http://127.0.0.1:7420/components/primary/x/c/");
+// tsk984: a frame is served the bundle snapshot its host loaded, by its
+// version — a folder of its own, so the bundle's relative URLs stay in it.
+test("the bundle URL is the loaded version's folder", () => {
+  expect(componentBundleUrl("http://127.0.0.1:7420", "ab12")).toBe("http://127.0.0.1:7420/components/v/ab12/");
+  expect(componentBundleUrl("http://127.0.0.1:7420", "a/b")).toBe("http://127.0.0.1:7420/components/v/a%2Fb/");
 });
 
 test("theme tokens come from the root's custom properties", () => {

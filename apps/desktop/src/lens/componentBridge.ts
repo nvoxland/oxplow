@@ -61,12 +61,11 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   }
 }
 
-/** Where the daemon serves a component's bundle (its folder URL). The
- *  stream is a path segment (`primary` outside any stream), so the
- *  bundle's relative URLs resolve in the same worktree. */
-export function componentBundleUrl(base: string, extension: string, component: string, streamId: string | null): string {
-  const segments = [streamId ?? "primary", extension, component].map(encodeURIComponent);
-  return `${base}/components/${segments.join("/")}/`;
+/** Where the daemon serves the bundle its host loaded at `version`
+ *  (tsk984): a folder of its own, so the bundle's relative URLs stay in
+ *  it. */
+export function componentBundleUrl(base: string, version: string): string {
+  return `${base}/components/v/${encodeURIComponent(version)}/`;
 }
 
 /** The theme's tokens: the root's custom properties (`--text-primary`). */

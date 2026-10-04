@@ -203,6 +203,10 @@ pub const MANIFEST: &[Capability] = &[
         "a custom component's bridged read, from its sandboxed frame through the host (P6b.D2)",
     ),
     ui(
+        "load_component",
+        "the host loads a custom component's bundle for the frame it shows the person (tsk984)",
+    ),
+    ui(
         "invoke_component_command",
         "a custom component's bridged command, from its sandboxed frame through the host (P6b.D2)",
     ),

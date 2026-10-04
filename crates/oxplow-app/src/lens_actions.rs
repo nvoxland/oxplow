@@ -324,40 +324,53 @@ pub struct ComponentInvoke {
     pub on_behalf_of: Actor,
     /// The person confirmed this call, in the host (never in the frame).
     pub confirmed: bool,
+    /// The bundle version the frame was loaded at
+    /// ([`crate::component_bundles`]): what is running, and what must be
+    /// approved.
+    pub version: String,
 }
 
 /// Run `call`'s command as the lens acting for its viewer, so every
 /// policy applies as if they ran it — a component can offer an action but
-/// never grant a power — when the component declares it, and a person
-/// approved the component as it is now (tsk960): its bundle runs that
-/// command with their rights.
+/// never grant a power — when the bundle its frame was loaded at declares
+/// the command and a person approved that version (tsk960, tsk984): what
+/// acts is what was approved, whatever the disk says now.
 pub async fn invoke_component_command(
     svc: &crate::Services,
     lens_root: &Path,
     call: ComponentInvoke,
 ) -> Result<CommandOutcome, CommandError> {
     let (ext, component) = component_of(svc, lens_root, &call.lens_id)?;
-    if !component.commands.contains(&call.command) {
+    let loaded = svc
+        .component_bundles
+        .get(&call.version)
+        .filter(|b| b.extension == ext.name && b.component == component.id)
+        .ok_or_else(|| CommandError::Denied {
+            reason: format!(
+                "component `{}/{}` isn't loaded at that version any more; reload its lens",
+                ext.name, component.id
+            ),
+        })?;
+    if !loaded.commands.contains(&call.command) {
         return Err(CommandError::Invalid {
             field: Some("/command".into()),
             message: format!(
                 "`{}` isn't one of component `{}`'s commands ({})",
                 call.command,
                 component.id,
-                component.commands.join(", ")
+                loaded.commands.join(", ")
             ),
         });
     }
-    if let Some(program) = crate::exec_consent::component_program(&ext, &component) {
-        if !crate::exec_consent::may_run_program(&svc.approvals, lens_root, &program) {
-            return Err(CommandError::Denied {
-                reason: crate::exec_consent::needs_approval(
-                    program.kind,
-                    &program.name,
-                    &program.program,
-                ),
-            });
-        }
+    let program = crate::exec_consent::component_program(&ext, &component);
+    if !svc.approvals.is_approved(&program.key(), &loaded.version) {
+        return Err(CommandError::Denied {
+            reason: crate::exec_consent::needs_approval(
+                program.kind,
+                &program.name,
+                &program.program,
+            ),
+        });
     }
     svc.commands
         .run(
@@ -370,6 +383,21 @@ pub async fn invoke_component_command(
             call.confirmed,
         )
         .await
+}
+
+/// Load the bundle of `lens_id`'s component as it is now under
+/// `lens_root`, for its frame: the version to serve it at and invoke with.
+pub fn load_component(
+    svc: &crate::Services,
+    lens_root: &Path,
+    lens_id: &str,
+) -> Result<String, CommandError> {
+    let (ext, component) = component_of(svc, lens_root, lens_id)?;
+    let loaded = svc
+        .component_bundles
+        .load(lens_root, &ext, &component)
+        .map_err(CommandError::from)?;
+    Ok(loaded.version.clone())
 }
 
 /// `input` with its placeholders bound: a string that is exactly
@@ -681,8 +709,7 @@ actions:
     /// Approve `acme/board` as it is now, as a person on Programs does.
     fn approve_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) {
         let ext = fx.svc.extension_catalog.named(root, "acme").unwrap();
-        let program =
-            crate::exec_consent::component_program(&ext, &ext.custom_components[0]).unwrap();
+        let program = crate::exec_consent::component_program(&ext, &ext.custom_components[0]);
         let config = fx.svc.config.read().unwrap().clone();
         crate::exec_consent::approve_program(
             &fx.svc.approvals,
@@ -694,6 +721,27 @@ actions:
             &program.hash(root).unwrap(),
         )
         .unwrap();
+    }
+
+    /// Load `acme/view`'s bundle as its frame does: the version it runs.
+    fn load_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) -> String {
+        load_component(&fx.svc, root, "acme/view").unwrap()
+    }
+
+    /// An invoke of `command` from `acme/view`'s frame loaded at `version`.
+    fn board_invoke(
+        fx: &crate::test_fixtures::EffortFixture,
+        command: &str,
+        version: &str,
+    ) -> ComponentInvoke {
+        ComponentInvoke {
+            lens_id: "acme/view".into(),
+            command: command.into(),
+            input: serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
+            on_behalf_of: Actor::Human,
+            confirmed: false,
+            version: version.into(),
+        }
     }
 
     /// The programs a person is asked to approve, as Programs lists them.
@@ -718,13 +766,6 @@ actions:
     #[tokio::test]
     async fn an_unapproved_components_invoke_is_refused() {
         let (fx, root) = component_fixture().await;
-        let invoke = || ComponentInvoke {
-            lens_id: "acme/view".into(),
-            command: "work_item.transition".into(),
-            input: serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
-            on_behalf_of: Actor::Human,
-            confirmed: false,
-        };
         let listed = programs(&fx, &root);
         let board = listed
             .iter()
@@ -733,17 +774,18 @@ actions:
         assert_eq!(board.name, "acme/board");
         assert_eq!(board.commands, vec!["work_item.transition".to_string()]);
         assert!(!board.approved);
-        let refused = |err: CommandError| {
-            assert!(
-                matches!(&err, CommandError::Denied { reason }
-                    if reason.contains("component `acme/board`") && reason.contains("approval")),
-                "{err:?}"
-            );
-        };
+        let version = load_board(&fx, &root);
+        assert_eq!(
+            board.version.as_deref(),
+            Some(version.as_str()),
+            "the listing's version is the frame's"
+        );
+        let invoke = || board_invoke(&fx, "work_item.transition", &version);
         refused(
             invoke_component_command(&fx.svc, &root, invoke())
                 .await
                 .unwrap_err(),
+            "approval",
         );
         assert_ne!(state(&fx.svc, fx.task).await, "done");
         approve_board(&fx, &root);
@@ -751,16 +793,116 @@ actions:
             .await
             .unwrap();
         assert_eq!(state(&fx.svc, fx.task).await, "done");
+        // A changed bundle is another version: loaded again, it asks again.
         std::fs::write(
             root.join("oxplow/extensions/acme/components/board/index.html"),
             "<!doctype html><script src=other.js></script>",
         )
         .unwrap();
+        let changed = load_board(&fx, &root);
+        assert_ne!(changed, version);
         refused(
-            invoke_component_command(&fx.svc, &root, invoke())
-                .await
-                .unwrap_err(),
+            invoke_component_command(
+                &fx.svc,
+                &root,
+                board_invoke(&fx, "work_item.transition", &changed),
+            )
+            .await
+            .unwrap_err(),
+            "approval",
         );
+    }
+
+    /// `err` is a refusal saying `why`.
+    fn refused(err: CommandError, why: &str) {
+        assert!(
+            matches!(&err, CommandError::Denied { reason }
+                if reason.contains("component `acme/board`") && reason.contains(why)),
+            "{err:?}"
+        );
+    }
+
+    /// tsk984: what acts is what the frame loaded. A frame loaded while the
+    /// bundle was edited can't act on the approval of what the disk says
+    /// once it's put back; one loaded at the approved version keeps acting
+    /// whatever the disk says later — it runs what was approved. A version
+    /// that isn't loaded, or is another component's, is refused.
+    #[tokio::test]
+    async fn an_invoke_acts_only_for_the_version_its_frame_loaded() {
+        let (fx, root) = component_fixture().await;
+        let index = root.join("oxplow/extensions/acme/components/board/index.html");
+        let approved = load_board(&fx, &root);
+        approve_board(&fx, &root);
+        std::fs::write(&index, "<!doctype html><script src=evil.js></script>").unwrap();
+        let tampered = load_board(&fx, &root);
+        std::fs::write(&index, "<!doctype html>").unwrap();
+        refused(
+            invoke_component_command(
+                &fx.svc,
+                &root,
+                board_invoke(&fx, "work_item.transition", &tampered),
+            )
+            .await
+            .unwrap_err(),
+            "approval",
+        );
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        refused(
+            invoke_component_command(
+                &fx.svc,
+                &root,
+                board_invoke(&fx, "work_item.transition", "0123abcd"),
+            )
+            .await
+            .unwrap_err(),
+            "isn't loaded",
+        );
+        std::fs::write(&index, "<!doctype html><p>later</p>").unwrap();
+        invoke_component_command(
+            &fx.svc,
+            &root,
+            board_invoke(&fx, "work_item.transition", &approved),
+        )
+        .await
+        .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// tsk984: the bundle is read as it is served — the extension's folder
+    /// joined with the manifest's `bundle` — so on a case-insensitive disk a
+    /// spelling that differs only in case still covers every file it
+    /// serves, and an edit is a new version.
+    #[tokio::test]
+    async fn a_bundle_spelled_in_another_case_is_hashed_as_served() {
+        let (fx, root) = fixture().await;
+        let ext = root.join("oxplow/extensions/acme");
+        std::fs::create_dir_all(ext.join("components/board")).unwrap();
+        if !ext.join("components/BOARD").exists() {
+            // A case-sensitive disk: the manifest's spelling is a missing
+            // folder there, a load error, never a silent hash.
+            return;
+        }
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, bundle: components/Board, assets: [tasks], commands: [work_item.transition] }\n",
+        )
+        .unwrap();
+        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
+        std::fs::write(
+            ext.join("lenses/view.yaml"),
+            "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
+        )
+        .unwrap();
+        let first = load_board(&fx, &root);
+        let served = fx.svc.component_bundles.get(&first).unwrap();
+        assert_eq!(served.file(""), Some(&b"<!doctype html>"[..]));
+        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>2").unwrap();
+        assert_ne!(load_board(&fx, &root), first);
+        let program = programs(&fx, &root)
+            .into_iter()
+            .find(|p| p.kind == crate::exec_consent::ProgramKind::Component)
+            .unwrap();
+        assert_ne!(program.version.as_deref(), Some(first.as_str()));
     }
 
     /// P11 (tsk960): a component that declares no commands can only show
@@ -824,13 +966,8 @@ actions:
     #[tokio::test]
     async fn a_component_invokes_only_its_declared_commands_as_the_lens() {
         let (fx, root) = component_fixture().await;
-        let invoke = |command: &str| ComponentInvoke {
-            lens_id: "acme/view".into(),
-            command: command.into(),
-            input: serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
-            on_behalf_of: Actor::Human,
-            confirmed: false,
-        };
+        let version = load_board(&fx, &root);
+        let invoke = |command: &str| board_invoke(&fx, command, &version);
         let err = invoke_component_command(&fx.svc, &root, invoke("config.set"))
             .await
             .unwrap_err();
@@ -864,6 +1001,7 @@ actions:
     #[tokio::test(flavor = "multi_thread")]
     async fn a_component_invoke_with_a_non_object_input_is_invalid() {
         let (fx, root) = component_fixture().await;
+        let version = load_board(&fx, &root);
         approve_board(&fx, &root);
         for input in [
             serde_json::json!([1, 2]),
@@ -879,6 +1017,7 @@ actions:
                     input: input.clone(),
                     on_behalf_of: Actor::Human,
                     confirmed: false,
+                    version: version.clone(),
                 },
             )
             .await

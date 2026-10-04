@@ -278,16 +278,10 @@ pub fn router(state: DaemonState) -> Router {
     // carry the token — and outside the CORS layer, so a page can't read
     // them with `fetch`.
     let components = Router::new()
+        .route("/components/v/{version}", get(components::component_root))
+        .route("/components/v/{version}/", get(components::component_index))
         .route(
-            "/components/{stream}/{ext}/{component}",
-            get(components::component_root),
-        )
-        .route(
-            "/components/{stream}/{ext}/{component}/",
-            get(components::component_index),
-        )
-        .route(
-            "/components/{stream}/{ext}/{component}/{*path}",
+            "/components/v/{version}/{*path}",
             get(components::component_file),
         )
         // The client library a bundle loads (P9.A4).
@@ -434,6 +428,7 @@ mod tests {
         .unwrap();
         std::fs::write(ext.join("components/c/index.html"), "<!doctype html>hi").unwrap();
         std::fs::write(ext.join("components/c/assets/app.js"), "1").unwrap();
+        let version = load(&svc, dir.path(), "x", "c");
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -442,10 +437,8 @@ mod tests {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap();
-        for path in [
-            "/components/primary/x/c/",
-            "/components/primary/x/c/index.html",
-        ] {
+        let folder_url = format!("/components/v/{version}/");
+        for path in [folder_url.clone(), format!("{folder_url}index.html")] {
             let resp = bare.get(format!("{base}{path}")).send().await.unwrap();
             assert_eq!(resp.status(), 200, "{path}");
             let h = resp.headers();
@@ -456,7 +449,7 @@ mod tests {
             assert_eq!(
                 h["content-security-policy"].to_str().unwrap(),
                 components::bundle_csp(
-                    &format!("{base}/components/primary/x/c/"),
+                    &format!("{base}{folder_url}"),
                     &format!("{base}/component-lib/")
                 )
             );
@@ -467,7 +460,7 @@ mod tests {
             assert_eq!(resp.text().await.unwrap(), "<!doctype html>hi");
         }
         let js = bare
-            .get(format!("{base}/components/primary/x/c/assets/app.js"))
+            .get(format!("{base}{folder_url}assets/app.js"))
             .send()
             .await
             .unwrap();
@@ -476,37 +469,52 @@ mod tests {
             "text/javascript; charset=utf-8"
         );
         let folder = bare
-            .get(format!("{base}/components/primary/x/c"))
+            .get(format!("{base}/components/v/{version}"))
             .send()
             .await
             .unwrap();
         assert_eq!(folder.status(), 308);
-        assert_eq!(folder.headers()["location"], "/components/primary/x/c/");
+        assert_eq!(folder.headers()["location"], folder_url.as_str());
+        // tsk984: what's served is the snapshot — the disk changing after
+        // the load isn't what the frame gets.
+        std::fs::write(
+            ext.join("components/c/index.html"),
+            "<!doctype html>changed",
+        )
+        .unwrap();
+        let again = bare
+            .get(format!("{base}{folder_url}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(again.text().await.unwrap(), "<!doctype html>hi");
         for path in [
-            "/components/primary/x/nope/",
-            "/components/primary/nope/c/",
-            "/components/primary/oxplow-review/c/",
-            "/components/primary/x/c/%2e%2e/%2e%2e/extension.yaml",
-            "/components/primary/x/c/assets",
-            "/components/str99/x/c/",
-            "/components/nonsense/x/c/",
-            "/components/x/c/",
+            "/components/v/0123abcd/".to_string(),
+            format!("{folder_url}nope.js"),
+            format!("{folder_url}assets"),
+            format!("{folder_url}%2e%2e/%2e%2e/extension.yaml"),
+            "/components/primary/x/c/".to_string(),
         ] {
             let resp = bare.get(format!("{base}{path}")).send().await.unwrap();
             assert_eq!(resp.status(), 404, "{path}");
         }
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "extensions:\n  disabled: [x]\n",
-        )
-        .unwrap();
-        let resp = bare
-            .get(format!("{base}/components/primary/x/c/"))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), 404, "a disabled extension's");
+    }
+
+    /// Load `component` of extension `ext` under `root` as a frame's host
+    /// does: its version.
+    fn load(svc: &Arc<Services>, root: &std::path::Path, ext: &str, component: &str) -> String {
+        let ext = svc.extension_catalog.named(root, ext).unwrap();
+        let declared = ext
+            .custom_components
+            .iter()
+            .find(|c| c.id == component)
+            .unwrap()
+            .clone();
+        svc.component_bundles
+            .load(root, &ext, &declared)
+            .unwrap()
+            .version
+            .clone()
     }
 
     /// P9.A4: the component client library — one fixed file, served like a
@@ -579,6 +587,9 @@ mod tests {
         )
         .unwrap();
         std::fs::write(ext.join("components/c/index.html"), "hi").unwrap();
+        let version = load(&svc, dir.path(), "x", "c");
+        let folder = format!("/components/v/{version}/");
+        let bare_folder = format!("/components/v/{version}");
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -587,7 +598,7 @@ mod tests {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap();
-        let get = |path: &'static str, host: String| {
+        let get = |path: &str, host: String| {
             bare.get(format!("http://{}{path}", daemon.bind_addr))
                 .header("host", host)
                 .send()
@@ -597,12 +608,12 @@ mod tests {
             format!("localhost:{port}"),
             "localhost".to_string(),
         ] {
-            let resp = get("/components/primary/x/c/", host.clone()).await.unwrap();
+            let resp = get(&folder, host.clone()).await.unwrap();
             assert_eq!(resp.status(), 200, "{host}");
             assert_eq!(
                 resp.headers()["content-security-policy"].to_str().unwrap(),
                 components::bundle_csp(
-                    &format!("http://{host}/components/primary/x/c/"),
+                    &format!("http://{host}{folder}"),
                     &format!("http://{host}/component-lib/")
                 ),
             );
@@ -614,17 +625,17 @@ mod tests {
             format!("localhost.evil.example:{port}"),
             String::new(),
         ] {
-            for path in ["/components/primary/x/c/", "/components/primary/x/c"] {
+            for path in [&folder, &bare_folder] {
                 let resp = get(path, host.clone()).await.unwrap();
                 assert_eq!(resp.status(), 404, "{host} {path}");
             }
         }
     }
 
-    /// The stream is part of the bundle's path, so the bundle's relative
-    /// URLs stay in its worktree; the folder redirect keeps the raw path.
+    /// A stream's lens loads its component from the stream's worktree: a
+    /// version of its own, served from what that worktree held.
     #[tokio::test]
-    async fn a_streams_bundle_is_served_from_its_worktree() {
+    async fn a_streams_bundle_is_loaded_from_its_worktree() {
         let (svc, dir) = services();
         let wt = tempfile::tempdir().unwrap();
         for (root, js) in [(dir.path(), "primary"), (wt.path(), "stream")] {
@@ -659,28 +670,19 @@ mod tests {
             })
             .await
             .unwrap();
+        let primary = load(&svc, dir.path(), "x", "c");
+        let stream = load(&svc, wt.path(), "x", "c");
+        assert_ne!(primary, stream);
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
         let base = format!("http://{}", daemon.bind_addr);
-        let bare = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap();
-        let text = |path: &'static str| {
-            let url = format!("{base}{path}");
-            let bare = bare.clone();
-            async move { bare.get(url).send().await.unwrap().text().await.unwrap() }
+        let text = |version: String| {
+            let url = format!("{base}/components/v/{version}/app.js");
+            async move { reqwest::get(url).await.unwrap().text().await.unwrap() }
         };
-        assert_eq!(text("/components/str2/x/c/app.js").await, "stream");
-        assert_eq!(text("/components/primary/x/c/app.js").await, "primary");
-        let folder = bare
-            .get(format!("{base}/components/str2/x/c%3Fq"))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(folder.status(), 308);
-        assert_eq!(folder.headers()["location"], "/components/str2/x/c%3Fq/");
+        assert_eq!(text(stream).await, "stream");
+        assert_eq!(text(primary).await, "primary");
     }
 
     #[tokio::test]

@@ -342,16 +342,10 @@ impl ProjectProgram {
                 h.update([2u8]);
                 h.update(files_hash(&*self.files(project_dir)?, &|_| false)?.as_bytes());
             }
-            // Its bundle — every file of it, the code the frame runs; the
-            // commands it may run are hashed below.
+            // Its bundle folder as served, read where it is now (tsk984).
             ProgramKind::Component => {
-                h.update(self.program.as_bytes());
-                h.update([2u8]);
-                let bundle = self.in_tree().unwrap_or_default();
-                h.update(
-                    files_hash(&*self.files(project_dir)?, &|rel| !rel.starts_with(bundle))?
-                        .as_bytes(),
-                );
+                return self
+                    .component_hash(&*crate::extensions::files_at(project_dir, &self.program)?);
             }
             ProgramKind::AcpAgent => {
                 h.update(self.program.as_bytes());
@@ -412,6 +406,28 @@ impl ProjectProgram {
             Some(rel) => self.files(project_dir)?.bytes(rel),
             None => std::fs::read(project_dir.join(&self.program)),
         }
+    }
+
+    /// A component's approval hash over `files`, its bundle folder's files
+    /// (tsk984): its folder's path, every file of it — the code the frame
+    /// runs — and the commands it may run. The same whether the files are
+    /// read from disk for Programs or held in the snapshot a frame is
+    /// served from ([`crate::component_bundles`]), so a frame's version is
+    /// what an approval names.
+    pub(crate) fn component_hash(
+        &self,
+        files: &dyn crate::extensions::ExtensionFiles,
+    ) -> std::io::Result<String> {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(self.program.as_bytes());
+        h.update([2u8]);
+        h.update(files_hash(files, &|_| false)?.as_bytes());
+        for c in &self.commands {
+            h.update([7u8]);
+            h.update(c.as_bytes());
+        }
+        Ok(hex::encode(h.finalize()))
     }
 
     /// `program` relative to its extension's folder, when it's in it.
@@ -527,12 +543,6 @@ pub fn may_run(
         version: None,
     };
     approved_now(store, project_dir, &p)
-}
-
-/// Whether `program`, its files read under `root` (the project, or the
-/// stream's worktree it runs from), is what this machine approved.
-pub fn may_run_program(store: &ApprovalStore, root: &Path, program: &ProjectProgram) -> bool {
-    approved_now(store, root, program)
 }
 
 /// Whether `p` is approved on this machine as it is now.
@@ -653,18 +663,18 @@ pub fn provider_program(
     }
 }
 
-/// A custom component as a program to approve: its bundle and the
-/// commands it may run. `None` for one that declares no commands — it
-/// only shows and queries, which needs no approval.
+/// A custom component as a program: its bundle folder (`program`, the
+/// extension's path joined with the manifest's `bundle`, as the folder is
+/// served) and the commands it may run. Only one that declares commands is
+/// listed to approve — one that declares none only shows and queries — but
+/// every component has this shape, which its bundle's version is hashed
+/// from ([`crate::component_bundles`]).
 pub fn component_program(
     ext: &crate::extensions::Extension,
     component: &crate::extensions::custom_components::CustomComponent,
-) -> Option<ProjectProgram> {
-    if component.commands.is_empty() {
-        return None;
-    }
+) -> ProjectProgram {
     let dir = ext.path.trim_end_matches('/');
-    Some(ProjectProgram {
+    ProjectProgram {
         kind: ProgramKind::Component,
         name: format!("{}/{}", ext.name, component.id),
         program: format!("{dir}/{}", component.bundle.trim_end_matches('/')),
@@ -677,7 +687,7 @@ pub fn component_program(
         remote: false,
         approved: false,
         version: None,
-    })
+    }
 }
 
 /// Whether an extension's provider may start: approved as it is now.
@@ -774,7 +784,8 @@ pub fn list(
     out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
         e.custom_components
             .iter()
-            .filter_map(move |c| component_program(e, c))
+            .filter(|c| !c.commands.is_empty())
+            .map(move |c| component_program(e, c))
     }));
     for p in &mut out {
         p.version = p.hash(project_dir).ok();

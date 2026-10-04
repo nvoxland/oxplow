@@ -163,9 +163,35 @@ pub async fn run_component_query(
     .await?)
 }
 
+/// The worktree a component's lens is shown in: the stream's, or the
+/// primary's outside any stream — never the primary's for a stream that is
+/// gone (tsk984).
+async fn component_root(
+    svc: &Services,
+    stream_id: Option<&str>,
+) -> Result<std::path::PathBuf, IpcError> {
+    match stream_id {
+        Some(stream) => Ok(svc.worktrees.resolve_strict(Some(stream)).await?),
+        None => Ok(svc.worktrees.project_dir().to_path_buf()),
+    }
+}
+
+/// Load the bundle of the `custom` lens `id`'s component as it is now, for
+/// its frame (tsk984): the version the daemon serves it at
+/// (`/components/v/<version>/`) and the frame invokes with.
+pub async fn load_component(
+    svc: &Services,
+    id: String,
+    stream_id: Option<String>,
+) -> Result<String, IpcError> {
+    let root = component_root(svc, stream_id.as_deref()).await?;
+    Ok(oxplow_app::lens_actions::load_component(svc, &root, &id)?)
+}
+
 /// A custom component's frame invokes one of its declared commands, as the
 /// lens acting for the person (`NEEDS_CONFIRMATION`: the host asks them,
-/// never the frame).
+/// never the frame) — when the bundle `version` the frame was loaded at is
+/// approved.
 pub async fn invoke_component_command(
     svc: &Services,
     id: String,
@@ -173,8 +199,9 @@ pub async fn invoke_component_command(
     input: oxplow_domain::Json,
     stream_id: Option<String>,
     confirmed: bool,
+    version: String,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = component_root(svc, stream_id.as_deref()).await?;
     Ok(oxplow_app::lens_actions::invoke_component_command(
         svc,
         &root,
@@ -184,6 +211,7 @@ pub async fn invoke_component_command(
             input: input.0,
             on_behalf_of: oxplow_domain::Actor::Human,
             confirmed,
+            version,
         },
     )
     .await?)

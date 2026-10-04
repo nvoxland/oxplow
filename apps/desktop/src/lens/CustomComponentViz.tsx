@@ -9,7 +9,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
-import { invokeComponentCommand, recordUsage, runComponentQuery } from "../api.js";
+import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery } from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
@@ -50,24 +50,63 @@ export function CustomComponentViz({
   readyTimeoutMs?: number;
 }) {
   const component = run.lens.custom?.component ?? null;
+  const lensId = run.lens.id;
+  // The bundle its frame runs, loaded for the lens and the stream it's
+  // shown in (tsk984): the daemon serves the frame that snapshot, by its
+  // version, and the frame invokes with it.
+  const loadKey = base && component ? `${lensId}\u0000${streamId ?? ""}` : null;
+  const [loaded, setLoaded] = useState<{ key: string; version?: string; error?: string } | null>(null);
+  useEffect(() => {
+    if (loadKey === null) return;
+    let live = true;
+    loadComponent(lensId, streamId).then(
+      (version) => {
+        if (live) setLoaded({ key: loadKey, version });
+      },
+      (e: unknown) => {
+        if (live) setLoaded({ key: loadKey, error: e instanceof Error ? e.message : String(e) });
+      },
+    );
+    return () => {
+      live = false;
+    };
+    // `loadKey` names the lens and stream it loads for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadKey]);
+  const current = loaded?.key === loadKey ? loaded : null;
+  const version = current?.version ?? null;
+  const src = base && version ? componentBundleUrl(base, version) : null;
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
-  const src = base && component ? componentBundleUrl(base, run.lens.extension, component, streamId) : null;
-  const reason = src === null ? "Its component can't be shown here." : failed?.src === src ? failed.reason : null;
+  const reason =
+    loadKey === null
+      ? "Its component can't be shown here."
+      : current?.error
+        ? `Its component couldn't be loaded: ${current.error}.`
+        : src !== null && failed?.src === src
+          ? failed.reason
+          : null;
   useEffect(() => {
     if (reason !== null) onFailure?.(reason);
     // Once per reason; `onFailure` is the caller's, not a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reason]);
   if (reason !== null && onFailure) return null;
-  if (src === null) return <>{fallback}</>;
+  if (loadKey === null) return <>{fallback}</>;
   if (reason !== null) {
     return (
       <div>
         <div data-testid="custom-component-fallback" style={noteStyle}>
-          {failed.reason} Showing its table.
+          {reason} Showing its table.
         </div>
         {fallback}
+      </div>
+    );
+  }
+  if (src === null || version === null || component === null) {
+    return (
+      <div data-testid="custom-component-loading" style={noteStyle}>
+        Loading its component…
       </div>
     );
   }
@@ -76,11 +115,13 @@ export function CustomComponentViz({
       <span data-testid="custom-component-badge" style={badgeStyle} title={`${run.lens.extension}'s own component, sandboxed`}>
         custom
       </span>
-      {/* Keyed by its URL: a stream switch mounts a new frame, whose first
-          load is its own — never the old frame navigating away. */}
+      {/* Keyed by its URL: another version (a stream switch) mounts a new
+          frame, whose first load is its own — never the old frame
+          navigating away. */}
       <ComponentFrame
         key={src}
         src={src}
+        version={version}
         component={component}
         run={run}
         streamId={streamId}
@@ -96,6 +137,7 @@ export function CustomComponentViz({
 /** One frame at one bundle URL and its bridge. */
 function ComponentFrame({
   src,
+  version,
   component,
   run,
   streamId,
@@ -105,6 +147,8 @@ function ComponentFrame({
   onReady,
 }: {
   src: string;
+  /** The bundle version it was loaded at: what it invokes with. */
+  version: string;
   component: string;
   run: LensRun;
   streamId: string | null;
@@ -157,7 +201,7 @@ function ComponentFrame({
         query: (asset, params) => runComponentQuery(runRef.current.lens.id, asset, params, streamId),
         invoke: async (command, input, confirmed) => {
           try {
-            const out = await invokeComponentCommand(runRef.current.lens.id, command, input, streamId, confirmed);
+            const out = await invokeComponentCommand(runRef.current.lens.id, command, input, streamId, confirmed, version);
             setRefused(null);
             return out;
           } catch (e) {

@@ -1,27 +1,32 @@
-//! `GET /components/{stream}/{ext}/{component}/{*path}` (P6b.D3): a private
-//! extension's custom component bundle, for the sandboxed frame a
-//! `viz: custom` lens renders (`.context/extensions.md`, "Custom
-//! components"). The daemon serves it because the shell holds no project
-//! state and browser mode has no custom scheme.
+//! `GET /components/v/{version}/{*path}` (P6b.D3, tsk984): a custom
+//! component's bundle, for the sandboxed frame a `viz: custom` lens
+//! renders (`.context/extensions.md`, "Custom components"). The daemon
+//! serves it because the shell holds no project state and browser mode has
+//! no custom scheme.
+//!
+//! **What it serves is a snapshot.** The host loads the component's bundle
+//! (`load_component`) into `Services::component_bundles`, keyed by its
+//! version — the component's approval hash over exactly those files — and
+//! the frame is served from that snapshot alone, so it runs what was
+//! hashed: a file edited on disk after loading isn't what runs, and the
+//! frame's `invoke` names the version it loaded, which must be approved.
 //!
 //! **Ungated** like `/health`: a frame can't carry the UI token, and what
-//! it serves is the extension's own files — never project data, which the
+//! it serves is an extension's own files — never project data, which the
 //! frame reaches only through the host's bridged calls. It is outside the
 //! permissive CORS layer, so a web page can't read a bundle with `fetch`.
 //! Only a loopback `Host` (DNS rebinding: a page whose name resolves to
-//! 127.0.0.1 would otherwise read bundles same-origin), only a declared
-//! component of an enabled, non-bundled extension, only a plain file
-//! inside its bundle folder; every 200 carries a CSP that lets the bundle
-//! load its own files and nothing else — no network, no forms.
+//! 127.0.0.1 would otherwise read bundles same-origin), only a loaded
+//! version, only a file of it; every 200 carries a CSP that lets the
+//! bundle load its own files and nothing else — no network, no forms.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use axum::{
     extract::{Path as AxumPath, State},
     http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Redirect, Response},
 };
-use oxplow_app::extensions::custom_components::MAX_BUNDLE_BYTES;
 
 use crate::DaemonState;
 
@@ -29,9 +34,6 @@ use crate::DaemonState;
 /// beside `/components/` (whose routes would read a path under it as a
 /// bundle's).
 pub const LIB_PATH: &str = "/component-lib/";
-
-/// The largest single file served (a bundle's whole cap).
-pub const MAX_FILE_BYTES: u64 = MAX_BUNDLE_BYTES;
 
 /// The CSP on every bundle file. `lib` is the client library's folder
 /// ([`LIB_PATH`]): a script source (the library) and a style source (the
@@ -122,32 +124,6 @@ pub fn content_type_for(path: &Path) -> &'static str {
     }
 }
 
-/// `rel` inside `bundle_root`, when it names a plain file there: no empty,
-/// `.`, `..`, backslash or NUL segment, not absolute, not a symlink or a
-/// directory, and — resolved — still inside the bundle. An empty `rel` is
-/// `index.html`.
-pub fn safe_bundle_path(bundle_root: &Path, rel: &str) -> Option<PathBuf> {
-    let rel = if rel.is_empty() { "index.html" } else { rel };
-    let ok_segment = |s: &str| !s.is_empty() && s != "." && s != ".." && !s.contains(['\\', '\0']);
-    if rel.starts_with('/') || !rel.split('/').all(ok_segment) {
-        return None;
-    }
-    let candidate = bundle_root.join(rel);
-    if !Path::new(rel)
-        .components()
-        .all(|c| matches!(c, Component::Normal(_)))
-    {
-        return None;
-    }
-    let meta = std::fs::symlink_metadata(&candidate).ok()?;
-    if !meta.is_file() {
-        return None;
-    }
-    let root = bundle_root.canonicalize().ok()?;
-    let resolved = candidate.canonicalize().ok()?;
-    resolved.starts_with(&root).then_some(resolved)
-}
-
 /// The request's `Host` when it names this machine's loopback —
 /// `127.0.0.1`, `localhost` or `[::1]`, with an optional numeric port.
 pub fn loopback_host(headers: &HeaderMap) -> Option<&str> {
@@ -160,9 +136,9 @@ pub fn loopback_host(headers: &HeaderMap) -> Option<&str> {
     (port_ok && matches!(name, "127.0.0.1" | "localhost" | "[::1]")).then_some(host)
 }
 
-/// `/components/{stream}/{ext}/{component}`: the folder form, so the
-/// bundle's relative URLs resolve inside it. The redirect appends `/` to
-/// the raw request path — decoded segments are never re-formatted.
+/// `/components/v/{version}`: the folder form, so the bundle's relative
+/// URLs resolve inside it. The redirect appends `/` to the raw request path
+/// — decoded segments are never re-formatted.
 pub async fn component_root(uri: Uri, headers: HeaderMap) -> Response {
     if loopback_host(&headers).is_none() {
         return StatusCode::NOT_FOUND.into_response();
@@ -170,83 +146,55 @@ pub async fn component_root(uri: Uri, headers: HeaderMap) -> Response {
     Redirect::permanent(&format!("{}/", uri.path())).into_response()
 }
 
-/// `/components/{stream}/{ext}/{component}/` — the bundle's `index.html`.
+/// `/components/v/{version}/` — the bundle's `index.html`.
 pub async fn component_index(
     state: State<DaemonState>,
-    AxumPath((stream, ext, component)): AxumPath<(String, String, String)>,
+    AxumPath(version): AxumPath<String>,
     headers: HeaderMap,
 ) -> Response {
-    serve(state, stream, ext, component, String::new(), headers).await
+    serve(state, version, String::new(), headers)
 }
 
-/// `/components/{stream}/{ext}/{component}/{*path}` — one of the bundle's
-/// files.
+/// `/components/v/{version}/{*path}` — one of the bundle's files.
 pub async fn component_file(
     state: State<DaemonState>,
-    AxumPath((stream, ext, component, path)): AxumPath<(String, String, String, String)>,
+    AxumPath((version, path)): AxumPath<(String, String)>,
     headers: HeaderMap,
 ) -> Response {
-    serve(state, stream, ext, component, path, headers).await
+    serve(state, version, path, headers)
 }
 
-/// The path segment naming the primary worktree, for a lens shown outside
-/// any stream.
-pub const PRIMARY: &str = "primary";
-
-async fn serve(
+/// `path` (`""`: `index.html`) of the bundle loaded at `version`, exactly
+/// one of its files — a map lookup, so nothing else can be named.
+fn serve(
     State(state): State<DaemonState>,
-    stream: String,
-    ext: String,
-    component: String,
+    version: String,
     path: String,
     headers: HeaderMap,
 ) -> Response {
     let Some(host) = loopback_host(&headers) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let svc = &state.ctx.services;
-    let root = if stream == PRIMARY {
-        svc.worktrees.project_dir().to_path_buf()
+    let Some(snapshot) = state.ctx.services.component_bundles.get(&version) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(bytes) = snapshot.file(&path) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let name = if path.is_empty() {
+        "index.html"
     } else {
-        match svc.worktrees.resolve_strict(Some(&stream)).await {
-            Ok(root) => root,
-            Err(_) => return StatusCode::NOT_FOUND.into_response(),
-        }
+        path.as_str()
     };
-    let Ok(extension) = svc.extension_catalog.named(&root, &ext) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    if extension.origin == "bundled" {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let Some(declared) = extension
-        .custom_components
-        .iter()
-        .find(|c| c.id == component)
-    else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let bundle_root = root.join(&extension.path).join(&declared.bundle);
-    let Some(file) = safe_bundle_path(&bundle_root, &path) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    match std::fs::metadata(&file) {
-        Ok(m) if m.len() > MAX_FILE_BYTES => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
-        Ok(_) => {}
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
-    }
-    let Ok(bytes) = tokio::fs::read(&file).await else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let source = format!("http://{host}/components/{stream}/{ext}/{component}/");
-    let mut response = bytes.into_response();
+    let source = format!("http://{host}/components/v/{version}/");
+    let mut response = bytes.to_vec().into_response();
     let h = response.headers_mut();
     let set = |h: &mut HeaderMap, name: header::HeaderName, value: &str| {
         if let Ok(v) = HeaderValue::from_str(value) {
             h.insert(name, v);
         }
     };
-    set(h, header::CONTENT_TYPE, content_type_for(&file));
+    set(h, header::CONTENT_TYPE, content_type_for(Path::new(name)));
     let lib = format!("http://{host}{LIB_PATH}");
     set(
         h,
@@ -262,32 +210,6 @@ async fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_bundle_path_is_a_plain_file_inside_the_bundle() {
-        let d = tempfile::tempdir().unwrap();
-        let root = d.path().join("bundle");
-        std::fs::create_dir_all(root.join("assets")).unwrap();
-        std::fs::write(root.join("index.html"), "x").unwrap();
-        std::fs::write(root.join("assets/app.js"), "x").unwrap();
-        std::fs::write(d.path().join("secret.txt"), "x").unwrap();
-        std::os::unix::fs::symlink(d.path().join("secret.txt"), root.join("link.txt")).unwrap();
-        assert!(safe_bundle_path(&root, "assets/app.js").is_some());
-        assert!(safe_bundle_path(&root, "").is_some(), "the index");
-        for bad in [
-            "../secret.txt",
-            "/etc/hosts",
-            "assets/../../secret.txt",
-            "a\\..\\b",
-            "assets",
-            "link.txt",
-            "assets//app.js",
-            "./index.html",
-            "nope.js",
-        ] {
-            assert!(safe_bundle_path(&root, bad).is_none(), "{bad}");
-        }
-    }
 
     #[test]
     fn the_csp_sandboxes_the_bundle_itself() {

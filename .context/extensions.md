@@ -1233,8 +1233,25 @@ again. Unapproved, it still renders and queries; its `invoke` is
 `Denied` with the approval message, and the host shows that reason
 under the frame (`custom-component-refused`, `componentRefusal`) — the
 component's own code may not. A component that declares no commands
-only shows and reads, and isn't a program. The gate reads the bundle
-where it is served from (the stream's worktree).
+only shows and reads, and isn't a program.
+
+**What runs is what was approved** (tsk984). Before it shows a frame the
+host loads the component's bundle (`load_component`, from the worktree
+of the stream the lens is shown in — never the primary's for a stream
+that's gone) into `Services::component_bundles`
+(`component_bundles.rs`): every file of the folder, read once, keyed by
+its **version** — the component's approval hash over exactly those files
+and its commands (`ProjectProgram::component_hash`, the same function
+Programs lists the version with). The daemon serves the frame from that
+snapshot alone (`/components/v/<version>/…`), and the frame's `invoke`
+names the version it loaded: it runs only when that version is
+approved and declares the command. So a bundle edited on disk after the
+frame loaded changes nothing that runs, and one loaded while edited
+can't act on the approval of what the disk says later. The folder is
+read as served — the extension's path joined with the manifest's
+`bundle` — so a spelling that differs from the disk's only in case still
+covers every file. The snapshots kept are the 16 newest; an older
+frame's invoke is refused with "reload its lens".
 
 ```yaml
 custom_components:
@@ -1287,9 +1304,11 @@ asks, never the frame. Both are UI RPCs (`ui` in surface parity).
 
 **The host** (P6b.D4, `lens/CustomComponentViz.tsx` +
 `lens/componentBridge.ts`): `<iframe sandbox="allow-scripts"
-referrerPolicy="no-referrer">` at `componentBundleUrl` (the daemon's
-`/components/…` route; with no daemon base — `remoteBaseUrl()` null —
-the lens shows its table), under a **custom** badge. On the frame's first
+referrerPolicy="no-referrer">` at `componentBundleUrl(base, version)`
+(the daemon's `/components/v/<version>/`, once `load_component` answered;
+a bundle that can't be loaded shows the table and why; with no daemon
+base — `remoteBaseUrl()` null — the lens shows its table), under a
+**custom** badge. On the frame's first
 `load` the host posts `init { protocol, run, props, tokens }`
 (`initMessage`, the one builder) with one end
 of a `MessageChannel` (to `"*"`: the frame's origin is opaque; the port

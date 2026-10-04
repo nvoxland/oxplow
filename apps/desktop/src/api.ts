@@ -627,16 +627,25 @@ export async function runComponentQuery(
   return unwrap(await commands.runComponentQuery(id, asset, params, streamId));
 }
 
+/** Load the `custom` lens `id`'s component bundle as it is now, for its
+ *  frame (tsk984): the version the daemon serves it at and the frame
+ *  invokes with. */
+export async function loadComponent(id: string, streamId: string | null): Promise<string> {
+  return unwrap(await commands.loadComponent(id, streamId));
+}
+
 /** A custom component's frame invokes one of its declared commands, as the
- *  lens acting for the person; `confirmed` only after the host asked. */
+ *  lens acting for the person; `confirmed` only after the host asked;
+ *  `version` is the bundle the frame was loaded at, which must be approved. */
 export async function invokeComponentCommand(
   id: string,
   command: string,
   input: unknown,
   streamId: string | null,
   confirmed: boolean,
+  version: string,
 ): Promise<CommandOutcome> {
-  return unwrap(await commands.invokeComponentCommand(id, command, input as never, streamId, confirmed));
+  return unwrap(await commands.invokeComponentCommand(id, command, input as never, streamId, confirmed, version));
 }
 
 /** What the person can ask: every capability's questions and the stream's

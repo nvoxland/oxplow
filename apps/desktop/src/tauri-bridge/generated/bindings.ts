@@ -215,7 +215,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	invokeComponentCommand: (id: string, command: string, input: unknown, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("invoke_component_command", { id, command, input, streamId, confirmed })),
+	loadComponent: (id: string, streamId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("load_component", { id, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	invokeComponentCommand: (id: string, command: string, input: unknown, streamId: string | null, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("invoke_component_command", { id, command, input, streamId, confirmed, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
