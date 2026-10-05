@@ -175,7 +175,8 @@ export function TerminalPane({
       if (senderRef.current === sender) senderRef.current = null;
     };
   }, []);
-  const sendToTerminal = (sessionId: string, message: TerminalMessage) => senderRef.current?.send(sessionId, message);
+  const sendToTerminal = (sessionId: string | null, message: TerminalMessage) =>
+    senderRef.current?.send(sessionId, message);
   const [mode, setMode] = useState<"live" | "history">("live");
   const modeRef = useRef<"live" | "history">("live");
   const [dragHovering, setDragHovering] = useState(false);
@@ -437,15 +438,13 @@ export function TerminalPane({
 
     let disposed = false;
     let ro: ResizeObserver | null = null;
+    // Before the session opens there's no id yet: the sender holds the
+    // keystrokes and sends them once it does (tsk993).
     const dataDisp = term.onData((data) => {
-      if (sessionIdRef.current) {
-        sendToTerminal(sessionIdRef.current, { type: "input", data });
-      }
+      sendToTerminal(sessionIdRef.current, { type: "input", data });
     });
     const binaryDisp = term.onBinary((data) => {
-      if (sessionIdRef.current) {
-        sendToTerminal(sessionIdRef.current, { type: "input-binary", data });
-      }
+      sendToTerminal(sessionIdRef.current, { type: "input-binary", data });
     });
 
     // Wait until the host has a real layout size, then open the terminal,
@@ -524,6 +523,7 @@ export function TerminalPane({
           return;
         }
         sessionIdRef.current = sessionId;
+        senderRef.current?.attach(sessionId);
         // Replay the session's ring buffer into the fresh xterm so
         // re-attaching to a long-running thread shows the same screen
         // state the user left it in (instead of a blank pane that

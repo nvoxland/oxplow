@@ -179,7 +179,10 @@ session's waiting messages are **dropped** — never delivered later in a
 burst the person didn't see land (a stale prompt and Enter, into an
 agent's terminal). The sender lives as long as its pane (created and
 closed by an effect, read through a ref): an unmounted pane's waiting
-messages are dropped and nothing more is sent. Locked by
+messages are dropped and nothing more is sent. Keystrokes typed while
+the session is still opening (its id not back yet) are held — up to
+`HELD_MAX` characters, keystrokes only — and sent first once it opens
+(`attach`), so a fast typist's first keys aren't lost (tsk993). Locked by
 `terminalInput.test.ts`.
 
 ## Multiple terminals (Terminal page)

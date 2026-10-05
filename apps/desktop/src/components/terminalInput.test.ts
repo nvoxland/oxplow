@@ -26,7 +26,7 @@ function harness(timeoutMs = 1000) {
     replies.shift()!(ok);
     await new Promise((r) => setTimeout(r, 0));
   };
-  return { send: sender.send, close: sender.close, sent, answer, errors };
+  return { send: sender.send, attach: sender.attach, close: sender.close, sent, answer, errors };
 }
 
 const decoded = (m: unknown) => new TextDecoder().decode(Uint8Array.from(atob((m as { bytes: string }).bytes), (c) => c.charCodeAt(0)));
@@ -124,4 +124,31 @@ test("a closed sender sends nothing more", async () => {
   send("s1", { type: "input", data: "c" });
   await answer();
   expect(sent.map(([, m]) => decoded(m))).toEqual(["a"]);
+});
+
+// tsk993: keystrokes typed while the terminal's session is still opening
+// are kept, and sent — in order, before anything after them — once it
+// opens; only keystrokes are kept, and only so many.
+test("keystrokes typed before the session opens are sent when it does", async () => {
+  const { send, attach, sent, answer } = harness();
+  send(null, { type: "input", data: "ec" });
+  send(null, { type: "input", data: "ho" });
+  send(null, { type: "resize", cols: 80, rows: 24 });
+  expect(sent).toEqual([]);
+  attach("s1");
+  send("s1", { type: "input", data: " hi" });
+  await answer();
+  await answer();
+  expect(sent.map(([s, m]) => [s, decoded(m)])).toEqual([
+    ["s1", "echo"],
+    ["s1", " hi"],
+  ]);
+});
+
+test("a closed sender drops keystrokes held for a session that never opened", () => {
+  const { send, attach, close, sent } = harness();
+  send(null, { type: "input", data: "x" });
+  close();
+  attach("s1");
+  expect(sent).toEqual([]);
 });

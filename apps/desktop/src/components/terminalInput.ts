@@ -12,6 +12,9 @@
 /// - A send that doesn't answer within the timeout is reported and that
 ///   session's waiting messages are dropped — never delivered later in a
 ///   burst the person didn't see land; the next session's still go.
+/// - Keystrokes typed while the session is still opening (no session id
+///   yet) are held, up to `HELD_MAX` characters, and sent first once it
+///   opens (`attach`), so a fast typist's first keys aren't lost (tsk993).
 /// - A closed sender (its pane is gone) drops what waits and sends nothing
 ///   more.
 
@@ -28,11 +31,18 @@ export type TerminalMessage =
 type Queued = { sessionId: string; message: TerminalMessage };
 
 export interface TerminalSender {
-  /** Queue `message` for `sessionId`. */
-  send(sessionId: string, message: TerminalMessage): void;
+  /** Queue `message` for `sessionId`; with none yet (the session is
+   *  opening), a keystroke is held for [`attach`] and anything else
+   *  dropped. */
+  send(sessionId: string | null, message: TerminalMessage): void;
+  /** The session opened: send the keystrokes held for it, first. */
+  attach(sessionId: string): void;
   /** Drop what waits and send nothing more: the pane is gone. */
   close(): void;
 }
+
+/** The most characters held for a session that hasn't opened yet. */
+export const HELD_MAX = 4096;
 
 /** How long a send may go unanswered before its session's backlog is
  *  dropped. */
@@ -46,8 +56,16 @@ export function terminalSender(
   { timeoutMs = SEND_TIMEOUT_MS }: { timeoutMs?: number } = {},
 ): TerminalSender {
   let queue: Queued[] = [];
+  let held: TerminalMessage[] = [];
   let sending = false;
   let closed = false;
+
+  const enqueue = (sessionId: string, message: TerminalMessage) => {
+    const last = queue[queue.length - 1];
+    const joined = last && last.sessionId === sessionId ? merged(last.message, message) : null;
+    if (last && joined) last.message = joined;
+    else queue.push({ sessionId, message });
+  };
 
   async function drain() {
     sending = true;
@@ -81,15 +99,30 @@ export function terminalSender(
   return {
     send(sessionId, message) {
       if (closed) return;
-      const last = queue[queue.length - 1];
-      const joined = last && last.sessionId === sessionId ? merged(last.message, message) : null;
-      if (last && joined) last.message = joined;
-      else queue.push({ sessionId, message });
+      if (sessionId === null) {
+        const keystroke = message.type === "input" || message.type === "input-binary";
+        const size = held.reduce((n, m) => n + ("data" in m ? m.data.length : 0), 0);
+        if (keystroke && size + message.data.length <= HELD_MAX) held.push(message);
+        return;
+      }
+      enqueue(sessionId, message);
       if (!sending) void drain();
+    },
+    attach(sessionId) {
+      if (closed) return;
+      const keys = held;
+      held = [];
+      // Ahead of anything already queued for it: they were typed first.
+      const after = queue;
+      queue = [];
+      for (const m of keys) enqueue(sessionId, m);
+      for (const q of after) enqueue(q.sessionId, q.message);
+      if (queue.length > 0 && !sending) void drain();
     },
     close() {
       closed = true;
       queue = [];
+      held = [];
     },
   };
 }
