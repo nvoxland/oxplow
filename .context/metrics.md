@@ -1265,7 +1265,10 @@ dimensions:                        # custom conformed slice axes
   `built-in` carrying the catalog default target plus the project's
   target/warnAt/failAt overrides (from the `use:` entry). The
   second pass must not skip built-in scope, or those thresholds never reach
-  the persisted `metric_spec` the engine reads.
+  the persisted `metric_spec` the engine reads. The resolve catalog's
+  built-in layer (`builtin_spec_entries`) holds the producer metrics as well
+  as the code gauges: without them a producer's `use:` was skipped with an
+  "unknown catalog key" warning and its target dropped (tsk1071).
 - **Adding one** is `config.set` on `measures` / `dimensions` (a global one
   is a file under the global dir). The old `scaffold_measure` /
   `scaffold_dimension` writers had no caller and were deleted (P4.8).

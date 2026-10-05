@@ -2709,6 +2709,32 @@ fn builtin_spec_entries() -> Vec<MetricEntry> {
                 ..Default::default()
             }
         })
+        // The always-on producer metrics are built-ins too: a `use:` of one
+        // carries the project's thresholds onto its spec (tsk1071).
+        .chain(
+            crate::producer_metrics::builtin_producer_specs()
+                .into_iter()
+                .map(|s| MetricEntry {
+                    key: Some(s.key),
+                    title: Some(s.title),
+                    filter: filter_from_json(s.filter_json.as_deref()),
+                    source_measure: s.source_measure,
+                    aggregation: Some(s.aggregation),
+                    unit: s.unit,
+                    direction: Some(s.direction),
+                    display_kind: Some(s.display_kind),
+                    category: s.category,
+                    description: s.description,
+                    sliceable_dims: s
+                        .sliceable_dims_json
+                        .and_then(|j| serde_json::from_str(&j).ok())
+                        .unwrap_or_default(),
+                    target: s.target,
+                    warn_at: s.warn_at,
+                    fail_at: s.fail_at,
+                    ..Default::default()
+                }),
+        )
         .collect()
 }
 
@@ -5103,6 +5129,38 @@ def transform(input):
                 "{key} measure seeded by V46"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_use_of_a_producer_metric_sets_its_target() {
+        // tsk1071: `use:` resolved only against the gauge definitions, so a
+        // producer metric's `use:` was skipped with a warning and its target
+        // never reached the spec.
+        let (svc, _dir) = fixture().await;
+        svc.config.write().unwrap().metrics = vec![MetricEntry {
+            use_key: Some("oxplow.tests.failed".into()),
+            target: Some(0.0),
+            fail_at: Some(1.0),
+            ..Default::default()
+        }];
+        let resolved = svc.metrics.resolved_specs();
+        let failed = resolved
+            .iter()
+            .find(|s| s.key == "oxplow.tests.failed")
+            .expect("the use: resolves");
+        assert_eq!(failed.scope, "built-in");
+        svc.metrics.seed_catalog().await;
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.tests.failed")
+            .await
+            .unwrap()
+            .expect("producer spec seeded");
+        assert_eq!((spec.target, spec.fail_at), (Some(0.0), Some(1.0)));
+        // Its shape is still the producer's.
+        assert_eq!(spec.source_measure.as_deref(), Some("oxplow.test_case"));
+        assert_eq!(spec.aggregation, "count");
+        assert_eq!(spec.display_kind, "gauge");
     }
 
     #[tokio::test]

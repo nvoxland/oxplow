@@ -2536,8 +2536,8 @@ pub fn resolve_metrics(
                 Some((scope, def)) => out.push(resolve_one(uk, scope, def, Some(e))),
                 // A `use:` of a key not in the resolve catalog is normally a typo.
                 // The exception is a **disable marker** (`enabled: false`) for a
-                // producer/plugin metric — those keys aren't config definitions,
-                // so `seed_catalog` handles their pruning directly from config
+                // plugin metric — its key isn't a config definition, so
+                // `seed_catalog` handles its pruning directly from config
                 // state; skip it here silently rather than warn.
                 None if e.enabled == Some(false) => {}
                 None => tracing::warn!(
