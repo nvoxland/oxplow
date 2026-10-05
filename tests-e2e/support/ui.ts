@@ -20,11 +20,15 @@ export async function openNewTask(page: Page): Promise<void> {
 }
 
 /** Open a page through the launcher: search for `query`, take the first
- *  result — once it is the query's, since Enter takes whatever row is
- *  first, and the results update after the typing. */
+ *  result — once it is a page, command or search hit naming the query,
+ *  since Enter takes whatever row is first, the results update after the
+ *  typing, and "Ask the Agent: <query>" names any query. */
 export async function openFromLauncher(page: Page, query: string): Promise<void> {
   await page.getByTestId("rail-search").click();
   await page.keyboard.type(query);
-  await expect(page.locator('[data-row-index="0"]')).toContainText(query, { ignoreCase: true });
+  const first = page.locator(
+    '[data-row-index="0"]:is([data-testid^="launcher-page-"], [data-testid^="launcher-command-"], [data-testid^="launcher-hit-"])',
+  );
+  await expect(first).toContainText(query, { ignoreCase: true });
   await page.keyboard.press("Enter");
 }

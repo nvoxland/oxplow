@@ -16,6 +16,10 @@ import type {
 } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
+/** Whether this window is in the desktop shell — false in a plain browser
+ *  driving a daemon, which has no native menu or recent projects. */
+export { shellAvailable } from "./tauri-bridge/transport.js";
+
 export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
 import { latestWins } from "./latestWins.js";

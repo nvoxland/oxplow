@@ -232,21 +232,21 @@ export async function probeRemoteDaemon(
 }
 
 /// Where an `invoke(name)` goes: the desktop shell's Tauri IPC
-/// ("tauri") or this window's daemon ("http").
+/// ("tauri"), this window's daemon ("http"), or nowhere ("none").
 ///
 /// With no daemon everything is the shell's. With one, shell commands
-/// stay in the shell — unless there is no Tauri host at all (a plain
-/// browser driving a daemon), where the only reachable backend is the
-/// daemon; it answers with a structured "unknown command" rather than
-/// the renderer throwing on a missing `__TAURI_INTERNALS__`.
+/// stay in the shell — and with no Tauri host at all (a plain browser
+/// driving a daemon) a shell command has nowhere to go: no daemon serves
+/// one, so it's refused here as the daemon would refuse it, with no
+/// request made (tsk996).
 /// Pure; exported for tests.
 export function invokeRoute(
   name: string,
   base: string | null,
   tauriAvailable: boolean,
-): "tauri" | "http" {
+): "tauri" | "http" | "none" {
   if (base === null) return "tauri";
-  if (SHELL_COMMAND_SET.has(name) && tauriAvailable) return "tauri";
+  if (SHELL_COMMAND_SET.has(name)) return tauriAvailable ? "tauri" : "none";
   return "http";
 }
 
@@ -256,8 +256,10 @@ export function invokeRoute(
 /// as `@tauri-apps/api/core`'s invoke, which the bindings' typedError
 /// wrapper converts into the `{status, data|error}` envelope.
 export async function invoke<T>(name: string, args?: Record<string, unknown>): Promise<T> {
-  if (invokeRoute(name, remoteBase, tauriHostAvailable()) === "tauri") {
-    return tauriInvoke<T>(name, args);
+  const route = invokeRoute(name, remoteBase, shellAvailable());
+  if (route === "tauri") return tauriInvoke<T>(name, args);
+  if (route === "none") {
+    throw { code: "NOT_FOUND", message: `${name} is the desktop shell's, and this window has none`, cause: null };
   }
   const resp = await fetch(`${remoteBase}/ipc/${name}`, {
     method: "POST",
@@ -389,7 +391,9 @@ export function listenRoute(
   return tauriAvailable ? "tauri" : "none";
 }
 
-function tauriHostAvailable(): boolean {
+/// Whether this window is in the desktop shell (a Tauri host): false in a
+/// plain browser driving a daemon. The one check every bridge uses.
+export function shellAvailable(): boolean {
   try {
     return "__TAURI_INTERNALS__" in window;
   } catch {
@@ -406,7 +410,7 @@ export async function listen<T>(
   channel: ListenChannel,
   handler: (event: { payload: T }) => void,
 ): Promise<UnlistenFn> {
-  const route = listenRoute(channel, remoteBase, tauriHostAvailable());
+  const route = listenRoute(channel, remoteBase, shellAvailable());
   if (route === "none") return () => {};
   if (route === "tauri") {
     return tauriListen<T>(channel, handler);

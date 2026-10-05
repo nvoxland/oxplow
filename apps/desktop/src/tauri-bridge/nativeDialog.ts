@@ -9,20 +9,13 @@
 // picker can't open, so it resolves to `null` instead of throwing.
 
 import { open as tauriOpen } from "@tauri-apps/plugin-dialog";
-
-function tauriHostAvailable(): boolean {
-  try {
-    return "__TAURI_INTERNALS__" in window;
-  } catch {
-    return false;
-  }
-}
+import { shellAvailable } from "./transport";
 
 /// Open the native single-folder picker. Resolves with the selected
 /// absolute path, or `null` if the user cancels or no Tauri host is
 /// present (plain browser).
 export async function pickFolder(title: string): Promise<string | null> {
-  if (!tauriHostAvailable()) return null;
+  if (!shellAvailable()) return null;
   const selected = await tauriOpen({ directory: true, multiple: false, title });
   return typeof selected === "string" ? selected : null;
 }

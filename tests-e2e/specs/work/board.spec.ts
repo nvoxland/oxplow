@@ -19,6 +19,7 @@ test("moving a card transitions its item, and Undo moves it back", async ({ page
 
 test("deleting an item asks first, then it's gone from the board", async ({ page, daemon }) => {
   await run(daemon, "work_item.create", { title: "Card to delete", native: { thread: daemon.thread } });
+  await run(daemon, "work_item.create", { title: "Card to keep", native: { thread: daemon.thread } });
   await page.goto("/");
   await openFromLauncher(page, "Board");
   await page.getByTestId("board-card").filter({ hasText: "Card to delete" }).getByText("Card to delete").click();
@@ -27,6 +28,7 @@ test("deleting an item asks first, then it's gone from the board", async ({ page
   await expect(page.getByTestId("task-rail-delete-confirm")).toBeVisible();
   await page.getByTestId("task-rail-delete-confirm").click();
   await openFromLauncher(page, "Board");
-  await expect(page.getByTestId("work-board")).toBeVisible();
+  // The board has loaded its cards: what's absent is gone, not unloaded.
+  await expect(page.getByTestId("work-board")).toContainText("Card to keep");
   await expect(page.getByTestId("work-board")).not.toContainText("Card to delete");
 });

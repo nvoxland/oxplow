@@ -9,14 +9,7 @@
 // in at all.
 
 import { commands, type SignInCompletion } from "./generated/bindings";
-
-function tauriHostAvailable(): boolean {
-  try {
-    return "__TAURI_INTERNALS__" in window;
-  } catch {
-    return false;
-  }
-}
+import { shellAvailable } from "./transport";
 
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
@@ -27,7 +20,7 @@ function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error:
 /// Whether this window can catch a sign-in's redirect: only the desktop
 /// app can.
 export function canCatchSignInRedirect(): boolean {
-  return tauriHostAvailable();
+  return shellAvailable();
 }
 
 /// A listener the shell opened for a sign-in: its id (what waits on,

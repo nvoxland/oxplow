@@ -21,7 +21,7 @@ test("a lens re-runs when its model changes, and pins to a new dashboard", async
   await expect
     .poll(async () => {
       const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-        sql: "SELECT d.title, i.kind FROM v_dashboard_item i JOIN v_dashboard d ON d.id = i.dashboard_id",
+        sql: "SELECT d.title, i.kind FROM v_dashboard_item i JOIN v_dashboard d ON d.id = i.dashboard_id WHERE json_extract(i.options_json, '$.lensId') = 'mine/numbat-tasks'",
       });
       return out.rows;
     })

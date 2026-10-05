@@ -172,7 +172,7 @@ import {
   writePersistedFileSessionPaths,
 } from "./tabs/pageTabsPersistence.js";
 import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportOpenPage } from "./api.js";
-import { openProject, createProject, listRecentProjects } from "./api.js";
+import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import { coalescedRefresh } from "./coalesced-refresh.js";
 import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
@@ -1359,7 +1359,10 @@ export function App() {
     },
   }), [stream, selectedFilePath, workspaceContext.vcsEnabled, runGitMenuOp]);
   const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
+  // The native menu and its recent projects are the shell's: a browser
+  // window has neither to ask for.
   useEffect(() => {
+    if (!shellAvailable()) return;
     listRecentProjects()
       .then(setRecentProjects)
       .catch((e) => logUi("warn", "failed to load recent projects for menu", { error: String(e) }));
@@ -1415,6 +1418,7 @@ export function App() {
   }, [commandMap]);
 
   useEffect(() => {
+    if (!shellAvailable()) return;
     void desktopBridge().setNativeMenu(nativeMenuSnapshots).catch((error) => {
       logUi("error", "failed to update native menu", { error: String(error) });
     });

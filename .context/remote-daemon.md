@@ -79,11 +79,12 @@ developer-facing mechanics.
   `generated/shellCommands.ts`, emitted from
   `oxplow_tauri_ipc::SHELL_ONLY_COMMANDS` by the `export_ts_bindings`
   test and asserted by the surface-parity test, so the TS side can't
-  drift from the Rust definition. One exception keeps the browser path
-  working: with **no Tauri host at all** (plain browser over a tunnel)
-  shell commands fall through to the daemon, which answers with a
-  structured "unknown command" instead of the renderer throwing on a
-  missing `__TAURI_INTERNALS__`.
+  drift from the Rust definition. With **no Tauri host at all** (a
+  plain browser over a tunnel) a shell command has nowhere to go: the
+  transport refuses it itself (`"none"`, a `NOT_FOUND` error), with no
+  request — no daemon serves one (tsk996). `shellAvailable()` is the one
+  check for a Tauri host every bridge uses, and the app doesn't ask for
+  what only a shell has (the native menu, recent projects) without one.
 
   **Signing in to a provider works the same with a remote daemon** (P10):
   the service sends the browser back to a loopback port on the person's

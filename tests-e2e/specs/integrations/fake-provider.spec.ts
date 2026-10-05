@@ -20,7 +20,11 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await page.goto("/");
   await openFromLauncher(page, "Settings");
   await page.getByTestId("integration-config-e2e/fake-team").fill("core");
+  // Check starts it with this config, asks it, and shows what it said —
+  // before anything is saved or enabled.
+  await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Off");
   await page.getByTestId("integration-check-e2e/fake").click();
+  await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
   await page.getByTestId("integration-toggle-e2e/fake").click();
   await until("the fake to be enabled and ready", 30_000, async () => {
     const all = await ipc<Array<{ instance: string; enabled: boolean; health: { state: { state: string } } }>>(
@@ -32,7 +36,9 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   });
   await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
   await page.getByTestId("integrations-active-fake").click();
-  await run(daemon, "work_item.create", { provider: "fake", title: "Kiwi from oxplow" });
+  await expect(page.getByTestId("integrations-active-fake")).toBeChecked();
+  // Made with no provider named: the active one, which the radio chose.
+  await run(daemon, "work_item.create", { title: "Kiwi from oxplow" });
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from oxplow");
   // An external item reaches oxplow's models through its collector's read.
   await page.getByTestId("integration-sync-e2e/fake-work_items").click();

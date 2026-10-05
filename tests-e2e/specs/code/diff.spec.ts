@@ -15,8 +15,10 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
   await openFromLauncher(page, "Git History");
   await page.getByTestId("commit-graph-row").filter({ hasText: "Add the emu file" }).click();
   await expect(page.getByTestId("page-git-commit")).toBeVisible();
-  // Its Change Analysis lenses read their extension's models (tsk977).
+  // Its Change Analysis lenses read their extension's models (tsk977):
+  // once the slot has rendered its runs, none failed.
   await expect(page.getByTestId("page-git-commit")).toContainText("1 file");
+  await expect(page.getByTestId("vcs.commit.details-oxplow-analytics/change-review")).toBeVisible();
   await expect(page.getByTestId("page-git-commit")).not.toContainText("no such table");
   await page.getByTestId("git-commit-files").getByText("emu.txt").click();
   await expect(page.getByTestId("page-diff")).toContainText("second emu line");

@@ -63,11 +63,10 @@ describe("invokeRoute", () => {
     expect(invokeRoute(PROJECT_COMMAND, DAEMON, true)).toBe("http");
   });
 
-  test("with no Tauri host, shell commands fall through to the daemon", () => {
-    // Plain browser over an ssh tunnel: there is no shell to ask, so
-    // let the daemon answer with a structured error rather than
-    // throwing on a missing __TAURI_INTERNALS__.
-    expect(invokeRoute(SHELL_COMMAND, DAEMON, false)).toBe("http");
+  test("with no Tauri host, a shell command has nowhere to go", () => {
+    // A plain browser driving a daemon (tsk996): no daemon serves a shell
+    // command, so it's refused here, not sent to fail there.
+    expect(invokeRoute(SHELL_COMMAND, DAEMON, false)).toBe("none");
     expect(invokeRoute(PROJECT_COMMAND, DAEMON, false)).toBe("http");
   });
 });

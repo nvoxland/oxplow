@@ -10,19 +10,12 @@
 // host) it is a new tab.
 
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
-
-function tauriHostAvailable(): boolean {
-  try {
-    return "__TAURI_INTERNALS__" in window;
-  } catch {
-    return false;
-  }
-}
+import { shellAvailable } from "./transport";
 
 /// Open an http(s) `url` in the person's default browser.
 export async function openInSystemBrowser(url: string): Promise<void> {
   if (!/^https?:\/\//.test(url)) throw new Error(`not an http(s) URL: ${url}`);
-  if (tauriHostAvailable()) {
+  if (shellAvailable()) {
     await shellOpen(url);
     return;
   }
