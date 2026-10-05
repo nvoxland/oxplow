@@ -34,3 +34,10 @@ tests-e2e/*.png
 tests-e2e/.output/
 tests-e2e/*.json
 !tests-e2e/tsconfig.json
+
+# Local work tracking and design notes — never committed: the acceptance
+# script, the target-architecture spec, and local agent instructions
+# (CLAUDE.local.md points agents at the spec)
+ACCEPTANCE-TEST.md
+.context/target-architecture.md
+CLAUDE.local.md
