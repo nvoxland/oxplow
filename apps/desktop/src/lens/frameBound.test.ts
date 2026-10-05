@@ -7,7 +7,9 @@ import { join } from "node:path";
 // `frame-src` bounds where to, to this machine. Tauri's window gets it in
 // its CSP; a plain browser gets the page from whatever serves `dist/`
 // (vite, any static server), so the page carries the same bound itself.
-// One value, both places.
+// One value, both places. Every loopback name the daemon serves a bundle
+// to (tsk1003): a browser that reached the daemon as `localhost` or
+// `[::1]` builds its frames' URLs from that base.
 
 const DESKTOP = join(import.meta.dir, "..", "..");
 
@@ -30,7 +32,7 @@ test("the window frames only this machine, and the page says the same", () => {
     app: { security: { csp: string } };
   };
   const tauri = directives(conf.app.security.csp);
-  expect(tauri["frame-src"]).toEqual(["http://127.0.0.1:*"]);
+  expect(tauri["frame-src"]).toEqual(["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]);
   expect(tauri["default-src"]).toEqual(["'self'"]);
 
   const html = readFileSync(join(DESKTOP, "index.html"), "utf8");

@@ -1216,7 +1216,9 @@ the frame has an opaque origin (the iframe's `sandbox="allow-scripts"`
 *and* the daemon's `sandbox allow-scripts` CSP directive), no daemon
 token and no way to send data — no fetch/XHR/WebSocket (`connect-src
 'none'`), no forms, no storage. The one way out is navigating itself:
-the page's `frame-src http://127.0.0.1:*` bounds that to this machine —
+the page's `frame-src` (`http://127.0.0.1:*`, `http://localhost:*`,
+`http://[::1]:*` — each loopback name the daemon serves a bundle to,
+tsk1003) bounds that to this machine —
 Tauri's CSP in the app, and a one-directive meta CSP in `index.html`
 for a plain browser, where whatever serves `dist/` sends no header
 (`lens/frameBound.test.ts` keeps them one value; only `frame-src`,

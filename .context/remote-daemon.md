@@ -207,7 +207,10 @@ script source (the client library) and a style source (the kit's sheet,
 P11). `style-src` keeps `'unsafe-inline'` for the bundle's own inline
 styles — CSS there can fetch nothing from outside, every fetching
 directive being bounded to the bundle; inline scripts stay refused. The
-page bounds where a frame may go with `frame-src http://127.0.0.1:*`:
+page bounds where a frame may go with `frame-src http://127.0.0.1:*
+http://localhost:* http://[::1]:*` — every loopback name the daemon
+serves a bundle to, since a browser builds its frames' URLs from the base
+it reached the daemon by (tsk1003):
 the main window's CSP (`tauri.conf.json`; with no `devCsp`, Tauri
 applies the same `csp` in dev) and, for a plain browser, a one-directive
 meta CSP in `index.html` (P11, tsk960) — `lens/frameBound.test.ts`
