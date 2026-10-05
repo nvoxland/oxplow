@@ -82,6 +82,15 @@ impl ExternalVerbs for ExternalWorkItems {
         idempotency_key: Option<String>,
     ) -> Result<VerbOutcome, CommandError> {
         let id = &self.instance.id;
+        // The thread a create is filed on is oxplow's record, not the
+        // tracker's (tsk1058): it anchors the item, the provider never sees it.
+        let mut input = input;
+        let filed_on = match (verb, &mut input) {
+            ("create", Value::Object(fields)) => fields
+                .remove("thread")
+                .and_then(|t| t.as_str().and_then(|t| t.parse().ok())),
+            _ => None,
+        };
         let validator = self.inputs.get(verb).ok_or_else(|| CommandError::Invalid {
             field: None,
             message: format!("{id} work items don't support `{verb}`"),
@@ -97,7 +106,7 @@ impl ExternalVerbs for ExternalWorkItems {
         let events = out
             .events
             .into_iter()
-            .map(|d| self.instance.envelope(actor, d))
+            .map(|d| self.instance.envelope(actor, filed_on, d))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(VerbOutcome {
             result: out.result,

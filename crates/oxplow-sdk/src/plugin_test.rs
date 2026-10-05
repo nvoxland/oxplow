@@ -1318,6 +1318,13 @@ async fn suite(
         let findings = match spec.capability.as_str() {
             providers::spec::WORK_ITEMS => {
                 let provider = svc.work_items.get(&spec.id).map_err(|e| e.to_string())?;
+                // Every create files on the active tracker (tsk1058): the
+                // throwaway host's is the one under test.
+                svc.config
+                    .write()
+                    .map_err(|e| e.to_string())?
+                    .active_providers
+                    .insert("work_items".into(), provider.id.clone());
                 oxplow_app::work_items_conformance::suite(
                     &svc.work_items_client(),
                     &provider.id,

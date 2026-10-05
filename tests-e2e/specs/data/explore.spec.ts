@@ -11,7 +11,7 @@ async function keeps(daemon: Parameters<typeof ipc>[0]): Promise<number> {
 }
 
 test("explore a model, run SQL, and keep it as a lens through lens.keep", async ({ page, daemon }) => {
-  await run(daemon, "work_item.create", { title: "Echidna task", native: { thread: daemon.thread } });
+  await run(daemon, "work_item.create", { title: "Echidna task", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Explore Data");
   await page.getByTestId("explore-entity-v_task").click();

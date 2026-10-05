@@ -20,7 +20,7 @@ test("a task made elsewhere appears without a reload", async ({ fresh }) => {
   await expandRailSection(page, "core:work");
   await expect(page.getByTestId("rail-section-core:work")).toBeVisible();
   await waitForModels(daemon, ["v_task"], () =>
-    run(daemon, "work_item.create", { title: "Made elsewhere", native: { thread: daemon.thread } }),
+    run(daemon, "work_item.create", { title: "Made elsewhere", thread: daemon.thread }),
   );
   await expect(page.getByTestId("rail-section-core:work")).toContainText("Made elsewhere");
 });

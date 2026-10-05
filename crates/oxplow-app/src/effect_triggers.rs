@@ -37,8 +37,9 @@
 //! ([`RETRY_DELAYS`]); waiting, it doesn't count against the effect's
 //! health, and the attempt that exhausts the retries counts once.
 //! The retry sends exactly what the failed attempt composed, kept with it
-//! while the retry is scheduled ([`Resend`]); a `work_item.create` naming
-//! no provider was pinned to the active one when composed (tsk999). An
+//! while the retry is scheduled ([`Resend`]); a `work_item.create` in it
+//! files on the tracker active when it's sent, as every create does
+//! (tsk1058). An
 //! attempt cut off by oxplow stopping is retried the same way, timed from
 //! when it started — found at start by [`recover_interrupted`] when no
 //! pump delivery will find it. Anything else — a step inside oxplow,
@@ -601,7 +602,7 @@ pub(crate) async fn run_reaction(
         };
         match composed {
             Reaction::Skip(why) => return skipped(why).await,
-            Reaction::Run { calls, events } => (pin_providers(svc, calls), events),
+            Reaction::Run { calls, events } => (calls, events),
         }
     };
     let resend = serde_json::to_string(&Resend {
@@ -718,27 +719,6 @@ fn schedule_retry_tx(
         oxplow_domain::Timestamp::from_unix_ms(retry.from.unix_ms() + delay.as_millis() as i64);
     oxplow_db::effect_run_store::schedule_retry_tx(tx, key, &at.to_string(), &retry.resend)?;
     Ok(true)
-}
-
-/// Each `work_item.create` in `calls` that names no provider, pinned to
-/// the one active now (tsk999): the composition is what an automatic retry
-/// sends, and it must file where the first attempt meant to, not wherever
-/// the active provider is by then.
-fn pin_providers(svc: &Services, calls: Vec<CommandCall>) -> Vec<CommandCall> {
-    let active = svc.work_items.active();
-    calls
-        .into_iter()
-        .map(|mut call| {
-            if call.name == "work_item.create" {
-                if let Some(input) = call.input.as_object_mut() {
-                    if input.get("provider").is_none_or(serde_json::Value::is_null) {
-                        input.insert("provider".into(), json!(active));
-                    }
-                }
-            }
-            call
-        })
-        .collect()
 }
 
 /// How late a retry may be sent by itself: one due longer ago (oxplow was

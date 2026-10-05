@@ -1568,7 +1568,7 @@ acceptance of the same effort (its `v_effect_run` reaction to that event
 is `ok` or `proposed`, tsk991; an earlier acceptance from before its
 approval, or whose reaction skipped or failed, doesn't count). With
 nothing unchecked it skips; otherwise it files **one** item on the
-reviewed item's provider — "Verify what the review of <effort> accepted
+active tracker, like every new item (tsk1058) — "Verify what the review of <effort> accepted
 unchecked", a checklist naming each claim and decision. Each line is
 text, not markdown: whitespace becomes one space, markdown's punctuation
 is escaped and a long one is cut at 300 characters, and the list stops
@@ -2002,10 +2002,11 @@ instead of running the script again (tsk887): composing afresh could read
 changed rows, change a step's input and so its key, and make a write that
 landed again. It is sent only while every step still goes to a provider
 keeping the promise; otherwise it isn't sent (`Reacted::NotResent`) and the
-failure counts, a person's. A composed `work_item.create` that names no
-provider is **pinned** to the one active when it was composed
-(`pin_providers`, tsk999): its retry files where the first attempt meant
-to, not wherever the active provider is by then. Each step carries its idempotency key, the
+failure counts, a person's. A composed `work_item.create` files on the
+tracker active when it's **sent**, like every create (tsk1058): pointed
+elsewhere meanwhile, the retry goes there — or, when that tracker keeps
+no idempotent writes (oxplow's own), isn't sent by itself and waits for a
+person. Each step carries its idempotency key, the
 same on every attempt ([commands.md](./commands.md) `effect_step_key`), so
 a write that landed lands once. A person's **Retry** composes afresh from
 what the effect reads now — the person decides it should. A loop every 5 s (`spawn_auto_retry`, at boot — its first tick only
@@ -2239,9 +2240,11 @@ Every contribution that runs — a provider instance, a collector, an effect
   golden `crates/oxplow-app/tests/fixtures/repair-prompt.md`: what failed,
   its intent and declaration, its recent failures, what `plugin check`
   reports, its intent examples, `engine:` against the running oxplow, and
-  what to do). When the active provider can't take it — not running, or
-  the very contribution just disabled — it's filed on oxplow's own tasks
-  with a line saying why (tsk714), so a repair item always exists. A later
+  what to do). It goes to the active tracker like every item (tsk1058).
+  When that tracker can't take it — not running, or the very contribution
+  just disabled (tsk714) — the delivery fails naming it (retried, then a
+  dead letter in Delivery, beside the tracker's own alert); nothing is
+  filed in oxplow's list instead. A later
   disable while the item is open comments on it;
   once it's done or canceled the next disable files a new one
   (`plugin_health.repair_item`, `v_plugin_health.repair_item` while open).

@@ -55,12 +55,15 @@ pub trait WorkItemsProbe: Send + Sync {
     async fn verbs(&self, provider: &str) -> Option<Arc<dyn ExternalVerbs>>;
     /// The refs of `provider`'s live rows titled `title`.
     async fn titled(&self, provider: &str, title: &str) -> Vec<String>;
+    /// The host's active work-items provider: where every create files.
+    async fn active(&self) -> String;
 }
 
 /// Run every check against `provider` (its id and declared features) as
-/// `actor`, writing through `items`. `native` is the provider's own
-/// fields for the items the suite files (oxplow: the actor's thread, so
-/// `in_progress` claims it), `None` for none.
+/// `actor`, writing through `items`, on the host's active tracker (the
+/// suite checks it's `provider`). `native` is the provider's own fields
+/// for the items it files, `None` for none; an agent `actor` files them on
+/// its thread, so `in_progress` claims it on oxplow.
 pub async fn suite(
     items: &WorkItems,
     provider: &str,
@@ -72,8 +75,23 @@ pub async fn suite(
     let mut findings = Vec::new();
     let mut fail = |check: &'static str, message: String| findings.push(Finding { check, message });
     let prefix = format!("work_item:{provider}:");
+    // Every create files on the active tracker (tsk1058): the host runs the
+    // suite with `provider` active.
+    let active = probe.active().await;
+    if active != provider {
+        fail(
+            "create",
+            format!(
+                "`{provider}` isn't the active work-items provider (`{active}` is): the suite \
+                 files on it"
+            ),
+        );
+        return SuiteRun {
+            findings,
+            left: Vec::new(),
+        };
+    }
     let new = |title: &str, parent_ref: Option<String>| NewItem {
-        provider: Some(provider.to_string()),
         title: title.into(),
         body: "made by the conformance suite".into(),
         parent_ref,
@@ -542,6 +560,10 @@ impl WorkItemsProbe for ServicesProbe<'_> {
         self.0.work_items.get(provider).ok()?.external
     }
 
+    async fn active(&self) -> String {
+        self.0.work_items.active()
+    }
+
     async fn titled(&self, provider: &str, title: &str) -> Vec<String> {
         let (prefix, title) = (format!("work_item:{provider}:%"), title.to_string());
         self.0
@@ -603,7 +625,7 @@ mod tests {
             &items,
             &provider.id,
             provider.features,
-            Some(serde_json::json!({ "thread": fx.thread.to_string() })),
+            None,
             &ServicesProbe(&fx.svc),
             &actor,
         )

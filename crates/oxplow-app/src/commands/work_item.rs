@@ -1,8 +1,8 @@
 //! The `work_item.*` commands (P2.6 / P5.C2 / P7.A1): the one write
 //! surface for every provider's items. Each verb is a `Dispatch` command
 //! (`.context/commands.md`): the bus routes it by the item's provider —
-//! the ref's segment, or for `create` the named (else active) provider —
-//! to oxplow's `Tx` core in the bus's transaction, or to another
+//! the ref's segment, or for `create` the active one: every new item goes
+//! to the tracker the person chose (tsk1058) — to oxplow's `Tx` core in the bus's transaction, or to another
 //! provider's [`ExternalVerbs`] through its process, with **one** audit
 //! row `work_item.<verb>` either way. A provider the registry doesn't
 //! know is refused at `/ref` naming the registered ones; a parent or
@@ -13,7 +13,9 @@
 //! The inputs are the `v_work_item` columns, one shape for every
 //! provider: `title`, `body`, `parent_ref`, a canonical `state` and the
 //! provider's `native_state`, and `native` for its own fields — oxplow's
-//! `thread` and `priority` ([`OxplowNative`]). `reorder` and `move` stay
+//! `priority` ([`OxplowNative`]). The thread a new item is filed on is
+//! oxplow's record, not a tracker's: `create`'s common `thread`
+//! ([`filing_thread`]). `reorder` and `move` stay
 //! oxplow's own (`Tx`): they place an item in oxplow's lists.
 //!
 //! oxplow's cores: `work_item.transition` is `task_store::set_status_tx`
@@ -120,14 +122,10 @@ pub fn oxplow_status(
     }
 }
 
-/// oxplow's own fields, under `native`: the thread a new task is filed
-/// on (absent: the backlog) and its priority.
+/// oxplow's own fields, under `native`: a task's priority.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OxplowNative {
-    /// `thr3`; only on `create` (a task moves lists with `work_item.move`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<TaskPriority>,
 }
@@ -137,7 +135,7 @@ fn oxplow_native(native: Option<&Value>) -> Result<OxplowNative, CommandError> {
         None => Ok(OxplowNative::default()),
         Some(v) => serde_json::from_value(v.clone()).map_err(|e| CommandError::Invalid {
             field: Some("/native".into()),
-            message: format!("oxplow's native fields are `thread` and `priority`: {e}"),
+            message: format!("oxplow's native field is `priority`: {e}"),
         }),
     }
 }
@@ -147,6 +145,28 @@ fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
         field: Some(field.into()),
         message: format!("{e}"),
     })
+}
+
+/// The thread a new item is filed on, whatever tracker holds it
+/// (tsk1058): the one `create` names, else an agent's own; none for a
+/// person who names none (oxplow's backlog).
+pub fn filing_thread(
+    actor: &oxplow_domain::Actor,
+    named: Option<&str>,
+) -> Result<Option<ThreadId>, CommandError> {
+    match named {
+        Some(raw) => parse_thread(raw, "/thread").map(Some),
+        None => Ok(agent_thread(actor)),
+    }
+}
+
+fn agent_thread(actor: &oxplow_domain::Actor) -> Option<ThreadId> {
+    use oxplow_domain::Actor;
+    match actor {
+        Actor::Agent { thread_id, .. } => *thread_id,
+        Actor::Lens { on_behalf_of, .. } => agent_thread(on_behalf_of),
+        _ => None,
+    }
 }
 
 /// The oxplow task `item_ref` names. Refused (an `Invalid` at `field`)
@@ -283,19 +303,15 @@ fn create_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemCreateInput = parse(input.clone())?;
-    let (id, field) = match &input.provider {
-        Some(p) => (p.clone(), "/provider"),
-        None => (registry.active(), "/provider"),
-    };
-    let provider =
-        provider_named(registry, &id, field).map_err(|e| match (&input.provider, e) {
-            // The active provider isn't running: say so, never file elsewhere.
-            (None, CommandError::Invalid { message, .. }) => invalid_at(
-                field,
-                format!("the active work-items provider isn't running: {message}"),
-            ),
-            (_, e) => e,
-        })?;
+    // Always the tracker the person chose (tsk1058); one that isn't
+    // running is said so, never a fallback.
+    let provider = provider_named(registry, &registry.active(), "").map_err(|e| match e {
+        CommandError::Invalid { message, .. } => CommandError::Invalid {
+            field: None,
+            message: format!("the active work-items provider isn't running: {message}"),
+        },
+        e => e,
+    })?;
     if let Some(parent) = &input.parent_ref {
         supports(
             &provider,
@@ -386,9 +402,10 @@ pub(crate) fn provider_for(
 }
 
 /// A `work_item.<verb>` command: routed by `target` to oxplow's `tx` core
-/// or to the provider's process. The external run hands the provider the
-/// input less `provider`, and renames its inverse (a verb) back to
-/// `work_item.<verb>`, so an undo dispatches again.
+/// or to the provider's process. A `create`'s `thread` is resolved here
+/// ([`filing_thread`]) for the host to anchor the item to, and the
+/// provider's inverse (a verb) is renamed back to `work_item.<verb>`, so
+/// an undo dispatches again.
 fn dispatching(
     spec: CommandSpec,
     registry: WorkItemsRegistry,
@@ -415,8 +432,14 @@ fn dispatching(
                 ),
             })?;
             let mut input = input;
-            if let Value::Object(fields) = &mut input {
-                fields.remove("provider");
+            if verb == "create" {
+                if let Value::Object(fields) = &mut input {
+                    let named = fields.get("thread").and_then(Value::as_str);
+                    match filing_thread(&invocation.actor, named)? {
+                        Some(t) => fields.insert("thread".into(), Value::String(t.to_string())),
+                        None => fields.remove("thread"),
+                    };
+                }
             }
             let out = verbs
                 .invoke(&invocation.actor, verb, input, invocation.idempotency_key)
@@ -607,15 +630,11 @@ pub fn command(registry: WorkItemsRegistry) -> Command {
 
 pub const CREATE: &str = "work_item.create";
 
-/// A new item on a provider (the active one when none is named),
-/// optionally straight into a state.
+/// A new item on the active tracker (tsk1058), optionally straight into
+/// a state.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemCreateInput {
-    /// The provider to file on (`oxplow`, `linear`); absent, the active
-    /// one — which must be running (never a silent fallback).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
@@ -630,19 +649,25 @@ pub struct WorkItemCreateInput {
     /// given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_state: Option<String>,
-    /// The provider's own fields (oxplow: `{ thread?, priority? }`;
-    /// absent `thread` files onto the backlog).
+    /// The tracker's own fields (oxplow: `{ priority? }`), as its
+    /// `create` declares them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native: Option<Value>,
+    /// The thread it's filed on (`thr3`): absent, an agent's own, or none
+    /// for a person (oxplow's backlog).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
 }
 
 pub fn create_spec() -> CommandSpec {
     spec(
         CREATE,
-        "File a work item on a provider (the active one by default), optionally straight into \
-         a state. oxplow's native fields: { thread, priority }; absent thread files onto the \
-         backlog, in_progress opens its effort in the same transaction. On oxplow the \
-         result carries `link_warnings`: the `[[…]]` links in the body that don't resolve.",
+        "File a work item on the active tracker (the one the person chose), optionally \
+         straight into a state. `thread` is the thread it's filed on: absent, an agent's own \
+         (a person's lands on the backlog). `native` is the tracker's own fields as its create \
+         declares them (oxplow: { priority }). On oxplow, in_progress opens its effort in the \
+         same transaction, and the result carries `link_warnings`: the `[[…]]` links in the \
+         body that don't resolve.",
         schema_of::<WorkItemCreateInput>(),
         Confirm::Never,
         // Undoing a filing would be deleting an item — not what undo is for.
@@ -693,11 +718,7 @@ fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             .map(|r| oxplow_task(&registry, r, "/parent_ref"))
             .transpose()?;
         let native = oxplow_native(input.native.as_ref())?;
-        let thread = native
-            .thread
-            .as_deref()
-            .map(|raw| parse_thread(raw, "/native/thread"))
-            .transpose()?;
+        let thread = filing_thread(ctx.actor, input.thread.as_deref())?;
         let now = Timestamp::now();
         let status =
             oxplow_status(input.state, input.native_state.as_deref())?.unwrap_or(TaskStatus::Ready);
@@ -804,12 +825,6 @@ fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             Some(r) => Some(Some(oxplow_task(&registry, r, "/parent_ref")?)),
         };
         let native = oxplow_native(input.native.as_ref())?;
-        if native.thread.is_some() {
-            return Err(invalid_at(
-                "/native/thread",
-                "a task moves to another thread's list with `work_item.move`".into(),
-            ));
-        }
         let status = oxplow_status(input.state, input.native_state.as_deref())?;
         let not_found = |e: oxplow_domain::DomainError| match e {
             oxplow_domain::DomainError::NotFound => CommandError::Failed {
@@ -1325,7 +1340,7 @@ mod tests {
         };
         let filed = run(
             CREATE,
-            json!({ "provider": "oxplow", "title": "linky", "body": "see [[tsk99999]] and [[#12]]" }),
+            json!({ "title": "linky", "body": "see [[tsk99999]] and [[#12]]" }),
         )
         .await;
         let targets = |v: &Value| -> Vec<String> {
@@ -1497,7 +1512,8 @@ mod tests {
                 json!({
                     "title": "filed",
                     "body": "the body",
-                    "native": { "thread": fx.thread.to_string(), "priority": "high" },
+                    "thread": fx.thread.to_string(),
+                    "native": { "priority": "high" },
                 }),
                 false,
             )
@@ -1512,10 +1528,7 @@ mod tests {
                 Some("/native"),
             ),
             (json!({ "title": "x", "priority": "high" }), None),
-            (
-                json!({ "title": "x", "native": { "thread": "nope" } }),
-                Some("/native/thread"),
-            ),
+            (json!({ "title": "x", "thread": "nope" }), Some("/thread")),
         ] {
             let err = fx
                 .svc
@@ -1590,11 +1603,11 @@ mod tests {
         assert_eq!(fx.svc.work_items.active(), "linear");
     }
 
-    /// P7.A2: a `create` that names no provider files on the active one
-    /// — oxplow's by default — and when the active provider isn't
-    /// running it fails naming it: never a silent fallback to oxplow.
+    /// P7.A2, tsk1058: every `create` files on the active tracker — oxplow's
+    /// by default; one that isn't running is an error naming it, never a
+    /// fallback — and no caller can name another.
     #[tokio::test]
-    async fn a_create_without_a_provider_files_on_the_active_one() {
+    async fn every_create_files_on_the_active_tracker() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let filed = fx
             .svc
@@ -1606,12 +1619,25 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("work_item:oxplow:"));
+        // Naming a provider isn't an input: the person chose the tracker.
+        let named = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "provider": "oxplow", "title": "named" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(named, CommandError::Invalid { .. }), "{named:?}");
         fx.svc
             .config
             .write()
             .unwrap()
             .active_providers
-            .insert("work_items".into(), "linear".into());
+            .insert("work_items".into(), "tracker".into());
         let config = crate::config_service::read_config(&fx.svc.config);
         crate::capabilities::apply_active(&config, &fx.svc.db)
             .await
@@ -1625,27 +1651,67 @@ mod tests {
             .unwrap_err();
         match err {
             CommandError::Invalid { field, message } => {
-                assert_eq!(field.as_deref(), Some("/provider"));
+                assert_eq!(field, None);
                 assert!(
                     message.contains("active work-items provider isn't running")
-                        && message.contains("linear"),
+                        && message.contains("tracker"),
                     "{message}"
                 );
             }
             other => panic!("{other:?}"),
         }
         assert_eq!(list_order(&fx, None).await.len(), before, "nothing filed");
-        // Naming oxplow still files there.
-        fx.svc
+    }
+
+    /// tsk1058: the thread a work item is filed on is a common field, not
+    /// a tracker's own: an agent's create lands on its own thread unless it
+    /// names one, a person's on the one named (else the backlog).
+    #[tokio::test]
+    async fn a_create_is_filed_on_a_thread_by_the_common_field() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let agent = Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let mine = fx
+            .svc
+            .commands
+            .run(&agent, CREATE, json!({ "title": "mine" }), false)
+            .await
+            .unwrap();
+        assert_eq!(mine.result["thread_id"], fx.thread.to_string());
+        let named = fx
+            .svc
             .commands
             .run(
                 &Actor::Human,
                 CREATE,
-                json!({ "provider": "oxplow", "title": "named" }),
+                json!({ "title": "theirs", "thread": fx.thread.to_string() }),
                 false,
             )
             .await
             .unwrap();
+        assert_eq!(named.result["thread_id"], fx.thread.to_string());
+        let backlog = fx
+            .svc
+            .commands
+            .run(&Actor::Human, CREATE, json!({ "title": "later" }), false)
+            .await
+            .unwrap();
+        assert!(backlog.result["thread_id"].is_null(), "{}", backlog.result);
+        // oxplow's own fields are its priority only.
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "old", "native": { "thread": fx.thread.to_string() } }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
     }
 
     /// A link made by a person (no thread of their own) belongs to the
@@ -1919,7 +1985,12 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("work_item.move"), "{err}");
+        // A task changes lists with `work_item.move`; the thread isn't a
+        // native field.
+        assert!(
+            matches!(&err, CommandError::Invalid { field, .. } if field.as_deref() == Some("/native")),
+            "{err:?}"
+        );
     }
 
     /// A queued thread (tsk466) may edit a task and move it anywhere but
@@ -2009,7 +2080,7 @@ mod tests {
                     "title": "filed",
                     "body": "see [[tsk1]]",
                     "state": "in_progress",
-                    "native": { "thread": fx.thread.to_string() },
+                    "thread": fx.thread.to_string(),
                 }),
                 false,
             )
@@ -2059,7 +2130,7 @@ mod tests {
             .run(
                 &queued,
                 CREATE,
-                json!({ "title": "noted", "native": { "thread": "thr9" } }),
+                json!({ "title": "noted", "thread": "thr9" }),
                 false,
             )
             .await
@@ -2071,7 +2142,7 @@ mod tests {
             .run(
                 &queued,
                 CREATE,
-                json!({ "title": "mine now", "native": { "thread": "thr9" }, "state": "in_progress" }),
+                json!({ "title": "mine now", "thread": "thr9", "state": "in_progress" }),
                 false,
             )
             .await
@@ -2201,7 +2272,7 @@ mod tests {
     ) -> String {
         let mut input = json!({ "title": title });
         if let Some(t) = thread {
-            input["native"] = json!({ "thread": t.to_string() });
+            input["thread"] = json!(t.to_string());
         }
         fx.svc
             .commands

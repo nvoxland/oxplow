@@ -434,24 +434,30 @@ export async function readTaskEfforts(taskId: string): Promise<{ efforts: Effort
 
 const taskRef = (id: string) => `work_item:oxplow:${id}`;
 
-/** File a task on a thread (or the backlog, `null`). */
-export async function createTask(
+/** What `work_item.create` takes for a new task on a thread (or none,
+ *  `null`). It names no tracker: every create files on the active one
+ *  (tsk1058). The thread is the common field; priority is oxplow's own. */
+export function createTaskInput(
   threadId: string | null,
   input: { title: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
-): Promise<string> {
-  const native = {
-    ...(threadId ? { thread: threadId } : {}),
-    ...(input.priority ? { priority: input.priority } : {}),
-  };
-  const out = await runCommand("work_item.create", {
-    provider: "oxplow",
+): Record<string, unknown> {
+  return {
     title: input.title,
     ...(input.description ? { body: input.description } : {}),
     ...(input.parentId ? { parent_ref: taskRef(input.parentId) } : {}),
     // oxplow's status is its native state (the canonical one follows).
     ...(input.status ? { native_state: input.status } : {}),
-    ...(Object.keys(native).length > 0 ? { native } : {}),
-  });
+    ...(threadId ? { thread: threadId } : {}),
+    ...(input.priority ? { native: { priority: input.priority } } : {}),
+  };
+}
+
+/** File a task on a thread (or none, `null`). */
+export async function createTask(
+  threadId: string | null,
+  input: { title: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
+): Promise<string> {
+  const out = await runCommand("work_item.create", createTaskInput(threadId, input));
   return String((out.result as { ref?: unknown } | null)?.ref ?? "");
 }
 

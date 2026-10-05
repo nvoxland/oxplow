@@ -32,7 +32,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
   await openFromLauncher(page, "Settings");
-  await run(daemon, "work_item.create", { title: "Plum [fail]", native: { thread: daemon.thread } });
+  await run(daemon, "work_item.create", { title: "Plum [fail]", thread: daemon.thread });
   const row = page.locator('[data-testid^="reaction-row-e2e/note-created-"]');
   await expect(row).toBeVisible();
   await expect(row).toContainText("tsk999999");
@@ -48,7 +48,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
 
 test("a person's Backfill reaches what was logged before the effect was approved", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await run(daemon, "work_item.create", { title: "Fig", native: { thread: daemon.thread } });
+  await run(daemon, "work_item.create", { title: "Fig", thread: daemon.thread });
   await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
   await openFromLauncher(page, "Settings");

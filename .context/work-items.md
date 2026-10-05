@@ -44,12 +44,12 @@ There are two writers, one schema:
 `sort_index`, priority, author, note count), scoped to a thread, the
 backlog or everything, in list order. A thread's scope is
 `v_work_item.thread_id` (v2, tsk1041): an oxplow task's own thread, and
-an outside tracker's item **the thread that filed it** — the provider's
-`work_item.recorded` envelope carries the acting agent's thread as its
-anchor, and the projection keeps it from the item's first record
-(`work_item.filed_in_thread`, V167), so an agent's item on the active
-tracker shows on its thread's Board and in the rail's Work panel ("On your
-tracker"). A person's has none. Each read returns its `reads` so a
+an outside tracker's item **the thread it was filed on** — `create`'s
+common `thread`, else an agent's own (`filing_thread`, tsk1058), carried
+as the `work_item.recorded` envelope's anchor and kept by the projection
+from the item's first record (`work_item.filed_in_thread`, V167) — so it
+shows on that thread's Board and in the rail's Work panel ("On your
+tracker"). The tracker never sees the thread: it is oxplow's record. Each read returns its `reads` so a
 page re-runs with `useRerunOnChange`. Writes are `work_item.*` commands
 (`transitionWorkItem`; the task pages reorder and move through `reorderTasks` / `moveTask`). `modelIds.ts`
 converts the models' integer ids to the UI's `thr3` / `tsk42`.
@@ -89,8 +89,8 @@ state> }` for any provider — the bus dispatches it). Like Comment… and
 Link… it runs through `personCommands` (one person path: its
 confirmation and its error reporting). Every card opens its item's page
 (`workItemTabRef`). The oxplow task writes (`createTask`, `updateTask`)
-send a status as oxplow's `native_state` and thread / priority under
-`native`.
+send a status as oxplow's `native_state`, the thread as `create`'s
+common `thread`, and priority under `native`.
 
 **Another provider's item has a page of its own** (P6b.C3,
 `pages/WorkItemPage.tsx`; oxplow's tasks keep `TaskPage`):
@@ -135,7 +135,7 @@ item).
 - **`WorkItemsRegistry`** (`Services.work_items`): providers by name;
   `for_ref` picks one by the ref's provider segment, and an unknown one
   is refused naming the registered providers; `active()` names the
-  provider a `create` without one files on, read each time from the
+  provider every `create` files on, read each time from the
   config's `activeProviders` through the source `Services` gives it at
   boot — no copy, so a person's choice applies to the very next `create`
   (tsk1011; see below).
@@ -146,14 +146,15 @@ item).
 `commands/work_item.rs`). Each verb is a `Dispatch` command
 ([commands.md](./commands.md) "Tx, External and Dispatch"): the bus
 routes by the item's provider — the ref's segment, or for `create` the
-named (else active) provider — to oxplow's `Tx` core in the bus's
+active one — to oxplow's `Tx` core in the bus's
 transaction, or to the provider's `ExternalVerbs` through its process,
 with **one audit row** `work_item.<verb>` either way. The route also
 refuses, before anything runs: an unregistered provider (`/ref`, naming
 the registered), a parent or link target of another provider
 (`/parent_ref`, `/target`), and a feature the provider doesn't declare.
-An external run hands the provider the input less `provider` and renames
-its inverse to `work_item.<verb>`, so an undo dispatches again.
+An external `create` hands the provider the input less `thread` (the host
+anchors the item to it) and renames its inverse to `work_item.<verb>`, so
+an undo dispatches again.
 `reorder` and `move` stay oxplow's own `Tx` (they place a task in
 oxplow's lists). A Rust client, **`work_items::WorkItems`**
 (`Services::work_items_client()`), types the calls; the conformance
@@ -163,11 +164,15 @@ transition an effort's work item whatever its provider
 ([extensions.md](./extensions.md) "oxplow-review").
 
 **The contract is the `v_work_item` columns**, one shape for every
-provider (a provider's verb receives the same input, less `provider`):
+provider (a provider's verb receives the same input, less `create`'s
+`thread`):
 
-- `create { provider?, title, body?, parent_ref?, state?, native_state?,
-  native? }` — no `provider` files on the active one, which must be
-  running (never a silent fallback);
+- `create { title, body?, parent_ref?, state?, native_state?, native?,
+  thread? }` — **always on the active tracker** (tsk1058): the person
+  chose it, and nothing a caller says — a person, an agent, an effect or
+  oxplow itself — files anywhere else. One that isn't running is an
+  error, never a fallback. `thread` is the thread it's filed on: absent,
+  an agent's own; a person's without one has none (oxplow: the backlog);
 - `update { ref, title?, body?, parent_ref? ("" detaches), state?,
   native_state?, native? }`;
 - `transition { ref, to, native_state? }` — `to` canonical; a
@@ -179,8 +184,8 @@ provider (a provider's verb receives the same input, less `provider`):
 oxplow's mapping: its status is its `native_state` (`ready` is `todo`;
 `archived` rides on `done` or `canceled` — archiving as `done` a task that
 wasn't completed passes through `done` first, so the row reads as
-asked); `native` holds `{ thread?, priority? }` (`deny_unknown_fields`;
-`thread` only on `create` — a task changes lists with `work_item.move`).
+asked); `native` holds `{ priority? }` (`deny_unknown_fields`; a task
+changes lists with `work_item.move`).
 A `native_state` alone (no `state`) is a valid update or create: that is
 how the task writes send a status. A person's link (no thread of their
 own) belongs to the linked task's thread, else the target's.
@@ -211,9 +216,10 @@ key unset), oxplow's own when it names none; a capability nobody can swap
 is the one rule the rows follow (`publish_core`, `ProviderRegistry::
 publish`), and `capabilities::apply_active` restates the column at boot
 and on every reconcile (each config change); the registry's `active()`
-needs no restating, as it reads the config. A `work_item.create` naming no `provider` files on the active
-one; one that isn't running is `Invalid` at `/provider` ("the active
-work-items provider isn't running: …"), never a fallback to oxplow. The desktop reads it with
+needs no restating, as it reads the config. Every `work_item.create` files on the active
+one; one that isn't running is `Invalid` ("the active work-items provider
+isn't running: …"), never a fallback to oxplow. The conformance suite
+runs with the provider under test active, and checks it. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and
 `featuresFor(providers, provider)` → `WorkItemsFeatures` (the Rust type,
 exported through the bindings), which turns every flag a provider

@@ -8,7 +8,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   const created = await run<{ result: { id: string } }>(daemon, "work_item.create", {
     title: "Wombat fix",
     state: "in_progress",
-    native: { thread: daemon.thread },
+    thread: daemon.thread,
   });
   const effort = (
     await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {

@@ -47,8 +47,6 @@ pub fn oxplow_provider() -> WorkItemsProvider {
 /// A new item, as `work_item.create` takes it.
 #[derive(Debug, Clone, Default)]
 pub struct NewItem {
-    /// `None`: the active provider.
-    pub provider: Option<String>,
     pub title: String,
     pub body: String,
     pub parent_ref: Option<String>,
@@ -82,13 +80,13 @@ impl WorkItems {
     /// File an item; its ref.
     pub async fn create(&self, actor: &Actor, item: NewItem) -> Result<String, CommandError> {
         let input = serde_json::to_value(work_item::WorkItemCreateInput {
-            provider: item.provider,
             title: item.title,
             body: (!item.body.is_empty()).then_some(item.body),
             parent_ref: item.parent_ref,
             state: item.state,
             native_state: item.native_state,
             native: item.native,
+            thread: None,
         })
         .expect("input serializes");
         let out = self.run(actor, work_item::CREATE, input).await?;

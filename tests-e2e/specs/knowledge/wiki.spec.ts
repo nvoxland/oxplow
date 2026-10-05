@@ -4,7 +4,7 @@ import { expect, test } from "../../support/fixtures.js";
 test("a written page renders, and a task link in it opens the task", async ({ page, daemon }) => {
   const created = await run<{ result: { id: string } }>(daemon, "work_item.create", {
     title: "Wombat follow-up",
-    native: { thread: daemon.thread },
+    thread: daemon.thread,
   });
   await run(daemon, "knowledge.write_page", {
     slug: "wombat-plan",

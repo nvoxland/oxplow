@@ -14,7 +14,7 @@ test("a lens re-runs when its model changes, and pins to a new dashboard", async
   const lens = page.getByTestId("page-lens");
   await expect(lens).toContainText("No rows.");
   // A write elsewhere changes `v_task`: the open lens runs again by itself.
-  await run(daemon, "work_item.create", { title: "Numbat one", native: { thread: daemon.thread } });
+  await run(daemon, "work_item.create", { title: "Numbat one", thread: daemon.thread });
   await expect(lens).toContainText("Numbat one");
   await page.getByTestId("lens-pin").click();
   await page.getByTestId("lens-pin-new").click();

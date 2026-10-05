@@ -1,6 +1,7 @@
 # oxplow-review/verify-unchecked: after an acceptance that left claims
 # unverified or decisions inferred (a forced one), file one item to verify
-# them, on the reviewed item's provider — a checklist naming each. Its
+# them — a checklist naming each, on the active tracker like every new
+# item. Its
 # `input` reads the acceptance's subject (the effort, its item, what was
 # accepted unchecked) and is empty when nothing was, or when this effect
 # already followed up an earlier acceptance of the same effort.
@@ -32,8 +33,6 @@ def transform(x):
         return {"skip": "nothing was accepted unchecked"}
     effort = row["effort"]
     item = row["work_item"]
-    # `work_item:<provider>:<id>`: file on the same tracker.
-    provider = item.split(":")[1]
     items = ["- [ ] %s: %s" % (c["claim"], _text(c["statement"])) for c in claims]
     items.extend(["- [ ] %s: %s → %s" % (d["decision"], _text(d["question"]), _text(d["choice"])) for d in decisions])
     lines = ["The review of %s (%s) accepted these unchecked:" % (effort, item), ""]
@@ -44,7 +43,6 @@ def transform(x):
         "commands": [{
             "name": "work_item.create",
             "input": {
-                "provider": provider,
                 "title": "Verify what the review of %s accepted unchecked" % effort,
                 "body": "\n".join(lines),
             },

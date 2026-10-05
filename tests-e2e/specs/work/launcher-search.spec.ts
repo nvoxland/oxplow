@@ -7,7 +7,7 @@ import { expect, test } from "../../support/fixtures.js";
 test("search finds a task and a wiki page, and opens them", async ({ page, daemon }) => {
   const created = await run<{ result: { id: string } }>(daemon, "work_item.create", {
     title: "Quokka migration",
-    native: { thread: daemon.thread },
+    thread: daemon.thread,
   });
   await run(daemon, "knowledge.write_page", { slug: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
   await searchable(daemon, "quokka", "task");

@@ -100,7 +100,6 @@ pub fn filing_reason(
     }
     Some(build_filing_enforcement_pre_tool_reason(
         label,
-        thread.id,
         active_work_items,
     ))
 }
@@ -108,13 +107,13 @@ pub fn filing_reason(
 /// oxplow's own work-items provider.
 const OXPLOW: &str = "oxplow";
 
-/// The reason, naming the project's active work-items provider when it
-/// isn't oxplow's own: new work belongs on it (P7.A2). Every fix is a
-/// command (`mcp__oxplow__run_command`, P8.A10); `thread` is the agent's
-/// own, which a new task is filed on.
+/// The reason. Every fix is a command (`mcp__oxplow__run_command`,
+/// P8.A10); a new concern is filed the one way that works on any tracker
+/// — common fields only, on the agent's thread by default, on the active
+/// tracker always (tsk1058) — and on a tracker other than oxplow's own,
+/// whose `in_progress` opens no effort, the effort is opened on its ref.
 pub fn build_filing_enforcement_pre_tool_reason(
     tool_name: &str,
-    thread: oxplow_domain::ThreadId,
     active_work_items: &str,
 ) -> String {
     let mut lines = vec![
@@ -123,10 +122,10 @@ pub fn build_filing_enforcement_pre_tool_reason(
         "No effort is open in this stream. An effort opens when a task goes `in_progress` — `ready`-status rows don't count: `ready` is backlog, `in_progress` is the actual claim. The Work panel needs to honestly reflect what's shipping while it ships, not after.".into(),
         String::new(),
         "Pick one before re-issuing the edit — each is `mcp__oxplow__run_command`:".into(),
-        format!("  • New concern → `work_item.create` with `{{\"title\": …, \"body\": …, \"state\": \"in_progress\", \"native\": {{\"thread\": \"{thread}\"}}}}`, then re-run {tool_name}. When it ships: `command.sequence` of `work_item.transition` (`\"to\": \"done\"`) and `effort.report` (`summary`, `touched_files`)."),
-        format!("  • Fix/redo of a recently-closed done item → `work_item.transition` with `{{\"ref\": \"work_item:oxplow:tsk…\", \"to\": \"in_progress\"}}`, then re-run {tool_name}. Close it back to done when settled."),
+        format!("  • New concern → `work_item.create` with `{{\"title\": …, \"body\": …, \"state\": \"in_progress\"}}` (filed on your thread), then re-run {tool_name}. When it ships: `command.sequence` of `work_item.transition` (`\"to\": \"done\"`) and `effort.report` (`summary`, `touched_files`)."),
+        format!("  • Fix/redo of a recently-closed done item → `work_item.transition` with `{{\"ref\": <its ref>, \"to\": \"in_progress\"}}`, then re-run {tool_name}. Close it back to done when settled."),
         "  • Already dispatched against a ready row → `work_item.transition` it to `in_progress` first.".into(),
-        format!("  • Work tracked outside oxplow (a Linear/GitHub issue) → `effort.open` with `{{\"work_item\": \"work_item:<provider>:<id>\"}}`, then re-run {tool_name}; `effort.close` when done."),
+        format!("  • Work on an item that's already filed elsewhere → `effort.open` with `{{\"work_item\": <its ref>}}`, then re-run {tool_name}; `effort.close` when done."),
         String::new(),
         "Do not file a placeholder \"untracked work\" item — describe the real change you're about to make.".into(),
     ];
@@ -134,7 +133,7 @@ pub fn build_filing_enforcement_pre_tool_reason(
         lines.splice(
             2..2,
             [
-                format!("This project's work items live on `{active_work_items}` (its active provider). File a new concern there — `mcp__oxplow__run_command` `work_item.create` with `{{\"title\": …}}` files on `{active_work_items}` — then `effort.open` on the ref it returns, and re-run {tool_name}; `effort.close` when done. The `work_item:oxplow` lines below file oxplow tasks."),
+                format!("This project's active tracker is `{active_work_items}`: `work_item.create` files there, and moving its items to `in_progress` opens no effort — after filing (or picking up) one, `effort.open` with `{{\"work_item\": <its ref>}}`, then re-run {tool_name}; `effort.close` when done."),
                 String::new(),
             ],
         );
@@ -263,26 +262,26 @@ mod tests {
         );
     }
 
-    /// P7.A2: with another active work-items provider, the directive
-    /// says where new work belongs and how to file it there.
+    /// P7.A2, tsk1058: the directive files a new concern the one way that
+    /// works on any tracker — common fields only, no tracker named, on the
+    /// agent's thread by default — and on another tracker says to open the
+    /// effort on the ref it returns.
     #[test]
-    fn the_directive_names_another_active_provider() {
-        let thread = oxplow_domain::ThreadId::new(4);
-        let oxplow = build_filing_enforcement_pre_tool_reason("Edit", thread, "oxplow");
-        assert!(!oxplow.contains("active provider"), "{oxplow}");
-        // P8.A10: the fixes are commands; a new task goes on the agent's
-        // own thread.
+    fn the_directive_files_on_the_active_tracker() {
+        let oxplow = build_filing_enforcement_pre_tool_reason("Edit", "oxplow");
+        assert!(!oxplow.contains("active tracker is"), "{oxplow}");
+        // P8.A10: the fixes are commands.
+        assert!(oxplow.contains("`work_item.create`"), "{oxplow}");
+        for stale in ["\"native\"", "\"provider\"", "create_task", "Linear"] {
+            assert!(!oxplow.contains(stale), "{stale}: {oxplow}");
+        }
+        let other = build_filing_enforcement_pre_tool_reason("Edit", "tracker");
         assert!(
-            oxplow.contains("`work_item.create`") && oxplow.contains("\"thread\": \"thr4\""),
-            "{oxplow}"
+            other.contains("active tracker is `tracker`")
+                && other.contains("`work_item.create`")
+                && other.contains("effort.open"),
+            "{other}"
         );
-        assert!(!oxplow.contains("create_task"), "{oxplow}");
-        let linear = build_filing_enforcement_pre_tool_reason("Edit", thread, "linear");
-        assert!(
-            linear.contains("work items live on `linear` (its active provider)")
-                && linear.contains("`work_item.create`")
-                && linear.contains("effort.open"),
-            "{linear}"
-        );
+        assert!(!other.contains("\"native\""), "{other}");
     }
 }

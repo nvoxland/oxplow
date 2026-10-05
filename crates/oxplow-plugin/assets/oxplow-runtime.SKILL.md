@@ -14,20 +14,23 @@ you want to:
 - Record a follow-up you noticed but can't fix right now.
 
 Every task write is a **command** you run with `mcp__oxplow__run_command
-{ name, input }` (see "Commands" below). A task's ref is
-`work_item:oxplow:tsk42`. File one with:
+{ name, input }` (see "Commands" below). File one with:
 
 ```json
 { "name": "work_item.create",
   "input": { "title": "Fix login redirect loop", "body": "…",
-             "state": "in_progress",
-             "native": { "thread": "<your thread id, thr…>", "priority": "medium" } } }
+             "state": "in_progress" } }
 ```
 
-`state` is `todo` (the default — the backlog's `ready`) or `in_progress`
-(it opens your effort in the same run). Without `native.thread` the task
-goes on the project-wide backlog. The result carries the new task's
-`ref`.
+It goes on the project's **active tracker** — oxplow's own task list, or
+the tracker the person chose — always; you don't pick one. It's filed on
+your thread (`thread` names another). `state` is `todo` (the default —
+the backlog's `ready`) or `in_progress`. The result carries the new item's
+`ref` (`work_item:oxplow:tsk42` on oxplow's list). On oxplow's list
+`in_progress` opens your effort in the same run; on another tracker, open
+it yourself with `effort.open { work_item: <ref> }` (and `effort.close`
+when done). A tracker's own fields go under `native`, as its `create`
+declares them (oxplow's: `{ "priority": "high" }`).
 
 ## Task vs epic
 
@@ -203,10 +206,10 @@ state: `todo`, `in_progress`, `blocked`, `done`, `canceled`; oxplow's
 `work_item.update { ref, title?, body?, parent_ref?, state?, native? }`,
 `work_item.link { ref, target, link_type }` (`blocks`, `relates_to`, …),
 `work_item.comment { ref, body }` and `work_item.reorder { ref, before?,
-after? }`; `work_item.create { provider?, title, body?, … }` files on the
-active provider unless you name one. Another provider's item has no
-status-driven effort: bracket your work on it with `effort.open
-{ work_item }` / `effort.close { effort, summary? }`.
+after? }`; `work_item.create { title, body?, … }` always files on the
+active tracker. Another provider's item has no status-driven effort:
+bracket your work on it with `effort.open { work_item }` / `effort.close
+{ effort, summary? }`.
 
 ## Decisions and claims
 

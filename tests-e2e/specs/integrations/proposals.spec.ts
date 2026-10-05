@@ -10,7 +10,7 @@ test("an effect's destructive step waits in Approvals until a person approves it
   const { page, daemon } = fresh;
   await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
-  await run(daemon, "work_item.create", { title: "Pear [delete]", native: { thread: daemon.thread } });
+  await run(daemon, "work_item.create", { title: "Pear [delete]", thread: daemon.thread });
   await expandRailSection(page, "core:approvals");
   const card = page.locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   await expect(card).toBeVisible();

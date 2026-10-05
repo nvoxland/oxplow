@@ -376,30 +376,14 @@ impl AsyncEventConsumer for PluginRepair {
                     body: render(&context),
                     ..Default::default()
                 };
-                // The active provider may be down — even the contribution
-                // just disabled (tsk714): then oxplow's own tasks hold the
-                // item, which says why.
-                let active = svc.work_items.active();
-                match client.create(&Actor::System, item.clone()).await {
-                    Ok(item) => item,
-                    Err(e) if active != crate::work_items::PROVIDER => {
-                        let fallback = crate::work_items::NewItem {
-                            provider: Some(crate::work_items::PROVIDER.into()),
-                            body: format!(
-                                "{}\n\n> Filed on oxplow: the active work-items provider `{active}` \
-                                 couldn't take it ({e}).\n",
-                                item.body
-                            ),
-                            ..item
-                        };
-                        client.create(&Actor::System, fallback).await.map_err(|e| {
-                            DomainError::Invalid(format!("filing the repair item: {e}"))
-                        })?
-                    }
-                    Err(e) => {
-                        return Err(DomainError::Invalid(format!("filing the repair item: {e}")))
-                    }
-                }
+                // Filed on the active tracker, like every item (tsk1058).
+                // One that's down — even the contribution just disabled
+                // (tsk714) — fails this delivery: retried, then a dead
+                // letter in Delivery, beside the tracker's own alert.
+                client
+                    .create(&Actor::System, item)
+                    .await
+                    .map_err(|e| DomainError::Invalid(format!("filing the repair item: {e}")))?
             }
         };
         let seq = event.seq;
@@ -490,12 +474,12 @@ mod tests {
             .collect()
     }
 
-    /// P7 review (tsk714): when the active work-items provider isn't
-    /// running — it may be the very contribution that was disabled — the
-    /// repair item is filed on oxplow's own tasks, saying why, rather than
-    /// lost.
+    /// tsk1058: a repair item goes to the active tracker like every item.
+    /// When that tracker isn't running — it may be the very contribution
+    /// that was disabled (tsk714) — the delivery fails, naming it (retried,
+    /// then a dead letter in Delivery), and nothing lands in oxplow's list.
     #[tokio::test]
-    async fn a_repair_item_is_filed_on_oxplow_when_the_active_provider_is_down() {
+    async fn a_repair_item_waits_for_the_active_tracker() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx.svc.layout.project_dir.clone();
         let ext = root.join("oxplow/extensions/work");
@@ -515,30 +499,15 @@ mod tests {
             .write()
             .unwrap()
             .active_providers
-            .insert("work_items".into(), "linear".into());
+            .insert("work_items".into(), "tracker".into());
         let consumer = PluginRepair::new(Arc::downgrade(&fx.svc));
         let event = disable(&fx.svc, "3 failures in a row; the last: boom").await;
-        consumer.handle(&event).await.unwrap();
-        let items = repair_items(&fx.svc).await;
-        assert_eq!(items.len(), 1, "{items:?}");
-        assert!(items[0].0.starts_with("work_item:oxplow:"), "{items:?}");
-        let body = fx
-            .svc
-            .sql
-            .query_sql(
-                "SELECT body FROM v_work_item WHERE ref = ?1",
-                vec![oxplow_db::SqlCell::Text(items[0].0.clone())],
-                None,
-            )
-            .await
-            .unwrap();
-        let oxplow_db::SqlCell::Text(body) = &body.rows[0][0] else {
-            panic!("a body");
-        };
+        let err = consumer.handle(&event).await.unwrap_err();
         assert!(
-            body.contains("`linear`"),
-            "says why it isn't on the active provider: {body}"
+            err.to_string().contains("tracker"),
+            "names the tracker that couldn't take it: {err}"
         );
+        assert!(repair_items(&fx.svc).await.is_empty());
     }
 
     /// A disable files a repair item whose body is the prompt; a repeat

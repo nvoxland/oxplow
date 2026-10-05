@@ -4,7 +4,7 @@ import { expect, test } from "../../support/fixtures.js";
 test("an extension's ref renders as a link and opens its page", async ({ page, daemon }) => {
   const created = await run<{ result: { id: string } }>(daemon, "work_item.create", {
     title: "Platypus item",
-    native: { thread: daemon.thread },
+    thread: daemon.thread,
   });
   const n = created.result.id.replace(/^tsk/, "");
   // `[[item:<n>]]` is the test extension's wikilink for `e2e_item:<n>`.

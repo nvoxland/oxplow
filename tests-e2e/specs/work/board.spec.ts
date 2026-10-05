@@ -3,7 +3,7 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 test("moving a card transitions its item, and Undo moves it back", async ({ page, daemon }) => {
-  await run(daemon, "work_item.create", { title: "Card to move", native: { thread: daemon.thread } });
+  await run(daemon, "work_item.create", { title: "Card to move", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Board");
   const todo = page.getByTestId("board-column-todo");
@@ -18,8 +18,8 @@ test("moving a card transitions its item, and Undo moves it back", async ({ page
 });
 
 test("deleting an item asks first, then it's gone from the board", async ({ page, daemon }) => {
-  await run(daemon, "work_item.create", { title: "Card to delete", native: { thread: daemon.thread } });
-  await run(daemon, "work_item.create", { title: "Card to keep", native: { thread: daemon.thread } });
+  await run(daemon, "work_item.create", { title: "Card to delete", thread: daemon.thread });
+  await run(daemon, "work_item.create", { title: "Card to keep", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Board");
   await page.getByTestId("board-card").filter({ hasText: "Card to delete" }).getByText("Card to delete").click();

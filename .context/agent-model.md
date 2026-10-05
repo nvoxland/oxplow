@@ -789,12 +789,14 @@ open **effort**, not a task status: an effort opens in the same
 transaction as a task filed or moved `in_progress`
 (`work_item.create` / `work_item.update` / `work_item.transition`), or
 through `run_command effort.open {work_item}` for another provider's work
-item (a Linear/GitHub issue); an `in_progress` row alone isn't a claim
-(recovery gives it an effort at boot). The deny text names both doors —
-and, when the project's active work-items provider isn't oxplow
-(`activeProviders`, P7.A2), opens by saying the work items live there
-and how to file one (`run_command work_item.create`, which files on it,
-then `effort.open` on its ref): `PolicyFacts.active_work_items`, from
+item; an `in_progress` row alone isn't a claim
+(recovery gives it an effort at boot). The deny text names both doors.
+It files a new concern the one way that works on any tracker: common
+fields only, no tracker named, on the agent's thread by default (every
+create files on the active tracker, tsk1058). When the active tracker
+isn't oxplow's own (`activeProviders`, P7.A2), it opens by saying so —
+moving its items to `in_progress` opens no effort, so `effort.open` on
+the ref: `PolicyFacts.active_work_items`, from
 `Services.work_items.active()`.
 **A `ready`-status filing call does NOT satisfy the guard** — `ready` is
 backlog ("noticed for later"), only an open effort is a commitment to
@@ -1161,10 +1163,12 @@ is `{ to: done|canceled, native_state: archived }`.
   write is `run_command` (P8.A10 deleted the MCP task-write tools —
   `create_task`, `update_task`, `complete_task`, `upsert_task`,
   `transition_tasks`, `reorder_tasks`, `file_epic_with_children`):
-  `work_item.create { title, body?, parent_ref?, state?, native?: {
-  thread?, priority? } }` (`state` defaults to `todo` = oxplow `ready`;
-  `in_progress` opens the effort in the same run; no `native.thread`
-  files onto the backlog; the result carries `ref`), `work_item.update`,
+  `work_item.create { title, body?, parent_ref?, state?, native?,
+  thread? }` — always on the active tracker; filed on the agent's own
+  thread unless `thread` names another; `native` is the tracker's own
+  fields (oxplow: `{ priority? }`); `state` defaults to `todo` = oxplow
+  `ready`, and on oxplow's list `in_progress` opens the effort in the same
+  run; the result carries `ref` — `work_item.update`,
   `work_item.transition`, `work_item.reorder { ref, before?, after? }`,
   `work_item.link` / `work_item.comment`. There is no agent delete —
   `work_item.delete` is destructive, and an agent never confirms one:
