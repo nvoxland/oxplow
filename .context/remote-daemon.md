@@ -30,7 +30,9 @@ developer-facing mechanics.
   payload shapes the Tauri bridges emit; the `lsp` frame carries
   `LspSessionEvent` from `LspSessionManager` — see `.context/lsp.md`;
   the `acp` frame carries `AcpEvent` from `Services.acp` — see
-  `.context/agent-model.md` → "ACP agents"),
+  `.context/agent-model.md` → "ACP agents"; every channel is subscribed
+  before the upgrade is answered, so a client that writes once its socket
+  opens never misses the event its write caused — tsk995),
   `GET /health`. Same per-project instance lock as the shell.
   `/ipc` and `/events` require the UI token (see "Auth" below);
   `/health` doesn't. CORS stays permissive so the frontend can run in a

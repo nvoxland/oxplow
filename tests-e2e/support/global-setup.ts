@@ -1,8 +1,10 @@
 // Build the binaries the suite runs, once, and hand their paths to the
 // workers through the environment.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+
+import { LOG_DIR } from "./daemon.js";
 
 /** The executable cargo built for `bin` (`--message-format=json`). */
 function built(output: string, bin: string): string {
@@ -14,20 +16,25 @@ function built(output: string, bin: string): string {
   throw new Error(`cargo built no ${bin}`);
 }
 
-/** Specs wait on what they expect (web-first `expect`, `waitForModels`),
- *  never on time: a sleep is either too short (flaky) or too long. */
-function refuseSleeps(dir: string): void {
-  for (const name of readdirSync(dir)) {
+/** The spec files under `dir` that name a timer — Playwright's
+ *  `waitForTimeout` or a `setTimeout`, called or not (`test.setTimeout`
+ *  is a spec's time limit, not a sleep). Specs wait on what
+ *  they expect (web-first `expect`, `waitForModels`, `until`), never on
+ *  time: a sleep is either too short (flaky) or too long. */
+export function sleepsIn(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir).sort()) {
     const path = join(dir, name);
-    if (statSync(path).isDirectory()) refuseSleeps(path);
-    else if (/\.ts$/.test(name) && readFileSync(path, "utf8").includes("waitForTimeout(")) {
-      throw new Error(`${path} sleeps (waitForTimeout); wait on what it expects instead`);
-    }
+    if (statSync(path).isDirectory()) out.push(...sleepsIn(path));
+    else if (/\.ts$/.test(name) && /\bwaitForTimeout\b|(?<!test\.)\bsetTimeout\b/.test(readFileSync(path, "utf8"))) out.push(path);
   }
+  return out;
 }
 
 export default function globalSetup(): void {
-  refuseSleeps(join(import.meta.dirname, "..", "specs"));
+  const sleeps = sleepsIn(join(import.meta.dirname, "..", "specs"));
+  if (sleeps.length > 0) throw new Error(`these specs sleep; wait on what they expect instead:\n${sleeps.join("\n")}`);
+  rmSync(LOG_DIR, { recursive: true, force: true });
   const output = execFileSync(
     "cargo",
     ["build", "-p", "oxplow-daemon-sim", "-p", "oxplow-acp-fake", "-p", "oxplow-provider-fake", "--message-format=json"],

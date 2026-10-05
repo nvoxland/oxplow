@@ -143,8 +143,80 @@ async fn health() -> &'static str {
 /// frame is `{"channel":"oxplow"|"lsp"|"terminal"|"acp","payload":<event>}`
 /// with the event's serialized shape, so the renderer's handlers are
 /// transport-agnostic.
+///
+/// The channels are subscribed here, before the upgrade is answered
+/// (tsk995): the upgrade's callback runs only after the client has its
+/// `101`, so a client that writes once its socket opens could otherwise
+/// cause an event no forwarder was there to see.
 async fn events_ws(State(state): State<DaemonState>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| events_stream(socket, state))
+    let forwarders = subscribe(&state);
+    ws.on_upgrade(move |socket| events_stream(socket, forwarders))
+}
+
+/// One channel's subscription, waiting for the socket's queue to forward
+/// into.
+type Forwarder =
+    Box<dyn FnOnce(tokio::sync::mpsc::Sender<String>) -> tokio::task::JoinHandle<()> + Send>;
+
+/// A subscription to `rx`, each event framed by `frame`. A lagged
+/// subscriber just drops frames — the renderer's coarse "bucket changed,
+/// refetch" model recovers on the next event (and refetches everything on
+/// reconnect anyway).
+fn forward<T, F>(mut rx: tokio::sync::broadcast::Receiver<T>, frame: F) -> Forwarder
+where
+    T: Clone + Send + 'static,
+    F: Fn(&T) -> Option<String> + Send + 'static,
+{
+    Box::new(move |tx| {
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if let Some(text) = frame(&event) {
+                            if tx.send(text).await.is_err() {
+                                break; // client gone
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "events ws forwarder lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+    })
+}
+
+fn frame_json<T: serde::Serialize>(channel: &str, event: &T) -> Option<String> {
+    match serde_json::to_value(event) {
+        Ok(payload) => {
+            Some(serde_json::json!({ "channel": channel, "payload": payload }).to_string())
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, channel, "events ws: serialize failed");
+            None
+        }
+    }
+}
+
+/// Subscribe every channel the socket carries. Frame keys come from the
+/// shared channel registry so the daemon, the Tauri shell, and the
+/// renderer's demux table can't drift.
+fn subscribe(state: &DaemonState) -> [Forwarder; 4] {
+    let [oxplow_key, lsp_key, terminal_key, acp_key] = ws_frame_keys();
+    [
+        forward(state.ctx.events.subscribe_ui(), move |e| {
+            frame_json(oxplow_key, e)
+        }),
+        forward(state.ctx.lsp_sessions.subscribe(), move |e| {
+            frame_json(lsp_key, e)
+        }),
+        forward(state.ctx.terminal_sessions.subscribe(), move |e| {
+            frame_json(terminal_key, e)
+        }),
+        forward(state.ctx.acp.subscribe(), move |e| frame_json(acp_key, e)),
+    ]
 }
 
 /// The `/events` frame keys in [oxplow, lsp, terminal, acp] order,
@@ -167,73 +239,12 @@ fn ws_frame_keys() -> [&'static str; 4] {
     ]
 }
 
-/// Spawn a forwarder per broadcast source into one mpsc, then pump the
-/// socket from it. A lagged subscriber just drops frames — the
-/// renderer's coarse "bucket changed, refetch" model recovers on the
-/// next event (and refetches everything on reconnect anyway).
-async fn events_stream(socket: WebSocket, state: DaemonState) {
+/// Start each channel's forwarder into one queue, then pump the socket
+/// from it.
+async fn events_stream(socket: WebSocket, subscriptions: [Forwarder; 4]) {
     let (mut sink, mut inbound) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
-
-    fn forward<T, F>(
-        mut rx: tokio::sync::broadcast::Receiver<T>,
-        tx: tokio::sync::mpsc::Sender<String>,
-        frame: F,
-    ) -> tokio::task::JoinHandle<()>
-    where
-        T: Clone + Send + 'static,
-        F: Fn(&T) -> Option<String> + Send + 'static,
-    {
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if let Some(text) = frame(&event) {
-                            if tx.send(text).await.is_err() {
-                                break; // client gone
-                            }
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::warn!(skipped = n, "events ws forwarder lagged");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        })
-    }
-
-    fn frame_json<T: serde::Serialize>(channel: &str, event: &T) -> Option<String> {
-        match serde_json::to_value(event) {
-            Ok(payload) => {
-                Some(serde_json::json!({ "channel": channel, "payload": payload }).to_string())
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, channel, "events ws: serialize failed");
-                None
-            }
-        }
-    }
-
-    // Frame keys come from the shared channel registry so the daemon,
-    // the Tauri shell, and the renderer's demux table can't drift.
-    let [oxplow_key, lsp_key, terminal_key, acp_key] = ws_frame_keys();
-    let forwarders = [
-        forward(state.ctx.events.subscribe_ui(), tx.clone(), move |e| {
-            frame_json(oxplow_key, e)
-        }),
-        forward(state.ctx.lsp_sessions.subscribe(), tx.clone(), move |e| {
-            frame_json(lsp_key, e)
-        }),
-        forward(
-            state.ctx.terminal_sessions.subscribe(),
-            tx.clone(),
-            move |e| frame_json(terminal_key, e),
-        ),
-        forward(state.ctx.acp.subscribe(), tx.clone(), move |e| {
-            frame_json(acp_key, e)
-        }),
-    ];
+    let forwarders = subscriptions.map(|start| start(tx.clone()));
     drop(tx);
 
     loop {
@@ -839,35 +850,29 @@ mod tests {
         assert_eq!(resp["error"]["code"], "INVALID");
     }
 
-    #[tokio::test]
-    async fn events_ws_streams_oxplow_events() {
+    /// tsk995: the socket listens before it opens — an event emitted the
+    /// moment a client sees the upgrade reaches it, so a client can open
+    /// the socket, then write, and never miss what its write caused.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn an_event_emitted_as_the_socket_opens_arrives() {
         use futures::StreamExt as _;
         let (svc, _dir) = services();
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
         let url = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
-        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-        // The server-side forwarders subscribe after the upgrade
-        // completes, so a single immediate emit can race them — keep
-        // emitting until the first frame lands.
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                svc.events
-                    .emit(oxplow_app::OxplowEvent::BackgroundTasksChanged);
-                match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
-                    Ok(Some(Ok(msg))) if msg.is_text() => {
-                        return msg.into_text().unwrap().to_string()
-                    }
-                    _ => continue,
-                }
-            }
-        })
-        .await
-        .expect("ws frame within timeout");
-        let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
-        assert_eq!(v["channel"], "oxplow");
-        assert_eq!(v["payload"]["kind"], "backgroundTasksChanged");
+        for _ in 0..50 {
+            let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+            svc.events
+                .emit(oxplow_app::OxplowEvent::BackgroundTasksChanged);
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
+                .await
+                .expect("the event emitted as the socket opened")
+                .unwrap()
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+            assert_eq!(v["payload"]["kind"], "backgroundTasksChanged");
+        }
     }
 
     #[tokio::test]
@@ -879,27 +884,22 @@ mod tests {
             .unwrap();
         let url = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
         let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-        // Same subscribe-race handling as the oxplow-events test above.
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                svc.lsp_sessions.emit_event_for_tests(
-                    oxplow_app::lsp_sessions::LspSessionEvent::SessionStatus {
-                        stream_id: "s-1".into(),
-                        language: "rust".into(),
-                        status: oxplow_app::lsp_sessions::LspSessionStatus::Crashed,
-                        message: Some("boom".into()),
-                    },
-                );
-                match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
-                    Ok(Some(Ok(msg))) if msg.is_text() => {
-                        return msg.into_text().unwrap().to_string()
-                    }
-                    _ => continue,
-                }
-            }
-        })
-        .await
-        .expect("ws frame within timeout");
+        svc.lsp_sessions.emit_event_for_tests(
+            oxplow_app::lsp_sessions::LspSessionEvent::SessionStatus {
+                stream_id: "s-1".into(),
+                language: "rust".into(),
+                status: oxplow_app::lsp_sessions::LspSessionStatus::Crashed,
+                message: Some("boom".into()),
+            },
+        );
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
+            .await
+            .expect("ws frame within timeout")
+            .unwrap()
+            .unwrap()
+            .into_text()
+            .unwrap()
+            .to_string();
         let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
         assert_eq!(v["channel"], "lsp");
         assert_eq!(v["payload"]["kind"], "sessionStatus");

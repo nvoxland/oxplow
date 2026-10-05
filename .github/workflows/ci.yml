@@ -227,12 +227,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload traces
+      - name: Upload traces and daemon logs
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: e2e-traces
-          path: tests-e2e/.output/results
+          path: |
+            tests-e2e/.output/results
+            tests-e2e/.output/daemons
           if-no-files-found: ignore
           retention-days: 14
 

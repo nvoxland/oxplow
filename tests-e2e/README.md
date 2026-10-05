@@ -31,43 +31,58 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   (two pull requests) — the documented example, no GitHub.
 - **`support/daemon.ts`** starts one daemon: `oxplow-daemon-sim` (the daemon
   with its secrets in memory — nothing reaches the keychain) over a throwaway
-  git project, with its own `OXPLOW_HOME` and `TMUX_TMPDIR` and no `$TMUX`
-  (a tmux client finds its server by it first); a tmux server it started
-  is killed with it. (No spec starts one today: the threads speak ACP
+  git project, with its own `OXPLOW_HOME`, `HOME` (no rc file read, no
+  shell history written), `SHELL=/bin/sh`, no global or system git config,
+  and its own `TMUX_TMPDIR` with no `$TMUX` (a tmux client finds its
+  server by it first); a tmux server it started is killed with it. Its
+  stderr is kept in `tests-e2e/.output/daemons/` and named in a failure to
+  start; whatever fails before it listens, the process is killed and its
+  project removed, and `stop()` returns for a daemon a signal already
+  killed. (No spec starts one today: the threads speak ACP
   and the Terminal page is a plain shell.) `ipc()` calls
   `/ipc/<name>` as the person; `run()` runs a bus command, confirmed;
   `settle()` waits until boot's background tasks are done; `waitForModels()`
-  opens `/events` first, does a write, and resolves once the daemon says
-  each named model changed — so a seeding write is never raced;
+  opens `/events` first (the daemon subscribes before answering the
+  upgrade), does a write, and resolves once the daemon says each named
+  model changed — so a seeding write is never raced;
   `approveProgram()` / `approveCollector()` approve a program or an
   extension's collector as a person does; `searchable()` waits until site
   search has indexed a write;
-  `until()` polls any such background state.
+  `until()` polls any such background state, trying a check that throws
+  again and naming its last error on timeout. `ipc()` on a reply that
+  isn't JSON names the call, the HTTP status and what came back.
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
   - `daemon`, one per worker. Before any page opens it selects an ACP thread
     on the fake agent: the boot thread is a terminal agent's, and the suite
     never starts a real agent CLI.
+  - A workspace that fails while booting is stopped and removed; each
+    fixture tears down in a `finally`.
   - `daemon` is settled before any page opens — boot's background tasks
     done and the extensions' models published — and carries the `stream`
     and `thread` its pages open on.
   - `storageState` points the page at that daemon (`connectedTo()` builds one
     for a context of a spec's own, e.g. with another token).
-  - `pageErrors` fails any spec whose page threw.
+  - `page` fails any spec whose page threw.
   - `fresh` — a daemon and page of the spec's own, for a spec whose state
-    no other may touch first (nothing approved, an empty project).
+    no other may touch first (nothing approved, an empty project). Its page
+    has the same guard, and a spec on `fresh` alone never boots the
+    worker's daemon.
 - **`support/ui.ts`** — a person's moves (`expandRailSection`, `openNewTask`,
   `openFromLauncher` — which waits for the query's own row before Enter).
-- **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect` or
-  `waitForModels`, never a sleep: global setup refuses a spec that calls
-  `waitForTimeout`.
-- **Reports**: a JUnit report at `tests-e2e/.output/junit.xml` and, for a
-  failed spec, its trace under `tests-e2e/.output/results` (both gitignored).
+- **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`,
+  `waitForModels` or `until`, never a sleep: global setup refuses a spec
+  that names `waitForTimeout` or `setTimeout` (`test.setTimeout`, a spec's
+  time limit, is fine). `specs/harness/` checks the helpers themselves.
+- **Reports**: a JUnit report at `tests-e2e/.output/junit.xml`, for a
+  failed spec its trace under `tests-e2e/.output/results`, and every
+  daemon's log under `tests-e2e/.output/daemons` (all gitignored).
 - **Projects**: `chromium` runs every spec; `webkit` runs
   `specs/components/` (a custom component's frame, the one place the two
   engines are checked apart — the macOS window is WebKit).
 - **CI**: the `e2e` job in `.github/workflows/ci.yml` — Chromium and WebKit,
-  two workers, one retry, the JUnit report uploaded always and traces on
-  failure. `daemon-contract` stays browser-free.
+  two workers, no retries (a spec that passes only on a second try is a
+  failure to fix), the JUnit report uploaded always and traces and daemon
+  logs on failure. `daemon-contract` stays browser-free.
 
 ## What the specs cover
 

@@ -11,7 +11,8 @@ export default defineConfig({
   globalSetup: "./tests-e2e/support/global-setup.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // A spec that passes only on a second try is a failure to fix, not hide.
+  retries: 0,
   workers: process.env.CI ? 2 : undefined,
   timeout: 60_000,
   expect: { timeout: 15_000 },
