@@ -2,7 +2,6 @@
 
 What this doc covers: the canonical ref grammar, the kind registry, and
 how refs replace tab ids, `page_ref` kinds and `[[…]]` wikilink shapes.
-Target design: [target-architecture.md](./target-architecture.md) §4.
 Built so far: the grammar (P1.1, tsk403); the kind registry, the Rust
 `[[…]]` translation and the canonical `page_ref` vocabulary (P1.2,
 tsk404); the TS parser, tab ids, wikilink hrefs and comment anchors

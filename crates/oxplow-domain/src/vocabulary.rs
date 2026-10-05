@@ -1,4 +1,5 @@
-//! The vocabulary (P8.D1, `.context/target-architecture.md` §5, §10.1):
+//! The vocabulary (P8.D1, `.context/data-model.md` "event_log",
+//! `.context/extensions.md`):
 //! what the event log accepts — every event type at every version, with
 //! its schema and upcasts — and what a ref may name — every ref kind with
 //! its id shape. Core's, plus what the running extensions declare

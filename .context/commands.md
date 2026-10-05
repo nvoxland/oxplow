@@ -2,8 +2,7 @@
 
 What this doc covers: the command bus — what a command declares, who
 may run it, the pipeline every run goes through, the audit and undo,
-and how a new command is added. Target design:
-[target-architecture.md](./target-architecture.md) §7. Built in
+and how a new command is added. Built in
 P1.8–P1.10 (tsk410–412): the bus, `config.*`, and the generic MCP
 surface (`list_commands` / `run_command`) with caller identity.
 

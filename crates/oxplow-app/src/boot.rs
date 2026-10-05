@@ -413,7 +413,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     );
 
     // Event retention (P3.11): expire old agent/test payloads and bodies
-    // per `.context/target-architecture.md` §5.4 — a while after boot (the
+    // per `.context/data-model.md` "event_log" — a while after boot (the
     // first sweep after an upgrade may have a large backlog, and hooks
     // shouldn't meet it while the app is starting), then daily.
     // Each sweep reads the project's windows (`eventRetention`) as they

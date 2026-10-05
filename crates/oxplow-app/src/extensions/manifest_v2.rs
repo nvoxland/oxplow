@@ -1,5 +1,4 @@
-//! `extension.yaml`, manifest version 2 (`.context/extensions.md`;
-//! `.context/target-architecture.md` §10).
+//! `extension.yaml`, manifest version 2 (`.context/extensions.md`).
 //!
 //! A v2 manifest declares every contribution as data, carries the
 //! plugin's **intent**, says whether it is **private** or **shared**, and

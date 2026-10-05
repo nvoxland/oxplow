@@ -1,8 +1,7 @@
 # Knowledge (the wiki)
 
 The per-project wiki: pages at `.oxplow/wiki/<slug>.md`, their row in
-`wiki_page` and their links in `page_ref` (P5.C3, `target-architecture.md`
-§6). Pages are agent-written writeups, diagrams and explanations; the
+`wiki_page` and their links in `page_ref` (P5.C3). Pages are agent-written writeups, diagrams and explanations; the
 file is the page, the row and edges are derived from it.
 
 ## One write path: `knowledge.write_page`

@@ -1,5 +1,5 @@
 //! Retention for the event log's bodies (P3.11,
-//! `.context/target-architecture.md` §5.4). Envelopes are tiny and are
+//! `.context/data-model.md` "event_log"). Envelopes are tiny and are
 //! what timelines and attribution rely on, so they are kept; payloads and
 //! large content (tool input and output) are the bulk and the privacy
 //! exposure, so they expire per namespace:

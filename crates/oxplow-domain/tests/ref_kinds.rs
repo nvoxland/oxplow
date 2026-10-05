@@ -1,5 +1,5 @@
 //! The kind registry and the `[[…]]` sugar → canonical ref translation
-//! (target-architecture §4.2). The registry is the one list of what a ref
+//! (`.context/refs.md`). The registry is the one list of what a ref
 //! can name; the translation is what lets `[[tsk42]]`, `[[git:abc1234]]`
 //! and `[[src/a.rs@HEAD:42]]` keep working while everything downstream
 //! sees `work_item:oxplow:tsk42`, `commit:abc1234`,

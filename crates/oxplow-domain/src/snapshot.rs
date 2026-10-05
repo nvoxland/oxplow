@@ -1,6 +1,5 @@
 //! The snapshot capability's shared vocabulary (P2.2, tsk424;
-//! `.context/target-architecture.md` §6.1, `.context/data-model.md`
-//! "snapshot_op").
+//! `.context/data-model.md` "snapshot_op").
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

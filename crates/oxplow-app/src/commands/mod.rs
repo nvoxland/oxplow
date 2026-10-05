@@ -1,5 +1,4 @@
-//! The command bus: the one write path (`.context/commands.md`;
-//! `.context/target-architecture.md` §7).
+//! The command bus: the one write path (`.context/commands.md`).
 //!
 //! Every command runs the same pipeline — validate the input against the
 //! spec's schema, check the invoker, apply the agent policy, require a

@@ -1,6 +1,6 @@
 //! The event log (`event_log`, `event_consumer_checkpoint`,
 //! `event_dead_letter`; migration V93). See `.context/data-model.md`
-//! "event_log" and `.context/target-architecture.md` §5.
+//! "event_log".
 //!
 //! **The contract is [`append_tx`]**: a producer appends its envelope
 //! inside the same `Database::transaction` closure as the state change

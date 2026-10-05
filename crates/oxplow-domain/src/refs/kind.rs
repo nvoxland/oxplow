@@ -1,4 +1,4 @@
-//! The kind registry (target-architecture §4.2): the one list of what a
+//! The kind registry (`.context/refs.md`): the one list of what a
 //! ref can name. Each kind says what its ids look like, whether it takes a
 //! `@rev`, and whether its id is `<provider>:<native id>`. Core kinds are
 //! registered statically here; a plugin's `ref_kinds` register into the
@@ -137,7 +137,7 @@ fn prefixed(prefix: &str) -> String {
     format!(r"^{prefix}\d+$")
 }
 
-/// The core kinds (target-architecture §4.2). `work_item` is the only
+/// The core kinds (`.context/refs.md`). `work_item` is the only
 /// provider-scoped kind in P1; `wiki`, `commit` and `symbol` use the
 /// capability's active provider and keep bare ids.
 pub fn core_kinds() -> KindRegistry {

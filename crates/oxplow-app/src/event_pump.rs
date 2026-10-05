@@ -1,5 +1,5 @@
 //! Delivery from the event log to its consumers (`.context/data-model.md`
-//! "event_log"; `.context/target-architecture.md` §5.4).
+//! "event_log").
 //!
 //! **At least once, forward only.** Each consumer has a checkpoint (the
 //! last `seq` it handled). The pump reads `seq > checkpoint` in batches

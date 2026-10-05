@@ -1,4 +1,4 @@
-//! The event log's envelope (`.context/target-architecture.md` §5).
+//! The event log's envelope (`.context/data-model.md` "event_log").
 //!
 //! State tables hold current truth; the event log records activity and
 //! state changes and is written in the **same transaction** as the

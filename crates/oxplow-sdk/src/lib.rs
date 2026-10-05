@@ -1,5 +1,4 @@
-//! The plugin SDK (`.context/extensions.md` "The SDK";
-//! `.context/target-architecture.md` §10.5): scaffold, check and test an
+//! The plugin SDK (`.context/extensions.md` "The SDK"): scaffold, check and test an
 //! extension, and the provider conformance kit
 //! ([`conformance`], [`plugin_test`]).
 //!

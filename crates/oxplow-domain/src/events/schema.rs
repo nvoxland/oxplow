@@ -11,7 +11,7 @@
 //! edit. Run the test with `OXPLOW_BLESS=1` to write a new golden.
 //!
 //! **Namespaces.** Core types live in the namespaces of
-//! `.context/target-architecture.md` §5.3 ([`CORE_NAMESPACES`]). An
+//! [`CORE_NAMESPACES`] (`.context/data-model.md` "event_log"). An
 //! extension declares types (a JSON Schema each, not a Rust type —
 //! [`DeclaredEventType`]) only under its own namespace
 //! ([`plugin_namespace`]); declaring into a core namespace, or under

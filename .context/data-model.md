@@ -1126,8 +1126,7 @@ file/directory). The action verb (`created`, `updated`, `deleted`,
 
 ### `event_log` + `event_consumer_checkpoint` + `event_dead_letter` + `command_audit` — `SqliteEventLogStore` (`crates/oxplow-db/src/event_log_store.rs`, migration `V93__event_log.sql`)
 
-The event log of [target-architecture.md](./target-architecture.md) §5,
-built in P1.4 (tsk406). **State tables hold current truth; the log
+The event log, built in P1.4 (tsk406). **State tables hold current truth; the log
 records activity and state changes**, and it is written in the *same
 transaction* as the change — the outbox pattern — so the two never
 disagree. The envelope is `oxplow_domain::events::Envelope`

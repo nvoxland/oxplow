@@ -1,5 +1,5 @@
 //! The core sub-components an extension may replace (`ui.replacements`,
-//! experimental; `.context/target-architecture.md` §11.2): each a named
+//! experimental; `.context/extensions.md` "Replacements"): each a named
 //! target of one capability with a **props contract** — the params its
 //! replacement lens gets, and must declare, instead of any host state.
 //! (The viewer's stream isn't a prop: any lens declaring `stream_id` gets

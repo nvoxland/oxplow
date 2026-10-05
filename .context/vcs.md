@@ -1,7 +1,7 @@
 # VCS capability
 
 How core reads and changes version control without knowing it's git
-(P5, `target-architecture.md` §6.2). Git watching, the commit indexer
+(P5). Git watching, the commit indexer
 and the git-native extras live in [git-integration.md](./git-integration.md).
 
 ## The trait

@@ -1,4 +1,4 @@
-//! Golden tests for the canonical ref grammar (target-architecture §4.1).
+//! Golden tests for the canonical ref grammar (`.context/refs.md`).
 //! The fixture is shared with the TS parser (`apps/desktop/src/refs/ref.test.ts`).
 
 use oxplow_domain::refs::grammar::{CanonicalRef, RefParseError};

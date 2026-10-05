@@ -2,7 +2,7 @@
 
 A provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities (work items
-first) outside the app (P5.D, `target-architecture.md` §10). This doc
+first) outside the app (P5.D). This doc
 covers the protocol (D1), the fake provider (D2) and the host with its
 consent and spawn rules (D3), instances with health (D4), the
 conformance kit with `oxplow plugin test` (D5), the reference Linear

@@ -1,5 +1,5 @@
-//! The turn-end snapshot (P2.3, tsk425; `.context/target-architecture.md`
-//! §4.3, §6.1; `.context/agent-model.md` "Snapshot tracking").
+//! The turn-end snapshot (P2.3, tsk425; `.context/agent-model.md`
+//! "Snapshot tracking").
 //!
 //! When a turn ends (Stop, or an interrupt — every harness reaches this
 //! through `HookIngestService::ingest`), the worktree is snapshotted with a

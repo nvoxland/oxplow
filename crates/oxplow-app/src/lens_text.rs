@@ -1,5 +1,5 @@
 //! Every lens has a text rendering (design rule 17,
-//! `.context/target-architecture.md` §11.3): what an agent reads instead
+//! `.context/extensions.md`): what an agent reads instead
 //! of the rows, what `copy` puts on the clipboard, and what a panel says
 //! when read as text. One renderer per kit component, each saying what
 //! the component shows — a chart's series, a treemap's sizes, a grid's

@@ -1,5 +1,5 @@
 {
-  "$comment": "Golden cases for the canonical ref grammar `<kind>:<id>[@<rev>][#<frag>]` (target-architecture §4.1). Asserted by crates/oxplow-domain/tests/ref_grammar.rs and by apps/desktop/src/refs/ref.test.ts, so the Rust and TS parsers can't drift. `id` is the DECODED id; `text` is the canonical string form (`format(parse(text)) == text`).",
+  "$comment": "Golden cases for the canonical ref grammar `<kind>:<id>[@<rev>][#<frag>]` (.context/refs.md). Asserted by crates/oxplow-domain/tests/ref_grammar.rs and by apps/desktop/src/refs/ref.test.ts, so the Rust and TS parsers can't drift. `id` is the DECODED id; `text` is the canonical string form (`format(parse(text)) == text`).",
   "valid": [
     { "text": "effort:eff362", "kind": "effort", "id": "eff362", "rev": null, "frag": null },
     { "text": "thread:thr1", "kind": "thread", "id": "thr1", "rev": null, "frag": null },

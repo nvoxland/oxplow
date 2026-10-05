@@ -1,5 +1,4 @@
-//! The VCS capability's contract (P5, `.context/target-architecture.md`
-//! §6.2, `.context/vcs.md`), as checks any provider must pass. Each
+//! The VCS capability's contract (P5, `.context/vcs.md`), as checks any provider must pass. Each
 //! check takes a `&dyn Vcs` and a fresh workspace, so a second provider
 //! runs the same list; the tests at the bottom run it against git. Test
 //! code: the module compiles under `cfg(test)` only.

@@ -1,4 +1,4 @@
-//! The canonical ref grammar (target-architecture §4.1):
+//! The canonical ref grammar (`.context/refs.md`):
 //!
 //! ```text
 //! ref  := kind ":" id [ "@" rev ] [ "#" frag ]

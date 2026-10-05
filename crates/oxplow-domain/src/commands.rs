@@ -1,5 +1,4 @@
-//! Commands: the one write path (`.context/target-architecture.md` §7,
-//! `.context/commands.md`). Pure data here — the spec a command
+//! Commands: the one write path (`.context/commands.md`). Pure data here — the spec a command
 //! declares, who is running it, and what running it produced. The bus
 //! that executes them lives in `oxplow-app`.
 

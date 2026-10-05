@@ -1,5 +1,5 @@
 //! The snapshot capability's contract (P2.8, tsk432;
-//! `.context/target-architecture.md` §6.1), as tests run against the one
+//! `.context/data-model.md`), as tests run against the one
 //! provider there is — `SnapshotCaptureService` over the local worktree.
 //! A second provider (a remote worktree, a VCS-native one) must pass the
 //! same six properties; the `SnapshotProvider` trait waits until one

@@ -2,7 +2,7 @@
 //! whose inputs are tables, recomputed when a commit touches one.
 //!
 //! Two spine mechanisms, chosen by what a computation reads
-//! (`target-architecture.md` §8.2): inputs that are **tables** make an
+//! (`.context/semantic-layer.md` "Assets"): inputs that are **tables** make an
 //! asset — level-triggered by the database's own change notifications
 //! (`Database::subscribe_changes`), recomputed in its own transactions,
 //! with a persisted `asset_state` row; inputs from **outside the tables**

@@ -1829,7 +1829,7 @@ design, so building it is filling in, not deciding:
   also stored with `rev` NULL), and a consumer that wants a pull request
   as it stood — a review or an effort linking the PR at the commit it
   reviewed. Until something reads it, building it would be an unproven
-  contract (target-architecture §15 "Left for P11").
+  contract.
 
 ## Effects
 

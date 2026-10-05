@@ -1,5 +1,4 @@
-//! The VCS capability (P5, `.context/target-architecture.md` §6.2,
-//! `.context/vcs.md`): what core needs from a version-control system,
+//! The VCS capability (P5, `.context/vcs.md`): what core needs from a version-control system,
 //! with no git in it. The default provider is git
 //! (`oxplow_app::vcs::GitProvider`); a second provider (jj, Sapling) implements
 //! this trait and passes the same conformance suite

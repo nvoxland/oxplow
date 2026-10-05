@@ -489,8 +489,7 @@ backfill); a failed recompute is logged and the next change retries.
 
 Derived data whose inputs include the world **outside** the tables (a
 working tree, the VCS tree, a program, a provider) is ingestion
-instead — a collector or a pump consumer, at-least-once and checkpointed
-(target-architecture.md §8.2).
+instead — a collector or a pump consumer, at-least-once and checkpointed.
 
 A **snapshot blob named by a table row** counts as a table input (tsk862):
 content-addressed, it never changes under its name, so a recompute after the

@@ -125,7 +125,7 @@ A new way for config to start a program must go through the same gate.
 ## Skeleton + semantic layer (direction, mostly built)
 
 > **Superseded direction (2026-09-28, epic tsk393).** The target is now
-> [target-architecture.md](./target-architecture.md): anchors + an event
+> anchors + an event
 > log + SQL models, with capabilities and commands as the act side, and
 > everything pluggable through declared plugin kinds. The section below
 > describes the current code, which that epic moves away from phase by

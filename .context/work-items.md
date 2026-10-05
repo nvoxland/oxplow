@@ -1,7 +1,7 @@
 # Work items
 
 Tasks, issues, tickets — whatever a provider tracks — behind one
-capability (P5.C, `target-architecture.md` §6). oxplow's own tasks are the
+capability (P5.C). oxplow's own tasks are the
 built-in provider, `oxplow`; an issue tracker is another provider (P5.D
 brings external ones). Reads are SQL; writes are the `work_item.*`
 commands — **one write surface for every provider** (P7.A1), which the
