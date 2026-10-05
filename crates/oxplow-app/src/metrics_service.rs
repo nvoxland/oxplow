@@ -2042,7 +2042,7 @@ impl MetricsService {
         };
         // Facts the ingest would refuse fail the run here, with why (tsk986).
         let outcome = match outcome {
-            Ok(gauge_facts) => match self.refused_facts(&gauge_facts).await {
+            Ok(gauge_facts) => match self.refused_facts(gauge, &gauge_facts).await {
                 Some(why) => Err(why),
                 None => Ok(gauge_facts),
             },
@@ -2255,10 +2255,48 @@ impl MetricsService {
     /// after the last offender is fixed; the engine zero-fills the series from
     /// the producer's captures (tsk44). Builds the capture and its facts;
     /// [`Self::log_run`] writes them with the run's record.
-    /// Why the ingest would refuse `gauge_facts`, if it would: a bare
-    /// dimension key, which would roll the whole capture back (tsk986).
-    async fn refused_facts(&self, gauge_facts: &[CollectedFact]) -> Option<String> {
+    /// Why `gauge_facts` can't be recorded, if they can't — a failed run
+    /// that says so, never facts dropped behind a run reported as recorded:
+    /// a measure outside the collector's `facts:`, a measure no one defines
+    /// (tsk1029), or a bare dimension key, which would roll the whole
+    /// capture back (tsk986). A measure not yet in the catalog reseeds it
+    /// once first: an extension added while oxplow runs can trigger its
+    /// collector before the catalog's reseed has registered its measures.
+    async fn refused_facts(
+        &self,
+        gauge: &FactCollector,
+        gauge_facts: &[CollectedFact],
+    ) -> Option<String> {
         let store = self.fact_store.as_ref()?;
+        // The collector's own contract: a declared `facts:` list is all it
+        // may emit (built-ins declare none: unrestricted).
+        if !gauge.facts.is_empty() {
+            if let Some(f) = gauge_facts
+                .iter()
+                .find(|f| !gauge.facts.contains(&f.measure))
+            {
+                return Some(format!(
+                    "a fact for `{}`, which isn't in the collector's `facts:`",
+                    f.measure
+                ));
+            }
+        }
+        let undefined = |known: Vec<oxplow_db::Measure>| -> Option<String> {
+            let known: std::collections::HashSet<String> =
+                known.into_iter().map(|m| m.key).collect();
+            gauge_facts
+                .iter()
+                .find(|f| !known.contains(&f.measure))
+                .map(|f| f.measure.clone())
+        };
+        if undefined(store.list_measures().await.ok()?).is_some() {
+            self.seed_catalog().await;
+            if let Some(measure) = undefined(store.list_measures().await.ok()?) {
+                return Some(format!(
+                    "a fact for `{measure}`, which no measure defines (declare it in `measures:`)"
+                ));
+            }
+        }
         let dims: Vec<String> = gauge_facts
             .iter()
             .filter_map(|f| f.dims.as_ref())
@@ -2295,20 +2333,12 @@ impl MetricsService {
             if !gf.value.is_finite() {
                 continue;
             }
-            // The gauge's own contract: a config gauge may only emit measures it
-            // declared in `emits` (built-ins declare none → unrestricted).
-            if !gauge.facts.is_empty() && !gauge.facts.iter().any(|m| m == &gf.measure) {
-                tracing::warn!(
-                    key = %gauge.key, measure = %gf.measure,
-                    "collector facts: measure not in the collector's `facts` — fact dropped"
-                );
-                continue;
-            }
+            // `refused_facts` failed the run for an undeclared or undefined
+            // measure; only a catalog changing in between reaches this.
             let Some(&measure_id) = by_key.get(gf.measure.as_str()) else {
-                // Declare-to-collect: a gauge may only emit DEFINED measures.
                 tracing::warn!(
                     key = %gauge.key, measure = %gf.measure,
-                    "gauge facts: undefined measure — fact dropped (declare it in `measures:`)"
+                    "gauge facts: measure left the catalog during the run — fact dropped"
                 );
                 continue;
             };
@@ -3532,6 +3562,96 @@ mod tests {
         assert!(failed.1.unwrap_or_default().contains("oxplow.language"));
     }
 
+    /// Run `repo.<id>` (a Starlark collector emitting one `measure` fact,
+    /// declaring `facts: [measure]`) on a snapshot; its run's status and
+    /// error, and how many facts it recorded.
+    async fn run_one_fact(
+        svc: &Arc<crate::Services>,
+        dir: &tempfile::TempDir,
+        id: &str,
+        measure: &str,
+    ) -> (String, Option<String>, i64) {
+        std::fs::write(
+            dir.path().join(format!("{id}.star")),
+            format!(
+                "def transform(input):\n    return {{\"facts\": [{{\"measure\": \"{measure}\", \"value\": 1, \"subject\": \"file:src/a.rs\"}}]}}\n"
+            ),
+        )
+        .unwrap();
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            oxplow_config::collectors::PROJECT,
+            &serde_yaml::from_str(&format!(
+                "- {{ id: repo.{id}, runtime: starlark, entry: {id}.star, trigger: {{ on: [snapshot.taken] }}, facts: [{measure}] }}"
+            ))
+            .unwrap(),
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        svc.config.write().unwrap().collectors = specs;
+        let snap =
+            snapshot_with_files(svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let event = log_take(svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
+        let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(svc));
+        use crate::event_pump::AsyncEventConsumer as _;
+        let _ = consumer.handle(&event).await;
+        let id = format!("repo.{id}");
+        let measure = measure.to_string();
+        svc.db
+            .read(move |c| {
+                let (status, error) = c.query_row(
+                    "SELECT status, error FROM collector_run WHERE id = ?1",
+                    [&id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                let facts = c.query_row(
+                    "SELECT count(*) FROM fact f JOIN measure m ON m.id = f.measure_id WHERE m.key = ?1",
+                    [&measure],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok((status, error, facts))
+            })
+            .await
+            .unwrap()
+    }
+
+    /// tsk1029: a fact for a measure nobody defined failed silently — the
+    /// run said "ok" and recorded nothing. It is a failed run naming the
+    /// measure.
+    #[tokio::test]
+    async fn a_fact_for_an_undefined_measure_fails_the_run_naming_it() {
+        let (svc, dir) = fixture().await;
+        let (status, error, facts) = run_one_fact(&svc, &dir, "nope", "repo.nope.count").await;
+        assert_eq!(status, "error");
+        assert!(
+            error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("repo.nope.count"),
+            "{error:?}"
+        );
+        assert_eq!(facts, 0);
+    }
+
+    /// tsk1029: a measure declared after the catalog was seeded (an
+    /// extension added while oxplow runs, its collector triggered before the
+    /// reseed reached the catalog) is found: the run seeds the catalog
+    /// before it calls a measure undefined.
+    #[tokio::test]
+    async fn a_measure_declared_after_the_catalog_was_seeded_is_found() {
+        let (svc, dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        svc.config.write().unwrap().measures = vec![oxplow_config::MeasureEntry {
+            key: Some("repo.lines.count".into()),
+            subject_kind: Some("file".into()),
+            ..Default::default()
+        }];
+        let (status, error, facts) = run_one_fact(&svc, &dir, "lines", "repo.lines.count").await;
+        assert_eq!((status.as_str(), error), ("ok", None));
+        assert_eq!(facts, 1);
+    }
+
     fn starlark_gauge(key: &str, entry_file: &str) -> FactCollector {
         starlark_gauge_emits(key, entry_file, Vec::new())
     }
@@ -4506,10 +4626,10 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn gauge_facts_on_undefined_measure_are_dropped_not_written() {
-        // Declare-to-collect (decision #4): a gauge may only emit DEFINED measures.
-        // A fact on an undefined measure is dropped (surfaced via warn), while a
-        // sibling fact on a defined measure in the same report still lands.
+    async fn a_fact_on_an_undefined_measure_fails_the_whole_run() {
+        // Declare-to-collect (decision #4): a gauge may only emit DEFINED
+        // measures. A fact on an undefined one fails the run (tsk1029: it was
+        // dropped behind an "ok"), so nothing of that run is written.
         let (svc, dir) = fixture().await;
         std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
@@ -4541,7 +4661,6 @@ def transform(input):
             .run_one_collector(&metric, &ctx, Arc::new(HashMap::new()))
             .await;
 
-        // The defined-measure fact landed…
         let complexity = svc
             .fact_store
             .get_measure("oxplow.complexity")
@@ -4553,9 +4672,8 @@ def transform(input):
             .facts_for_measure(complexity.id)
             .await
             .unwrap();
-        assert_eq!(rows.len(), 1, "the defined-measure fact is written");
-        assert_eq!(rows[0].value, 5.0);
-        // …and the undefined measure was never auto-created by the write.
+        assert!(rows.is_empty(), "a failed run writes no facts");
+        // …and the undefined measure was never auto-created.
         assert!(
             svc.fact_store
                 .get_measure("acme.undefined")
@@ -4567,11 +4685,11 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn gauge_facts_outside_the_emits_allow_list_are_dropped() {
-        // A config gauge's `emits` is its contract: even a fact on a DEFINED
-        // catalog measure is dropped if the gauge didn't declare it. Here the
-        // gauge emits only `oxplow.complexity`; a sibling fact on the (also
-        // defined) `oxplow.fn_length` measure is dropped for being off-contract.
+    async fn a_fact_outside_the_facts_list_fails_the_whole_run() {
+        // A collector's `facts:` is its contract: even a fact on a DEFINED
+        // catalog measure fails the run if the collector didn't declare it
+        // (tsk1029: it was dropped behind an "ok"). Here it declares only
+        // `oxplow.complexity` and emits `oxplow.fn_length` too.
         let (svc, dir) = fixture().await;
         std::fs::create_dir_all(dir.path().join("oxplow/gauges")).unwrap();
         std::fs::write(
@@ -4619,8 +4737,8 @@ def transform(input):
                 .await
                 .unwrap()
                 .len(),
-            1,
-            "the declared-measure fact is written"
+            0,
+            "a failed run writes no facts"
         );
         let fn_length = svc
             .fact_store
@@ -4635,7 +4753,7 @@ def transform(input):
                 .unwrap()
                 .len(),
             0,
-            "the off-contract fact (defined but not in `emits`) is dropped"
+            "nor the off-contract one"
         );
     }
 
