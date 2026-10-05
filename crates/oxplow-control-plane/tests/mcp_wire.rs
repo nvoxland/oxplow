@@ -77,10 +77,11 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
         init["result"]["capabilities"]["tools"].is_object(),
         "{init}"
     );
+    // The server's own instructions arrive over the wire.
     assert!(init["result"]["instructions"]
         .as_str()
         .unwrap()
-        .starts_with("Oxplow MCP server"));
+        .contains("show_lens"));
     let session = session.expect("server assigns an Mcp-Session-Id");
 
     post(
