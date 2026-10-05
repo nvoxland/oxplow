@@ -23,6 +23,10 @@ use crate::{
 /// gets a proposal the person approves or declines. Everything else is the
 /// agent's to set through `config.set`. A key whose doc says it runs
 /// programs or steers agents must be listed here (a test enforces it).
+///
+/// The gate is `config.set`'s: an edit to `.oxplow/project.yaml` on disk
+/// is reloaded whole, person-only keys included — a known gap, left as is
+/// (tsk997; `.context/commands.md`).
 pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "agents",
     "agentModels",
