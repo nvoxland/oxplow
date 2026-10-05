@@ -357,6 +357,15 @@ pub fn claim_tx(
     if inserted == 0 {
         return Err(already(key));
     }
+    // The attempts before it keep no composition: what a retry sends moves
+    // to the attempt sending it (tsk999). Their `retry_at` stays, a record
+    // that they were sent again.
+    conn.execute(
+        "UPDATE effect_run SET resend_json = NULL
+          WHERE effect = ?1 AND event_id = ?2 AND attempt < ?3 AND resend_json IS NOT NULL",
+        params![key.effect, key.event_id, key.attempt],
+    )
+    .map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -523,6 +532,24 @@ mod tests {
                     .as_deref(),
                 Some("x")
             );
+            // Its retry claimed: the composition moves to the attempt
+            // sending it, and the failed one keeps none.
+            let retrying = EffectRunKey {
+                attempt: 2,
+                origin: ReactionOrigin::Auto,
+                ..failing.clone()
+            };
+            claim_tx(tx, &retrying, "t4", Some("x"))?;
+            let kept: Vec<Option<String>> = tx
+                .prepare(
+                    "SELECT resend_json FROM effect_run WHERE event_id = 'e2' ORDER BY attempt",
+                )
+                .map_err(map_sql_err)?
+                .query_map([], |r| r.get(0))
+                .map_err(map_sql_err)?
+                .collect::<Result<_, _>>()
+                .map_err(map_sql_err)?;
+            assert_eq!(kept, vec![None, Some("x".into())]);
             let plain = EffectRunKey {
                 event_id: "e3".into(),
                 ..key()

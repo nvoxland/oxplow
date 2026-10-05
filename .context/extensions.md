@@ -1948,8 +1948,8 @@ than `MAX_ASKED_WAIT`, 15 minutes, is a person's). A refused input, a
 refusal of credentials renewal can't fix, a method or configuration the
 provider lacks — `Failed` — is never retried by itself. The failed attempt keeps what it composed (`effect_run.
 resend_json`, V162) for as long as its retry is scheduled — finishing an
-attempt drops it, scheduling a retry writes it, so no composition
-outlives its retry (tsk999) — and the automatic attempt **sends exactly that**
+attempt drops it, scheduling a retry writes it, and claiming the next
+attempt moves it there, so no composition outlives its retry (tsk999) — and the automatic attempt **sends exactly that**
 instead of running the script again (tsk887): composing afresh could read
 changed rows, change a step's input and so its key, and make a write that
 landed again. It is sent only while every step still goes to a provider
