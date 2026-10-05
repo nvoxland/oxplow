@@ -1,12 +1,13 @@
 /// When a lens re-runs (P4.6, `.context/semantic-layer.md` "Subscriptions"):
 /// when a model it read changed (`modelsChanged`), when facts landed for a
-/// measure its `metric_grid()` read (`metricSamplesChanged`), or when a lens
-/// definition changed. A run's `result.reads` says what it read. Every lens
+/// measure its `metric_grid()` read (`metricSamplesChanged`), when a lens
+/// definition changed, or after a reconnect (anything may have changed while
+/// the socket was down). A run's `result.reads` says what it read. Every lens
 /// host — a lens page, a slot, a dashboard tile, the rail's alerts — uses
 /// `useRerunOnChange`, so there is one rule.
 import { useEffect, useRef } from "react";
 
-import { subscribeOxplowEvents } from "../api.js";
+import { onRemoteReconnect, subscribeOxplowEvents } from "../api.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 
 export const NO_READS: Reads = { models: [], tables: [], measures: [] };
@@ -66,8 +67,10 @@ export function unionReads(list: readonly (Reads | null | undefined)[]): Reads {
 /** A burst of commits (a hook's several writes) is one re-run. */
 const COALESCE_MS = 100;
 
-/** Re-run `refresh` when an event changes what the last run read, or a
- *  lens definition changed. `reads` and `refresh` may change every render. */
+/** Re-run `refresh` when an event changes what the last run read, a lens
+ *  definition changed, or the daemon is reached again — the events sent
+ *  while it was unreachable never arrive (tsk1050). `reads` and `refresh`
+ *  may change every render. */
 export function useRerunOnChange(reads: Reads, refresh: () => void): void {
   const readsRef = useRef(reads);
   readsRef.current = reads;
@@ -75,17 +78,21 @@ export function useRerunOnChange(reads: Reads, refresh: () => void): void {
   refreshRef.current = refresh;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const off = subscribeOxplowEvents((event) => {
-      if (!lensDefinitionChanged(event) && !readsChanged(event, readsRef.current)) return;
+    const rerun = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
         refreshRef.current();
       }, COALESCE_MS);
+    };
+    const off = subscribeOxplowEvents((event) => {
+      if (lensDefinitionChanged(event) || readsChanged(event, readsRef.current)) rerun();
     });
+    const offReconnect = onRemoteReconnect(rerun);
     return () => {
       if (timer) clearTimeout(timer);
       off();
+      offReconnect();
     };
   }, []);
 }

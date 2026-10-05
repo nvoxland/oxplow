@@ -108,9 +108,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     with Agent".
   - The page re-runs when a model it read changed (`modelsChanged`), when
     facts landed for a measure its `metric_grid()` read
-    (`metricSamplesChanged`), and on edits under `oxplow/extensions/` —
-    the run's `result.reads` is what it subscribes to (P4.6). Every lens
-    host uses `useRerunOnChange` in `src/lens/lensRerun.ts`.
+    (`metricSamplesChanged`), on edits under `oxplow/extensions/` —
+    the run's `result.reads` is what it subscribes to (P4.6) — and after a
+    reconnect (`onRemoteReconnect`): events sent while the daemon was
+    unreachable never arrive, so anything may have changed (tsk1050). Every
+    lens host uses `useRerunOnChange` in `src/lens/lensRerun.ts`.
   - "Improve with Agent" inserts `[oxplow lens <id> k=v…]`, with only the
     changed params, through the standard add-to-context path.
   - The Cmd+P launcher re-reads lenses from the stream's worktree every
