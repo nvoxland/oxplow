@@ -3,13 +3,15 @@ import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import { runLens, type LensRun, type SqlCell } from "../api.js";
+import { querySql, runLens, type LensRun, type SqlCell } from "../api.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
 import { changedParams, parseParamInput } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
+import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../lens/lensParams.js";
+import { recordOpError } from "../components/opErrorsStore.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
@@ -150,8 +152,8 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
   );
 }
 
-/** "Pin to Dashboard": adds a `lens` tile to a chosen dashboard (or a new
- *  "My Dashboard" when there are none), then offers to open it. */
+/** The lens's params: oxplow's id params as pickers (`lensParams.ts`),
+ *  anything else typed. */
 function ParamsForm({
   lens,
   values,
@@ -172,6 +174,71 @@ function ParamsForm({
 }
 
 function ParamInput({
+  name,
+  label,
+  value,
+  onApply,
+}: {
+  name: string;
+  label: string;
+  value: SqlCell;
+  onApply(name: string, value: SqlCell): void;
+}) {
+  const kind = paramKind(name);
+  if (kind) return <ParamPicker name={name} label={label} kind={kind} value={value} onApply={onApply} />;
+  return <ParamText name={name} label={label} value={value} onApply={onApply} />;
+}
+
+/** One of oxplow's id params: pick what it names, by title (tsk1043). */
+function ParamPicker({
+  name,
+  label,
+  kind,
+  value,
+  onApply,
+}: {
+  name: string;
+  label: string;
+  kind: ParamKind;
+  value: SqlCell;
+  onApply(name: string, value: SqlCell): void;
+}) {
+  const [options, setOptions] = useState<ParamOption[]>([]);
+  useEffect(() => {
+    let live = true;
+    querySql(paramOptionsSql(kind))
+      .then((r) => {
+        if (live) setOptions(paramOptions(r));
+      })
+      .catch((e: unknown) => recordOpError({ label: `List ${kind}s`, message: e instanceof Error ? e.message : String(e) }));
+    return () => {
+      live = false;
+    };
+  }, [kind]);
+  const at = options.findIndex((o) => o.value === value);
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-sm)" }}>
+      {label}
+      <select
+        data-testid={`lens-param-${name}`}
+        value={at === -1 ? "" : String(at)}
+        onChange={(e) => {
+          const picked = options[Number(e.target.value)];
+          if (picked) onApply(name, picked.value);
+        }}
+      >
+        {at === -1 ? <option value="">{value === null ? "—" : String(value)}</option> : null}
+        {options.map((o, i) => (
+          <option key={i} value={String(i)}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ParamText({
   name,
   label,
   value,

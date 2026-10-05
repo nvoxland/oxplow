@@ -856,6 +856,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 `children`, `launcher`, `hidden`, `actions` and `alert`.
 
 - `params`: `name`, `label`, `default`. Untyped: a value is bound as-is.
+- **Id params are pickers (tsk1043).** On a lens page, a param named
+  `task_id`, `effort_id`, `thread_id` or `stream_id` — oxplow's own ids,
+  the names it fills from context or a slot binds — is a picker over the
+  matching model, by title (`lens/lensParams.ts`); any other param is
+  typed. The details rail's header wraps, so its actions sit below its
+  title when they don't fit beside it.
 - **Implicit params (tsk375).** A param named `stream_id` or `thread_id`
   is bound to the viewer's context (`extensions::LensContext`, numeric ids)
   unless the caller supplies it; precedence is supplied → context →

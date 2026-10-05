@@ -104,6 +104,7 @@ title: Waiting on me
 description: Blocked tasks and open follow-up comments in this stream.
 params:                         # optional; bound as :name in the query
   - { name: stream_id, label: Stream }   # filled in: the viewer's stream
+  # task_id / effort_id / thread_id / stream_id are pickers on the lens page
 query: |
   SELECT id, title, status, thread_id
   FROM v_task

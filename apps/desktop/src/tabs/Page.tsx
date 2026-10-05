@@ -439,6 +439,9 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
       <div
         style={{
           display: "flex",
+          // The title keeps its line; the actions wrap below it when they
+          // don't fit beside it (tsk1043: they overlapped it).
+          flexWrap: "wrap",
           alignItems: "center",
           gap: 8,
           padding: "8px 10px",
@@ -452,9 +455,11 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
           ...(variant === "aside" ? { position: "sticky", top: 0 } : {}),
         }}
       >
-        <span style={{ flex: 1, minWidth: 0 }}>{rightRailTitle ?? "Details"}</span>
+        <span style={{ flex: "1 0 auto" }}>{rightRailTitle ?? "Details"}</span>
         {rightRailActions ? (
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{rightRailActions}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, textTransform: "none", letterSpacing: 0 }}>
+            {rightRailActions}
+          </div>
         ) : null}
       </div>
       <div style={{ padding: 12 }}>{rightRail}</div>
