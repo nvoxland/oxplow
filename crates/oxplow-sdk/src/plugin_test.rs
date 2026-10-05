@@ -7,6 +7,8 @@
 //! (`input: { lens, params? }`, `expect: { columns?, rows }`), a derived
 //! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
 //! n }, events?: [{ type, payload? }] }`; an exec collector's isn't run — it needs a person's approval),
+//! a fact collector (`input: { collector, files: { <path>: <text> } }`,
+//! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
 //! or one of its own commands (`input: { command, input, rows? }`,
 //! `expect: { commands: [names] }` or `{ refuses }`, dry-run),
 //! the extension's `questions.yaml`, and for each declared provider —
@@ -143,7 +145,8 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         let Some((shown, doc)) = example_fixture(&dir, &rel, &example.name) else {
             report.warnings.push(format!(
                 "{rel}/fixtures/{}.yaml:1: example `{}` has no fixture, so it isn't run — fix: \
-                 write its `input` (`{{ lens, params? }}`, `{{ collector, rows? }}`, or a \
+                 write its `input` (`{{ lens, params? }}`, `{{ collector, rows? }}`, a fact \
+                 collector's `{{ collector, files }}`, or a \
                  provider's `{{ command, input }}`) and `expect`",
                 example.name, example.name
             ));
@@ -481,6 +484,78 @@ fn ref_kind_example(ext: &Extension, ex: &Example<'_>, link: &str, report: &mut 
     }
 }
 
+/// Run fact collector `spec` over the fixture's `files` (path → content;
+/// its other input keys — `report`, `rows`, `event` — are the collector's
+/// input), storing nothing; its facts against `expect: { facts: [...] }`,
+/// each compared on the keys its expected fact names (tsk1047).
+async fn fact_collector_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    spec: &oxplow_config::collectors::CollectorSpec,
+    report: &mut TestReport,
+) {
+    let (shown, example, id) = (ex.shown, ex.name, spec.id.as_str());
+    report.ran.push(format!("example {example}"));
+    let files: std::collections::HashMap<String, String> = ex
+        .input
+        .get("files")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let input: serde_json::Map<String, Value> = ex
+        .input
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .filter(|(k, _)| !matches!(k.as_str(), "collector" | "files"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let facts = match host
+        .svc
+        .metrics
+        .preview_fact_collector(&ext.name, spec, files, Value::Object(input))
+        .await
+    {
+        Ok(f) => f,
+        Err(why) => {
+            report.errors.push(format!(
+                "{shown}:1: collector `{id}` failed: {why} — fix: its script, or the example's files"
+            ));
+            return;
+        }
+    };
+    // Each fact compared on what its expected fact names.
+    let wanted = ex.expect.get("facts").and_then(Value::as_array);
+    let got: Vec<Value> = facts
+        .iter()
+        .enumerate()
+        .map(
+            |(i, f)| match wanted.and_then(|w| w.get(i)).and_then(Value::as_object) {
+                Some(keys) => Value::Object(
+                    keys.keys()
+                        .map(|k| (k.clone(), f.get(k).cloned().unwrap_or(Value::Null)))
+                        .collect(),
+                ),
+                None => f.clone(),
+            },
+        )
+        .collect();
+    if let Some((path, want, got)) = first_mismatch(&ex.expect, &json!({ "facts": got })) {
+        report.errors.push(format!(
+            "{shown}:1: collector `{id}` returned {got} at `{path}`, the example expects {want} — \
+             fix: the script, or the example's `expect` (`{{ facts: [{{ measure, value?, path?, \
+             subject?, line?, rule?, dims? }}] }}`)"
+        ));
+    }
+}
+
 /// Run derived collector `id` over the fixture's `rows` (else its `input`
 /// query, on the empty throwaway), storing nothing; the rows it would
 /// store per entity — typed against the declaration — against `expect`.
@@ -500,6 +575,9 @@ async fn collector_example(
         ));
         return;
     };
+    if !spec.facts.is_empty() {
+        return fact_collector_example(host, ext, ex, spec, report).await;
+    }
     if !spec.runtime.is_derived() {
         report.warnings.push(format!(
             "{shown}:1: example `{example}` runs exec collector `{id}`, which `plugin test` \

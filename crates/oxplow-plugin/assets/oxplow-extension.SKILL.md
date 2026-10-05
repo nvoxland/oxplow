@@ -342,6 +342,10 @@ names the file and line and says what to change.
      stands in for its `input` query), `expect: { entities: { <name>: n
      } }` — it runs your script and types its rows; an exec collector's
      example isn't run (a person approves it);
+   - a fact collector (one with `facts:`): `input: { collector: <id>,
+     files: { "src/a.ts": "…" } }` (the tree its `files()` sees),
+     `expect: { facts: [{ measure, value, path? }] }` — each fact is
+     compared on the keys you name, in order;
    - a command: `input: { command: <ns>.<name>, input: {...}, rows? }`,
      `expect: { commands: [names] }` or `{ refuses: <part of the reason>
      }` — a dry run; nothing changes;

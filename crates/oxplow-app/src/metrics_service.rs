@@ -1993,6 +1993,41 @@ impl MetricsService {
         })
     }
 
+    /// Run `owner`'s fact collector `spec` over `files` (path → content)
+    /// with `input` — an example's fixture — recording nothing: what `oxplow
+    /// plugin test` runs for a fact collector's example (tsk1047). The facts
+    /// as JSON, a whole-number value as an integer.
+    pub async fn preview_fact_collector(
+        &self,
+        owner: &str,
+        spec: &oxplow_config::collectors::CollectorSpec,
+        files: HashMap<String, String>,
+        input: serde_json::Value,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let collector = FactCollector::from_spec(owner, spec)
+            .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
+        if matches!(collector.runtime, CollectorRuntime::Exec) {
+            return Err(format!(
+                "collector `{}` runs a program, which only a person's approval runs",
+                spec.id
+            ));
+        }
+        let runner = self.fact_runner(&collector)?;
+        let facts = tokio::task::spawn_blocking(move || runner.run(&input, TreeHost::new(files)))
+            .await
+            .map_err(|e| format!("task failed: {e}"))??;
+        Ok(facts
+            .into_iter()
+            .map(|f| {
+                let mut v = serde_json::to_value(&f).unwrap_or_default();
+                if f.value.fract() == 0.0 && f.value.abs() < 9e15 {
+                    v["value"] = serde_json::json!(f.value as i64);
+                }
+                v
+            })
+            .collect())
+    }
+
     /// Run one fact collector: build its runner and run it with the
     /// file-map host. Best-effort — a collector that can't run (no consent,
     /// no script) is logged and recorded as failed. How it went.

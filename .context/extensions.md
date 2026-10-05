@@ -798,6 +798,12 @@ launcher commands are checked), then — only if `check` is clean — each
   its `input` query, `preview_collector(…, rows)`), storing nothing, its
   rows typed against the declaration; an exec collector's example is a
   warning, not run (it needs a person's approval);
+- `input: { collector: <id>, files: { <path>: <text> } }`, `expect: {
+  facts: [...] }` — a **fact** collector (one with `facts:`) runs over
+  `files` as its tree (`MetricsService::preview_fact_collector`, its other
+  input keys — `report`, `rows`, `event` — as its input), storing nothing;
+  each fact is compared on the keys its expected fact names (tsk1047: it
+  used to be run as an entity collector and fail);
 - `input: { command, input }` — a provider's, run in its session
   (providers.md "The conformance kit");
 - `input: { effect: <id>, event: { type, payload, subject? }, rows? }`,
