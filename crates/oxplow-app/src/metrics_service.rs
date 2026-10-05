@@ -489,6 +489,11 @@ impl MetricsService {
     /// activates one with `metrics: - use: oxplow.<lang>.<name>` and its own
     /// `key:` specs.
     fn resolved_specs(&self) -> Vec<ResolvedSpec> {
+        self.metric_layers().resolve()
+    }
+
+    /// The four scopes metric resolution reads (see [`MetricLayers`]).
+    fn metric_layers(&self) -> MetricLayers {
         let mut project = self
             .config
             .read()
@@ -510,9 +515,12 @@ impl MetricsService {
                 }),
         );
         let global = self.with_global_catalog(|g| g.metrics.clone());
-        let builtin = builtin_spec_entries();
-        let ext = self.extension_catalog();
-        resolve_metrics(&builtin, &global, &ext.metrics, &project)
+        MetricLayers {
+            builtin: builtin_spec_entries(),
+            global,
+            extensions: self.extension_catalog().metrics,
+            project,
+        }
     }
 
     /// `collectors` without the ones failures disabled (P7.C2) and the ones
@@ -765,7 +773,13 @@ impl MetricsService {
         // re-seed AFTER the override-free built-ins above — dropping it left
         // target/warn_at/fail_at NULL everywhere the engine reads the spec row. A
         // disabled entry (`enabled: false`) is pruned instead of seeded.
-        let resolved = self.resolved_specs();
+        // Seeding runs once per load and change, not per event: the place to
+        // name a `use:` that resolves to nothing (tsk1076).
+        let layers = self.metric_layers();
+        for key in layers.unknown_uses() {
+            tracing::warn!(%key, "metrics: `use:` names no metric; skipping it");
+        }
+        let resolved = layers.resolve();
         for s in &resolved {
             let mut spec = spec_to_new_spec(s);
             let res = if s.enabled
@@ -2673,6 +2687,26 @@ fn filter_to_json(f: &oxplow_config::FilterConfig) -> String {
 /// (`{op, left, right}`).
 fn formula_to_json(f: &oxplow_config::FormulaConfig) -> String {
     serde_json::json!({ "op": f.op, "left": f.left, "right": f.right }).to_string()
+}
+
+/// The four scopes metric resolution reads: built-in definitions, global,
+/// enabled extensions', and the project's entries (with the default-on
+/// built-ins it doesn't mention).
+struct MetricLayers {
+    builtin: Vec<MetricEntry>,
+    global: Vec<MetricEntry>,
+    extensions: Vec<oxplow_config::ExtensionLayer<MetricEntry>>,
+    project: Vec<MetricEntry>,
+}
+
+impl MetricLayers {
+    fn resolve(&self) -> Vec<ResolvedSpec> {
+        resolve_metrics(&self.builtin, &self.global, &self.extensions, &self.project)
+    }
+
+    fn unknown_uses(&self) -> Vec<String> {
+        oxplow_config::unknown_uses(&self.builtin, &self.global, &self.extensions, &self.project)
+    }
 }
 
 /// The bundled built-in metric catalog as spec-shaped `MetricEntry`s, so the

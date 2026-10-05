@@ -2501,23 +2501,15 @@ fn parse_project_collectors(
     }
 }
 
-/// Resolve declared metric SPECS across the three scopes into the flat
-/// [`ResolvedSpec`] list the runner consumes. Definitions (`key:` entries) from
-/// built-in, then global, then project build a catalog by key (later scope wins →
-/// precedence project > global > built-in). The **project's** entries are what's
-/// *active*: a `key:` entry defines + enables (scope `project`); a `use:` entry
-/// enables a catalog metric, layering its threshold overrides on top (scope = the
-/// definition's scope). A `use:` referencing an unknown key is skipped with a
-/// warning.
-pub fn resolve_metrics(
-    builtin: &[MetricEntry],
-    global: &[MetricEntry],
-    extensions: &[ExtensionLayer<MetricEntry>],
-    project: &[MetricEntry],
-) -> Vec<ResolvedSpec> {
-    // Catalog of definitions by key, with the scope each came from.
-    let mut catalog: std::collections::HashMap<String, (String, &MetricEntry)> =
-        std::collections::HashMap::new();
+/// Every metric definition (`key:` entry) by key, with the scope it came
+/// from; a later scope wins (project > extension > global > built-in).
+fn definition_catalog<'a>(
+    builtin: &'a [MetricEntry],
+    global: &'a [MetricEntry],
+    extensions: &'a [ExtensionLayer<MetricEntry>],
+    project: &'a [MetricEntry],
+) -> std::collections::HashMap<String, (String, &'a MetricEntry)> {
+    let mut catalog = std::collections::HashMap::new();
     for (scope, entries) in scoped_layers(builtin, global, extensions, project) {
         for e in entries {
             if let Some(k) = e.key.as_deref() {
@@ -2525,25 +2517,52 @@ pub fn resolve_metrics(
             }
         }
     }
+    catalog
+}
 
+/// The project's `use:` keys that name no definition: normally typos,
+/// which [`resolve_metrics`] skips. A **disable marker** (`enabled: false`)
+/// for a plugin metric isn't one — its key isn't a config definition, and
+/// `seed_catalog` prunes it from config state.
+pub fn unknown_uses(
+    builtin: &[MetricEntry],
+    global: &[MetricEntry],
+    extensions: &[ExtensionLayer<MetricEntry>],
+    project: &[MetricEntry],
+) -> Vec<String> {
+    let catalog = definition_catalog(builtin, global, extensions, project);
+    project
+        .iter()
+        .filter(|e| e.key.is_none() && e.enabled != Some(false))
+        .filter_map(|e| e.use_key.clone())
+        .filter(|k| !catalog.contains_key(k))
+        .collect()
+}
+
+/// Resolve declared metric SPECS across the three scopes into the flat
+/// [`ResolvedSpec`] list the runner consumes. Definitions (`key:` entries) from
+/// built-in, then global, then project build a catalog by key (later scope wins →
+/// precedence project > global > built-in). The **project's** entries are what's
+/// *active*: a `key:` entry defines + enables (scope `project`); a `use:` entry
+/// enables a catalog metric, layering its threshold overrides on top (scope = the
+/// definition's scope). A `use:` referencing an unknown key is skipped
+/// silently: this runs on every event, so [`unknown_uses`] reports those
+/// once per load (tsk1076).
+pub fn resolve_metrics(
+    builtin: &[MetricEntry],
+    global: &[MetricEntry],
+    extensions: &[ExtensionLayer<MetricEntry>],
+    project: &[MetricEntry],
+) -> Vec<ResolvedSpec> {
+    let catalog = definition_catalog(builtin, global, extensions, project);
     let mut out = Vec::new();
     for e in project {
         if let Some(k) = e.key.as_deref() {
             // A project definition: it is its own resolved spec.
             out.push(resolve_one(k, "project", e, None));
         } else if let Some(uk) = e.use_key.as_deref() {
-            match catalog.get(uk) {
-                Some((scope, def)) => out.push(resolve_one(uk, scope, def, Some(e))),
-                // A `use:` of a key not in the resolve catalog is normally a typo.
-                // The exception is a **disable marker** (`enabled: false`) for a
-                // plugin metric — its key isn't a config definition, so
-                // `seed_catalog` handles its pruning directly from config
-                // state; skip it here silently rather than warn.
-                None if e.enabled == Some(false) => {}
-                None => tracing::warn!(
-                    key = uk,
-                    "metrics: `use:` references an unknown catalog key; skipping"
-                ),
+            if let Some((scope, def)) = catalog.get(uk) {
+                out.push(resolve_one(uk, scope, def, Some(e)));
             }
         }
     }
@@ -4613,6 +4632,33 @@ metrics:
             ..Default::default()
         }];
         assert!(resolve_metrics(&[], &[], &[], &project).is_empty());
+    }
+
+    /// tsk1076: resolution runs on every event, so it reports nothing; the
+    /// config's unknown `use:` keys are named once per load by
+    /// `unknown_uses`, a disable marker for a plugin key aside.
+    #[test]
+    fn unknown_uses_names_the_typos() {
+        let builtin = vec![define("oxplow.unsafe", Some(0.0))];
+        let project = vec![
+            MetricEntry {
+                use_key: Some("oxplow.unsafe".into()),
+                ..Default::default()
+            },
+            MetricEntry {
+                use_key: Some("nope.missing".into()),
+                ..Default::default()
+            },
+            MetricEntry {
+                use_key: Some("agent.tokens.total".into()),
+                enabled: Some(false),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(
+            unknown_uses(&builtin, &[], &[], &project),
+            vec!["nope.missing".to_string()]
+        );
     }
 
     #[test]

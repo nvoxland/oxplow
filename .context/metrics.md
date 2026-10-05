@@ -1269,6 +1269,10 @@ dimensions:                        # custom conformed slice axes
   built-in layer (`builtin_spec_entries`) holds the producer metrics as well
   as the code gauges: without them a producer's `use:` was skipped with an
   "unknown catalog key" warning and its target dropped (tsk1071).
+  `resolve_metrics` itself is silent: it runs on every event (through
+  `fact_collectors`), so a `use:` naming nothing is reported by
+  `unknown_uses` once per `seed_catalog` (boot, config or extension
+  change), never per call (tsk1076).
 - **Adding one** is `config.set` on `measures` / `dimensions` (a global one
   is a file under the global dir). The old `scaffold_measure` /
   `scaffold_dimension` writers had no caller and were deleted (P4.8).
