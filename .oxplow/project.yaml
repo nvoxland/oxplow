@@ -85,26 +85,17 @@ zones:
 # Config files outside a recognized crate/app (repo root, tooling).
 - match: "**/*.toml"
   zone: meta
-collection:
-  testCommand: bun run test:collect
-  fastTestCommand: bun run test:fast
-  reports:
-  - path: target/coverage/lcov.info
-    format: lcov
-  - path: target/nextest/default/junit.xml
-    format: junit
-  - path: apps/desktop/test-report.xml
-    format: junit
-  - path: target/clippy.json
-    format: clippy-json
-  testRunPatterns:
+testing:
+  command: bun run test:collect
+  fastCommand: bun run test:fast
+  runPatterns:
   - cargo cov
   - llvm-cov
   - nextest
   - bun test
   - test:collect
   - test:junit
-  analysisRunPatterns:
+  analysisPatterns:
   - clippy --message-format=json
   - lint:collect
   agentHint: 'While iterating (red phase, green phase, single tests) run `OXPLOW_TASK=<your task id> bun run test:fast` with a filter (e.g. `bun run test:fast -p oxplow-app some_test`) and `bun run test:fast:ts` for the frontend: they write the JUnit reports the effort''s Tests panel shows, without coverage instrumentation. Close a task that changes logic with one full run, lint alongside: `OXPLOW_TASK=<your task id> bash -c ''(bun run lint:collect >/dev/null 2>&1 & bun run test:collect; wait)''` — `test:collect` is the only run that emits coverage. Always in the FOREGROUND (a backgrounded run finishes after the collection hook fires, so its reports are never ingested). Never bare `cargo test`/`bun test`/`bun run test`: they emit no reports. The `OXPLOW_TASK=` prefix pins the run to your effort even with concurrent efforts.'
@@ -403,6 +394,30 @@ metrics:
   language: typescript
   description: '% of TS expressions with a non-any type (the type-coverage tool).'
 collectors:
+- id: tests.rust_coverage
+  doc: Coverage of the Rust workspace (cargo cov).
+  records: coverage
+  entry: "oxplow:lcov"
+  report: { path: target/coverage/lcov.info }
+  trigger: { on_run: test }
+- id: tests.rust_junit
+  doc: The Rust test cases (nextest JUnit).
+  records: tests
+  entry: "oxplow:junit"
+  report: { path: target/nextest/default/junit.xml }
+  trigger: { on_run: test }
+- id: tests.desktop_junit
+  doc: The desktop test cases (bun JUnit).
+  records: tests
+  entry: "oxplow:junit"
+  report: { path: apps/desktop/test-report.xml }
+  trigger: { on_run: test }
+- id: lint.clippy
+  doc: Clippy findings (lint:collect).
+  records: analysis
+  entry: "oxplow:clippy"
+  report: { path: target/clippy.json }
+  trigger: { on_run: analysis }
 - id: repo.scan_clone
   doc: Rust .clone() scan
   runtime: starlark
