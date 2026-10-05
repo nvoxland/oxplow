@@ -68,6 +68,36 @@ pub(super) struct Admitted {
     pub origin: RunOrigin,
 }
 
+/// A check to run before the transaction ([`super::Precheck`]): a
+/// command's own for its input, or a composed call's, its refusal placed
+/// at the call's input (`/calls/<i>/input…`).
+pub(super) struct Pending {
+    check: Arc<super::Precheck>,
+    input: Value,
+    at: String,
+}
+
+impl Pending {
+    /// The command's own check of the input it was called with.
+    pub(super) fn own(check: Arc<super::Precheck>, input: Value) -> Self {
+        Self {
+            check,
+            input,
+            at: String::new(),
+        }
+    }
+
+    pub(super) async fn run(self) -> Result<(), CommandError> {
+        (self.check)(self.input).await.map_err(|e| match e {
+            CommandError::Invalid { field, message } => CommandError::Invalid {
+                field: Some(format!("{}{}", self.at, field.unwrap_or_default())),
+                message,
+            },
+            other => other,
+        })
+    }
+}
+
 /// Where a composite's calls run.
 enum Routed {
     /// Every call joins the transaction.
@@ -76,94 +106,116 @@ enum Routed {
     Steps(Plan),
 }
 
-/// Compose `compose` for `input` on `conn` and route each call; a call
-/// that is itself a composite must route inside the transaction (its
-/// steps would otherwise land outside the run they're a step of).
-fn route(
-    registry: &BTreeMap<String, Arc<Command>>,
-    conn: &rusqlite::Connection,
-    compose: &Compose,
-    input: &Value,
-    name: &str,
-    depth: usize,
-) -> Result<Routed, CommandError> {
-    if depth >= MAX_NESTING {
-        return Err(CommandError::Invalid {
-            field: None,
-            message: format!(
-                "`{name}` is nested more than {MAX_NESTING} composites deep — does a command \
-                 compose itself?"
-            ),
-        });
-    }
-    let composition = (compose.compose)(conn, input)?;
-    let mut steps = Vec::with_capacity(composition.calls.len());
-    let mut outside = false;
-    for (i, call) in composition.calls.into_iter().enumerate() {
-        let name_field = || Some(format!("/calls/{i}/name"));
-        let at_input = |e: CommandError| match e {
-            CommandError::Invalid { field, message } => CommandError::Invalid {
-                field: Some(format!("/calls/{i}/input{}", field.unwrap_or_default())),
-                message,
-            },
-            other => other,
-        };
-        let command = registry
-            .get(&call.name)
-            .cloned()
-            .ok_or_else(|| CommandError::Unknown {
-                name: call.name.clone(),
-            })?;
-        if command.spec.effect == oxplow_domain::CommandEffect::Read {
+/// Routes a composite's calls on a read snapshot, collecting each call's
+/// check before the transaction (tsk1010).
+struct Router<'a> {
+    registry: &'a BTreeMap<String, Arc<Command>>,
+    conn: &'a rusqlite::Connection,
+    prechecks: Vec<Pending>,
+}
+
+impl Router<'_> {
+    /// Compose `compose` for `input` on the snapshot and route each call; a
+    /// call that is itself a composite must route inside the transaction
+    /// (its steps would otherwise land outside the run they're a step of).
+    /// Each call's check before the transaction is collected, placed at `at`
+    /// + the call's input.
+    fn route(
+        &mut self,
+        compose: &Compose,
+        input: &Value,
+        name: &str,
+        depth: usize,
+        at: &str,
+    ) -> Result<Routed, CommandError> {
+        let (registry, conn) = (self.registry, self.conn);
+        if depth >= MAX_NESTING {
             return Err(CommandError::Invalid {
-                field: name_field(),
+                field: None,
                 message: format!(
-                    "`{}` only reads; a composite composes commands that write",
-                    call.name
+                    "`{name}` is nested more than {MAX_NESTING} composites deep — does a command \
+                 compose itself?"
                 ),
             });
         }
-        command.validator.check(&call.input).map_err(at_input)?;
-        let run = match &command.handler {
-            Handler::Tx(h) => StepRun::Tx(h.clone()),
-            Handler::External(h) => {
-                outside = true;
-                StepRun::External(h.clone())
+        let composition = (compose.compose)(conn, input)?;
+        let mut steps = Vec::with_capacity(composition.calls.len());
+        let mut outside = false;
+        for (i, call) in composition.calls.into_iter().enumerate() {
+            let name_field = || Some(format!("/calls/{i}/name"));
+            let at_input = |e: CommandError| match e {
+                CommandError::Invalid { field, message } => CommandError::Invalid {
+                    field: Some(format!("/calls/{i}/input{}", field.unwrap_or_default())),
+                    message,
+                },
+                other => other,
+            };
+            let command =
+                registry
+                    .get(&call.name)
+                    .cloned()
+                    .ok_or_else(|| CommandError::Unknown {
+                        name: call.name.clone(),
+                    })?;
+            if command.spec.effect == oxplow_domain::CommandEffect::Read {
+                return Err(CommandError::Invalid {
+                    field: name_field(),
+                    message: format!(
+                        "`{}` only reads; a composite composes commands that write",
+                        call.name
+                    ),
+                });
             }
-            Handler::Dispatch(d) => match (d.route)(&call.input).map_err(at_input)? {
-                Route::Tx => StepRun::Tx(d.tx.clone()),
-                Route::External(_) => {
+            command.validator.check(&call.input).map_err(at_input)?;
+            let call_at = format!("{at}/calls/{i}/input");
+            if let Some(check) = &command.precheck {
+                self.prechecks.push(Pending {
+                    check: check.clone(),
+                    input: call.input.clone(),
+                    at: call_at.clone(),
+                });
+            }
+            let run = match &command.handler {
+                Handler::Tx(h) => StepRun::Tx(h.clone()),
+                Handler::External(h) => {
                     outside = true;
-                    StepRun::External(d.external.clone())
+                    StepRun::External(h.clone())
                 }
-            },
-            Handler::Compose(c) => {
-                match route(registry, conn, c, &call.input, &call.name, depth + 1)? {
-                    Routed::Tx => StepRun::Tx(c.tx.clone()),
-                    Routed::Steps(_) => {
-                        return Err(CommandError::Invalid {
-                            field: name_field(),
-                            message: format!(
-                                "`{}` runs steps outside the transaction, so it can't be one \
+                Handler::Dispatch(d) => match (d.route)(&call.input).map_err(at_input)? {
+                    Route::Tx => StepRun::Tx(d.tx.clone()),
+                    Route::External(_) => {
+                        outside = true;
+                        StepRun::External(d.external.clone())
+                    }
+                },
+                Handler::Compose(c) => {
+                    match self.route(c, &call.input, &call.name, depth + 1, &call_at)? {
+                        Routed::Tx => StepRun::Tx(c.tx.clone()),
+                        Routed::Steps(_) => {
+                            return Err(CommandError::Invalid {
+                                field: name_field(),
+                                message: format!(
+                                    "`{}` runs steps outside the transaction, so it can't be one \
                                  step of another composite",
-                                call.name
-                            ),
-                        })
+                                    call.name
+                                ),
+                            })
+                        }
                     }
                 }
-            }
-        };
-        steps.push(Step { command, call, run });
-    }
-    Ok(if outside {
-        Routed::Steps(Plan {
-            steps,
-            result: composition.result,
-            events: composition.events,
+            };
+            steps.push(Step { command, call, run });
+        }
+        Ok(if outside {
+            Routed::Steps(Plan {
+                steps,
+                result: composition.result,
+                events: composition.events,
+            })
+        } else {
+            Routed::Tx
         })
-    } else {
-        Routed::Tx
-    })
+    }
 }
 
 /// A step sent with an idempotency key is the same write on every
@@ -205,12 +257,13 @@ impl CommandBus {
     /// Route composite `compose` for `input`: composed on a read snapshot,
     /// each call checked and routed. Every call inside the transaction →
     /// its `Tx` handler (which composes again, in the run's own
-    /// transaction); any outside → its steps.
+    /// transaction); any outside → its steps. With it, every composed
+    /// call's check before the transaction (tsk1010).
     pub(super) async fn route_composite(
         &self,
         compose: &Arc<Compose>,
         input: &Value,
-    ) -> Result<Resolved, CommandError> {
+    ) -> Result<(Resolved, Vec<Pending>), CommandError> {
         let registry = self.commands.read().commands.clone();
         let (c, input) = (compose.clone(), input.clone());
         let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
@@ -218,10 +271,18 @@ impl CommandBus {
         let routed = self
             .db
             .read(move |conn| {
-                route(&registry, conn, &c, &input, "", 0).map_err(|err| {
-                    *failed_c.lock() = Some(err);
-                    oxplow_domain::DomainError::Invariant("routing a composite failed".into())
-                })
+                let mut router = Router {
+                    registry: &registry,
+                    conn,
+                    prechecks: Vec::new(),
+                };
+                router
+                    .route(&c, &input, "", 0, "")
+                    .map(|routed| (routed, router.prechecks))
+                    .map_err(|err| {
+                        *failed_c.lock() = Some(err);
+                        oxplow_domain::DomainError::Invariant("routing a composite failed".into())
+                    })
             })
             .await
             .map_err(|db_err| {
@@ -230,10 +291,14 @@ impl CommandBus {
                     .take()
                     .unwrap_or_else(|| CommandError::from(db_err))
             })?;
-        Ok(match routed {
-            Routed::Tx => Resolved::Tx(compose.tx.clone()),
-            Routed::Steps(plan) => Resolved::Steps(Arc::new(plan)),
-        })
+        let (routed, prechecks) = routed;
+        Ok((
+            match routed {
+                Routed::Tx => Resolved::Tx(compose.tx.clone()),
+                Routed::Steps(plan) => Resolved::Steps(Arc::new(plan)),
+            },
+            prechecks,
+        ))
     }
 
     /// Run `plan`'s steps as `actor` (see the module doc).

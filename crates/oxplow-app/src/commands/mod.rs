@@ -267,6 +267,15 @@ struct Prepared<'a> {
 
 type ConfirmFor = dyn Fn(&Value) -> oxplow_domain::Confirm + Send + Sync;
 
+/// A command's own check of an input that needs what a transaction can't
+/// do — async work, such as resolving a metric query through the metric
+/// engine (tsk1010). Run once the actor is admitted, before the
+/// transaction opens: for a direct call, and for each call a composite
+/// composes (`steps.rs` collects them while routing). A refusal is the
+/// command's `Invalid`, at the input's field.
+pub type Precheck =
+    dyn Fn(Value) -> futures::future::BoxFuture<'static, Result<(), CommandError>> + Send + Sync;
+
 /// A registered command: its spec, compiled input schema and handler.
 pub struct Command {
     pub spec: CommandSpec,
@@ -276,6 +285,8 @@ pub struct Command {
     /// Per-input confirmation, when the spec's `confirm` depends on the
     /// input (`config.set` on a human-only key). Overrides `spec.confirm`.
     confirm_for: Option<Arc<ConfirmFor>>,
+    /// Its check before the transaction, if it has one ([`Precheck`]).
+    precheck: Option<Arc<Precheck>>,
 }
 
 impl Command {
@@ -288,6 +299,7 @@ impl Command {
             handler,
             validator: self.validator.clone(),
             confirm_for: self.confirm_for.clone(),
+            precheck: self.precheck.clone(),
         };
         copy.check_atomicity()?;
         Ok(copy)
@@ -309,6 +321,7 @@ impl Command {
             handler,
             validator,
             confirm_for: None,
+            precheck: None,
         };
         command.check_atomicity()?;
         Ok(command)
@@ -335,6 +348,12 @@ impl Command {
 
     /// Its confirmation decided per input. A `Read` command may not have
     /// one (see [`Self::may_ask`]).
+    /// This command with its check before the transaction ([`Precheck`]).
+    pub fn with_precheck(mut self, f: Arc<Precheck>) -> Self {
+        self.precheck = Some(f);
+        self
+    }
+
     pub fn with_confirm_for(mut self, f: Arc<ConfirmFor>) -> Result<Self, CommandError> {
         Self::may_ask(&self.spec)?;
         self.confirm_for = Some(f);
@@ -807,10 +826,16 @@ impl CommandBus {
         }
         // A composite is routed now that the actor is admitted: composed on
         // a read snapshot, each call checked and routed (`steps.rs`).
-        let resolved = match routing {
-            Routing::Ready(resolved) => resolved,
+        let (resolved, prechecks) = match routing {
+            Routing::Ready(resolved) => {
+                let own = command
+                    .precheck
+                    .clone()
+                    .map(|p| steps::Pending::own(p, input.clone()));
+                (resolved, own.into_iter().collect())
+            }
             Routing::Composite(compose) => match self.route_composite(&compose, &input).await {
-                Ok(resolved) => resolved,
+                Ok(routed) => routed,
                 Err(err) => {
                     let recorded = match err {
                         CommandError::Denied { .. } => Outcome::Denied,
@@ -822,6 +847,15 @@ impl CommandBus {
                 }
             },
         };
+        // Each check that needs more than a transaction, before it opens
+        // (tsk1010): the command's own, or each composed call's.
+        for pending in prechecks {
+            if let Err(err) = pending.run().await {
+                self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
+                    .await;
+                return Err(err);
+            }
+        }
         // 4. A person confirms; an agent or an effect never can. Nothing is
         // written: a person is asked, an agent's or effect's run is kept as
         // a proposal.

@@ -11,9 +11,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_db::semantic_layer::check_query_on;
 use oxplow_db::thread_answer_store::{self as answers, AnswerShows};
-use oxplow_db::{SqlCell, SqlQuery};
+use oxplow_db::SqlCell;
 use oxplow_domain::events::schema::{LensKept, LensKeptV2, LensShown, LensShownV1};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{answer_ref, lens_ref, thread_ref};
@@ -175,24 +174,22 @@ fn stream_root_tx(
     ))
 }
 
-/// A lens spec's check, `lens.show`'s and `lens.keep`'s: its shape, its
-/// params bound in `lens_ctx`, and its query through the authorizer
-/// `query_sql` uses — one read-only statement over the published models.
-fn check_spec_tx(
-    conn: &rusqlite::Connection,
+/// A lens spec's query, checked as `query_sql` checks it — one read-only
+/// statement over the published models, metric functions resolved through
+/// the metric engine (`SqlGateway::check`). `lens.show` runs it before its
+/// transaction (its [`Precheck`](crate::commands::Precheck), tsk1010),
+/// `lens.keep` in its run.
+async fn check_spec_query(
+    sql: &crate::sql_gateway::SqlGateway,
     spec: &LensSpec,
-    params: &BTreeMap<String, Value>,
-    lens_ctx: &LensContext,
 ) -> Result<(), CommandError> {
-    let bound = check_spec_shape(spec, params, lens_ctx)?;
-    if !spec.query.trim().is_empty() {
-        check_query_on(
-            conn,
-            &SqlQuery::new(&spec.query).named(bound.into_iter().collect()),
-        )
-        .map_err(|e| invalid("/spec/query", e.to_string()))?;
+    if spec.query.trim().is_empty() {
+        return Ok(());
     }
-    Ok(())
+    sql.check(&spec.query)
+        .await
+        .map(|_| ())
+        .map_err(|e| invalid("/spec/query", e.to_string()))
 }
 
 /// A spec's shape and its params bound in `lens_ctx` — everything of its
@@ -229,6 +226,18 @@ fn answer_id(raw: &str) -> Result<i64, CommandError> {
 }
 
 fn show(target: LensTarget) -> Command {
+    // A spec's query is checked before the transaction: resolving a metric
+    // query takes the metric engine, which a transaction can't (tsk1010).
+    let sql = target.sql.clone();
+    let precheck: Arc<crate::commands::Precheck> = Arc::new(move |input: Value| {
+        let sql = sql.clone();
+        Box::pin(async move {
+            match parse::<ShowInput>(input)?.spec {
+                Some(spec) => check_spec_query(&sql, &spec).await,
+                None => Ok(()),
+            }
+        })
+    });
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: ShowInput = parse(input)?;
         let thread: i64 = match input.thread.as_deref() {
@@ -268,7 +277,8 @@ fn show(target: LensTarget) -> Command {
                 (lens.title.clone(), AnswerShows::Lens(id.clone()), Some(id))
             }
             (None, Some(spec)) => {
-                check_spec_tx(ctx.conn, &spec, &params, &lens_ctx)?;
+                // Its query was checked before the transaction.
+                check_spec_shape(&spec, &params, &lens_ctx)?;
                 let value = serde_json::to_value(&spec).expect("spec serializes");
                 (spec.title.clone(), AnswerShows::Spec(value), None)
             }
@@ -316,6 +326,7 @@ fn show(target: LensTarget) -> Command {
         handler,
     )
     .expect("lens.show registers")
+    .with_precheck(precheck)
 }
 
 /// What `lens.keep` writes for answer `id`: its spec with the shown
@@ -439,16 +450,8 @@ async fn keeping_spec(
         })
         .await
         .map_err(CommandError::from)??;
-    // Its query is checked as the explorer runs it: the metric functions
-    // (`metric_grid()`, `metric_findings()`) rewritten, then the read
-    // contract (tsk987).
-    if !keeping.spec.query.trim().is_empty() {
-        target
-            .sql
-            .check(&keeping.spec.query)
-            .await
-            .map_err(|e| invalid("/spec/query", e.to_string()))?;
-    }
+    // Its query is checked as the explorer runs it (tsk987).
+    check_spec_query(&target.sql, &keeping.spec).await?;
     Ok(keeping)
 }
 
@@ -700,12 +703,12 @@ async fn share_lens(
     let query_problem = if lens.query.trim().is_empty() {
         None
     } else {
-        let query = SqlQuery::new(&lens.query);
         target
-            .db
-            .read(move |tx| Ok(check_query_on(tx, &query).err().map(|e| e.to_string())))
+            .sql
+            .check(&lens.query)
             .await
-            .map_err(CommandError::from)?
+            .err()
+            .map(|e| e.to_string())
     };
     if !problems.is_empty() || query_problem.is_some() {
         undo();
@@ -1075,21 +1078,7 @@ mod tests {
     #[tokio::test]
     async fn keep_takes_a_metric_spec() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        fx.svc
-            .fact_store
-            .upsert_measure(oxplow_db::NewMeasure::new("acme.todo", "TODOs"))
-            .await
-            .unwrap();
-        fx.svc
-            .fact_store
-            .upsert_spec(oxplow_db::NewMetricSpec::base(
-                "acme.todos",
-                "TODOs",
-                "acme.todo",
-                "sum",
-            ))
-            .await
-            .unwrap();
+        todos_metric(&fx).await;
         let saved = fx
             .svc
             .commands
@@ -1109,6 +1098,93 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(saved.result["lens"], "saved/weekly-todos");
+    }
+
+    /// A measure (`acme.todo`) and its metric (`acme.todos`).
+    async fn todos_metric(fx: &crate::test_fixtures::EffortFixture) {
+        fx.svc
+            .fact_store
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.todo", "TODOs"))
+            .await
+            .unwrap();
+        fx.svc
+            .fact_store
+            .upsert_spec(oxplow_db::NewMetricSpec::base(
+                "acme.todos",
+                "TODOs",
+                "acme.todo",
+                "sum",
+            ))
+            .await
+            .unwrap();
+    }
+
+    /// tsk1010: an agent shows a metric chart in its thread — the query is
+    /// checked as `query_sql` checks it, metric functions resolved — both
+    /// called directly and as a step of a composite; an unknown metric is
+    /// refused at the query.
+    #[tokio::test]
+    async fn show_takes_a_metric_query() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        todos_metric(&fx).await;
+        let spec = |metric: &str| {
+            json!({
+                "title": "Weekly TODOs",
+                "query": format!("SELECT bucket, MEASURE('{metric}') AS todos FROM metric_grid('week')"),
+                "viz": "table"
+            })
+        };
+        fx.svc
+            .commands
+            .run(
+                &agent(&fx),
+                SHOW,
+                json!({ "spec": spec("acme.todos") }),
+                false,
+            )
+            .await
+            .unwrap();
+        fx.svc
+            .commands
+            .run(
+                &agent(&fx),
+                crate::commands::compose::SEQUENCE,
+                json!({ "calls": [{ "name": SHOW, "input": { "spec": spec("acme.todos") } }] }),
+                false,
+            )
+            .await
+            .unwrap();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                SHOW,
+                json!({ "spec": spec("acme.nope") }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/spec/query" && message.contains("acme.nope")),
+            "{err:?}"
+        );
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                crate::commands::compose::SEQUENCE,
+                json!({ "calls": [{ "name": SHOW, "input": { "spec": spec("acme.nope") } }] }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/calls/0/input/spec/query"),
+            "{err:?}"
+        );
+        assert_eq!(events_of(&fx, "lens.shown").await.len(), 2);
     }
 
     /// tsk988: an agent keeps a lens only in its own thread's stream — the
