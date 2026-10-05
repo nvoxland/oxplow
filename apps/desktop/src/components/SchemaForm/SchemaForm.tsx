@@ -34,8 +34,15 @@ export function SchemaForm({
   busy = false,
   testIdPrefix = "schema-form",
 }: SchemaFormProps) {
-  const fields = useMemo(() => fieldsOf(schema), [schema]);
-  const initialDrafts = useMemo(() => draftsFrom(fields, initial ?? {}), [fields, initial]);
+  // Keyed on content: a host re-reading its data passes fresh copies of
+  // the same schema and starting value, and that mustn't throw away what
+  // the person typed (tsk1054). A different starting value does.
+  const schemaText = JSON.stringify(schema);
+  const initialText = JSON.stringify(initial ?? {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
+  const fields = useMemo(() => fieldsOf(schema), [schemaText]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
+  const initialDrafts = useMemo(() => draftsFrom(fields, initial ?? {}), [fields, initialText]);
   const [drafts, setDrafts] = useState<Drafts>(initialDrafts);
   useEffect(() => setDrafts(initialDrafts), [initialDrafts]);
   const { value, errors } = valueOf(fields, drafts);

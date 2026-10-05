@@ -54,7 +54,8 @@ const instance = {
 };
 mock.module("../api.js", () => ({
   ...realApi,
-  listProviderInstances: async () => [instance, ...more],
+  // A fresh copy each read, as over IPC.
+  listProviderInstances: async () => structuredClone([instance, ...more]),
   addProviderInstance: async (inst: string, provider: string, scope: string) => {
     added.push([inst, provider, scope]);
     more = [{ ...instance, instance: inst, instanceId: inst.split("/")[1], scope, enabled: false }];
@@ -445,3 +446,17 @@ test("a global instance has Off in this project", async () => {
   expect(view.queryByTestId("integration-off-here-tracker/fake_shared")).toBeNull();
 });
 
+
+// tsk1054: a re-read of the instances (a config change elsewhere, an
+// approval) brought a fresh copy of the same saved config and wiped what
+// the person had typed but not saved — Enable then went out without it.
+test("what the person typed survives a re-read", async () => {
+  const view = render(<IntegrationsSection />);
+  const team = await waitFor(() => view.getByTestId("integration-config-tracker/fake-team") as HTMLInputElement);
+  fireEvent.change(team, { target: { value: "platform" } });
+  await act(async () => {
+    for (const l of listeners) l({ kind: "approvalsChanged" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect((view.getByTestId("integration-config-tracker/fake-team") as HTMLInputElement).value).toBe("platform");
+});

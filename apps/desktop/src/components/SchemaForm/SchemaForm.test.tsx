@@ -65,3 +65,16 @@ test("Escape in the form, or in a confirmation, stays inside it", async () => {
   fireEvent.keyDown(getByTestId("c-run"), { key: "Escape" });
   expect(outer).toBe(0);
 });
+
+// tsk1054: a host re-reading its data passes a fresh copy of the same
+// schema and starting value; that's no reason to throw away an edit. A
+// different starting value is.
+test("an edit survives a fresh copy of the same starting value", () => {
+  const view = render(<SchemaForm schema={schema} initial={{ title: "Start" }} testIdPrefix="f" />);
+  const title = () => view.getByTestId("f-title") as HTMLInputElement;
+  fireEvent.change(title(), { target: { value: "Edited" } });
+  view.rerender(<SchemaForm schema={structuredClone(schema)} initial={{ title: "Start" }} testIdPrefix="f" />);
+  expect(title().value).toBe("Edited");
+  view.rerender(<SchemaForm schema={schema} initial={{ title: "Saved elsewhere" }} testIdPrefix="f" />);
+  expect(title().value).toBe("Saved elsewhere");
+});

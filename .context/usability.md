@@ -56,6 +56,14 @@ Things I keep forgetting. Read this before adding any UI.
   request when it mounts. A page that shows state from outside any model
   refreshes on the event that says it changed (Integrations and Data on
   `approvalsChanged`, sent when a person approves a program).
+- **A re-read never wipes what the person typed** (tsk1054). A host
+  re-reading its data hands a form fresh copies of the same schema and
+  saved value, so a form resets its fields on the *content* changing, not
+  the object: `SchemaForm` keys on `JSON.stringify` of both, and a row
+  holding a draft beside it (`IntegrationRow`'s `config`) does the same.
+  Otherwise any event that re-reads — an approval, a config change
+  elsewhere, a health record — silently drops unsaved input, and the next
+  action sends the old value.
 - **Never call `window.prompt()`.** The Tauri webview blocks it —
   it returns `null` synchronously without
   showing anything, so any code path gated on its return value

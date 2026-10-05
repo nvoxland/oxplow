@@ -487,7 +487,12 @@ function IntegrationRow({
   const [config, setConfig] = useState<Record<string, unknown> | null>(saved);
   const [checked, setChecked] = useState<ProviderInstanceView | null>(null);
   const [busy, setBusy] = useState<"check" | "toggle" | "sync" | "remove" | "off-here" | null>(null);
-  useEffect(() => setConfig(saved), [saved]);
+  // The draft follows the saved config when it changes, not each re-read
+  // of the instances, which brings a fresh copy of the same one and would
+  // wipe what the person typed but hasn't saved (tsk1054).
+  const savedText = JSON.stringify(saved);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
+  useEffect(() => setConfig(saved), [savedText]);
 
   const shown = checked ?? view;
   const m = integrationRow(shown);
