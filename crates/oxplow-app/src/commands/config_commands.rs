@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use oxplow_config::keys::{config_key, config_keys, key_value, with_key, ConfigKey};
-use oxplow_config::{write_project_config, OxplowConfig};
+use oxplow_config::{write_project_key, OxplowConfig};
 use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
 use oxplow_domain::{
     Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Envelope,
@@ -216,9 +216,10 @@ pub(crate) fn change(
 }
 
 /// After commit: apply `key` to the config as it is NOW (another key may
-/// have changed since the handler ran), write the file, swap memory, wake
-/// the UI. Holding the write lock across write + swap keeps the file and
-/// the in-memory config in step.
+/// have changed since the handler ran), write that one key into the file —
+/// the rest stays as the person wrote it (tsk1028) — swap memory, wake the
+/// UI. Holding the write lock across write + swap keeps the file and the
+/// in-memory config in step.
 fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>) {
     let mut guard = target.config.write().unwrap_or_else(|e| e.into_inner());
     let next = match with_key(&guard, &target.project_dir, key, value) {
@@ -228,7 +229,7 @@ fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>) {
             return;
         }
     };
-    if let Err(e) = write_project_config(&target.project_dir, &next) {
+    if let Err(e) = write_project_key(&target.project_dir, key, value) {
         tracing::error!(key, error = %e, "config.set: writing project.yaml after commit failed");
         return;
     }
@@ -702,7 +703,7 @@ mod tests {
                     let text = std::fs::read_to_string(&path).unwrap();
                     // Production code only: stop at the test module.
                     let prod = text.split("#[cfg(test)]").next().unwrap_or_default();
-                    if prod.contains("write_project_config(") {
+                    if prod.contains("write_project_key(") {
                         writers.push(path.strip_prefix(&crates).unwrap().display().to_string());
                     }
                 }

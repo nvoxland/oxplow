@@ -4076,7 +4076,7 @@ export type OxplowConfig = {
 	 * 
 	 *  No `skip_serializing_if`: this type is a command result, and specta
 	 *  rejects conditional omission in unified mode. Absence from the written
-	 *  YAML is handled by `write_project_config`, which builds its mapping by
+	 *  YAML is handled by `render_project_config`, which builds its mapping by
 	 *  hand rather than through this derive.
 	 */
 	iconTint: string | null,

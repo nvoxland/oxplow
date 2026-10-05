@@ -1,11 +1,11 @@
 //! The `.oxplow/project.yaml` key registry (`.context/commands.md`,
 //! "config.*"). One source of truth for what the file may contain:
 //! the JSON Schema generated from the file's own shape (`RawConfig`),
-//! whose top-level properties are the keys. `write_project_config` uses
+//! whose top-level properties are the keys. `render_project_config` uses
 //! it to know which keys it owns, and the `config.*` commands use it to
 //! list, describe and validate keys — so a field added to `RawConfig` is
-//! automatically managed, documented and settable, and can never again be
-//! the "unknown extra" that re-inserted a stale value over a fresh one.
+//! automatically managed, documented and settable. The file is written one
+//! key at a time (`write_project_key`), the rest left as the person wrote it.
 
 use serde_json::Value;
 

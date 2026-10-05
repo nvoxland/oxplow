@@ -653,7 +653,7 @@ pub struct OxplowConfig {
     ///
     /// No `skip_serializing_if`: this type is a command result, and specta
     /// rejects conditional omission in unified mode. Absence from the written
-    /// YAML is handled by `write_project_config`, which builds its mapping by
+    /// YAML is handled by `render_project_config`, which builds its mapping by
     /// hand rather than through this derive.
     #[serde(rename = "iconTint")]
     pub icon_tint: Option<String>,
@@ -1015,74 +1015,126 @@ pub fn parse_project_config(
     validate(parsed, fallback_name)
 }
 
-/// Re-serialize an `OxplowConfig` back to `.oxplow/project.yaml`.
+/// Write `key` into `.oxplow/project.yaml` as `value`, or remove it when
+/// `None` — editing only that key's lines (tsk1028). Every other line of
+/// the file is kept byte for byte: the person's formatting, comments, flow
+/// style, and keys that happen to equal their default. A key's block is its
+/// line at column 0 through the line before the next one, with the comment
+/// lines directly above it; a new key is appended. The key's own value is
+/// written block style, and comments inside it are not kept.
 ///
-/// **Comment preservation:** none of the maintained Rust YAML
-/// crates (serde_yaml, yaml-rust2, saphyr) round-trip comments,
-/// so YAML comments and exact whitespace in the user's original
-/// file ARE LOST on write. What we do preserve:
-///
-/// - Any top-level keys the user added that aren't in oxplow's
-///   schema (read here, copied through, written back). This
-///   matters when a third tool shares `.oxplow/project.yaml`.
-/// - The minimal-default behavior — keys whose value matches the
-///   default are omitted entirely, so a hand-edited file stays
-///   minimal across writes.
-///
-/// If you maintain heavy comments in `.oxplow/project.yaml`, prefer
-/// editing the file by hand; oxplow only writes through the
-/// settings UI's explicit save actions.
-pub fn write_project_config(
+/// The caller validates the change first (`keys::with_key`); this checks
+/// only that the edited text still reads as the same document with that one
+/// key changed, and refuses rather than write anything else (a file whose
+/// YAML ties blocks together — anchors, multiple documents — can't be
+/// edited in place).
+pub fn write_project_key(
     project_dir: impl AsRef<Path>,
-    config: &OxplowConfig,
+    key: &str,
+    value: Option<&serde_json::Value>,
 ) -> Result<(), ConfigError> {
-    let project_dir = project_dir.as_ref();
-    let path = config_path(project_dir);
+    let path = config_path(project_dir.as_ref());
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let fallback_name = basename(project_dir);
-
-    // Every key the file schema knows (`keys::config_keys`) is ours to
-    // render; anything else found in an existing file is copied through
-    // verbatim (best-effort, since YAML→serde_yaml::Value→YAML is still
-    // lossy on style). Deriving the set from the schema is what keeps a
-    // new field from being "an extra" that re-inserts its stale on-disk
-    // value over the one just written (tsk164, tsk411).
-    let existing_extras: serde_yaml::Mapping = if path.exists() {
-        match std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|raw| serde_yaml::from_str::<serde_yaml::Value>(&raw).ok())
-        {
-            Some(serde_yaml::Value::Mapping(m)) => m
-                .into_iter()
-                .filter(|(k, _)| match k {
-                    serde_yaml::Value::String(s) => !keys::is_config_key(s),
-                    _ => true,
-                })
-                .collect(),
-            _ => serde_yaml::Mapping::new(),
-        }
+    let original = if path.exists() {
+        std::fs::read_to_string(&path)?
     } else {
-        serde_yaml::Mapping::new()
+        String::new()
     };
+    let block = value
+        .map(|v| {
+            let mut one = serde_yaml::Mapping::new();
+            one.insert(serde_yaml::Value::String(key.to_string()), to_yaml(v));
+            serde_yaml::to_string(&serde_yaml::Value::Mapping(one))
+        })
+        .transpose()?;
+    let edited = edit_top_level_key(&original, key, block.as_deref());
 
-    let mut doc = render_project_config(config, &fallback_name);
-    // Carry forward any unknown top-level keys the user (or a
-    // sibling tool) added to .oxplow/project.yaml.
-    for (k, v) in existing_extras {
-        doc.insert(k, v);
+    // The edit must change that key and nothing else.
+    let as_map = |text: &str| -> Result<serde_yaml::Mapping, ConfigError> {
+        match serde_yaml::from_str::<serde_yaml::Value>(text)? {
+            serde_yaml::Value::Mapping(m) => Ok(m),
+            serde_yaml::Value::Null => Ok(serde_yaml::Mapping::new()),
+            _ => Err(ConfigError::Invalid(
+                ".oxplow/project.yaml is not a mapping".into(),
+            )),
+        }
+    };
+    let mut expected = as_map(&original)?;
+    let yaml_key = serde_yaml::Value::String(key.to_string());
+    match value {
+        Some(v) => {
+            expected.insert(yaml_key, to_yaml(v));
+        }
+        None => {
+            expected.remove(&yaml_key);
+        }
     }
-
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
-    std::fs::write(path, yaml)?;
+    if as_map(&edited)? != expected {
+        return Err(ConfigError::Invalid(format!(
+            "`{key}` can't be edited in place in .oxplow/project.yaml (its YAML ties keys \
+             together, e.g. with anchors); edit the file by hand"
+        )));
+    }
+    std::fs::write(path, edited)?;
     Ok(())
+}
+
+/// The top-level key a `.oxplow/project.yaml` line starts, if it does: a
+/// `name:` at column 0 (not a comment, list item or flow value).
+fn top_key(line: &str) -> Option<&str> {
+    let first = line.chars().next()?;
+    if first.is_whitespace() || matches!(first, '#' | '-' | '{' | '[' | '\'' | '"') {
+        return None;
+    }
+    let (name, _) = line.split_once(':')?;
+    Some(name.trim_end())
+}
+
+/// `text` with top-level `key`'s block replaced by `block` (or removed when
+/// `None`; appended when the key is new). See [`write_project_key`].
+fn edit_top_level_key(text: &str, key: &str, block: Option<&str>) -> String {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let Some(at) = lines.iter().position(|l| top_key(l) == Some(key)) else {
+        let mut out = text.to_string();
+        if let Some(block) = block {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(block);
+        }
+        return out;
+    };
+    // The block runs to the next top-level key, less the comments that
+    // belong to that key (directly above it).
+    let mut end = lines[at + 1..]
+        .iter()
+        .position(|l| top_key(l).is_some())
+        .map_or(lines.len(), |i| at + 1 + i);
+    while end > at + 1 && lines[end - 1].trim_start().starts_with('#') && end < lines.len() {
+        end -= 1;
+    }
+    // Its own comments: the comment lines directly above it.
+    let mut start = at;
+    if block.is_none() {
+        while start > 0 && lines[start - 1].trim_start().starts_with('#') {
+            start -= 1;
+        }
+    }
+    let mut out: String = lines[..start].concat();
+    if let Some(block) = block {
+        out.push_str(block);
+    }
+    out.push_str(&lines[end..].concat());
+    out
 }
 
 /// The `.oxplow/project.yaml` document for `config`: only keys whose
 /// value differs from the default, so a hand-edited file stays minimal.
 /// `fallback_name` is the project name that needs no `projectName` key.
-/// Pure — `write_project_config` adds the file's unknown keys and writes.
+/// Pure: what `keys::with_key` validates a change through; the file itself
+/// is written one key at a time (`write_project_key`).
 pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serde_yaml::Mapping {
     config_entries(config, fallback_name)
         .into_iter()
@@ -3420,7 +3472,7 @@ mod tests {
         );
         assert_eq!(resolved[1].0.args, vec!["--acp", "--yolo"]);
         // Written back as it was.
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         assert_eq!(
             load_project_config(dir.path()).unwrap().acp_agents,
             cfg.acp_agents
@@ -3524,6 +3576,86 @@ dimensions:
     /// Resolve the project config path under `<dir>/.oxplow/`, creating the
     /// `.oxplow` parent so a subsequent write succeeds. Used by tests that
     /// author a config file directly (simulating a user-edited file).
+    /// tsk1028: a command's write changes only its key. The person's
+    /// formatting, comments and default-valued keys (`agents: [claude]`)
+    /// stay as written.
+    #[test]
+    fn a_key_write_leaves_the_rest_of_the_file_as_written() {
+        let dir = tempdir().unwrap();
+        let original = "# The cart project.\n\
+                        agents: [claude]\n\
+                        testing:\n  command: bun test   # with reports\n\
+                        collectors:\n\
+                        - { id: tests.junit, doc: Cases., records: tests, entry: \"oxplow:junit\", report: { path: junit.xml }, trigger: { on_run: test } }\n";
+        std::fs::write(cfg_path(dir.path()), original).unwrap();
+        let metrics = serde_json::json!([{ "use": "oxplow.fn_count" }]);
+        write_project_key(dir.path(), "metrics", Some(&metrics)).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
+        assert!(raw.starts_with(original), "the rest moved:\n{raw}");
+        assert!(raw.ends_with("metrics:\n- use: oxplow.fn_count\n"), "{raw}");
+        assert_eq!(
+            load_project_config(dir.path()).unwrap().agents,
+            vec![AgentKind::Claude]
+        );
+    }
+
+    /// Setting a key the file has replaces only that key's lines, under its
+    /// comment; unsetting removes them, comment and all.
+    #[test]
+    fn a_key_write_replaces_or_removes_only_its_block() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "agents: [claude]\n\
+             # Keep a week of history.\n\
+             snapshotRetentionDays: 7\n\
+             zones: []   # none yet\n",
+        )
+        .unwrap();
+        write_project_key(
+            dir.path(),
+            "snapshotRetentionDays",
+            Some(&serde_json::json!(14)),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
+            "agents: [claude]\n# Keep a week of history.\nsnapshotRetentionDays: 14\nzones: []   # none yet\n"
+        );
+        write_project_key(dir.path(), "snapshotRetentionDays", None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
+            "agents: [claude]\nzones: []   # none yet\n"
+        );
+    }
+
+    /// A file that doesn't exist yet gets just the key.
+    #[test]
+    fn a_key_write_creates_the_file() {
+        let dir = tempdir().unwrap();
+        write_project_key(
+            dir.path(),
+            "snapshotRetentionDays",
+            Some(&serde_json::json!(3)),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(config_path(dir.path())).unwrap(),
+            "snapshotRetentionDays: 3\n"
+        );
+    }
+
+    /// `cfg` as the renderer writes it: the round trip `keys::with_key`
+    /// validates a change through.
+    fn write_rendered(project_dir: &Path, cfg: &OxplowConfig) {
+        let doc = render_project_config(cfg, &basename(project_dir));
+        std::fs::write(
+            cfg_path(project_dir),
+            serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap(),
+        )
+        .unwrap();
+    }
+
     fn cfg_path(project_dir: &Path) -> std::path::PathBuf {
         let p = config_path(project_dir);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -3746,7 +3878,7 @@ lsp:
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let reloaded = load_project_config(dir.path()).unwrap();
         assert_eq!(reloaded.generated.exclude, vec!["target".to_string()]);
         assert_eq!(
@@ -3850,7 +3982,7 @@ lsp:
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let reloaded = load_project_config(dir.path()).expect("still loads after a write");
         assert_eq!(reloaded.metrics, cfg.metrics);
         assert_eq!(reloaded.dimensions, cfg.dimensions);
@@ -3875,7 +4007,7 @@ lsp:
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let reloaded = load_project_config(dir.path()).unwrap();
         assert_eq!(reloaded.zones, cfg.zones);
         assert_eq!(reloaded.zones[0].zone, "test");
@@ -3898,7 +4030,7 @@ lsp:
             cfg.testing.fast_command.as_deref(),
             Some("bun run test:fast")
         );
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let reloaded = load_project_config(dir.path()).unwrap();
         assert_eq!(
             reloaded.testing.fast_command.as_deref(),
@@ -3932,7 +4064,7 @@ lsp:
         let mut cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.collectors.len(), 1);
         cfg.snapshot_retention_days = 3;
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let reloaded = load_project_config(dir.path()).unwrap();
         assert_eq!(reloaded.collectors, cfg.collectors);
         assert_eq!(reloaded.snapshot_retention_days, 3);
@@ -3940,9 +4072,8 @@ lsp:
 
     #[test]
     fn managed_keys_covers_every_block_the_writer_emits() {
-        // Guard against the next block drifting the same way tsk164's did: any
-        // top-level key `write_project_config` serializes must be MANAGED, or
-        // the stale on-disk copy silently wins.
+        // Every top-level key the renderer emits reads back the same: what
+        // `keys::with_key` validates a command's change through (tsk164).
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
@@ -3958,7 +4089,7 @@ lsp:
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         let doc: serde_yaml::Value = serde_yaml::from_str(&raw).unwrap();
         let serde_yaml::Value::Mapping(map) = doc else {
@@ -3991,7 +4122,7 @@ lsp:
                 .map(String::as_str),
             Some("github-copilot/gpt-5-mini")
         );
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.contains("agentModels:"), "got:\n{raw}");
         assert!(
@@ -4010,7 +4141,7 @@ lsp:
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.extensions_disabled, vec!["oxplow-analytics"]);
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         assert_eq!(disabled_extensions(dir.path()), vec!["oxplow-analytics"]);
         assert!(disabled_extensions(tempdir().unwrap().path()).is_empty());
     }
@@ -4031,7 +4162,7 @@ lsp:
                 model: "openai/gpt-5-mini".into()
             })
         );
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let again = load_project_config(dir.path()).unwrap();
         assert_eq!(again.ai_roles, cfg.ai_roles, "written back unchanged");
 
@@ -4090,7 +4221,7 @@ lsp:
             inject_session_context: false,
             ..default_config("test".into())
         };
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let loaded = load_project_config(dir.path()).unwrap();
         assert!(!loaded.inject_session_context);
     }
@@ -4104,7 +4235,7 @@ lsp:
             icon_tint: Some("#c2410c".into()),
             ..default_config("test".into())
         };
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let loaded = load_project_config(dir.path()).unwrap();
         assert_eq!(loaded.icon_tint.as_deref(), Some("#c2410c"));
     }
@@ -4221,7 +4352,7 @@ testing:
             },
             ..default_config("test".into())
         };
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.contains("testing:"), "got:\n{raw}");
         let loaded = load_project_config(dir.path()).unwrap();
@@ -4234,7 +4365,7 @@ testing:
     /// otherwise a sibling tool sharing .oxplow/project.yaml would lose its
     /// state every time the user touched oxplow's settings UI.
     #[test]
-    fn write_preserves_unknown_top_level_keys() {
+    fn a_key_write_preserves_unknown_top_level_keys() {
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
@@ -4242,11 +4373,12 @@ testing:
         )
         .unwrap();
 
-        let cfg = OxplowConfig {
-            snapshot_retention_days: 14,
-            ..default_config("test".into())
-        };
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_project_key(
+            dir.path(),
+            "snapshotRetentionDays",
+            Some(&serde_json::json!(14)),
+        )
+        .unwrap();
 
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(
@@ -4539,7 +4671,7 @@ metrics:
             }],
             ..default_config("test".into())
         };
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.contains("enabled: false"), "got:\n{raw}");
         let loaded = load_project_config(dir.path()).unwrap();
@@ -4553,7 +4685,7 @@ metrics:
             metrics: vec![define("acme.loc", Some(2.0))],
             ..default_config("test".into())
         };
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.contains("metrics:"), "got:\n{raw}");
         // No null fields written for unset options.
@@ -4791,7 +4923,7 @@ dimensions:
             }],
             ..default_config("test".into())
         };
-        write_project_config(dir.path(), &cfg).unwrap();
+        write_rendered(dir.path(), &cfg);
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.contains("measures:"), "got:\n{raw}");
         assert!(raw.contains("dimensions:"), "got:\n{raw}");

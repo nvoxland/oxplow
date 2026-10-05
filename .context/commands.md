@@ -292,12 +292,15 @@ happened.
 `oxplow_config::keys` (`config_keys()`): the JSON Schema generated from
 the file's own shape (`RawConfig`, `deny_unknown_fields`), whose
 top-level properties are the keys, each with its field doc and value
-schema. `write_project_config` renders only those keys and copies any
-other top-level key through — deriving the managed set from the schema
-is what fixed `metricRetentionDays`, `metricDetailMaxPerProducer`,
-`metricDetailRetentionDays` and `iconTint` silently reverting (they were
-missing from the old hand-kept `MANAGED_KEYS` list, so their on-disk
-value came back as an "extra" over the one just written). Adding a field
+schema. A `config.set` / `config.unset` writes **only its key** into the
+file (`write_project_key`, tsk1028): that key's block — its line at column
+0 through the next key, under its own comments — is replaced, removed or
+appended, and every other line stays byte for byte as the person wrote it
+(flow style, comments, keys equal to their default such as
+`agents: [claude]`). The edit is checked to change that key and nothing
+else; a file whose YAML ties keys together (anchors) is refused, to be
+edited by hand. The whole-file re-render it replaced lost comments and
+formatting and dropped default-valued keys. Adding a field
 to `RawConfig` makes it managed, documented and settable at once.
 `set_zones` is gone (tsk392): `zones` is just a key.
 
@@ -470,7 +473,7 @@ and `enable_metrics` each run `config.set` / `config.unset` as
 `Actor::Human`, confirmed — the person's click is the confirmation a
 person-only key asks for — through `oxplow_rpc::commands::config::set_key`.
 `config_service` only reads. `only_the_config_commands_write_project_yaml`
-scans the crates for any other `write_project_config` call. A key whose
+scans the crates for any other `write_project_key` call. A key whose
 new value must reach something running reacts to the `config.changed`
 event on the pump, reading the value from the event's `after` (the pump
 can see the event before the after-commit swap): `generated` →
