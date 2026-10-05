@@ -25,6 +25,9 @@ export function ThreadAnswer({ answer, onOpenPage }: ThreadAnswerProps) {
   const [error, setError] = useState<string | null>(null);
   const [kept, setKept] = useState<string | null>(answer.keptLens);
   useEffect(() => setKept(answer.keptLens), [answer.keptLens]);
+  // A kept answer is a lens now, a link away: one line until asked for,
+  // so kept answers don't crowd the terminal (tsk1042).
+  const [shown, setShown] = useState(answer.keptLens === null);
   const refresh = useCallback(async () => {
     try {
       setRun(await runAnswer(answer.ref));
@@ -56,11 +59,18 @@ export function ThreadAnswer({ answer, onOpenPage }: ThreadAnswerProps) {
         ) : (
           <KeepThis answer={answer.ref} onKept={setKept} />
         )}
+        {kept ? (
+          <button type="button" data-testid="thread-answer-show" onClick={() => setShown(!shown)}>
+            {shown ? "Hide" : "Show"}
+          </button>
+        ) : null}
       </div>
-      {error ? (
+      {!shown ? null : error ? (
         <div style={{ color: "var(--severity-critical)", fontSize: "var(--text-sm)" }}>{error}</div>
       ) : run ? (
-        <LensResultView run={run} toolbar={false} maxRows={20} onOpenPage={onOpenPage} />
+        <div data-testid="thread-answer-body">
+          <LensResultView run={run} toolbar={false} maxRows={20} onOpenPage={onOpenPage} />
+        </div>
       ) : (
         <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>Loading…</div>
       )}

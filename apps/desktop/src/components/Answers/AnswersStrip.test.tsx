@@ -158,6 +158,17 @@ test("a kept answer links to its lens", async () => {
   expect(opened).toEqual(["lens:review/waiting"]);
 });
 
+// tsk1042: a kept answer is a lens now, a link away; in the strip it's one
+// line until asked for, so kept answers don't crowd the terminal.
+test("a kept answer is one line until shown", async () => {
+  const answer = { ref: "answer:1", title: "Open tasks", lens: "review/waiting", keptLens: "review/waiting" };
+  const view = render(<ThreadAnswer answer={answer} />);
+  await waitFor(() => view.getByTestId("thread-answer-lens"));
+  expect(view.queryByTestId("thread-answer-body")).toBeNull();
+  fireEvent.click(view.getByTestId("thread-answer-show"));
+  await waitFor(() => view.getByTestId("thread-answer-body"));
+});
+
 // P9.A3: what the agent asked for waits where the conversation is.
 test("a thread's pending proposals wait above its answers; Approve decides as the person", async () => {
   answerRows = [];

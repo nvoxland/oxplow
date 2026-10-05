@@ -91,7 +91,8 @@ const stripStyle: CSSProperties = {
   flexDirection: "column",
   gap: 6,
   padding: 8,
-  maxHeight: "40%",
+  // The terminal keeps most of the column (tsk1042).
+  maxHeight: "35%",
   minHeight: 0,
   borderBottom: "1px solid var(--border-subtle)",
   background: "var(--surface-app)",

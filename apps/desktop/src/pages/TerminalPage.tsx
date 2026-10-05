@@ -165,7 +165,9 @@ export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps)
                 style={{
                   position: "absolute",
                   inset: 0,
-                  display: isActive ? "block" : "none",
+                  // A flex column, so the pane fills it (tsk1042).
+                  display: isActive ? "flex" : "none",
+                  flexDirection: "column",
                 }}
               >
                 <TerminalPane

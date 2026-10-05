@@ -77,7 +77,10 @@ export function AgentPage({
         {/* What the agent showed with `show_lens` (P6.C2); an ACP thread
           *  renders each answer inline in its transcript instead. */}
         <AnswersStrip key={thread.id} threadId={thread.id} onOpenPage={onOpenPage} />
-        <div style={{ flex: 1, minHeight: 0 }}>
+        {/* A flex column all the way down: a percentage height under a flex
+          *  item doesn't resolve, so the terminal kept its own height when
+          *  the strip grew, was clipped, and never refit (tsk1042). */}
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           {/* Key on thread.id so switching to a different thread
             *  remounts the terminal — pane_target alone collides
             *  ("working" for every thread), so without the key

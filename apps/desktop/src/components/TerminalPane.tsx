@@ -563,7 +563,7 @@ export function TerminalPane({
 
   return (
     <div
-      style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}
+      style={{ position: "relative", width: "100%", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

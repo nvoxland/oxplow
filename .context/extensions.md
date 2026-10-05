@@ -338,8 +338,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       re-runs through `run_answer` with `useRerunOnChange`, and offers
       **Keep This** (an inline name — empty takes it from the title —
       Enter keeps via `lens.keep`, Escape cancels) or, once it is a lens
-      (kept, or an existing lens shown), a link to it. The agent tab has
-      no route context, so `AgentPage` takes `onOpenPage`.
+      (kept, or an existing lens shown), a link to it. A **kept** answer
+      is one line — its title and lens link — with Show / Hide, so kept
+      answers don't crowd the terminal; the strip is capped at 35% of the
+      column, and the terminal below it sits in a flex column so it refits
+      when the strip grows (tsk1042: a `height: 100%` under a flex item
+      doesn't resolve, so the terminal was clipped and never refit). The
+      agent tab has no route context, so `AgentPage` takes `onOpenPage`.
     - Explore Data's **Save as Lens** (`lens.keep { spec, stream }`) uses
       the lens's title as a new extension's `intent.purpose`, and the
       caller's thread, when it has one, as its `intent.origin`.

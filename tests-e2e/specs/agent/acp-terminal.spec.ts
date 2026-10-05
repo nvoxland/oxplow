@@ -26,6 +26,11 @@ test("a terminal opens a shell in the project", async ({ page }) => {
   await page.keyboard.type("echo e2e-$((6*7))");
   await page.keyboard.press("Enter");
   await expect(page.locator(".xterm-rows")).toContainText("e2e-42");
+  // It fits its pane: the screen's last row is inside the page, not
+  // clipped below it (tsk1042).
+  const screen = await page.locator(".xterm-screen").boundingBox();
+  const pageBox = await page.getByTestId("page-terminal").boundingBox();
+  expect(screen && pageBox && screen.y + screen.height <= pageBox.y + pageBox.height + 1).toBeTruthy();
 });
 
 // tsk1026: a session whose process exited says so, takes no keys, and Start
