@@ -32,14 +32,12 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 - **`support/daemon.ts`** starts one daemon: `oxplow-daemon-sim` (the daemon
   with its secrets in memory — nothing reaches the keychain) over a throwaway
   git project, with its own `OXPLOW_HOME`, `HOME` (no rc file read, no
-  shell history written), `SHELL=/bin/sh`, no global or system git config,
-  and its own `TMUX_TMPDIR` with no `$TMUX` (a tmux client finds its
-  server by it first); a tmux server it started is killed with it. Its
+  shell history written), `SHELL=/bin/sh`, and no global or system git
+  config. Its
   stderr is kept in `tests-e2e/.output/daemons/` and named in a failure to
   start; whatever fails before it listens, the process is killed and its
   project removed, and `stop()` returns for a daemon a signal already
-  killed. (No spec starts one today: the threads speak ACP
-  and the Terminal page is a plain shell.) `ipc()` calls
+  killed. `ipc()` calls
   `/ipc/<name>` as the person; `run()` runs a bus command, confirmed;
   `settle()` waits until boot's background tasks are done; `waitForModels()`
   opens `/events` first (the daemon subscribes before answering the

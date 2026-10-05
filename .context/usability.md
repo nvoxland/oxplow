@@ -816,8 +816,7 @@ no caller may bypass the bus to write to the terminal.
   `decodeTaskDragRefs` / `dragHasTaskRefs` in
   `apps/desktop/src/agent-context-dnd.ts`.
 - **Sink**: `TerminalPane` is the only drop target. It writes through
-  `term.paste(text)` so the same xterm input pipeline handles both
-  direct and tmux transports — do not branch by transport.
+  `term.paste(text)`, so the same xterm input pipeline handles it.
 - **Mention shape** (`formatContextMention`):
   - file → `@<workspace-relative path> ` (Claude reads the file
     automatically on the next prompt).

@@ -12,7 +12,6 @@
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "tmux", "cmd": "tmux", "args": true },
         { "name": "git", "cmd": "git", "args": true },
         {
           "name": "typescript-language-server",

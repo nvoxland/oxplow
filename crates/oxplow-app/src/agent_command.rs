@@ -1,12 +1,11 @@
-//! Build the shell command oxplow runs in a tmux pane to launch the
-//! agent CLI (Claude, Codex, or opencode).
+//! Build the shell command oxplow runs in a PTY to launch the agent CLI
+//! (Claude, Codex, or opencode).
 //!
 //! Pure string-building, no IO. Mirrors the original
 //! `src/agent/agent-command.ts` so the launcher signature is stable
 //! across the migration.
 
 use oxplow_config::AgentKind;
-use oxplow_domain::Stream;
 
 /// Model opencode launches with (`-m provider/model`) when the project
 /// config doesn't override it (`agentModels: { opencode: … }` in
@@ -30,25 +29,6 @@ pub struct AgentCommandOptions {
     /// (tsk245). `None` falls back to the bare binary name plus a preflight
     /// that explains the GUI-launch PATH gap — see [`program_and_guard`].
     pub program: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaneKind {
-    Working,
-    Talking,
-}
-
-pub fn build_agent_command(
-    agent: AgentKind,
-    stream: &Stream,
-    pane: PaneKind,
-    opts: &AgentCommandOptions,
-) -> String {
-    let resume_session_id = match pane {
-        PaneKind::Working => stream.working_session_id.as_str(),
-        PaneKind::Talking => stream.talking_session_id.as_str(),
-    };
-    build_agent_command_for_session(agent, &stream.worktree_path, resume_session_id, opts)
 }
 
 pub fn build_agent_command_for_session(
@@ -197,7 +177,7 @@ pub fn shell_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::{StreamId, StreamKind, Timestamp};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Timestamp};
 
     fn stream() -> Stream {
         Stream {
@@ -219,6 +199,16 @@ mod tests {
         }
     }
 
+    /// The command for `s`'s working session (it resumes `sess-w`).
+    fn working(agent: AgentKind, s: &Stream, opts: &AgentCommandOptions) -> String {
+        build_agent_command_for_session(agent, &s.worktree_path, &s.working_session_id, opts)
+    }
+
+    /// The command for `s`'s talking session (none to resume: fresh).
+    fn talking(agent: AgentKind, s: &Stream, opts: &AgentCommandOptions) -> String {
+        build_agent_command_for_session(agent, &s.worktree_path, &s.talking_session_id, opts)
+    }
+
     #[test]
     fn shell_escape_handles_apostrophes() {
         assert_eq!(shell_escape("it's"), r"'it'\''s'");
@@ -231,7 +221,7 @@ mod tests {
     #[test]
     fn codex_command_uses_codex_cli() {
         let s = stream();
-        let cmd = build_agent_command(AgentKind::Codex, &s, PaneKind::Working, &Default::default());
+        let cmd = working(AgentKind::Codex, &s, &Default::default());
         assert!(cmd.starts_with("sh -lc "));
         assert!(cmd.contains("exec codex"));
         assert!(cmd.contains("--cd"));
@@ -245,7 +235,7 @@ mod tests {
             codex_config_overrides: vec!["mcp_servers.oxplow.url=\"http://127.0.0.1/mcp\"".into()],
             ..Default::default()
         };
-        let cmd = build_agent_command(AgentKind::Codex, &s, PaneKind::Working, &opts);
+        let cmd = working(AgentKind::Codex, &s, &opts);
         assert!(cmd.contains("--config"));
         assert!(cmd.contains("mcp_servers.oxplow.url"));
         assert!(!cmd.contains("--dangerously-bypass-hook-trust"));
@@ -254,12 +244,7 @@ mod tests {
     #[test]
     fn claude_command_resumes_when_session_id_set() {
         let s = stream();
-        let cmd = build_agent_command(
-            AgentKind::Claude,
-            &s,
-            PaneKind::Working,
-            &Default::default(),
-        );
+        let cmd = working(AgentKind::Claude, &s, &Default::default());
         assert!(cmd.contains("--resume "));
         assert!(cmd.contains("sess-w"));
         // Falls back to a fresh session on stale id.
@@ -270,12 +255,7 @@ mod tests {
     #[test]
     fn claude_command_fresh_when_no_session() {
         let s = stream();
-        let cmd = build_agent_command(
-            AgentKind::Claude,
-            &s,
-            PaneKind::Talking,
-            &Default::default(),
-        );
+        let cmd = talking(AgentKind::Claude, &s, &Default::default());
         assert!(!cmd.contains("--resume"));
         assert!(cmd.contains("exec claude"));
     }
@@ -283,12 +263,7 @@ mod tests {
     #[test]
     fn opencode_command_fresh_when_no_session() {
         let s = stream();
-        let cmd = build_agent_command(
-            AgentKind::Opencode,
-            &s,
-            PaneKind::Talking,
-            &Default::default(),
-        );
+        let cmd = talking(AgentKind::Opencode, &s, &Default::default());
         assert!(cmd.starts_with("sh -lc "));
         assert!(cmd.contains("exec opencode"));
         assert!(cmd.contains(" -m "));
@@ -304,7 +279,7 @@ mod tests {
             opencode_model: Some("anthropic/claude-sonnet-4-6".into()),
             ..Default::default()
         };
-        let cmd = build_agent_command(AgentKind::Opencode, &s, PaneKind::Talking, &opts);
+        let cmd = talking(AgentKind::Opencode, &s, &opts);
         assert!(cmd.contains("anthropic/claude-sonnet-4-6"));
         assert!(!cmd.contains(OPENCODE_MODEL));
     }
@@ -312,12 +287,7 @@ mod tests {
     #[test]
     fn opencode_command_resumes_with_stale_fallback() {
         let s = stream();
-        let cmd = build_agent_command(
-            AgentKind::Opencode,
-            &s,
-            PaneKind::Working,
-            &Default::default(),
-        );
+        let cmd = working(AgentKind::Opencode, &s, &Default::default());
         assert!(cmd.contains(" -s "));
         assert!(cmd.contains("sess-w"));
         // Falls back to a fresh session on stale id, like claude.
@@ -341,8 +311,10 @@ mod tests {
                 program: Some(format!("/opt/agents/{bin}")),
                 ..Default::default()
             };
-            for pane in [PaneKind::Working, PaneKind::Talking] {
-                let cmd = build_agent_command(agent, &s, pane, &opts);
+            for (pane, cmd) in [
+                ("working", working(agent, &s, &opts)),
+                ("talking", talking(agent, &s, &opts)),
+            ] {
                 assert!(
                     cmd.contains(&format!("/opt/agents/{bin}")),
                     "{bin} ({pane:?}) should exec the resolved path: {cmd}"
@@ -372,7 +344,7 @@ mod tests {
             (AgentKind::Codex, "codex"),
             (AgentKind::Opencode, "opencode"),
         ] {
-            let cmd = build_agent_command(agent, &s, PaneKind::Working, &Default::default());
+            let cmd = working(agent, &s, &Default::default());
             assert!(
                 cmd.contains(&format!("command -v {bin}")),
                 "{bin} should preflight PATH: {cmd}"
@@ -398,7 +370,7 @@ mod tests {
             )],
             ..Default::default()
         };
-        let cmd = build_agent_command(AgentKind::Opencode, &s, PaneKind::Talking, &opts);
+        let cmd = talking(AgentKind::Opencode, &s, &opts);
         assert!(cmd.contains("OPENCODE_CONFIG_CONTENT="));
         assert!(cmd.contains("http://x/mcp"));
     }
@@ -410,7 +382,7 @@ mod tests {
             append_system_prompt: Some("be terse".into()),
             ..Default::default()
         };
-        let cmd = build_agent_command(AgentKind::Claude, &s, PaneKind::Working, &opts);
+        let cmd = working(AgentKind::Claude, &s, &opts);
         assert!(cmd.contains("--append-system-prompt"));
         assert!(cmd.contains("be terse"));
     }

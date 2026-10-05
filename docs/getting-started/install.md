@@ -84,8 +84,6 @@ Prerequisites:
     - Windows: WebView2 (preinstalled on modern Windows; otherwise
       Microsoft's redistributable) plus the MSVC build tools
 - **Git** — oxplow expects the workspace root to be a repo.
-- **`tmux`** — agent panes are tmux-managed (the suite skips when
-  it's missing, but real use needs it).
 - **An agent CLI** — install and authenticate Claude Code (`claude`),
   Codex (`codex`), OpenCode (`opencode`), or any combination. Oxplow
   launches the CLI assigned to each

@@ -4,7 +4,7 @@
 //! (`plugin_runtime`); both the Tauri shell and the daemon populate
 //! them from their own control plane.
 
-use oxplow_app::agent_command::{build_agent_command_for_session, AgentCommandOptions, PaneKind};
+use oxplow_app::agent_command::{build_agent_command_for_session, AgentCommandOptions};
 use oxplow_app::agent_prompt::assemble_system_prompt;
 use oxplow_app::config_service::read_config;
 use oxplow_app::terminal_sessions::{AttachResult, SpawnRequest};
@@ -199,25 +199,20 @@ fn toml_cli_string(value: &str) -> String {
 ///
 /// `pane_target` is either the bare `"shell"` (the default Terminal-page
 /// terminal) or `"shell:<id>"` for an additional terminal. The full
-/// `pane_target` rides inside the key (`{stream}|{pane_target}|{mode}`),
-/// so each terminal id resolves to its own PTY.
-fn shell_session_key(stream_id: &str, pane_target: &str, transport_mode: &str) -> Option<String> {
+/// `pane_target` rides inside the key (`{stream}|{pane_target}`), so each
+/// terminal id resolves to its own PTY.
+fn shell_session_key(stream_id: &str, pane_target: &str) -> Option<String> {
     if pane_target == "shell" || pane_target.starts_with("shell:") {
-        Some(format!("{stream_id}|{pane_target}|{transport_mode}"))
+        Some(format!("{stream_id}|{pane_target}"))
     } else {
         None
     }
 }
 
-/// Build the dedup key for an *agent* PTY session.
-///
-/// Keyed on (stream, thread, agent, pane) ONLY — deliberately **not**
-/// the transport mode. A re-attach that negotiated a different transport
-/// (e.g. a second daemon/browser client) must resume the one live agent
-/// PTY for this (stream, thread, pane), not spawn a duplicate agent in
-/// the same worktree (tsk138). The shell path keeps transport in its key
-/// (`shell_session_key`) because shell sessions may legitimately differ
-/// by transport.
+/// Build the dedup key for an *agent* PTY session: (stream, thread,
+/// agent, pane), so a re-attach — another window, a browser client —
+/// resumes the one live agent PTY rather than spawning a duplicate agent
+/// in the same worktree (tsk138).
 fn agent_session_key(
     stream_id: &str,
     thread_id: Option<&str>,
@@ -233,21 +228,15 @@ fn agent_session_key(
     )
 }
 
-/// Open a renderer-attached terminal session.
-///
-/// Two transports, mirroring the main-branch design:
-/// - `transport_mode == "direct"` — spawn the agent CLI directly via
-///   `sh -lc <build_agent_command>` in a PTY; no tmux. The default.
-/// - `transport_mode == "tmux"` — `ensure_pane` to create/reuse a
-///   tmux session+window running the agent command, then
-///   `tmux attach-session -t <resolved-target>`. The target is the
-///   `oxplow-<stream-id>:working|talking` form, not the bare slot.
+/// Open a renderer-attached terminal session: the agent CLI, or a shell,
+/// run directly in a PTY (`sh -lc <command>`). There is no terminal
+/// multiplexer (tsk1018): the session lives as long as the daemon, and a
+/// re-attach replays its buffer.
 pub async fn open_terminal_session(
     ctx: &RpcContext,
     pane_target: String,
     cols: u16,
     rows: u16,
-    transport_mode: String,
 ) -> Result<AttachResult, IpcError> {
     // The "shell" pane is a plain interactive terminal (the Terminal
     // page), not the agent: spawn the user's $SHELL rooted at the
@@ -262,31 +251,29 @@ pub async fn open_terminal_session(
         let cols = cols.max(20);
         let rows = rows.max(5);
         // One persistent shell per (stream, terminal id); re-attach resumes it.
-        let session_key = shell_session_key(&stream.id.to_string(), &pane_target, &transport_mode)
+        let session_key = shell_session_key(&stream.id.to_string(), &pane_target)
             .expect("pane_target was verified to be a shell target above");
         let cwd = std::path::PathBuf::from(&stream.worktree_path);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let result = ctx
             .terminal_sessions
-            .attach_or_create(session_key, "shell".to_string(), cols, rows, |c, r| {
-                SpawnRequest {
-                    command: shell,
-                    args: vec!["-l".into()],
-                    cwd,
-                    env: oxplow_app::agent_path::base_pty_env(),
-                    cols: c,
-                    rows: r,
-                }
+            .attach_or_create(session_key, cols, rows, |c, r| SpawnRequest {
+                command: shell,
+                args: vec!["-l".into()],
+                cwd,
+                env: oxplow_app::agent_path::base_pty_env(),
+                cols: c,
+                rows: r,
             })
             .await?;
         return Ok(result);
     }
 
-    let pane_kind = match pane_target.as_str() {
-        "working" => PaneKind::Working,
-        "talking" => PaneKind::Talking,
-        other => return Err(IpcError::invalid(format!("unknown pane target: {other}"))),
-    };
+    if !matches!(pane_target.as_str(), "working" | "talking") {
+        return Err(IpcError::invalid(format!(
+            "unknown pane target: {pane_target}"
+        )));
+    }
 
     // Agent spawn needs the control-plane coordinates; a host that
     // didn't supply them can't wire hooks/MCP, so refuse cleanly.
@@ -330,10 +317,8 @@ pub async fn open_terminal_session(
 
     // Identity used to deduplicate sessions so re-attaches resume the
     // same PTY instead of spawning a new one. Includes the thread id
-    // when known so per-thread state is isolated. Transport mode is
-    // intentionally excluded so a re-attach over a different transport
-    // resumes the one live agent rather than spawning a duplicate
-    // (tsk138).
+    // when known so per-thread state is isolated; a re-attach from
+    // another window resumes the one live agent (tsk138).
     let thread_id_str = thread_id.as_ref().map(|t| t.to_string());
     let session_key = agent_session_key(
         &stream.id.to_string(),
@@ -465,106 +450,70 @@ pub async fn open_terminal_session(
         }
     }
 
-    let result = match transport_mode.as_str() {
-        "tmux" => {
-            let outcome = ctx
-                .agent_panes
-                .ensure_pane(&stream, pane_kind, agent, opts.clone())
-                .await
-                .map_err(|e| IpcError::internal(e.to_string()))?;
-            let target_label = outcome.target.as_str().to_string();
-            ctx.terminal_sessions
-                .attach_or_create_for_thread(
-                    session_key,
-                    target_label.clone(),
-                    thread_id,
-                    cols,
-                    rows,
-                    |c, r| SpawnRequest {
-                        command: "tmux".into(),
-                        args: vec!["attach-session".into(), "-t".into(), target_label.clone()],
-                        cwd: std::env::current_dir()
-                            .unwrap_or_else(|_| std::path::PathBuf::from(".")),
-                        env: oxplow_app::agent_path::base_pty_env(),
-                        cols: c,
-                        rows: r,
-                    },
-                )
-                .await?
-        }
-        // Default to direct.
-        _ => {
-            // Resume from the THREAD's resume_session_id (populated by
-            // the resume-tracker in the control plane), not the
-            // stream's working_session_id. Each thread runs an
-            // independent Claude session even though they share the
-            // working pane slot.
-            let mut resume_session_id = thread
-                .as_ref()
-                .map(|t| t.resume_session_id.clone())
-                .unwrap_or_default();
+    let result = {
+        // Resume from the THREAD's resume_session_id (populated by
+        // the resume-tracker in the control plane), not the
+        // stream's working_session_id. Each thread runs an
+        // independent Claude session even though they share the
+        // working pane slot.
+        let mut resume_session_id = thread
+            .as_ref()
+            .map(|t| t.resume_session_id.clone())
+            .unwrap_or_default();
 
-            // Proactively drop a stale Claude resume pointer. If the
-            // session transcript is gone, `claude --resume <id>` prints a
-            // raw "No conversation found" error before the shell `||` net
-            // falls back to fresh, and the dead id lingers in the DB until
-            // the next prompt self-heals it (Claude Code drops HTTP hooks
-            // for SessionStart, so nothing fires sooner). Clearing it here
-            // launches fresh with no `--resume` and no raw error. Claude-
-            // only: codex/opencode use different on-disk session schemes
-            // and keep the shell net. See `.context/agent-model.md`.
-            if matches!(agent, AgentKind::Claude) && !resume_session_id.is_empty() {
-                if let Ok(home) = std::env::var("HOME") {
-                    let state = oxplow_app::resume_check::claude_resume_state(
-                        std::path::Path::new(&home),
-                        &stream.worktree_path,
-                        &resume_session_id,
-                    );
-                    if state == oxplow_app::resume_check::ResumeState::Missing {
-                        if let Some(t) = thread.as_ref() {
-                            if let Err(err) = oxplow_app::resume_check::forget_missing(
-                                &ctx.db,
-                                t.id,
-                                &resume_session_id,
-                            )
-                            .await
-                            {
-                                tracing::warn!(
-                                    ?err,
-                                    "resume-check: clearing stale resume pointer failed"
-                                );
-                            }
+        // Proactively drop a stale Claude resume pointer. If the
+        // session transcript is gone, `claude --resume <id>` prints a
+        // raw "No conversation found" error before the shell `||` net
+        // falls back to fresh, and the dead id lingers in the DB until
+        // the next prompt self-heals it (Claude Code drops HTTP hooks
+        // for SessionStart, so nothing fires sooner). Clearing it here
+        // launches fresh with no `--resume` and no raw error. Claude-
+        // only: codex/opencode use different on-disk session schemes
+        // and keep the shell net. See `.context/agent-model.md`.
+        if matches!(agent, AgentKind::Claude) && !resume_session_id.is_empty() {
+            if let Ok(home) = std::env::var("HOME") {
+                let state = oxplow_app::resume_check::claude_resume_state(
+                    std::path::Path::new(&home),
+                    &stream.worktree_path,
+                    &resume_session_id,
+                );
+                if state == oxplow_app::resume_check::ResumeState::Missing {
+                    if let Some(t) = thread.as_ref() {
+                        if let Err(err) = oxplow_app::resume_check::forget_missing(
+                            &ctx.db,
+                            t.id,
+                            &resume_session_id,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                ?err,
+                                "resume-check: clearing stale resume pointer failed"
+                            );
                         }
-                        resume_session_id.clear();
                     }
+                    resume_session_id.clear();
                 }
             }
-
-            let command = build_agent_command_for_session(
-                agent,
-                &stream.worktree_path,
-                &resume_session_id,
-                &opts,
-            );
-            let cwd = std::path::PathBuf::from(&stream.worktree_path);
-            ctx.terminal_sessions
-                .attach_or_create_for_thread(
-                    session_key,
-                    pane_target.clone(),
-                    thread_id,
-                    cols,
-                    rows,
-                    |c, r| SpawnRequest {
-                        command: "sh".into(),
-                        args: vec!["-lc".into(), command],
-                        cwd,
-                        env: oxplow_app::agent_path::base_pty_env(),
-                        cols: c,
-                        rows: r,
-                    },
-                )
-                .await?
         }
+
+        let command = build_agent_command_for_session(
+            agent,
+            &stream.worktree_path,
+            &resume_session_id,
+            &opts,
+        );
+        let cwd = std::path::PathBuf::from(&stream.worktree_path);
+        ctx.terminal_sessions
+            .attach_or_create_for_thread(session_key, thread_id, cols, rows, |c, r| SpawnRequest {
+                command: "sh".into(),
+                args: vec!["-lc".into(), command],
+                cwd,
+                env: oxplow_app::agent_path::base_pty_env(),
+                cols: c,
+                rows: r,
+            })
+            .await?
     };
     Ok(result)
 }
@@ -605,7 +554,7 @@ pub async fn lookup_terminal_session(
 ) -> Result<Option<String>, IpcError> {
     let pane_target = pane.unwrap_or_else(|| "working".to_string());
     // Agent panes only — shells aren't agent sessions and key
-    // differently (transport is in the shell key, not the agent key).
+    // differently.
     match pane_target.as_str() {
         "working" | "talking" => {}
         other => return Err(IpcError::invalid(format!("unknown pane target: {other}"))),
@@ -636,8 +585,8 @@ pub async fn close_terminal_session(svc: &Services, session_id: String) -> Resul
 }
 
 /// Best-effort live working directory of a session's child process, as an
-/// absolute path. `None` when it can't be determined (tmux-backed pane, dead
-/// session, unsupported platform). The renderer uses it to resolve relative
+/// absolute path. `None` when it can't be determined (dead session,
+/// unsupported platform). The renderer uses it to resolve relative
 /// terminal file-path links against the shell's real cwd, falling back to the
 /// worktree root.
 pub async fn terminal_session_cwd(
@@ -718,19 +667,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_key_ignores_transport_mode() {
-        // The agent key is (stream, thread, agent, pane) only — the same
-        // tuple must produce the same key regardless of the transport a
-        // client negotiated, so a re-attach resumes the one live PTY
-        // instead of spawning a duplicate (tsk138).
-        let key = agent_session_key("s-1", Some("thr3"), AgentKind::Claude, "working");
-        assert_eq!(key, "s-1|thr3|claude|working");
-        // No transport segment appears anywhere in the key.
-        assert!(!key.contains("direct"));
-        assert!(!key.contains("tmux"));
-    }
-
-    #[test]
     fn agent_key_distinguishes_thread_agent_and_pane() {
         let base = agent_session_key("s-1", Some("thr3"), AgentKind::Claude, "working");
         assert_ne!(
@@ -802,33 +738,21 @@ mod tests {
     }
 
     #[test]
-    fn bare_shell_keeps_legacy_key() {
-        // The default Terminal-page terminal must reattach the existing
-        // persistent shell after the upgrade, so its key is unchanged
-        // from the old `{stream}|shell|{mode}` form.
+    fn each_shell_terminal_has_its_own_key() {
         assert_eq!(
-            shell_session_key("s-1", "shell", "direct").as_deref(),
-            Some("s-1|shell|direct"),
+            shell_session_key("s-1", "shell").as_deref(),
+            Some("s-1|shell")
         );
-    }
-
-    #[test]
-    fn additional_shell_gets_its_own_key() {
         assert_eq!(
-            shell_session_key("s-1", "shell:t2", "direct").as_deref(),
-            Some("s-1|shell:t2|direct"),
-        );
-        // Distinct from the default terminal's key.
-        assert_ne!(
-            shell_session_key("s-1", "shell:t2", "direct"),
-            shell_session_key("s-1", "shell", "direct"),
+            shell_session_key("s-1", "shell:t2").as_deref(),
+            Some("s-1|shell:t2"),
         );
     }
 
     #[test]
     fn non_shell_target_is_none() {
-        assert_eq!(shell_session_key("s-1", "working", "direct"), None);
-        assert_eq!(shell_session_key("s-1", "talking", "tmux"), None);
+        assert_eq!(shell_session_key("s-1", "working"), None);
+        assert_eq!(shell_session_key("s-1", "talking"), None);
     }
 
     #[tokio::test]
@@ -839,7 +763,7 @@ mod tests {
         let (svc, _dir) = services();
         let err = crate::dispatch(
             "open_terminal_session",
-            json!({ "paneTarget": "working", "cols": 80, "rows": 24, "transportMode": "direct" }),
+            json!({ "paneTarget": "working", "cols": 80, "rows": 24 }),
             &svc,
         )
         .await
@@ -853,13 +777,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_session_dedupes_across_transport_modes() {
-        // Regression for tsk138: transport_mode must NOT be part of the
-        // agent session key. Opening the same (stream, thread, pane)
-        // twice with two different transports must reattach the ONE
-        // existing PTY, not spawn a second agent. Both "direct" and
-        // "pipe" land on the non-tmux spawn branch, so this exercises the
-        // real dedup path without requiring tmux.
+    async fn an_agent_session_is_reattached_not_spawned_again() {
+        // Regression for tsk138: opening the same (stream, thread, pane)
+        // twice — another window, a browser client — reattaches the ONE
+        // existing PTY, not a second agent.
         let (mut ctx, _dir) = services();
         ctx.plugin_runtime = Some(crate::PluginRuntime {
             hook_base_url: "http://127.0.0.1:9/hook".into(),
@@ -870,14 +791,14 @@ mod tests {
 
         let first = crate::dispatch(
             "open_terminal_session",
-            json!({ "paneTarget": "working", "cols": 80, "rows": 24, "transportMode": "direct" }),
+            json!({ "paneTarget": "working", "cols": 80, "rows": 24 }),
             &ctx,
         )
         .await
         .unwrap();
         let second = crate::dispatch(
             "open_terminal_session",
-            json!({ "paneTarget": "working", "cols": 80, "rows": 24, "transportMode": "pipe" }),
+            json!({ "paneTarget": "working", "cols": 80, "rows": 24 }),
             &ctx,
         )
         .await
@@ -887,7 +808,7 @@ mod tests {
         let second_id = second["sessionId"].as_str().expect("second sessionId");
         assert_eq!(
             first_id, second_id,
-            "different transports must reattach the same agent PTY, not spawn a duplicate"
+            "a second open must reattach the same agent PTY, not spawn a duplicate"
         );
 
         // Clean up the spawned PTY so the test doesn't leak a child.
@@ -899,7 +820,7 @@ mod tests {
         let (svc, _dir) = services();
         let err = crate::dispatch(
             "open_terminal_session",
-            json!({ "paneTarget": "bogus", "cols": 80, "rows": 24, "transportMode": "direct" }),
+            json!({ "paneTarget": "bogus", "cols": 80, "rows": 24 }),
             &svc,
         )
         .await
@@ -1007,7 +928,7 @@ mod tests {
         });
         let opened = crate::dispatch(
             "open_terminal_session",
-            json!({ "paneTarget": "working", "cols": 80, "rows": 24, "transportMode": "direct" }),
+            json!({ "paneTarget": "working", "cols": 80, "rows": 24 }),
             &ctx,
         )
         .await

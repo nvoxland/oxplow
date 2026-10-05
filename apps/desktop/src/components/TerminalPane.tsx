@@ -6,12 +6,7 @@ import { desktopBridge } from "../api.js";
 import { logUi } from "../logger.js";
 import { terminalSender, type TerminalMessage, type TerminalSender } from "./terminalInput.js";
 import { TASK_DRAG_MIME } from "../dragMimes.js";
-import {
-  shouldHandleTerminalPageKey,
-  shouldReturnTerminalToPrompt,
-  shouldRouteWheelToTmuxHistory,
-  wheelDeltaToScrollLines,
-} from "../terminal-scroll.js";
+import { shouldHandleTerminalPageKey } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import { TerminalCommentLayer } from "./Comments/TerminalCommentLayer.js";
 import {
@@ -76,8 +71,8 @@ function resolveAgainstWorktree(path: string, worktree: string | undefined): str
 /// Absolute paths pass through; `~/` is dropped (frontend doesn't know HOME).
 /// A relative path is resolved against the session's *live* cwd — so a path
 /// printed after `cd`ing into a subdir opens correctly — falling back to the
-/// worktree root when the cwd can't be determined (tmux pane, dead session,
-/// unsupported platform).
+/// worktree root when the cwd can't be determined (dead session, unsupported
+/// platform).
 async function resolveClickedPath(
   text: string,
   sessionId: string | null,
@@ -113,7 +108,6 @@ async function readClipboard(): Promise<string> {
 export function TerminalPane({
   paneTarget,
   visible,
-  transportMode,
   onUserInterrupt,
   worktreePath,
   onOpenFile,
@@ -123,7 +117,6 @@ export function TerminalPane({
 }: {
   paneTarget: string;
   visible: boolean;
-  transportMode: "direct" | "tmux";
   /// Fires when the user presses Escape in live mode (i.e. signals
   /// Claude Code to cancel the in-flight turn). Lets the host
   /// synthesize an Interrupt hook so the working-dot flips to idle
@@ -177,8 +170,6 @@ export function TerminalPane({
   }, []);
   const sendToTerminal = (sessionId: string | null, message: TerminalMessage) =>
     senderRef.current?.send(sessionId, message);
-  const [mode, setMode] = useState<"live" | "history">("live");
-  const modeRef = useRef<"live" | "history">("live");
   const [dragHovering, setDragHovering] = useState(false);
   // Live refs so the link-provider activate handler always sees the
   // current worktree + callback even though the provider is
@@ -190,30 +181,20 @@ export function TerminalPane({
   onOpenFileRef.current = onOpenFile;
   isLinkablePathRef.current = isLinkablePath;
   // Mirror so the session-open effect's cleanup (which captures values at
-  // mount, deps `[paneTarget, transportMode]`) sees the latest flag.
+  // mount, deps `[paneTarget]`) sees the latest flag.
   const terminateOnUnmountRef = useRef<boolean>(!!terminateOnUnmount);
   terminateOnUnmountRef.current = !!terminateOnUnmount;
-
-  function setInteractionMode(next: "live" | "history") {
-    modeRef.current = next;
-    setMode(next);
-  }
 
   useEffect(() => {
     if (!visible) return;
     termRef.current?.focus();
-    if (transportMode === "tmux" && sessionIdRef.current) {
-      sendToTerminal(sessionIdRef.current, { type: "history-exit" });
-    }
-    setInteractionMode("live");
-  }, [paneTarget, transportMode, visible]);
+  }, [paneTarget, visible]);
 
   // Subscribe to the "Add to agent context" bus only while this pane is
   // visible — `insertIntoAgent` from a drag-drop or right-click anywhere
   // in the UI naturally targets the agent the user is currently looking
   // at. `term.paste(text)` writes through xterm's input pipeline so the
-  // existing `onData` handler ships the bytes to the agent process for
-  // both direct and tmux transports — no transport branching here.
+  // existing `onData` handler ships the bytes to the agent process.
   useEffect(() => {
     if (!visible) return;
     const unsub = subscribeAgentInput((text) => {
@@ -356,23 +337,6 @@ export function TerminalPane({
       }
 
       if (shouldHandleTerminalPageKey(event)) {
-        const routeToTmuxHistory = transportMode === "tmux" && shouldRouteWheelToTmuxHistory({
-          mode: modeRef.current,
-          bufferType: term.buffer.active.type,
-          mouseTrackingMode: term.modes.mouseTrackingMode,
-        });
-
-        if (routeToTmuxHistory) {
-          if (sessionIdRef.current) {
-            sendToTerminal(sessionIdRef.current, {
-              type: "history-page",
-              direction: event.key === "PageUp" ? "up" : "down",
-            });
-          }
-          setInteractionMode("history");
-          return false;
-        }
-
         if (term.buffer.active.type === "normal") {
           term.scrollPages(event.key === "PageUp" ? -1 : 1);
           return false;
@@ -381,18 +345,7 @@ export function TerminalPane({
         return true;
       }
 
-        if (transportMode === "tmux" && modeRef.current === "history" && shouldReturnTerminalToPrompt(event)) {
-        if (sessionIdRef.current) {
-          sendToTerminal(sessionIdRef.current, { type: "history-exit" });
-        }
-        setInteractionMode("live");
-        term.focus();
-        if (event.key === "Escape") {
-          return false;
-        }
-      }
-
-      // Plain Escape in live mode: Claude Code interprets a single
+      // Plain Escape: Claude Code interprets a single
       // \x1b as "cancel the in-flight turn" but does NOT emit a Stop
       // hook for it, so oxplow's working-dot would stay Running until
       // the next user prompt. Notify the host so it can synthesize an
@@ -400,7 +353,6 @@ export function TerminalPane({
       // needs to receive the \x1b through the normal onData path.
       if (
         event.key === "Escape" &&
-        modeRef.current === "live" &&
         !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
       ) {
         onUserInterrupt?.();
@@ -408,33 +360,8 @@ export function TerminalPane({
 
       return true;
     });
-    term.attachCustomWheelEventHandler((event) => {
-      if (event.ctrlKey || event.metaKey) {
-        return false;
-      }
-
-      const routeToTmuxHistory = transportMode === "tmux" && shouldRouteWheelToTmuxHistory({
-        mode: modeRef.current,
-        bufferType: term.buffer.active.type,
-        mouseTrackingMode: term.modes.mouseTrackingMode,
-      });
-
-      if (!routeToTmuxHistory) {
-        return true;
-      }
-
-      const lines = wheelDeltaToScrollLines(event);
-      if (lines === 0) {
-        return false;
-      }
-
-      if (sessionIdRef.current) {
-        sendToTerminal(sessionIdRef.current, { type: "history-scroll", lines });
-      }
-      setInteractionMode("history");
-      event.preventDefault();
-      return false;
-    });
+    // A modified wheel is the page's (zoom), not the terminal's scroll.
+    term.attachCustomWheelEventHandler((event) => !(event.ctrlKey || event.metaKey));
 
     let disposed = false;
     let ro: ResizeObserver | null = null;
@@ -448,9 +375,8 @@ export function TerminalPane({
     });
 
     // Wait until the host has a real layout size, then open the terminal,
-    // fit it, and only then open the WebSocket with the measured cols/rows
-    // in the query string so the server can create the tmux window at the
-    // correct size on first contact.
+    // fit it, and only then open the session with the measured cols/rows so
+    // the process starts at the right size.
     const start = () => {
       if (disposed) return;
       if (host.clientWidth < 2 || host.clientHeight < 2) {
@@ -465,10 +391,6 @@ export function TerminalPane({
         return;
       }
       const handleMouseDown = () => {
-        if (sessionIdRef.current) {
-          sendToTerminal(sessionIdRef.current, { type: "history-exit" });
-        }
-        setInteractionMode("live");
         term.focus();
       };
       host.addEventListener("mousedown", handleMouseDown);
@@ -516,8 +438,8 @@ export function TerminalPane({
         applyEvent(event);
       });
 
-      logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows, transportMode });
-      void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows, transportMode).then(({ sessionId, replayB64 }) => {
+      logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows });
+      void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows).then(({ sessionId, replayB64 }) => {
         if (disposed) {
           void desktopBridge().closeTerminalSession(sessionId);
           return;
@@ -541,24 +463,20 @@ export function TerminalPane({
         }
         pendingEvents.length = 0;
         term.focus();
-        if (transportMode === "tmux") {
-          sendToTerminal(sessionId, { type: "history-exit" });
-        }
-        setInteractionMode("live");
-        logUi("info", "terminal session opened", { paneTarget, sessionId, transportMode });
+        logUi("info", "terminal session opened", { paneTarget, sessionId });
       }).catch((error) => {
         logUi("error", "terminal session open failed", { paneTarget, error: String(error) });
       });
 
-      // Debounce resizes so we don't spam tmux during a drag.
+      // Debounce resizes so a drag doesn't send one per frame.
       let resizeTimer: number | null = null;
       ro = new ResizeObserver(() => {
         if (resizeTimer !== null) clearTimeout(resizeTimer);
         resizeTimer = window.setTimeout(() => {
           // Skip refits when the host is hidden (display:none) or otherwise
           // has no layout size — FitAddon would clamp to its minimum and we
-          // would push a tiny resize at tmux, shrinking the underlying
-          // window for real. See MainTabs/PaneHost: inactive tabs are
+          // would push a tiny resize at the process, reflowing its output
+          // for real. See MainTabs/PaneHost: inactive tabs are
           // display:none'd rather than unmounted.
           if (host.clientWidth < 2 || host.clientHeight < 2) return;
           try {
@@ -603,7 +521,7 @@ export function TerminalPane({
       }
       term.dispose();
     };
-  }, [paneTarget, transportMode]);
+  }, [paneTarget]);
 
   return (
     <div
@@ -658,24 +576,6 @@ export function TerminalPane({
           }}
         >
           Drop to add to agent context
-        </div>
-      ) : null}
-      {mode === "history" ? (
-        <div
-          style={{
-            position: "absolute",
-            right: 12,
-            bottom: 12,
-            padding: "6px 10px",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "rgba(14, 14, 14, 0.92)",
-            color: "var(--muted)",
-            fontSize: 11,
-            pointerEvents: "none",
-          }}
-        >
-          History mode — click or type to return to the prompt
         </div>
       ) : null}
     </div>

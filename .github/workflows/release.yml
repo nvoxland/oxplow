@@ -82,8 +82,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
-            build-essential \
-            tmux
+            build-essential
       - name: Cache Cargo registry + target
         uses: actions/cache@v6
         with:

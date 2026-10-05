@@ -36,8 +36,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
-            build-essential \
-            tmux
+            build-essential
 
       - name: Cache Cargo registry + target
         uses: actions/cache@v6
@@ -136,12 +135,12 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # tmux for the terminal/control-plane paths; build-essential for
-      # the vendored native deps (libgit2). No webkit — daemon is headless.
+      # build-essential for the vendored native deps (libgit2). No webkit —
+      # the daemon is headless.
       - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential tmux
+          sudo apt-get install -y --no-install-recommends build-essential
 
       - name: Cache Cargo registry + target
         uses: actions/cache@v6
@@ -181,9 +180,8 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # build-essential for the vendored native deps. No tmux — the suite
-      # runs no tmux-backed pane (its agents speak ACP; the Terminal page
-      # is a plain shell) — and no webkit2gtk: the daemon is headless.
+      # build-essential for the vendored native deps, and no webkit2gtk:
+      # the daemon is headless.
       - name: Install system deps
         run: |
           sudo apt-get update
@@ -294,8 +292,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
-            build-essential \
-            tmux
+            build-essential
 
       - name: Cache Cargo registry + target
         uses: actions/cache@v6

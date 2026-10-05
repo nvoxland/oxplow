@@ -14,7 +14,7 @@ import {
 /// auto-resyncs the client stores (see `onRemoteReconnect` in
 /// transport.ts), so `restored` is just a brief non-blocking
 /// confirmation — no reload prompt, and it auto-dismisses. The
-/// daemon-side work (tmux agents, watchers) ran through the gap either
+/// daemon-side work (agents, watchers) ran through the gap either
 /// way.
 export type BannerState = "hidden" | "down" | "restored";
 

@@ -30,7 +30,7 @@ pub enum AgentKind {
 }
 
 impl AgentKind {
-    /// Runs in a terminal (a PTY / tmux pane), as opposed to ACP.
+    /// Runs in a terminal (a PTY), as opposed to ACP.
     pub fn is_terminal(self) -> bool {
         !matches!(self, AgentKind::Acp)
     }

@@ -234,7 +234,7 @@ Each stream owns:
 - a worktree path (projectDir for primary; sibling
   `<parent>/<project_basename>-<slug>/` for worktree kind — the
   `<slug>` is fixed at creation and does not rename on branch switch)
-- two tmux pane targets (`working` and `talking`)
+- two agent pane targets (`working` and `talking`)
 - per-pane / per-thread agent resume session ids (so reconnecting picks up
   history for the assigned agent)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)

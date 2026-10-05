@@ -8,7 +8,7 @@
 ///   message, so typing fast costs no extra round trips — except a bare
 ///   Escape, which keeps its own message: merged with the next key it would
 ///   read as an Alt sequence (`\x1b\r` is Shift+Enter).
-/// - Waiting scrolls sum, and a newer resize replaces a waiting one.
+/// - A newer resize replaces a waiting one.
 /// - A send that doesn't answer within the timeout is reported and that
 ///   session's waiting messages are dropped — never delivered later in a
 ///   burst the person didn't see land; the next session's still go.
@@ -23,10 +23,7 @@
 export type TerminalMessage =
   | { type: "input"; data: string }
   | { type: "input-binary"; data: string }
-  | { type: "resize"; cols: number; rows: number }
-  | { type: "history-page"; direction: "up" | "down" }
-  | { type: "history-scroll"; lines: number }
-  | { type: "history-exit" };
+  | { type: "resize"; cols: number; rows: number };
 
 type Queued = { sessionId: string; message: TerminalMessage };
 
@@ -128,11 +125,10 @@ export function terminalSender(
 }
 
 /** `a` then `b` as one message, when they can be: keystrokes of one kind
- *  (not after a bare Escape), scrolls (summed), resizes (the newer). */
+ *  (not after a bare Escape), resizes (the newer). */
 function merged(a: TerminalMessage, b: TerminalMessage): TerminalMessage | null {
   if (a.type === "input" && b.type === "input" && !a.data.endsWith("\x1b")) return { type: "input", data: a.data + b.data };
   if (a.type === "input-binary" && b.type === "input-binary") return { type: "input-binary", data: a.data + b.data };
-  if (a.type === "history-scroll" && b.type === "history-scroll") return { type: "history-scroll", lines: a.lines + b.lines };
   if (a.type === "resize" && b.type === "resize") return b;
   return null;
 }

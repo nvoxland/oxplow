@@ -1,23 +1,22 @@
 //! Terminal session registry powering the renderer's `TerminalPane`.
 //!
 //! Each session bridges an xterm.js instance in the renderer to a
-//! tmux pane on the host. The renderer talks the same JSON protocol
-//! the original Electron build used:
+//! process in a PTY on the host — a shell, or an agent CLI run directly
+//! (no terminal multiplexer, tsk1018). The renderer
+//! talks a small JSON protocol:
 //!
 //! - Outgoing (renderer → daemon):
 //!   - `{type:"input", bytes:base64}` — user keystrokes
 //!   - `{type:"input-binary", bytes:base64}` — binary input (paste)
 //!   - `{type:"resize", cols, rows}` — viewport changed
-//!   - `{type:"history-page", direction:"up"|"down"}` — page in copy-mode
-//!   - `{type:"history-scroll", lines:int}` — scroll N lines (positive = older)
-//!   - `{type:"history-exit"}` — leave copy-mode
 //!
 //! - Incoming (daemon → renderer):
 //!   - `{type:"data", bytes:base64}` — bytes from the PTY
+//!   - `{type:"exit", exitCode}` — the process ended
 //!
-//! Implementation: spawn `tmux attach-session -t <pane_target>` via
-//! `oxplow_pty::PtyManager`. PTY bytes flow back as `data` events.
-//! Resize and copy-mode messages dispatch to the shared `TmuxRunner`.
+//! Implementation: spawn the request via `oxplow_pty::PtyManager`; PTY
+//! bytes flow back as `data` events. Scrollback is xterm.js's own, plus
+//! the replay buffer a re-attach starts from.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -27,7 +26,6 @@ use bytes::Bytes;
 use oxplow_domain::{ThreadId, Timestamp};
 pub use oxplow_pty::SpawnRequest;
 use oxplow_pty::{PaneEvent, PaneId, PtyManager};
-use oxplow_tmux::{ScrollDirection, TmuxRunner, WindowTarget};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
@@ -70,7 +68,6 @@ pub struct TerminalBridgeEvent {
 pub type SessionKey = String;
 
 struct SessionEntry {
-    pane_target: String,
     pane_id: PaneId,
     /// OS pid of the spawned child (the shell, for the `shell` pane).
     /// Used to read the live cwd for terminal file-link resolution.
@@ -131,7 +128,6 @@ impl RingBuffer {
 #[derive(Clone)]
 pub struct TerminalSessionRegistry {
     pty: PtyManager,
-    tmux: Arc<dyn TmuxRunner>,
     inner: Arc<Mutex<HashMap<String, SessionEntry>>>,
     /// External-key → session_id index. Lets `attach_or_create`
     /// look up an existing session for a given (stream, thread,
@@ -146,15 +142,10 @@ pub struct TerminalSessionRegistry {
 }
 
 impl TerminalSessionRegistry {
-    pub fn new(
-        pty: PtyManager,
-        tmux: Arc<dyn TmuxRunner>,
-        activity: crate::output_activity::OutputActivity,
-    ) -> Self {
+    pub fn new(pty: PtyManager, activity: crate::output_activity::OutputActivity) -> Self {
         let (events_tx, _) = broadcast::channel(1024);
         Self {
             pty,
-            tmux,
             inner: Arc::new(Mutex::new(HashMap::new())),
             by_key: Arc::new(Mutex::new(HashMap::new())),
             events_tx,
@@ -192,12 +183,11 @@ impl TerminalSessionRegistry {
     pub async fn attach_or_create(
         &self,
         key: SessionKey,
-        pane_target: String,
         cols: u16,
         rows: u16,
         make_request: impl FnOnce(u16, u16) -> SpawnRequest,
     ) -> Result<AttachResult, TerminalSessionError> {
-        self.attach_or_create_for_thread(key, pane_target, None, cols, rows, make_request)
+        self.attach_or_create_for_thread(key, None, cols, rows, make_request)
             .await
     }
 
@@ -208,7 +198,6 @@ impl TerminalSessionRegistry {
     pub async fn attach_or_create_for_thread(
         &self,
         key: SessionKey,
-        pane_target: String,
         activity_thread: Option<ThreadId>,
         cols: u16,
         rows: u16,
@@ -225,9 +214,7 @@ impl TerminalSessionRegistry {
             // create a fresh session.
         }
         let req = make_request(cols, rows);
-        let session_id = self
-            .spawn_with(pane_target, req, key.clone(), activity_thread)
-            .await?;
+        let session_id = self.spawn_with(req, key.clone(), activity_thread).await?;
         Ok(Self::build_attach_result(session_id, Vec::new()))
     }
 
@@ -250,7 +237,6 @@ impl TerminalSessionRegistry {
 
     async fn spawn_with(
         &self,
-        pane_target: String,
         req: SpawnRequest,
         key: SessionKey,
         activity_thread: Option<ThreadId>,
@@ -259,11 +245,6 @@ impl TerminalSessionRegistry {
         let pane_id = handle.id.clone();
         let pid = handle.pid;
         let session_id = format!("term-{}", uuid::Uuid::new_v4().simple());
-
-        // Force a tmux repaint so freshly-attached clients see the
-        // current pane state immediately even if no new output is
-        // produced.
-        self.tmux.refresh_clients().await;
 
         // Spawn a forwarder that pumps PaneEvents → TerminalBridgeEvents
         // and tees a copy into the session's replay buffer so any
@@ -321,7 +302,6 @@ impl TerminalSessionRegistry {
         self.inner.lock().await.insert(
             session_id.clone(),
             SessionEntry {
-                pane_target,
                 pane_id,
                 pid,
                 forwarder,
@@ -333,10 +313,8 @@ impl TerminalSessionRegistry {
         Ok(session_id)
     }
 
-    /// Best-effort live working directory of a session's child process.
-    /// Meaningful for the direct `shell` pane (the child IS the shell, so
-    /// this tracks `cd`); for tmux-backed panes the child is the tmux client,
-    /// so it reflects the worktree root, not the active pane's shell.
+    /// Best-effort live working directory of a session's child process:
+    /// for the `shell` pane the child IS the shell, so this tracks `cd`.
     /// Returns `None` on any failure (no pid, process gone, unsupported
     /// platform) — callers fall back to the worktree root.
     pub async fn session_cwd(&self, session_id: &str) -> Option<std::path::PathBuf> {
@@ -357,12 +335,12 @@ impl TerminalSessionRegistry {
             .unwrap_or("")
             .to_string();
 
-        let (pane_id, pane_target) = {
+        let pane_id = {
             let map = self.inner.lock().await;
             let entry = map
                 .get(session_id)
                 .ok_or_else(|| TerminalSessionError::NotFound(session_id.to_string()))?;
-            (entry.pane_id.clone(), entry.pane_target.clone())
+            entry.pane_id.clone()
         };
 
         match kind.as_str() {
@@ -379,37 +357,13 @@ impl TerminalSessionRegistry {
             "resize" => {
                 let cols = parsed.get("cols").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
                 let rows = parsed.get("rows").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-                // Reject absurdly-small resizes — see history-mode comment
-                // in the original Electron pty-bridge: a hidden xterm can
-                // fit-down to two cells and shrink the real tmux window.
+                // Reject absurdly-small resizes: a hidden xterm can fit
+                // down to two cells, which would reflow the process's
+                // output to that width.
                 if cols < 20 || rows < 5 {
                     return Ok(());
                 }
                 self.pty.resize(&pane_id, cols, rows).await?;
-                if let Some(target) = parse_window_target(&pane_target) {
-                    self.tmux.resize_window(&target, cols, rows).await;
-                }
-            }
-            "history-page" => {
-                let dir = match parsed.get("direction").and_then(|v| v.as_str()) {
-                    Some("up") => ScrollDirection::Up,
-                    Some("down") => ScrollDirection::Down,
-                    _ => return Ok(()),
-                };
-                if let Some(target) = parse_window_target(&pane_target) {
-                    self.tmux.copy_mode_page(&target, dir).await;
-                }
-            }
-            "history-scroll" => {
-                let lines = parsed.get("lines").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                if let Some(target) = parse_window_target(&pane_target) {
-                    self.tmux.copy_mode_scroll(&target, lines).await;
-                }
-            }
-            "history-exit" => {
-                if let Some(target) = parse_window_target(&pane_target) {
-                    self.tmux.exit_copy_mode(&target).await;
-                }
             }
             other => {
                 debug!(message_type = %other, "unhandled terminal message");
@@ -457,16 +411,6 @@ pub struct AttachResult {
     pub replay_b64: String,
 }
 
-/// Pane targets are `"<session>:<window>"`; both sides non-empty.
-fn parse_window_target(pane_target: &str) -> Option<WindowTarget> {
-    let (session, window) = pane_target.split_once(':')?;
-    if session.is_empty() || window.is_empty() {
-        return None;
-    }
-    let session = oxplow_tmux::Session(session.to_string());
-    Some(WindowTarget::from_parts(&session, window))
-}
-
 /// Read a process's current working directory by pid. Linux reads the
 /// `/proc/<pid>/cwd` symlink; macOS shells out to `lsof` (no extra crate, and
 /// `lsof` ships with the OS). Returns `None` on any failure. Runs blocking, so
@@ -504,19 +448,6 @@ fn read_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
 mod tests {
     use super::*;
     use std::time::Duration;
-
-    #[test]
-    fn parse_window_target_round_trip() {
-        let t = parse_window_target("oxplow-foo:work").unwrap();
-        assert_eq!(t.as_str(), "oxplow-foo:work");
-    }
-
-    #[test]
-    fn parse_window_target_rejects_malformed() {
-        assert!(parse_window_target("nopeartf").is_none());
-        assert!(parse_window_target(":x").is_none());
-        assert!(parse_window_target("x:").is_none());
-    }
 
     /// Build an `{type:"input", bytes:<base64>}` message the way the
     /// renderer's `forwardTerminalInput` does for a paste.
@@ -573,7 +504,6 @@ mod tests {
     async fn session_id_for_key_reads_without_spawning() {
         let reg = TerminalSessionRegistry::new(
             PtyManager::spawn(),
-            Arc::new(oxplow_tmux::SystemTmux),
             crate::output_activity::OutputActivity::new(),
         );
         let key = "s-1|thr3|claude|working".to_string();
@@ -583,7 +513,7 @@ mod tests {
         // Register a session under the key via the normal attach path.
         let dir = std::env::temp_dir();
         let result = reg
-            .attach_or_create(key.clone(), "working".into(), 80, 24, |c, r| SpawnRequest {
+            .attach_or_create(key.clone(), 80, 24, |c, r| SpawnRequest {
                 command: "cat".into(),
                 args: vec![],
                 cwd: dir,
@@ -615,7 +545,6 @@ mod tests {
     async fn spawn_capture(label: &str) -> (TerminalSessionRegistry, String, std::path::PathBuf) {
         let reg = TerminalSessionRegistry::new(
             PtyManager::spawn(),
-            Arc::new(oxplow_tmux::SystemTmux),
             crate::output_activity::OutputActivity::new(),
         );
         let dir = std::env::temp_dir();
@@ -635,7 +564,7 @@ mod tests {
         };
         let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
         let session_id = reg
-            .spawn_with(format!("test-{label}"), req, key, None)
+            .spawn_with(req, key, None)
             .await
             .expect("spawn capture shell");
         (reg, session_id, path)

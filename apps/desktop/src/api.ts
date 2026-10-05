@@ -198,11 +198,8 @@ function buildBridge() {
       paneTarget: string,
       cols: number,
       rows: number,
-      transportMode: string,
     ): Promise<{ sessionId: string; replayB64: string }> => {
-      const result = unwrap(
-        await commands.openTerminalSession(paneTarget, cols, rows, transportMode),
-      );
+      const result = unwrap(await commands.openTerminalSession(paneTarget, cols, rows));
       return { sessionId: result.sessionId, replayB64: result.replayB64 };
     },
     closeTerminalSession: async (sessionId: string): Promise<void> => {

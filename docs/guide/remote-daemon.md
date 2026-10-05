@@ -2,8 +2,8 @@
 
 Run the oxplow backend — worktrees, git, agents, watchers — on a
 remote machine (an EC2 dev box, a homelab server) and drive it from
-the desktop app on your laptop. Agents run in tmux on the remote box,
-so they keep working when your laptop sleeps or your connection
+the desktop app on your laptop. Agents run in the daemon on the remote
+box, so they keep working when your laptop sleeps or your connection
 drops; you reconnect and pick up where things are.
 
 Single-user by design: the daemon binds to loopback on the remote
@@ -29,8 +29,8 @@ project. To work on a different project, run it with a different
 per-project instance locks, so two daemons can't fight over the same
 project).
 
-Run it under tmux or systemd if you want it to survive your SSH
-session ending.
+Run it under systemd (or a terminal multiplexer) if you want it to
+survive your SSH session ending.
 
 ## Tunnel and connect
 
@@ -53,7 +53,7 @@ the remote box's state.
 ## Disconnects
 
 If the connection drops, a red banner appears and the app retries in
-the background. The work doesn't stop — agents run in tmux on the
+the background. The work doesn't stop — agents run in the daemon on the
 remote box, and watchers/indexers are daemon-side. When the
 connection comes back, the banner offers **Reload** to resync; we
 don't reload automatically because that would drop unsaved editor

@@ -109,13 +109,6 @@ The selected CLI must be installed, authenticated, and available on
 `PATH`. See [Agents](../guide/agents.md) for thread selection, runtime
 integration, and concurrent operation.
 
-### tmux mode
-
-Per-thread. Default on. The agent process runs inside a tmux
-session so it survives oxplow restarts. Toggle from the agent
-tab's context menu. The tmux session name is requested when you switch a
-thread into tmux mode.
-
 ### Snapshot retention
 
 Snapshot **content** is expired on a 24-hour schedule

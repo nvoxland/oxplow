@@ -951,9 +951,6 @@ export function App() {
     },
     [selectedThreadId],
   );
-  // Reset terminal transport to direct whenever the active pane target
-  // changes — matches the old TerminalPane's internal useEffect.
-  useEffect(() => { setAgentTransportMode("direct"); }, [selectedThread?.pane_target]);
 
   const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
   useEffect(() => {
@@ -1231,11 +1228,6 @@ export function App() {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [selectedFilePath, stream]);
-  // Agent-terminal transport — lifted from TerminalPane so the Agent
-  // tab's right-click menu can toggle between direct stdin and tmux.
-  // Reset to direct when the active thread changes (the old TerminalPane
-  // had this behavior via a useEffect on paneTarget).
-  const [agentTransportMode, setAgentTransportMode] = useState<"direct" | "tmux">("direct");
   const [planEditRequest, setPlanEditRequest] = useState<{ itemId: string; token: number } | null>(null);
   // Imperative shortcut for opening the New-Task modal. When PlanPane is
   // mounted it registers its openCreateModal here; the menu handler can
@@ -2295,20 +2287,11 @@ export function App() {
         label: selectedThread ? threadAgentLabel(selectedThread) : "Agent",
         closable: false,
         agentStatus: agentThreadStatus,
-        contextMenu: selectedThread ? [
-          {
-            id: "agent.transport.toggle",
-            label: agentTransportMode === "direct" ? "Open in tmux" : "Use direct mode",
-            enabled: true,
-            run: () => setAgentTransportMode((prev) => prev === "direct" ? "tmux" : "direct"),
-          },
-        ] : undefined,
         render: () => (
           <AgentPage
             thread={selectedThread}
             stream={stream}
             visible={effectiveCenterActive === AGENT_TAB_ID}
-            transportMode={agentTransportMode}
             onOpenFile={(absPath, line, column) => {
               if (!stream) return;
               // The terminal link provider hands us absolute paths
@@ -3250,7 +3233,6 @@ export function App() {
   }, [
     selectedThread,
     agentThreadStatus,
-    agentTransportMode,
     effectiveCenterActive,
     stream,
     currentSession.openOrder,

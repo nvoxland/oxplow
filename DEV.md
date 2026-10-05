@@ -14,8 +14,6 @@
     redistributable otherwise) + MSVC build tools.
 - **Git** — oxplow's git features expect the workspace root to be a
   repo.
-- **`tmux`** — the agent panes are tmux-managed. Optional for tests
-  (the runtime tmux suite skips when tmux isn't on PATH).
 
 If you use [mise](https://mise.jdx.dev/), `mise install` picks up
 bun/node/rust from `mise.toml`.
@@ -128,10 +126,6 @@ Then iterate:
 - **Bare-DB boot** (no streams / threads) is normal on a fresh clone.
   The desktop shell auto-creates the primary stream and seeds a
   default thread on first launch.
-- **Agent pane "can't find session"**: that's tmux mode trying to
-  attach to a session that doesn't exist yet. The default transport
-  is `direct` (spawns the agent CLI in a PTY, no tmux); switch back
-  via the agent pane's kebab → "Use direct mode" if you toggled it.
 - **Vite must be running for any debug build** even if you're only
   iterating on Rust. Killing Vite and re-running the binary is
   what produces the empty white window.
@@ -262,8 +256,8 @@ bunx playwright test tests-e2e/specs/work # one area
 ```
 
 Each worker boots `oxplow-daemon-sim` (the daemon with its secrets in
-memory) over a throwaway git project, so nothing reaches your config,
-keychain or tmux server. Read `tests-e2e/README.md` before writing a
+memory) over a throwaway git project, so nothing reaches your config
+or keychain. Read `tests-e2e/README.md` before writing a
 spec, and `.context/working-in-this-repo.md` → "The browser suite" for
 when to run it.
 
@@ -280,7 +274,7 @@ cargo llvm-cov --html --workspace           # HTML report under target/llvm-cov/
 
 No coverage floor is gated yet — the goal is to keep the numbers
 visible so the thinnest crates (`oxplow-mcp`, `oxplow-tauri-ipc`,
-`oxplow-pty`, `oxplow-tmux`) get backfill before regressions creep
+`oxplow-pty`) get backfill before regressions creep
 in.
 
 ## Build installers
@@ -477,7 +471,6 @@ Cargo registry + target dir cached per OS, keyed on `Cargo.lock`.
   - `oxplow-git` — repo detection, branches, worktrees, conflict state.
   - `oxplow-session` — stream + worktree lifecycle.
   - `oxplow-runtime` — write guard + filing enforcement.
-  - `oxplow-tmux` — tmux command wrapper.
   - `oxplow-pty` — owner-task PTY manager (portable-pty).
   - `oxplow-lsp` — JSON-RPC stdio proxy.
   - `oxplow-mcp` — MCP server (rmcp).

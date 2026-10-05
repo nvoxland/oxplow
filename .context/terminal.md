@@ -111,13 +111,13 @@ The component owns:
   padding the mount makes the computed row count oscillate (the text
   visibly jumps). The wrapper's `background` matches `XTERM_THEME.background`
   so the gutter reads as the terminal's own padding.
-- A custom keydown handler (Cmd+V paste, Shift+Enter, PageUp/Down
-  routing for tmux history mode, Escape interrupt detection).
+- A custom keydown handler (Cmd+V paste, Shift+Enter, PageUp/Down as a
+  page of xterm's own scrollback, Escape interrupt detection).
 - Fast scroll is **Alt**+wheel (`fastScrollSensitivity: 4`). xterm 6
   dropped the `fastScrollModifier` option and hardwired Alt, so it is
   no longer configurable (it was Shift before the v6 upgrade).
-- A custom wheel handler (mousewheel → tmux history scrolling when
-  appropriate).
+- A custom wheel handler that leaves a Ctrl/Cmd-wheel to the page.
+  Scrollback is xterm's own; there is no tmux history mode (tsk1018).
 - The PTY session lifecycle via `desktopBridge().openTerminalSession`
   / `sendTerminalMessage` / `closeTerminalSession`.
 - Drag-drop "Add to agent context" support (see
@@ -171,9 +171,8 @@ later keystroke could overtake an earlier one (the browser suite typed
 in flight wait together and go as one `input` message, so fast typing
 costs no extra round trips — except a bare Escape, which keeps its own
 message (merged with the next key it reads as an Alt sequence; `\x1b\r`
-is Shift+Enter). Waiting scrolls sum and a newer resize replaces a
-waiting one, so a trackpad's stream of scrolls doesn't queue up behind a
-slow link (tsk992). A failed send is logged and the next still goes; one
+is Shift+Enter). A newer resize replaces a waiting one, so a drag doesn't
+queue up behind a slow link (tsk992). A failed send is logged and the next still goes; one
 that doesn't answer within `SEND_TIMEOUT_MS` (5 s) is reported and its
 session's waiting messages are **dropped** — never delivered later in a
 burst the person didn't see land (a stale prompt and Enter, into an
@@ -286,10 +285,9 @@ know HOME).
   `TerminalSessionRegistry` stashes it; `read_process_cwd` reads
   `/proc/<pid>/cwd` on Linux / `lsof -d cwd` on macOS — no extra crate).
   This makes a path printed after `cd`ing into a subfolder open
-  correctly. **Caveat:** only the direct `shell` pane benefits — its
-  child *is* the shell, so the pid's cwd tracks `cd`. For tmux-backed
-  panes the pid is the tmux client, so the read returns `None`/the root
-  and we fall back to the worktree (agent panes don't `cd` anyway).
+  correctly. **Caveat:** only the `shell` pane benefits — its child *is*
+  the shell, so the pid's cwd tracks `cd`; an agent pane's child is the
+  agent, which doesn't `cd`, so its cwd is the worktree anyway.
 - A missing target is benign: `handleOpenFile` (App.tsx) shows a
   friendly "File not found: <path>" at `warn`, not an error with the
   raw OS code — so a stale link doesn't look like a crash.

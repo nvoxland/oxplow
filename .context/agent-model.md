@@ -102,7 +102,8 @@ chaining only begins after the agent has done at least one turn.
 Everything a test harness (or another agent) needs to drive an inner
 oxplow agent:
 
-- **Where the agent runs.** Each thread has a tmux pane rendered in the
+- **Where the agent runs.** Each thread's terminal agent runs directly in
+  a PTY (there is no terminal multiplexer, tsk1018), rendered in the
   first center-area tab. The renderer is `TerminalPane` attached to
   `selectedBatch.pane_target`; UI-side, it's an xterm.js inside
   `.xterm`. Click that element to focus, type with regular keystrokes;
@@ -183,9 +184,14 @@ concurrently.
   `OXPLOW_HOOK_TOKEN`, and `OXPLOW_PANE` so hooks can identify
   themselves to the runtime.
 
-The command is launched in a tmux pane via `ensureAgentPane`
-(`crates/oxplow-app/src/agent_pane.rs`). Switching streams or threads doesn't kill
-existing agent sessions; tmux keeps them alive in the background.
+The command runs as `sh -lc <command>` in a PTY
+(`oxplow_rpc::commands::terminal::open_terminal_session`, keyed by stream,
+thread, agent and pane so a re-attach resumes the live session). Switching
+streams or threads doesn't kill existing agent sessions: the daemon keeps
+them, and a re-attach replays their buffer. They end with the daemon; the
+next open resumes the agent's own session (`--resume`). There is no tmux
+mode (tsk1018): it went with the "Open in tmux" toggle and the
+`oxplow-tmux` crate.
 
 ### The agent is spawned by absolute path, on purpose (tsk245)
 
@@ -275,7 +281,7 @@ are not supported for SessionStart" in `claude --debug-file`). Only command-
 type hooks are supported there. Everywhere else we rely on hook events to
 learn the session id, so we adopt whichever id shows up on the *next* hook
 that does fire (`UserPromptSubmit`, `PreToolUse`, `Stop`, `SessionEnd`, …) —
-see `decideResumeUpdate` in `crates/oxplow-app/src/agent_pane.rs`.
+see the resume handling in `crates/oxplow-app/src/hook_ingest.rs`.
 
 `oxplow__get_batch_context` returns, besides the caller's stream/thread
 ids + summary, an `otherActiveBatches: Array<{ streamId, streamTitle,
@@ -1728,7 +1734,7 @@ oxplow hooks, and are **not suppressible** from the plugin side:
 ## Session-context injection
 
 The thread id always resolves to *something* at agent-spawn time: the
-Tauri commands (`open_terminal_session`, `ensure_agent_pane`) call
+spawn path (`open_terminal_session`) calls
 `ThreadService::selected_or_active(&stream_id)`, which falls back from
 the user's explicit selection → the writer (active) thread → the first
 queued thread. This guarantees `OXPLOW_THREAD_ID` and the

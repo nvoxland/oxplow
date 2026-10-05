@@ -183,7 +183,7 @@ macro_rules! oxplow_command_table {
         $callback! {
             ctx {
                 // terminal — the agent-spawn path needs plugin_runtime
-                "open_terminal_session" => $crate::commands::terminal::open_terminal_session { pane_target: String, cols: u16, rows: u16, transport_mode: String },
+                "open_terminal_session" => $crate::commands::terminal::open_terminal_session { pane_target: String, cols: u16, rows: u16 },
                 // acp — opening a session needs plugin_runtime (oxplow's MCP endpoint)
                 "acp_open_session" => $crate::commands::acp::acp_open_session { thread_id: ::oxplow_domain::ThreadId },
             }

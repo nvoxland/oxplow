@@ -19,8 +19,8 @@ developer-facing mechanics.
   (or `OXPLOW_PROJECT_DIR`) + `--bind 127.0.0.1:7420`. Boots
   `Services::boot` → `oxplow_app::boot::run_boot_orchestration`
   (shared with the Tauri shell — recovery, ensure_primary, all
-  watchers/indexers) → control-plane spawn (hooks/MCP for agents in
-  tmux on that box). Routes: `POST /ipc/:name` (tauri-specta result
+  watchers/indexers) → control-plane spawn (hooks/MCP for the agents
+  on that box). Routes: `POST /ipc/:name` (tauri-specta result
   envelope — built by the shared `oxplow_rpc::ipc_envelope`, the single
   Rust owner of the `{status, data|error}` shape; the Tauri path reaches
   the byte-identical shape via the TS `typedError` wrapper + the same
@@ -138,7 +138,7 @@ developer-facing mechanics.
   Disconnect). Once it recovers, state auto-resyncs (see above), so the
   banner shows only a brief, non-blocking "Connection restored — state
   resynced" confirmation that auto-dismisses (`RESTORED_AUTO_DISMISS_MS`)
-  — no reload prompt. tmux agents on the daemon box run through the gap.
+  — no reload prompt. Agents on the daemon box run through the gap.
   (A genuine version/schema skew after a backend upgrade would still
   warrant a reload prompt; there's no skew detection yet, so nothing
   surfaces one today.)

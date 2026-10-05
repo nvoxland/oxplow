@@ -171,7 +171,6 @@ export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps)
                 <TerminalPane
                   paneTarget={paneTargetFor(tab.id)}
                   visible={visible && isActive}
-                  transportMode="direct"
                   worktreePath={stream.worktree_path}
                   onOpenFile={onOpenFile}
                   terminateOnUnmount={closingIds.has(tab.id)}

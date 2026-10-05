@@ -9,7 +9,6 @@ members = [
     "crates/oxplow-git",
     "crates/oxplow-session",
     "crates/oxplow-runtime",
-    "crates/oxplow-tmux",
     "crates/oxplow-pty",
     "crates/oxplow-lsp",
     "crates/oxplow-lsp-installer",
@@ -183,7 +182,6 @@ oxplow-fs-watch = { path = "crates/oxplow-fs-watch" }
 oxplow-git = { path = "crates/oxplow-git" }
 oxplow-session = { path = "crates/oxplow-session" }
 oxplow-runtime = { path = "crates/oxplow-runtime" }
-oxplow-tmux = { path = "crates/oxplow-tmux" }
 oxplow-pty = { path = "crates/oxplow-pty" }
 oxplow-lsp = { path = "crates/oxplow-lsp" }
 oxplow-lsp-installer = { path = "crates/oxplow-lsp-installer" }

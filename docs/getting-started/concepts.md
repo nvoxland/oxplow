@@ -33,8 +33,7 @@ Each thread carries its own:
 
 - assigned agent (Claude Code, Codex, OpenCode or an ACP agent,
   fixed at thread creation)
-- agent view: a terminal (a tmux pane that survives oxplow restarts)
-  for Claude Code, Codex and OpenCode; for an ACP agent, a structured
+- agent view: a terminal for Claude Code, Codex and OpenCode; for an ACP agent, a structured
   conversation (messages, tool calls with diffs, the plan, permission
   prompts) with a prompt box
 - set of open tabs and active tab

@@ -1,9 +1,10 @@
 # Terminal
 
-Each thread has an **Agent** tab that wraps a tmux pane running
-the thread's assigned agent — Claude Code, Codex, or OpenCode — in the stream's
-worktree. The pane survives oxplow restarts because tmux owns the process —
-killing oxplow doesn't kill your in-flight agent.
+Each thread has an **Agent** tab running the thread's assigned agent —
+Claude Code, Codex, or OpenCode — in a terminal in the stream's worktree.
+Switching threads or streams leaves it running; coming back replays what it
+printed. Quitting oxplow stops it, and the next open resumes the agent's own
+session.
 
 ## Agent terminal
 
@@ -53,13 +54,6 @@ Open a shell tab from the **+** in any tab strip — it's just a
 pty in the stream's worktree. Use it for `git status`, `npm
 install`, running tests. Multiple shells per thread are fine;
 they share the worktree but are otherwise independent.
-
-## tmux mode
-
-The agent terminal runs in tmux by default so detaching and
-reattaching survives oxplow restarts. Toggle it from the agent
-tab's context menu if you want a plain pty instead. Sessions are
-per-thread.
 
 ## Copy / paste
 

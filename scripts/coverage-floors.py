@@ -37,7 +37,6 @@ FLOORS = {
     "oxplow-session": 70.0,
     # Subprocess-heavy crates exercised through oxplow-app integration:
     "oxplow-pty": 80.0,
-    "oxplow-tmux": 70.0,
     # Adapter crates currently with light coverage. Floors are set at
     # the current baseline and should be raised as integration tests
     # land. The MCP + IPC adapters are mostly thin handlers that need a

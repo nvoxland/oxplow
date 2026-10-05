@@ -97,7 +97,7 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   store traits), `oxplow-db` (rusqlite stores + migrations),
   `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
   `oxplow-runtime` (write guard + filing enforcement),
-  `oxplow-tmux`, `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
+  `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
   `oxplow-coverage` (pure report-parse data types),
   `oxplow-collect-plugin` (the bundled report parsers + host parse
   helpers + jaq/Starlark/exec transform runtimes),

@@ -4410,7 +4410,6 @@ dependencies = [
  "oxplow-pty",
  "oxplow-runtime",
  "oxplow-session",
- "oxplow-tmux",
  "oxplow-workspace-hack",
  "parking_lot",
  "proptest",
@@ -5033,21 +5032,6 @@ dependencies = [
  "tauri",
  "tauri-plugin-clipboard-manager",
  "tauri-specta",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "oxplow-tmux"
-version = "0.7.0"
-dependencies = [
- "async-trait",
- "oxplow-domain",
- "oxplow-workspace-hack",
- "serde",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

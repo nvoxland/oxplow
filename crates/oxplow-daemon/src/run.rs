@@ -168,7 +168,7 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
     // identical to the desktop shell's boot.
     oxplow_app::boot::run_boot_orchestration(&state).await;
 
-    // Hook + MCP control plane (agents spawned in tmux on this box
+    // Hook + MCP control plane (agents spawned on this box
     // talk to it over its own loopback listener).
     let control_plane = oxplow_control_plane::spawn(state.clone())
         .await

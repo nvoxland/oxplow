@@ -11,7 +11,6 @@ pub mod acp;
 pub mod advisories;
 pub mod agent_command;
 pub mod agent_context;
-pub mod agent_pane;
 pub mod agent_path;
 pub mod agent_policy;
 pub mod agent_prompt;
@@ -595,8 +594,6 @@ pub struct Services {
     pub background_tasks: BackgroundTaskStore,
     pub followups: FollowupStore,
     pub pty: oxplow_pty::PtyManager,
-    pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
-    pub agent_panes: agent_pane::AgentPaneService,
     pub blobs: blob_store::BlobStore,
     /// Reads a captured file's bytes from whichever store holds them.
     pub snapshot_content: snapshot_content::SnapshotContent,
@@ -859,8 +856,6 @@ impl Services {
         );
 
         let pty = oxplow_pty::PtyManager::spawn();
-        let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
-        let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
         // is paid on first request, not at boot.
         let config_arc = Arc::new(RwLock::new(config));
@@ -905,11 +900,8 @@ impl Services {
         // Shared PTY liveness — the terminal forwarder stamps it, the
         // stall watchdog reads it (tsk141).
         let output_activity = output_activity::OutputActivity::new();
-        let terminal_sessions = terminal_sessions::TerminalSessionRegistry::new(
-            pty.clone(),
-            tmux.clone(),
-            output_activity.clone(),
-        );
+        let terminal_sessions =
+            terminal_sessions::TerminalSessionRegistry::new(pty.clone(), output_activity.clone());
         let worktrees = Arc::new(worktrees::WorktreeRouter::new(
             layout.project_dir.clone(),
             stream_store.clone(),
@@ -1421,8 +1413,6 @@ impl Services {
             background_tasks,
             followups,
             pty,
-            tmux,
-            agent_panes,
             blobs,
             snapshot_content,
             code_intel,

@@ -177,7 +177,7 @@ layer everything else builds on.
 - Custom backend daemon that owns:
   - streams
   - per-stream worktrees
-  - tmux / Claude panes
+  - agent terminals (PTYs) and ACP sessions
   - hook events
   - stream-scoped APIs
 

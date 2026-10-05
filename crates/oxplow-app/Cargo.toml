@@ -23,7 +23,6 @@ oxplow-code-deps = { workspace = true }
 oxplow-git = { workspace = true }
 oxplow-session = { workspace = true }
 oxplow-runtime = { workspace = true }
-oxplow-tmux = { workspace = true }
 oxplow-pty = { workspace = true }
 oxplow-lsp = { workspace = true }
 oxplow-lsp-installer = { workspace = true }

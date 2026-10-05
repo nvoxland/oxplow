@@ -718,3 +718,37 @@ fn the_core_never_binds_a_socket_for_a_sign_in() {
         .collect();
     assert!(offenders.is_empty(), "{offenders:#?}");
 }
+
+/// tsk1018: there is no tmux in the app — agents and shells run as
+/// direct PTYs. No tracked source, manifest, script or CI file names it.
+/// Prose (`docs/`, `.context/`, `DEV.md`) may say it's gone or suggest
+/// a person's own multiplexer; `.oxplow/` is this repo's config, not the
+/// app; this guard names it to look for it.
+#[test]
+fn no_tmux_in_the_app() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let out = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(&root)
+        .output()
+        .expect("git ls-files");
+    let named: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|path| {
+            ["crates/", "apps/", "tests-e2e/", "scripts/", ".github/"]
+                .iter()
+                .any(|dir| path.starts_with(dir))
+                || matches!(*path, "Cargo.toml" | "package.json")
+        })
+        .filter(|path| !path.ends_with("source_guards.rs"))
+        .filter(|path| {
+            std::fs::read(root.join(path)).is_ok_and(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .to_ascii_lowercase()
+                    .contains("tmux")
+            })
+        })
+        .map(str::to_string)
+        .collect();
+    assert_eq!(named, Vec::<String>::new());
+}

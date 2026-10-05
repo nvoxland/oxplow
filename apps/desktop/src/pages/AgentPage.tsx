@@ -12,7 +12,6 @@ interface AgentPageProps {
   thread: Thread | null;
   stream: Stream | null;
   visible: boolean;
-  transportMode: "direct" | "tmux";
   /** Click-through handler for file paths detected in terminal output. */
   onOpenFile?(absPath: string, line?: number, column?: number): void;
   /** ACP threads: open an agent edit's diff. */
@@ -39,7 +38,6 @@ export function AgentPage({
   thread,
   stream,
   visible,
-  transportMode,
   onOpenFile,
   onOpenDiff,
   onOpenSettings,
@@ -91,7 +89,6 @@ export function AgentPage({
             key={thread.id}
             paneTarget={thread.pane_target}
             visible={visible}
-            transportMode={transportMode}
             worktreePath={stream?.worktree_path}
             onOpenFile={onOpenFile}
             isLinkablePath={isLinkablePath}

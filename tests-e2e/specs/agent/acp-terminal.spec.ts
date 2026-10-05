@@ -17,7 +17,7 @@ test("the fake agent's reply streams into the thread's transcript", async ({ pag
   await expect(said).toContainText("Hello from the fake agent");
 });
 
-// The Terminal page is a plain shell in the stream's worktree (no tmux).
+// The Terminal page is a plain shell in the stream's worktree.
 test("a terminal opens a shell in the project", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Terminal");

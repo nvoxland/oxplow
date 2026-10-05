@@ -1,7 +1,6 @@
 // One test daemon: `oxplow-daemon-sim` over a throwaway git project with its
-// own global config (`OXPLOW_HOME`), home, shell, git config and tmux socket
-// dir, so nothing reaches the person's real config, keychain, rc files,
-// shell history or tmux server.
+// own global config (`OXPLOW_HOME`), home, shell and git config, so nothing
+// reaches the person's real config, keychain, rc files or shell history.
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { chmodSync, cpSync, createWriteStream, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,8 +16,6 @@ export type Daemon = {
   token: string;
   /** The project's worktree. */
   project: string;
-  /** Its `TMUX_TMPDIR`: where its tmux server's socket is. */
-  tmux: string;
   /** Its process. */
   pid: number;
   /** Its stderr, kept after it stops (`tests-e2e/.output/daemons/`). */
@@ -68,15 +65,12 @@ function installGithubExample(project: string): void {
 
 /** The environment a daemon runs in: its own home (so a terminal's shell
  *  reads no rc file and writes no history of the person's), a plain
- *  `/bin/sh`, no global or system git config, and its own tmux sockets. A
- *  tmux client finds its server by `$TMUX` before `TMUX_TMPDIR`: run from
- *  inside tmux, the daemon would otherwise reach the person's own server. */
+ *  `/bin/sh`, and no global or system git config. */
 function isolated(dir: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: join(dir, "user"),
     OXPLOW_HOME: join(dir, "home"),
-    TMUX_TMPDIR: join(dir, "tmux"),
     SHELL: "/bin/sh",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
@@ -86,7 +80,7 @@ function isolated(dir: string): NodeJS.ProcessEnv {
     GIT_COMMITTER_EMAIL: "e2e@example.com",
     RUST_LOG: process.env.RUST_LOG ?? "warn",
   };
-  for (const name of ["TMUX", "TMUX_PANE", "ZDOTDIR", "BASH_ENV", "ENV", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"]) {
+  for (const name of ["ZDOTDIR", "BASH_ENV", "ENV", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"]) {
     delete env[name];
   }
   return env;
@@ -114,17 +108,10 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
       await exited;
     }
-    // Its terminals' tmux server outlives it; with none started, there is
-    // nothing to kill.
-    try {
-      execFileSync("tmux", ["kill-server"], { env, stdio: "ignore" });
-    } catch {
-      // no server
-    }
     rmSync(dir, { recursive: true, force: true });
   };
   try {
-    for (const d of [project, env.HOME!, env.OXPLOW_HOME!, env.TMUX_TMPDIR!, join(project, ".oxplow")]) mkdirSync(d, { recursive: true });
+    for (const d of [project, env.HOME!, env.OXPLOW_HOME!, join(project, ".oxplow")]) mkdirSync(d, { recursive: true });
     writeFileSync(join(project, ".oxplow", "project.yaml"), projectYaml(acpFake));
     installTestExtension(project, providerFake);
     installGithubExample(project);
@@ -168,7 +155,7 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
         reject(new Error(`the daemon exited (${code ?? signal}):\n${said()}`));
       });
     });
-    return { base, token, project, tmux: env.TMUX_TMPDIR!, pid: spawned.pid!, log, stop };
+    return { base, token, project, pid: spawned.pid!, log, stop };
   } catch (e) {
     await stop();
     throw e;

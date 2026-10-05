@@ -7,7 +7,7 @@ import { terminalSender } from "./terminalInput.js";
 // overtake an earlier one — and keystrokes that wait together go as one.
 // tsk992: a send that doesn't answer drops its session's backlog rather
 // than delivering it late in a burst; a closed pane sends nothing more; a
-// bare Escape keeps its own message; scrolls and resizes coalesce.
+// bare Escape keeps its own message; resizes coalesce.
 
 function harness(timeoutMs = 1000) {
   const sent: Array<[string, unknown]> = [];
@@ -48,7 +48,7 @@ test("a message waits for the one before it, and keystrokes waiting together go 
 
 test("only neighbouring keystrokes of one session merge; everything else keeps its place", async () => {
   const { send, sent, answer } = harness();
-  send("s1", { type: "history-exit" });
+  send("s1", { type: "resize", cols: 100, rows: 30 });
   send("s1", { type: "input", data: "a" });
   send("s1", { type: "resize", cols: 80, rows: 24 });
   send("s1", { type: "input", data: "é" });
@@ -56,7 +56,7 @@ test("only neighbouring keystrokes of one session merge; everything else keeps i
   send("s1", { type: "input-binary", data: "\x01" });
   for (let i = 0; i < 6; i++) await answer();
   expect(sent.map(([s, m]) => [s, (m as { type: string }).type])).toEqual([
-    ["s1", "history-exit"],
+    ["s1", "resize"],
     ["s1", "input"],
     ["s1", "resize"],
     ["s1", "input"],
@@ -86,18 +86,14 @@ test("a bare Escape isn't merged with the key after it", async () => {
   expect(sent.map(([, m]) => decoded(m))).toEqual(["a", "\x1b", "\r"]);
 });
 
-test("scrolls waiting together sum, and a newer resize replaces a waiting one", async () => {
+test("a newer resize replaces a waiting one", async () => {
   const { send, sent, answer } = harness();
   send("s1", { type: "input", data: "x" });
-  send("s1", { type: "history-scroll", lines: 3 });
-  send("s1", { type: "history-scroll", lines: -1 });
-  send("s1", { type: "history-scroll", lines: 2 });
   send("s1", { type: "resize", cols: 80, rows: 24 });
   send("s1", { type: "resize", cols: 100, rows: 30 });
-  for (let i = 0; i < 3; i++) await answer();
+  for (let i = 0; i < 2; i++) await answer();
   expect(sent.map(([, m]) => m)).toEqual([
     { type: "input", bytes: btoa("x") },
-    { type: "history-scroll", lines: 4 },
     { type: "resize", cols: 100, rows: 30 },
   ]);
 });

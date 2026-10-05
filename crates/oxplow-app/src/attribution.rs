@@ -923,7 +923,7 @@ mod target_scoring_tests {
             "no targets at all must decline"
         );
         assert_eq!(
-            unique_best_by_targets(&run_targets("cargo test -p oxplow-tmux"), &two_in_one_crate),
+            unique_best_by_targets(&run_targets("cargo test -p oxplow-pty"), &two_in_one_crate),
             None,
             "no overlap must decline"
         );

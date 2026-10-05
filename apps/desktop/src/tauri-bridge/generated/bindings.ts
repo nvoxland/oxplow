@@ -942,17 +942,10 @@ export const commands = {
 	 */
 	respondLspApplyEdit: (token: number, applied: boolean, failureReason: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("respond_lsp_apply_edit", { token, applied, failureReason })),
 	/**
-	 *  Open a renderer-attached terminal session.
-	 * 
-	 *  Two transports, mirroring the main-branch design:
-	 *  - `transport_mode == "direct"` — spawn the agent CLI directly via
-	 *    `sh -lc <build_agent_command>` in a PTY; no tmux. The default.
-	 *  - `transport_mode == "tmux"` — `ensure_pane` to create/reuse a
-	 *    tmux session+window running the agent command, then
-	 *    `tmux attach-session -t <resolved-target>`. The target is the
-	 *    `oxplow-<stream-id>:working|talking` form, not the bare slot.
+	 *  Open a renderer-attached terminal session: the agent CLI or a shell,
+	 *  run directly in a PTY (`oxplow_rpc::commands::terminal`).
 	 */
-	openTerminalSession: (paneTarget: string, cols: number, rows: number, transportMode: string) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows, transportMode })),
+	openTerminalSession: (paneTarget: string, cols: number, rows: number) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows })),
 	/**
 	 *  Open (or reattach to) an ACP thread's agent session. Hand-written like
 	 *  `open_terminal_session`: the MCP endpoint comes from the plugin runtime.
