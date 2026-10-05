@@ -178,6 +178,10 @@ A `native_state` alone (no `state`) is a valid update or create: that is
 how the task writes send a status. A person's link (no thread of their
 own) belongs to the linked task's thread, else the target's.
 `work_item.comment` and `work_item.link` refuse a deleted task (tsk572).
+A comment's `task_note.author` names who made it (`note_author`, tsk1000):
+`user`, `agent` (a lens acting for one included), `effect:<extension>/<id>`
+or `oxplow` — as a task's `author` is left empty for an effect or oxplow
+(`task_author`), neither is shown as the person's.
 `effort.open` asks the ref's provider's features: refused when it
 declares `in_progress_opens_effort`, open to an unregistered provider's
 item.

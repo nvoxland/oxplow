@@ -669,6 +669,21 @@ fn task_author(actor: &oxplow_domain::Actor) -> Option<oxplow_domain::TaskAuthor
     }
 }
 
+/// Who a comment's `task_note.author` names (tsk1000), as [`task_author`]
+/// does for a task: `user` (a person), `agent` (a lens acting for one
+/// included), `effect:<extension>/<id>` or `oxplow` — never the person's
+/// for what an effect or oxplow wrote.
+fn note_author(actor: &oxplow_domain::Actor) -> String {
+    use oxplow_domain::Actor;
+    match actor {
+        Actor::Human => "user".into(),
+        Actor::Agent { .. } => "agent".into(),
+        Actor::Lens { on_behalf_of, .. } => note_author(on_behalf_of),
+        Actor::Effect { effect } => format!("effect:{effect}"),
+        Actor::System => "oxplow".into(),
+    }
+}
+
 fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemCreateInput = parse(input)?;
@@ -984,17 +999,12 @@ fn tx_comment(registry: WorkItemsRegistry) -> Arc<TxHandler> {
         if input.body.trim().is_empty() {
             return Err(invalid_at("/body", "a comment needs a body".into()));
         }
-        let author = if ctx.actor.is_agent_driven() {
-            "agent"
-        } else {
-            "user"
-        };
         let note = oxplow_db::task_satellite::add_task_note_tx(
             ctx.conn,
             &ctx.events.vocabulary.kinds,
             task,
             &input.body,
-            author,
+            &note_author(ctx.actor),
         )
         .map_err(CommandError::from)?;
         let event = ctx
@@ -1521,6 +1531,37 @@ mod tests {
                 }
                 other => panic!("{input}: {other:?}"),
             }
+        }
+    }
+
+    /// tsk1000: a comment is recorded as its author — an effect's or
+    /// oxplow's own isn't shown as the person's.
+    #[tokio::test]
+    async fn a_comment_is_recorded_as_whoever_made_it() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let item = oxplow_domain::refs::build::work_item_ref(fx.task);
+        for (actor, author) in [
+            (Actor::Human, "user"),
+            (
+                Actor::Effect {
+                    effect: "acme/notify".into(),
+                },
+                "effect:acme/notify",
+            ),
+            (Actor::System, "oxplow"),
+        ] {
+            let commented = fx
+                .svc
+                .commands
+                .run(
+                    &actor,
+                    COMMENT,
+                    json!({ "ref": item, "body": "noted" }),
+                    false,
+                )
+                .await
+                .unwrap();
+            assert_eq!(commented.result["author"], author, "{actor:?}");
         }
     }
 
