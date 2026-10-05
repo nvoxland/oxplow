@@ -137,6 +137,42 @@ pub fn augmented_path() -> Option<String> {
     augmented_path_in(std::env::var_os("PATH").as_deref(), &extra)
 }
 
+/// Variables an agent or terminal must not inherit from oxplow's own
+/// environment (tsk1032): when oxplow itself runs inside an agent (you
+/// dogfood it from an oxplow agent's terminal), that agent's session markers
+/// would make its agents child sessions — Claude Code then turns transcript
+/// saving off, which breaks resume and token counts — and the outer oxplow's
+/// identity would point their hooks at the wrong oxplow. A list, not a
+/// prefix: `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK` and the like are
+/// the person's own configuration and must pass. Oxplow sets its own
+/// identity for an agent after these are removed (`OXPLOW_*` ride the
+/// agent's command).
+pub const NOT_INHERITED: &[&str] = &[
+    // Claude Code's markers for a session and the processes it starts.
+    "CLAUDECODE",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_EXECPATH",
+    // An oxplow agent's identity.
+    "OXPLOW_HOOK_TOKEN",
+    "OXPLOW_HOOK_BASE_URL",
+    "OXPLOW_STREAM_ID",
+    "OXPLOW_THREAD_ID",
+    "OXPLOW_PANE",
+];
+
+/// [`NOT_INHERITED`] as a spawn's `env_remove`.
+pub fn not_inherited() -> Vec<String> {
+    NOT_INHERITED.iter().map(|s| s.to_string()).collect()
+}
+
 /// The env every agent/terminal PTY is spawned with. One place so the five
 /// spawn sites can't drift on whether they widen PATH.
 pub fn base_pty_env() -> Vec<(String, String)> {
@@ -153,6 +189,30 @@ pub fn base_pty_env() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tsk1032: another session's markers and an oxplow agent's identity are
+    /// dropped; the person's own Claude configuration passes.
+    #[test]
+    fn an_agent_inherits_no_session_markers_but_keeps_configuration() {
+        let dropped = not_inherited();
+        for marker in [
+            "CLAUDECODE",
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDE_CODE_SESSION_ID",
+            "OXPLOW_HOOK_TOKEN",
+            "OXPLOW_THREAD_ID",
+        ] {
+            assert!(dropped.iter().any(|d| d == marker), "{marker} is inherited");
+        }
+        for config in [
+            "CLAUDE_CONFIG_DIR",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "OXPLOW_HOME",
+            "ANTHROPIC_API_KEY",
+        ] {
+            assert!(!dropped.iter().any(|d| d == config), "{config} is dropped");
+        }
+    }
 
     /// A dir containing an executable-ish file named `bin`.
     fn dir_with(root: &Path, name: &str, bin: &str) -> PathBuf {

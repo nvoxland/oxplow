@@ -262,6 +262,7 @@ pub async fn open_terminal_session(
                 args: vec!["-l".into()],
                 cwd,
                 env: oxplow_app::agent_path::base_pty_env(),
+                env_remove: oxplow_app::agent_path::not_inherited(),
                 cols: c,
                 rows: r,
             })
@@ -510,6 +511,7 @@ pub async fn open_terminal_session(
                 args: vec!["-lc".into(), command],
                 cwd,
                 env: oxplow_app::agent_path::base_pty_env(),
+                env_remove: oxplow_app::agent_path::not_inherited(),
                 cols: c,
                 rows: r,
             })

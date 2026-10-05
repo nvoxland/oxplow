@@ -60,6 +60,9 @@ pub struct SpawnRequest {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
+    /// Variables of this process the child must not inherit; removed
+    /// before `env` is applied.
+    pub env_remove: Vec<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -333,6 +336,9 @@ async fn spawn_one(
     let mut cmd = CommandBuilder::new(&req.command);
     cmd.args(req.args.iter().map(|s| s.as_str()));
     cmd.cwd(&req.cwd);
+    for k in req.env_remove.iter() {
+        cmd.env_remove(k);
+    }
     for (k, v) in req.env.iter() {
         cmd.env(k, v);
     }
@@ -438,6 +444,7 @@ mod tests {
             args: vec![],
             cwd: tempdir().unwrap().keep(),
             env: vec![],
+            env_remove: vec![],
             cols: 80,
             rows: 24,
         }
@@ -451,6 +458,7 @@ mod tests {
             args: vec!["10".into()],
             cwd: tempdir().unwrap().keep(),
             env: vec![],
+            env_remove: vec![],
             cols: 80,
             rows: 24,
         };
@@ -510,6 +518,7 @@ mod tests {
             args: vec!["60".into()],
             cwd: tempdir().unwrap().keep(),
             env: vec![],
+            env_remove: vec![],
             cols: 80,
             rows: 24,
         };
@@ -533,6 +542,35 @@ mod tests {
         })
         .await;
         assert!(exit.is_ok(), "child should exit promptly after kill");
+    }
+
+    /// tsk1032: a variable named in `env_remove` doesn't reach the child,
+    /// though the parent (this test process) has it.
+    #[tokio::test]
+    async fn a_removed_variable_does_not_reach_the_child() {
+        let mgr = PtyManager::spawn();
+        let req = SpawnRequest {
+            command: "sh".into(),
+            args: vec!["-c".into(), "echo \"home=${HOME-unset}\"".into()],
+            cwd: tempdir().unwrap().keep(),
+            env: vec![],
+            env_remove: vec!["HOME".into()],
+            cols: 80,
+            rows: 24,
+        };
+        let mut handle = mgr.spawn_pane(req).await.unwrap();
+        let out = timeout(Duration::from_secs(5), async {
+            let mut out = String::new();
+            loop {
+                match handle.events.recv().await {
+                    Ok(PaneEvent::Output(b)) => out.push_str(&String::from_utf8_lossy(&b)),
+                    Ok(PaneEvent::Exit { .. }) | Err(_) => return out,
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(out.contains("home=unset"), "{out}");
     }
 
     #[tokio::test]

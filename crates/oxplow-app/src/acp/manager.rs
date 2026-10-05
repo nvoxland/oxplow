@@ -176,6 +176,9 @@ impl AcpManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        for k in crate::agent_path::NOT_INHERITED {
+            cmd.env_remove(k);
+        }
         if let Some(path) = crate::agent_path::augmented_path() {
             cmd.env("PATH", path);
         }

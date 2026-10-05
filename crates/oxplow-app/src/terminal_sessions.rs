@@ -535,6 +535,7 @@ mod tests {
                 args: vec![],
                 cwd: dir,
                 env: vec![],
+                env_remove: vec![],
                 cols: c,
                 rows: r,
             })
@@ -572,6 +573,7 @@ mod tests {
             args: vec!["-c".into(), "exit 0".into()],
             cwd: std::env::temp_dir(),
             env: vec![],
+            env_remove: vec![],
             cols: c,
             rows: r,
         };
@@ -623,6 +625,7 @@ mod tests {
             args: vec!["-lc".into(), command],
             cwd: dir.clone(),
             env: crate::agent_path::base_pty_env(),
+            env_remove: vec![],
             cols: 80,
             rows: 24,
         };

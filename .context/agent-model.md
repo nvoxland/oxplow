@@ -151,6 +151,16 @@ oxplow agent:
 
 `build_agent_command_for_session` in `crates/oxplow-app/src/agent_command.rs`
 constructs a shell command for the thread's assigned `AgentKind`.
+
+**What an agent inherits (tsk1032).** Every agent and terminal (PTY and
+ACP) is spawned without `agent_path::NOT_INHERITED`: Claude Code's session
+markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, …) and an oxplow agent's
+identity (`OXPLOW_HOOK_TOKEN`, `OXPLOW_THREAD_ID`, …). Otherwise oxplow run
+from inside an agent's terminal starts child sessions — Claude Code turns
+transcript saving off, breaking resume and token counts — whose hooks point
+at the outer oxplow. It's a list, not a prefix: `CLAUDE_CONFIG_DIR`,
+`CLAUDE_CODE_USE_BEDROCK` and `OXPLOW_HOME` are the person's configuration
+and pass. Oxplow's own `OXPLOW_*` for the agent ride its command.
 Project configuration is changed through the `config.*` commands on the
 command bus ([commands.md](./commands.md)) — an agent sets `zones`,
 `metricRetentionDays`, `generated`, … with `config.set`, while the keys
