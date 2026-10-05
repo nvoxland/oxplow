@@ -164,7 +164,10 @@ pub const MANIFEST: &[Capability] = &[
     both("search"),
     both("query_sql"),
     // Settings → Data: models with counts, and entities not yet synced.
-    model("list_data_entities", &["v_model"]),
+    ui(
+        "list_data_entities",
+        "the Data settings list, which joins the extensions' manifests: an agent reads published entities in `v_model` and one declared but not synced yet in its extension's `extension.yaml`",
+    ),
     ui(
         "prompt_catalog",
         "what the person can ask oxplow's agent; the agent is who gets asked",
@@ -490,7 +493,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "set_agent_prompt_append",
-        "the Settings form; an agent sets config with `config.set`",
+        "the Settings form for a person-only key: an agent's `config.set` of it is a proposal the person decides",
     ),
     ui(
         "set_generated",
@@ -498,7 +501,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "set_agent_model",
-        "the Settings form; an agent sets config with `config.set`",
+        "the Settings form for a person-only key (`agentModels`): an agent's `config.set` of it is a proposal the person decides",
     ),
     ui(
         "get_workspace_context",
@@ -509,9 +512,12 @@ pub const MANIFEST: &[Capability] = &[
     model("get_effort", &["v_effort"]),
     model("list_efforts_at_snapshots", &["v_effort"]),
     model("list_efforts_overlapping_range", &["v_effort"]),
+    // The files of the effort's snapshot bracket (`v_snapshot_file`
+    // between `v_effort`'s start and end snapshots), split by whether the
+    // effort claimed them (`v_effort_file`).
     model(
         "list_changed_paths_for_effort",
-        &["v_effort_file", "v_effort_unattributed_file"],
+        &["v_effort", "v_snapshot_file", "v_effort_file"],
     ),
     // ---- workspace file I/O (agent uses Read/Write tools) ----
     ui(
