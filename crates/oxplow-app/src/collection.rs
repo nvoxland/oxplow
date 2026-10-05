@@ -81,7 +81,13 @@ const DEFAULT_ANALYSIS_PATTERNS: &[&str] = &[
 /// Does `command` look like a test run? Case-insensitive substring match
 /// against the built-in patterns plus any caller-supplied extras.
 pub fn detect_test_run(command: &str, extra_patterns: &[String]) -> bool {
-    matches_any(command, DEFAULT_TEST_PATTERNS, extra_patterns)
+    test_run_segment(command, extra_patterns).is_some()
+}
+
+/// The sub-command of `command` that runs the tests, trimmed — what a test
+/// run shows as its command, not the agent's whole Bash call (tsk1037).
+pub fn test_run_segment(command: &str, extra_patterns: &[String]) -> Option<String> {
+    matched_segment(command, DEFAULT_TEST_PATTERNS, extra_patterns)
 }
 
 /// Does `command` look like a static-analysis run? Same substring matching as
@@ -218,6 +224,11 @@ fn subcommand_is_read_only(sub: &str) -> bool {
 /// a pattern (e.g. `grep test:collect .oxplow/project.yaml`) no longer counts as a run,
 /// while a real `cd app && OXPLOW_TASK=tsk1 bun run test:collect` still does.
 fn matches_any(command: &str, builtins: &[&str], extras: &[String]) -> bool {
+    matched_segment(command, builtins, extras).is_some()
+}
+
+/// The first sub-command of `command` that [`matches_any`] matched.
+fn matched_segment(command: &str, builtins: &[&str], extras: &[String]) -> Option<String> {
     let pats: Vec<String> = builtins
         .iter()
         .map(|s| s.to_ascii_lowercase())
@@ -226,16 +237,19 @@ fn matches_any(command: &str, builtins: &[&str], extras: &[String]) -> bool {
         .filter(|s| !s.is_empty())
         .collect();
     if pats.is_empty() {
-        return false;
+        return None;
     }
     let normalized = command
         .replace("&&", "\n")
         .replace("||", "\n")
         .replace([';', '|'], "\n");
-    normalized.split('\n').any(|sub| {
-        let lower = sub.to_ascii_lowercase();
-        pats.iter().any(|p| lower.contains(p.as_str())) && !subcommand_is_read_only(sub)
-    })
+    normalized
+        .split('\n')
+        .find(|sub| {
+            let lower = sub.to_ascii_lowercase();
+            pats.iter().any(|p| lower.contains(p.as_str())) && !subcommand_is_read_only(sub)
+        })
+        .map(|sub| sub.trim().to_string())
 }
 
 /// The optional `OXPLOW_TASK=<id>` attribution token an agent prefixes onto a
@@ -600,6 +614,18 @@ impl CollectionService {
             .get(thread)
             .await?
             .map(|t| t.stream_id.to_string()))
+    }
+
+    /// What counts as a test run besides the built-in patterns: the
+    /// project's `runPatterns`, and its own configured commands — running
+    /// the way you declared to run tests is a test run, so `fastCommand`
+    /// (tsk171) detects without a built-in pattern in its script name.
+    fn test_patterns(&self) -> Vec<String> {
+        let cfg = self.testing_cfg();
+        let mut patterns = cfg.run_patterns.clone();
+        patterns.extend(cfg.command.clone());
+        patterns.extend(cfg.fast_command.clone());
+        patterns
     }
 
     /// The project's `testing:` block, as it is now (hot-reloaded).
@@ -1035,7 +1061,14 @@ impl CollectionService {
             return Ok(None);
         };
         let mut payload = serde_json::Map::new();
-        payload.insert("command".into(), json!(command));
+        // The sub-command that ran the tests; the whole call beside it
+        // when it was more (tsk1037).
+        let shown = test_run_segment(command, &self.test_patterns())
+            .unwrap_or_else(|| command.trim().to_string());
+        if shown != command.trim() {
+            payload.insert("shellCommand".into(), json!(command));
+        }
+        payload.insert("command".into(), json!(shown));
         if let Some(c) = exit_code {
             payload.insert("exitCode".into(), json!(c));
         }
@@ -2287,14 +2320,7 @@ impl CollectionService {
             return Ok(None);
         };
         let cfg = self.testing_cfg();
-        // The project's OWN configured commands count as test-run patterns
-        // without having to be restated in `runPatterns` — if you declared
-        // it as the way to run tests, running it is a test run. This is what
-        // makes `fastCommand` (tsk171) detectable when its script name
-        // doesn't happen to contain a built-in pattern like `cargo test`.
-        let mut test_patterns = cfg.run_patterns.clone();
-        test_patterns.extend(cfg.command.clone());
-        test_patterns.extend(cfg.fast_command.clone());
+        let test_patterns = self.test_patterns();
         let is_test = detect_test_run(&bash.command, &test_patterns);
         let is_analysis = detect_analysis_run(&bash.command, &cfg.analysis_patterns);
         let is_commit = detect_git_commit(&bash.command);
@@ -4069,6 +4095,26 @@ mod tests {
         assert!(detect_test_run("./run-suite.sh", &["run-suite".into()]));
         // Empty extra patterns are ignored (don't match everything).
         assert!(!detect_test_run("echo hi", &["".into(), "   ".into()]));
+    }
+
+    /// tsk1037: a run shows the sub-command that ran the tests, not the
+    /// agent's whole Bash call (a heredoc that edited a file, a `cd`).
+    #[test]
+    fn a_test_run_shows_the_sub_command_that_ran_it() {
+        let call = "python3 - <<'EOF'\nopen('a.ts','w').write('x')\nEOF\nbun test --coverage 2>&1 | tail -5";
+        assert_eq!(
+            test_run_segment(call, &[]).as_deref(),
+            Some("bun test --coverage 2>&1")
+        );
+        assert_eq!(
+            test_run_segment(
+                "cd app && OXPLOW_TASK=tsk1 bun run test:collect",
+                &["test:collect".into()]
+            )
+            .as_deref(),
+            Some("OXPLOW_TASK=tsk1 bun run test:collect")
+        );
+        assert_eq!(test_run_segment("ls -la", &[]), None);
     }
 
     #[test]

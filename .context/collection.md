@@ -207,7 +207,11 @@ hook + MCP wiring):
   command that merely MENTIONS a pattern (`grep test:collect .oxplow/project.yaml`) is no
   longer a phantom run (and fires no report-less nudge); leading `VAR=val` env
   assignments are skipped so the `OXPLOW_TASK=` prefix doesn't mask the real
-  exec. **Background caveat:** the PostToolUse hook fires when the Bash call
+  exec. The sub-command that matched is what the run records as its
+  `command` (`test_run_segment`, tsk1037) — the whole Bash call, when it was
+  more (a heredoc that edited a file, a `cd`), rides beside it as
+  `shellCommand` — so the effort's Test Runs show `bun test --coverage`, not
+  a wall of script. **Background caveat:** the PostToolUse hook fires when the Bash call
   *returns*; a **backgrounded** `test:collect` returns at launch (before its
   reports regenerate), so nothing fresh is ingested — run it in the FOREGROUND.
   **The recording is a pump reactor, not part of the hook (P3.6, tsk476).**
