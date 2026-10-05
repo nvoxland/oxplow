@@ -6,7 +6,7 @@ import { lensRef } from "../tabs/pageRefs.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "./LensResultView.js";
-import { slotRuns } from "./lensModel.js";
+import { foldEmpty, slotRuns } from "./lensModel.js";
 import { unionReads, useRerunOnChange } from "./lensRerun.js";
 
 const MAX_ROWS = 25;
@@ -94,10 +94,12 @@ export function LensSlots({
       </>
     );
   }
+  // Sections with nothing to show fold into one closing line (tsk1036).
+  const { shown, empty } = foldEmpty(runs);
   return (
     <>
-      {runs.map(({ id, params: lensParams, run, error }) => (
-        <section key={id} data-testid={`${slot}-${id}`} data-slot={slot}>
+      {shown.map(({ id, params: lensParams, run, error }) => (
+        <section key={id} data-testid={`${slot}-${id}`} data-slot={slot} className="lens-section">
           <h2 style={h2Style} className={h2ClassName}>
             <RouteLink
               to={lensRef(id, lensParams)}
@@ -119,6 +121,24 @@ export function LensSlots({
           ) : null}
         </section>
       ))}
+      {empty.length > 0 ? (
+        <p data-testid={`${slot}-nothing-found`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", margin: 0 }}>
+          Nothing found:{" "}
+          {empty.map(({ id, params: lensParams, run }, i) => (
+            <span key={id}>
+              {i > 0 ? ", " : null}
+              <RouteLink
+                to={lensRef(id, lensParams)}
+                onNavigate={onOpenPage ? () => onOpenPage(lensRef(id, lensParams)) : undefined}
+                style={{ color: "inherit" }}
+              >
+                {run?.lens.title ?? id}
+              </RouteLink>
+            </span>
+          ))}
+          .
+        </p>
+      ) : null}
     </>
   );
 }

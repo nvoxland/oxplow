@@ -267,6 +267,11 @@
          anywhere MarkdownView renders. Serif body, capped width, comfortable
          rhythm. Sans-serif headings for visual contrast (Wikipedia / Metabase
          pattern). Code surfaces inside prose stay mono. */
+      /* A section's Copy / Add to Agent Context show when it's pointed at or
+         focused, so a page of sections isn't a wall of buttons (tsk1036). */
+      .lens-section [data-testid="lens-actions"] { opacity: 0; transition: opacity 0.1s; }
+      .lens-section:hover [data-testid="lens-actions"],
+      .lens-section:focus-within [data-testid="lens-actions"] { opacity: 1; }
       .oxplow-md {
         max-width: 78ch;
         margin: 0 auto;

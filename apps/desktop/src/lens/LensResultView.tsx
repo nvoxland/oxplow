@@ -20,6 +20,7 @@ import {
   childParams,
   displayColumns,
   formatCell,
+  foldEmpty,
   hunkRows,
   isTimestamp,
   limitRows,
@@ -721,9 +722,11 @@ function GridViz({
     // paramsKey stands in for `params` (a fresh object each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [childIds.join("|"), paramsKey, streamId]);
+  // Children with nothing to show fold into one closing line (tsk1036).
+  const { shown, empty } = foldEmpty(children);
   return (
     <div data-testid="lens-grid">
-      {children.map(({ id, run, error }) => (
+      {shown.map(({ id, run, error }) => (
         <section key={id} data-testid={`lens-grid-child-${id}`} style={{ marginBottom: 20 }}>
           <h3 style={{ fontSize: "var(--text-sm)", margin: "0 0 6px" }}>{run?.lens.title ?? id}</h3>
           {error ? (
@@ -733,6 +736,11 @@ function GridViz({
           ) : null}
         </section>
       ))}
+      {empty.length > 0 ? (
+        <p data-testid="lens-grid-nothing-found" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", margin: 0 }}>
+          Nothing found: {empty.map(({ id, run }) => run?.lens.title ?? id).join(", ")}.
+        </p>
+      ) : null}
     </div>
   );
 }

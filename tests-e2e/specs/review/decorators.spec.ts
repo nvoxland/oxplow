@@ -22,7 +22,9 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   await page.getByTestId("rail-search").click();
   await page.keyboard.type("Wombat fix");
   await page.getByTestId(`launcher-hit-task:${created.result.id}`).click();
-  // The task's effort, its Details: the effort's own page.
+  // The task's effort, its Review: the effort's own page.
   await page.locator('[data-testid^="tasks-show-in-history-"]').first().click();
   await expect(page.getByTestId("page-chips")).toContainText("Accepted");
+  // It leads with the verdict (tsk1036): no tests ran in this effort.
+  await expect(page.getByTestId("effort-verdict-tests")).toContainText("Tests: none ran");
 });

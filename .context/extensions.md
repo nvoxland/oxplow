@@ -421,6 +421,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   `enabled: false` and no lenses, slots or sources, so every consumer
   ignores it; `find_lens` and `run_lens` say it's disabled. Settings →
   Extensions toggles it through the UI-only `set_extension_enabled`.
+- **A page of sections leads with what matters** (tsk1036). Slot sections
+  (`LensSlots`) and a `grid`'s children with no rows (no error, not a grid)
+  fold into one closing line, "Nothing found: Duplication, Co-change
+  Surprises, …", each a link to its lens (`lensModel::foldEmpty`). A
+  section's Copy / Add to Agent Context show on hover or focus (the
+  `.lens-section` rule in `index.html`). The effort page opens with a core
+  verdict strip above the slots (`pages/effortVerdict.ts`, core models
+  only: the last test run, diff coverage, unverified claims, decisions to
+  confirm), and the task page's activity card links to it as **Review**.
 - **`oxplow-review` (the review packet).** Its lenses, mounted in
   `effort.review.details`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)

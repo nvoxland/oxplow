@@ -116,6 +116,16 @@ export function cellLinkRef(
   }
 }
 
+/** Lens runs split for a page of sections (tsk1036): the ones to show, and
+ *  the ones with nothing to show — no rows, no error, not a grid (whose
+ *  children decide) — folded into one "Nothing found" line. */
+export function foldEmpty<T extends { run: LensRun | null; error: string | null }>(
+  runs: T[],
+): { shown: T[]; empty: T[] } {
+  const isEmpty = (r: T) => r.error === null && r.run !== null && r.run.lens.viz !== "grid" && r.run.result.rows.length === 0;
+  return { shown: runs.filter((r) => !isEmpty(r)), empty: runs.filter(isEmpty) };
+}
+
 /** A stored timestamp (ISO-8601 with a time and a zone), not a bare date. */
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
 

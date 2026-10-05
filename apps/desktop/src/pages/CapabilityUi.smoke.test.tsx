@@ -163,7 +163,9 @@ test("an extension's mounts reach the uncommitted strip and the history side col
   cleanup();
   const history = mount("page:git-history", <GitHistoryPage stream={STREAM} onOpenPage={() => {}} />);
   await waitFor(() => expect(lensRuns).toContainEqual(["x/history", { stream_id: 1 }]));
-  await waitFor(() => expect(history.container.innerHTML).toContain('data-testid="vcs.history.sidebar-x/history"'));
+  // Mounted, with no rows: it folds into the column's "Nothing found" line,
+  // named (tsk1036).
+  await waitFor(() => expect(history.getByTestId("vcs.history.sidebar-nothing-found").textContent).toContain("Mounted"));
 });
 
 

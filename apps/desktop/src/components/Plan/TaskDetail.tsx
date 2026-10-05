@@ -674,20 +674,10 @@ function ActivityEffortSection({
             type="button"
             data-testid={`tasks-show-in-history-${detail.effort.id}`}
             onClick={() => onShowEffortDiff(detail.effort.id)}
-            style={{
-              flexShrink: 0,
-              background: "transparent",
-              border: "none",
-              padding: 0,
-              color: "var(--accent)",
-              cursor: "pointer",
-              font: "inherit",
-              fontSize: "var(--text-xs)",
-              textDecoration: "underline",
-            }}
-            title="Open the diff view for this effort (start → end)"
+            style={{ flexShrink: 0, fontSize: "var(--text-xs)" }}
+            title="Open this effort's review: what it changed, its tests and coverage, and what to check"
           >
-            Details
+            Review
           </button>
         ) : null}
       </header>

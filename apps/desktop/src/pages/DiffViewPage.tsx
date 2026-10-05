@@ -48,6 +48,7 @@ import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { effortRowId } from "../lens/lensModel.js";
+import { EffortVerdict } from "./EffortVerdictStrip.js";
 import { EndpointPicker, type EndpointSnapshotOption } from "../components/Diff/EndpointPicker.js";
 import { formatFullDateTime, formatTimeOnly } from "../components/format.js";
 import { workItemLabel } from "../workItemRef.js";
@@ -669,6 +670,10 @@ function ResolvedEndpointDiff({
             style={{ marginLeft: 0, marginRight: 0 }}
           />
         </div>
+      ) : null}
+
+      {primaryEffortId && effortRowId(primaryEffortId) !== null ? (
+        <EffortVerdict effortRow={effortRowId(primaryEffortId)!} />
       ) : null}
 
       {primaryEffortId ? (
