@@ -1163,7 +1163,10 @@ mod tests {
             rows(&f.svc, "SELECT name, status, signature_changed FROM v_change_function WHERE change_id = ?1 ORDER BY name", c.id).await,
             serde_json::json!([["fresh", "added", 0], ["grow", "modified", 1]])
         );
-        // HEAD resolves to the same commit, so it's the same change.
+        // HEAD resolves to the same commit, so it's the same change — read,
+        // not written: a write announces `v_change`, and a page re-asks on
+        // every announcement (tsk1024).
+        let mut changes = f.svc.db.subscribe_changes();
         let again = ensure_change(
             &f.svc,
             ChangeTarget::Commit {
@@ -1174,6 +1177,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!((again.id, again.computed_at), (c.id, c.computed_at));
+        while let Ok(t) = changes.try_recv() {
+            assert!(
+                !t.tables.contains("change"),
+                "a cached change was written: {:?}",
+                t.tables
+            );
+        }
     }
 
     #[tokio::test]

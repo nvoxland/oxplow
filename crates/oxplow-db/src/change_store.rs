@@ -134,6 +134,9 @@ impl SqliteChangeStore {
     /// new, with its revisions updated. The flag says whether an existing
     /// row's head moved (its `head_revision` differs from the given one):
     /// its stored results are then of another head and must be recomputed.
+    /// A change whose revisions are already these is only read: a write
+    /// would announce `v_change`, and a page re-asks on every announcement
+    /// (tsk1024).
     pub async fn get_or_create(
         &self,
         stream_id: i64,
@@ -144,35 +147,38 @@ impl SqliteChangeStore {
     ) -> Result<(ChangeRow, bool), DomainError> {
         let (kind, target) = (kind.to_string(), target.to_string());
         let base = base.map(Revision::to_string);
-        let wanted_head = head.to_string();
-        let head = wanted_head.clone();
-        let (id, previous_head): (i64, Option<Option<String>>) = self
+        let head = head.to_string();
+        let (id, moved): (i64, bool) = self
             .db
             .call(move |c| {
-                let previous: Option<Option<String>> = c
+                let existing: Option<(i64, Option<String>, Option<String>)> = c
                     .query_row(
-                        "SELECT head_revision FROM change WHERE stream_id = ?1 AND kind = ?2 AND target = ?3",
+                        "SELECT id, base_revision, head_revision FROM change
+                         WHERE stream_id = ?1 AND kind = ?2 AND target = ?3",
                         rusqlite::params![stream_id, kind, target],
-                        |r| r.get(0),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )
                     .optional()?;
-                c.execute(
-                    "INSERT INTO change (stream_id, kind, target, base_revision, head_revision, status)
-                     VALUES (?1, ?2, ?3, ?4, ?5, 'pending')
-                     ON CONFLICT (stream_id, kind, target) DO UPDATE SET
-                       base_revision = coalesce(excluded.base_revision, change.base_revision),
-                       head_revision = excluded.head_revision",
-                    rusqlite::params![stream_id, kind, target, base, head],
-                )?;
-                let id = c.query_row(
-                    "SELECT id FROM change WHERE stream_id = ?1 AND kind = ?2 AND target = ?3",
-                    rusqlite::params![stream_id, kind, target],
-                    |r| r.get(0),
-                )?;
-                Ok((id, previous))
+                let Some((id, stored_base, stored_head)) = existing else {
+                    c.execute(
+                        "INSERT INTO change (stream_id, kind, target, base_revision, head_revision, status)
+                         VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
+                        rusqlite::params![stream_id, kind, target, base, head],
+                    )?;
+                    return Ok((c.last_insert_rowid(), false));
+                };
+                let moved = stored_head.as_deref() != Some(head.as_str());
+                let rebased = base.is_some() && base != stored_base;
+                if moved || rebased {
+                    c.execute(
+                        "UPDATE change SET base_revision = coalesce(?2, base_revision), head_revision = ?3
+                         WHERE id = ?1",
+                        rusqlite::params![id, base, head],
+                    )?;
+                }
+                Ok((id, moved))
             })
             .await?;
-        let moved = matches!(previous_head, Some(before) if before.as_deref() != Some(wanted_head.as_str()));
         let row = self.get(id).await?.ok_or(DomainError::NotFound)?;
         Ok((row, moved))
     }
@@ -373,6 +379,40 @@ mod tests {
             .unwrap();
         assert!(moved);
         assert_eq!(row.head_revision, Some(Revision::Snapshot(12)));
+    }
+
+    /// tsk1024: asking for a change that is already there writes nothing,
+    /// so it announces nothing: a page re-asks whenever `v_change` changes,
+    /// and a write here would make it ask forever.
+    #[tokio::test]
+    async fn asking_for_an_unchanged_change_writes_nothing() {
+        let db = Database::in_memory();
+        let store = SqliteChangeStore::new(db.clone());
+        let base = Revision::git("abc^");
+        let head = Revision::git("abc");
+        store
+            .get_or_create(1, "commit", "abc", Some(&base), &head)
+            .await
+            .unwrap();
+        let mut rx = db.subscribe_changes();
+        store
+            .get_or_create(1, "commit", "abc", Some(&base), &head)
+            .await
+            .unwrap();
+        store
+            .get_or_create(1, "commit", "abc", None, &head)
+            .await
+            .unwrap();
+        assert!(
+            rx.try_recv().is_err(),
+            "an unchanged change announced a write"
+        );
+        let (_, moved) = store
+            .get_or_create(1, "commit", "abc", Some(&base), &Revision::git("def"))
+            .await
+            .unwrap();
+        assert!(moved);
+        assert!(rx.try_recv().is_ok(), "a moved head is written");
     }
 
     #[tokio::test]

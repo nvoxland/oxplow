@@ -1052,7 +1052,10 @@ oxplow-analytics change cards) only read them.
   the stream. Each analysis stamps `change.snapshot_id` (what it was
   computed against) and `events_to` (the log's highest seq as it began;
   `v_change` v3). Results are announced by their commit (`ModelsChanged`
-  on `v_change*`): `useChange` re-ensures when `v_change` changes. The
+  on `v_change*`): `useChange` re-ensures when `v_change` changes, so
+  asking for a change whose revisions are already stored writes nothing
+  (`get_or_create` only reads it) — a write there would announce
+  `v_change` and every open change page would re-ask forever (tsk1024). The
   in-memory `ChangeStale` / `ChangeAnalyzed` / `CodeQualityScanned` and the
   invalidation loop are gone. Concurrent requests for the same change
   return it `running`.
