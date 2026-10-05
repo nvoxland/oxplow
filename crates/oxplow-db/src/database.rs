@@ -477,17 +477,20 @@ impl Database {
                 // `busy_timeout`). A deferred read-then-write transaction
                 // fails with SQLITE_BUSY_SNAPSHOT when another commits
                 // between its read and its first write, which no wait fixes.
-                let tx = conn
+                // So Busy comes at BEGIN, and is retried like any other
+                // (tsk1005).
+                let outcome = conn
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .map_err(map_sql_err)?;
-                let outcome = f(&tx).and_then(|value| {
-                    if commit {
-                        tx.commit().map_err(map_sql_err)?;
-                    } else {
-                        tx.rollback().map_err(map_sql_err)?;
-                    }
-                    Ok(value)
-                });
+                    .map_err(map_sql_err)
+                    .and_then(|tx| {
+                        let value = f(&tx)?;
+                        if commit {
+                            tx.commit().map_err(map_sql_err)?;
+                        } else {
+                            tx.rollback().map_err(map_sql_err)?;
+                        }
+                        Ok(value)
+                    });
                 match outcome {
                     Ok(value) => return Ok(value),
                     Err(err) if err.is_retryable() && attempt < MAX_ATTEMPTS => {
@@ -937,6 +940,41 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, oxplow_domain::DomainError::Constraint(_)));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// tsk1005: under IMMEDIATE, Busy comes at `BEGIN` — another writer
+    /// holds the lock past `busy_timeout` — and that is retried like a
+    /// Busy inside the transaction.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_transaction_that_cant_begin_is_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("busy.sqlite");
+        let db = Database::open(&path).unwrap();
+        db.transaction(|tx| {
+            tx.execute("CREATE TABLE t (x INTEGER)", [])
+                .map_err(map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        // Another writer holds the lock past the pool's 5 s wait.
+        let (held, holding) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+            held.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(6_500));
+            conn.execute_batch("COMMIT").unwrap();
+        });
+        holding.recv().unwrap();
+        db.transaction(|tx| {
+            tx.execute("INSERT INTO t VALUES (1)", [])
+                .map_err(map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .expect("retried once the lock was free");
+        holder.join().unwrap();
     }
 
     /// A rehearsal keeps nothing it wrote, and absorbs a busy blip like

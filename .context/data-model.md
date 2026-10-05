@@ -79,7 +79,9 @@ several cores inside one `Database::transaction(f)` closure
 (`crates/oxplow-db/src/database.rs`) — which owns commit/rollback and
 the bounded `SQLITE_BUSY` retry (safe because a rolled-back attempt
 left no trace; that's why `f` is `Fn`). It begins **IMMEDIATE** (tsk503):
-the write lock is taken at BEGIN and waited for under `busy_timeout`, so
+the write lock is taken at BEGIN and waited for under `busy_timeout` — a
+BEGIN still Busy after that wait is retried like a Busy inside the
+closure (tsk1005) — so
 a read-then-write closure (the hook ingest, most `_tx` cores) can't fail
 with `SQLITE_BUSY_SNAPSHOT` when another writer commits between its read
 and its first write. A pure read therefore uses `Database::read` (a
