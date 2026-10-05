@@ -176,7 +176,11 @@ overriding `https://api.linear.app/graphql`). Its example extension is
   `issueRelation` by id) and answers with it. When the lookup finds
   nothing the refusal was the create's own — answered as Linear said it,
   at no field when Linear names none (the parent was resolved before the
-  create was sent; `LinearSim::refuse_next_of`, tsk946); when the lookup itself fails
+  create was sent; `LinearSim::refuse_next_of`, tsk946) — and so is an
+  update's, a comment's, a transition's or a link's: any field it sent may
+  be what Linear refused, and the refs a comment, transition or link names
+  were resolved first, each blamed on its field when that fails (tsk1006);
+  only a delete, whose one input is its ref, blames its ref; when the lookup itself fails
   (rate limited, unreachable) that is the answer, since only it could say
   whether the write landed (`LinearSim::rate_limit_next_of`). It
   does **not** declare `idempotent_writes` until a live run confirms

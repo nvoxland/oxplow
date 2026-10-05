@@ -681,10 +681,11 @@ async fn invoke(
             let id = instance.identifier(required(input, "ref")?, "/ref")?;
             let parent = parent_of(client, instance, input).await?;
             let fields = issue_input(instance, input, "state", parent)?;
+            // A refusal Linear attributes to no field stays field-less: any
+            // field sent may be what it refused, not only the ref (tsk1006).
             let data = client
                 .run(issue::ISSUE_UPDATE, json!({ "id": id, "input": fields }))
-                .await
-                .map_err(at("/ref"))?;
+                .await?;
             Ok(written(
                 instance.record(&data["issueUpdate"]["issue"])?,
                 None,
@@ -705,8 +706,8 @@ async fn invoke(
                     issue::ISSUE_UPDATE,
                     json!({ "id": id, "input": { "stateId": state.id } }),
                 )
-                .await
-                .map_err(at("/ref"))?;
+                // Its ref was read just now: a refusal is of the move.
+                .await?;
             let inverse = CommandCall {
                 command: "transition".into(),
                 input: json!({ "ref": item_ref, "to": before.state.as_str(),
@@ -745,8 +746,8 @@ async fn invoke(
                 id,
                 issue::RELATION,
             )
-            .await
-            .map_err(at("/target"))?;
+            // Both refs were resolved first: a refusal is of the link.
+            .await?;
             let relation = data["issueRelationCreate"]["issueRelation"]
                 .as_object()
                 .map_or(&data["issueRelation"], |_| {
@@ -765,8 +766,8 @@ async fn invoke(
                 id,
                 issue::COMMENT,
             )
-            .await
-            .map_err(at("/ref"))?;
+            // Its ref was resolved first: a refusal is of the comment.
+            .await?;
             let comment = data["commentCreate"]["comment"]
                 .as_object()
                 .map_or(&data["comment"], |_| &data["commentCreate"]["comment"]);

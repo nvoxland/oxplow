@@ -646,6 +646,53 @@ async fn a_create_refusal_isnt_blamed_on_the_parent() {
     assert!(sim.live_issues().is_empty());
 }
 
+/// tsk1006: a write's refusal Linear attributes to no field isn't blamed
+/// on the item's ref — an update's title, a comment's body, a transition's
+/// state or a link's type may be what it refused.
+#[tokio::test]
+async fn a_write_refusal_isnt_blamed_on_the_ref() {
+    let sim = LinearSim::start(KEY).await.unwrap();
+    let (_child, peer) = spawn(&sim, Some(KEY));
+    initialize(&peer).await;
+    let handle = checked(&peer).await;
+    for title in ["Short", "Other"] {
+        invoke(&peer, &handle, "create", json!({ "title": title }))
+            .await
+            .unwrap();
+    }
+    let item = "work_item:linear:ENG-1";
+    for (op, command, input) in [
+        (
+            "IssueUpdate",
+            "update",
+            json!({ "ref": item, "title": "Long" }),
+        ),
+        (
+            "CommentCreate",
+            "comment",
+            json!({ "ref": item, "body": "Long" }),
+        ),
+        (
+            "IssueUpdate",
+            "transition",
+            json!({ "ref": item, "to": "done" }),
+        ),
+        (
+            "IssueRelationCreate",
+            "link",
+            json!({ "ref": item, "target": "work_item:linear:ENG-2", "link_type": "blocks" }),
+        ),
+    ] {
+        sim.refuse_next_of(op, "Too long");
+        let err = invoke(&peer, &handle, command, input).await.unwrap_err();
+        assert!(
+            matches!(&err, ProtocolError::InvalidInput { field, message }
+                if field.is_empty() && message.contains("Too long")),
+            "{command}: {err:?}"
+        );
+    }
+}
+
 /// tsk931: a create sent again is refused as taken, and the lookup of what
 /// it made is rate limited: the caller is told it is rate limited — the
 /// write may well have landed — not the refusal of the repeat.
