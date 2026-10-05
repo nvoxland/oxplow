@@ -53,12 +53,19 @@ fn write_extension(project: &Path, sim: &OAuthSim) {
     .unwrap();
 }
 
+/// File an item on the notes tracker: the active one, as every create
+/// files there (tsk1058).
 async fn create(svc: &oxplow_app::Services, title: &str) -> Result<(), String> {
+    svc.config
+        .write()
+        .unwrap()
+        .active_providers
+        .insert("work_items".into(), "notes".into());
     svc.commands
         .run(
             &Actor::Human,
             "work_item.create",
-            json!({ "provider": "notes", "title": title }),
+            json!({ "title": title }),
             false,
         )
         .await
