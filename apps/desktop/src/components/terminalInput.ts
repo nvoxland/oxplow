@@ -7,7 +7,9 @@
 /// - Keystrokes made while a send is in flight wait together and go as one
 ///   message, so typing fast costs no extra round trips — except a bare
 ///   Escape, which keeps its own message: merged with the next key it would
-///   read as an Alt sequence (`\x1b\r` is Shift+Enter).
+///   read as an Alt sequence (`\x1b\r` is Shift+Enter); and an Enter, which
+///   keeps its own too: merged with the text before it, a TUI reads the
+///   chunk as a paste and doesn't submit (tsk1027).
 /// - A newer resize replaces a waiting one.
 /// - A send that doesn't answer within the timeout is reported and that
 ///   session's waiting messages are dropped — never delivered later in a
@@ -125,12 +127,21 @@ export function terminalSender(
 }
 
 /** `a` then `b` as one message, when they can be: keystrokes of one kind
- *  (not after a bare Escape), resizes (the newer). */
+ *  (not after a bare Escape, and never an Enter), resizes (the newer). */
 function merged(a: TerminalMessage, b: TerminalMessage): TerminalMessage | null {
-  if (a.type === "input" && b.type === "input" && !a.data.endsWith("\x1b")) return { type: "input", data: a.data + b.data };
+  if (a.type === "input" && b.type === "input" && !a.data.endsWith("\x1b") && !hasEnter(a.data) && !hasEnter(b.data)) {
+    return { type: "input", data: a.data + b.data };
+  }
   if (a.type === "input-binary" && b.type === "input-binary") return { type: "input-binary", data: a.data + b.data };
   if (a.type === "resize" && b.type === "resize") return b;
   return null;
+}
+
+/** An Enter (CR) in typed input. Merged into the text before it, a TUI
+ *  such as Claude Code reads the chunk as a paste and the Enter as a newline:
+ *  the prompt isn't sent (tsk1027). */
+function hasEnter(data: string): boolean {
+  return data.includes("\r");
 }
 
 function encode(message: TerminalMessage): string {

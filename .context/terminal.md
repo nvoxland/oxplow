@@ -171,7 +171,10 @@ later keystroke could overtake an earlier one (the browser suite typed
 in flight wait together and go as one `input` message, so fast typing
 costs no extra round trips — except a bare Escape, which keeps its own
 message (merged with the next key it reads as an Alt sequence; `\x1b\r`
-is Shift+Enter). A newer resize replaces a waiting one, so a drag doesn't
+is Shift+Enter), and an Enter, which keeps its own too: merged with the
+text before it, Claude Code read the chunk as a paste, turned the Enter
+into a newline and didn't send the prompt (tsk1027, found typing a long
+prompt fast). A newer resize replaces a waiting one, so a drag doesn't
 queue up behind a slow link (tsk992). A failed send is logged and the next still goes; one
 that doesn't answer within `SEND_TIMEOUT_MS` (5 s) is reported and its
 session's waiting messages are **dropped** — never delivered later in a

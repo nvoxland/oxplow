@@ -86,6 +86,19 @@ test("a bare Escape isn't merged with the key after it", async () => {
   expect(sent.map(([, m]) => decoded(m))).toEqual(["a", "\x1b", "\r"]);
 });
 
+// tsk1027: text and an Enter waiting together reached Claude Code as one
+// chunk, which it reads as a paste: the Enter became a newline and the prompt
+// wasn't sent. An Enter keeps its own message, as a bare Escape does.
+test("an Enter waiting behind text goes as its own message", async () => {
+  const { send, sent, answer } = harness();
+  send("s1", { type: "input", data: "P" });
+  send("s1", { type: "input", data: "lease reply with pong" });
+  send("s1", { type: "input", data: "\r" });
+  send("s1", { type: "input", data: "n" });
+  for (let i = 0; i < 4; i++) await answer();
+  expect(sent.map(([, m]) => decoded(m))).toEqual(["P", "lease reply with pong", "\r", "n"]);
+});
+
 test("a newer resize replaces a waiting one", async () => {
   const { send, sent, answer } = harness();
   send("s1", { type: "input", data: "x" });
