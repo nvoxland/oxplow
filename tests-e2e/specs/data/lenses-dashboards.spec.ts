@@ -18,6 +18,9 @@ test("a lens re-runs when its model changes, and pins to a new dashboard", async
   await expect(lens).toContainText("Numbat one");
   await page.getByTestId("lens-pin").click();
   await page.getByTestId("lens-pin-new").click();
+  // It asks for the new dashboard's name (tsk1045); Enter creates it.
+  await page.getByTestId("lens-pin-new-name").fill("Numbats");
+  await page.keyboard.press("Enter");
   await expect
     .poll(async () => {
       const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
@@ -25,5 +28,5 @@ test("a lens re-runs when its model changes, and pins to a new dashboard", async
       });
       return out.rows;
     })
-    .toEqual([["My Dashboard", "lens"]]);
+    .toEqual([["Numbats", "lens"]]);
 });

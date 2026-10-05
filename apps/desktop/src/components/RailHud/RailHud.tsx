@@ -578,6 +578,8 @@ function WorkSection({
     <RailSection
       id="core:work"
       title="Work"
+      // What's open on this thread: in progress, ready, and on the tracker.
+      count={(working ? 1 : 0) + readyCount + outside.length || undefined}
       collapsedContent={collapsedContent}
       onOpen={() => onOpenPage(tasksRef())}
       openTitle="Open Tasks"

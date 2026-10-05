@@ -14,11 +14,12 @@ import {
 
 const core = CORE_PANELS.map((p) => p.id);
 
-test("no stored layout: every panel in default order, Work collapsed", () => {
+test("no stored layout: every panel in default order, all open", () => {
   const out = resolveLayout([...core, "ext:gh/prs"], []);
   expect(out.order).toEqual([...core, "ext:gh/prs"]);
   expect(out.hidden).toEqual([]);
-  expect([...out.collapsed]).toEqual(["core:work"]);
+  // Work too (tsk1045): collapsed, it hid the task a person had just added.
+  expect([...out.collapsed]).toEqual([]);
 });
 
 test("the stored layout orders, hides and collapses; unknown ids drop, new ones append", () => {
@@ -30,7 +31,7 @@ test("the stored layout orders, hides and collapses; unknown ids drop, new ones 
   expect(out.order).toEqual(["ext:gh/prs", "core:work"]);
   expect(out.hidden).toEqual(["core:comments"]);
   expect(out.collapsed.has("ext:gh/prs")).toBe(true);
-  expect(out.collapsed.has("core:work")).toBe(true);
+  expect(out.collapsed.has("core:work")).toBe(false);
 });
 
 test("moving, hiding, showing and collapsing produce the next stored layout", () => {

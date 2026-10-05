@@ -20,8 +20,9 @@ export const CORE_PANELS: readonly CorePanel[] = [
   { id: "core:bookmarks", title: "Bookmarks" },
 ];
 
-/** Work keeps a one-line summary, so it starts collapsed. */
-const DEFAULT_COLLAPSED = new Set(["core:work"]);
+/** Every panel starts open: a collapsed Work hid the task a person had just
+ *  added (tsk1045). */
+const DEFAULT_COLLAPSED = new Set<string>();
 
 /** An extension panel's id in the layout. */
 export function extensionPanelId(panel: ExtensionPanel): string {

@@ -10,7 +10,9 @@ export type AgentStatusDotState = "working" | "waiting" | "stalled" | "awaiting"
 
 const COLORS: Record<AgentStatusDotState, string> = {
   working: "#fcd34d",
-  waiting: "#fca5a5",
+  // Neutral: an idle agent is waiting for the next prompt, not wrong
+  // (tsk1045: pale red read as an error).
+  waiting: "#94a3b8",
   stalled: "#ef4444",
   // Sky blue: "you're on the clock" — distinct from working's yellow
   // and waiting's washed-out red, so a thread parked on YOUR answer
@@ -20,7 +22,7 @@ const COLORS: Record<AgentStatusDotState, string> = {
 
 const LABELS: Record<AgentStatusDotState, string> = {
   working: "Working",
-  waiting: "Waiting for input",
+  waiting: "Idle — ready for your next prompt",
   stalled: "Agent exited or errored mid-turn — re-run (uncommitted work may be unsaved)",
   awaiting: "Waiting on your answer",
 };
@@ -49,7 +51,7 @@ export function AgentStatusDot({
     animation: status !== "waiting" ? "oxplow-pulse 1.4s ease-in-out infinite" : undefined,
     boxShadow:
       status === "waiting"
-        ? `0 0 0 2px rgba(252, 165, 165, 0.25)`
+        ? `0 0 0 2px rgba(148, 163, 184, 0.25)`
         : status === "stalled"
           ? `0 0 0 2px rgba(239, 68, 68, 0.35)`
           : status === "awaiting"

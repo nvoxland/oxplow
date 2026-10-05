@@ -255,12 +255,15 @@ function AddInstance({ views, onChanged }: { views: ProviderInstanceView[]; onCh
   return (
     <form
       data-testid="integrations-add-instance"
-      style={{ ...fieldsetStyle, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}
+      // Two rows, left-aligned: what it's an instance of, then its name,
+      // scope and Add (tsk1045: one wrapped row centred and clipped it).
+      style={{ ...fieldsetStyle, display: "flex", flexDirection: "column", alignItems: "stretch", gap: 8, textAlign: "left" }}
       onSubmit={(e) => {
         e.preventDefault();
         void add();
       }}
     >
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
       <span style={mutedStyle}>Add another instance of</span>
       {programs.length === 1 ? (
         <code>{of.key}</code>
@@ -273,8 +276,11 @@ function AddInstance({ views, onChanged }: { views: ProviderInstanceView[]; onCh
           ))}
         </select>
       )}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
       <input
         data-testid="integrations-add-name"
+        style={{ flex: "1 1 220px", minWidth: 220 }}
         value={name}
         placeholder="its name, e.g. linear_acme"
         autoComplete="off"
@@ -299,7 +305,8 @@ function AddInstance({ views, onChanged }: { views: ProviderInstanceView[]; onCh
       <button type="submit" data-testid="integrations-add-submit" disabled={problem !== null || adding}>
         {adding ? "Adding…" : "Add"}
       </button>
-      {problem ? <div style={{ ...errorStyle, flexBasis: "100%" }}>{problem}</div> : null}
+      </div>
+      {problem ? <div style={errorStyle}>{problem}</div> : null}
     </form>
   );
 }

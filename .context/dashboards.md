@@ -248,6 +248,10 @@ DOM order) render on top and the header collides with rows scrolling under it;
 and `opacity` on the header dims its **background** too, letting rows show
 through a supposedly opaque bar — dim the text `color` instead.
 
+**Pin to Dashboard → New Dashboard…** asks for the new dashboard's name
+inline (Enter creates it and pins, Escape cancels; tsk1045 — it used to
+make "My Dashboard" without asking).
+
 **New Dashboard command** — `dashboard.new` in `commands.ts` (Tasks/"plan"
 group); the App handler create-then-navigates (`createDashboard` →
 `customDashboardRef`), no form.

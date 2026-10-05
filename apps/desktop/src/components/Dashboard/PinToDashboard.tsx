@@ -30,6 +30,9 @@ export function PinToDashboard({
   disabledReason?: string | null;
 }) {
   const [dashboards, setDashboards] = useState<Dashboard[] | null>(null);
+  // New Dashboard… asks for its name inline (tsk1045: it made "My
+  // Dashboard" without asking).
+  const [naming, setNaming] = useState<string | null>(null);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
   const isOpen = dashboards !== null;
 
@@ -40,7 +43,10 @@ export function PinToDashboard({
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setDashboards(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDashboards(null);
+      if (e.key === "Escape") {
+        setDashboards(null);
+        setNaming(null);
+      }
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
@@ -73,9 +79,10 @@ export function PinToDashboard({
     }
   }
 
-  async function pinToNew() {
+  async function pinToNew(title: string) {
+    setNaming(null);
     try {
-      const d = await createDashboard("My Dashboard");
+      const d = await createDashboard(title);
       await pin(d.id, d.title);
     } catch (e) {
       recordOpError({ label: "Create dashboard", message: String(e) });
@@ -106,9 +113,30 @@ export function PinToDashboard({
               {d.title}
             </button>
           ))}
-          <button type="button" data-testid={`${testId}-new`} style={pinItemStyle} onClick={() => void pinToNew()}>
-            New Dashboard…
-          </button>
+          {naming === null ? (
+            <button type="button" data-testid={`${testId}-new`} style={pinItemStyle} onClick={() => setNaming("")}>
+              New Dashboard…
+            </button>
+          ) : (
+            <form
+              style={{ display: "flex", gap: 4, padding: 4 }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (naming.trim()) void pinToNew(naming.trim());
+              }}
+            >
+              <input
+                data-testid={`${testId}-new-name`}
+                autoFocus
+                placeholder="Dashboard name"
+                value={naming}
+                onChange={(e) => setNaming(e.target.value)}
+              />
+              <button type="submit" data-testid={`${testId}-new-create`} disabled={!naming.trim()}>
+                Create
+              </button>
+            </form>
+          )}
         </div>
       ) : null}
     </span>
