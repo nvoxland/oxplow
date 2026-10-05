@@ -69,7 +69,9 @@ test("rows read as work items, with oxplow's own fields when the item is a task"
 
 test("a query scoped to a thread, the backlog, or everything; states filter", () => {
   expect(workItemsQuery({ scope: { thread: "thr2" } }).params).toEqual([2]);
-  expect(workItemsQuery({ scope: { thread: "thr2" } }).sql).toContain("t.thread_id = ?1");
+  // The item's thread, whatever its provider: an outside tracker's item is
+  // in the thread that filed it (tsk1041).
+  expect(workItemsQuery({ scope: { thread: "thr2" } }).sql).toContain("w.thread_id = ?1");
   expect(workItemsQuery({ scope: "backlog" }).sql).toContain("t.thread_id IS NULL");
   const all = workItemsQuery({ scope: "all", states: ["todo", "blocked"] });
   expect(all.sql).toContain("w.state IN ('todo', 'blocked')");

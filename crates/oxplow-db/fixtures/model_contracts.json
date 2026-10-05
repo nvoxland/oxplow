@@ -5152,6 +5152,66 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider it comes from (`oxplow`)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`. oxplow: `ready` is `todo`; `archived` is `done` when it was completed, else `canceled`."
+        },
+        {
+          "name": "native_state",
+          "type": "TEXT",
+          "doc": "The provider's own state (oxplow: the task status, `archived` included)."
+        },
+        {
+          "name": "native",
+          "type": "TEXT",
+          "doc": "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at)."
+        },
+        {
+          "name": "parent_ref",
+          "type": "TEXT",
+          "doc": "The parent work item's ref (an epic); NULL at top level or when the parent is deleted."
+        },
+        {
+          "name": "thread_id",
+          "type": "INT",
+          "doc": "The thread it belongs to: an oxplow task's own thread; an outside tracker's item, the thread that filed it. NULL for the backlog / filed by a person."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "search_comment": {

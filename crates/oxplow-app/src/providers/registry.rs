@@ -949,8 +949,21 @@ impl Instance {
         for subject in &draft.subject {
             check_subject(&self.id, &self.ext.name, subject).map_err(&failed)?;
         }
+        // An agent's thread anchors what it did: an item it files keeps
+        // that thread (tsk1041).
+        let anchors = match actor {
+            Actor::Agent {
+                thread_id,
+                stream_id,
+            } => oxplow_domain::Anchors {
+                thread_id: *thread_id,
+                stream_id: *stream_id,
+                ..Default::default()
+            },
+            _ => oxplow_domain::Anchors::default(),
+        };
         Envelope::new(draft.event_type, draft.v, actor.source(), draft.payload)
-            .map(|e| e.with_subject(draft.subject))
+            .map(|e| e.with_subject(draft.subject).with_anchors(anchors))
             .map_err(|e| failed(e.to_string()))
     }
 }

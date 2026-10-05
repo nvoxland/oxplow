@@ -1043,7 +1043,7 @@
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: work_item
-  version: 1
+  version: 2
   description: "Work items from every provider (P5.C1), excluding deleted ones: oxplow's tasks (`work_item:oxplow:tsk<n>`, written with the task) and, later, a provider's issues. `state` is the canonical state every provider maps to; `v_task` stays oxplow's native view."
   columns:
     - { name: "ref", type: "TEXT", doc: "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)." }
@@ -1054,6 +1054,7 @@
     - { name: "native_state", type: "TEXT", doc: "The provider's own state (oxplow: the task status, `archived` included)." }
     - { name: "native", type: "TEXT", doc: "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at)." }
     - { name: "parent_ref", type: "TEXT", doc: "The parent work item's ref (an epic); NULL at top level or when the parent is deleted." }
+    - { name: "thread_id", type: "INT", doc: "The thread it belongs to: an oxplow task's own thread; an outside tracker's item, the thread that filed it. NULL for the backlog / filed by a person." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:

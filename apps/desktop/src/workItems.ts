@@ -114,8 +114,10 @@ export function workItemsQuery(opts: {
   const params: SqlCell[] = [];
   if (opts.scope === "backlog") where.push("t.id IS NOT NULL AND t.thread_id IS NULL");
   else if (opts.scope !== "all") {
+    // The item's thread, whatever its provider: an oxplow task's own, an
+    // outside tracker's item the thread that filed it (tsk1041).
     params.push(threadRowId(opts.scope.thread));
-    where.push("t.thread_id = ?1");
+    where.push("w.thread_id = ?1");
   }
   if (opts.hideArchived) where.push("w.native_state IS NOT 'archived'");
   if (opts.states && opts.states.length > 0) {

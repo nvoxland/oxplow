@@ -4,7 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { DiffEntry, FinishedEntry, FileStatus, InProgressOp, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef, lensRef, indexRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef, lensRef, indexRef, workItemTabRef } from "../../tabs/pageRefs.js";
+import { readWorkItems, type WorkItem } from "../../workItems.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
@@ -559,9 +560,10 @@ function WorkSection({
 }) {
   const finished = recentlyFinished ?? [];
   const readyCount = readyItems.length;
+  const outside = useOutsideItems(threadId);
   const working = !!activeItem;
   const lastFinished = finished[0] ?? null;
-  const hasContent = working || finished.length > 0 || readyCount > 0;
+  const hasContent = working || finished.length > 0 || readyCount > 0 || outside.length > 0;
   const isEmpty = !threadId || !hasContent;
 
   const collapsedContent = isEmpty ? (
@@ -593,6 +595,7 @@ function WorkSection({
           {readyCount > 0 ? (
             <UpNextSection items={readyItems.slice(0, 10)} onOpenPage={onOpenPage} />
           ) : null}
+          {outside.length > 0 ? <OutsideSection items={outside.slice(0, 10)} onOpenPage={onOpenPage} /> : null}
           {finished.length > 0 ? (
             <FinishedSection entries={finished} onOpenPage={onOpenPage} onClear={onClearFinished} />
           ) : null}
@@ -1425,6 +1428,55 @@ function CommentsSection({
         </button>
       ) : null}
     </RailSection>
+  );
+}
+
+/** The thread's open items on another provider — an outside tracker the
+ *  agent filed them on (tsk1041); oxplow's own tasks are `threadWork`. */
+function useOutsideItems(threadId: string | null): WorkItem[] {
+  const [items, setItems] = useState<WorkItem[]>([]);
+  const [reads, setReads] = useState(NO_READS);
+  const load = useCallback(async () => {
+    if (!threadId) {
+      setItems([]);
+      return;
+    }
+    try {
+      const read = await readWorkItems({ scope: { thread: threadId }, states: ["todo", "in_progress", "blocked"] });
+      setItems(read.items.filter((i) => i.provider !== "oxplow"));
+      setReads(read.reads);
+    } catch {
+      setItems([]);
+    }
+  }, [threadId]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  useRerunOnChange(reads, () => void load());
+  return items;
+}
+
+/** The thread's open items on an outside tracker, each opening its page. */
+function OutsideSection({ items, onOpenPage }: { items: WorkItem[]; onOpenPage(ref: TabRef): void }) {
+  return (
+    <>
+      <SectionHeading>On your tracker</SectionHeading>
+      <div data-testid="rail-outside-items" style={{ paddingBottom: 8 }}>
+        {items.map((item) => (
+          <button
+            key={item.ref}
+            type="button"
+            data-testid={`rail-outside-item-${item.ref}`}
+            title={`${item.title} (${item.provider}, ${item.state.replace("_", " ")})`}
+            onClick={() => onOpenPage(workItemTabRef(item.ref))}
+            style={rowHoverStyle()}
+          >
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</span>
+            <span style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>{item.provider}</span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 

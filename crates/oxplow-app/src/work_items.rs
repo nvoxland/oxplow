@@ -210,8 +210,9 @@ impl EventConsumer for WorkItemsProjection {
         let at = event.envelope.at.to_string();
         conn.execute(
             "INSERT INTO work_item (ref, provider, title, body, state, native_state, native,
-                                    parent_ref, created_at, updated_at, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, CASE WHEN ?10 THEN ?9 END)
+                                    parent_ref, created_at, updated_at, deleted_at,
+                                    filed_in_thread)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, CASE WHEN ?10 THEN ?9 END, ?11)
              ON CONFLICT(ref) DO UPDATE SET
                 title = excluded.title, body = excluded.body, state = excluded.state,
                 native_state = excluded.native_state, native = excluded.native,
@@ -228,6 +229,9 @@ impl EventConsumer for WorkItemsProjection {
                 item.parent_ref,
                 at,
                 item.deleted,
+                // The thread that filed it, at its first record only
+                // (tsk1041): a restatement keeps it.
+                event.envelope.anchors.thread_id.map(|t| t.value()),
             ],
         )
         .map_err(|e| DomainError::Storage(e.to_string()))?;
@@ -313,5 +317,55 @@ mod tests {
         assert_eq!(report.dead_lettered, 1);
         assert_ne!(row(svc, &own).await.unwrap().0, "hijack");
         assert!(WorkItemsProjection.handles(WorkItemRecorded::TYPE));
+    }
+
+    /// tsk1041: an outside tracker's item keeps the thread that filed it
+    /// (the record's thread anchor, at its first record), so "This thread"
+    /// lists it; a later restatement from elsewhere doesn't move it.
+    #[tokio::test]
+    async fn an_outside_item_keeps_the_thread_that_filed_it() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let r = "work_item:fake:W-7";
+        let anchored = |title: &str| {
+            recorded(r, title, false).with_anchors(oxplow_domain::Anchors {
+                thread_id: Some(fx.thread),
+                ..Default::default()
+            })
+        };
+        svc.event_log_store.append(anchored("Kiwi")).await.unwrap();
+        svc.event_log_store
+            .append(recorded(r, "Kiwi, renamed by a sync", false))
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        let out = svc
+            .sql
+            .query_sql(
+                "SELECT thread_id FROM v_work_item WHERE ref = ?1",
+                vec![oxplow_db::SqlCell::Text(r.into())],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(out.rows).unwrap(),
+            json!([[fx.thread.value()]])
+        );
+        // An oxplow task's thread is the task's own.
+        let own = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let out = svc
+            .sql
+            .query_sql(
+                "SELECT thread_id FROM v_work_item WHERE ref = ?1",
+                vec![oxplow_db::SqlCell::Text(own)],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(out.rows).unwrap(),
+            json!([[fx.thread.value()]])
+        );
     }
 }

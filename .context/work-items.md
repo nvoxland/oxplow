@@ -42,7 +42,14 @@ There are two writers, one schema:
 `apps/desktop/src/workItems.ts` (P6.E1a) is the UI's one read path:
 `v_work_item` joined to `v_task` for oxplow's own fields (thread,
 `sort_index`, priority, author, note count), scoped to a thread, the
-backlog or everything, in list order; each read returns its `reads` so a
+backlog or everything, in list order. A thread's scope is
+`v_work_item.thread_id` (v2, tsk1041): an oxplow task's own thread, and
+an outside tracker's item **the thread that filed it** — the provider's
+`work_item.recorded` envelope carries the acting agent's thread as its
+anchor, and the projection keeps it from the item's first record
+(`work_item.filed_in_thread`, V167), so an agent's item on the active
+tracker shows on its thread's Board and in the rail's Work panel ("On your
+tracker"). A person's has none. Each read returns its `reads` so a
 page re-runs with `useRerunOnChange`. Writes are `work_item.*` commands
 (`transitionWorkItem`; the task pages reorder and move through `reorderTasks` / `moveTask`). `modelIds.ts`
 converts the models' integer ids to the UI's `thr3` / `tsk42`.
