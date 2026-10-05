@@ -63,15 +63,13 @@ pub fn is_active(config: &oxplow_config::OxplowConfig, capability: &str, provide
         || active_provider(config, capability) == provider
 }
 
-/// Restate the active providers from `config`: the work-items registry's
-/// default for a `create` without a provider, and each swappable
-/// capability's `active` column.
+/// Restate each swappable capability's `active` column from `config` (the
+/// `v_*` read side). A `create`'s default needs no restating: the
+/// work-items registry reads the config itself (tsk1011).
 pub async fn apply_active(
     config: &oxplow_config::OxplowConfig,
-    work_items: &oxplow_domain::work_items::WorkItemsRegistry,
     db: &oxplow_db::Database,
 ) -> Result<(), DomainError> {
-    work_items.set_active(&active_provider(config, "work_items"));
     let store = SqliteCapabilityStore::new(db.clone());
     for capability in oxplow_config::SWAPPABLE_CAPABILITIES {
         store
@@ -171,9 +169,7 @@ mod tests {
             .active_providers
             .insert("work_items".into(), "linear".into());
         let config = crate::config_service::read_config(&fx.svc.config);
-        apply_active(&config, &fx.svc.work_items, &fx.svc.db)
-            .await
-            .unwrap();
+        apply_active(&config, &fx.svc.db).await.unwrap();
         assert_eq!(
             active(store.list().await.unwrap()),
             vec![

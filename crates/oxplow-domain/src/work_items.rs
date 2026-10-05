@@ -210,20 +210,28 @@ pub fn provider_id_problem(id: &str) -> Option<String> {
 #[derive(Default)]
 struct Providers {
     by_id: BTreeMap<String, WorkItemsProvider>,
-    /// The provider a `create` with no `provider` files on; oxplow until
-    /// the config names another (`activeProviders`).
-    active: Option<String>,
 }
 
+/// Where the active provider is read from: the config as it is now
+/// (`activeProviders`), so a person's choice applies to the next `create`
+/// — no copy for a reactor to refresh late (tsk1011).
+pub type ActiveSource = Arc<dyn Fn() -> String + Send + Sync>;
+
 /// The registered providers, by name. Cloning shares them.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct WorkItemsRegistry {
     providers: Arc<std::sync::RwLock<Providers>>,
+    active: ActiveSource,
 }
 
 impl WorkItemsRegistry {
-    pub fn new() -> Self {
-        Self::default()
+    /// A registry whose active provider is what `active` says each time
+    /// it's asked.
+    pub fn new(active: ActiveSource) -> Self {
+        Self {
+            providers: Arc::default(),
+            active,
+        }
     }
 
     pub fn register(&self, provider: WorkItemsProvider) {
@@ -276,19 +284,7 @@ impl WorkItemsRegistry {
     /// running is the caller's to check (`get`): an active provider that
     /// isn't is a failure naming it, never a silent fallback.
     pub fn active(&self) -> String {
-        self.providers
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .active
-            .clone()
-            .unwrap_or_else(|| OXPLOW.to_string())
-    }
-
-    pub fn set_active(&self, provider: &str) {
-        self.providers
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .active = Some(provider.to_string());
+        (self.active)()
     }
 }
 
@@ -306,7 +302,7 @@ mod tests {
 
     #[test]
     fn a_ref_finds_its_provider_and_a_foreign_one_names_the_registered() {
-        let registry = WorkItemsRegistry::new();
+        let registry = WorkItemsRegistry::new(Arc::new(|| OXPLOW.to_string()));
         registry.register(named("oxplow"));
         registry.register(named("fake"));
         assert_eq!(
@@ -328,15 +324,17 @@ mod tests {
         ));
     }
 
-    /// The active provider is oxplow until set; setting it doesn't check
-    /// that it runs — a `create` on a missing active provider must fail
-    /// naming it, which `get` does.
+    /// The active provider is what its source says each time it's asked;
+    /// naming one doesn't check that it runs — a `create` on a missing
+    /// active provider must fail naming it, which `get` does.
     #[test]
-    fn the_active_provider_defaults_to_oxplow_and_is_not_a_fallback() {
-        let registry = WorkItemsRegistry::new();
+    fn the_active_provider_is_read_from_its_source_and_is_not_a_fallback() {
+        let named_now = Arc::new(std::sync::Mutex::new(OXPLOW.to_string()));
+        let source = named_now.clone();
+        let registry = WorkItemsRegistry::new(Arc::new(move || source.lock().unwrap().clone()));
         registry.register(named("oxplow"));
         assert_eq!(registry.active(), "oxplow");
-        registry.set_active("linear");
+        *named_now.lock().unwrap() = "linear".into();
         assert_eq!(registry.active(), "linear");
         assert!(registry.get(&registry.active()).is_err());
     }

@@ -127,9 +127,11 @@ item).
   "Idempotency").
 - **`WorkItemsRegistry`** (`Services.work_items`): providers by name;
   `for_ref` picks one by the ref's provider segment, and an unknown one
-  is refused naming the registered providers; `active()` /
-  `set_active()` name the provider a `create` without one files on
-  (from `activeProviders`; see below).
+  is refused naming the registered providers; `active()` names the
+  provider a `create` without one files on, read each time from the
+  config's `activeProviders` through the source `Services` gives it at
+  boot — no copy, so a person's choice applies to the very next `create`
+  (tsk1011; see below).
 - **`VERBS`**: `create`, `update`, `transition`, `link`, `comment`,
   `delete` — the capability's verbs.
 
@@ -196,9 +198,9 @@ Integrations offers it as "Active for work items", oxplow's own being the
 key unset), oxplow's own when it names none; a capability nobody can swap
 (`vcs`, `knowledge`) has its one provider active. `capabilities::is_active`
 is the one rule the rows follow (`publish_core`, `ProviderRegistry::
-publish`), and `capabilities::apply_active` restates it — the registry's
-`active()` and the column — at boot and on every reconcile (each config
-change). A `work_item.create` naming no `provider` files on the active
+publish`), and `capabilities::apply_active` restates the column at boot
+and on every reconcile (each config change); the registry's `active()`
+needs no restating, as it reads the config. A `work_item.create` naming no `provider` files on the active
 one; one that isn't running is `Invalid` at `/provider` ("the active
 work-items provider isn't running: …"), never a fallback to oxplow. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and

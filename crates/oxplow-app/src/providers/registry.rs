@@ -1558,9 +1558,7 @@ impl ProviderRegistry {
         }
         // The config may name another active provider (P7.A2).
         let config = crate::config_service::read_config(&self.deps.config);
-        if let Err(e) =
-            crate::capabilities::apply_active(&config, &self.work_items, &self.deps.db).await
-        {
+        if let Err(e) = crate::capabilities::apply_active(&config, &self.deps.db).await {
             tracing::warn!(error = %e, "restating the active providers failed");
         }
     }

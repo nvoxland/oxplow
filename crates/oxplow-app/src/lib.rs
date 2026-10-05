@@ -1098,14 +1098,14 @@ impl Services {
             .expect("command.sequence registers");
         // The work-items providers (`.context/work-items.md`); oxplow's
         // own, over this bus.
-        let work_items = oxplow_domain::work_items::WorkItemsRegistry::new();
+        // Its active provider is the config's as it is now (tsk1011).
+        let work_items = {
+            let config = config_arc.clone();
+            oxplow_domain::work_items::WorkItemsRegistry::new(Arc::new(move || {
+                capabilities::active_provider(&config_service::read_config(&config), "work_items")
+            }))
+        };
         work_items.register(work_items::oxplow_provider());
-        // The default for a `create` without a provider, from the start:
-        // a `create` before the first reconcile mustn't file elsewhere.
-        work_items.set_active(&capabilities::active_provider(
-            &config_service::read_config(&config_arc),
-            "work_items",
-        ));
         for command in commands::vcs::commands(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
             git: vcs::GitProvider,

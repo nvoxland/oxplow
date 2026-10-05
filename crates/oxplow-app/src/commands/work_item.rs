@@ -1524,6 +1524,31 @@ mod tests {
         }
     }
 
+    /// tsk1011: the active provider is the config's as it is now — a
+    /// `create` right after a person chose another files there (or says
+    /// it isn't running), with no reconcile in between.
+    #[tokio::test]
+    async fn a_create_reads_the_active_provider_the_config_names_now() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        fx.svc
+            .config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert("work_items".into(), "linear".into());
+        let err = fx
+            .svc
+            .commands
+            .run(&Actor::Human, CREATE, json!({ "title": "where?" }), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("linear")),
+            "{err:?}"
+        );
+        assert_eq!(fx.svc.work_items.active(), "linear");
+    }
+
     /// P7.A2: a `create` that names no provider files on the active one
     /// — oxplow's by default — and when the active provider isn't
     /// running it fails naming it: never a silent fallback to oxplow.
@@ -1547,7 +1572,7 @@ mod tests {
             .active_providers
             .insert("work_items".into(), "linear".into());
         let config = crate::config_service::read_config(&fx.svc.config);
-        crate::capabilities::apply_active(&config, &fx.svc.work_items, &fx.svc.db)
+        crate::capabilities::apply_active(&config, &fx.svc.db)
             .await
             .unwrap();
         let before = list_order(&fx, None).await.len();

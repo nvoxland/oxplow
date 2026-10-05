@@ -510,7 +510,12 @@ mod tests {
             "def transform(input):\n    return 1 // 0\n",
         )
         .unwrap();
-        fx.svc.work_items.set_active("linear");
+        fx.svc
+            .config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert("work_items".into(), "linear".into());
         let consumer = PluginRepair::new(Arc::downgrade(&fx.svc));
         let event = disable(&fx.svc, "3 failures in a row; the last: boom").await;
         consumer.handle(&event).await.unwrap();
