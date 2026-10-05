@@ -32,10 +32,11 @@ afterEach(() => {
 
 test("prompts about a kind; grouped by source, core first; asking about a ref leads with it", () => {
   expect(promptsAbout(catalog, "effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
-  expect(promptsBySource(catalog).map((g) => [g.label, g.prompts.length])).toEqual([
-    ["vcs", 1],
-    ["work_items", 1],
-    ["gh", 1],
+  // A capability reads as a person names it (tsk1044); its id stays the key.
+  expect(promptsBySource(catalog).map((g) => [g.name, g.label, g.prompts.length])).toEqual([
+    ["vcs", "Version control", 1],
+    ["work_items", "Work items", 1],
+    ["gh", "gh", 1],
   ]);
   expect(askText("Who has changed this file the most?", "file:src/a.rs")).toBe(
     "[oxplow ref file:src/a.rs] Who has changed this file the most?",

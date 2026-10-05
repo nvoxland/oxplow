@@ -17,6 +17,7 @@ const proposal: Proposal = {
   actorKind: "agent",
   actorId: "thr3",
   threadId: 3,
+  threadTitle: "Fix the cart",
   key: "config:agentPromptAppend",
   preview: { command: "config.set", summary: "Set one key.", input: {}, destructive: false },
   dryRun: { key: "agentPromptAppend", before: null, after: "be brief", changed: true },
@@ -35,7 +36,7 @@ test("a card shows what the agent proposed and decides it", async () => {
   );
   const card = view.getByTestId("proposal-7");
   expect(card.textContent).toContain("Set agentPromptAppend");
-  expect(card.textContent).toContain("The agent in thr3");
+  expect(card.textContent).toContain("The agent in “Fix the cart”");
   expect(view.getByTestId("proposal-change-7").textContent).toContain("be brief");
   fireEvent.click(view.getByTestId("proposal-approve-7"));
   await waitFor(() => expect(decided).toEqual([[7, true]]));

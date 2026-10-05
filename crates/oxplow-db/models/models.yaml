@@ -56,7 +56,7 @@
     - { unique: id }
 - name: ai_result
   version: 3
-  description: "Recorded AI computations (P5.E1): a classify / score / summarize / extract result kept by the hash of its input, the provider, the model and the prompt version, so asking again reads it instead of calling. Tokens only; no cost."
+  description: "Recorded AI computations: a classify / score / summarize / extract result kept by the hash of its input, the provider, the model and the prompt version, so asking again reads it instead of calling. Tokens only; no cost."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
     - { name: "input_hash", type: "TEXT", doc: "sha256 of the canonical `{ op, args }`." }
@@ -313,7 +313,7 @@
     - { unique: id }
 - name: dashboard_item
   version: 2
-  description: "Tiles on dashboards: a query (pinned SQL shown as a lens viz or the metric card), a lens or a text note. v2 (P4.7): `query` replaces `metric`; its SQL is in `options_json`."
+  description: "Tiles on dashboards: a query (pinned SQL shown as a lens viz or the metric card), a lens or a text note. v2: `query` replaces `metric`; its SQL is in `options_json`."
   columns:
     - { name: "id", type: "INTEGER", doc: "Tile id." }
     - { name: "dashboard_id", type: "INTEGER", doc: "Its dashboard (v_dashboard.id)." }
@@ -606,9 +606,9 @@
     - { not_null: id }
     - { unique: id }
 - name: effect_run
-  version: 3
+  version: 4
   key: [effect, event_id, attempt]
-  description: "Each attempt at an extension effect's reaction to an event (P8.D10; attempts P9.D4): the live consumer makes one — ran (`ok`), `skipped`, left a `proposal` for a person, or `failed` — and a person's `effect.retry` of a failed one makes the next. A failed attempt whose every step was a write to a provider keeping `idempotent_writes` is sent again by itself, at most twice (`auto`, P10; `retry_at` says when); any other waits for a person. A reaction's state is its latest attempt's (`latest = 1`)."
+  description: "Each attempt at an extension effect's reaction to an event: the live consumer makes one — ran (`ok`), `skipped`, left a `proposal` for a person, or `failed` — and a person's `effect.retry` of a failed one makes the next. A failed attempt whose every step was a write to a provider keeping `idempotent_writes` is sent again by itself, at most twice (`auto`; `retry_at` says when); any other waits for a person. A reaction's state is its latest attempt's (`latest = 1`)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Attempt id." }
     - { name: "effect", type: "TEXT", doc: "The effect: `<extension>/<id>`." }
@@ -616,7 +616,7 @@
     - { name: "event_id", type: "TEXT", doc: "The event it reacted to (`v_event.id`)." }
     - { name: "event_seq", type: "INTEGER", doc: "That event's log position." }
     - { name: "attempt", type: "INTEGER", doc: "Which attempt at the reaction, from 1." }
-    - { name: "origin", type: "TEXT", doc: "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself, P10)." }
+    - { name: "origin", type: "TEXT", doc: "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself)." }
     - { name: "latest", type: "", doc: "1 when it is the reaction's latest attempt: its state is where the reaction stands." }
     - { name: "state", type: "TEXT", doc: "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`." }
     - { name: "reason", type: "TEXT", doc: "Why it skipped or failed." }
@@ -630,7 +630,7 @@
 - name: event_type
   version: 2
   key: [event_type, v]
-  description: "Every event type the log has accepted, at each version (P8.D3): core types and those extensions declare (`event_types:`). An extension's removed types stay listed, unregistered, and their logged rows stay readable."
+  description: "Every event type the log has accepted, at each version: core types and those extensions declare (`event_types:`). An extension's removed types stay listed, unregistered, and their logged rows stay readable."
   columns:
     - { name: "event_type", type: "TEXT", doc: "`namespace.name`; an extension's namespace is its name with `-` read as `_`." }
     - { name: "v", type: "INTEGER", doc: "The schema version." }
@@ -645,7 +645,7 @@
 - name: ref_kind
   version: 2
   key: [kind]
-  description: "Every kind of ref the running vocabulary knows (P8.D6): core's, and those extensions declare (`ref_kinds:`, with how to show one). A removed extension's kinds leave with it."
+  description: "Every kind of ref the running vocabulary knows: core's, and those extensions declare (`ref_kinds:`, with how to show one). A removed extension's kinds leave with it."
   columns:
     - { name: "kind", type: "TEXT", doc: "The kind (`work_item`, `acme_pr`)." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it; NULL for a core kind." }
@@ -660,8 +660,8 @@
   tests:
     - { not_null: kind }
 - name: plugin_health
-  version: 2
-  description: "Each plugin contribution's health on this machine (P7.C1): a provider instance or a collector, under one failure policy — three failures in a row disable it until a person runs `plugin.enable`."
+  version: 3
+  description: "Each plugin contribution's health on this machine: a provider instance or a collector, under one failure policy — three failures in a row disable it until a person runs `plugin.enable`."
   columns:
     - { name: "plugin", type: "TEXT", doc: "The extension it belongs to." }
     - { name: "contribution", type: "TEXT", doc: "The provider's or collector's id within it." }
@@ -676,7 +676,7 @@
     - { name: "updated_at", type: "TEXT", doc: "When this row last changed." }
     - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<plugin>/<contribution>`) or of events about the plugin." }
     - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed)." }
-    - { name: "repair_item", type: "TEXT", doc: "The open repair work item filed when it was disabled (P7.C2); NULL once that item is done or canceled." }
+    - { name: "repair_item", type: "TEXT", doc: "The open repair work item filed when it was disabled; NULL once that item is done or canceled." }
   tests:
     - { not_null: plugin }
 - name: snapshot
@@ -751,7 +751,7 @@
     - { name: "count", type: "", doc: "How many edits / failures." }
 - name: symbol
   version: 2
-  description: "The symbols (functions, classes, methods, …) the running language servers report for each stream's files — the current tree, restated per changed file at each snapshot (P5.C6). Only files whose language has a running server are covered; `v_symbol_capture` says what each snapshot's collection covered."
+  description: "The symbols (functions, classes, methods, …) the running language servers report for each stream's files — the current tree, restated per changed file at each snapshot. Only files whose language has a running server are covered; `v_symbol_capture` says what each snapshot's collection covered."
   columns:
     - { name: "ref", type: "TEXT", doc: "`symbol:<path>/<name>@snap:<id>`; a nested symbol's name is its container path (`Widget::spin`), and a name path's later symbols in a file (an overload, a setter after its getter) are numbered in position order (`Widget::value~2`). Unique." }
     - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot the file's symbols were read at." }
@@ -773,7 +773,7 @@
     - { not_null: name }
 - name: symbol_capture
   version: 2
-  description: "One row per snapshot the symbol collector handled (P5.C6): how many changed files it asked the language servers about, how many went over the `symbolsMaxFilesPerSnapshot` bound, and how many had no running server."
+  description: "One row per snapshot the symbol collector handled: how many changed files it asked the language servers about, how many went over the `symbolsMaxFilesPerSnapshot` bound, and how many had no running server."
   columns:
     - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot (v_snapshot.id)." }
     - { name: "stream_id", type: "INTEGER", doc: "The stream (v_stream.id)." }
@@ -886,7 +886,7 @@
     - { unique: id }
 - name: asset
   version: 3
-  description: "Each asset's last recompute (P7.B1): derived data computed from tables — the metric cube, a materialized model — recomputed when a commit touches one of its inputs, or on its clock; and its last failure, until one succeeds."
+  description: "Each asset's last recompute: derived data computed from tables — the metric cube, a materialized model — recomputed when a commit touches one of its inputs, or on its clock; and its last failure, until one succeeds."
   columns:
     - { name: "asset", type: "TEXT", doc: "The asset: `metric_cube`, or a materialized model's view (`v_<name>`)." }
     - { name: "computed_at", type: "TEXT", doc: "When it was last recomputed (RFC 3339)." }
@@ -926,7 +926,7 @@
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector_run
   version: 2
-  description: "Each collector's last run (P7.B3): its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
+  description: "Each collector's last run: its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
   columns:
     - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
     - { name: "id", type: "TEXT", doc: "The collector's id within its owner (may be dotted: `repo.scan_clone`)." }
@@ -941,7 +941,7 @@
     - { not_null: id }
 - name: capability_provider
   version: 1
-  description: "Each capability's providers and the feature flags they declare (P6b): oxplow's own (`work_items/oxplow`, `vcs/git`, `knowledge/oxplow`) and every running external provider. The UI shows a provider's enhancements only when its flags allow them (a Comment… action only for a work-items provider with `comments`)."
+  description: "Each capability's providers and the feature flags they declare: oxplow's own (`work_items/oxplow`, `vcs/git`, `knowledge/oxplow`) and every running external provider. The UI shows a provider's enhancements only when its flags allow them (a Comment… action only for a work-items provider with `comments`)."
   columns:
     - { name: "capability", type: "TEXT", doc: "`work_items`, `vcs`, `knowledge`." }
     - { name: "provider", type: "TEXT", doc: "The provider's name: a work item ref's segment (`work_item:<provider>:…`), `git`." }
@@ -953,7 +953,7 @@
     - { not_null: provider }
 - name: command_proposal
   version: 1
-  description: "Commands an agent ran that need a person's confirmation (P6b): each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Approvals panel lists the pending ones."
+  description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Approvals panel lists the pending ones."
   columns:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
     - { name: "ref", type: "TEXT", doc: "`proposal:<id>`." }
@@ -977,7 +977,7 @@
     - { accepted_values: { column: decision, values: [pending, approved, declined, superseded] } }
 - name: thread_answer
   version: 1
-  description: "An agent's answers in a thread (P6.C1): what `show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
+  description: "An agent's answers in a thread: what `show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
   columns:
     - { name: "id", type: "INTEGER", doc: "Answer id." }
     - { name: "ref", type: "TEXT", doc: "`answer:<id>`." }
@@ -1044,7 +1044,7 @@
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: work_item
   version: 2
-  description: "Work items from every provider (P5.C1), excluding deleted ones: oxplow's tasks (`work_item:oxplow:tsk<n>`, written with the task) and, later, a provider's issues. `state` is the canonical state every provider maps to; `v_task` stays oxplow's native view."
+  description: "Work items from every provider, excluding deleted ones: oxplow's tasks (`work_item:oxplow:tsk<n>`, written with the task) and, later, a provider's issues. `state` is the canonical state every provider maps to; `v_task` stays oxplow's native view."
   columns:
     - { name: "ref", type: "TEXT", doc: "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)." }
     - { name: "provider", type: "TEXT", doc: "The provider it comes from (`oxplow`)." }
@@ -1065,7 +1065,7 @@
     - { sql: "SELECT t.id FROM v_task t WHERE NOT EXISTS (SELECT 1 FROM v_work_item w WHERE w.ref = 'work_item:oxplow:tsk' || t.id) UNION ALL SELECT w.ref FROM v_work_item w WHERE w.provider = 'oxplow' AND NOT EXISTS (SELECT 1 FROM v_task t WHERE 'work_item:oxplow:tsk' || t.id = w.ref)" }
 - name: knowledge_page
   version: 1
-  description: "Knowledge pages (the wiki, P5.C4): one row per page with what it links to and how many of its file refs have drifted since they were pinned. A page's full text is `v_knowledge_body`; search them with the `search` tool."
+  description: "Knowledge pages (the wiki): one row per page with what it links to and how many of its file refs have drifted since they were pinned. A page's full text is `v_knowledge_body`; search them with the `search` tool."
   columns:
     - { name: "ref", type: "TEXT", doc: "`wiki:<slug>`." }
     - { name: "provider", type: "TEXT", doc: "The knowledge provider (`oxplow`)." }
@@ -1082,7 +1082,7 @@
     - { accepted_values: { column: provider, values: [oxplow] } }
 - name: knowledge_ref
   version: 2
-  description: "Each knowledge page's file refs and how current they are (P5.C4): the snapshot a ref was pinned to against the file's latest — both the primary stream's, the one definition of staleness every reader uses. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `wiki_ref_drift` shows one's diff."
+  description: "Each knowledge page's file refs and how current they are: the snapshot a ref was pinned to against the file's latest — both the primary stream's, the one definition of staleness every reader uses. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `wiki_ref_drift` shows one's diff."
   columns:
     - { name: "page", type: "TEXT", doc: "The page (`wiki:<slug>`, v_knowledge_page.ref)." }
     - { name: "path", type: "TEXT", doc: "The file it relies on (workspace-relative)." }
@@ -1096,7 +1096,7 @@
     - { relationships: { column: page, to: knowledge_page, field: ref } }
 - name: knowledge_body
   version: 1
-  description: "Each knowledge page's full markdown body (P6.E2), apart from v_knowledge_page so listing pages never reads bodies."
+  description: "Each knowledge page's full markdown body, apart from v_knowledge_page so listing pages never reads bodies."
   columns:
     - { name: "ref", type: "TEXT", doc: "`wiki:<slug>` (v_knowledge_page.ref)." }
     - { name: "body", type: "TEXT", doc: "The page's markdown, as its file holds it." }
@@ -1161,7 +1161,7 @@
     - { name: ran_at, type: TEXT, doc: "RFC 3339 time it ran." }
 - name: dimension
   version: 1
-  description: "Dimensions: what metrics can be sliced by — `metric_grid('<bucket>', '<dimension>')` groups by one of these keys (P4.5)."
+  description: "Dimensions: what metrics can be sliced by — `metric_grid('<bucket>', '<dimension>')` groups by one of these keys."
   columns:
     - { name: key, type: TEXT, doc: "The dimension key, e.g. `zone`; `oxplow.*` keys are built in." }
     - { name: label, type: TEXT, doc: "Display name." }

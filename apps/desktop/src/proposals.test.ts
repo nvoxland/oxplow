@@ -5,7 +5,7 @@ import { proposalForSetting, proposalOfTool, proposalsFromResult, summarizePropo
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
-    columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run"],
+    columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"],
     rows,
     truncated: false,
     reads: { models: ["v_command_proposal"], tables: [], measures: [] },
@@ -21,6 +21,7 @@ const proposal = (over: Partial<Proposal>): Proposal => ({
   actorKind: "agent",
   actorId: "thr3",
   threadId: 3,
+  threadTitle: "Fix the cart",
   key: "config:x",
   preview: { command: "config.set", summary: "Set one key.", input: {}, destructive: false },
   dryRun: null,
@@ -42,6 +43,7 @@ test("rows read as proposals, JSON columns parsed", () => {
         "agent",
         "thr3",
         3,
+        "Thread",
         "config:agentPromptAppend",
         '{"command":"config.set","summary":"Set one key.","input":{},"destructive":false}',
         '{"key":"agentPromptAppend","before":null,"after":"be brief","changed":true}',
@@ -57,6 +59,7 @@ test("rows read as proposals, JSON columns parsed", () => {
     actorKind: "agent",
     actorId: "thr3",
     threadId: 3,
+    threadTitle: "Thread",
     key: "config:agentPromptAppend",
     preview: { command: "config.set", summary: "Set one key.", input: {}, destructive: false },
     dryRun: { key: "agentPromptAppend", before: null, after: "be brief", changed: true },
@@ -74,7 +77,8 @@ test("a config change summarizes as the key with its before and after", () => {
     }),
   );
   expect(s.title).toBe("Set agentPromptAppend");
-  expect(s.who).toBe("The agent in thr3");
+  // The thread by its title, never its id (tsk1044).
+  expect(s.who).toBe("The agent in “Fix the cart”");
   expect(s.change).toEqual({ before: "(not set)", after: "be brief" });
   expect(s.children).toEqual([]);
   expect(s.destructive).toBe(false);

@@ -54,7 +54,7 @@ export function CommandConfirm({
       }}
     >
       <div style={{ fontSize: "var(--text-sm)" }}>
-        <strong>{label}</strong> runs <code>{command}</code>
+        <strong title={command}>{label}</strong>
         {destructive ? <span style={{ color: "var(--severity-critical)" }}> — it can't be undone</span> : null}.
       </div>
       {spec ? <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{spec.summary}</div> : null}

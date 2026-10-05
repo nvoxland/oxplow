@@ -2378,6 +2378,24 @@ mod tests {
     }
 
     #[test]
+    fn model_docs_carry_no_plan_labels() {
+        // tsk1044: a model's description is read by people (Catalog,
+        // Explore Data) and agents; a plan code ("(P5.E1)") means nothing
+        // to either.
+        let yaml = include_str!("../models/models.yaml");
+        let bytes = yaml.as_bytes();
+        let found: Vec<String> = (0..bytes.len().saturating_sub(1))
+            .filter(|&i| {
+                bytes[i] == b'P'
+                    && bytes[i + 1].is_ascii_digit()
+                    && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+            })
+            .map(|i| yaml[i..].chars().take(8).collect())
+            .collect();
+        assert_eq!(found, Vec::<String>::new());
+    }
+
+    #[test]
     fn every_core_model_contract_is_pinned_at_its_version() {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/model_contracts.json");

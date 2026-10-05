@@ -2213,6 +2213,90 @@
         "event_id",
         "attempt"
       ]
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Attempt id."
+        },
+        {
+          "name": "effect",
+          "type": "TEXT",
+          "doc": "The effect: `<extension>/<id>`."
+        },
+        {
+          "name": "extension",
+          "type": "",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The event it reacted to (`v_event.id`)."
+        },
+        {
+          "name": "event_seq",
+          "type": "INTEGER",
+          "doc": "That event's log position."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Which attempt at the reaction, from 1."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself)."
+        },
+        {
+          "name": "latest",
+          "type": "",
+          "doc": "1 when it is the reaction's latest attempt: its state is where the reaction stands."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`."
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "doc": "Why it skipped or failed."
+        },
+        {
+          "name": "audit_id",
+          "type": "INTEGER",
+          "doc": "Its run's `command_audit` row, when its commands ran."
+        },
+        {
+          "name": "proposal_id",
+          "type": "INTEGER",
+          "doc": "The proposal it left, when a command asked a person."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it started (RFC 3339)."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it ended; NULL while `started`."
+        },
+        {
+          "name": "retry_at",
+          "type": "TEXT",
+          "doc": "A failed attempt sent again by itself at this time (RFC 3339); NULL when it waits for a person, or wasn't failed."
+        }
+      ],
+      "key": [
+        "effect",
+        "event_id",
+        "attempt"
+      ]
     }
   },
   "effort": {
@@ -3711,6 +3795,81 @@
           "name": "repair_item",
           "type": "TEXT",
           "doc": "The open repair work item filed when it was disabled (P7.C2); NULL once that item is done or canceled."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "plugin",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The provider's or collector's id within it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`provider` or `collector`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`ok`, `failing` or `disabled`."
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "doc": "Why it's disabled."
+        },
+        {
+          "name": "consecutive_failures",
+          "type": "INTEGER",
+          "doc": "Failures since its last success."
+        },
+        {
+          "name": "last_ok_at",
+          "type": "TEXT",
+          "doc": "When it last succeeded (RFC 3339)."
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "doc": "Its last failure."
+        },
+        {
+          "name": "mean_ms",
+          "type": "REAL",
+          "doc": "A moving average of its successful runs or calls, in milliseconds."
+        },
+        {
+          "name": "next_due_at",
+          "type": "TEXT",
+          "doc": "When it should next run (a schedule's next slot), if it runs on one."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When this row last changed."
+        },
+        {
+          "name": "dead_letters",
+          "type": "",
+          "doc": "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<plugin>/<contribution>`) or of events about the plugin."
+        },
+        {
+          "name": "fresh",
+          "type": "",
+          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed)."
+        },
+        {
+          "name": "repair_item",
+          "type": "TEXT",
+          "doc": "The open repair work item filed when it was disabled; NULL once that item is done or canceled."
         }
       ],
       "key": []

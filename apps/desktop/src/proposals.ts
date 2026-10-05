@@ -35,6 +35,8 @@ export interface Proposal {
   /** The proposing thread (`thr3`) or lens. */
   actorId: string | null;
   threadId: number | null;
+  /** The proposing thread's title, as a person knows it (tsk1044). */
+  threadTitle: string | null;
   /** `config:<key>` for a config change, else the command and its input. */
   key: string;
   preview: ProposalPreview;
@@ -82,6 +84,7 @@ export function proposalsFromResult(result: SqlQueryResult): Proposal[] {
     actorKind: String(at(row, "actor_kind")),
     actorId: at(row, "actor_id") == null ? null : String(at(row, "actor_id")),
     threadId: at(row, "thread_id") == null ? null : Number(at(row, "thread_id")),
+    threadTitle: at(row, "thread_title") == null ? null : String(at(row, "thread_title")),
     key: String(at(row, "key")),
     preview: json(at(row, "preview")) as ProposalPreview,
     dryRun: json(at(row, "dry_run")),
@@ -95,8 +98,8 @@ export function proposalsFromResult(result: SqlQueryResult): Proposal[] {
 /** The pending proposals, newest first, and what was read. */
 export async function readPendingProposals(): Promise<{ proposals: Proposal[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT id, ref, created_at, command, input, actor_kind, actor_id, thread_id, key, preview, dry_run
-       FROM v_command_proposal WHERE decision = 'pending' ORDER BY id DESC`,
+    `SELECT id, ref, created_at, command, input, actor_kind, actor_id, thread_id, ${THREAD_TITLE}, key, preview, dry_run
+       FROM v_command_proposal p WHERE decision = 'pending' ORDER BY id DESC`,
     [],
     1_000,
   );
@@ -124,6 +127,9 @@ export function useProposals(): Proposal[] {
   return proposals;
 }
 
+/** The proposing thread's title, by the proposal's `thread_id`. */
+const THREAD_TITLE = "(SELECT title FROM v_thread th WHERE th.id = p.thread_id) AS thread_title";
+
 const field = (value: unknown, name: string): unknown =>
   value && typeof value === "object" ? (value as Record<string, unknown>)[name] : undefined;
 
@@ -135,7 +141,8 @@ export function summarizeProposal(p: Proposal): ProposalSummary {
       : p.command === "config.unset" && typeof key === "string"
         ? `Unset ${key}`
         : p.preview?.summary || p.command;
-  const agent = p.actorId ? `The agent in ${p.actorId}` : "The agent";
+  // The thread by its title, as the person knows it, never its id.
+  const agent = p.threadTitle ? `The agent in “${p.threadTitle}”` : "The agent";
   const who = p.actorKind === "lens" ? `A lens${p.actorId ? ` (${p.actorId})` : ""} for the agent` : agent;
   const hasChange = p.dryRun != null && typeof p.dryRun === "object" && "before" in p.dryRun && "after" in p.dryRun;
   const shown = (v: unknown) => (v == null ? "(not set)" : valueText(v));
@@ -160,13 +167,13 @@ export async function decide(p: Proposal, approve: boolean): Promise<void> {
 }
 
 const COLUMNS =
-  "id, ref, created_at, command, input, actor_kind, actor_id, thread_id, key, preview, dry_run, decision, decided_at, audit_id";
+  "id, ref, created_at, command, input, actor_kind, actor_id, thread_id, (SELECT title FROM v_thread th WHERE th.id = p.thread_id) AS thread_title, key, preview, dry_run, decision, decided_at, audit_id";
 
 /** A thread's proposals, newest first — pending and decided — and what
  *  was read. */
 export async function readThreadProposals(threadId: string): Promise<{ proposals: Proposal[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT ${COLUMNS} FROM v_command_proposal WHERE thread_id = ?1 ORDER BY id DESC`,
+    `SELECT ${COLUMNS} FROM v_command_proposal p WHERE thread_id = ?1 ORDER BY id DESC`,
     [threadRowId(threadId)],
     1_000,
   );

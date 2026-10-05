@@ -112,7 +112,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                 </RouteLink>
                 <div style={metaStyle}>
                   {item.provider === "oxplow" ? item.task?.priority : `${item.provider} · ${item.nativeState}`}
-                  {item.task && item.task.noteCount > 0 ? ` · ${item.task.noteCount} notes` : ""}
+                  {item.task && item.task.noteCount > 0 ? ` · ${item.task.noteCount} ${item.task.noteCount === 1 ? "note" : "notes"}` : ""}
                 </div>
               </div>
             );

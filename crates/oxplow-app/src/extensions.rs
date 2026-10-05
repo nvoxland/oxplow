@@ -3628,12 +3628,12 @@ pub fn save_lens(
             &manifest,
             scaffold_manifest(&ManifestScaffold {
                 name: extension,
-                description: "TODO: one line on what this extension shows or does",
+                description: "Lenses kept from answers in your threads",
                 purpose: origin.purpose,
                 origin: origin.origin,
                 example_name: slug,
                 example_input: &format!("{{ lens: {slug} }}"),
-                example_expect: "TODO: what a run should show",
+                example_expect: "the rows the answer showed",
                 shared: false,
             }),
         )

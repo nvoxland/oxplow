@@ -4,12 +4,12 @@
   reaches:
     sql: SELECT ref, provider, title FROM v_work_item WHERE state = 'in_progress'
   shape: { columns: [ref, provider, title] }
-- question: What are the children of this work item?
+- question: What has been done on this work item so far?
   about: work_item
   skill: oxplow-runtime
   reaches:
-    sql: SELECT ref, title, state FROM v_work_item WHERE parent_ref = 'work_item:oxplow:tsk1'
-  shape: { columns: [ref, title, state] }
+    sql: SELECT id, started_at, ended_at, summary FROM v_effort WHERE work_item = 'work_item:oxplow:tsk1' ORDER BY started_at
+  shape: { columns: [id, started_at, ended_at, summary] }
 - question: Mark a work item done.
   skill: oxplow-runtime
   reaches:

@@ -10,17 +10,34 @@ export function promptsAbout(catalog: CatalogPrompt[], kind: string): CatalogPro
 
 export interface PromptGroup {
   /** The capability or extension name. */
+  name: string;
+  /** How a person reads it: a capability's label, an extension's name. */
   label: string;
   kind: "capability" | "extension";
   prompts: CatalogPrompt[];
 }
 
 /** Grouped by who offers them: capabilities, then extensions, each by name. */
+/** A core capability's name as a person reads it (tsk1044: the headings
+ *  showed `code_intel`, `work_items`). */
+const CAPABILITY_LABELS: Record<string, string> = {
+  code_intel: "Code",
+  knowledge: "Wiki",
+  plugins: "Extensions",
+  vcs: "Version control",
+  work_items: "Work items",
+};
+
+export function capabilityLabel(name: string): string {
+  return CAPABILITY_LABELS[name] ?? name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
 export function promptsBySource(catalog: CatalogPrompt[]): PromptGroup[] {
   const groups = new Map<string, PromptGroup>();
   for (const p of catalog) {
     const key = `${p.source.kind}:${p.source.name}`;
-    const group = groups.get(key) ?? { label: p.source.name, kind: p.source.kind, prompts: [] };
+    const label = p.source.kind === "capability" ? capabilityLabel(p.source.name) : p.source.name;
+    const group = groups.get(key) ?? { name: p.source.name, label, kind: p.source.kind, prompts: [] };
     group.prompts.push(p);
     groups.set(key, group);
   }

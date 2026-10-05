@@ -90,7 +90,9 @@ export function collectorRowModel(l: CollectorListing): CollectorRowModel {
       ? "Failed"
       : Object.entries(st.rowCounts)
           .map(([entity, n]) => `${n} ${entity}`)
-          .join(" · ") || "0 rows";
+          .join(" · ") ||
+        // A fact collector records facts, not rows (tsk1044).
+        (l.spec.facts.length > 0 ? "Recorded facts" : "0 rows");
   const passed = [
     l.spec.env.length > 0 ? `${l.spec.env.join(", ")} from your environment` : null,
     l.spec.credentials.length > 0 ? `${l.spec.credentials.join(", ")} from your keychain` : null,

@@ -54,7 +54,7 @@ export function CatalogPage({ streamId, onOpenPage }: { streamId: string | null;
           <h2 style={h2Style}>What you can ask</h2>
           <p style={hintStyle}>Ask puts the question in the agent's input for you to edit and send.</p>
           {promptsBySource(catalog).map((g) => (
-            <div key={`${g.kind}:${g.label}`} data-testid={`catalog-prompts-${g.kind}-${g.label}`} style={groupStyle}>
+            <div key={`${g.kind}:${g.name}`} data-testid={`catalog-prompts-${g.kind}-${g.name}`} style={groupStyle}>
               <div style={labelStyle}>
                 {g.label}
                 <span style={hintStyle}> {g.kind === "capability" ? "core" : "extension"}</span>
