@@ -9,21 +9,31 @@ export interface EntityRowModel {
   description: string;
   /** Formatted row count, or a status when there is none. */
   rows: string;
+  /** Why there's no count, on hover. */
+  rowsTitle?: string;
   available: boolean;
 }
 
+/** One model's row count as the Data section holds it: absent while it's
+ *  still being counted. */
+export type EntityCount = { rows: number } | { error: string };
+
 /// One row per entity: core first, then by provider and name. An entity
-/// whose source hasn't synced (`declared`) shows "Not synced yet".
-export function entityRows(entities: DataEntity[]): EntityRowModel[] {
+/// whose source hasn't synced (`declared`) shows "Not synced yet". Counts
+/// arrive one model at a time after the list shows (tsk1065): a model too
+/// big to count in time reads as a dash with why, not a failed list.
+export function entityRows(entities: DataEntity[], counts: Record<string, EntityCount>): EntityRowModel[] {
   const fmt = new Intl.NumberFormat();
   return entities
     .map((e) => {
       const available = e.kind !== "declared";
+      const count = counts[e.name];
       return {
         name: e.name,
         owner: e.owner,
         description: e.description,
-        rows: !available ? "Not synced yet" : e.rows == null ? "—" : fmt.format(e.rows),
+        rows: !available ? "Not synced yet" : !count ? "Counting…" : "rows" in count ? fmt.format(count.rows) : "—",
+        rowsTitle: available && count && "error" in count ? `Couldn't count it: ${count.error}` : undefined,
         available,
       };
     })

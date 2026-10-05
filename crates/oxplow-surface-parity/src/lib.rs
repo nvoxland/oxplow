@@ -163,7 +163,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     both("search"),
     both("query_sql"),
-    // Settings → Data: models with counts, and entities not yet synced.
+    // Settings → Data: the models, and entities not yet synced.
     ui(
         "list_data_entities",
         "the Data settings list, which joins the extensions' manifests: an agent reads published entities in `v_model` and one declared but not synced yet in its extension's `extension.yaml`",

@@ -2,7 +2,9 @@
 //! much. The catalog itself is the model registry (`v_model`,
 //! `v_model_column`, P4.2/P4.9) — read through SQL like everything else;
 //! this adds what SQL can't say: an entity an extension declares that
-//! hasn't synced yet, and row counts. See `.context/semantic-layer.md`.
+//! hasn't synced yet. Row counts aren't here: one `count(*)` over a big
+//! model can outrun the query timeout, so the UI counts each row itself
+//! (tsk1065). See `.context/semantic-layer.md`.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -22,11 +24,9 @@ pub struct DataEntity {
     /// `declared` (an entity whose source hasn't synced: no view yet).
     pub kind: String,
     pub description: String,
-    /// Rows in it now; `None` for a declared entity.
-    pub rows: Option<i64>,
 }
 
-/// Every published model with its row count, then every entity the
+/// Every published model, then every entity the
 /// enabled extensions under `root` declare but haven't synced.
 pub async fn data_entities(
     layer: &crate::sql_gateway::SqlGateway,
@@ -45,25 +45,16 @@ pub async fn data_entities(
             Some(oxplow_db::semantic_layer::MAX_ROW_LIMIT),
         )
         .await?;
-    let mut out = Vec::with_capacity(models.rows.len());
-    for row in &models.rows {
-        let name = text(&row[0]);
-        // Names come from the registry (compiled or validated views), never
-        // from user input.
-        let count = layer
-            .query_sql(&format!("SELECT count(*) FROM \"{name}\""), vec![], Some(1))
-            .await?;
-        out.push(DataEntity {
-            rows: match count.rows.first().and_then(|r| r.first()) {
-                Some(SqlCell::Int(n)) => Some(*n),
-                _ => None,
-            },
-            name,
+    let mut out: Vec<DataEntity> = models
+        .rows
+        .iter()
+        .map(|row| DataEntity {
+            name: text(&row[0]),
             owner: text(&row[1]),
             kind: text(&row[2]),
             description: text(&row[3]),
-        });
-    }
+        })
+        .collect();
     let published: BTreeSet<String> = out.iter().map(|e| e.name.clone()).collect();
     for ext in catalog.get(root).iter().filter(|e| e.enabled) {
         for collector in &ext.collectors {
@@ -83,7 +74,6 @@ pub async fn data_entities(
                     } else {
                         e.doc.clone()
                     },
-                    rows: None,
                 });
             }
         }
@@ -96,7 +86,7 @@ mod tests {
     use super::*;
     use oxplow_db::{Database, EntityColumn, EntityTable, SqliteCollectorStore, StoredType};
 
-    /// tsk517: Settings → Data lists every published model with its count
+    /// tsk517: Settings → Data lists every published model
     /// — a synced entity once, from the registry, with its doc — and a
     /// declared entity that hasn't synced as `declared`.
     #[tokio::test]
@@ -122,12 +112,12 @@ mod tests {
         };
         let task = get(&all, "v_task");
         assert_eq!(
-            (task[0].owner.as_str(), task[0].kind.as_str(), task[0].rows),
-            ("core", "sql", Some(0))
+            (task[0].owner.as_str(), task[0].kind.as_str()),
+            ("core", "sql")
         );
         let pr = get(&all, "v_my_gh_pr");
         assert_eq!(pr.len(), 1);
-        assert_eq!((pr[0].kind.as_str(), pr[0].rows), ("declared", None));
+        assert_eq!(pr[0].kind, "declared");
         assert_eq!(pr[0].description, "A pull request.");
 
         SqliteCollectorStore::new(db)
@@ -155,10 +145,9 @@ mod tests {
             (
                 pr[0].owner.as_str(),
                 pr[0].kind.as_str(),
-                pr[0].rows,
                 pr[0].description.as_str()
             ),
-            ("my-gh", "entity", Some(2), "A pull request.")
+            ("my-gh", "entity", "A pull request.")
         );
     }
 }

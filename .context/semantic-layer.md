@@ -26,7 +26,10 @@ and agents query.
 > - **Current (tsk324):** the exec-source `network` allowlist, enforced
 >   on macOS.
 > - **Current (tsk325):** Settings → Data: every entity with provider and
->   row count (IPC `list_data_entities`, UI-only), and the source rows.
+>   row count, and the source rows. `list_data_entities` (IPC, UI-only)
+>   lists models and unsynced entities without counting; the UI counts
+>   each model with `query_sql`, one at a time, so a model too big to
+>   count within the 5 s timeout costs only its own cell (tsk1065).
 > - **Current (P4, epic tsk484):** every published view is a **model**
 >   (core files and extensions' `models:`, compiled with lineage,
 >   contracts, versions and tests; the registry `v_model*` is the

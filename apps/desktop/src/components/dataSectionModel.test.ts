@@ -3,21 +3,23 @@ import { expect, test } from "bun:test";
 import type { DataEntity } from "../tauri-bridge/generated/bindings.js";
 import { entityRows, entitySummary, programRow } from "./dataSectionModel.js";
 
-const entity = (name: string, owner: string, kind: string, rows: number | null): DataEntity => ({
+const entity = (name: string, owner: string, kind: string): DataEntity => ({
   name,
   owner,
   kind,
-  rows,
   description: `${name} rows`,
 });
 
 test("entityRows puts core first, formats counts and flags unsynced entities", () => {
-  const rows = entityRows([
-    entity("v_github_pr", "github", "declared", null),
-    entity("v_task", "core", "sql", 12345),
-    entity("v_commit", "core", "sql", 0),
-    entity("v_issues_issue", "issues", "entity", 7),
-  ]);
+  const rows = entityRows(
+    [
+      entity("v_github_pr", "github", "declared"),
+      entity("v_task", "core", "sql"),
+      entity("v_commit", "core", "sql"),
+      entity("v_issues_issue", "issues", "entity"),
+    ],
+    { v_task: { rows: 12345 }, v_commit: { rows: 0 }, v_issues_issue: { rows: 7 } },
+  );
   expect(rows.map((r) => r.name)).toEqual(["v_commit", "v_task", "v_github_pr", "v_issues_issue"]);
   expect(rows[1]!.rows).toBe(new Intl.NumberFormat().format(12345));
   expect(rows[0]!.rows).toBe("0");
@@ -28,8 +30,15 @@ test("entityRows puts core first, formats counts and flags unsynced entities", (
   expect(entitySummary(rows.slice(0, 1))).toBe("1 entity");
 });
 
-test("a model whose count didn't come back reads as a dash, not zero", () => {
-  expect(entityRows([entity("v_task", "core", "sql", null)])[0]!.rows).toBe("—");
+// tsk1065: counts load one model at a time after the list shows, so a
+// model too big to count in time costs its own cell, not the list.
+test("a count still loading says so, and one that failed reads as a dash with why", () => {
+  const [counting, failed] = entityRows([entity("v_a", "core", "sql"), entity("v_b", "core", "sql")], {
+    v_b: { error: "query_sql: timed out after 5s" },
+  });
+  expect([counting!.rows, counting!.rowsTitle]).toEqual(["Counting…", undefined]);
+  expect(failed!.rows).toBe("—");
+  expect(failed!.rowsTitle).toBe("Couldn't count it: query_sql: timed out after 5s");
 });
 
 test("programRow says what runs and whether it will", () => {

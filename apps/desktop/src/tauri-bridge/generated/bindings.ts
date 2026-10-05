@@ -2017,8 +2017,6 @@ export type DataEntity = {
 	 */
 	kind: string,
 	description: string,
-	// Rows in it now; `None` for a declared entity.
-	rows: number | null,
 };
 
 // A parked event: the consumer that failed on it, why, and how often.

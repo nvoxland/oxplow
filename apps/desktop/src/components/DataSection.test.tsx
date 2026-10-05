@@ -11,12 +11,21 @@ const ran: Array<[string, unknown, boolean]> = [];
 /** What `effect.retry` answers. */
 let retried: unknown = { effect: "acme/mark-done", event: "event:e1", attempt: 2, outcome: "ok" };
 const letter = { id: 7, consumer: "change.analyze", event_seq: 41, error: "boom", attempts: 2, first_failed_at: "t", last_failed_at: "t" };
+/** The models Settings → Data lists, and what counting each answers (none: it times out). */
+let entities: Array<{ name: string; owner: string; kind: string; description: string }> = [];
+let counts: Record<string, number> = {};
 /** What `effect.backfill_plan` counts. */
 let plannedCount = 3;
 mock.module("../api.js", () => ({
   ...realApi,
-  querySql: async (sql: string) =>
-    sql.includes("FROM v_effect_run")
+  querySql: async (sql: string) => {
+    const counted = /^SELECT count\(\*\) FROM "(\w+)"$/.exec(sql)?.[1];
+    if (counted) {
+      const n = counts[counted];
+      if (n === undefined) throw new Error("query_sql: timed out after 5s");
+      return { columns: ["count(*)"], rows: [[n]], truncated: false, reads: { models: [counted], tables: [], measures: [] }, freshness: {} };
+    }
+    return sql.includes("FROM v_effect_run")
       ? {
           columns: ["effect", "event_id", "event_seq", "attempt", "reason", "event_type"],
           rows: [["acme/mark-done", "e1", 52, 1, "interrupted: a step outside oxplow may have run", "work_item.transitioned"]],
@@ -30,7 +39,8 @@ mock.module("../api.js", () => ({
           truncated: false,
           reads: { models: ["v_event_dead_letter"], tables: [], measures: [] },
           freshness: {},
-        },
+        };
+  },
   runCommand: async (name: string, input: unknown, confirmed = false) => {
     ran.push([name, input, confirmed]);
     const result =
@@ -49,7 +59,7 @@ mock.module("../api.js", () => ({
     decided.push(`discard ${id}`);
     return { ...letter, state: "discarded" };
   },
-  listDataEntities: async () => [],
+  listDataEntities: async () => entities,
   listCollectors: async () => [],
   listProjectPrograms: async () => [
     {
@@ -98,6 +108,8 @@ mock.module("../api.js", () => ({
 const { DataSection } = await import("./DataSection.js");
 
 afterEach(() => {
+  entities = [];
+  counts = {};
   decided.length = 0;
   ran.length = 0;
   cleanup();
@@ -206,4 +218,19 @@ test("a bundled program's script toggle says whether it's shown", async () => {
   expect(toggle.getAttribute("aria-controls")).toBe(view.getByTestId(`program-source-${key}`).id);
   fireEvent.click(toggle);
   await waitFor(() => expect(toggle.getAttribute("aria-expanded")).toBe("false"));
+});
+
+// tsk1065: the list shows without waiting on counts, and a model too big
+// to count in time costs only its own cell.
+test("a model that can't be counted in time leaves the rest of the list", async () => {
+  entities = [
+    { name: "v_file_metric", owner: "core", kind: "sql", description: "" },
+    { name: "v_task", owner: "core", kind: "sql", description: "" },
+  ];
+  counts = { v_task: 3 };
+  const view = render(<DataSection />);
+  const cell = (name: string) => view.getByTestId(`data-entity-${name}`).querySelectorAll("td")[2]!;
+  await waitFor(() => expect(cell("v_task").textContent).toBe("3"));
+  expect(cell("v_file_metric").textContent).toBe("—");
+  expect(cell("v_file_metric").getAttribute("title")).toContain("timed out");
 });

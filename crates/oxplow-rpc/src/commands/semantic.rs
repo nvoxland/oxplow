@@ -28,9 +28,10 @@ pub async fn query_sql(
         .await?)
 }
 
-/// Settings → Data: every published model with its row count, and the
-/// entities extensions declare that haven't synced. UI-only: an agent
-/// reads `v_model` and counts with `query_sql`.
+/// Settings → Data: every published model, and the entities extensions
+/// declare that haven't synced. No row counts: the UI counts each model
+/// with `query_sql`, so one too big to count costs only its own row.
+/// UI-only: an agent reads `v_model` and counts with `query_sql`.
 pub async fn list_data_entities(
     svc: &Services,
 ) -> Result<Vec<oxplow_app::semantic_catalog::DataEntity>, IpcError> {
@@ -124,7 +125,10 @@ mod tests {
             .iter()
             .find(|e| e["name"] == "v_task")
             .unwrap();
-        assert!(task["rows"].is_number());
+        assert_eq!(task["kind"], "sql");
+        // tsk1065: the listing counts nothing: a model too big to count in
+        // the query timeout failed the whole list. The UI counts per row.
+        assert!(task.get("rows").is_none(), "{task}");
     }
 
     use serde_json::json;

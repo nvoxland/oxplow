@@ -1,5 +1,5 @@
 /// "Data" section body for SettingsPage: every semantic-layer entity with
-/// its provider and row count, and every extension source with its last
+/// its provider and row count (counted per model after the list shows), and every extension source with its last
 /// sync and a Run button (Approve & Run for an exec source nobody on this
 /// machine approved yet). Credentials and enabling stay under Extensions.
 /// Delivery lists the events a consumer couldn't take, with Retry and
@@ -9,7 +9,7 @@
 /// opErrorsStore, not alerts.
 
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
   approveProjectProgram,
@@ -19,6 +19,7 @@ import {
   listProjectPrograms,
   listCollectors,
   approveCollector,
+  querySql,
   discardDeadLetter,
   retryDeadLetter,
   runCommand,
@@ -26,7 +27,7 @@ import {
   subscribeOxplowEvents,
   type CollectorListing,
 } from "../api.js";
-import type { ProjectProgram } from "../tauri-bridge/generated/bindings.js";
+import type { DataEntity, ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import {
@@ -38,7 +39,7 @@ import {
   programRow,
   providerEffectLines,
   type BackfillResult,
-  type EntityRowModel,
+  type EntityCount,
   type ProviderEffectState,
 } from "./dataSectionModel.js";
 import {
@@ -56,7 +57,10 @@ import { showToast } from "./toastStore.js";
 
 export function DataSection() {
   const nav = useOptionalPageNavigation();
-  const [rows, setRows] = useState<EntityRowModel[] | null>(null);
+  const [entities, setEntities] = useState<DataEntity[] | null>(null);
+  const [counts, setCounts] = useState<Record<string, EntityCount>>({});
+  // Each refresh recounts; a newer one stops an older one's counting.
+  const counting = useRef(0);
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
   const [programs, setPrograms] = useState<ProjectProgram[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -72,14 +76,42 @@ export function DataSection() {
         listCollectors(),
         listProjectPrograms(),
       ]);
-      setRows(entityRows(entities));
+      setEntities(entities);
       setCollectors(listings);
       setPrograms(progs);
+      void countRows(entities);
     } catch (e) {
       recordOpError({ label: "List data", message: String(e) });
-      setRows([]);
+      setEntities([]);
     }
   }, []);
+
+  // One model at a time, so counting never crowds the daemon: a model too
+  // big to count within query_sql's timeout costs its own cell (tsk1065).
+  async function countRows(entities: DataEntity[]) {
+    const run = ++counting.current;
+    setCounts({});
+    for (const e of entities.filter((e) => e.kind !== "declared")) {
+      let count: EntityCount;
+      try {
+        // Names come from the registry, never from user input.
+        const result = await querySql(`SELECT count(*) FROM "${e.name}"`, [], 1);
+        const n = result.rows[0]?.[0];
+        count = typeof n === "number" ? { rows: n } : { error: "no count came back" };
+      } catch (err) {
+        count = { error: err instanceof Error ? err.message : String(err) };
+      }
+      if (run !== counting.current) return;
+      setCounts((prev) => ({ ...prev, [e.name]: count }));
+    }
+  }
+
+  useEffect(
+    () => () => {
+      counting.current++;
+    },
+    [],
+  );
 
   useEffect(() => {
     void refresh();
@@ -187,7 +219,8 @@ export function DataSection() {
     }
   }
 
-  if (rows === null) return <div style={mutedStyle}>Loading…</div>;
+  if (entities === null) return <div style={mutedStyle}>Loading…</div>;
+  const rows = entityRows(entities, counts);
   return (
     <div data-testid="data-section">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -216,7 +249,10 @@ export function DataSection() {
                 <code>{r.name}</code>
               </td>
               <td style={tdStyle}>{r.owner}</td>
-              <td style={{ ...tdStyle, textAlign: "right", color: r.available ? undefined : "var(--text-secondary)" }}>
+              <td
+                style={{ ...tdStyle, textAlign: "right", color: r.available ? undefined : "var(--text-secondary)" }}
+                title={r.rowsTitle}
+              >
                 {r.rows}
               </td>
             </tr>

@@ -84,8 +84,10 @@ file with its `models.yaml` entry — [semantic-layer.md](./semantic-layer.md)
 bespoke IPC/MCP read. The result says what it read (`reads`), and the
 view refreshes through `useRerunOnChange` when `ModelsChanged` names a
 model it read — no per-feature event to add. A bespoke read stays for
-what SQL can't answer (a git or LSP call, a file on disk, a row count
-per model); Settings → Data's `list_data_entities` is one.
+what SQL can't answer (a git or LSP call, a file on disk, an entity an
+extension declared but hasn't synced); Settings → Data's
+`list_data_entities` is one. Don't fold per-model SQL (e.g. row counts)
+into such a read: one slow query fails the whole call (tsk1065).
 
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
