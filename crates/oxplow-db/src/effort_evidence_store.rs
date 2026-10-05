@@ -151,8 +151,8 @@ impl SqliteEffortEvidenceStore {
             .await
     }
 
-    /// `effort_id`'s stored observations, in their stored order (newest
-    /// first); `kind` filters.
+    /// `effort_id`'s stored observations, in their stored order (oldest
+    /// first, the order they ran in); `kind` filters.
     pub async fn list_observations(
         &self,
         effort_id: i64,

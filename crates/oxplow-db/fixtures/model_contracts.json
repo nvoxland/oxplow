@@ -2555,6 +2555,56 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort (v_effort.id)."
+        },
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "Order within the effort, oldest first: the highest is the latest."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`test-run`, `diff-coverage`, `static-analysis`, …"
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`observed` (oxplow saw it) or `asserted` (the agent reported it)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "Where it came from, e.g. `post-tool-bash`."
+        },
+        {
+          "name": "metric_value",
+          "type": "REAL",
+          "doc": "Headline number, e.g. coverage %."
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "doc": "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines)."
+        },
+        {
+          "name": "local_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot it was captured against."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "event": {

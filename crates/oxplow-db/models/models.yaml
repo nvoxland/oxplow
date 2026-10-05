@@ -408,11 +408,11 @@
     - { name: "latest_capture_id", type: "INTEGER", doc: "The latest contributing capture (v_capture.id), for drill-in." }
     - { name: "refreshed_at", type: "TEXT", doc: "When oxplow last recomputed it (RFC 3339)." }
 - name: effort_observation
-  version: 1
+  version: 2
   description: "Evidence gathered during an effort: test runs, diff coverage and analysis results, rebuilt from the captures the effort claimed."
   columns:
     - { name: "effort_id", type: "INTEGER", doc: "Effort (v_effort.id)." }
-    - { name: "seq", type: "INTEGER", doc: "Order within the effort." }
+    - { name: "seq", type: "INTEGER", doc: "Order within the effort, oldest first: the highest is the latest." }
     - { name: "kind", type: "TEXT", doc: "`test-run`, `diff-coverage`, `static-analysis`, …" }
     - { name: "provenance", type: "TEXT", doc: "`observed` (oxplow saw it) or `asserted` (the agent reported it)." }
     - { name: "source", type: "TEXT", doc: "Where it came from, e.g. `post-tool-bash`." }

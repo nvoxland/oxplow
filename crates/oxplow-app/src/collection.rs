@@ -2783,7 +2783,8 @@ impl CollectionService {
     /// effort panel renders off the model. Computed only for the
     /// `effort_evidence` asset, which stores the rows
     /// (`v_effort_observation`); readers read those (tsk862).
-    /// One row per run, newest-first; `kind` optionally filters.
+    /// One row per run, oldest first: stored in this order, the highest
+    /// `seq` is the latest (tsk1049). `kind` optionally filters.
     pub async fn effort_observations_from_metrics(
         &self,
         effort_id: &str,
@@ -2813,8 +2814,8 @@ impl CollectionService {
                 caps.push(c);
             }
         }
-        // Newest-first for the panel.
-        caps.sort_by(|a, b| b.captured_at.cmp(&a.captured_at).then(b.id.cmp(&a.id)));
+        // Oldest first: the order they ran in.
+        caps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
         let mut out = Vec::new();
         for c in caps {
             let Some(envelope) = c
@@ -5983,6 +5984,57 @@ mod tests {
                 .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
                 .await
                 .is_empty());
+        }
+
+        /// tsk1049: an effort's runs come oldest first, as `seq` numbers them
+        /// and every reader takes the highest `seq` as the latest. A red run
+        /// then a green one reads green last.
+        #[tokio::test]
+        async fn effort_observations_come_oldest_first() {
+            use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
+            let h = build(None).await;
+            let report = |status| TestReport {
+                suites: vec![TestSuite {
+                    name: "s".into(),
+                    cases: vec![TestCase {
+                        classname: "c".into(),
+                        name: "t1".into(),
+                        status,
+                        time_ms: None,
+                    }],
+                }],
+            };
+            for (status, exit) in [(TestStatus::Failed, 1), (TestStatus::Passed, 0)] {
+                h.service
+                    .record_test_run(
+                        &h.thread,
+                        "cargo test",
+                        Some(exit),
+                        None,
+                        None,
+                        None,
+                        None,
+                        "observed",
+                        "post-tool-bash",
+                        Some(&report(status)),
+                        None,
+                        None,
+                    )
+                    .await
+                    .unwrap();
+            }
+            let failed: Vec<i64> = h
+                .service
+                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
+                .await
+                .iter()
+                .map(|o| {
+                    let p: serde_json::Value =
+                        serde_json::from_str(o.payload_json.as_deref().unwrap()).unwrap();
+                    p["failed"].as_i64().unwrap()
+                })
+                .collect();
+            assert_eq!(failed, vec![1, 0], "the red run, then the green one");
         }
 
         // ---- effort_metric_deltas (tsk250) -------------------------------
