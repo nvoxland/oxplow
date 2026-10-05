@@ -1,5 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { formatShortDateTime } from "./format.js";
 
 // P7.A2: the project's work items are filed on one provider, chosen on
 // Settings → Integrations; the choice is the person's `config.set` of
@@ -184,7 +185,7 @@ test("an active provider that isn't running is said so", async () => {
 test("Sync Now runs provider.sync for that collector", async () => {
   const view = render(<IntegrationsSection />);
   const line = await waitFor(() => view.getByTestId("integration-collector-tracker/fake-work_items"));
-  expect(line.textContent).toContain("work_items: 3 records · last read 2026-10-01T00:00:00Z");
+  expect(line.textContent).toContain(`work_items: 3 records · last read ${formatShortDateTime("2026-10-01T00:00:00Z")}`);
   fireEvent.click(view.getByTestId("integration-sync-tracker/fake-work_items"));
   await waitFor(() =>
     expect(ran).toEqual([["provider.sync", { instance: "tracker/fake", collector: "work_items" }, false]]),
