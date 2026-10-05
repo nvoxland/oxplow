@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   disconnectRemote,
   isRemote,
+  isTokenRefused,
   onRemoteConnectionState,
   remoteBaseUrl,
   type RemoteConnectionState,
@@ -15,8 +16,9 @@ import {
 /// transport.ts), so `restored` is just a brief non-blocking
 /// confirmation — no reload prompt, and it auto-dismisses. The
 /// daemon-side work (agents, watchers) ran through the gap either
-/// way.
-export type BannerState = "hidden" | "down" | "restored";
+/// way. `refused` when the daemon refused this window's token (tsk971):
+/// not a drop, so sticky — only reconnecting with the right token helps.
+export type BannerState = "hidden" | "down" | "restored" | "refused";
 
 /// How long the "reconnected" confirmation lingers before it
 /// auto-dismisses (ms). Non-blocking — purely informational.
@@ -26,6 +28,7 @@ export const RESTORED_AUTO_DISMISS_MS = 4000;
 /// (sticky until dismissed); an "up" with no preceding drop (the
 /// initial connect) stays hidden.
 export function nextBannerState(prev: BannerState, event: RemoteConnectionState): BannerState {
+  if (prev === "refused" || event === "refused") return "refused";
   if (event === "down") return "down";
   return prev === "down" ? "restored" : prev;
 }
@@ -36,9 +39,13 @@ export function RemoteConnectionBanner() {
 
   useEffect(() => {
     if (!isRemote()) return;
-    return onRemoteConnectionState((event) => {
+    const unsubscribe = onRemoteConnectionState((event) => {
       setState((prev) => nextBannerState(prev, event));
     });
+    // A token refused before this mounted (the first calls) fired its
+    // one event already: start from it.
+    if (isTokenRefused()) setState("refused");
+    return unsubscribe;
   }, []);
 
   // The "reconnected" confirmation is informational only — auto-dismiss
@@ -50,6 +57,25 @@ export function RemoteConnectionBanner() {
   }, [state]);
 
   if (!isRemote() || state === "hidden") return null;
+
+  if (state === "refused") {
+    return (
+      <div data-testid="remote-banner-refused" style={{ ...stripStyle, ...downStyle }}>
+        <span>
+          This window's token was refused by the daemon at {remoteBaseUrl()}. Reconnect from the
+          launcher with the token the daemon prints when it starts.
+        </span>
+        <button
+          type="button"
+          data-testid="remote-banner-disconnect"
+          onClick={() => disconnectRemote()}
+          style={buttonStyle}
+        >
+          Disconnect
+        </button>
+      </div>
+    );
+  }
 
   if (state === "down") {
     return (

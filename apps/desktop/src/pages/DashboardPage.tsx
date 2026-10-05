@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { PageVisitApi, Stream, TopVisitedRowApi } from "../api.js";
 import { listRecentPageVisits, subscribePageVisitEvents, topVisitedPages } from "../api.js";
+import { readFailed } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
@@ -80,10 +81,10 @@ function VisitsSections({
         excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
       }).then((rows) => {
         if (!cancelled) setRecent(rows);
-      });
+      }, readFailed("recent pages"));
       void topVisitedPages({ limit: 25, sinceT: since }).then((rows) => {
         if (!cancelled) setTop(rows);
-      });
+      }, readFailed("most visited pages"));
     };
     refresh();
     const off = subscribePageVisitEvents(refresh);

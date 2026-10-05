@@ -381,3 +381,10 @@ function serializeValue(value: unknown): unknown {
     return String(value);
   }
 }
+
+/** A background read's failure handler: logged, never thrown uncaught.
+ *  A read that fails (the daemon gone, this window's token refused) shows
+ *  as what the UI already says about that, not as a page error (tsk971). */
+export function readFailed(what: string): (error: unknown) => void {
+  return (error) => logUi("warn", `couldn't read ${what}`, { error: String(error) });
+}

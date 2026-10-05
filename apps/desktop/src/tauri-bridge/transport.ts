@@ -266,6 +266,11 @@ export async function invoke<T>(name: string, args?: Record<string, unknown>): P
     headers: { "Content-Type": "application/json", ...authHeaders(remoteToken) },
     body: JSON.stringify(args ?? null),
   });
+  if (resp.status === 401) {
+    // The daemon refused this window's token: no retry fixes that.
+    markTokenRefused();
+    throw { code: "UNAUTHORIZED", message: TOKEN_REFUSED, cause: null };
+  }
   if (!resp.ok) {
     // Transport-level failure (tunnel down, daemon restarting).
     throw { code: "TRANSPORT", message: `daemon http ${resp.status}`, cause: null };
@@ -287,9 +292,30 @@ let socket: WebSocket | null = null;
 let reconnectDelayMs = 500;
 
 /// Remote connection lifecycle, for the reconnect banner. "up" fires
-/// on every successful (re)connect; "down" on every drop. Local mode
-/// never fires either.
-export type RemoteConnectionState = "up" | "down";
+/// on every successful (re)connect; "down" on every drop; "refused" once,
+/// when the daemon refuses this window's token (tsk971) — after which the
+/// socket isn't opened or retried, since no retry fixes a wrong token.
+/// Local mode never fires any.
+export type RemoteConnectionState = "up" | "down" | "refused";
+
+/// What a call says when the daemon refused this window's token.
+export const TOKEN_REFUSED =
+  "the daemon refused this window's token; reconnect from the launcher with the token it prints";
+
+let tokenRefused = false;
+
+/// Whether the daemon refused this window's token: every call fails the
+/// same way until the window reconnects with the right one.
+export function isTokenRefused(): boolean {
+  return tokenRefused;
+}
+
+function markTokenRefused(): void {
+  if (tokenRefused) return;
+  tokenRefused = true;
+  socket?.close();
+  notifyConnectionState("refused");
+}
 const connectionStateHandlers = new Set<(s: RemoteConnectionState) => void>();
 
 export function onRemoteConnectionState(
@@ -330,7 +356,7 @@ export function triggerRemoteResync(): void {
 let wasDown = false;
 
 function ensureSocket(): void {
-  if (remoteBase === null || socket !== null) return;
+  if (remoteBase === null || socket !== null || tokenRefused) return;
   // Browsers can't set headers on a WebSocket; the token rides the query.
   const query = remoteToken ? `?token=${encodeURIComponent(remoteToken)}` : "";
   const wsUrl = `${remoteBase.replace(/^http/, "ws")}/events${query}`;
@@ -362,6 +388,8 @@ function ensureSocket(): void {
   };
   ws.onclose = () => {
     socket = null;
+    // A refused token isn't a drop: nothing to wait out or retry.
+    if (tokenRefused) return;
     wasDown = true;
     notifyConnectionState("down");
     // Backoff reconnect; the RemoteConnectionBanner drives the

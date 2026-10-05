@@ -1,13 +1,11 @@
-import { approveProgram } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 // The suite's threads run the fake ACP agent, which does what each
 // `fake:<step>` line of a prompt says.
 
-test("the fake agent's reply streams into the thread's transcript", async ({ page, daemon }) => {
-  // An ACP agent is a project program: it runs once a person approves it.
-  await approveProgram(daemon, "acp-agent", "fake");
+test("the fake agent's reply streams into the thread's transcript", async ({ page }) => {
+  // An ACP agent is a project program; the workspace approved it.
   await page.goto("/");
   const input = page.getByTestId("acp-prompt-input");
   await input.fill("fake:say Hello from the fake agent");

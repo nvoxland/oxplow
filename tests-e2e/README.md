@@ -52,7 +52,9 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
   - `daemon`, one per worker. Its pages open on the stream's seeded
     thread, which runs the project's default agent — the fake ACP agent
-    (`agents: [acp]`) — so the suite never starts a real agent CLI.
+    (`agents: [acp]`) — so the suite never starts a real agent CLI. That
+    agent is a project program, approved at setup as a person would, so
+    no spec depends on another having approved it.
   - A workspace that fails while booting is stopped and removed; each
     fixture tears down in a `finally`.
   - `daemon` is settled before any page opens — boot's background tasks

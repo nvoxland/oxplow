@@ -3,7 +3,7 @@
 // boots the worker's daemon: only `page` (through `storageState`) asks for it.
 import { test as base, expect, type Page } from "@playwright/test";
 
-import { ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
+import { approveProgram, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
 
 type Stream = { id: string };
 type Thread = { id: string; agent: string };
@@ -39,6 +39,10 @@ async function workspace(): Promise<Workspace> {
       });
       return out.rows.length > 0;
     });
+    // Its pages open on the fake ACP agent, a program from the project:
+    // approved first, as a person does before using it, so no spec
+    // depends on another having approved it.
+    await approveProgram(daemon, "acp-agent", "fake");
     return { ...daemon, ...(await seededThread(daemon)) };
   } catch (e) {
     await daemon.stop();

@@ -32,6 +32,7 @@ import { ProposalCard } from "../Proposals/ProposalCard.js";
 import { panelAlerts, useExtensionPanelRuns, type PanelAlert, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../opErrorsStore.js";
+import { readFailed } from "../../logger.js";
 import {
   listCommentsForStream,
   listRecentPageVisits,
@@ -1628,7 +1629,7 @@ function useHistoryRows(threadId: string | null): HistoryRowsState {
         excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
       }).then((rows) => {
         if (!cancelled) setRecent(rows);
-      });
+      }, readFailed("recent pages"));
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       void topVisitedPages({
         threadId,
@@ -1637,7 +1638,7 @@ function useHistoryRows(threadId: string | null): HistoryRowsState {
         excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
       }).then((rows) => {
         if (!cancelled) setTop(rows);
-      });
+      }, readFailed("most visited pages"));
     };
     refresh();
     const off = subscribePageVisitEvents(refresh);
@@ -1659,7 +1660,7 @@ function useHistoryRows(threadId: string | null): HistoryRowsState {
       for (const p of pages) map[p.slug] = p.title;
       setWikiTitles(map);
       setTitleReads(reads);
-    });
+    }, readFailed("wiki page titles"));
     return () => {
       cancelled = true;
     };

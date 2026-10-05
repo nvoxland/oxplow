@@ -141,7 +141,14 @@ developer-facing mechanics.
   — no reload prompt. Agents on the daemon box run through the gap.
   (A genuine version/schema skew after a backend upgrade would still
   warrant a reload prompt; there's no skew detection yet, so nothing
-  surfaces one today.)
+  surfaces one today.) **A refused token is not a drop** (tsk971): an
+  `/ipc` 401 marks the transport refused (`isTokenRefused`), each call
+  fails `UNAUTHORIZED` with what to do, the socket is closed and never
+  retried, and the banner shows `remote-banner-refused` — "this window's
+  token was refused… reconnect from the launcher" — sticky, since no
+  retry fixes it. The health probe counts a refusal as the daemon
+  answering, so the "Backend daemon disconnected" overlay doesn't show;
+  background reads fail through `readFailed` (logged), never uncaught.
 
 ## Deployment model (v1)
 

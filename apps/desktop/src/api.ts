@@ -2596,8 +2596,10 @@ export async function probeDaemon(): Promise<boolean> {
   try {
     unwrap(await commands.ping());
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    // A refused token is the daemon answering: it's there, and the
+    // banner says what's wrong (tsk971).
+    return e instanceof IpcCallError && e.code === "UNAUTHORIZED";
   }
 }
 
