@@ -2,7 +2,9 @@ import Link from "@tiptap/extension-link";
 
 /**
  * Tiptap Link mark extended to permit our internal URL schemes
- * (`file:`, `dir:`, `commit:`, `work_item:`). Tiptap's default `Link` allowlists
+ * (`file:`, `dir:`, `commit:`, `work_item:`, and `oxplow-invalid:` — the
+ * link an unresolvable wikilink is kept as, so it saves back as `[[…]]`
+ * rather than losing its mark; tsk1007). Tiptap's default `Link` allowlists
  * http/https/mailto/ftp; without this extension our schemes either
  * get stripped on parse or fail the click-validation in the standard
  * link plugin.
@@ -24,7 +26,13 @@ import Link from "@tiptap/extension-link";
  * name match against its internal `link` extension and invokes
  * `setup(md)` at parse time.
  */
-const INTERNAL_PROTOCOL_RE = /^(file|dir|commit|work_item):/i;
+const INTERNAL_PROTOCOL_RE = /^(file|dir|commit|work_item|oxplow-invalid):/i;
+
+/** Whether `url` is one of our schemes. Tiptap may hand a link with no
+ *  href over as null. */
+function internal(url: string | null | undefined): boolean {
+  return typeof url === "string" && INTERNAL_PROTOCOL_RE.test(url.trim());
+}
 
 export const InternalLink = Link.extend({
   // Allow our schemes through the URL sanitizer — `isAllowedUri`, which
@@ -39,7 +47,7 @@ export const InternalLink = Link.extend({
       autolink: false,
       protocols: [],
       isAllowedUri: (url: string, ctx: { defaultValidate: (url: string) => boolean }) =>
-        INTERNAL_PROTOCOL_RE.test(url.trim()) || ctx.defaultValidate(url),
+        internal(url) || ctx.defaultValidate(url),
     };
   },
   addStorage() {
@@ -50,7 +58,7 @@ export const InternalLink = Link.extend({
           setup(md: { validateLink: (url: string) => boolean }) {
             const original = md.validateLink.bind(md);
             md.validateLink = (url: string) => {
-              if (INTERNAL_PROTOCOL_RE.test(url.trim())) return true;
+              if (internal(url)) return true;
               return original(url);
             };
           },

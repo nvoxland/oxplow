@@ -24,3 +24,20 @@ test("internal links are allowed and a script url isn't", () => {
   }
   expect(options.isAllowedUri("javascript:alert(1)", ctx)).toBe(false);
 });
+
+// tsk1007: an invalid wikilink is an `oxplow-invalid:` link (the preprocess
+// keeps what it can't resolve as one), kept through the editor so it saves
+// back as `[[…]]`; and a link Tiptap hands over without an href doesn't
+// throw.
+test("an invalid wikilink's link is kept, and a missing href doesn't throw", () => {
+  const ctx = { defaultValidate: (u: string | null) => !u || /^(https?|mailto):/i.test(u), protocols: [] };
+  expect(options.isAllowedUri("oxplow-invalid:%2313", ctx)).toBe(true);
+  expect(() => options.isAllowedUri(null as unknown as string, ctx)).not.toThrow();
+  const storage = (InternalLink.config.addStorage as () => {
+    markdown: { parse: { setup(md: { validateLink: (url: string) => boolean }): void } };
+  }).call({ parent: undefined });
+  const md = { validateLink: (_url: string) => false };
+  storage.markdown.parse.setup(md);
+  expect(md.validateLink("oxplow-invalid:%2313")).toBe(true);
+  expect(md.validateLink("javascript:alert(1)")).toBe(false);
+});

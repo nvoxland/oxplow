@@ -76,7 +76,10 @@ show the pencil — that's the consistent signal "this is for reading."
 - **`InternalLink.ts`** — extends Tiptap's standard `Link` mark to
   allow `file:`, `dir:`, `commit:`, `work_item:` URL schemes through the
   URL sanitizer — Link's `isAllowedUri`, which every parse, render and
-  set-link check goes through. **Never as Link's `protocols`**: Tiptap
+  set-link check goes through — and `oxplow-invalid:`, the link an
+  unresolvable wikilink is kept as, so it saves back as `[[…]]` instead
+  of plain text; a link Tiptap hands over with a null href is passed to
+  the default check, never `.trim()`med (tsk1007). **Never as Link's `protocols`**: Tiptap
   registers those with linkify (for autolinking, off here), and linkify
   throws on a scheme it can't tokenize — `work_item`'s underscore broke
   every rich-text field (tsk974; `InternalLink.test.ts`). `openOnClick:
