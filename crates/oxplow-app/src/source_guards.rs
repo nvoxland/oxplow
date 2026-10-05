@@ -153,6 +153,8 @@ fn emitters() -> BTreeSet<(String, String)> {
 #[rustfmt::skip]
 const EMITTERS: &[(&str, &str)] = &[
     ("AgentStallAlert", "crates/oxplow-app/src/agent_stall_watch.rs"),
+    // A person's approval is per machine, in no model (tsk1040).
+    ("ApprovalsChanged", "crates/oxplow-rpc/src/commands/collectors.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),

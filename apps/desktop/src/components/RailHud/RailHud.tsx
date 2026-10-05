@@ -44,6 +44,7 @@ import {
 } from "../../api.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 import { readWikiPages } from "../../knowledge.js";
+import { goToSettingsSection } from "../../pages/settingsSections.js";
 
 export interface UncommittedSummary {
   added: number;
@@ -1253,7 +1254,10 @@ function AlertsSection({
         <button
           type="button"
           data-testid="rail-alert-delivery"
-          onClick={() => onOpenPage(indexRef("settings"))}
+          onClick={() => {
+            goToSettingsSection("settings-data-delivery");
+            onOpenPage(indexRef("settings"));
+          }}
           title="Open Settings → Data → Delivery"
           style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
         >

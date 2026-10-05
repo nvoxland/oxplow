@@ -85,9 +85,12 @@ export function IntegrationsSection() {
   useEffect(() => {
     void refresh();
     return subscribeOxplowEvents((event) => {
-      // A sign-in finishing changes only the keychain: there is no model
-      // to re-read, so the instances are read again.
-      if (event.kind === "configChanged" || event.kind === "credentialChanged") void refresh();
+      // A sign-in finishing changes only the keychain, and an approval only
+      // this machine's approvals: there is no model to re-read, so the
+      // instances are read again (tsk1040).
+      if (event.kind === "configChanged" || event.kind === "credentialChanged" || event.kind === "approvalsChanged") {
+        void refresh();
+      }
     });
   }, [refresh]);
 
@@ -627,7 +630,9 @@ function IntegrationRow({
         );
       })}
       {m.needsApproval ? (
-        <div style={mutedStyle}>Its program isn&apos;t approved on this machine yet: see Data → Programs.</div>
+        <div style={mutedStyle} data-testid={`integration-needs-approval-${m.key}`}>
+          Its program isn&apos;t approved on this machine yet: see Data → Programs.
+        </div>
       ) : null}
       {view.credentials.map((c) =>
         c.signIn ? (

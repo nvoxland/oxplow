@@ -27,7 +27,10 @@ pub async fn approve_collector(
 ) -> Result<(), IpcError> {
     let root = svc.worktrees.resolve(None).await;
     collector_runner::approve_reviewed(&Collectors::of(svc, &root), &owner, &id, &version)
-        .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
+        .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))?;
+    svc.events
+        .emit(oxplow_app::events::OxplowEvent::ApprovalsChanged);
+    Ok(())
 }
 
 /// Set (or clear with `null`) a credential an extension's collector or
@@ -133,6 +136,8 @@ pub async fn approve_project_program(
         }
         _ => {}
     }
+    svc.events
+        .emit(oxplow_app::events::OxplowEvent::ApprovalsChanged);
     Ok(oxplow_app::exec_consent::list(
         &svc.approvals,
         &svc.layout.project_dir,
@@ -218,6 +223,30 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, "INVALID");
+    }
+
+    /// tsk1040: approving a program says so, so what shows its approval
+    /// (Settings → Integrations) refreshes instead of staying stale.
+    #[tokio::test]
+    async fn approving_a_program_announces_it() {
+        let (svc, _dir) = crate::test_support::services();
+        let mut events = svc.events.subscribe_ui();
+        let listed = crate::dispatch("list_project_programs", serde_json::json!({}), &svc)
+            .await
+            .unwrap();
+        let version = listed[0]["version"].as_str().unwrap().to_string();
+        crate::dispatch(
+            "approve_project_program",
+            serde_json::json!({ "kind": "effect", "name": "oxplow-review/verify-unchecked", "version": version }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let mut heard = false;
+        while let Ok(e) = events.try_recv() {
+            heard |= matches!(e, oxplow_app::events::OxplowEvent::ApprovalsChanged);
+        }
+        assert!(heard, "approving announced nothing");
     }
 
     #[tokio::test]

@@ -48,6 +48,14 @@ Things I keep forgetting. Read this before adding any UI.
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
   `apps/desktop/src/pages/SettingsPage.tsx` — full Page tab, no backdrop.
+- **A long page has an index, and a link lands on its section**
+  (tsk1040). Settings opens with an index of its sections
+  (`pages/settingsSections.ts`, `SETTINGS_SECTIONS`); an alert or link that
+  means one section calls `goToSettingsSection(id)` before opening the
+  page — an open Settings scrolls there, a closed one takes the pending
+  request when it mounts. A page that shows state from outside any model
+  refreshes on the event that says it changed (Integrations and Data on
+  `approvalsChanged`, sent when a person approves a program).
 - **Never call `window.prompt()`.** The Tauri webview blocks it —
   it returns `null` synchronously without
   showing anything, so any code path gated on its return value

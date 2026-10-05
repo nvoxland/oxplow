@@ -138,6 +138,11 @@ pub enum OxplowEvent {
     /// extensions contribute — the launcher, pages, panels, slots —
     /// reloads, and a lens re-runs its definition.
     ExtensionsChanged,
+    /// A person approved a program on this machine (a provider, collector,
+    /// effect, component, ACP agent): what shows approval state —
+    /// Settings → Integrations and Data — refreshes (tsk1040). Approvals
+    /// are per machine, not config, so `ConfigChanged` never said so.
+    ApprovalsChanged,
     /// `.git` directory appeared/disappeared at the project root —
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.

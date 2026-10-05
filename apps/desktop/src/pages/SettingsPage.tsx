@@ -22,6 +22,7 @@ import { AiSection } from "../components/AiSection.js";
 import { ProposalCard } from "../components/Proposals/ProposalCard.js";
 import { decide, proposalForSetting, useProposals, type Proposal } from "../proposals.js";
 import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
+import { onSettingsSection, scrollToSettingsSection, SETTINGS_SECTIONS, takeSettingsSection } from "./settingsSections.js";
 
 export interface SettingsPageProps {
   /** Closes the page (caller closes the tab). Optional — settings can be a
@@ -37,6 +38,13 @@ export interface SettingsPageProps {
  * (agents, AI, language servers, extensions, integrations, programs).
  */
 export function SettingsPage({ onClose }: SettingsPageProps) {
+  // Land on the section an alert or link asked for (tsk1040): the one
+  // asked before this opened, and each one asked while it's open.
+  useEffect(() => {
+    const pending = takeSettingsSection();
+    if (pending) requestAnimationFrame(() => scrollToSettingsSection(pending));
+    return onSettingsSection(scrollToSettingsSection);
+  }, []);
   const [promptAppend, setPromptAppend] = useState("");
   const [agents, setAgentsState] = useState<AgentKind[]>(["claude"]);
   const [opencodeModel, setOpencodeModel] = useState("");
@@ -109,7 +117,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       }
     >
       <div style={{ padding: "20px 24px", maxWidth: 820 }}>
-        <Section title="Every Setting">
+        <nav data-testid="settings-index" aria-label="Settings sections" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
+          {SETTINGS_SECTIONS.map((s) => (
+            <button key={s.id} type="button" data-testid={`settings-index-${s.id}`} onClick={() => scrollToSettingsSection(s.id)}>
+              {s.title}
+            </button>
+          ))}
+        </nav>
+        <Section title="Every Setting" id="settings-every">
           <Hint>
             What shapes this project, where each value comes from, and Ask the Agent to Change This. When the agent
             changes a setting only a person may change, its change waits on the setting's row (and in Approvals) for
@@ -160,7 +175,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           ) : null}
         </Section>
 
-        <Section title="Agent Prompt Additions">
+        <Section title="Agent Prompt Additions" id="settings-prompt">
           <Hint>
             Text appended to every agent's system prompt. Applies to agent sessions started after Save —
             existing sessions keep the prompt they launched with. Stored in <code>.oxplow/project.yaml</code>.
@@ -194,7 +209,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <ExtensionsSection />
         </Section>
 
-        <Section title="Data">
+        <Section title="Data" id="settings-data">
           <Hint>
             What oxplow can query: its own data and what extension sources bring in, with row counts. Lenses,
             metrics and agents read these through SQL. Sources run here, and programs the project&apos;s config would run

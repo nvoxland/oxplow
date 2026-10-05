@@ -86,7 +86,7 @@ export function DataSection() {
     // Scheduled and agent-triggered runs land here too: each commits its
     // `collector_run` row.
     return subscribeOxplowEvents((event) => {
-      if (collectorRan(event)) void refresh();
+      if (collectorRan(event) || event.kind === "approvalsChanged") void refresh();
     });
   }, [refresh]);
 
@@ -259,7 +259,7 @@ export function DataSection() {
           );
         })
       )}
-      <h3 style={subheadStyle}>Programs</h3>
+      <h3 style={subheadStyle} id="settings-data-programs">Programs</h3>
       {programs.length === 0 ? (
         <div style={mutedStyle} data-testid="data-programs-empty">
           This project&apos;s config runs no programs.
@@ -308,7 +308,7 @@ export function DataSection() {
           );
         })
       )}
-      <h3 style={subheadStyle}>Delivery</h3>
+      <h3 style={subheadStyle} id="settings-data-delivery">Delivery</h3>
       {failedReactions.map((r) => {
         const key = `${r.effect}-${r.eventId}`;
         return (
