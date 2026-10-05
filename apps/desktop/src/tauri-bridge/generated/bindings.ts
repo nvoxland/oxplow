@@ -3259,6 +3259,11 @@ export type LensColumn = {
 	// Header text; defaults to `key`.
 	label?: string | null,
 	link?: LensLink | null,
+	/**
+	 *  A column of the same row holding this one's unit (`ms`, `%`,
+	 *  `lines`): a number shows as a metric value in it (tsk1038).
+	 */
+	unit?: string | null,
 };
 
 // A `custom` lens's component and the props it starts with.

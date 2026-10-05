@@ -431,6 +431,10 @@ pub struct LensColumn {
     pub label: Option<String>,
     #[serde(default)]
     pub link: Option<LensLink>,
+    /// A column of the same row holding this one's unit (`ms`, `%`,
+    /// `lines`): a number shows as a metric value in it (tsk1038).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// A value the viewer (or an agent) can set when running the lens,
@@ -3020,6 +3024,7 @@ async fn prepare(
                 }
                 for c in &run.lens.columns {
                     let mut keys = vec![&c.key];
+                    keys.extend(c.unit.iter());
                     if let Some(link) = c.link.as_ref() {
                         keys.extend(link.from.iter());
                         keys.extend(link.line.iter());

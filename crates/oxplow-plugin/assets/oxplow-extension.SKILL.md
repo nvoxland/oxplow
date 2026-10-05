@@ -113,6 +113,7 @@ viz: table                      # table | list | number | markdown | bar | line 
 columns:                        # optional; controls headers, order and links
   - { key: title, label: Task, link: { kind: task, from: id } }
   - { key: status }
+  # - { key: took, unit: unit }  # a number shown in another column's unit (ms, %, lines)
 empty: Nothing is waiting on you.
 ```
 

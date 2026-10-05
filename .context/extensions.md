@@ -864,10 +864,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `tree` (`id`, `parent`, `label`), `timeline` (`at`, `label`, `ref`),
   `steps` (`label`, `status`), `hunks` (`path`, `from`, `to` — two
   revisions, `working` / `snap:<id>` / `git:<rev>`).
-- `columns`: `key`, `label`, and `link: {kind, from, line?, base?, head?}`
-  to a core page, so rows are page-graph links. Kinds: `task`, `file`,
+- `columns`: `key`, `label`, `link: {kind, from, line?, base?, head?}`
+  to a core page, so rows are page-graph links (kinds: `task`, `file`,
   `wiki`, `effort-diff`, `commit`, `metric`, `page`, `diff-at`,
-  `compare`.
+  `compare`), and `unit` — another column of the row holding this one's
+  unit, so a number shows as a metric value (`16.4 s`, `42.5%`; tsk1038).
+  A timestamp cell shows in local time, its full time on hover.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
   row? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
   for whoever pressed, so they grant no power.

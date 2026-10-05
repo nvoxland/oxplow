@@ -4,6 +4,7 @@
  * entries for loaded lenses. React-free so it's unit-tested directly.
  * See `.context/extensions.md`.
  */
+import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import type { Extension, Lens, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
@@ -18,6 +19,8 @@ export interface DisplayColumn {
   /** Position in the result row. */
   index: number;
   link: LensLink | null;
+  /** Position of the column holding this one's unit, if it names one. */
+  unitIndex: number | null;
 }
 
 /** Columns to render, in order. Declared `columns` win (skipping keys the
@@ -25,13 +28,14 @@ export interface DisplayColumn {
  *  every result column, labelled by name. */
 export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColumn[] {
   if (lens.columns.length === 0) {
-    return resultColumns.map((key, index) => ({ key, label: key, index, link: null }));
+    return resultColumns.map((key, index) => ({ key, label: key, index, link: null, unitIndex: null }));
   }
   const out: DisplayColumn[] = [];
   for (const c of lens.columns) {
     const index = resultColumns.indexOf(c.key);
     if (index === -1) continue;
-    out.push({ key: c.key, label: c.label ?? c.key, index, link: c.link ?? null });
+    const unitIndex = c.unit ? resultColumns.indexOf(c.unit) : -1;
+    out.push({ key: c.key, label: c.label ?? c.key, index, link: c.link ?? null, unitIndex: unitIndex === -1 ? null : unitIndex });
   }
   return out;
 }
@@ -112,11 +116,22 @@ export function cellLinkRef(
   }
 }
 
-/** Plain-text rendering of one cell. */
-export function formatCell(v: SqlCell): string {
+/** A stored timestamp (ISO-8601 with a time and a zone), not a bare date. */
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
+
+/** Whether `v` is a stored timestamp — shown in local time (tsk1038). */
+export function isTimestamp(v: SqlCell): v is string {
+  return typeof v === "string" && TIMESTAMP.test(v);
+}
+
+/** Plain-text rendering of one cell: a timestamp in local time, as the rest
+ *  of the app shows times; a number with its `unit` (another cell's value,
+ *  `LensColumn.unit`) as a metric value (tsk1038). */
+export function formatCell(v: SqlCell, unit?: SqlCell): string {
   if (v === null) return "—";
   if (typeof v === "boolean") return v ? "yes" : "no";
-  if (typeof v === "number") return String(v);
+  if (typeof v === "number") return typeof unit === "string" ? formatMetricValue(v, unit) : String(v);
+  if (isTimestamp(v)) return formatShortDateTime(v);
   return v;
 }
 

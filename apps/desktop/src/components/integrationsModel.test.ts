@@ -125,7 +125,9 @@ test("collectorLine says what a collector's reads delivered", async () => {
   const { collectorLine } = await import("./integrationsModel.js");
   const base = { name: "work_items", entity: "work_item", status: "ok", error: null, lastReadAt: "2026-10-01T00:00:00Z", records: 3 };
   expect(collectorLine({ ...base, status: "never", records: 0, lastReadAt: null })).toEqual({ text: "work_items: not read yet", problem: false });
-  expect(collectorLine(base).text).toBe("work_items: 3 records · last read 2026-10-01T00:00:00Z");
+  // In local time, as the rest of the app shows times (tsk1038).
+  const { formatShortDateTime } = await import("./format.js");
+  expect(collectorLine(base).text).toBe(`work_items: 3 records · last read ${formatShortDateTime("2026-10-01T00:00:00Z")}`);
   const failed = collectorLine({ ...base, status: "error", error: "timed out" });
   expect(failed.problem).toBe(true);
   expect(failed.text).toContain("its last read failed (timed out)");

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions } from "./lensModel.js";
+import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp } from "./lensModel.js";
+import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -29,22 +30,22 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
 describe("displayColumns", () => {
   test("without declared columns shows every result column by name", () => {
     expect(displayColumns(lens(), ["id", "title"])).toEqual([
-      { key: "id", label: "id", index: 0, link: null },
-      { key: "title", label: "title", index: 1, link: null },
+      { key: "id", label: "id", index: 0, link: null, unitIndex: null },
+      { key: "title", label: "title", index: 1, link: null, unitIndex: null },
     ]);
   });
 
-  test("declared columns set order, labels and links, and skip keys the result lacks", () => {
+  test("declared columns set order, labels, links and units, and skip keys the result lacks", () => {
     const l = lens({
       columns: [
-        { key: "title", label: "Task", link: { kind: "task", from: "id", line: null, base: null, head: null } },
-        { key: "missing", label: null, link: null },
-        { key: "id", label: null, link: null },
+        { key: "title", label: "Task", link: { kind: "task", from: "id", line: null, base: null, head: null }, unit: null },
+        { key: "missing", label: null, link: null, unit: null },
+        { key: "id", label: null, link: null, unit: "u" },
       ],
     });
-    expect(displayColumns(l, ["id", "title"])).toEqual([
-      { key: "title", label: "Task", index: 1, link: { kind: "task", from: "id", line: null, base: null, head: null } },
-      { key: "id", label: "id", index: 0, link: null },
+    expect(displayColumns(l, ["id", "title", "u"])).toEqual([
+      { key: "title", label: "Task", index: 1, link: { kind: "task", from: "id", line: null, base: null, head: null }, unitIndex: null },
+      { key: "id", label: "id", index: 0, link: null, unitIndex: 2 },
     ]);
   });
 });
@@ -74,6 +75,21 @@ describe("formatCell", () => {
     expect(formatCell(1200)).toBe("1200"); // ids must not get grouping separators
     expect(formatCell(true)).toBe("yes");
     expect(formatCell("x")).toBe("x");
+  });
+  // tsk1038: one time format — a stored timestamp shows in local time, as
+  // the rest of the app does; a day (a chart bucket) stays a day.
+  test("a timestamp shows in local time; a date stays a date", () => {
+    const at = "2026-10-05T04:55:02.914532Z";
+    expect(formatCell(at)).toBe(formatShortDateTime(at));
+    expect(formatCell(at)).not.toContain("T04:55");
+    expect(formatCell("2026-10-05")).toBe("2026-10-05");
+    expect(isTimestamp(at)).toBe(true);
+    expect(isTimestamp("2026-10-05")).toBe(false);
+  });
+  test("a number with a unit shows it", () => {
+    expect(formatCell(16446, "ms")).toBe(formatMetricValue(16446, "ms"));
+    expect(formatCell(42.5, "%")).toBe("42.5%");
+    expect(formatCell(7, null)).toBe("7");
   });
 });
 

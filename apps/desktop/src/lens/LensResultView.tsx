@@ -5,7 +5,7 @@ import type { LensAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
 import { TrendChart } from "../components/charts/TrendChart.js";
 import { squarify } from "../components/charts/squarify.js";
-import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
+import { formatFullDateTime, formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
@@ -21,6 +21,7 @@ import {
   displayColumns,
   formatCell,
   hunkRows,
+  isTimestamp,
   limitRows,
   lineSeries,
   rowAsk,
@@ -227,7 +228,10 @@ function RowsBody({
   }
   const cols = displayColumns(lens, result.columns);
   const cell: CellRenderer = (row, c) => {
-    const text = formatCell(row[c.index] ?? null);
+    const raw = row[c.index] ?? null;
+    const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null));
+    // A timestamp keeps its full local time a hover away.
+    const text = isTimestamp(raw) ? <span title={formatFullDateTime(raw)}>{formatted}</span> : formatted;
     const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
     if (!ref) return text;
     const link = (

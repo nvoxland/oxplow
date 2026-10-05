@@ -3,6 +3,7 @@
 /// what the person can do about it.
 
 import type { CollectorView, ProviderInstanceView, SignInState } from "../tauri-bridge/generated/bindings.js";
+import { formatShortDateTime } from "./format.js";
 
 export interface IntegrationRowModel {
   key: string;
@@ -174,6 +175,11 @@ export function activeProviderProblem(choices: WorkItemsChoice[], active: string
 
 /** One collector's line (P7.A3): what its reads have delivered and when
  *  it last read. */
+/** When `c` was last read, in local time (tsk1038). */
+function lastRead(c: CollectorView): string {
+  return c.lastReadAt ? formatShortDateTime(c.lastReadAt) : "";
+}
+
 export function collectorLine(c: CollectorView): { text: string; problem: boolean } {
   const records = `${c.records} ${c.records === 1 ? "record" : "records"}`;
   switch (c.status) {
@@ -182,8 +188,8 @@ export function collectorLine(c: CollectorView): { text: string; problem: boolea
     case "reading":
       return { text: `${c.name}: reading… · ${records}`, problem: false };
     case "error":
-      return { text: `${c.name}: its last read failed (${c.error ?? "unknown"}) · ${records} · ${c.lastReadAt ?? ""}`, problem: true };
+      return { text: `${c.name}: its last read failed (${c.error ?? "unknown"}) · ${records} · ${lastRead(c)}`, problem: true };
     default:
-      return { text: `${c.name}: ${records} · last read ${c.lastReadAt ?? ""}`, problem: false };
+      return { text: `${c.name}: ${records} · last read ${lastRead(c)}`, problem: false };
   }
 }

@@ -2,7 +2,7 @@ title: Metrics
 description: How the effort moved the metrics oxplow tracks. Tests, coverage, analysis, tokens and nudges have their own sections and are left out.
 params: [{ name: effort_id }]
 query: |
-  SELECT key, title,
+  SELECT key, title, unit,
          CASE category
            WHEN 'operational' THEN 'Activity'
            WHEN 'custom' THEN 'Custom'
@@ -25,9 +25,9 @@ query: |
 columns:
   - { key: title, label: Metric, link: { kind: metric, from: key } }
   - { key: area, label: Area }
-  - { key: before, label: Before }
-  - { key: after, label: After }
-  - { key: delta, label: Δ }
+  - { key: before, label: Before, unit: unit }
+  - { key: after, label: After, unit: unit }
+  - { key: delta, label: Δ, unit: unit }
   - { key: move, label: Move }
   - { key: crossing, label: Threshold }
 empty: No metrics collected for this effort.
