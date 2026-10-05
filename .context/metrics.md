@@ -1461,7 +1461,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest` — tsk22, tsk860) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' ∪ `use:`-enabled built-ins; an id two owners declare runs once, project > extension > built-in) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
+| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' ∪ `use:`-enabled built-ins and the default-on ones (`DEFAULT_ON`, unless a marker disables them); an id two owners declare runs once, project > extension > built-in) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
@@ -1699,8 +1699,12 @@ The mechanics behind those controls (unchanged by tsk117):
   "always on" class is retired: producers/plugins can be enabled/disabled just
   like code metrics. `catalog()` reads each row's `enabled` from config
   (`config_state`): a built-in code metric is on only when a non-disabled `use:`
-  resolves it; producers/plugins are default-ON unless an `enabled: false`
-  marker disables them.
+  resolves it — except `builtin_metrics::DEFAULT_ON` (`oxplow.todos`,
+  `fn_count`, `long_functions`, `high_complexity_fns`: what fills
+  `v_function`, so a new project can answer "which functions are longest";
+  tsk1034), which `resolved_specs` uses unless the project mentions them;
+  producers/plugins are default-ON unless an `enabled: false` marker
+  disables them, and so are those four.
 - **Enable/disable** via the `metric.enable { keys, enabled }` command
   (`commands/metric.rs`; the desktop's `enable_metrics` IPC runs it as the
   person) — it computes the new `metrics:` list and hands it to

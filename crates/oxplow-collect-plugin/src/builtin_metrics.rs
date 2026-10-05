@@ -93,6 +93,17 @@ const RUST: &[BuiltinMetric] = &[
     },
 ];
 
+/// The built-in gauges a project runs without a `metrics: - use:` entry
+/// (tsk1034): the ones behind `v_function` — so a new project can answer
+/// "which functions are longest" — and the TODO count. An `enabled: false`
+/// marker turns one off; every other built-in runs only when `use:`d.
+pub const DEFAULT_ON: &[&str] = &[
+    "oxplow.todos",
+    "oxplow.fn_count",
+    "oxplow.high_complexity_fns",
+    "oxplow.long_functions",
+];
+
 /// Language-agnostic code metrics (tsk314): one metric per concept, driven by
 /// the per-language capability layer (`source_files()` + `code_metrics()` /
 /// `markers()`). `language: ""` → no single language (the seeded definition's

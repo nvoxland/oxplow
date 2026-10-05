@@ -477,7 +477,10 @@ mod tests {
             "every predecessor, for ordering"
         );
         assert!(consumer.handles("effort.claim_verified"));
-        assert!(!consumer.handles("snapshot.taken"));
+        // The default-on code gauges handle `snapshot.taken` (tsk1034); an
+        // event no collector names isn't handled.
+        assert!(consumer.handles("snapshot.taken"));
+        assert!(!consumer.handles("work_item.created"));
         assert!(!consumer.handles("collector.synced"));
     }
 

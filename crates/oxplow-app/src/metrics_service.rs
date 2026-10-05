@@ -489,11 +489,26 @@ impl MetricsService {
     /// activates one with `metrics: - use: oxplow.<lang>.<name>` and its own
     /// `key:` specs.
     fn resolved_specs(&self) -> Vec<ResolvedSpec> {
-        let project = self
+        let mut project = self
             .config
             .read()
             .map(|c| c.metrics.clone())
             .unwrap_or_default();
+        // The default-on built-ins (tsk1034) are used unless the project
+        // mentions them (its own `use:` or an `enabled: false` marker).
+        let mentioned: std::collections::HashSet<String> = project
+            .iter()
+            .filter_map(|e| e.use_key.clone().or_else(|| e.key.clone()))
+            .collect();
+        project.extend(
+            oxplow_collect_plugin::builtin_metrics::DEFAULT_ON
+                .iter()
+                .filter(|k| !mentioned.contains(**k))
+                .map(|k| MetricEntry {
+                    use_key: Some((*k).to_string()),
+                    ..Default::default()
+                }),
+        );
         let global = self.with_global_catalog(|g| g.metrics.clone());
         let builtin = builtin_spec_entries();
         let ext = self.extension_catalog();
@@ -1000,6 +1015,9 @@ impl MetricsService {
     /// the presence of a `use:` entry. Drives the config edit shape in
     /// [`Self::apply_metric_enabled`].
     fn is_default_on(&self, key: &str) -> bool {
+        if oxplow_collect_plugin::builtin_metrics::DEFAULT_ON.contains(&key) {
+            return true;
+        }
         let is_builtin_gauge = builtin_metrics().iter().any(|m| m.key == key);
         let is_global =
             self.with_global_catalog(|g| g.metrics.iter().any(|e| e.key.as_deref() == Some(key)));
@@ -3244,7 +3262,8 @@ mod tests {
             .read(|c| {
                 c.query_row(
                     "SELECT (SELECT count(*) FROM metric_capture WHERE producer = 'repo.once'),
-                            (SELECT count(*) FROM event_log WHERE type = 'collector.synced')",
+                            (SELECT count(*) FROM event_log WHERE type = 'collector.synced'
+                               AND json_extract(payload, '$.collector') = 'collector:project/repo.once')",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -3685,6 +3704,40 @@ mod tests {
         let (status, error, facts) = run_one_fact(&svc, &dir, "lines", "repo.lines.count").await;
         assert_eq!((status.as_str(), error), ("ok", None));
         assert_eq!(facts, 1);
+    }
+
+    /// tsk1034: a new project has function data — the code gauges behind
+    /// `v_function` and the TODO count run without a `use:` entry; an
+    /// `enabled: false` marker still turns one off.
+    #[tokio::test]
+    async fn the_code_gauges_run_by_default_and_a_marker_turns_one_off() {
+        let (svc, _dir) = fixture().await;
+        let keys = |svc: &crate::Services| -> Vec<String> {
+            svc.metrics
+                .fact_collectors()
+                .into_iter()
+                .map(|c| c.key)
+                .collect()
+        };
+        for key in [
+            "oxplow.todos",
+            "oxplow.fn_count",
+            "oxplow.long_functions",
+            "oxplow.high_complexity_fns",
+        ] {
+            assert!(
+                keys(&svc).iter().any(|k| k == key),
+                "{key} isn't on: {:?}",
+                keys(&svc)
+            );
+        }
+        svc.config.write().unwrap().metrics = vec![oxplow_config::MetricEntry {
+            use_key: Some("oxplow.todos".into()),
+            enabled: Some(false),
+            ..Default::default()
+        }];
+        assert!(!keys(&svc).iter().any(|k| k == "oxplow.todos"));
+        assert!(keys(&svc).iter().any(|k| k == "oxplow.fn_count"));
     }
 
     fn starlark_gauge(key: &str, entry_file: &str) -> FactCollector {
