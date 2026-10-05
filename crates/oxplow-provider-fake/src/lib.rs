@@ -25,7 +25,10 @@
 //! in memory.
 //!
 //! **Hooks**, from `OXPLOW_FAKE_HOOKS` at start or a `fake/hooks { hooks }`
-//! notification later (comma-separated):
+//! notification later (comma-separated). A notification **replaces** the
+//! hooks — `""` clears them — keeping only what the fake declared at
+//! `initialize` (`plain-writes`, `bad-declarations`), which a running
+//! process can't take back (tsk1001):
 //! - `fail-next:<n>` — the next `n` `check` / `invoke` / `read` calls fail
 //!   (`Internal`);
 //! - `slow-check:<ms>` — every `check` takes `ms` first;
@@ -129,6 +132,16 @@ impl Hooks {
         let mut hooks = Hooks::default();
         hooks.apply(spec);
         hooks
+    }
+
+    /// The hooks a `fake/hooks` notification sets: `spec`'s, over what was
+    /// declared at `initialize`.
+    pub fn replaced(&self, spec: &str) -> Hooks {
+        Hooks {
+            plain_writes: self.plain_writes,
+            bad_declarations: self.bad_declarations,
+            ..Hooks::parse(spec)
+        }
     }
 
     fn apply(&mut self, spec: &str) {
@@ -426,7 +439,8 @@ where
             }
             Incoming::Notification { method, params } if method == "fake/hooks" => {
                 let spec = params.get("hooks").and_then(Value::as_str).unwrap_or("");
-                world.lock().await.hooks.apply(spec);
+                let mut world = world.lock().await;
+                world.hooks = world.hooks.replaced(spec);
             }
             Incoming::Notification { .. } => {}
             Incoming::Request { id, method, params } => {

@@ -1773,6 +1773,20 @@ async fn set_hooks(fx: &EffortFixture, hooks: &str) {
     instance.hook(hooks).await;
 }
 
+/// tsk1001: a hooks notification replaces the last one — `set_hooks(fx,
+/// "")` clears a slow call — so a test that sets hooks and clears them
+/// runs on the fake it means to.
+#[tokio::test]
+async fn the_fakes_hooks_are_replaced_not_merged() {
+    let (fx, _ext) = enabled_fake().await;
+    set_hooks(&fx, "slow:30000").await;
+    set_hooks(&fx, "").await;
+    let created = tokio::time::timeout(std::time::Duration::from_secs(10), create_on_fake(&fx))
+        .await
+        .expect("the slow hook was cleared");
+    created.unwrap();
+}
+
 /// Run `work_item.create` on the fake as the person.
 async fn create_on_fake(
     fx: &EffortFixture,
@@ -4934,7 +4948,7 @@ async fn a_cut_off_attempt_toward_a_plain_provider_waits_for_a_person() {
 /// at start (`recover_interrupted`) and sent again by itself, like a live
 /// attempt.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_cut_off_retry_or_backfill_is_sent_again_at_start() {
+async fn a_cut_off_backfill_is_sent_again_at_start() {
     let fx = with_effect("", FILE_ON_FAKE).await;
     cut_off(&fx, |svc, _| async move {
         // Approved again after the event: it's the past a backfill covers.
@@ -4967,6 +4981,45 @@ async fn a_cut_off_retry_or_backfill_is_sent_again_at_start() {
     );
     assert_eq!(
         crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
+}
+
+/// tsk1001: an automatic attempt cut off with its write under way is found
+/// at start and sent again by itself — the reaction's second automatic
+/// attempt, a minute after it started — and lands once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cut_off_automatic_attempt_is_sent_again_at_start() {
+    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    cut_off(&fx, |svc, _| async move {
+        let _ = crate::effect_triggers::auto_retry_due(&svc, in_secs(11)).await;
+    })
+    .await;
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "live", "failed", 1], [2, "auto", "started", 0]])
+    );
+    assert_eq!(
+        crate::effect_triggers::recover_interrupted(&fx.svc)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "live", "failed", 1], [2, "auto", "failed", 1]])
+    );
+    assert_eq!(effect_failures(&fx).await, 0, "awaiting its retry");
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(75))
             .await
             .unwrap(),
         1

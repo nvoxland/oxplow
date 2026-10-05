@@ -86,7 +86,9 @@ revision order, as `$/record` followed by a `$/state { cursor, seen }`
 checkpoint (opaque to the host), then `{ records }`.
 
 **Script hooks** — `OXPLOW_FAKE_HOOKS` at spawn, or a `fake/hooks
-{ hooks }` notification mid-session (comma-separated):
+{ hooks }` notification mid-session, which **replaces** them (`""`
+clears), keeping only what was declared at `initialize` — `plain-writes`,
+`bad-declarations` (tsk1001) (comma-separated):
 `fail-next:<n>` (the next n check/invoke/read fail `Internal`),
 `started-file:<path>` (each invoke writes `<path>` as it begins, before
 `slow` — so a test knows a call is under way without timing it),
