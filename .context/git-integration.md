@@ -48,7 +48,12 @@ full rescan every 250ms, overlapping.
 It now routes both subscriptions through one `coalescedRefresh`
 (`apps/desktop/src/coalesced-refresh.ts`) — trailing debounce **plus
 single-flight**, with exactly one queued follow-up so the summary can't
-end stale. Single-flight is the part that matters: it bounds concurrent
+end stale. And each scan is cheaper (tsk241): `get_change_scopes`
+(`oxplow-git/src/branch_changes.rs`) reads the branch, its base and its
+upstream in-process through `git2`, the repo opened once, so the one git
+process a scan spawns is the `status` — whose untracked walk uses git's
+own caches; measured, each `rev-parse` it replaced cost ~8 ms of spawn
+against the status's ~10 ms (a test counts the spawns). Single-flight is the part that matters: it bounds concurrent
 scans to one however slow the scan gets. Reach for it (rather than a bare
 `setTimeout` debounce) for any expensive refresh fed by more than one
 event stream.

@@ -29,10 +29,17 @@ pub struct ChangeScopes {
     pub unstaged: Vec<BranchChangeEntry>,
 }
 
+/// The branch context and the working tree's changes. The context is read
+/// in-process (`git2`, the repo opened once); the one git process a call
+/// spawns is the working tree's `status`, whose untracked walk uses git's
+/// own caches (tsk241).
 pub fn get_change_scopes(repo: &Path) -> ChangeScopes {
-    let current_branch = crate::repo::detect_current_branch(repo);
-    let branch_base = detect_base_branch(repo);
-    let upstream = detect_upstream_ref(repo);
+    let git = crate::repo::is_git_repo(repo)
+        .then(|| git2::Repository::open(repo).ok())
+        .flatten();
+    let current_branch = git.as_ref().and_then(current_branch_of);
+    let branch_base = git.as_ref().and_then(detect_base_branch);
+    let upstream = git.as_ref().and_then(detect_upstream_ref);
     let base_name = branch_base
         .as_deref()
         .and_then(|b| b.strip_prefix("origin/").or(Some(b)));
@@ -138,55 +145,38 @@ fn classify(code: char) -> ChangeKind {
     }
 }
 
-fn detect_base_branch(repo: &Path) -> Option<String> {
-    if !crate::repo::is_git_repo(repo) {
+/// The branch `HEAD` is on, when it's on one.
+fn current_branch_of(git: &git2::Repository) -> Option<String> {
+    let head = git.head().ok()?;
+    if !head.is_branch() {
         return None;
     }
+    head.shorthand().ok().map(str::to_string)
+}
+
+/// The base the branch's changes are against: the first of `origin/main`,
+/// `main`, `origin/master`, `master` that exists, else what `origin`'s HEAD
+/// points at (`origin/<branch>`).
+fn detect_base_branch(git: &git2::Repository) -> Option<String> {
     for candidate in ["origin/main", "main", "origin/master", "master"] {
-        if ref_exists(repo, candidate) {
+        if git.revparse_single(candidate).is_ok() {
             return Some(candidate.to_string());
         }
     }
-    let out = Command::new("git")
-        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-        .current_dir(repo)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
+    let origin_head = git.find_reference("refs/remotes/origin/HEAD").ok()?;
+    let target = origin_head.symbolic_target().ok()??;
+    target
+        .strip_prefix("refs/remotes/")
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
-fn detect_upstream_ref(repo: &Path) -> Option<String> {
-    let out = Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
-        .current_dir(repo)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
-}
-
-fn ref_exists(repo: &Path, r#ref: &str) -> bool {
-    Command::new("git")
-        .args(["rev-parse", "--verify", "--quiet", r#ref])
-        .current_dir(repo)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+/// The current branch's upstream, short (`origin/main`).
+fn detect_upstream_ref(git: &git2::Repository) -> Option<String> {
+    let name = current_branch_of(git)?;
+    let branch = git.find_branch(&name, git2::BranchType::Local).ok()?;
+    let upstream = branch.upstream().ok()?;
+    upstream.name().ok().flatten().map(str::to_string)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -377,5 +367,87 @@ mod tests {
             "untracked.txt should appear in `unstaged` as Untracked, got {:?}",
             scopes.unstaged
         );
+    }
+
+    /// A repo on `feat`, with a remote `origin` holding `main` and `feat`
+    /// tracking `origin/main`.
+    fn repo_with_upstream(dir: &Path) {
+        let origin = dir.join("origin.git");
+        let work = dir.join("work");
+        std::fs::create_dir(&work).unwrap();
+        init_repo(&work);
+        std::fs::write(work.join("a.txt"), "a").unwrap();
+        commit(&work, "init");
+        let git = |args: &[&str]| {
+            let out = Cmd::new("git")
+                .args(args)
+                .current_dir(&work)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["branch", "-M", "main"]);
+        git(&["clone", "-q", "--bare", ".", origin.to_str().unwrap()]);
+        git(&["remote", "add", "origin", origin.to_str().unwrap()]);
+        git(&["fetch", "-q", "origin"]);
+        git(&["checkout", "-q", "-b", "feat", "--track", "origin/main"]);
+    }
+
+    /// The branch context: the current branch, the base the diff is
+    /// against (`origin/main` first), the upstream, whether it's the base.
+    #[test]
+    fn change_scopes_name_the_branch_its_base_and_upstream() {
+        let dir = tempdir().unwrap();
+        repo_with_upstream(dir.path());
+        let scopes = get_change_scopes(&dir.path().join("work"));
+        assert_eq!(scopes.current_branch.as_deref(), Some("feat"));
+        assert_eq!(scopes.branch_base.as_deref(), Some("origin/main"));
+        assert_eq!(scopes.upstream.as_deref(), Some("origin/main"));
+        assert!(!scopes.on_default_branch);
+    }
+
+    /// tsk241: the branch context is read in-process; the one git process a
+    /// call spawns is the working tree's `status` (its untracked walk uses
+    /// git's own caches). nextest runs each test in its own process, so the
+    /// counting `git` on `PATH` is this test's alone.
+    #[test]
+    fn change_scopes_spawn_only_the_status() {
+        let dir = tempdir().unwrap();
+        repo_with_upstream(dir.path());
+        let real = Cmd::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap();
+        let real = String::from_utf8_lossy(&real.stdout).trim().to_string();
+        let shim = dir.path().join("bin");
+        std::fs::create_dir(&shim).unwrap();
+        let count = dir.path().join("spawned");
+        std::fs::write(
+            shim.join("git"),
+            format!(
+                "#!/bin/sh\necho \"$1\" >> '{}'\nexec '{real}' \"$@\"\n",
+                count.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            shim.join("git"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        let path = format!(
+            "{}:{}",
+            shim.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        // SAFETY: nextest runs this test alone in its process.
+        unsafe { std::env::set_var("PATH", path) };
+        get_change_scopes(&dir.path().join("work"));
+        let spawned = std::fs::read_to_string(&count).unwrap_or_default();
+        assert_eq!(spawned.lines().collect::<Vec<_>>(), vec!["status"]);
     }
 }
