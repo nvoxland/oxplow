@@ -259,6 +259,12 @@ export async function readCapabilityProviders(
   return { providers: capabilityProvidersFromResult(res), reads: res.reads };
 }
 
+/** The capability's active work-items provider — where every create files
+ *  (tsk1058) — or null while none is listed. */
+export function activeProviderOf(providers: CapabilityProvider[]): string | null {
+  return providers.find((p) => p.capability === "work_items" && p.active)?.provider ?? null;
+}
+
 /** A work-items provider's flags; every flag off for one that isn't
  *  listed or doesn't declare it, so the UI only offers what it can do. */
 export function featuresFor(providers: CapabilityProvider[], provider: string): WorkItemsFeatures {
@@ -434,28 +440,29 @@ export async function readTaskEfforts(taskId: string): Promise<{ efforts: Effort
 
 const taskRef = (id: string) => `work_item:oxplow:${id}`;
 
-/** What `work_item.create` takes for a new task on a thread (or none,
+/** What `work_item.create` takes for a new item on a thread (or none,
  *  `null`). It names no tracker: every create files on the active one
- *  (tsk1058). The thread is the common field; priority is oxplow's own. */
+ *  (tsk1058). The thread is the common field and the state canonical —
+ *  every tracker takes them; a parent and priority are oxplow's own, sent
+ *  only while its list is the active tracker. */
 export function createTaskInput(
   threadId: string | null,
-  input: { title: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
+  input: { title: string; description?: string; parentId?: string | null; state?: CanonicalState; priority?: TaskPriority },
 ): Record<string, unknown> {
   return {
     title: input.title,
     ...(input.description ? { body: input.description } : {}),
     ...(input.parentId ? { parent_ref: taskRef(input.parentId) } : {}),
-    // oxplow's status is its native state (the canonical one follows).
-    ...(input.status ? { native_state: input.status } : {}),
+    ...(input.state ? { state: input.state } : {}),
     ...(threadId ? { thread: threadId } : {}),
     ...(input.priority ? { native: { priority: input.priority } } : {}),
   };
 }
 
-/** File a task on a thread (or none, `null`). */
+/** File an item on a thread (or none, `null`), on the active tracker. */
 export async function createTask(
   threadId: string | null,
-  input: { title: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
+  input: { title: string; description?: string; parentId?: string | null; state?: CanonicalState; priority?: TaskPriority },
 ): Promise<string> {
   const out = await runCommand("work_item.create", createTaskInput(threadId, input));
   return String((out.result as { ref?: unknown } | null)?.ref ?? "");

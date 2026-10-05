@@ -1,7 +1,10 @@
 import type { CSSProperties } from "react";
-import { useEffect, useRef, useState } from "react";
-import type { Task, TaskPriority, TaskStatus } from "../api.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Task, TaskPriority } from "../api.js";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { Page } from "../tabs/Page.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
+import { activeProviderOf, readCapabilityProviders, type CanonicalState } from "../workItems.js";
 
 // Edit flow now lives on TaskPage (the canonical Task page); this
 // form is create-only.
@@ -12,7 +15,8 @@ import { Page } from "../tabs/Page.js";
 type TaskKind = "task" | "epic" | "subtask" | "bug" | "note";
 const KIND_OPTIONS: TaskKind[] = ["task", "epic", "subtask", "bug", "note"];
 const PRIORITY_OPTIONS: TaskPriority[] = ["low", "medium", "high", "urgent"];
-const STATUS_OPTIONS: Array<Extract<TaskStatus, "ready" | "blocked">> = ["ready", "blocked"];
+/** Canonical states, which every tracker takes (tsk1059). */
+const STATE_OPTIONS: Array<Extract<CanonicalState, "todo" | "blocked">> = ["todo", "blocked"];
 
 /**
  * Defaults negotiation between the original `newTaskRef` payload
@@ -54,9 +58,26 @@ export interface NewTaskPageProps {
     title: string;
     description?: string;
     parentId?: string | null;
-    status?: TaskStatus;
+    state?: CanonicalState;
     priority?: TaskPriority;
   }): Promise<void>;
+}
+
+/** Whether oxplow's own list is the active tracker — where every create
+ *  files (tsk1058) — so its own fields (priority, a parent epic) apply;
+ *  null until it's known. */
+function useOwnTasksActive(): boolean | null {
+  const [own, setOwn] = useState<boolean | null>(null);
+  const [reads, setReads] = useState<Reads>(NO_READS);
+  const load = useCallback(() => {
+    void readCapabilityProviders("work_items").then(({ providers, reads }) => {
+      setOwn(activeProviderOf(providers) === "oxplow");
+      setReads(reads);
+    });
+  }, []);
+  useEffect(load, [load]);
+  useRerunOnChange(reads, load);
+  return own;
 }
 
 /**
@@ -87,7 +108,8 @@ export function NewTaskPage({
 
   const [kind, setKind] = useState<TaskKind>(coerceKind(resolved.initialCategory));
   const [priority, setPriority] = useState<TaskPriority>(coercePriority(resolved.initialPriority));
-  const [status, setStatus] = useState<"ready" | "blocked">("ready");
+  const [state, setState] = useState<"todo" | "blocked">("todo");
+  const ownTasks = useOwnTasksActive();
   const [parentId, setParentId] = useState<string | null>(resolved.parentId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -109,9 +131,10 @@ export function NewTaskPage({
       await onSubmit({
         title: title.trim(),
         description: description.trim() ? description : undefined,
-        parentId: parentId ?? null,
-        priority,
-        status,
+        // A parent epic and priority are oxplow's own: another tracker
+        // takes neither.
+        ...(ownTasks ? { parentId: parentId ?? null, priority } : {}),
+        state,
       });
       // Save-and-Another resets the title/description fields but
       // keeps the kind/priority/parent so the user doesn't have to
@@ -188,6 +211,7 @@ export function NewTaskPage({
               ))}
             </select>
           </Field>
+          {ownTasks ? (
           <Field label="Priority">
             <select
               data-testid="tasks-priority"
@@ -202,21 +226,22 @@ export function NewTaskPage({
               ))}
             </select>
           </Field>
+          ) : null}
           <Field label="Status">
             <select
               data-testid="tasks-status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value === "blocked" ? "blocked" : "ready")}
+              value={state}
+              onChange={(e) => setState(e.target.value === "blocked" ? "blocked" : "todo")}
               style={inputStyle}
             >
-              {STATUS_OPTIONS.map((s) => (
+              {STATE_OPTIONS.map((s) => (
                 <option key={s} value={s}>
-                  {s === "ready" ? "Ready" : "Blocked"}
+                  {s === "todo" ? "Ready" : "Blocked"}
                 </option>
               ))}
             </select>
           </Field>
-          {epics.length > 0 ? (
+          {ownTasks && epics.length > 0 ? (
             <Field label="Parent epic">
               <select
                 data-testid="tasks-parent"

@@ -88,9 +88,13 @@ it (`transitionWorkItem`: `work_item.transition { ref, to: <canonical
 state> }` for any provider — the bus dispatches it). Like Comment… and
 Link… it runs through `personCommands` (one person path: its
 confirmation and its error reporting). Every card opens its item's page
-(`workItemTabRef`). The oxplow task writes (`createTask`, `updateTask`)
-send a status as oxplow's `native_state`, the thread as `create`'s
-common `thread`, and priority under `native`.
+(`workItemTabRef`). **The New Task page files on the active tracker**
+(`createTaskInput`, tsk1059): the canonical `state` (Ready is `todo`) and
+`create`'s common `thread`, which any tracker takes; a parent epic and
+priority are oxplow's own, so the page offers and sends them only while
+oxplow's list is the active tracker (`activeProviderOf` over
+`v_capability_provider`, re-read when it changes). `updateTask` sends a
+status as oxplow's `native_state` and priority under `native`.
 
 **Another provider's item has a page of its own** (P6b.C3,
 `pages/WorkItemPage.tsx`; oxplow's tasks keep `TaskPage`):

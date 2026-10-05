@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { boardColumns, createTaskInput, effortDetailsFromResult, itemsFromResult, orderedTaskIds, workItemsQuery, type WorkItem } from "./workItems.js";
+import { activeProviderOf, boardColumns, createTaskInput, effortDetailsFromResult, itemsFromResult, orderedTaskIds, workItemsQuery, type CapabilityProvider, type WorkItem } from "./workItems.js";
 
 // A task's activity is one read over the models: `v_effort` joined to
 // `v_effort_file` (one row per effort and file; an effort with no files
@@ -203,14 +203,30 @@ test("capability providers read with their features; an unknown provider has non
 
 
 // tsk1058: every create files on the active tracker, so the page names
-// none; the thread is the common field, oxplow's priority its own.
+// none; the thread is the common field, the state canonical (every tracker
+// takes it), oxplow's priority its own.
 test("a new task's input names no tracker and files on the thread", () => {
-  expect(createTaskInput("thr2", { title: "Fix it", description: "why", priority: "high", status: "in_progress" })).toEqual({
+  expect(createTaskInput("thr2", { title: "Fix it", description: "why", priority: "high", state: "blocked" })).toEqual({
     title: "Fix it",
     body: "why",
-    native_state: "in_progress",
+    state: "blocked",
     thread: "thr2",
     native: { priority: "high" },
   });
   expect(createTaskInput(null, { title: "Later" })).toEqual({ title: "Later" });
+});
+
+// tsk1059: the page offers oxplow's own fields only while its list is the
+// active tracker.
+test("the active work-items provider is the row marked active", () => {
+  const row = (provider: string, active: boolean): CapabilityProvider => ({
+    capability: "work_items",
+    provider,
+    extension: provider === "oxplow" ? null : "tracker",
+    features: {},
+    active,
+  });
+  expect(activeProviderOf([row("oxplow", false), row("fake", true)])).toBe("fake");
+  expect(activeProviderOf([row("oxplow", true), row("fake", false)])).toBe("oxplow");
+  expect(activeProviderOf([])).toBeNull();
 });

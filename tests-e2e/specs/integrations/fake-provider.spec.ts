@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { approveProgram, ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { openFromLauncher, openNewTask } from "../../support/ui.js";
 
 /** What the fake tracker's service holds (its state files), as text. */
 function fakeState(project: string): string {
@@ -47,4 +47,16 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   // A tracker's item is on no thread.
   await page.getByTestId("board-scope").selectOption("all");
   await expect(page.getByTestId("work-board")).toContainText("Kiwi from oxplow");
+  // The New Task page files on the active tracker too, on this thread
+  // (tsk1059): it offers what any tracker takes, not oxplow's priority.
+  await openNewTask(page);
+  await expect(page.getByTestId("tasks-status")).toBeVisible();
+  await expect(page.getByTestId("tasks-priority")).toHaveCount(0);
+  await page.getByTestId("tasks-title").fill("Kiwi from the page");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from the page");
+  await run(daemon, "provider.sync", { instance: "e2e/fake", collector: "work_items" });
+  await openFromLauncher(page, "Board");
+  await page.getByTestId("board-scope").selectOption("thread");
+  await expect(page.getByTestId("work-board")).toContainText("Kiwi from the page");
 });

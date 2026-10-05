@@ -58,6 +58,7 @@ import {
   readThreadWork,
   reorderTasks,
   updateTask,
+  type CanonicalState,
   type TaskPriority,
   type TaskStatus,
 } from "./workItems.js";
@@ -879,7 +880,7 @@ export function App() {
     title: string;
     description?: string;
     parentId?: string | null;
-    status?: TaskStatus;
+    state?: CanonicalState;
     priority?: TaskPriority;
   }) {
     if (!selectedThread) return;
@@ -3080,8 +3081,8 @@ export function App() {
                   title: input.title,
                   description: input.description,
                   parentId: input.parentId ?? null,
-                  status: input.status ?? "ready",
-                  priority: input.priority ?? "medium",
+                  state: input.state ?? "todo",
+                  priority: input.priority,
                 });
               }}
             />
