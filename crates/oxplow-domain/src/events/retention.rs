@@ -48,6 +48,7 @@ pub const CORE_WINDOWS: &[(&str, RetentionWindow)] = &[
     ("code", RetentionWindow::new(90, 30)),
     ("collector", RetentionWindow::new(90, 30)),
     ("effect", RetentionWindow::new(90, 30)),
+    ("ui", RetentionWindow::new(30, 14)),
 ];
 
 /// A plugin namespace's window, unless its extension declares a shorter
@@ -112,4 +113,20 @@ pub fn core_window(namespace: &str) -> Option<RetentionWindow> {
         .iter()
         .find(|(ns, _)| *ns == namespace)
         .map(|(_, w)| *w)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// tsk1072: an operation the person saw fail is kept a month, its
+    /// captured output two weeks, and a project can't keep it under the
+    /// core floor.
+    #[test]
+    fn ui_op_errors_keep_30_days_and_their_output_14() {
+        assert!(CORE_NAMESPACES.contains(&"ui"));
+        assert_eq!(core_window("ui"), Some(RetentionWindow::new(30, 14)));
+        assert!(!is_kept_whole("ui"));
+        assert!(window_problem("ui", RetentionWindow::new(MIN_CORE_DAYS - 1, 1)).is_some());
+    }
 }

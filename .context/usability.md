@@ -95,7 +95,11 @@ Things I keep forgetting. Read this before adding any UI.
   "Errors" section** any more. For ops that already have a page focus
   when they fail (e.g. `runOp` in GitDashboardPage), call
   `onOpenPage(opErrorRef(id))` after recording so the user lands on
-  the detail view directly.
+  the detail view directly. The store stays in memory (gone on reload),
+  but each record is also reported to the daemon, fire-and-forget, as
+  the person-only `ui.report_error` (tsk1072), so the agent reads what
+  the person saw in `v_op_error`. A report that fails is logged with
+  `logUi`, never recorded as another op error (it would loop).
 - **Every `<button>` needs an explicit `type`.** HTML defaults
   `<button>` to `type="submit"`, which silently submits any enclosing
   form on click. Use `type="button"` for every action button; use

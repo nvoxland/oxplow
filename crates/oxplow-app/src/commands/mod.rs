@@ -33,6 +33,7 @@ mod steps;
 pub mod stream;
 pub mod test_runs;
 pub mod thread;
+pub mod ui;
 pub mod vcs;
 pub mod work_item;
 

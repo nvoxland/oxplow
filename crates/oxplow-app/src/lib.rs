@@ -1139,6 +1139,7 @@ impl Services {
         .chain(commands::dashboard::commands(db.clone(), sql.clone()))
         .chain(commands::comment::commands())
         .chain(commands::reasoning::commands())
+        .chain(commands::ui::commands())
         .chain(commands::effort_report::commands(
             commands::effort_report::EffortDeps {
                 tasks: tasks.clone(),

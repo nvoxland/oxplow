@@ -1,0 +1,14 @@
+{
+  "label": "Merge bugfixes into current",
+  "command": "git merge bugfixes",
+  "message": "IpcCallError: vcs.merge: conflicts in 2 files",
+  "exit_code": 1,
+  "thread": "thr3",
+  "signal": "SIGTERM",
+  "duration_ms": 5012,
+  "output": {
+    "hash": "9a8b7c6d5e4f30211f2e3d4c5b6a7980",
+    "size": 20480,
+    "truncated": true
+  }
+}

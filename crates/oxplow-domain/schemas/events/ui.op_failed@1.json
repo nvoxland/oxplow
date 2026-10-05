@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "description": "Where a large or sensitive body lives: `event_content.hash` (xxh3-128\nhex) and its length. Retention may delete the body; the ref stays.",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "size": {
+          "description": "The whole body's length, stored or not.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Only the first part was stored (bodies are capped).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hash",
+        "size"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ui.op_failed@1` (tsk1072): an operation the person started in the\napp failed, as the app showed it (`ui.report_error`). Its captured\nstderr and stdout are the `output` body.",
+  "properties": {
+    "command": {
+      "description": "The command it ran, shell-style (\"git merge bugfixes\").",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "duration_ms": {
+      "description": "How long it ran, in milliseconds.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "exit_code": {
+      "description": "The process's exit code.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "label": {
+      "description": "What the person was doing (\"Merge bugfixes into current\").",
+      "type": "string"
+    },
+    "message": {
+      "description": "The error message, when there was no captured output to show.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its captured output, `{ stderr?, stdout? }`."
+    },
+    "signal": {
+      "description": "The signal that killed the process (`SIGKILL`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "thread": {
+      "description": "The thread it was started from (`thr3`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "label"
+  ],
+  "title": "UiOpFailedV1",
+  "type": "object"
+}

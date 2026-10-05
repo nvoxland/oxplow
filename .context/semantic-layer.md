@@ -126,6 +126,7 @@ What core publishes, by where it comes from. Each row names its models
 | agent | `agent_turn`, `tool_call`, `token_usage`, `agent_nudge`, and agent events (hooks, sessions) as `v_event` `agent.*` | tokens, struggle |
 | ai | `ai_call` | tokens, latency |
 | usage | `page_visit` | — |
+| ui | `op_error` (operations that failed in front of the person, from `ui.op_failed` events) | — |
 | metrics | `measure`, `dimension`, `metric_spec`, `metric_catalog`, `capture`, `fact`, `effort_metric_delta`; series through `metric_grid()`, offenders through `metric_findings()` | — |
 | the log and the registry | `event`, `event_content`, `event_checkpoint`, `event_dead_letter`; `model`, `model_column`, `model_lineage`, `model_test` | — |
 
@@ -542,6 +543,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject refs and payload (V94; see [data-model.md](./data-model.md) "event_log"); `payload_expired_at` since V102) |
+| `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@1` event (`ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`. The stderr / stdout are the event's `output` body (`read_event_content`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
 | `v_event_content` | large event bodies (tool input/output, prompts) by content hash, without the bytes (V102) |
 | `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `retry_dead_letter` / `discard_dead_letter` (V94) |
 | `v_event_checkpoint` | how far each event consumer has read (V94) |

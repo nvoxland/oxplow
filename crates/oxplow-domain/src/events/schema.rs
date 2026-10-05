@@ -46,6 +46,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "config",
     "provider",
     "plugin",
+    "ui",
 ];
 
 /// One event type at one schema version. `Payload` is the Rust shape
@@ -209,6 +210,7 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<CommandDeclined>()
             .expect("core type registers");
+        r.register::<UiOpFailed>().expect("core type registers");
         r
     }
 
@@ -1841,6 +1843,44 @@ impl EventType for LensKept {
     }
 }
 
+/// `ui.op_failed@1` (tsk1072): an operation the person started in the
+/// app failed, as the app showed it (`ui.report_error`). Its captured
+/// stderr and stdout are the `output` body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UiOpFailedV1 {
+    /// What the person was doing ("Merge bugfixes into current").
+    pub label: String,
+    /// The command it ran, shell-style ("git merge bugfixes").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// The error message, when there was no captured output to show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// The process's exit code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    /// The thread it was started from (`thr3`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+    /// The signal that killed the process (`SIGKILL`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
+    /// How long it ran, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    /// Its captured output, `{ stderr?, stdout? }`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<ContentRef>,
+}
+
+pub struct UiOpFailed;
+impl EventType for UiOpFailed {
+    const TYPE: &'static str = "ui.op_failed";
+    const V: u32 = 1;
+    type Payload = UiOpFailedV1;
+}
+
 /// `knowledge.page.deleted@1`: a knowledge page is gone, its row and
 /// edges with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2026,6 +2066,7 @@ mod tests {
                 ("snapshot.taken", 2),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 1),
+                ("ui.op_failed", 1),
                 ("vcs.head.moved", 1),
                 ("work_item.commented", 1),
                 ("work_item.created", 1),

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createOpErrorsStore } from "./opErrorsStore.js";
+import { createOpErrorsStore, reportOpErrorTo } from "./opErrorsStore.js";
 
 describe("opErrorsStore", () => {
   test("push prepends and notifies listeners", () => {
@@ -76,5 +76,67 @@ describe("opErrorsStore", () => {
     const [b, a] = store.getSnapshot();
     expect(a?.threadId).toBe("b-explicit");
     expect(b?.threadId).toBe(null);
+  });
+
+  test("push hands each new entry to the reporter", () => {
+    const reported: string[] = [];
+    const store = createOpErrorsStore((entry) => reported.push(entry.label));
+    store.push({ label: "a" });
+    store.push({ label: "b" });
+    expect(reported).toEqual(["a", "b"]);
+  });
+});
+
+describe("reportOpErrorTo", () => {
+  test("reports an op error to the daemon as ui.report_error, fire-and-forget", async () => {
+    const calls: Array<{ name: string; input: unknown }> = [];
+    const run = async (name: string, input: unknown) => {
+      calls.push({ name, input });
+      return {};
+    };
+    const store = createOpErrorsStore(reportOpErrorTo(run, () => {}));
+    store.setActiveThread("thr3");
+    store.push({
+      label: "List data",
+      command: "query_sql",
+      message: "IpcCallError: query_sql: timed out after 5s",
+      stderr: "timed out",
+      exitCode: 1,
+      durationMs: 5012,
+      signal: "SIGTERM",
+    });
+    store.push({ label: "Save note", threadId: null });
+    await Promise.resolve();
+    expect(calls).toEqual([
+      {
+        name: "ui.report_error",
+        input: {
+          label: "List data",
+          command: "query_sql",
+          message: "IpcCallError: query_sql: timed out after 5s",
+          stderr: "timed out",
+          exit_code: 1,
+          thread: "thr3",
+          signal: "SIGTERM",
+          duration_ms: 5012,
+        },
+      },
+      { name: "ui.report_error", input: { label: "Save note" } },
+    ]);
+  });
+
+  test("a failed report is logged, never recorded as another op error", async () => {
+    const logged: Array<{ level: string; message: string }> = [];
+    const run = async () => {
+      throw new Error("daemon unreachable");
+    };
+    const store = createOpErrorsStore(
+      reportOpErrorTo(run, (level, message) => logged.push({ level, message })),
+    );
+    store.push({ label: "Push" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getSnapshot().length).toBe(1);
+    expect(logged.length).toBe(1);
+    expect(logged[0]?.level).toBe("warn");
   });
 });

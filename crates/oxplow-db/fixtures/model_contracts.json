@@ -5739,5 +5739,74 @@
       ],
       "key": []
     }
+  },
+  "op_error": {
+    "1": {
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `ui.op_failed` event (v_event.id); read its output with `read_event_content`."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it failed (RFC 3339)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream of the thread it was started from, if any."
+        },
+        {
+          "name": "thread",
+          "type": "TEXT",
+          "doc": "The thread it was started from (`thr3`), if any."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What the person was doing (\"Merge bugfixes into current\")."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command it ran, shell-style (\"git merge bugfixes\"), if known."
+        },
+        {
+          "name": "message",
+          "type": "TEXT",
+          "doc": "The error message, when there was no captured output to show."
+        },
+        {
+          "name": "exit_code",
+          "type": "INT",
+          "doc": "The process's exit code, if known."
+        },
+        {
+          "name": "signal",
+          "type": "TEXT",
+          "doc": "The signal that killed the process (`SIGKILL`), if any."
+        },
+        {
+          "name": "duration_ms",
+          "type": "INT",
+          "doc": "How long it ran, in milliseconds, if measured."
+        },
+        {
+          "name": "output_size",
+          "type": "INT",
+          "doc": "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured."
+        },
+        {
+          "name": "payload_expired_at",
+          "type": "TEXT",
+          "doc": "When retention expired its details (they read NULL); NULL while kept."
+        }
+      ],
+      "key": [
+        "event_id"
+      ]
+    }
   }
 }

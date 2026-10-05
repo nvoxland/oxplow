@@ -4,8 +4,13 @@
  * `window.alert` pattern: failures push a structured record into this
  * store, the RailHud surfaces them as red rows, and clicking a row
  * opens a dedicated page with the full output. Capped at the last
- * MAX_ENTRIES; nothing persists across reload.
+ * MAX_ENTRIES; nothing persists across reload here. Each one is also
+ * reported to the daemon (`ui.report_error`, tsk1072), so the agent can
+ * read what the person saw in `v_op_error`.
  */
+
+import { runCommand } from "../api.js";
+import { logUi, type UiLogLevel } from "../logger.js";
 
 const MAX_ENTRIES = 20;
 
@@ -65,12 +70,44 @@ export interface OpErrorsStore {
   setActiveThread(threadId: string | null): void;
 }
 
+/** Called with each entry as it's pushed. */
+export type OpErrorReporter = (entry: OpError) => void;
+
+/**
+ * A reporter that records each op error on the daemon as
+ * `ui.report_error`, without waiting for it. A report that fails is
+ * logged, never pushed as another op error — that would report itself
+ * again, without end.
+ */
+export function reportOpErrorTo(
+  run: (name: string, input: unknown) => Promise<unknown>,
+  log: (level: UiLogLevel, message: string, context?: Record<string, unknown>) => void,
+): OpErrorReporter {
+  return (entry) => {
+    const input: Record<string, unknown> = { label: entry.label };
+    if (entry.command) input.command = entry.command;
+    if (entry.message) input.message = entry.message;
+    if (entry.stderr) input.stderr = entry.stderr;
+    if (entry.stdout) input.stdout = entry.stdout;
+    if (entry.exitCode !== null) input.exit_code = entry.exitCode;
+    if (entry.threadId !== null) input.thread = entry.threadId;
+    if (entry.signal !== null) input.signal = entry.signal;
+    if (entry.durationMs !== null) input.duration_ms = Math.round(entry.durationMs);
+    run("ui.report_error", input).catch((error: unknown) => {
+      log("warn", "couldn't report an op error to the daemon", {
+        label: entry.label,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  };
+}
+
 let nextSeq = 1;
 function makeId(): string {
   return `oe-${Date.now().toString(36)}-${(nextSeq++).toString(36)}`;
 }
 
-export function createOpErrorsStore(): OpErrorsStore {
+export function createOpErrorsStore(report?: OpErrorReporter): OpErrorsStore {
   let entries: OpError[] = [];
   let activeThreadId: string | null = null;
   const listeners = new Set<() => void>();
@@ -110,6 +147,7 @@ export function createOpErrorsStore(): OpErrorsStore {
       const next = [entry, ...entries];
       entries = next.length > MAX_ENTRIES ? next.slice(0, MAX_ENTRIES) : next;
       emit();
+      report?.(entry);
       return id;
     },
     markSeen(id) {
@@ -147,7 +185,7 @@ let singleton: OpErrorsStore | null = null;
 
 /** Process-wide op-errors store. */
 export function getOpErrorsStore(): OpErrorsStore {
-  if (!singleton) singleton = createOpErrorsStore();
+  if (!singleton) singleton = createOpErrorsStore(reportOpErrorTo(runCommand, logUi));
   return singleton;
 }
 
