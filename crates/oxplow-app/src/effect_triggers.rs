@@ -366,16 +366,65 @@ async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainEr
             },
         );
     };
-    if !finish(svc, key, ended(RunState::Failed, INTERRUPTED_RESENDABLE)).await? {
-        return Ok(Reacted::Nothing);
-    }
-    let started = oxplow_domain::Timestamp::parse(&claimed.started_at)
-        .unwrap_or_else(|_| oxplow_domain::Timestamp::now());
-    Ok(if schedule_retry(svc, key, resend, None, started).await? {
-        Reacted::Retrying(INTERRUPTED_RESENDABLE.into())
-    } else {
-        Reacted::Failed(INTERRUPTED_RESENDABLE.into())
+    // A start that can't be read can't be timed against the lateness
+    // bound: not sent again, a person's (tsk999).
+    let retry = oxplow_domain::Timestamp::parse(&claimed.started_at)
+        .ok()
+        .map(|from| Retry {
+            resend,
+            asked: None,
+            from,
+            if_already_failed: false,
+        });
+    Ok(match fail(svc, key, INTERRUPTED_RESENDABLE, retry).await? {
+        (false, _) => Reacted::Nothing,
+        (true, true) => Reacted::Retrying(INTERRUPTED_RESENDABLE.into()),
+        (true, false) => Reacted::Failed(INTERRUPTED_RESENDABLE.into()),
     })
+}
+
+/// A failed attempt's automatic retry, as [`fail`] schedules it: what to
+/// send, how long its service asked to wait, and when the delay counts
+/// from (when it failed, or when a cut-off attempt started).
+struct Retry {
+    resend: String,
+    asked: Option<Duration>,
+    from: oxplow_domain::Timestamp,
+    /// Scheduled even when the attempt had already been recorded failed
+    /// (the bus records a step's failure partway).
+    if_already_failed: bool,
+}
+
+/// Record `key`'s attempt failed for `reason` and, with `retry`, schedule
+/// it to be sent again — in one transaction (tsk999), so a failure meant
+/// to be sent again is never left recorded without its retry. Whether this
+/// recorded it, and whether its retry was scheduled.
+async fn fail(
+    svc: &Services,
+    key: &EffectRunKey,
+    reason: &str,
+    retry: Option<Retry>,
+) -> Result<(bool, bool), DomainError> {
+    let (key, vocabulary) = (key.clone(), svc.vocabulary.clone());
+    let done = ended(RunState::Failed, reason);
+    let outcome = svc
+        .db
+        .transaction(move |tx| {
+            let recorded = match effects::finished_tx(tx, &vocabulary.current(), &key, &done, None)
+            {
+                Ok(()) => true,
+                Err(DomainError::Invalid(_)) => false,
+                Err(e) => return Err(e),
+            };
+            let scheduled = match &retry {
+                Some(r) if recorded || r.if_already_failed => schedule_retry_tx(tx, &key, r)?,
+                _ => false,
+            };
+            Ok((recorded, scheduled))
+        })
+        .await;
+    svc.event_pump.wake();
+    outcome
 }
 
 /// At start: every attempt a person or oxplow started (a retry, a
@@ -390,10 +439,17 @@ pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, Do
         .db
         .read(|tx| oxplow_db::effect_run_store::person_started_tx(tx))
         .await?;
+    let health = crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut recovered = 0;
     for key in started {
-        if !matches!(cut_off(svc, &key).await?, Reacted::Nothing) {
-            recovered += 1;
+        let reacted = cut_off(svc, &key).await?;
+        if matches!(reacted, Reacted::Nothing) {
+            continue;
+        }
+        recovered += 1;
+        // Counted as the pump counts one it finds (tsk999).
+        if let Some((_, decl)) = find_effect(svc, &key.effect) {
+            count(&health, &decl, &reacted, Duration::ZERO).await;
         }
     }
     Ok(recovered)
@@ -540,7 +596,7 @@ pub(crate) async fn run_reaction(
         };
         match composed {
             Reaction::Skip(why) => return skipped(why).await,
-            Reaction::Run { calls, events } => (calls, events),
+            Reaction::Run { calls, events } => (pin_providers(svc, calls), events),
         }
     };
     let resend = serde_json::to_string(&Resend {
@@ -585,22 +641,19 @@ pub(crate) async fn run_reaction(
         // retries left.
         Err(e) => {
             let reason = e.to_string();
-            finish(svc, &key, ended(RunState::Failed, reason.clone())).await?;
-            if let CommandError::Unavailable { retry_after_ms, .. } = e {
-                if safe
-                    && schedule_retry(
-                        svc,
-                        &key,
-                        resend,
-                        retry_after_ms,
-                        oxplow_domain::Timestamp::now(),
-                    )
-                    .await?
-                {
-                    return Ok(Reacted::Retrying(reason));
-                }
-            }
-            Ok(Reacted::Failed(reason))
+            let retry = match e {
+                CommandError::Unavailable { retry_after_ms, .. } if safe => Some(Retry {
+                    resend,
+                    asked: retry_after_ms.map(Duration::from_millis),
+                    from: oxplow_domain::Timestamp::now(),
+                    if_already_failed: true,
+                }),
+                _ => None,
+            };
+            Ok(match fail(svc, &key, &reason, retry).await? {
+                (_, true) => Reacted::Retrying(reason),
+                (_, false) => Reacted::Failed(reason),
+            })
         }
     }
 }
@@ -639,37 +692,48 @@ fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
 /// longer wait is a person's to retry after (tsk914).
 pub(crate) const MAX_ASKED_WAIT: Duration = Duration::from_secs(15 * 60);
 
-/// Schedule `key`'s failed attempt to be sent again, its delay counted
-/// from `from` (when it failed, or when a cut-off attempt started) — no
-/// sooner than its service asked (`retry_after_ms`) — unless the reaction
-/// already had its automatic retries, or the service asked for longer than
-/// [`MAX_ASKED_WAIT`]: whether it was.
-async fn schedule_retry(
-    svc: &Services,
+/// In `tx`: schedule `key`'s failed attempt to be sent again as `retry`
+/// says, its delay counted from `retry.from` — no sooner than its service
+/// asked — unless the reaction already had its automatic retries, or the
+/// service asked for longer than [`MAX_ASKED_WAIT`]: whether it was.
+fn schedule_retry_tx(
+    tx: &rusqlite::Connection,
     key: &EffectRunKey,
-    resend: String,
-    retry_after_ms: Option<u64>,
-    from: oxplow_domain::Timestamp,
+    retry: &Retry,
 ) -> Result<bool, DomainError> {
-    let asked = retry_after_ms.map(Duration::from_millis);
-    if asked.is_some_and(|a| a > MAX_ASKED_WAIT) {
+    if retry.asked.is_some_and(|a| a > MAX_ASKED_WAIT) {
         return Ok(false);
     }
-    let key = key.clone();
-    svc.db
-        .transaction(move |tx| {
-            let made =
-                oxplow_db::effect_run_store::automatic_in_a_row_tx(tx, &key.effect, &key.event_id)?;
-            let Some(delay) = RETRY_DELAYS.get(made as usize) else {
-                return Ok(false);
-            };
-            let delay = asked.map_or(*delay, |a| a.max(*delay));
-            let at =
-                oxplow_domain::Timestamp::from_unix_ms(from.unix_ms() + delay.as_millis() as i64);
-            oxplow_db::effect_run_store::schedule_retry_tx(tx, &key, &at.to_string(), &resend)?;
-            Ok(true)
+    let made = oxplow_db::effect_run_store::automatic_in_a_row_tx(tx, &key.effect, &key.event_id)?;
+    let Some(delay) = RETRY_DELAYS.get(made as usize) else {
+        return Ok(false);
+    };
+    let delay = retry.asked.map_or(*delay, |a| a.max(*delay));
+    let at =
+        oxplow_domain::Timestamp::from_unix_ms(retry.from.unix_ms() + delay.as_millis() as i64);
+    oxplow_db::effect_run_store::schedule_retry_tx(tx, key, &at.to_string(), &retry.resend)?;
+    Ok(true)
+}
+
+/// Each `work_item.create` in `calls` that names no provider, pinned to
+/// the one active now (tsk999): the composition is what an automatic retry
+/// sends, and it must file where the first attempt meant to, not wherever
+/// the active provider is by then.
+fn pin_providers(svc: &Services, calls: Vec<CommandCall>) -> Vec<CommandCall> {
+    let active = svc.work_items.active();
+    calls
+        .into_iter()
+        .map(|mut call| {
+            if call.name == "work_item.create" {
+                if let Some(input) = call.input.as_object_mut() {
+                    if input.get("provider").is_none_or(serde_json::Value::is_null) {
+                        input.insert("provider".into(), json!(active));
+                    }
+                }
+            }
+            call
         })
-        .await
+        .collect()
 }
 
 /// How late a retry may be sent by itself: one due longer ago (oxplow was
@@ -720,8 +784,10 @@ async fn retry_one(
     due_at: &str,
     now_ms: i64,
 ) -> Result<bool, DomainError> {
-    let late = oxplow_domain::Timestamp::parse(due_at)
-        .is_ok_and(|at| now_ms - at.unix_ms() > MAX_RETRY_LATENESS.as_millis() as i64);
+    // A due time that can't be read is as late as can be (tsk999).
+    let late = oxplow_domain::Timestamp::parse(due_at).map_or(true, |at| {
+        now_ms - at.unix_ms() > MAX_RETRY_LATENESS.as_millis() as i64
+    });
     // At its newest version, as the pump, `effect.retry` and backfill
     // hand it over (tsk911). The attempt sends what the failed one
     // composed (tsk887), so an expired payload doesn't stop it.

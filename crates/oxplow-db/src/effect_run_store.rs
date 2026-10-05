@@ -386,9 +386,11 @@ pub fn claimed_tx(conn: &Connection, key: &EffectRunKey) -> Result<Option<Claime
 }
 
 /// Record how `key`'s attempt ended: its row, or its `started` claim
-/// finished — keeping what the claim composed only when it failed, for its
-/// automatic retry. `Invalid` when it already ended (a concurrent or
-/// earlier delivery got there first).
+/// finished — dropping what the claim composed: only a scheduled retry
+/// keeps a composition ([`schedule_retry_tx`], in the same transaction
+/// when the failure is sent again), so none outlives the retry it was for
+/// (tsk999). `Invalid` when it already ended (a concurrent or earlier
+/// delivery got there first).
 pub fn finish_tx(
     conn: &Connection,
     key: &EffectRunKey,
@@ -400,7 +402,7 @@ pub fn finish_tx(
             conn.execute(
                 "UPDATE effect_run
                     SET state = ?4, reason = ?5, audit_id = ?6, proposal_id = ?7, finished_at = ?8,
-                        resend_json = CASE WHEN ?4 = 'failed' THEN resend_json END
+                        resend_json = NULL
                   WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3",
                 params![
                     key.effect,
@@ -482,8 +484,9 @@ mod tests {
     }
 
     /// tsk954: an attempt claimed with what it composed keeps it while it
-    /// runs — what is sent again when it is cut off — and after, only if
-    /// it failed (for its automatic retry).
+    /// runs — what is sent again when it is cut off. tsk999: finished, it
+    /// drops it; only a scheduled retry keeps a composition, so none
+    /// outlives the retry it was for.
     #[tokio::test]
     async fn a_claim_keeps_what_it_composed() {
         let db = Database::in_memory();
@@ -511,6 +514,8 @@ mod tests {
                 proposal_id: None,
             };
             finish_tx(tx, &failing, &failed, "t2")?;
+            assert_eq!(latest_tx(tx, "acme/notify", "e2")?.unwrap().resend, None);
+            schedule_retry_tx(tx, &failing, "t3", "x")?;
             assert_eq!(
                 latest_tx(tx, "acme/notify", "e2")?
                     .unwrap()

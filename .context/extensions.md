@@ -1859,8 +1859,11 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    write to a provider keeping `idempotent_writes` (`claim_tx` writes
    `resend_json` then, P11, tsk954) — it is **sent again by itself** like
    a failure that may pass, its delay counted from when it started (so
-   one found more than an hour late is a person's); otherwise it is a
-   person's, never sent again by itself. One a person's retry or
+   one found more than an hour late is a person's, and so is one whose
+   start can't be read — tsk999); otherwise it is a person's, never sent
+   again by itself. Recording the failure and scheduling its retry are one
+   transaction (`effect_triggers::fail`, tsk999), here and for a failure
+   that may pass. One a person's retry or
    backfill claimed is theirs, under way, and the pump leaves it be
    (tsk847). A person's retry or backfill — or an automatic attempt — is
    no pump delivery, so nothing redelivers one cut off between its claim
@@ -1868,7 +1871,8 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    `effect_triggers::recover_interrupted`) every attempt still `started`
    whose origin isn't `live` is recovered the same way, with its
    `effect.result` saying what started it — Delivery lists it, and a
-   person may retry it (tsk845);
+   person may retry it (tsk845) — and counted toward the effect's health
+   as the pump counts one it finds (tsk999);
 2. `effects::gate` isn't `Runs`: nothing;
 3. the loop guard (`lineage`, walking the event's `cause` chain): an
    event its own run caused (source `effect:<extension>/<id>`) never
@@ -1943,12 +1947,17 @@ before — or later when the service asked for longer; one asking for more
 than `MAX_ASKED_WAIT`, 15 minutes, is a person's). A refused input, a
 refusal of credentials renewal can't fix, a method or configuration the
 provider lacks — `Failed` — is never retried by itself. The failed attempt keeps what it composed (`effect_run.
-resend_json`, V162), and the automatic attempt **sends exactly that**
+resend_json`, V162) for as long as its retry is scheduled — finishing an
+attempt drops it, scheduling a retry writes it, so no composition
+outlives its retry (tsk999) — and the automatic attempt **sends exactly that**
 instead of running the script again (tsk887): composing afresh could read
 changed rows, change a step's input and so its key, and make a write that
 landed again. It is sent only while every step still goes to a provider
 keeping the promise; otherwise it isn't sent (`Reacted::NotResent`) and the
-failure counts, a person's. Each step carries its idempotency key, the
+failure counts, a person's. A composed `work_item.create` that names no
+provider is **pinned** to the one active when it was composed
+(`pin_providers`, tsk999): its retry files where the first attempt meant
+to, not wherever the active provider is by then. Each step carries its idempotency key, the
 same on every attempt ([commands.md](./commands.md) `effect_step_key`), so
 a write that landed lands once. A person's **Retry** composes afresh from
 what the effect reads now — the person decides it should. A loop every 5 s (`spawn_auto_retry`, at boot — its first tick only
@@ -1960,7 +1969,8 @@ at its newest version (`at_latest`, as every runner hands it over; one that
 no longer upcasts drops the retry — tsk911), when the effect is still
 there, enabled and approved as it is now and the retry is at most an hour
 overdue (`MAX_RETRY_LATENESS`: one due longer ago — oxplow was closed — is
-a person's, its failure counted; tsk915) — otherwise the
+a person's, its failure counted; tsk915; a due time that can't be read
+counts as late, tsk999) — otherwise the
 retry is dropped and the failure is a person's. An attempt awaiting its
 retry isn't counted against the effect's health (`Reacted::Retrying`);
 the attempt that exhausts the retries counts once. A step inside oxplow, or

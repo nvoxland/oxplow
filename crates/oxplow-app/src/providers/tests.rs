@@ -4996,6 +4996,90 @@ async fn a_cut_off_attempt_found_an_hour_late_is_a_persons() {
     assert_eq!(effect_failures(&fx).await, 1);
 }
 
+/// tsk999: a step that names no provider is pinned, when composed, to the
+/// one active then: its automatic retry files there, whichever provider is
+/// active by the time it's sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_kept_composition_files_where_it_was_composed_for() {
+    let unnamed = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
+    let fx = with_effect("lose-reply", unnamed).await;
+    let set_active = |provider: Option<&str>| {
+        let mut config = fx.svc.config.write().unwrap();
+        match provider {
+            Some(p) => config
+                .active_providers
+                .insert("work_items".into(), p.into()),
+            None => config.active_providers.remove("work_items"),
+        };
+    };
+    set_active(Some("fake"));
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    set_active(None);
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
+}
+
+/// tsk999: an attempt cut off and found at start counts toward its
+/// effect's health, as one found by the pump does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cut_off_found_at_start_counts_toward_health() {
+    let fx = with_effect("plain-writes", FILE_ON_FAKE).await;
+    cut_off(&fx, |svc, _| async move {
+        crate::effects::approved(&svc.db, &format!("{EXT}/file"))
+            .await
+            .unwrap();
+        let (ext, decl) =
+            crate::effect_triggers::find_effect(&svc, &format!("{EXT}/file")).expect("its effect");
+        let range = crate::commands::effect::Range {
+            from_seq: None,
+            since: None,
+            to_seq: None,
+        };
+        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50).await;
+    })
+    .await;
+    assert_eq!(
+        crate::effect_triggers::recover_interrupted(&fx.svc)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "backfill", "failed", 0]])
+    );
+    assert_eq!(effect_failures(&fx).await, 1);
+}
+
+/// tsk999: a cut-off attempt whose start time can't be read can't be
+/// timed against the lateness bound: it's a person's, not sent again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cut_off_attempt_whose_start_cant_be_read_is_a_persons() {
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    let ev = cut_off(&fx, deliver).await;
+    fx.svc
+        .db
+        .transaction(|tx| {
+            tx.execute("UPDATE effect_run SET started_at = 'not a time'", [])
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    deliver(fx.svc.clone(), ev).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
+    assert_eq!(effect_failures(&fx).await, 1);
+}
+
 /// tsk935: a reaction cut off midway — its first write landed, its reply
 /// lost, the second never sent — is sent again whole under the same keys:
 /// each write lands once.
