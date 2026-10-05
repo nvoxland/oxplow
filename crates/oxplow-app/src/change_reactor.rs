@@ -98,16 +98,11 @@ impl AsyncEventConsumer for ChangeReactor {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
         if event.envelope.event_type == EFFORT_FINISHED {
-            let effort = event.envelope.payload["effort"]
-                .as_str()
-                .ok_or_else(|| {
-                    DomainError::Invalid(format!("effort.finished seq {}: no effort", event.seq))
-                })?
-                .to_string();
+            let effort = crate::effort_lifecycle::effort_of(event)?;
             return crate::change_analysis::refresh_change(
                 &svc,
                 ChangeTarget::Effort {
-                    effort_id: effort.clone(),
+                    effort_id: effort.to_string(),
                 },
             )
             .await
@@ -431,7 +426,8 @@ mod tests {
         let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
             "system",
             &oxplow_domain::events::schema::EffortFinishedV1 {
-                effort: f.effort.to_string(),
+                // The ref, as `effort.lifecycle` logs it (tsk1025).
+                effort: oxplow_domain::refs::build::effort_ref(f.effort),
                 work_item: "work_item:oxplow:tsk1".into(),
                 end_snapshot: Some(format!("snapshot:{end}")),
                 retroactive: false,

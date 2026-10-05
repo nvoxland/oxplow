@@ -102,13 +102,7 @@ async fn run_fact_collectors(svc: &Services, event: Arc<StoredEvent>) -> Result<
             }
         }
         "effort.finished" => {
-            let effort = event.envelope.payload["effort"]
-                .as_str()
-                .and_then(|r| r.strip_prefix("effort:"))
-                .and_then(oxplow_domain::EffortId::try_from_str)
-                .ok_or_else(|| {
-                    DomainError::Invalid(format!("effort.finished seq {}: no effort", event.seq))
-                })?;
+            let effort = crate::effort_lifecycle::effort_of(&event)?;
             if let Some(thread) = anchors.thread_id {
                 svc.metrics
                     .run_effort_collectors(&thread, &effort, Some(event.clone()))

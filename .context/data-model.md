@@ -1370,7 +1370,10 @@ effort's own work. `on_effort_closed` takes and pins the
 unclaimed files and runs, projects the lifecycle metrics, then logs
 **`effort.finished@1 { effort, work_item, end_snapshot?, retroactive? }`**
 (caused by the `effort.closed`, dedupe key `effort.finished:<effort>` so a
-re-delivery's second append is a no-op). A `retroactive` effort (recorded
+re-delivery's second append is a no-op). `effort` is the ref
+(`effort:eff12`), never a bare id: every consumer reads it through
+`effort_lifecycle::effort_of` (over `refs::build::effort_of_ref`), so no
+consumer parses it its own way (tsk1025). A `retroactive` effort (recorded
 by `record_effort_atomic` for an item never opened) gets only the metrics. Re-delivery is safe (review of P2.6, tsk462): pins are stamped only
 while NULL (`set_start_snapshot` / `set_end_snapshot`), the lifecycle
 metrics stop when the effort already has its `effort-lifecycle` capture,

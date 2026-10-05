@@ -53,6 +53,12 @@ pub fn effort_ref(id: EffortId) -> String {
     format!("effort:{id}")
 }
 
+/// The effort behind an `effort:` ref (`effort:eff12`), the inverse of
+/// [`effort_ref`]; `None` for any other string, a bare id included.
+pub fn effort_of_ref(r: &str) -> Option<EffortId> {
+    r.strip_prefix("effort:").and_then(EffortId::try_from_str)
+}
+
 pub fn turn_ref(id: AgentTurnId) -> String {
     format!("turn:{id}")
 }
@@ -171,6 +177,16 @@ mod tests {
     use super::*;
     use crate::refs::grammar::CanonicalRef;
     use crate::refs::kind::core_kinds;
+
+    /// tsk1025: an `effort.*` payload carries the ref, and every consumer
+    /// reads it back through this one inverse.
+    #[test]
+    fn an_effort_ref_reads_back_to_its_effort() {
+        let id = EffortId::try_from_str("eff12").unwrap();
+        assert_eq!(effort_of_ref(&effort_ref(id)), Some(id));
+        assert_eq!(effort_of_ref("eff12"), None, "a bare id isn't a ref");
+        assert_eq!(effort_of_ref("turn:12"), None);
+    }
 
     #[test]
     fn every_builder_produces_a_valid_canonical_ref() {

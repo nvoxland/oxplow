@@ -16,7 +16,7 @@
 use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
-use oxplow_domain::{DomainError, EffortId, StoredEvent};
+use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::event_pump::AsyncEventConsumer;
 use crate::Services;
@@ -42,15 +42,6 @@ pub fn register(svc: &Arc<Services>) {
     }
 }
 
-fn effort_of(event: &StoredEvent) -> Result<EffortId, DomainError> {
-    let r = event.envelope.payload["effort"]
-        .as_str()
-        .unwrap_or_default();
-    r.strip_prefix("effort:")
-        .and_then(EffortId::try_from_str)
-        .ok_or_else(|| DomainError::Invalid(format!("effort.finished seq {}: `{r}`", event.seq)))
-}
-
 #[async_trait]
 impl AsyncEventConsumer for EffortReactor {
     fn name(&self) -> &'static str {
@@ -69,7 +60,7 @@ impl AsyncEventConsumer for EffortReactor {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
-        let effort = effort_of(event)?;
+        let effort = crate::effort_lifecycle::effort_of(event)?;
         match self.reaction {
             Reaction::Evidence => crate::effort_evidence::refresh(&svc, effort.value()).await,
             Reaction::Decisions => {

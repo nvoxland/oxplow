@@ -91,19 +91,18 @@ impl EffortLifecycleConsumer {
     }
 }
 
-/// The effort an `effort.*` event is about (its `effort` payload ref).
-fn effort_of(event: &StoredEvent) -> Result<EffortId, DomainError> {
+/// The effort an `effort.*` event is about (its `effort` payload ref): what
+/// every consumer of `effort.closed` / `effort.finished` reads (tsk1025).
+pub(crate) fn effort_of(event: &StoredEvent) -> Result<EffortId, DomainError> {
     let r = event.envelope.payload["effort"]
         .as_str()
         .unwrap_or_default();
-    r.strip_prefix("effort:")
-        .and_then(EffortId::try_from_str)
-        .ok_or_else(|| {
-            DomainError::Invalid(format!(
-                "{} seq {}: `effort` is not an effort ref: `{r}`",
-                event.envelope.event_type, event.seq
-            ))
-        })
+    oxplow_domain::refs::build::effort_of_ref(r).ok_or_else(|| {
+        DomainError::Invalid(format!(
+            "{} seq {}: `effort` is not an effort ref: `{r}`",
+            event.envelope.event_type, event.seq
+        ))
+    })
 }
 
 #[async_trait]
