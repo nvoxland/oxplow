@@ -163,8 +163,7 @@ impl SqliteCollectorStore {
         let prefix = table_prefix(extension);
         let ext = extension.to_string();
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
+            .transaction(move |tx| {
                 let names = |sql: &str, param: &str| -> Result<Vec<String>, DomainError> {
                     let mut st = tx.prepare(sql).map_err(map_sql_err)?;
                     let rows = st
@@ -190,7 +189,7 @@ impl SqliteCollectorStore {
                 }
                 tx.execute("DELETE FROM collector_run WHERE owner = ?1", [&ext])
                     .map_err(map_sql_err)?;
-                tx.commit().map_err(map_sql_err)
+                Ok(())
             })
             .await
     }

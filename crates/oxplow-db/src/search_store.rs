@@ -183,8 +183,7 @@ impl SqliteSearchStore {
         let title = title.to_string();
         let body = body.to_string();
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
+            .transaction(move |tx| {
                 let existing: Option<i64> = tx
                     .query_row(
                         "SELECT rowid FROM search_entry \
@@ -216,7 +215,6 @@ impl SqliteSearchStore {
                     params![rowid, title, body],
                 )
                 .map_err(crate::database::map_sql_err)?;
-                tx.commit().map_err(crate::database::map_sql_err)?;
                 Ok(())
             })
             .await
@@ -233,8 +231,7 @@ impl SqliteSearchStore {
         let ref_id = ref_id.to_string();
         let stream_id = stream_id.map(|s| s.to_string());
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
+            .transaction(move |tx| {
                 let existing: Option<i64> = tx
                     .query_row(
                         "SELECT rowid FROM search_entry \
@@ -251,7 +248,6 @@ impl SqliteSearchStore {
                     tx.execute("DELETE FROM search_entry WHERE rowid = ?1", params![id])
                         .map_err(crate::database::map_sql_err)?;
                 }
-                tx.commit().map_err(crate::database::map_sql_err)?;
                 Ok(())
             })
             .await
@@ -263,8 +259,7 @@ impl SqliteSearchStore {
     pub async fn purge_stream_files(&self, stream_id: &str) -> Result<(), DomainError> {
         let stream_id = stream_id.to_string();
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
+            .transaction(move |tx| {
                 tx.execute(
                     "DELETE FROM search_fts WHERE rowid IN \
                      (SELECT rowid FROM search_entry WHERE kind = 'file' AND stream_id = ?1)",
@@ -276,7 +271,6 @@ impl SqliteSearchStore {
                     params![stream_id],
                 )
                 .map_err(crate::database::map_sql_err)?;
-                tx.commit().map_err(crate::database::map_sql_err)?;
                 Ok(())
             })
             .await

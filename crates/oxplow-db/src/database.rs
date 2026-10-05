@@ -942,6 +942,43 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
+    /// tsk978: `Database::transaction` is the one write path — it begins
+    /// IMMEDIATE and retries Busy. No store opens a transaction of its own
+    /// on a raw connection; the open-time model compile (`models.rs`, run
+    /// before the pool serves anyone) and this file's own are the two.
+    #[test]
+    fn every_store_write_runs_in_the_retried_transaction() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![src.clone()];
+        let mut own = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                let production = text.split("#[cfg(test)]").next().unwrap_or_default();
+                let rel = path
+                    .strip_prefix(&src)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                if production.contains(".transaction()")
+                    && !matches!(rel.as_str(), "database.rs" | "models.rs")
+                {
+                    own.push(rel);
+                }
+            }
+        }
+        own.sort();
+        assert_eq!(own, Vec::<String>::new());
+    }
+
     /// tsk1005: under IMMEDIATE, Busy comes at `BEGIN` — another writer
     /// holds the lock past `busy_timeout` — and that is retried like a
     /// Busy inside the transaction.

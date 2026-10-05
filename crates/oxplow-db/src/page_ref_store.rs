@@ -112,10 +112,9 @@ impl SqlitePageRefStore {
         let source_kind = source_kind.to_string();
         let source_id = source_id.to_string();
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
-                replace_source_tx(&tx, &source_kind, &source_id, edges)?;
-                tx.commit().map_err(crate::database::map_sql_err)
+            .transaction(move |tx| {
+                replace_source_tx(tx, &source_kind, &source_id, edges.clone())?;
+                Ok(())
             })
             .await
     }
@@ -145,10 +144,9 @@ impl SqlitePageRefStore {
         let source_kind = source_kind.to_string();
         let source_id = source_id.to_string();
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
-                merge_source_tx(&tx, &source_kind, &source_id, edges)?;
-                tx.commit().map_err(crate::database::map_sql_err)
+            .transaction(move |tx| {
+                merge_source_tx(tx, &source_kind, &source_id, edges.clone())?;
+                Ok(())
             })
             .await
     }

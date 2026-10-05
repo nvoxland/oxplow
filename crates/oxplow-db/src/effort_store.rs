@@ -1346,9 +1346,8 @@ impl EffortStore for SqliteEffortStore {
         let id_clone = *id;
         let paths = paths.to_vec();
         self.db
-            .call_mut(move |conn| {
+            .transaction(move |tx| {
                 let sql_err = crate::database::map_sql_err;
-                let tx = conn.transaction().map_err(sql_err)?;
                 tx.execute(
                     "DELETE FROM effort_unattributed_file WHERE effort_id = ?1",
                     params![id_clone.value()],
@@ -1364,7 +1363,6 @@ impl EffortStore for SqliteEffortStore {
                     )
                     .map_err(sql_err)?;
                 }
-                tx.commit().map_err(sql_err)?;
                 Ok(())
             })
             .await

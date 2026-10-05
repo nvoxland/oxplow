@@ -567,8 +567,8 @@ pub fn test_case_writes(prev: Option<&TestCaseStat>, case: &TestCaseResult) -> (
 
 pub fn record_facts_tx(
     conn: &rusqlite::Connection,
-    capture: NewMetricCapture,
-    facts: Vec<NewFact>,
+    capture: &NewMetricCapture,
+    facts: &[NewFact],
     log: Option<&CaptureEvent>,
 ) -> Result<i64, DomainError> {
     if let Some(key) = capture.idempotency_key.as_deref() {
@@ -584,13 +584,12 @@ pub fn record_facts_tx(
             return Ok(id);
         }
     }
-    for f in &facts {
+    for f in facts {
         check_dims_tx(conn, f.dims_json.as_deref())?;
     }
     let capture_id = insert_capture(conn, capture).map_err(map_sql_err)?;
-    for mut f in facts {
-        f.capture_id = Some(capture_id);
-        insert_fact(conn, f).map_err(map_sql_err)?;
+    for f in facts {
+        insert_fact(conn, f, capture_id).map_err(map_sql_err)?;
     }
     if let Some(log) = log {
         let env = (log.build)(capture_id);
@@ -669,7 +668,7 @@ fn test_case_stats_tx(
         .map_err(map_sql_err)
 }
 
-fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite::Result<i64> {
+fn insert_capture(conn: &rusqlite::Connection, c: &NewMetricCapture) -> rusqlite::Result<i64> {
     let captured = c
         .captured_at
         .map(ts_to_string)
@@ -1013,8 +1012,7 @@ fn row_to_fact_row_with(
     })
 }
 
-fn insert_fact(conn: &rusqlite::Connection, f: NewFact) -> rusqlite::Result<i64> {
-    let capture_id = f.capture_id.expect("fact must carry a capture_id");
+fn insert_fact(conn: &rusqlite::Connection, f: &NewFact, capture_id: i64) -> rusqlite::Result<i64> {
     conn.execute(
         "INSERT INTO fact
            (capture_id, measure_id, value, numerator, denominator, subject_kind, subject_ref,
@@ -1139,8 +1137,7 @@ impl SqliteFactStore {
     /// preserved across updates.
     pub async fn upsert_measure(&self, m: NewMeasure) -> Result<i64, DomainError> {
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
+            .transaction(move |tx| {
                 // A `capture_scope` change swaps the cube's BUILD RULE (state
                 // fold vs per-capture GROUP BY), so rows built under the old
                 // rule must not survive to be served — invalidate that
@@ -1202,7 +1199,6 @@ impl SqliteFactStore {
                     tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
                         .map_err(map_sql_err)?;
                 }
-                tx.commit().map_err(map_sql_err)?;
                 Ok(id)
             })
             .await
@@ -1237,9 +1233,8 @@ impl SqliteFactStore {
     /// may have carried the key in `dims_json` before the catalog knew it.
     pub async fn upsert_dimension(&self, d: NewDimension) -> Result<(), DomainError> {
         self.db
-            .call_mut(move |conn| {
+            .transaction(move |tx| {
                 let (scope, extension) = stored_scope(&d.scope);
-                let tx = conn.transaction().map_err(map_sql_err)?;
                 let prior: Option<bool> = tx
                     .query_row(
                         "SELECT promoted FROM dimension WHERE key = ?1",
@@ -1275,7 +1270,6 @@ impl SqliteFactStore {
                         tx.execute(sql, []).map_err(map_sql_err)?;
                     }
                 }
-                tx.commit().map_err(map_sql_err)?;
                 Ok(())
             })
             .await
@@ -1401,7 +1395,7 @@ impl SqliteFactStore {
 
     /// Insert one capture; returns its id. `captured_at` defaults to now.
     pub async fn record_capture(&self, c: NewMetricCapture) -> Result<i64, DomainError> {
-        self.db.call(move |conn| insert_capture(conn, c)).await
+        self.db.call(move |conn| insert_capture(conn, &c)).await
     }
 
     /// Atomically insert a capture plus all of its facts in one transaction. Each
@@ -1429,10 +1423,8 @@ impl SqliteFactStore {
     ) -> Result<i64, DomainError> {
         let result = self
             .db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
-                let capture_id = record_facts_tx(&tx, capture, facts, log.as_ref())?;
-                tx.commit().map_err(map_sql_err)?;
+            .transaction(move |tx| {
+                let capture_id = record_facts_tx(tx, &capture, &facts, log.as_ref())?;
                 Ok(capture_id)
             })
             .await;
@@ -1461,8 +1453,7 @@ impl SqliteFactStore {
     ) -> Result<i64, DomainError> {
         let result = self
             .db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
+            .transaction(move |tx| {
                 if let Some(key) = capture.idempotency_key.as_deref() {
                     let existing: Option<i64> = tx
                         .query_row(
@@ -1481,9 +1472,11 @@ impl SqliteFactStore {
                 let producer = capture.producer.clone();
                 let when = capture.captured_at.unwrap_or_else(Timestamp::now);
                 let at = ts_to_string(when);
-                let mut capture = capture;
+                // Its own copy per attempt: the retried closure keeps the
+                // input to try again with.
+                let mut capture = capture.clone();
                 capture.captured_at = Some(when);
-                let prev = test_case_stats_tx(&tx, stream, &branch, &producer)?;
+                let prev = test_case_stats_tx(tx, stream, &branch, &producer)?;
                 let mut facts = Vec::new();
                 for case in &cases {
                     let (status, duration) = test_case_writes(prev.get(&case.subject), case);
@@ -1504,7 +1497,7 @@ impl SqliteFactStore {
                         });
                     }
                 }
-                let capture_id = record_facts_tx(&tx, capture, facts, log.as_ref())?;
+                let capture_id = record_facts_tx(tx, &capture, &facts, log.as_ref())?;
                 let mut upsert = tx
                     .prepare_cached(
                         "INSERT INTO test_case_stat
@@ -1551,7 +1544,6 @@ impl SqliteFactStore {
                         .map_err(map_sql_err)?;
                 }
                 drop(upsert);
-                tx.commit().map_err(map_sql_err)?;
                 Ok(capture_id)
             })
             .await;
@@ -2087,8 +2079,7 @@ impl SqliteFactStore {
     ) -> Result<(), DomainError> {
         let branch = branch.unwrap_or_default();
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
+            .transaction(move |tx| {
                 tx.execute(
                     "DELETE FROM metric_live_fact
                       WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3",
@@ -2111,7 +2102,6 @@ impl SqliteFactStore {
                             .map_err(map_sql_err)?;
                     }
                 }
-                tx.commit().map_err(map_sql_err)?;
                 Ok(())
             })
             .await
@@ -2143,8 +2133,7 @@ impl SqliteFactStore {
         let branch = branch.unwrap_or_default();
         let captured_at = ts_to_string(captured_at);
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
+            .transaction(move |tx| {
                 let epoch: i64 = tx
                     .prepare_cached("SELECT epoch FROM metric_cube_epoch WHERE id = 1")
                     .map_err(map_sql_err)?
@@ -2202,7 +2191,6 @@ impl SqliteFactStore {
                     captured_at
                 ])
                 .map_err(map_sql_err)?;
-                tx.commit().map_err(map_sql_err)?;
                 Ok(true)
             })
             .await
@@ -2776,8 +2764,7 @@ impl SqliteFactStore {
     /// cube each start would turn tsk96's fix off for nothing.
     pub async fn prune_dominated_tree_captures(&self, stream_id: i64) -> Result<u64, DomainError> {
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
+            .transaction(move |tx| {
                 let n = tx
                     .execute(
                         "DELETE FROM metric_capture
@@ -2840,7 +2827,6 @@ impl SqliteFactStore {
                     tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
                         .map_err(map_sql_err)?;
                 }
-                tx.commit().map_err(map_sql_err)?;
                 Ok(n as u64)
             })
             .await
@@ -2865,8 +2851,7 @@ impl SqliteFactStore {
         expected_epoch: i64,
     ) -> Result<bool, DomainError> {
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
+            .transaction(move |tx| {
                 let epoch: i64 = tx
                     .prepare_cached("SELECT epoch FROM metric_cube_epoch WHERE id = 1")
                     .map_err(map_sql_err)?
@@ -2957,7 +2942,6 @@ impl SqliteFactStore {
                     ])
                     .map_err(map_sql_err)?;
                 }
-                tx.commit().map_err(map_sql_err)?;
                 Ok(true)
             })
             .await
@@ -2984,8 +2968,7 @@ impl SqliteFactStore {
     pub async fn prune_aged_captures(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
         let cutoff = ts_to_string(cutoff);
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
+            .transaction(move |tx| {
                 let doomed_where = "captured_at < ?1
                        AND effort_id IS NULL
                        AND id NOT IN (
@@ -3054,7 +3037,6 @@ impl SqliteFactStore {
                     tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
                         .map_err(map_sql_err)?;
                 }
-                tx.commit().map_err(map_sql_err)?;
                 Ok(n as u64)
             })
             .await
@@ -3264,6 +3246,31 @@ impl SqliteFactStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tsk978: a store write runs in the retried write transaction — the
+    /// measure seeding that failed a fresh daemon's boot with "database is
+    /// locked" lands while another writer holds the lock past the pool's
+    /// busy wait, then lets go.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_store_write_outlasts_another_writers_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("facts.sqlite");
+        let store = SqliteFactStore::new(Database::open(&path).unwrap());
+        let (held, holding) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+            held.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(6_500));
+            conn.execute_batch("COMMIT").unwrap();
+        });
+        holding.recv().unwrap();
+        store
+            .upsert_measure(NewMeasure::new("acme.todo", "TODOs"))
+            .await
+            .expect("retried once the lock was free");
+        holder.join().unwrap();
+    }
 
     /// stream(1) + thread(1) + task + effort so capture FKs resolve and the
     /// effort-GC test has a real effort to delete.

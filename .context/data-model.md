@@ -78,7 +78,11 @@ thin `db.call` wrapper over its core; multi-write actions compose
 several cores inside one `Database::transaction(f)` closure
 (`crates/oxplow-db/src/database.rs`) — which owns commit/rollback and
 the bounded `SQLITE_BUSY` retry (safe because a rolled-back attempt
-left no trace; that's why `f` is `Fn`). It begins **IMMEDIATE** (tsk503):
+left no trace; that's why `f` is `Fn`, borrowing what it writes rather
+than consuming it). It is the **one write path** (tsk978): no store opens
+a transaction of its own on a raw connection — a test
+(`every_store_write_runs_in_the_retried_transaction`) allows only
+`database.rs` and the open-time model compile in `models.rs`. It begins **IMMEDIATE** (tsk503):
 the write lock is taken at BEGIN and waited for under `busy_timeout` — a
 BEGIN still Busy after that wait is retried like a Busy inside the
 closure (tsk1005) — so

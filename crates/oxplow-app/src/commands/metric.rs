@@ -264,7 +264,7 @@ fn record_tx(ctx: &TxCtx<'_>, input: &RecordInput, primary: StreamId) -> Result<
         denominator,
         ..NewFact::new(measure.id, input.value)
     };
-    let capture_id = record_facts_tx(ctx.conn, capture, vec![fact], None)?;
+    let capture_id = record_facts_tx(ctx.conn, &capture, &[fact], None)?;
     Ok(capture_id)
 }
 

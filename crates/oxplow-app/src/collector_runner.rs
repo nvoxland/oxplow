@@ -1268,12 +1268,7 @@ impl RunLog {
                     return Ok(false);
                 }
                 if let Some((capture, facts)) = &capture {
-                    oxplow_db::fact_store::record_facts_tx(
-                        tx,
-                        capture.clone(),
-                        facts.clone(),
-                        None,
-                    )?;
+                    oxplow_db::fact_store::record_facts_tx(tx, capture, facts, None)?;
                 }
                 oxplow_db::collector_store::record_run_in(tx, &run)
                     .map_err(oxplow_db::map_sql_err)?;
