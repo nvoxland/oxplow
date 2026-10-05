@@ -211,7 +211,8 @@ takes (`bun run e2e`, below) and the one for remote dev (see
 `/ipc` and `/events` refuse a call without the token (`Authorization:
 Bearer`, or `?token=` on the WebSocket). To hand it over without
 putting it in a command line, start the daemon with `--token-stdin` and
-write it to its stdin.
+write it to its stdin, then keep stdin open: closing it stops the daemon
+(it's the lifeline to the app that started it).
 
 No HMR wanted? Build plain (`bun run --cwd apps/desktop build`), serve
 `dist/` (`bun run --cwd apps/desktop preview`, or any static server), and

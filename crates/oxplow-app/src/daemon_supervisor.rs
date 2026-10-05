@@ -160,6 +160,22 @@ fn terminate(pid: u32) {
 #[cfg(not(unix))]
 fn terminate(_pid: u32) {}
 
+/// The daemon's side of the lifeline (tsk1073): a supervising app keeps the
+/// daemon's stdin open for as long as it lives, so end-of-file means the
+/// app is gone — quit, crashed or killed — and the daemon stops with its
+/// agents (its whole group, when it leads one; just itself when started
+/// inside someone else's, as a test harness does). Watches on a thread of
+/// its own; returns at once.
+pub fn stop_when_app_goes(project_dir: PathBuf) {
+    std::thread::spawn(move || {
+        // `Stdin` is buffered: what follows the token line is read here.
+        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+        tracing::info!("the app that started this daemon is gone (its stdin closed); stopping");
+        clear_daemon_info(&project_dir);
+        terminate(std::process::id());
+    });
+}
+
 /// Kill a daemon left running for `project_dir` by a previous shell.
 /// Returns whether one was actually running. The endpoint file is
 /// cleared either way, so a stale file doesn't outlive its process.
@@ -241,6 +257,10 @@ struct DaemonHandle {
     base_url: String,
     token: String,
     child: Child,
+    /// The daemon's stdin, held open for as long as this app lives: when
+    /// the app goes, however it goes, the pipe closes and the daemon stops
+    /// (`stop_when_app_goes`, tsk1073).
+    _lifeline: Option<std::process::ChildStdin>,
     /// Drains the daemon's stdout for the life of the process. Joined on
     /// stop so no reader outlives the child that fed it.
     reader: Option<std::thread::JoinHandle<()>>,
@@ -305,11 +325,13 @@ impl DaemonSupervisor {
         let mut child = cmd.spawn()?;
         // The UI token goes over stdin: argv and the environment are
         // readable by every process of this user, the daemon's agents
-        // included. Closing stdin after the line ends the handover.
+        // included. Stdin then stays open as the daemon's lifeline.
         let token = new_token();
-        if let Some(mut stdin) = child.stdin.take() {
+        let mut lifeline = child.stdin.take();
+        if let Some(stdin) = lifeline.as_mut() {
             use std::io::Write;
             let _ = writeln!(stdin, "{token}");
+            let _ = stdin.flush();
         }
         let stdout = child
             .stdout
@@ -342,6 +364,7 @@ impl DaemonSupervisor {
                         base_url: base_url.clone(),
                         token: token.clone(),
                         child,
+                        _lifeline: lifeline,
                         reader: Some(reader),
                     },
                 );

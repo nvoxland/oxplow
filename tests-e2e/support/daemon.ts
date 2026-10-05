@@ -133,7 +133,9 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
       logFile.write(b);
     });
     spawned.once("close", () => logFile.end());
-    spawned.stdin?.end(`${token}\n`);
+    // Stdin stays open: it's the daemon's lifeline, and closing it stops
+    // the daemon (tsk1073).
+    spawned.stdin?.write(`${token}\n`);
     const base = await new Promise<string>((resolve, reject) => {
       const said = () => `${stderr.join("")}\n(log: ${log})`;
       const lines = createInterface({ input: spawned.stdout! });

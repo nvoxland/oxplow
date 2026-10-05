@@ -172,6 +172,13 @@ token**; only the person's renderer holds it.
   daemon and hands them over on **stdin** (`--token-stdin`). Never argv,
   the environment or a file: all are readable by other processes of the
   user, the daemon's own agents included.
+- **Lifeline (tsk1073):** after the token the shell keeps that stdin open
+  for as long as it lives. End-of-file means the app is gone (quit,
+  crashed, SIGKILLed), and the daemon stops with its agents
+  (`daemon_supervisor::stop_when_app_goes`: SIGTERM to its group when it
+  leads one, else just itself). Anything starting a daemon with
+  `--token-stdin` must hold stdin open; closing it stops the daemon. The
+  boot-time orphan sweep stays for a daemon from before this.
 - **Hand-started daemon:** it mints its own and prints `ui token: …`.
 - **Presenting it:** `Authorization: Bearer <token>` on `/ipc`, and
   `?token=` on the `/events` WebSocket (browsers can't set its headers).

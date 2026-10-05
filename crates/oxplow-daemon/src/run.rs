@@ -106,6 +106,10 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
             eprintln!("{name}: --token-stdin but no token on stdin");
             std::process::exit(2);
         }
+        // The rest of stdin is the lifeline to the app that started us.
+        if let Ok(dir) = args.project_dir.canonicalize() {
+            oxplow_app::daemon_supervisor::stop_when_app_goes(dir);
+        }
         (line.trim().to_string(), false)
     } else {
         (new_token(), true)

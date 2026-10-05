@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used)]
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 
 use serde_json::{json, Value};
 
@@ -14,6 +14,8 @@ const TOKEN: &str = "suite-token";
 
 struct Daemon {
     child: Child,
+    /// Held open: a daemon whose stdin closes stops (its lifeline).
+    _stdin: ChildStdin,
     base: String,
 }
 
@@ -35,7 +37,8 @@ fn start(project: &std::path::Path, home: &std::path::Path) -> Daemon {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    writeln!(child.stdin.take().unwrap(), "{TOKEN}").unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    writeln!(stdin, "{TOKEN}").unwrap();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
     let base = loop {
         let line = lines
@@ -46,7 +49,11 @@ fn start(project: &std::path::Path, home: &std::path::Path) -> Daemon {
             break url.trim().to_string();
         }
     };
-    Daemon { child, base }
+    Daemon {
+        child,
+        _stdin: stdin,
+        base,
+    }
 }
 
 async fn ipc(daemon: &Daemon, name: &str, args: Value) -> Value {
