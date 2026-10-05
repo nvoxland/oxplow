@@ -55,7 +55,11 @@ Things I keep forgetting. Read this before adding any UI.
   page — an open Settings scrolls there, a closed one takes the pending
   request when it mounts. A page that shows state from outside any model
   refreshes on the event that says it changed (Integrations and Data on
-  `approvalsChanged`, sent when a person approves a program).
+  `approvalsChanged`, sent when a person approves a program). Integrations
+  also re-reads when an instance's health is recorded (`v_plugin_health`,
+  through `useRerunOnChange`): Enable's own `configChanged` can be read
+  before the instance has started, and nothing else says it finished
+  (tsk1053).
 - **A re-read never wipes what the person typed** (tsk1054). A host
   re-reading its data hands a form fresh copies of the same schema and
   saved value, so a form resets its fields on the *content* changing, not

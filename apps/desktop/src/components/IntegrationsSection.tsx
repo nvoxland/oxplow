@@ -40,6 +40,7 @@ import {
   type ProviderInstanceView,
 } from "../api.js";
 import type { SignInCompletion, SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
+import { readsOf, useRerunOnChange } from "../lens/lensRerun.js";
 import { CredentialRow } from "./ExtensionsSection.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import {
@@ -93,6 +94,10 @@ export function IntegrationsSection() {
       }
     });
   }, [refresh]);
+  // An instance starting, failing or recovering is recorded in its health
+  // (`v_plugin_health`); Enable's own config change can be read before
+  // the start finishes, so the rows re-read on this too (tsk1053).
+  useRerunOnChange(readsOf("v_plugin_health"), () => void refresh());
 
   if (views === null) return <div style={mutedStyle}>Loading…</div>;
   if (views.length === 0) {

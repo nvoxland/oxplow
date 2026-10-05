@@ -460,3 +460,22 @@ test("what the person typed survives a re-read", async () => {
   });
   expect((view.getByTestId("integration-config-tracker/fake-team") as HTMLInputElement).value).toBe("platform");
 });
+
+// tsk1053: Enable's own config change can be read before the instance has
+// started, leaving the row on "Checking…". The start finishing is announced
+// only by its health being recorded (`v_plugin_health`): the row re-reads.
+test("a row re-reads when the instance's health is recorded", async () => {
+  const ready = instance.health;
+  instance.health = { ...ready, state: { state: "checking" } } as typeof ready;
+  try {
+    const view = render(<IntegrationsSection />);
+    await waitFor(() => expect(view.getByTestId("integration-status-tracker/fake").textContent).toContain("Checking…"));
+    instance.health = ready;
+    act(() => {
+      for (const l of listeners) l({ kind: "modelsChanged", models: ["v_plugin_health"] });
+    });
+    await waitFor(() => expect(view.getByTestId("integration-status-tracker/fake").textContent).toContain("Ready"));
+  } finally {
+    instance.health = ready;
+  }
+});
