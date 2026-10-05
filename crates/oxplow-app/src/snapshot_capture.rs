@@ -649,112 +649,6 @@ impl SnapshotCaptureService {
         Ok(Some(moved.snapshot_id))
     }
 
-    /// The paths to register with the OS watcher: the project root
-    /// NON-recursively, plus each non-ignored top-level directory recursively.
-    ///
-    /// Pruning at REGISTRATION rather than per delivered event (tsk206) is the
-    /// whole point: a recursive watch on the root hands us every write under
-    /// `target/` (345k files here) and `node_modules/`, each cloned into the
-    /// broadcast and then thrown away by the same filter. Nothing is hardcoded —
-    /// `WorkspaceFilter` layers `.git`/`.oxplow` defaults, `generated.include`,
-    /// `generated.exclude`, and `.gitignore`, so those dirs are skipped because
-    /// the repo gitignores them. Same rule `workspace_watch` already applies.
-    ///
-    /// The per-event check stays: it catches nested ignores inside a watched dir
-    /// (a `.gitignore` deeper in the tree), which a top-level prune can't see.
-    fn watch_paths_for(
-        project_dir: &Path,
-        filter: &WorkspaceFilter,
-    ) -> Vec<(PathBuf, oxplow_fs_watch::RecursiveMode)> {
-        use oxplow_fs_watch::RecursiveMode;
-        let mut paths = vec![(project_dir.to_path_buf(), RecursiveMode::NonRecursive)];
-        match std::fs::read_dir(project_dir) {
-            Ok(entries) => {
-                for entry in entries.flatten() {
-                    let Ok(file_type) = entry.file_type() else {
-                        continue;
-                    };
-                    if !file_type.is_dir() {
-                        continue;
-                    }
-                    let name = entry.file_name();
-                    if filter.ignore(Path::new(&name), true) {
-                        continue;
-                    }
-                    paths.push((entry.path(), RecursiveMode::Recursive));
-                }
-            }
-            // Unreadable project root: fall back to the old whole-tree watch
-            // rather than silently watching nothing.
-            Err(e) => {
-                warn!(error = %e, "snapshot capture: cannot enumerate project dir; watching it whole");
-                return vec![(project_dir.to_path_buf(), RecursiveMode::Recursive)];
-            }
-        }
-        paths
-    }
-
-    /// True when `dir` is a top-level directory that the current watch
-    /// generation covers nothing inside of.
-    ///
-    /// The root is registered NonRecursive and its subdirectories are
-    /// enumerated ONCE per generation ([`Self::watch_paths_for`], tsk206), so a
-    /// directory created *after* that enumeration is watched by nothing: the
-    /// root watch reports the mkdir itself and then never reports a single write
-    /// inside it. Left unhandled every file under it goes unsnapshotted until
-    /// restart — not just unattributed, absent from Local History entirely.
-    /// That is what happened to this repo's own `tests-e2e/`: 0 `file_snapshot`
-    /// rows while every pre-existing directory had hundreds (tsk227).
-    fn needs_rewatch(
-        &self,
-        registered: &[(PathBuf, oxplow_fs_watch::RecursiveMode)],
-        dir: &Path,
-    ) -> bool {
-        if !dir.is_dir() || dir.parent() != Some(self.inner.project_dir.as_path()) {
-            return false;
-        }
-        let rel = dir.strip_prefix(&self.inner.project_dir).unwrap_or(dir);
-        if self
-            .inner
-            .workspace_filter
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .ignore(rel, true)
-        {
-            return false;
-        }
-        // Already covered — re-registering would churn the watch set for nothing.
-        !registered.iter().any(|(p, _)| p == dir)
-    }
-
-    /// Mark every filtered-in file under `dir` dirty.
-    ///
-    /// Rebuilding the watch set is not sufficient on its own: `mkdir d && write
-    /// d/f` races the rebuild, and `watch_generation` drops events arriving in
-    /// that gap. Without this walk the fix would miss exactly the files that
-    /// motivate it. Mirrors the startup sweep's `filter_entry` idiom so one
-    /// filter decides coverage in both places.
-    pub fn mark_tree_dirty(&self, dir: &Path) {
-        let filter = self
-            .inner
-            .workspace_filter
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
-        let project_dir = &self.inner.project_dir;
-        for entry in walkdir::WalkDir::new(dir)
-            .into_iter()
-            .filter_entry(|e| {
-                let rel = e.path().strip_prefix(project_dir).unwrap_or(e.path());
-                !filter.ignore(rel, e.file_type().is_dir())
-            })
-            .filter_map(Result::ok)
-        {
-            if entry.file_type().is_file() {
-                self.mark_dirty(entry.path().to_path_buf(), WatchEventKind::Other);
-            }
-        }
-    }
-
     async fn run_watcher(self) {
         // Park on the shutdown signal ONCE, outside the re-registration loop, so
         // a `notify_one` that fires between iterations isn't missed (the pinned
@@ -768,25 +662,23 @@ impl SnapshotCaptureService {
         // rebuild gap are dropped; a config edit is a deliberate user action and
         // the next sweep/event covers it.
         loop {
-            let paths = Self::watch_paths_for(
-                &self.inner.project_dir,
-                &self
-                    .inner
-                    .workspace_filter
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner()),
-            );
-            let watcher = match FsWatcher::watch_paths(paths.clone()) {
+            // The root and each kept top-level directory, pruned at
+            // registration (tsk206) and following directories made later
+            // (tsk227, tsk1051) — `FsWatcher::watch_workspace`.
+            let filter = self
+                .inner
+                .workspace_filter
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let watcher = match FsWatcher::watch_workspace(&self.inner.project_dir, filter) {
                 Ok(w) => w,
                 Err(e) => {
                     warn!(error = %e, "snapshot capture: failed to start fs-watch");
                     return;
                 }
             };
-            if self
-                .watch_generation(&watcher, &paths, shutdown.as_mut())
-                .await
-            {
+            if self.watch_generation(&watcher, shutdown.as_mut()).await {
                 debug!("snapshot capture: watcher shutting down");
                 return;
             }
@@ -795,12 +687,10 @@ impl SnapshotCaptureService {
 
     /// Drain one registration generation. Returns `true` when the service is
     /// shutting down (stop for good), `false` when the watch set must be
-    /// rebuilt — either the filter changed, or a top-level directory appeared
-    /// that this generation's `registered` set doesn't cover.
+    /// rebuilt because the filter changed.
     async fn watch_generation(
         &self,
         watcher: &FsWatcher,
-        registered: &[(PathBuf, oxplow_fs_watch::RecursiveMode)],
         mut shutdown: std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
     ) -> bool {
         let refilter = self.inner.refilter.notified();
@@ -832,20 +722,6 @@ impl SnapshotCaptureService {
                             .ignore(rel, path.is_dir())
                         {
                             continue;
-                        }
-                        // A top-level dir created after this generation was
-                        // registered is watched by nothing. Backfill BEFORE
-                        // rebuilding: writes that land inside it before the new
-                        // registration takes effect are reported by no watch at
-                        // all, so re-registering alone would still lose them.
-                        if self.needs_rewatch(registered, &path) {
-                            debug!(
-                                dir = %path.display(),
-                                "snapshot capture: new top-level dir, backfilling and re-registering"
-                            );
-                            self.mark_tree_dirty(&path);
-                            self.note_activity();
-                            return false;
                         }
                         self.mark_dirty(path, event.kind);
                         self.note_activity();
@@ -2080,136 +1956,6 @@ mod tests {
             .iter()
             .all(|s| s.tree_hash.as_ref().is_some_and(|h| h.len() == 32)));
         assert_ne!(listed[0].tree_hash, listed[1].tree_hash);
-    }
-
-    #[tokio::test]
-    async fn the_watch_set_skips_filtered_dirs_at_registration() {
-        // tsk206: the watcher must not REGISTER ignored dirs — filtering per
-        // delivered event still hands us every write under `target/` (345k files
-        // on this repo). Deterministic: asserts the computed path set, never an
-        // fs event (see the tsk175 timing-flake lesson).
-        let project = tempdir().unwrap();
-        for d in ["src", "build", "node_modules"] {
-            std::fs::create_dir(project.path().join(d)).unwrap();
-        }
-        std::fs::write(project.path().join("README.md"), b"x").unwrap();
-        let (svc, _store) = svc_for(project.path()).await;
-
-        let names = |paths: &[(PathBuf, oxplow_fs_watch::RecursiveMode)]| {
-            paths
-                .iter()
-                .filter_map(|(p, _)| p.file_name()?.to_str().map(str::to_string))
-                .collect::<Vec<_>>()
-        };
-
-        // Nothing is hardcoded: with a default filter `build`/`node_modules` are
-        // ordinary dirs and ARE watched.
-        let default_set = SnapshotCaptureService::watch_paths_for(
-            project.path(),
-            &svc.inner.workspace_filter.read().unwrap(),
-        );
-        assert!(names(&default_set).contains(&"build".to_string()));
-        assert!(names(&default_set).contains(&"src".to_string()));
-
-        // The project's `generated` config is what prunes them.
-        let filter = oxplow_fs_watch::WorkspaceFilter::with_user_entries(["build", "node_modules"]);
-        let pruned = SnapshotCaptureService::watch_paths_for(project.path(), &filter);
-        let got = names(&pruned);
-        assert!(
-            !got.contains(&"build".to_string()),
-            "filtered dir not registered"
-        );
-        assert!(!got.contains(&"node_modules".to_string()));
-        assert!(got.contains(&"src".to_string()), "normal dir still watched");
-
-        // The root itself is always registered, and NON-recursively — otherwise
-        // the prune is pointless (a recursive root re-covers everything).
-        let root = pruned
-            .iter()
-            .find(|(p, _)| p == project.path())
-            .expect("project root registered");
-        assert!(
-            matches!(root.1, oxplow_fs_watch::RecursiveMode::NonRecursive),
-            "the root must be non-recursive or the prune buys nothing",
-        );
-        // …so a root-level file change is still seen.
-        assert!(pruned.iter().any(|(p, _)| p == project.path()));
-    }
-
-    #[tokio::test]
-    async fn a_top_level_dir_created_after_registration_is_backfilled_and_rewatched() {
-        // tsk227: pruning at registration (tsk206) enumerates the root's subdirs
-        // ONCE, and the root's own watch is NonRecursive — so a top-level dir
-        // created later is covered by nothing, and everything written inside it
-        // was silently never snapshotted. Measured on the live DB before the fix:
-        // `tests-e2e/` had 0 file_snapshot rows while every pre-existing dir had
-        // hundreds.
-        //
-        // Deterministic by construction: asserts the computed watch set and the
-        // dirty set, never a real fs event (the tsk175 timing-flake lesson the
-        // neighbouring tsk206 tests already follow).
-        let project = tempdir().unwrap();
-        std::fs::create_dir(project.path().join("src")).unwrap();
-        let (svc, store) = svc_for(project.path()).await;
-
-        let registered = SnapshotCaptureService::watch_paths_for(
-            project.path(),
-            &svc.inner.workspace_filter.read().unwrap(),
-        );
-
-        // The dir arrives after the watch set was computed.
-        let late = project.path().join("tests-e2e");
-        std::fs::create_dir(&late).unwrap();
-        std::fs::write(late.join("probe.mjs"), b"probe").unwrap();
-        std::fs::create_dir(late.join("nested")).unwrap();
-        std::fs::write(late.join("nested/deep.txt"), b"deep").unwrap();
-
-        // 1. It must be recognized as uncovered, so the watch set gets rebuilt.
-        assert!(
-            svc.needs_rewatch(&registered, &late),
-            "a top-level dir created after registration is watched by nothing",
-        );
-        // An already-registered top-level dir must NOT churn the watch set.
-        assert!(
-            !svc.needs_rewatch(&registered, &project.path().join("src")),
-            "an already-watched dir must not trigger re-registration",
-        );
-        // Nor may a filtered-out one (it's excluded on purpose).
-        let filtered = project.path().join("build");
-        std::fs::create_dir(&filtered).unwrap();
-        svc.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
-            "build",
-        ]));
-        assert!(
-            !svc.needs_rewatch(&registered, &filtered),
-            "a filtered dir must stay out of the watch set",
-        );
-
-        // 2. Re-registration alone loses whatever was written in the gap, so the
-        //    contents must be backfilled into the dirty set.
-        svc.mark_tree_dirty(&late);
-        svc.request_snapshot(SnapshotTrigger::Startup)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            store
-                .list_for_path("tests-e2e/probe.mjs")
-                .await
-                .unwrap()
-                .len(),
-            1,
-            "a file created in the gap must still be snapshotted",
-        );
-        assert_eq!(
-            store
-                .list_for_path("tests-e2e/nested/deep.txt")
-                .await
-                .unwrap()
-                .len(),
-            1,
-            "the backfill must recurse, not just read the top level",
-        );
     }
 
     #[tokio::test]

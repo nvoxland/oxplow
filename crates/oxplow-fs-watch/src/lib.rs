@@ -56,8 +56,9 @@ pub struct WatchEvent {
 /// Hold this for as long as you want to watch. Drop it to cancel.
 pub struct FsWatcher {
     // Holding the watcher alive keeps it running. Drop releases all OS
-    // handles.
-    _watcher: RecommendedWatcher,
+    // handles. Shared (weakly) with a workspace watch's follower, which
+    // adds a watch for each top-level directory that appears.
+    _watcher: std::sync::Arc<std::sync::Mutex<RecommendedWatcher>>,
     sender: broadcast::Sender<WatchEvent>,
 }
 
@@ -77,12 +78,56 @@ impl FsWatcher {
     /// any registered path flows through the same broadcast channel.
     /// Events are emitted immediately as the OS reports them.
     pub fn watch_paths(paths: Vec<(PathBuf, RecursiveMode)>) -> Result<Self, FsWatchError> {
+        Self::start(paths, None)
+    }
+
+    /// Watch a worktree: its root non-recursively and each top-level
+    /// directory `filter` keeps recursively ([`workspace_watch_paths`]) —
+    /// pruned at registration, so a gitignored `target/` never floods the
+    /// stream (tsk206). It **follows the tree** (tsk227, tsk1051): a kept
+    /// top-level directory that appears later gets its recursive watch,
+    /// and the files already in it are reported (as `Other`), since
+    /// whatever was written before that watch landed no watch saw.
+    pub fn watch_workspace(root: &Path, filter: WorkspaceFilter) -> Result<Self, FsWatchError> {
+        let paths = workspace_watch_paths(root, &filter);
+        let followed = paths
+            .iter()
+            .filter(|(_, mode)| matches!(mode, RecursiveMode::Recursive))
+            .filter_map(|(p, _)| p.file_name().map(|n| n.to_os_string()))
+            .collect();
+        // The OS may report paths under either spelling of the root (macOS
+        // reports `/private/var` for `/var`).
+        let mut roots = vec![root.to_path_buf()];
+        if let Ok(canonical) = root.canonicalize() {
+            if canonical != root {
+                roots.push(canonical);
+            }
+        }
+        Self::start(
+            paths,
+            Some(Follow {
+                roots,
+                filter,
+                followed,
+            }),
+        )
+    }
+
+    fn start(
+        paths: Vec<(PathBuf, RecursiveMode)>,
+        follow: Option<Follow>,
+    ) -> Result<Self, FsWatchError> {
         // Capacity is generous because the raw stream is un-coalesced:
         // a `git checkout` or build can fire hundreds of events before
         // a slow subscriber drains them. Lagged subscribers log and
         // recover; they never block the watcher thread.
         let (tx, _) = broadcast::channel(1024);
         let tx_clone = tx.clone();
+        // A path directly under a followed root goes to the follower, which
+        // decides (off the OS callback thread — registering a watch from it
+        // can deadlock a backend) whether it's a new top-level directory.
+        let (top_tx, top_rx) = std::sync::mpsc::channel::<PathBuf>();
+        let top_roots = follow.as_ref().map(|f| f.roots.clone()).unwrap_or_default();
 
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
@@ -93,11 +138,26 @@ impl FsWatcher {
                         path: path.clone(),
                         kind: kind.clone(),
                     });
+                    if path
+                        .parent()
+                        .is_some_and(|parent| top_roots.iter().any(|r| r == parent))
+                    {
+                        let _ = top_tx.send(path.clone());
+                    }
                 }
             })?;
 
         for (p, mode) in paths {
             watcher.watch(&p, mode)?;
+        }
+
+        let watcher = std::sync::Arc::new(std::sync::Mutex::new(watcher));
+        if let Some(follow) = follow {
+            let weak = std::sync::Arc::downgrade(&watcher);
+            let tx = tx.clone();
+            // Ends when the watcher is dropped: that drops the callback,
+            // and with it the only sender of `top_rx`.
+            std::thread::spawn(move || follow.run(&weak, &top_rx, &tx));
         }
 
         Ok(Self {
@@ -163,6 +223,104 @@ impl FsWatcher {
             }
         });
         rx
+    }
+}
+
+/// What a workspace watch registers: the root non-recursively (so a file
+/// at the root, or a top-level directory appearing, is still seen) and
+/// each top-level directory `filter` keeps, recursively. An unreadable
+/// root is watched whole rather than not at all.
+pub fn workspace_watch_paths(
+    root: &Path,
+    filter: &WorkspaceFilter,
+) -> Vec<(PathBuf, RecursiveMode)> {
+    let mut paths = vec![(root.to_path_buf(), RecursiveMode::NonRecursive)];
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!(error = %e, ?root, "cannot enumerate the workspace root; watching it whole");
+            return vec![(root.to_path_buf(), RecursiveMode::Recursive)];
+        }
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir())
+            && !filter.ignore(Path::new(&entry.file_name()), true)
+        {
+            paths.push((entry.path(), RecursiveMode::Recursive));
+        }
+    }
+    paths
+}
+
+/// A workspace watch's follower: adds the recursive watch for each kept
+/// top-level directory that appears, and reports what's already in it.
+struct Follow {
+    /// The root, as given and canonical.
+    roots: Vec<PathBuf>,
+    filter: WorkspaceFilter,
+    /// The top-level directories with a recursive watch, by name.
+    followed: HashSet<std::ffi::OsString>,
+}
+
+impl Follow {
+    fn run(
+        mut self,
+        watcher: &std::sync::Weak<std::sync::Mutex<RecommendedWatcher>>,
+        top: &std::sync::mpsc::Receiver<PathBuf>,
+        tx: &broadcast::Sender<WatchEvent>,
+    ) {
+        while let Ok(path) = top.recv() {
+            let Some(name) = path.file_name().map(|n| n.to_os_string()) else {
+                continue;
+            };
+            let Some(watcher) = watcher.upgrade() else {
+                return;
+            };
+            let mut watcher = watcher.lock().unwrap_or_else(|e| e.into_inner());
+            if !path.is_dir() {
+                // Gone: a later one of the same name is new again.
+                if self.followed.remove(&name) {
+                    let _ = watcher.unwatch(&path);
+                }
+                continue;
+            }
+            if self.followed.contains(&name) || self.filter.ignore(Path::new(&name), true) {
+                continue;
+            }
+            if let Err(e) = watcher.watch(&path, RecursiveMode::Recursive) {
+                tracing::warn!(error = %e, ?path, "could not watch a new top-level directory");
+                continue;
+            }
+            drop(watcher);
+            self.followed.insert(name.clone());
+            self.report_files(&path, Path::new(&name), tx);
+        }
+    }
+
+    /// Report every kept file under `dir` (`rel` from the root), as the
+    /// walks do.
+    fn report_files(&self, dir: &Path, rel: &Path, tx: &broadcast::Sender<WatchEvent>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let rel = rel.join(entry.file_name());
+            if self.filter.ignore(&rel, file_type.is_dir()) {
+                continue;
+            }
+            if file_type.is_dir() {
+                self.report_files(&path, &rel, tx);
+            } else if file_type.is_file() {
+                let _ = tx.send(WatchEvent {
+                    path,
+                    kind: WatchEventKind::Other,
+                });
+            }
+        }
     }
 }
 
@@ -578,6 +736,106 @@ mod tests {
             }
         }
         assert_eq!(seen, targets, "raw stream should surface each file");
+    }
+
+    /// Collect the canonical paths the stream reports within `within`,
+    /// stopping early once `want` was seen.
+    async fn seen_within(
+        rx: &mut broadcast::Receiver<WatchEvent>,
+        want: &Path,
+        within: Duration,
+    ) -> HashSet<PathBuf> {
+        let mut seen = HashSet::new();
+        let deadline = std::time::Instant::now() + within;
+        while std::time::Instant::now() < deadline && !seen.contains(want) {
+            if let Ok(Ok(evt)) = timeout(Duration::from_millis(200), rx.recv()).await {
+                seen.insert(evt.path.canonicalize().unwrap_or(evt.path));
+            }
+        }
+        seen
+    }
+
+    /// tsk206: the registration set prunes what the filter drops — a
+    /// recursive watch on `target/` would hand over every build write —
+    /// and keeps the root non-recursive, or the prune buys nothing.
+    #[test]
+    fn a_workspace_registers_its_kept_top_level_dirs() {
+        let project = tempdir().unwrap();
+        for d in ["src", "build", "node_modules"] {
+            std::fs::create_dir(project.path().join(d)).unwrap();
+        }
+        std::fs::write(project.path().join("README.md"), b"x").unwrap();
+        let names = |paths: &[(PathBuf, RecursiveMode)]| {
+            paths
+                .iter()
+                .filter_map(|(p, _)| p.file_name()?.to_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        };
+        // Nothing is hardcoded: by default `build` is an ordinary dir.
+        let all = workspace_watch_paths(project.path(), &WorkspaceFilter::default());
+        assert!(names(&all).contains(&"build".to_string()));
+        let pruned = workspace_watch_paths(
+            project.path(),
+            &WorkspaceFilter::with_user_entries(["build", "node_modules"]),
+        );
+        let got = names(&pruned);
+        assert!(
+            !got.contains(&"build".to_string()),
+            "filtered dir not registered"
+        );
+        assert!(!got.contains(&"node_modules".to_string()));
+        assert!(got.contains(&"src".to_string()));
+        let root = pruned
+            .iter()
+            .find(|(p, _)| p == project.path())
+            .expect("the root is registered");
+        assert!(matches!(root.1, RecursiveMode::NonRecursive));
+    }
+
+    /// tsk227, tsk1051: a top-level dir created after the watch started is
+    /// followed — what was written in it before its watch landed is
+    /// reported, and so is what's written after.
+    #[tokio::test]
+    async fn a_top_level_dir_created_later_is_followed() {
+        let project = tempdir().unwrap();
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        let watcher =
+            FsWatcher::watch_workspace(project.path(), WorkspaceFilter::default()).unwrap();
+        let mut rx = watcher.subscribe();
+
+        let late = project.path().join("oxplow");
+        std::fs::create_dir_all(late.join("extensions/mine")).unwrap();
+        std::fs::write(late.join("extensions/mine/extension.yaml"), b"x").unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let early = root.join("oxplow/extensions/mine/extension.yaml");
+        let seen = seen_within(&mut rx, &early, Duration::from_secs(3)).await;
+        assert!(
+            seen.contains(&early),
+            "written before its watch landed: {seen:?}"
+        );
+
+        let after = late.join("extensions/mine/lens.yaml");
+        std::fs::write(&after, b"y").unwrap();
+        let after = root.join("oxplow/extensions/mine/lens.yaml");
+        let seen = seen_within(&mut rx, &after, Duration::from_secs(3)).await;
+        assert!(seen.contains(&after), "written once it's watched: {seen:?}");
+    }
+
+    /// A top-level dir the filter drops stays unwatched when it appears.
+    #[tokio::test]
+    async fn a_filtered_top_level_dir_created_later_is_not_followed() {
+        let project = tempdir().unwrap();
+        let watcher = FsWatcher::watch_workspace(
+            project.path(),
+            WorkspaceFilter::with_user_entries(["build"]),
+        )
+        .unwrap();
+        let mut rx = watcher.subscribe();
+        std::fs::create_dir(project.path().join("build")).unwrap();
+        std::fs::write(project.path().join("build/out.js"), b"x").unwrap();
+        let out = project.path().canonicalize().unwrap().join("build/out.js");
+        let seen = seen_within(&mut rx, &out, Duration::from_millis(800)).await;
+        assert!(!seen.contains(&out), "{seen:?}");
     }
 
     #[tokio::test]

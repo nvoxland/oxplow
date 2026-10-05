@@ -167,34 +167,10 @@ fn spawn_for_stream(
         debug!(?worktree, %stream_id, "skipping watcher — worktree missing");
         return None;
     }
-    let mut paths: Vec<(PathBuf, RecursiveMode)> = Vec::new();
-    // Top-level non-recursive watch so new files at the worktree root
-    // (and the appearance/disappearance of top-level dirs) still fire.
-    paths.push((worktree.clone(), RecursiveMode::NonRecursive));
-    match std::fs::read_dir(&worktree) {
-        Ok(entries) => {
-            for entry in entries.flatten() {
-                let Ok(file_type) = entry.file_type() else {
-                    continue;
-                };
-                if !file_type.is_dir() {
-                    continue;
-                }
-                let name = entry.file_name();
-                // Never register a recursive watch on an ignored
-                // top-level dir (the central filter: `.git`/`.oxplow`
-                // + `.gitignore` + the project's `generated.exclude`).
-                if filter.ignore(Path::new(&name), true) {
-                    continue;
-                }
-                paths.push((entry.path(), RecursiveMode::Recursive));
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, %stream_id, ?worktree, "could not enumerate worktree top-level");
-        }
-    }
-    let fs = match FsWatcher::watch_paths(paths) {
+    // The root and each kept top-level directory, following new ones
+    // (`.git`/`.oxplow`, `.gitignore` and `generated.exclude` are never
+    // registered — tsk206; a directory made later is watched — tsk1051).
+    let fs = match FsWatcher::watch_workspace(&worktree, filter.clone()) {
         Ok(w) => w,
         Err(e) => {
             warn!(error = %e, %stream_id, ?worktree, "fs watcher failed to start");

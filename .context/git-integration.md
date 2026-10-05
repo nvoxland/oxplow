@@ -97,45 +97,51 @@ here — `SnapshotCaptureService` runs its own `FsWatcher` and subscribes
 to the *raw* (immediate) stream so the dirty set never lags a snapshot
 request (see the immediate-vs-debounced note above).
 
-**The snapshot watcher prunes the same way (tsk206), plus one wrinkle.**
-`SnapshotCaptureService::watch_paths_for` builds the identical scoped set
-(root non-recursive + non-ignored top-level dirs recursive). It used to
-register ONE recursive watch on the project root and filter per delivered
-event, which meant every write under `target/` (345k files here) was
-delivered and thrown away — any `cargo` build flooded it.
+**Both watchers register through one call: `FsWatcher::watch_workspace(root,
+filter)`** (`oxplow-fs-watch`, tsk1051) — the root non-recursively plus each
+top-level directory the filter keeps, recursively (`workspace_watch_paths`).
+The snapshot service used to register ONE recursive watch on the project
+root and filter per delivered event, which meant every write under
+`target/` (345k files here) was delivered and thrown away — any `cargo`
+build flooded it (tsk206).
 
-The wrinkle: unlike the workspace watcher, this service's filter can be
-**swapped at runtime** by the `set_generated` IPC, whose documented
-contract is that include/exclude edits apply *without an app restart*.
-Since the watch SET is now derived from the filter, `set_workspace_filter`
-also fires a `refilter` notify and the watcher rebuilds its registration —
-otherwise a `generated.include` that un-ignores a directory would stay
-unwatched until restart. Events in the rebuild gap are dropped; a config
-edit is a deliberate user action and the next sweep/event covers it.
+The snapshot service's filter can be **swapped at runtime** by the
+`set_generated` IPC, whose documented contract is that include/exclude
+edits apply *without an app restart*. Since the watch set is derived from
+the filter, `set_workspace_filter` also fires a `refilter` notify and the
+watcher starts a new `watch_workspace` with the new filter — otherwise a
+`generated.include` that un-ignores a directory would stay unwatched until
+restart. Events in the rebuild gap are dropped; a config edit is a
+deliberate user action and the next sweep/event covers it.
 
 **Deriving the watch set from a one-time listing has a second edge, and it
-cost real data (tsk227).** The root is non-recursive and the subdir listing
-happens once per generation, so a top-level directory created *afterwards*
+cost real data (tsk227, tsk1051).** The root is non-recursive and the
+subdir listing happens once, so a top-level directory created *afterwards*
 is covered by nothing: the root reports the `mkdir` itself and then never
-reports a single write inside it. Everything under it goes unsnapshotted
+reports a single write inside it. Everything under it went unsnapshotted
 until restart — absent from Local History, unrecoverable by
-`snapshot.restore_file`, invisible to effort attribution. It was found
-via that last symptom, and only after the differ and the review logic had
-both been wrongly accused; the giveaway was that this repo's own
+`snapshot.restore_file`, invisible to effort attribution (this repo's own
 `tests-e2e/` had **0** `file_snapshot` rows while every pre-existing
-directory had hundreds.
+directory had hundreds). And the workspace watcher, which had no fix of
+its own, never saw a project's first `oxplow/` — the extension catalog
+never signalled, so the first kept lens or new extension stayed out of
+the launcher.
 
-So the event loop also rebuilds when `needs_rewatch` sees a filtered-in
-directory directly under the root that the generation's registered set
-doesn't cover. Re-registering alone is **not** enough — `mkdir d && write
-d/f` races the rebuild and no watch reports the gap — so it first calls
-`mark_tree_dirty` to walk the new directory into the dirty set. If you
-touch this code, keep the backfill: without it the fix silently loses
-exactly the files that motivate it.
+So `watch_workspace` **follows the tree**: the event of a kept directory
+appearing directly under the root goes to a follower thread (registering a
+watch from the OS callback thread can deadlock a backend), which adds its
+recursive watch and then reports every kept file already inside it, as
+`Other` events. The report is **not** optional — `mkdir d && write d/f`
+races the new watch and no watch sees the gap — so consumers get the
+files that motivated the fix. A directory that disappears is unwatched, so
+a later one of the same name is new again. Followed directories are keyed
+by name: the OS may report either spelling of the root (`/private/var`
+for `/var`).
 
 A recursive root watch would make both edges disappear, and that is what
 this used to be. It is not worth it — see the 345k-file flood above. The
-cost of the scoped set is that *staleness must be handled explicitly*.
+cost of the scoped set is that *staleness must be handled explicitly*,
+once, in the watcher.
 
 ### 2. Project root watcher
 
