@@ -273,8 +273,13 @@ Units of work *within* a stream. Statuses: `active` (writer — may mutate
 the worktree) and `queued` (read-only, agents can run but writes are
 denied — see [agent-model.md](./agent-model.md)'s write-guard section).
 Exactly one thread per stream is `active`; the rest are `queued`. A
-newly-seeded stream ships with one thread titled `Default` (pre-v12 DBs
-called it `Current Thread`; migration v12 renames the sort_index=0 row).
+newly-seeded stream ships with one thread titled `Thread`, running the
+project's default agent — `oxplow_config::default_thread_agent`, the
+same rule `thread.create` uses when no agent is named: the first enabled
+agent, and for `acp` the project's first `acpAgents:` entry, else the
+first preset (tsk970). `StreamService` reads it through the source
+`Services` gives it, so it's the config as it is when the thread is
+made.
 The rolling `summary` field + `record_batch_summary` MCP tool were
 removed in v13 — use the task log as the source of truth instead.
 

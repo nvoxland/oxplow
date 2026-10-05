@@ -3,25 +3,23 @@
 // boots the worker's daemon: only `page` (through `storageState`) asks for it.
 import { test as base, expect, type Page } from "@playwright/test";
 
-import { ipc, run, settle, startDaemon, until, type Daemon } from "./daemon.js";
+import { ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
 
 type Stream = { id: string };
 type Thread = { id: string; agent: string };
 
-/** Select an ACP thread on the fake agent before any page opens: the boot
- *  thread is a terminal agent's, and the suite never starts a real agent CLI. */
-async function selectFakeAgentThread(daemon: Daemon): Promise<{ stream: string; thread: string }> {
+/** The stream and the thread its pages open on: the one a fresh stream is
+ *  seeded with, which runs the project's default agent — here the fake ACP
+ *  agent (`agents: [acp]`), so the suite never starts a real agent CLI. */
+async function seededThread(daemon: Daemon): Promise<{ stream: string; thread: string }> {
   const [stream] = await ipc<Stream[]>(daemon, "list_streams");
   if (!stream) throw new Error("the daemon has no stream");
   const threads = await ipc<Thread[]>(daemon, "list_threads", { streamId: stream.id });
-  let acp = threads.find((t) => t.agent === "acp");
-  if (!acp) {
-    await run(daemon, "thread.create", { stream: `stream:${stream.id}`, title: "Fake agent", agent: "acp", acp_agent: "fake" });
-    acp = (await ipc<Thread[]>(daemon, "list_threads", { streamId: stream.id })).find((t) => t.agent === "acp");
+  const [seeded] = threads;
+  if (threads.length !== 1 || seeded?.agent !== "acp") {
+    throw new Error(`expected one seeded ACP thread, got ${JSON.stringify(threads)}`);
   }
-  if (!acp) throw new Error("no ACP thread");
-  await ipc(daemon, "select_thread", { req: { streamId: stream.id, threadId: acp.id } });
-  return { stream: stream.id, thread: acp.id };
+  return { stream: stream.id, thread: seeded.id };
 }
 
 /** A worker's daemon, and the stream and thread its pages open on. */
@@ -41,7 +39,7 @@ async function workspace(): Promise<Workspace> {
       });
       return out.rows.length > 0;
     });
-    return { ...daemon, ...(await selectFakeAgentThread(daemon)) };
+    return { ...daemon, ...(await seededThread(daemon)) };
   } catch (e) {
     await daemon.stop();
     throw e;

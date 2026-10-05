@@ -833,11 +833,20 @@ impl Services {
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
+        let config_arc = Arc::new(RwLock::new(config));
+        // A stream's seeded thread runs the project's default agent, as
+        // the config says it when the thread is made (tsk970).
         let streams = StreamService::new(
             workspace_layout,
             vcs.clone(),
             stream_store.clone(),
             thread_store.clone(),
+            {
+                let config = config_arc.clone();
+                Arc::new(move || {
+                    oxplow_config::default_thread_agent(&config_service::read_config(&config))
+                })
+            },
         );
         let threads = ThreadService::new(thread_store.clone());
         let tasks = TaskService::new(task_store.clone()).with_event_pump(event_pump.clone());
@@ -858,7 +867,6 @@ impl Services {
         let pty = oxplow_pty::PtyManager::spawn();
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
         // is paid on first request, not at boot.
-        let config_arc = Arc::new(RwLock::new(config));
         let project_config = config_arc.clone();
         // Program approvals: this machine's, outside the repo (tsk344).
         let approvals = Arc::new(match machine.approvals_file.clone() {

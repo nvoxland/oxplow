@@ -308,8 +308,13 @@ pub fn create_command(config: Arc<RwLock<OxplowConfig>>) -> Command {
                     (source.agent, source.acp_agent)
                 }
                 None => {
-                    let agent = input.agent.unwrap_or_else(|| {
-                        config.agents.first().copied().unwrap_or(AgentKind::Claude)
+                    // Named or not, one rule for the default (tsk970).
+                    let (default_agent, default_acp) = oxplow_config::default_thread_agent(&config);
+                    let agent = input.agent.unwrap_or(default_agent);
+                    let input_acp = input.acp_agent.or_else(|| {
+                        (input.agent.is_none() && agent == AgentKind::Acp)
+                            .then_some(default_acp)
+                            .flatten()
                     });
                     if !config.agents.contains(&agent) {
                         return Err(invalid(
@@ -317,7 +322,7 @@ pub fn create_command(config: Arc<RwLock<OxplowConfig>>) -> Command {
                             format!("agent `{}` isn't enabled for this project", agent.as_str()),
                         ));
                     }
-                    let acp_agent = match (agent, input.acp_agent) {
+                    let acp_agent = match (agent, input_acp) {
                         (AgentKind::Acp, Some(name)) => {
                             if crate::acp::agents::find(&config, &name).is_none() {
                                 return Err(invalid(

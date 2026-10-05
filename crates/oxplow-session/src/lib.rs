@@ -82,6 +82,10 @@ impl WorkspaceLayout {
     }
 }
 
+/// The agent (and, for `acp`, the ACP agent) a stream's seeded thread
+/// runs: the project's default, read when the thread is made (tsk970).
+pub type DefaultAgent = Arc<dyn Fn() -> (oxplow_domain::AgentKind, Option<String>) + Send + Sync>;
+
 /// Top-level service. Cheap to clone — internals are `Arc`'d.
 #[derive(Clone)]
 pub struct StreamService {
@@ -89,6 +93,7 @@ pub struct StreamService {
     vcs: Arc<dyn Vcs>,
     streams: Arc<dyn StreamStore>,
     threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
+    default_agent: DefaultAgent,
 }
 
 /// Default title applied to the auto-generated thread that every
@@ -103,12 +108,14 @@ impl StreamService {
         vcs: Arc<dyn Vcs>,
         streams: Arc<dyn StreamStore>,
         threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
+        default_agent: DefaultAgent,
     ) -> Self {
         Self {
             layout,
             vcs,
             streams,
             threads,
+            default_agent,
         }
     }
 
@@ -130,6 +137,7 @@ impl StreamService {
             return;
         }
         let now = Timestamp::now();
+        let (agent, acp_agent) = (self.default_agent)();
         let thread = oxplow_domain::Thread {
             id: oxplow_domain::ThreadId::placeholder(),
             stream_id: *stream_id,
@@ -137,8 +145,8 @@ impl StreamService {
             status: oxplow_domain::ThreadStatus::Active,
             sort_index: 0,
             pane_target: "working".into(),
-            agent: oxplow_domain::AgentKind::Claude,
-            acp_agent: None,
+            agent,
+            acp_agent,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,

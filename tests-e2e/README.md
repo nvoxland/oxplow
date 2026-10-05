@@ -50,9 +50,9 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   again and naming its last error on timeout. `ipc()` on a reply that
   isn't JSON names the call, the HTTP status and what came back.
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
-  - `daemon`, one per worker. Before any page opens it selects an ACP thread
-    on the fake agent: the boot thread is a terminal agent's, and the suite
-    never starts a real agent CLI.
+  - `daemon`, one per worker. Its pages open on the stream's seeded
+    thread, which runs the project's default agent — the fake ACP agent
+    (`agents: [acp]`) — so the suite never starts a real agent CLI.
   - A workspace that fails while booting is stopped and removed; each
     fixture tears down in a `finally`.
   - `daemon` is settled before any page opens — boot's background tasks

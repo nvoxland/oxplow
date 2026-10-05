@@ -452,6 +452,7 @@ mod tests {
             Arc::new(crate::vcs::GitProvider),
             stream_store,
             thread_store,
+            Arc::new(|| (oxplow_domain::AgentKind::Claude, None)),
         );
         svc.ensure_primary().await.unwrap();
         // Use the real `create_worktree` path so the on-disk dir exists
@@ -546,6 +547,7 @@ mod tests {
             Arc::new(crate::vcs::GitProvider),
             stream_store,
             thread_store,
+            Arc::new(|| (oxplow_domain::AgentKind::Claude, None)),
         );
         svc.ensure_primary().await.unwrap();
         let stream = svc

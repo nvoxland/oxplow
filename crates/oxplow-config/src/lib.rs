@@ -146,6 +146,23 @@ pub fn acp_presets() -> Vec<AcpAgentConfig> {
 
 /// Presets, then the project's entries (a project entry replaces a
 /// preset of the same name), in that order.
+/// The agent a new thread runs when it names none (`thread.create`, a
+/// stream's seeded thread; tsk970): the project's first enabled agent
+/// (Claude when `agents:` is empty), and for `acp` the project's own first
+/// `acpAgents:` entry, else the first preset.
+pub fn default_thread_agent(config: &OxplowConfig) -> (AgentKind, Option<String>) {
+    let agent = config.agents.first().copied().unwrap_or(AgentKind::Claude);
+    let acp_agent = (agent == AgentKind::Acp).then(|| {
+        config
+            .acp_agents
+            .first()
+            .map(|a| a.name.clone())
+            .or_else(|| acp_presets().into_iter().next().map(|a| a.name))
+            .unwrap_or_default()
+    });
+    (agent, acp_agent)
+}
+
 pub fn resolve_acp_agents(project: &[AcpAgentConfig]) -> Vec<(AcpAgentConfig, AcpAgentSource)> {
     let mut out: Vec<(AcpAgentConfig, AcpAgentSource)> = acp_presets()
         .into_iter()
@@ -3542,6 +3559,33 @@ dimensions:
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.agents, vec![AgentKind::Claude, AgentKind::Codex]);
         assert_eq!(cfg.project_name, "explicit-name");
+    }
+
+    /// tsk970: a new thread that names no agent runs the project's first
+    /// enabled one; an ACP thread runs the project's first `acpAgents:`
+    /// entry, else the first preset.
+    #[test]
+    fn a_new_threads_default_agent_is_the_projects() {
+        let dir = tempdir().unwrap();
+        let load = |yaml: &str| {
+            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
+            load_project_config(dir.path()).unwrap()
+        };
+        assert_eq!(
+            default_thread_agent(&load("agents: [codex, claude]\n")),
+            (AgentKind::Codex, None)
+        );
+        assert_eq!(
+            default_thread_agent(&load(
+                "agents: [acp]\nacpAgents:\n  - { name: fake, command: fake-acp }\n"
+            )),
+            (AgentKind::Acp, Some("fake".to_string()))
+        );
+        let preset = acp_presets().remove(0).name;
+        assert_eq!(
+            default_thread_agent(&load("agents: [acp]\n")),
+            (AgentKind::Acp, Some(preset))
+        );
     }
 
     #[test]

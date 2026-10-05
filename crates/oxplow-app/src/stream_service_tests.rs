@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
-use oxplow_domain::{DomainError, StreamKind};
+use oxplow_domain::stores::ThreadStore as _;
+use oxplow_domain::{AgentKind, DomainError, StreamKind};
 use oxplow_session::{SessionError, StreamService, WorkspaceLayout};
 use tempfile::tempdir;
 
@@ -51,13 +52,46 @@ impl TestEnv {
 }
 
 fn service(project: &Path) -> StreamService {
+    service_running(project, AgentKind::Claude, None)
+}
+
+/// A service whose new threads run `agent` (and `acp_agent`).
+fn service_running(project: &Path, agent: AgentKind, acp_agent: Option<&str>) -> StreamService {
     let db = Database::in_memory();
+    let acp_agent = acp_agent.map(str::to_string);
     StreamService::new(
         WorkspaceLayout::for_project(project),
         Arc::new(GitProvider),
         Arc::new(SqliteStreamStore::new(db.clone())),
         Arc::new(SqliteThreadStore::new(db)),
+        Arc::new(move || (agent, acp_agent.clone())),
     )
+}
+
+/// tsk970: a stream's seeded thread runs the project's default agent, not
+/// always Claude.
+#[tokio::test]
+async fn the_seeded_thread_runs_the_projects_default_agent() {
+    let parent = tempdir().unwrap();
+    let project = parent.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    init_repo(&project);
+    let db = Database::in_memory();
+    let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
+    let svc = StreamService::new(
+        WorkspaceLayout::for_project(&project),
+        Arc::new(GitProvider),
+        Arc::new(SqliteStreamStore::new(db)),
+        thread_store.clone(),
+        Arc::new(|| (AgentKind::Acp, Some("fake".to_string()))),
+    );
+    let primary = svc.ensure_primary().await.unwrap();
+    let threads = thread_store.list_for_stream(&primary.id).await.unwrap();
+    assert_eq!(threads.len(), 1);
+    assert_eq!(
+        (threads[0].agent, threads[0].acp_agent.as_deref()),
+        (AgentKind::Acp, Some("fake"))
+    );
 }
 
 fn make_service() -> (StreamService, TestEnv) {

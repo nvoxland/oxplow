@@ -1739,7 +1739,7 @@ spawn path (`open_terminal_session`) calls
 the user's explicit selection → the writer (active) thread → the first
 queued thread. This guarantees `OXPLOW_THREAD_ID` and the
 visible `<session-context>` note's thread line are populated for any
-stream that has at least one thread (boot seeds a "Default" thread for
+stream that has at least one thread (boot seeds a thread, running the project's default agent, for
 every primary stream, so this is always true in practice).
 
 On every `UserPromptSubmit`, the runtime builds a fresh
