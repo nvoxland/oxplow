@@ -1,7 +1,7 @@
-//! An extension's effects (`effects:` in its manifest, experimental — a
-//! private extension only; P8.D9–D11, `.context/extensions.md` →
-//! "Effects"): a Starlark script that reacts to a logged event by
-//! composing commands, run as `Actor::Effect` with an agent's rights.
+//! An extension's effects (`effects:` in its manifest, P8.D9–D11; **stable
+//! since P11**, tsk956; `.context/extensions.md` → "Effects"): a Starlark
+//! script that reacts to a logged event by composing commands, run as
+//! `Actor::Effect` with an agent's rights.
 //!
 //! ```yaml
 //! effects:
@@ -9,14 +9,15 @@
 //!     summary: Note a finished item on its thread.
 //!     on: [work_item.transitioned]
 //!     where: { to: done }        # optional: payload fields equal to these
-//!     input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields bound
+//!     input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields, :event_id, :event_seq bound
 //!     entry: effects/announce.star   # transform({event, rows}) → {commands, events?} | {skip}
 //!     after: [page_ref.work_item]    # optional: consumers it waits for
 //! ```
 //!
 //! Nothing runs until a person approves the effect on this machine
-//! (`exec_consent::ProgramKind::Effect`, hashed over the whole extension
-//! folder, so any edit needs approving again), and an approval starts it
+//! (`exec_consent::ProgramKind::Effect`, hashed over every file of its
+//! extension — a bundled one's embedded files too — so any edit needs
+//! approving again), and an approval starts it
 //! at the log's head (`effect_state`): an effect never reacts to what
 //! happened before its approval.
 

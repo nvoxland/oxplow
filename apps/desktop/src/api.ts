@@ -1086,13 +1086,14 @@ export async function resolveCommitRefLabels(
  * immediately with a `taskId` once the BackgroundTaskStore row is
  * registered, and the actual work runs in the background. Each
  * renderer-side wrapper also exposes an `awaitDone` promise that
- * resolves with the final `BackgroundTask` (status, error, and
- * `result` payload — the command's `OpOutcome`). Pattern:
+ * resolves with the final `BackgroundTask` (status, error, and the
+ * `result_json` payload — the command's `OpOutcome`, read with
+ * `taskResult`). Pattern:
  *
  *     const { taskId, awaitDone } = await gitRebase(...);
  *     // mark UI pending using taskId / a label
  *     const task = await awaitDone;
- *     // task.result is the OpOutcome
+ *     // taskResult(task) is the OpOutcome
  *
  * Callers that don't need the final result can ignore `awaitDone`;
  * any other surface watching `subscribeBackgroundTaskEvents` still
@@ -1659,8 +1660,8 @@ export function subscribeBackgroundTask(
 
 /**
  * Resolve when a background task ends (done or failed). Reads the final
- * task row so callers can inspect `task.status`, `task.error`, and
- * `task.result`. Returns null if the task disappeared (evicted) before
+ * task row so callers can inspect `task.status`, `task.error`, and its
+ * result (`taskResult(task)`). Returns null if the task disappeared (evicted) before
  * we could read it.
  */
 export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | null> {

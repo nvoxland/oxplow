@@ -8,8 +8,9 @@
 //!
 //! 1. Already reacted (`effect_run`): nothing — a redelivery writes
 //!    nothing. A `started` row is a run interrupted after it claimed a
-//!    step outside the transaction: recorded `failed` and **never sent
-//!    again**.
+//!    step outside the transaction: recorded `failed` ([`cut_off`]) and,
+//!    when its claim kept what it composed, sent again by itself like a
+//!    failure that may pass (tsk954); otherwise a person's.
 //! 2. Not approved as it is now, or the event is from before its approval
 //!    (`effects::gate`): nothing — it never reacts to the past.
 //! 3. The loop guard: an event its own run caused is never its trigger,
@@ -35,10 +36,14 @@
 //! most twice, 10 s then 60 s after the failure before
 //! ([`RETRY_DELAYS`]); waiting, it doesn't count against the effect's
 //! health, and the attempt that exhausts the retries counts once.
-//! Anything else — a step inside oxplow, another provider, an attempt
-//! cut off by oxplow stopping (what it composed isn't kept) — waits for
-//! a person's retry, asked first (`.context/providers.md`
-//! "Idempotency").
+//! The retry sends exactly what the failed attempt composed, kept with it
+//! while the retry is scheduled ([`Resend`]); a `work_item.create` naming
+//! no provider was pinned to the active one when composed (tsk999). An
+//! attempt cut off by oxplow stopping is retried the same way, timed from
+//! when it started — found at start by [`recover_interrupted`] when no
+//! pump delivery will find it. Anything else — a step inside oxplow,
+//! another provider — waits for a person's retry, asked first
+//! (`.context/providers.md` "Idempotency").
 
 use std::sync::{Arc, Weak};
 

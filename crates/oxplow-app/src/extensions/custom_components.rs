@@ -1,9 +1,12 @@
-//! `custom_components:` (experimental — a private extension only; P6b.D1):
-//! a web bundle a `viz: custom` lens renders in a sandboxed frame. The
-//! frame has no origin, no network and no daemon token, so it reaches
-//! only what it declares: the lenses it may query (`assets`, lens ids)
-//! and the commands it may invoke (`commands`). That sandbox is the
-//! consent — the bundle runs without a person's approval.
+//! `custom_components:` (P6b.D1; **stable since P11**, tsk962): a web
+//! bundle a `viz: custom` lens renders in a sandboxed frame. The frame has
+//! no origin, no network and no daemon token, so it reaches only what it
+//! declares: the lenses it may query (`assets`, lens ids) and the commands
+//! it may invoke (`commands`). It renders and queries without approval;
+//! one that declares `commands` is a program a person approves before its
+//! `invoke` runs them with their rights (tsk960), at the version of the
+//! bundle it loaded (tsk984). A bundled extension can't declare one: its
+//! bundle is never served.
 //!
 //! ```yaml
 //! custom_components:

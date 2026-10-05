@@ -5,7 +5,10 @@
 // against `oxplow-daemon` over the `VITE_OXPLOW_REMOTE` transport switch and
 // captures a V8 CPU profile via CDP.
 //
-//   APP_URL=http://localhost:5199/ SECONDS=30 node tests-e2e/profile-renderer.mjs
+//   APP_URL='http://localhost:5199/#oxplow-token=<token>' SECONDS=30 node tests-e2e/profile-renderer.mjs
+//
+// The fragment carries the daemon's UI token (what it was given with
+// `--token-stdin`): without it every call is refused.
 //
 // ⚠️ This is CHROMIUM, not the shipped WKWebView. It is a good proxy for
 // React/JS work — which is what the idle-timer hypotheses are — and a poor one
@@ -24,7 +27,7 @@ const SECONDS = Number(process.env.SECONDS ?? 20);
 const OUT = process.env.OUT ?? "tests-e2e/renderer-profile.json";
 /** Optional data-testid to click before profiling — used to
  *  expand a collapsed section so its rows are actually mounted (e.g.
- *  rail-section-toggle-work). A profile of a
+ *  rail-section-toggle-core:work). A profile of a
  *  collapsed list measures nothing, which is easy to do by accident. */
 const CLICK_TESTID = process.env.CLICK_TESTID;
 const SHOT = process.env.SHOT;

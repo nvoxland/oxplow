@@ -9,7 +9,7 @@
 /// opErrorsStore, not alerts.
 
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 import {
   approveProjectProgram,
@@ -476,6 +476,7 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
 function ProgramSource({ rowKey, program }: { rowKey: string; program: ProjectProgram }) {
   const [source, setSource] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const sourceId = `program-source-${useId()}`;
   async function toggle() {
     if (open) {
       setOpen(false);
@@ -490,11 +491,17 @@ function ProgramSource({ rowKey, program }: { rowKey: string; program: ProjectPr
   }
   return (
     <div>
-      <button type="button" data-testid={`program-source-toggle-${rowKey}`} onClick={() => void toggle()}>
+      <button
+        type="button"
+        data-testid={`program-source-toggle-${rowKey}`}
+        aria-expanded={open}
+        aria-controls={sourceId}
+        onClick={() => void toggle()}
+      >
         {open ? "Hide the script" : "Read the script"}
       </button>
       {open && source !== null ? (
-        <pre data-testid={`program-source-${rowKey}`} style={{ ...mutedStyle, whiteSpace: "pre-wrap", margin: "4px 0 0" }}>
+        <pre id={sourceId} data-testid={`program-source-${rowKey}`} style={{ ...mutedStyle, whiteSpace: "pre-wrap", margin: "4px 0 0" }}>
           {source}
         </pre>
       ) : null}

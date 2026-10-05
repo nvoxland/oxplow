@@ -39,8 +39,8 @@ pub const LIB_PATH: &str = "/component-lib/";
 /// ([`LIB_PATH`]): a script source (the library) and a style source (the
 /// kit's sheet, tsk961), nothing else. `sandbox allow-scripts` makes the
 /// document's origin opaque however it is loaded — the host's iframe
-/// attribute is not the only fence. `source` is the bundle's own folder
-/// (`http://<host>/components/<ext>/<component>/`), named: there is no
+/// attribute is not the only fence. `source` is the loaded snapshot's own
+/// folder (`http://<host>/components/v/<version>/`), named: there is no
 /// `'self'` anywhere (tsk983), since in a sandboxed frame it still matches
 /// the daemon's whole origin — the response URL's — and would let a frame
 /// load another bundle's files, which its approval never covered. Nothing

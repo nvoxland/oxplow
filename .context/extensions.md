@@ -487,7 +487,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   *extend the shell*: `commands:` (Starlark composing core commands, see
   "Commands"), `ui:` — `slots` in one dotted namespace ("Slots"),
   `commands` in core menus ("Commands in core menus"), `decorators`
-  (experimental) — and `custom_components:` rendered sandboxed by
+  (stable since P10) — and `custom_components:` (stable since P11)
+  rendered sandboxed by
   `viz: custom` lenses ("Custom components"). Installs, updates and
   provider approvals are reviewed by what they change ("Reviewing by
   effect"). An agent's run that needs a person waits as a proposal
@@ -1793,9 +1794,10 @@ design, so building it is filling in, not deciding:
   reviewed. Until something reads it, building it would be an unproven
   contract (target-architecture §15 "Left for P11").
 
-## Effects (experimental)
+## Effects
 
-`effects:` (a private extension only; `effects.rs`) are scripts that react
+`effects:` (stable since P11, tsk956 — a shared or bundled extension's
+too; `effects.rs`) are scripts that react
 to a logged event by composing commands, run as
 `Actor::Effect { effect: "<extension>/<id>" }` — an agent's invoker
 rights, no thread, never a confirmation (commands.md "Only a person

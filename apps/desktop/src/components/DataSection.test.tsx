@@ -77,7 +77,21 @@ mock.module("../api.js", () => ({
       approved: true,
       version: "h2",
     },
+    {
+      kind: "effect",
+      name: "oxplow-review/verify-unchecked",
+      program: "bundled:oxplow-review/verify_unchecked.star",
+      args: [],
+      env: [],
+      credentials: [],
+      network: [],
+      tree: "bundled:oxplow-review",
+      remote: false,
+      approved: true,
+      version: "h3",
+    },
   ],
+  programSource: async () => "def transform(x):\n    return {\"skip\": \"nothing\"}\n",
   providerDeclarationEffects: () => answer(),
   subscribeOxplowEvents: () => () => {},
 }));
@@ -177,3 +191,19 @@ test("Escape closes Backfill's nothing-to-backfill note", async () => {
   }
 });
 
+
+// tsk1009: a bundled program's "Read the script" says whether its source is
+// shown, for a screen reader as for the eye.
+test("a bundled program's script toggle says whether it's shown", async () => {
+  answer = () => new Promise(() => {});
+  const view = render(<DataSection />);
+  const key = "effect:oxplow-review/verify-unchecked";
+  const toggle = await waitFor(() => view.getByTestId(`program-source-toggle-${key}`));
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  await waitFor(() => expect(view.getByTestId(`program-source-${key}`).textContent).toContain("transform"));
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(toggle.getAttribute("aria-controls")).toBe(view.getByTestId(`program-source-${key}`).id);
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle.getAttribute("aria-expanded")).toBe("false"));
+});

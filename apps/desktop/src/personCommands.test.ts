@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "./ipc-error.js";
 import { createPersonCommands } from "./personCommands.js";
+import type { CommandOutcome } from "./tauri-bridge/generated/bindings.js";
 
 // A command the person runs outside a page (a launcher entry): it runs;
 // when it asks, it waits for the person, then runs confirmed.
@@ -12,7 +13,7 @@ test("a command that asks waits for the person, then runs confirmed; Cancel drop
     runCommand: async (name, input, confirmed) => {
       calls.push([name, input, confirmed]);
       if (!confirmed) throw new IpcCallError("asks", "NEEDS_CONFIRMATION");
-      return { result: null, audit_id: 1, event_id: null, undo: null } as never;
+      return { result: null, audit_id: 1, event_id: null, inverse: null } satisfies CommandOutcome;
     },
     undo: async () => {},
     toast: (m) => toasts.push(m),
@@ -61,7 +62,7 @@ test("an undoable command's toast offers Undo, which undoes that run", async () 
         audit_id: name === "work_item.transition" ? 7 : 8,
         event_id: null,
         inverse: name === "work_item.transition" ? { name: "work_item.transition", input: {} } : null,
-      }) as never,
+      }) satisfies CommandOutcome,
     undo: async (auditId) => {
       undone.push(auditId);
     },

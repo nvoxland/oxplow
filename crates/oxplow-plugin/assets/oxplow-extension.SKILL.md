@@ -136,7 +136,7 @@ empty: Nothing is waiting on you.
     lens's first column link.
   - `grid` stacks other lenses: `children: [slug, other-ext/slug]`. Each
     child gets the params it declares from this lens's params.
-  - `custom` (experimental, private extensions only) renders one of the
+  - `custom` renders one of the
     extension's `custom_components` in a sandboxed frame: `custom: {
     component: <id>, props: { … } }`. It still needs a `query` — its rows
     are what the component gets and what an agent reads (as a table).
@@ -187,7 +187,7 @@ empty: Nothing is waiting on you.
   defaults to `{ ref: "{{ref}}" }` (`"{{ref.id}}"` binds the id alone).
   It runs as the person who picks it. Use it for a provider's
   own commands (`fake.estimate`; its capability verbs run as `work_item.<verb>`) or a core one with a fixed input.
-- **`ui.decorators`** (experimental, private only) add a label to refs:
+- **`ui.decorators`** add a label to refs:
   `{ model, kind, placement: ref-chip | row-badge, label, color? }` — the
   model (this extension's) needs a `ref` column plus the `label` (and
   `color`) columns; a chip shows on that ref's page, a badge after a
@@ -209,13 +209,15 @@ empty: Nothing is waiting on you.
   reason>`. A command on a ref's menu (`ui.commands`) gets `{ ref }`, so
   name its input field `ref`. `extensions/oxplow-review/` (bundled) is a
   working example.
-- **`custom_components:`** (experimental, private only) are web bundles a
+- **`custom_components:`** (stable; not in a bundled extension) are web bundles a
   `viz: custom` lens renders: `{ id, title?, bundle?: components/<id>,
   assets: [lens ids], commands: [names] }`. The bundle (an `index.html`
   and its files, at most 256 files / 5 MiB) runs sandboxed — no network,
   no storage, no token — and reaches oxplow only by asking the host to
-  run one of its `assets` lenses, invoke one of its `commands` (the
-  person confirms in the host) or navigate. Its `index.html` loads
+  run one of its `assets` lenses, invoke one of its `commands` (a
+  component that declares any is a program a person approves on
+  Settings → Data → Programs before its `invoke` runs; a command that asks
+  still asks) or navigate. Its `index.html` loads
   oxplow's client library with a plain `<script
   src="/component-lib/oxplow-component.js">` before its own plain script
   (no modules: a sandboxed frame can't load them), and the script calls

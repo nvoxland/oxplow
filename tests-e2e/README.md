@@ -106,8 +106,11 @@ sign-in and a live Linear run.
 
 - **`profile-renderer.mjs`** — CDP V8 CPU profile of the renderer, against an
   app you bring up by hand (a daemon plus `vite` with `VITE_OXPLOW_REMOTE`).
-  `CLICK_TESTID=rail-section-toggle-work` expands a collapsed section first, so
-  you don't profile an unmounted list by accident.
+  The daemon refuses a page without its UI token, so `APP_URL` carries it:
+  `APP_URL='http://localhost:5199/#oxplow-token=<token>'` (the token the
+  daemon was given with `--token-stdin`).
+  `CLICK_TESTID=rail-section-toggle-core:work` expands a collapsed section
+  first, so you don't profile an unmounted list by accident.
 
 ## Two things to know before trusting a number
 
