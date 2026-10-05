@@ -357,6 +357,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   hiding the extension's lenses. Settings → Data shows each source
   (runtime, schedule, row counts or failure, Approve & Run / Sync Now);
   Settings → Extensions keeps each extension's source credentials.
+- **Settings shows what `plugin check` finds** (tsk1039). Loading can't
+  catch a lens whose SQL fails (it never runs the SQL), so Settings →
+  Extensions runs `validate_extension` — the same dry run `oxplow plugin
+  check` prints — for each enabled project extension, on open and on
+  `extensionsChanged`, and lists its errors with the load errors, once
+  each. Bundled extensions are checked where they're built.
 - **Bundled extensions.**
   - Their sources live in the repo at `extensions/<name>/`. They're
     compiled into the binary by `crates/oxplow-app/src/bundled_extensions.rs`

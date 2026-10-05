@@ -288,6 +288,47 @@ fn invalid(e: rusqlite::Error) -> DomainError {
     DomainError::Invalid(format!("query_sql: {e}"))
 }
 
+/// A query that didn't prepare. An unknown table names the published model
+/// it most likely meant (tsk1039: `v_tree_facts` → `v_tree_fact`).
+fn prepare_failed(conn: &rusqlite::Connection, e: rusqlite::Error) -> DomainError {
+    let msg = e.to_string();
+    let missing = msg
+        .strip_prefix("no such table: ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .map(str::to_string);
+    let nearest = missing.as_deref().and_then(|name| {
+        let views = view_names(conn).ok()?;
+        let most = (name.len() / 4).max(2);
+        views
+            .iter()
+            .filter(|v| v.starts_with("v_"))
+            .map(|v| (edit_distance(name, v), v))
+            .filter(|(d, _)| *d <= most)
+            .min()
+            .map(|(_, v)| v.clone())
+    });
+    match nearest {
+        Some(v) => DomainError::Invalid(format!("query_sql: {msg}; did you mean `{v}`?")),
+        None => invalid(e),
+    }
+}
+
+/// Levenshtein distance between `a` and `b`, by characters.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut prev = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cur = row[j + 1];
+            row[j + 1] = (prev + usize::from(ca != *cb)).min(row[j] + 1).min(cur + 1);
+            prev = cur;
+        }
+    }
+    row[b.len()]
+}
+
 fn read_only_only() -> DomainError {
     DomainError::Invalid("query_sql accepts read-only statements only".into())
 }
@@ -556,6 +597,15 @@ impl<'c> ReadSession<'c> {
             .is_some_and(|a| !self.own_ctes.contains(&a.to_lowercase()))
     }
 
+    /// Why a statement didn't prepare: the authorizer's refusal, or the
+    /// error itself — read once the session has ended, so naming the model
+    /// it most likely meant can read the schema (tsk1039).
+    fn failed(self, conn: &rusqlite::Connection, e: rusqlite::Error) -> DomainError {
+        let refused = self.refusal();
+        drop(self);
+        refused.unwrap_or_else(|| prepare_failed(conn, e))
+    }
+
     /// Why the authorizer refused the statement, if it did: the read
     /// contract in words, pointing a table at the models that read it.
     fn refusal(&self) -> Option<DomainError> {
@@ -804,9 +854,10 @@ fn run_read_only(
         Access::Enforce
     };
     let session = ReadSession::open(conn, access, &query.sql)?;
-    let mut stmt = conn
-        .prepare(&query.sql)
-        .map_err(|e| session.refusal().unwrap_or_else(|| invalid(e)))?;
+    let mut stmt = match conn.prepare(&query.sql) {
+        Ok(stmt) => stmt,
+        Err(e) => return Err(session.failed(conn, e)),
+    };
     if !stmt.readonly() {
         return Err(read_only_only());
     }
@@ -894,9 +945,10 @@ pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<R
     };
     let session = ReadSession::open(conn, access, &query.sql)?;
     {
-        let stmt = conn
-            .prepare(&query.sql)
-            .map_err(|e| session.refusal().unwrap_or_else(|| invalid(e)))?;
+        let stmt = match conn.prepare(&query.sql) {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(session.failed(conn, e)),
+        };
         if !stmt.readonly() {
             return Err(read_only_only());
         }
@@ -1121,6 +1173,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(checked.models, vec!["v_task".to_string()]);
+    }
+
+    /// tsk1039: a misspelled model names the one it most likely meant —
+    /// an agent's lens query and `plugin check` read the same error.
+    #[tokio::test]
+    async fn an_unknown_model_suggests_the_nearest_one() {
+        let (_db, sl) = seeded().await;
+        let err = sl
+            .query_sql("SELECT * FROM v_tasks", vec![], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no such table: v_tasks"), "{err}");
+        assert!(err.contains("did you mean `v_task`?"), "{err}");
+        let err = sl
+            .query_sql("SELECT * FROM v_zzzzzzzzz", vec![], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(!err.contains("did you mean"), "nothing near it: {err}");
     }
 
     /// P4.3 (tsk488): the read contract is enforced — a query's own SQL

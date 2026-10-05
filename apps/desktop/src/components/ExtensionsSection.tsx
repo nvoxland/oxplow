@@ -27,6 +27,7 @@ import {
   setCredential,
   subscribeOxplowEvents,
   updateExtension,
+  validateExtension,
   type Extension,
   type ExtensionReview,
   type CollectorListing,
@@ -34,6 +35,7 @@ import {
 import { NEW_LENS_PROMPT } from "../lens/lensModel.js";
 import { enableAgain, healthLine, healthOf, repairWithAgent, usePluginHealth, type PluginHealth } from "../pluginHealth.js";
 import { collectorRan, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
+import { extensionsChanged } from "../lens/lensRerun.js";
 import { EffectReportView } from "./EffectReportView.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
@@ -42,6 +44,9 @@ import { EmptyState } from "./Prompts/EmptyState.js";
 
 export function ExtensionsSection() {
   const [exts, setExts] = useState<Extension[] | null>(null);
+  /** What each project extension's check found (bundled ones are checked
+   *  where they're built). */
+  const [checked, setChecked] = useState<Record<string, string[]>>({});
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
   const health = usePluginHealth();
   const [url, setUrl] = useState("");
@@ -53,8 +58,21 @@ export function ExtensionsSection() {
 
   const refresh = useCallback(async () => {
     try {
-      setExts(await listExtensions(null));
+      const listed = await listExtensions(null);
+      setExts(listed);
       setCollectors(await listCollectors());
+      const reports = await Promise.all(
+        listed
+          .filter((e) => e.origin !== "bundled" && e.enabled)
+          .map(async (e) => {
+            try {
+              return [e.name, (await validateExtension(e.name, null)).errors] as const;
+            } catch (err) {
+              return [e.name, [`couldn't check it: ${String(err)}`]] as const;
+            }
+          }),
+      );
+      setChecked(Object.fromEntries(reports));
     } catch (e) {
       recordOpError({ label: "List extensions", message: String(e) });
       setExts([]);
@@ -65,7 +83,7 @@ export function ExtensionsSection() {
     void refresh();
     // Scheduled and agent-triggered runs land here too.
     return subscribeOxplowEvents((event) => {
-      if (collectorRan(event)) void refresh();
+      if (collectorRan(event) || extensionsChanged(event as Record<string, unknown>)) void refresh();
     });
   }, [refresh]);
 
@@ -142,7 +160,7 @@ export function ExtensionsSection() {
       ) : (
         <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0 }}>
           {exts.map((ext) => {
-            const m = extensionRowModel(ext);
+            const m = extensionRowModel(ext, checked[ext.name]);
             return (
               <li key={m.name} data-testid={`extension-row-${m.name}`} style={rowStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -17,6 +17,17 @@ const ext = (over: Partial<Extension> = {}): Extension => ({
 });
 
 describe("extensionRowModel", () => {
+  // tsk1039: a lens whose SQL fails passes loading but fails `plugin check`;
+  // its row shows the check's errors too, once each.
+  test("a project extension's row shows what its check found", () => {
+    const m = extensionRowModel(ext({ errors: ["extension.yaml: bad"] }), [
+      "extension.yaml: bad",
+      "lens review/todos: query_sql: no such table: v_tree_facts",
+    ]);
+    expect(m.errors).toEqual(["extension.yaml: bad", "lens review/todos: query_sql: no such table: v_tree_facts"]);
+    expect(m.healthy).toBe(false);
+  });
+
   test("a local extension can't be updated and says it lives in the repo", () => {
     const m = extensionRowModel(ext());
     expect(m.canUpdate).toBe(false);

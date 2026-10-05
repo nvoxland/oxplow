@@ -601,7 +601,10 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     "`task` is a physical table, not a published model; read v_task",
     naming the models whose `source()` it is (from `model_input`), and
     never with SQLite's "no such table" (which `explain_unsynced` reads as
-    an unsynced source). `count(*)` over a view is allowed (SQLite reports
+    an unsynced source). A table that doesn't exist at all names the
+    published model it most likely meant ("no such table: v_tasks; did you
+    mean `v_task`?", edit distance, read once the session's authorizer is
+    off — tsk1039). `count(*)` over a view is allowed (SQLite reports
     its base table at top level after the view's own reads). **A read's
     accessor is the view *or CTE* it happened in** — SQLite names a CTE,
     not the view around it — so the session takes the statement's own

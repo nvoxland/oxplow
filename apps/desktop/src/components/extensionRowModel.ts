@@ -19,7 +19,11 @@ export interface ExtensionRowModel {
   disabledNote: string | null;
 }
 
-export function extensionRowModel(ext: Extension): ExtensionRowModel {
+/** `ext`'s row; `checked` is what its check (`validate_extension`, the dry
+ *  run `oxplow plugin check` prints) found — a lens whose SQL fails passes
+ *  loading, so its errors show only there (tsk1039). Each error once. */
+export function extensionRowModel(ext: Extension, checked: string[] = []): ExtensionRowModel {
+  const errors = [...new Set([...ext.errors, ...checked])];
   const src = ext.source;
   const origin =
     ext.origin === "bundled"
@@ -33,8 +37,8 @@ export function extensionRowModel(ext: Extension): ExtensionRowModel {
     lensCount: ext.lenses.length,
     origin,
     canUpdate: src !== null && ext.origin !== "bundled",
-    healthy: ext.errors.length === 0,
-    errors: ext.errors,
+    healthy: errors.length === 0,
+    errors,
     enabled: ext.enabled,
     toggleLabel: ext.enabled ? "Disable" : "Enable",
     disabledNote: ext.enabled ? null : "Off for this project (extensions.disabled in .oxplow/project.yaml).",
