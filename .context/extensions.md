@@ -434,7 +434,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   `.lens-section` rule in `index.html`). The effort page opens with a core
   verdict strip above the slots (`pages/effortVerdict.ts`, core models
   only: the last test run, diff coverage, unverified claims, decisions to
-  confirm), and the task page's activity card links to it as **Review**.
+  confirm), and the task page links to it as **Review**: on each effort's
+  activity card, and in the details rail for the newest effort.
 - **`oxplow-review` (the review packet).** Its lenses, mounted in
   `effort.review.details`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)

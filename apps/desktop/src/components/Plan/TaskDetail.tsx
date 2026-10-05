@@ -213,10 +213,13 @@ export function TaskDetailRail({
   onUpdateTask,
   onDelete,
   scopeAction,
+  onReview,
   formatTimestamp = (iso) => new Date(iso).toLocaleString(),
 }: {
   item: Task;
   onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  /** Open the task's latest effort's review; absent until it has one. */
+  onReview?: () => void;
   /** When provided, renders a danger "Delete" button at the bottom of
    *  the rail (mirrors the wiki page's rail Delete). */
   onDelete?: () => void;
@@ -246,6 +249,17 @@ export function TaskDetailRail({
           onChange={(value) => void onUpdateTask(item.id, { priority: value as TaskPriority })}
         />
       </RailPillRow>
+      {onReview ? (
+        <button
+          type="button"
+          data-testid="task-rail-review"
+          onClick={onReview}
+          title="Open the latest effort's review: what it changed, its tests and coverage, and what to check"
+          style={{ alignSelf: "flex-start", fontSize: "var(--text-xs)" }}
+        >
+          Review
+        </button>
+      ) : null}
 
       <div style={{
         display: "flex",
