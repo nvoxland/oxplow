@@ -556,7 +556,10 @@ commit into the unified `page_ref` graph (see
   a declared impact, the effort in `source_extra` — which `v_commit_task`
   (v2) and the commit's backlinks read. The other order (committed, then
   the task closed) is the `effort.commits` reaction to `effort.finished`,
-  over the commits since the effort started.
+  over the commits since the effort started. An effort whose end-snapshot
+  bytes have expired from Local History (or were never kept) can't be
+  shown to hold anything, so it simply doesn't match; it must never error,
+  or one old effort stops the commit linking to every other (tsk1078).
 
 Idempotent. Each commit is keyed by its full sha, and a one-row
 existence probe before re-diffing skips already-indexed commits, so

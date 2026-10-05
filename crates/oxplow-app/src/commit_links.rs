@@ -22,6 +22,8 @@ use oxplow_domain::stores::ThreadStore as _;
 use oxplow_domain::vcs::ObjectId;
 use oxplow_domain::{DomainError, EffortId, Timestamp};
 
+use crate::snapshot_files::SnapshotFileError;
+
 /// How far back a commit looks for the efforts whose work it may hold.
 const LOOKBACK_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 
@@ -105,11 +107,17 @@ async fn holds_effort(
             .object_at(ws, sha, path)
             .await
             .map_err(|e| DomainError::Invalid(format!("{sha}:{path}: {e}")))?;
-        let at_end = files
-            .read_file_at_snapshot(end, path)
-            .await
-            .map_err(|e| DomainError::Invalid(format!("snapshot {end}:{path}: {e}")))?
-            .map(|bytes| objects.id_of(&bytes));
+        let at_end = match files.read_file_at_snapshot(end, path).await {
+            Ok(bytes) => bytes.map(|b| objects.id_of(&b)),
+            // Its end version has aged out of Local History (or was never
+            // kept): what it was can't be known, so it can't be shown to
+            // hold the commit — and mustn't stop the commit linking to the
+            // efforts that do (tsk1078).
+            Err(SnapshotFileError::Expired | SnapshotFileError::NoContent) => return Ok(false),
+            Err(e) => {
+                return Err(DomainError::Invalid(format!("snapshot {end}:{path}: {e}")));
+            }
+        };
         pairs.push((in_commit, at_end));
     }
     Ok(holds(&pairs))
@@ -146,13 +154,13 @@ mod tests {
         serde_json::to_value(out.rows).unwrap()
     }
 
-    /// The fixture's effort, closed now: its end snapshot taken over the
-    /// working tree, and `paths` as its files.
-    async fn close_effort(f: &crate::test_fixtures::EffortFixture, paths: &[&str]) {
-        let root = f.svc.layout.project_dir.clone();
+    /// `effort`, closed now: its end snapshot taken over the working tree,
+    /// and `paths` as its files.
+    async fn close_effort(svc: &crate::Services, effort: EffortId, paths: &[&str]) {
+        let root = svc.layout.project_dir.clone();
         let capture = crate::snapshot_capture::SnapshotCaptureService::new(
-            f.svc.snapshot_store.clone(),
-            f.svc.blobs.clone(),
+            svc.snapshot_store.clone(),
+            svc.blobs.clone(),
             root.clone(),
             Arc::new(crate::vcs::GitProvider),
             oxplow_domain::StreamId::new(1),
@@ -175,18 +183,16 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        f.svc
-            .effort_store
-            .set_end_snapshot(&f.effort, end)
+        svc.effort_store
+            .set_end_snapshot(&effort, end)
             .await
             .unwrap();
         let (effort, paths): (i64, Vec<String>) = (
-            f.effort.value(),
+            effort.value(),
             paths.iter().map(|p| p.to_string()).collect(),
         );
         let ended = Timestamp::now().to_text();
-        f.svc
-            .db
+        svc.db
             .transaction(move |c| {
                 c.execute(
                     "UPDATE effort SET ended_at = ?2 WHERE id = ?1",
@@ -242,7 +248,7 @@ mod tests {
         std::fs::write(root.join("src/a.rs"), "fn a() {}\n").unwrap();
         commit_all(&root, "base");
         std::fs::write(root.join("src/a.rs"), "fn a() { 1 }\n").unwrap();
-        close_effort(&f, &["src/a.rs", "src/c.rs"]).await;
+        close_effort(&f.svc, f.effort, &["src/a.rs", "src/c.rs"]).await;
         // Committed: the effort's version of the one file they share.
         let sha = commit_all(&root, "the discount fix");
         index_and_link(&f.svc, &sha).await;
@@ -257,6 +263,41 @@ mod tests {
         assert_eq!(tasks_of(&f.svc, &other).await, serde_json::json!([]));
     }
 
+    /// tsk1078: an older effort whose end version has expired from Local
+    /// History can't hold the commit, and mustn't stop it linking to the
+    /// effort that does.
+    #[tokio::test]
+    async fn an_expired_effort_doesnt_stop_a_commit_linking() {
+        let f = services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "fn a() {}\n").unwrap();
+        commit_all(&root, "base");
+        std::fs::write(root.join("src/a.rs"), "fn a() { 1 }\n").unwrap();
+        close_effort(&f.svc, f.effort, &["src/a.rs"]).await;
+        // Its bytes age out.
+        f.svc.blobs.gc(&Default::default()).unwrap();
+        let later = f
+            .svc
+            .effort_store
+            .start(
+                &oxplow_domain::refs::build::work_item_ref(f.task),
+                &f.thread,
+                None,
+            )
+            .await
+            .unwrap()
+            .id;
+        std::fs::write(root.join("src/a.rs"), "fn a() { 2 }\n").unwrap();
+        close_effort(&f.svc, later, &["src/a.rs"]).await;
+        let sha = commit_all(&root, "the second fix");
+        index_and_link(&f.svc, &sha).await;
+        assert_eq!(
+            tasks_of(&f.svc, &sha).await,
+            serde_json::json!([[f.task.value()]])
+        );
+    }
+
     /// Committed before the task closed: the effort's finish links it.
     #[tokio::test]
     async fn an_effort_finished_after_its_commit_links_it() {
@@ -266,7 +307,7 @@ mod tests {
         std::fs::write(root.join("src/a.rs"), "fn a() { 1 }\n").unwrap();
         let sha = commit_all(&root, "the fix");
         crate::commit_indexer::refresh(&f.svc).await;
-        close_effort(&f, &["src/a.rs"]).await;
+        close_effort(&f.svc, f.effort, &["src/a.rs"]).await;
         link_effort(&f.svc, &f.effort).await.unwrap();
         assert_eq!(
             tasks_of(&f.svc, &sha).await,
