@@ -187,6 +187,22 @@ the session is still opening (its id not back yet) are held — up to
 (`attach`), so a fast typist's first keys aren't lost (tsk993). Locked by
 `terminalInput.test.ts`.
 
+## When a session ends or goes away (tsk1026)
+
+A session's process exiting sends `{type:"exit", exitCode}`; the registry
+then unregisters it (`TerminalSessionRegistry`'s forwarder removes it from
+both maps), so attaching to its key spawns a fresh one instead of replaying
+the dead one. The pane shows **Session ended (exit N)** with **Start Again**
+and takes no keys meanwhile (they must not reach the next session).
+
+The pane opens its session through one `openSession` path — first mount,
+Start Again, `onRemoteReconnect` (the daemon came back), and a send that
+fails with "terminal session not found". Opening again returns the same id
+for a session that survived (nothing changes) or a new one: the screen is
+reset and the new session's replay is written under a dim "the previous
+session ended; this one was started again" line. Helpers in
+`components/terminalSession.ts`.
+
 ## Multiple terminals (Terminal page)
 
 `TerminalPage` owns a per-stream list of terminals and renders one

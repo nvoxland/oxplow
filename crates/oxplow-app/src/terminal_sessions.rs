@@ -254,6 +254,13 @@ impl TerminalSessionRegistry {
         let ring = Arc::new(Mutex::new(RingBuffer::new()));
         let ring_for_task = Arc::clone(&ring);
         let activity = self.activity.clone();
+        let sessions = Arc::clone(&self.inner);
+        let by_key = Arc::clone(&self.by_key);
+        let pty = self.pty.clone();
+        let key_for_task = key.clone();
+        // Held until the entry is inserted, so a process that exits at once
+        // is unregistered only after it was registered.
+        let mut map = self.inner.lock().await;
         let forwarder = tokio::spawn(async move {
             loop {
                 match handle.events.recv().await {
@@ -286,6 +293,15 @@ impl TerminalSessionRegistry {
                             session_id: session_id_for_task.clone(),
                             message: msg,
                         });
+                        // Its process is gone: unregister it, so attaching
+                        // to its key starts a fresh one (tsk1026).
+                        if let Some(entry) = sessions.lock().await.remove(&session_id_for_task) {
+                            let _ = pty.kill(&entry.pane_id).await;
+                        }
+                        let mut keys = by_key.lock().await;
+                        if keys.get(&key_for_task) == Some(&session_id_for_task) {
+                            keys.remove(&key_for_task);
+                        }
                         break;
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -299,7 +315,7 @@ impl TerminalSessionRegistry {
             }
         });
 
-        self.inner.lock().await.insert(
+        map.insert(
             session_id.clone(),
             SessionEntry {
                 pane_id,
@@ -310,6 +326,7 @@ impl TerminalSessionRegistry {
             },
         );
         self.by_key.lock().await.insert(key, session_id.clone());
+        drop(map);
         Ok(session_id)
     }
 
@@ -537,6 +554,53 @@ mod tests {
         // Once killed, the key reads as None again (no stale id leaks).
         let _ = reg.close(&result.session_id).await;
         assert_eq!(reg.session_id_for_key(&key).await, None);
+    }
+
+    /// tsk1026: a session whose process exited is unregistered, so
+    /// attaching to its key again starts a fresh one (an agent the person
+    /// quit, opened again) instead of replaying the dead one forever.
+    #[tokio::test]
+    async fn an_exited_session_is_unregistered_and_attaching_starts_a_new_one() {
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            crate::output_activity::OutputActivity::new(),
+        );
+        let mut events = reg.subscribe();
+        let key = "s-1|thr3|claude|working".to_string();
+        let exiting = |c, r| SpawnRequest {
+            command: "sh".into(),
+            args: vec!["-c".into(), "exit 0".into()],
+            cwd: std::env::temp_dir(),
+            env: vec![],
+            cols: c,
+            rows: r,
+        };
+        let first = reg
+            .attach_or_create(key.clone(), 80, 24, exiting)
+            .await
+            .expect("spawn session");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let e = events.recv().await.unwrap();
+                if e.session_id == first.session_id && e.message.contains("\"exit\"") {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the session exits");
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while reg.session_id_for_key(&key).await.is_some() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("an exited session is unregistered");
+        let second = reg
+            .attach_or_create(key.clone(), 80, 24, exiting)
+            .await
+            .expect("spawn again");
+        assert_ne!(second.session_id, first.session_id);
     }
 
     /// Spawn a `cat > <capture-file>` session and return (registry,

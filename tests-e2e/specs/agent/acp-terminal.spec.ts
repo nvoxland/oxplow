@@ -27,3 +27,23 @@ test("a terminal opens a shell in the project", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.locator(".xterm-rows")).toContainText("e2e-42");
 });
+
+// tsk1026: a session whose process exited says so, takes no keys, and Start
+// Again opens a fresh one in the same pane.
+test("an exited shell says so, and Start Again opens a new one", async ({ page }) => {
+  await page.goto("/");
+  await openFromLauncher(page, "Terminal");
+  const terminal = page.locator(".xterm");
+  await expect(terminal).toBeVisible();
+  await terminal.click();
+  await page.keyboard.type("exit");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("terminal-ended")).toContainText("Session ended");
+  await page.getByTestId("terminal-start-again").click();
+  await expect(page.getByTestId("terminal-ended")).toHaveCount(0);
+  await expect(page.locator(".xterm-rows")).toContainText("started again");
+  await terminal.click();
+  await page.keyboard.type("echo again-$((6*7))");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".xterm-rows")).toContainText("again-42");
+});

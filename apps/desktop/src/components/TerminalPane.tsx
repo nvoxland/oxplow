@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "r
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { TerminalEvent } from "../editor-session.js";
-import { desktopBridge } from "../api.js";
+import { desktopBridge, onRemoteReconnect } from "../api.js";
 import { logUi } from "../logger.js";
 import { terminalSender, type TerminalMessage, type TerminalSender } from "./terminalInput.js";
+import { isSessionGone, readSessionMessage, reopened, RESTARTED_NOTICE } from "./terminalSession.js";
 import { TASK_DRAG_MIME } from "../dragMimes.js";
 import { shouldHandleTerminalPageKey } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
@@ -157,10 +158,19 @@ export function TerminalPane({
   // nothing more is sent (tsk992). Read through a ref at call time, so a
   // re-mount (React's dev double mount) sends through its own.
   const senderRef = useRef<TerminalSender | null>(null);
+  // Opens the pane's session again (set once the terminal is open): after
+  // the daemon restarted, or when a send finds the session gone (tsk1026).
+  const reopenRef = useRef<(() => void) | null>(null);
+  // The session's process exited: the pane says so and offers Start Again.
+  const [ended, setEnded] = useState<{ exitCode: number | null } | null>(null);
+  const endedRef = useRef(false);
   useEffect(() => {
     const sender = terminalSender(
       (sessionId, message) => desktopBridge().forwardTerminalInput(sessionId, message),
-      (error) => logUi("warn", "terminal input failed", { error: String(error) }),
+      (error) => {
+        logUi("warn", "terminal input failed", { error: String(error) });
+        if (isSessionGone(error) && !endedRef.current) reopenRef.current?.();
+      },
     );
     senderRef.current = sender;
     return () => {
@@ -367,10 +377,14 @@ export function TerminalPane({
     let ro: ResizeObserver | null = null;
     // Before the session opens there's no id yet: the sender holds the
     // keystrokes and sends them once it does (tsk993).
+    // An ended session takes no input: keys typed at "Session ended" must
+    // not reach the next one.
     const dataDisp = term.onData((data) => {
+      if (endedRef.current) return;
       sendToTerminal(sessionIdRef.current, { type: "input", data });
     });
     const binaryDisp = term.onBinary((data) => {
+      if (endedRef.current) return;
       sendToTerminal(sessionIdRef.current, { type: "input-binary", data });
     });
 
@@ -419,15 +433,12 @@ export function TerminalPane({
       // set. Buffer them until the sessionId is known.
       const pendingEvents: TerminalEvent[] = [];
       const applyEvent = (event: TerminalEvent) => {
-        try {
-          const msg = JSON.parse(event.message);
-          if (msg.type === "data" && typeof msg.bytes === "string") {
-            const bin = atob(msg.bytes);
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            term.write(bytes);
-          }
-        } catch {}
+        const msg = readSessionMessage(event.message);
+        if (msg?.kind === "data") term.write(msg.bytes);
+        if (msg?.kind === "exit") {
+          endedRef.current = true;
+          setEnded({ exitCode: msg.exitCode });
+        }
       };
       const unsubscribe = desktopBridge().onTerminalEvent((event) => {
         if (sessionIdRef.current === null) {
@@ -438,34 +449,59 @@ export function TerminalPane({
         applyEvent(event);
       });
 
-      logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows });
-      void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows).then(({ sessionId, replayB64 }) => {
-        if (disposed) {
-          void desktopBridge().closeTerminalSession(sessionId);
-          return;
-        }
-        sessionIdRef.current = sessionId;
-        senderRef.current?.attach(sessionId);
-        // Replay the session's ring buffer into the fresh xterm so
-        // re-attaching to a long-running thread shows the same screen
-        // state the user left it in (instead of a blank pane that
-        // only fills as new output arrives).
-        if (replayB64) {
-          try {
-            const bin = atob(replayB64);
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            term.write(bytes);
-          } catch {}
-        }
-        for (const event of pendingEvents) {
-          if (event.sessionId === sessionId) applyEvent(event);
-        }
-        pendingEvents.length = 0;
-        term.focus();
-        logUi("info", "terminal session opened", { paneTarget, sessionId });
-      }).catch((error) => {
-        logUi("error", "terminal session open failed", { paneTarget, error: String(error) });
+      // Open the pane's session — the first time, and again after the
+      // daemon restarted or the session ended (tsk1026). A session that is
+      // still running is kept as is; one that was replaced starts the screen
+      // over from its replay, under a notice.
+      let opening = false;
+      const openSession = (again: boolean) => {
+        if (opening || disposed) return;
+        opening = true;
+        logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows, again });
+        void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows).then(({ sessionId, replayB64 }) => {
+          if (disposed) {
+            void desktopBridge().closeTerminalSession(sessionId);
+            return;
+          }
+          if (reopened(sessionIdRef.current, sessionId) === "same") return;
+          if (again) {
+            term.reset();
+            term.write(RESTARTED_NOTICE);
+          }
+          sessionIdRef.current = sessionId;
+          endedRef.current = false;
+          setEnded(null);
+          senderRef.current?.attach(sessionId);
+          // Replay the session's ring buffer into the fresh xterm so
+          // re-attaching to a long-running thread shows the same screen
+          // state the user left it in (instead of a blank pane that
+          // only fills as new output arrives).
+          if (replayB64) {
+            try {
+              const bin = atob(replayB64);
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+              term.write(bytes);
+            } catch {}
+          }
+          for (const event of pendingEvents) {
+            if (event.sessionId === sessionId) applyEvent(event);
+          }
+          pendingEvents.length = 0;
+          term.focus();
+          logUi("info", "terminal session opened", { paneTarget, sessionId, again });
+        }).catch((error) => {
+          logUi("error", "terminal session open failed", { paneTarget, error: String(error) });
+        }).finally(() => {
+          opening = false;
+        });
+      };
+      openSession(false);
+      reopenRef.current = () => openSession(true);
+      // The daemon came back: the session may be gone with it. Opening it
+      // again keeps a live one and replaces a dead one.
+      const offReconnect = onRemoteReconnect(() => {
+        if (!endedRef.current) openSession(true);
       });
 
       // Debounce resizes so a drag doesn't send one per frame.
@@ -495,6 +531,8 @@ export function TerminalPane({
         host.removeEventListener("mousedown", handleMouseDown);
         host.removeEventListener("paste", handlePaste);
         unsubscribe();
+        offReconnect();
+        reopenRef.current = null;
         prevCleanup?.();
       };
     };
@@ -558,6 +596,37 @@ export function TerminalPane({
           targetKind={comments.targetKind}
           targetId={comments.targetId}
         />
+      ) : null}
+      {ended ? (
+        <div
+          data-testid="terminal-ended"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "8px 12px",
+            background: "var(--surface-card)",
+            borderTop: "1px solid var(--border-subtle)",
+            color: "var(--text-primary)",
+            fontSize: 13,
+            zIndex: 4,
+          }}
+        >
+          <span>
+            Session ended{ended.exitCode === null ? "" : ` (exit ${ended.exitCode})`}.
+          </span>
+          <button
+            type="button"
+            data-testid="terminal-start-again"
+            onClick={() => reopenRef.current?.()}
+          >
+            Start Again
+          </button>
+        </div>
       ) : null}
       {dragHovering ? (
         <div
