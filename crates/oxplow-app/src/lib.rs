@@ -1335,6 +1335,10 @@ impl Services {
             collection: collection.clone(),
             db: db.clone(),
         }));
+        // A run reported any other way has its coverage read from its event.
+        event_pump.register_async(Arc::new(post_tool_reactors::RunReportsConsumer {
+            collection: collection.clone(),
+        }));
         event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
             deps: advisories::AdvisoryDeps {
                 advisories: advisories.clone(),

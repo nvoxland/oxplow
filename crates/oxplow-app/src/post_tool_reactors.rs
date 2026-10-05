@@ -13,10 +13,16 @@
 //!   and its output back from `event_content`.
 //! - `advisories.post_tool` — the enabled extensions' post-tool-use
 //!   advisories for the effort the tool ran in.
+//! - `collection.run_reports` — a run reported any other way
+//!   (`test.record_run`, a by-hand sync) has its coverage read from its
+//!   `test.run.recorded` (`CollectionService::on_test_run_recorded`,
+//!   tsk1015).
 
 use async_trait::async_trait;
 use oxplow_db::{event_content_store, Database};
-use oxplow_domain::events::schema::{AgentToolFinished, AgentToolRequested, EventType};
+use oxplow_domain::events::schema::{
+    AgentToolFinished, AgentToolRequested, EventType, TestRunRecorded,
+};
 use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::advisories::AdvisoryDeps;
@@ -26,6 +32,7 @@ use crate::extensions::AdvisoryOn;
 
 pub const COLLECTION: &str = "collection";
 pub const POST_TOOL_ADVISORIES: &str = "advisories.post_tool";
+pub const RUN_REPORTS: &str = "collection.run_reports";
 
 /// The run `event` finished, with when it started: its cause, the tool
 /// call's `agent.tool.requested` (tsk888), when there is one.
@@ -94,10 +101,30 @@ impl AsyncEventConsumer for CollectionConsumer {
             .on_post_tool_use(
                 &thread,
                 &payload.to_string(),
-                crate::collection::RunOrigin::Tool(&cause_of(&self.db, event).await?),
+                crate::collection::RunOrigin::Event(&cause_of(&self.db, event).await?),
             )
             .await
             .map(|_| ())
+    }
+}
+
+/// A recorded run's coverage, read from its `test.run.recorded`.
+pub struct RunReportsConsumer {
+    pub collection: CollectionService,
+}
+
+#[async_trait]
+impl AsyncEventConsumer for RunReportsConsumer {
+    fn name(&self) -> &'static str {
+        RUN_REPORTS
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == TestRunRecorded::TYPE
+    }
+
+    async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
+        self.collection.on_test_run_recorded(event).await
     }
 }
 

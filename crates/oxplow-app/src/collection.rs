@@ -3,7 +3,7 @@
 //!
 //! Two ways in:
 //! - **A tool call**: the collection reactor runs `on_post_tool_use` for
-//!   each `agent.tool.finished` (`RunOrigin::Tool`). It detects a test or
+//!   each `agent.tool.finished` (`RunOrigin::Event`). It detects a test or
 //!   analysis run, runs the report collectors whose `on_run` matches, and
 //!   records what they parsed (`observed`).
 //! - **A command**: `collector.sync` runs one report collector by hand
@@ -460,13 +460,15 @@ pub struct RunCause {
     pub started: Option<oxplow_domain::Timestamp>,
 }
 
-/// Where a run's report came from: the agent's tool call, or a command
+/// Where a run's report came from: an event a reactor saw, or a command
 /// (tsk923). What it records is stamped with what that origin knows, never
 /// a guess.
 #[derive(Debug, Clone, Copy)]
 pub enum RunOrigin<'a> {
-    /// The `agent.tool.finished` event the collection reactor saw.
-    Tool(&'a RunCause),
+    /// An event a reactor saw: the `agent.tool.finished` the collection
+    /// reactor detects a run in, or a `test.run.recorded` whose coverage
+    /// the run-reports reactor reads (tsk1015).
+    Event(&'a RunCause),
     /// A command (`collector.sync`, `test.run.record`): `turn` is its
     /// actor's open turn when that actor is the thread's own agent, and
     /// none for anyone else — a person's sync during an agent's turn isn't
@@ -478,7 +480,7 @@ impl<'a> RunOrigin<'a> {
     /// The tool event, for a run the reactor saw.
     pub fn cause(self) -> Option<&'a RunCause> {
         match self {
-            RunOrigin::Tool(cause) => Some(cause),
+            RunOrigin::Event(cause) => Some(cause),
             RunOrigin::Command { .. } => None,
         }
     }
@@ -488,7 +490,7 @@ impl<'a> RunOrigin<'a> {
     /// none — or its command's.
     pub fn turn(self) -> Option<i64> {
         match self {
-            RunOrigin::Tool(cause) => cause.anchors.turn_id,
+            RunOrigin::Event(cause) => cause.anchors.turn_id,
             RunOrigin::Command { turn } => turn,
         }
     }
@@ -875,6 +877,20 @@ impl CollectionService {
         origin: RunOrigin<'_>,
         root: &std::path::Path,
     ) -> RunReports {
+        self.read_run_reports_of(run, None, window, origin, root)
+            .await
+    }
+
+    /// [`Self::read_run_reports`] of the collectors that record `records`
+    /// only, when given.
+    async fn read_run_reports_of(
+        &self,
+        run: RunKind,
+        records: Option<Records>,
+        window: FreshWindow,
+        origin: RunOrigin<'_>,
+        root: &std::path::Path,
+    ) -> RunReports {
         let cause = origin.cause();
         let source = oxplow_domain::Actor::System.source();
         let how = ReportRun {
@@ -884,7 +900,9 @@ impl CollectionService {
         };
         let mut out = RunReports::default();
         for spec in self.report_collectors() {
-            if spec.trigger != (Trigger::OnRun { run }) {
+            if spec.trigger != (Trigger::OnRun { run })
+                || records.is_some_and(|r| spec.records != Some(r))
+            {
                 continue;
             }
             match self.read_report(&spec, Some(window), &how, root).await {
@@ -911,6 +929,54 @@ impl CollectionService {
             }
         }
         out
+    }
+
+    /// A run's coverage, read from its `test.run.recorded` (tsk1015): the
+    /// coverage collectors whose report the run wrote — around the time it
+    /// was recorded — recorded as the collection reactor records a detected
+    /// run's, owned by the run's effort (the event's anchors). One routine
+    /// for every way a run is reported: a run logged with a cause is one
+    /// the collection reactor detected in a tool call, whose reports it
+    /// read inline (its same-call advisories and nudge depend on them), so
+    /// its event reads nothing more; every other run — `test.record_run`,
+    /// a by-hand sync of a test-report collector — has its coverage read
+    /// here. A run's own test report isn't read here: it *is* the run.
+    pub async fn on_test_run_recorded(
+        &self,
+        event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), DomainError> {
+        if event.envelope.cause.is_some() {
+            return Ok(());
+        }
+        let Some(thread) = event.envelope.anchors.thread_id else {
+            return Ok(());
+        };
+        let cause = RunCause {
+            event_id: event.envelope.id.as_str().to_string(),
+            seq: event.seq,
+            anchors: event.envelope.anchors.clone(),
+            at: event.envelope.at,
+            started: None,
+        };
+        let origin = RunOrigin::Event(&cause);
+        let root = self.worktree(&thread).await;
+        let reads = self
+            .read_run_reports_of(
+                RunKind::Test,
+                Some(Records::Coverage),
+                FreshWindow::around(event.envelope.at),
+                origin,
+                &root,
+            )
+            .await;
+        if let Some((merged, source)) = &reads.coverage() {
+            self.coverage_ride_along_with_retry(&thread, merged, source, origin)
+                .await;
+        } else if !reads.coverage_errors.is_empty() {
+            self.record_coverage_failure(&thread, &reads.coverage_errors.join("; "), origin)
+                .await;
+        }
+        Ok(())
     }
 
     /// Record a `test-run` observation against the thread's open effort.
@@ -4602,7 +4668,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload("bun test", 0),
-                    crate::collection::RunOrigin::Tool(&cause),
+                    crate::collection::RunOrigin::Event(&cause),
                 )
                 .await
                 .unwrap();
@@ -4673,7 +4739,7 @@ mod tests {
                     .on_post_tool_use(
                         &h.thread,
                         &bash_payload(command, 0),
-                        crate::collection::RunOrigin::Tool(&cause),
+                        crate::collection::RunOrigin::Event(&cause),
                     )
                     .await
                     .unwrap();
@@ -4696,7 +4762,7 @@ mod tests {
                     "report-less-run",
                     "m",
                     "cmd",
-                    crate::collection::RunOrigin::Tool(&cause),
+                    crate::collection::RunOrigin::Event(&cause),
                 )
                 .await;
             let by_producer: Vec<(String, Option<i64>)> =
@@ -5230,6 +5296,85 @@ mod tests {
                 .as_deref()
                 .unwrap()
                 .contains("cargo test"));
+        }
+
+        /// The `test.run.recorded` events logged so far.
+        async fn run_events(h: &Harness) -> Vec<oxplow_domain::StoredEvent> {
+            h.db.transaction(|tx| oxplow_db::event_log_store::read_after_tx(tx, 0, 500))
+                .await
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.envelope.event_type == "test.run.recorded")
+                .collect()
+        }
+
+        /// The coverage captures recorded so far, with their effort.
+        async fn coverage_captures(h: &Harness) -> Vec<Option<i64>> {
+            h.db.transaction(|tx| {
+                let mut st = tx
+                    .prepare("SELECT effort_id FROM metric_capture WHERE producer = 'coverage' ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| r.get(0))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap()
+        }
+
+        /// tsk1015: a run reported any way but the agent's own shell command
+        /// (`test.record_run`, a by-hand sync) has its coverage read from its
+        /// `test.run.recorded` — the coverage collectors whose report it
+        /// wrote — owned by the run's effort. A run the collection reactor
+        /// saw read its reports already: its event reads nothing more.
+        #[tokio::test]
+        async fn a_recorded_runs_coverage_is_read_from_its_event() {
+            let h = build(Some(COBERTURA_50PCT)).await;
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "make test",
+                    Some(0),
+                    Some(1200),
+                    Some(5),
+                    Some(0),
+                    Some(5),
+                    "asserted",
+                    "mcp",
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(coverage_captures(&h).await, Vec::<Option<i64>>::new());
+            let [event] = run_events(&h).await.try_into().expect("one run event");
+            h.service.on_test_run_recorded(&event).await.unwrap();
+            let effort = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            assert_eq!(coverage_captures(&h).await, vec![Some(effort.value())]);
+
+            // A tool run's event: its reports were read with it.
+            let cause = RunCause {
+                event_id: "evt-tool".into(),
+                seq: 1,
+                anchors: oxplow_domain::Anchors::default(),
+                at: Timestamp::now(),
+                started: None,
+            };
+            h.service
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("bun test", 0),
+                    crate::collection::RunOrigin::Event(&cause),
+                )
+                .await
+                .unwrap();
+            let tool_run = run_events(&h).await.pop().unwrap();
+            let before = coverage_captures(&h).await.len();
+            h.service.on_test_run_recorded(&tool_run).await.unwrap();
+            assert_eq!(coverage_captures(&h).await.len(), before);
         }
 
         #[tokio::test]
@@ -6473,7 +6618,7 @@ mod tests {
                     "report-less-run",
                     "m",
                     "cmd",
-                    crate::collection::RunOrigin::Tool(&cause),
+                    crate::collection::RunOrigin::Event(&cause),
                 )
                 .await;
             let owner: Option<i64> =
@@ -7354,7 +7499,7 @@ mod tests {
                     .read_run_reports(
                         RunKind::Test,
                         FreshWindow::around(cause.at),
-                        crate::collection::RunOrigin::Tool(&cause),
+                        crate::collection::RunOrigin::Event(&cause),
                         h.tmp.path(),
                     )
                     .await;
@@ -7802,7 +7947,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload("bun test --watch false", 0),
-                    crate::collection::RunOrigin::Tool(&cause),
+                    crate::collection::RunOrigin::Event(&cause),
                 )
                 .await
                 .unwrap();
@@ -8403,7 +8548,7 @@ mod tests {
                     Some(&report),
                     &["eslint".into()],
                     "analysis-report",
-                    RunOrigin::Tool(&cause),
+                    RunOrigin::Event(&cause),
                 )
                 .await
                 .unwrap()

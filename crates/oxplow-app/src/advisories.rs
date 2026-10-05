@@ -170,7 +170,7 @@ pub async fn for_thread(
                     "advisory",
                     cause.map_or(
                         crate::collection::RunOrigin::Command { turn: None },
-                        crate::collection::RunOrigin::Tool,
+                        crate::collection::RunOrigin::Event,
                     ),
                 )
                 .await;

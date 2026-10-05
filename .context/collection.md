@@ -300,8 +300,21 @@ hook + MCP wiring):
   falling back to HEAD with `exact = false` when the tree is dirty (the normal
   case). This is the fold's only ancestry material and is **not backfillable**;
   see the stamping note in [metrics.md](./metrics.md).
-  Left for later: running report collectors from `test.run.recorded`
-  (a run reported by command) — it changes `v_test_run`'s grain.
+  **A run reported any other way has its coverage read from its event**
+  (tsk1015): the `collection.run_reports` pump consumer reacts to
+  `test.run.recorded` and runs `CollectionService::on_test_run_recorded`
+  — the project's `on_run: test` **coverage** collectors whose report was
+  written around the run's time (`FreshWindow::around`), recorded as a
+  detected run's coverage is, owned by the run's effort (the event's
+  anchors; `RunOrigin::Event` over the run event, which also dedupes the
+  collector's run per reported run). One routine for every way a run is
+  reported: a run logged **with a cause** is one the collection reactor
+  detected in a tool call and read inline — the hook's same-call
+  advisories and report-less nudge depend on it — so its event reads
+  nothing more; `test.record_run` and a by-hand sync of a test-report
+  collector have theirs read here. A run's own **test** report isn't
+  read from the event: it *is* the run, and reading it after the run was
+  recorded would split one run across two rows (`v_test_run`'s grain).
 
 **Observe-always (tsk269/tsk270).** Tests, analysis, **and coverage** are recorded
 **regardless of how many efforts are open** — attribution is deferred to the
