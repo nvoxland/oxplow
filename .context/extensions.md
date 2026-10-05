@@ -1377,7 +1377,11 @@ draws each pull request as a bar from opened to merged — a range the
 kit's charts don't draw; its filters re-run its own lens (`query`), a
 bar opens `github_pr:<n>` (`navigate`), and Sync runs `collector.sync`
 (`invoke`) — refused until a person approves the component on
-Programs. The loader no longer limits components to private extensions
+Programs. The host's own re-run (`onUpdate`, at the lens's params) is
+asked again with a selected filter rather than drawn over it; a pull
+request whose dates can't be read is left out and counted in a note,
+never blanking the rest; a rejected `connect()` is said in the status
+(tsk1008) — a component author's model for each. The loader no longer limits components to private extensions
 (a bundled one is still an error: its bundle is never served). The
 browser suite's `specs/components/pr-lifetimes.spec.ts` runs it in
 Chromium **and WebKit** (the engines of browser mode and the macOS

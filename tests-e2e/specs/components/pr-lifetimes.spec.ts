@@ -1,3 +1,6 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import type { Page } from "@playwright/test";
 
 import { approveCollector, approveProgram, ipc, run, until, type Daemon } from "../../support/daemon.js";
@@ -10,22 +13,70 @@ import { openFromLauncher } from "../../support/ui.js";
 // window run. Every suite daemon has the example, its sync printing the
 // suite's two pull requests (#12 merged, #13 open).
 
-/** Collect the pull requests and open the lens. */
-async function openLifetimes(page: Page, daemon: Daemon) {
+/** Approve the example's sync as it is now and run it as a person, until
+ *  `count` pull requests are collected. Its approval covers its
+ *  extension's files, so a changed `prs.json` is approved again. */
+async function collect(daemon: Daemon, count: number) {
   await approveCollector(daemon, "github", "prs");
   await run(daemon, "collector.sync", { owner: "github", id: "prs" });
-  await until("the pull requests to be collected", 30_000, async () => {
-    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_github_pr" }).catch(
-      () => ({ rows: [[0]] }),
-    );
-    return out.rows[0]?.[0] === 2;
+  await until(`${count} pull requests to be collected`, 30_000, async () => {
+    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_github_pr" });
+    return out.rows[0]?.[0] === count;
   });
+}
+
+/** Collect the pull requests (`count` of them, `bars` drawable) and open
+ *  the lens. */
+async function openLifetimes(page: Page, daemon: Daemon, count = 2, bars = 2) {
+  await collect(daemon, count);
   await page.goto("/");
   await openFromLauncher(page, "PR Lifetimes");
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
-  await expect(frame.locator(".bar")).toHaveCount(2);
+  await expect(frame.locator(".bar")).toHaveCount(bars);
   return frame;
 }
+
+/** Add `prs` to what the example's sync prints. */
+function addPrs(daemon: Daemon, prs: Array<Record<string, unknown>>) {
+  const path = join(daemon.project, "oxplow", "extensions", "github", "prs.json");
+  const printed = JSON.parse(readFileSync(path, "utf8")) as { entities: { pr: unknown[] } };
+  printed.entities.pr.push(...prs);
+  writeFileSync(path, JSON.stringify(printed));
+}
+
+const pr = (number: number, opened_at: string) => ({
+  number,
+  title: `PR ${number}`,
+  body: "",
+  state: "open",
+  author: "octocat",
+  head_branch: `b${number}`,
+  draft: false,
+  opened_at,
+  merged_at: null,
+  url: `https://github.com/o/r/pull/${number}`,
+});
+
+// tsk1008: a date that can't be read leaves that pull request out — said,
+// not every bar blanked — and a selected filter holds when the host runs
+// the lens again (its models changed), rather than redrawing everything.
+test("a bad date is left out, and a filter holds across the host's re-run", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  addPrs(daemon, [pr(11, "not a date")]);
+  const frame = await openLifetimes(page, daemon, 3, 2);
+  await expect(frame.locator("#note")).toContainText("1 pull request has a date that can't be read");
+  for (const rect of await frame.locator(".bar rect").all()) {
+    expect(Number.isFinite(Number(await rect.getAttribute("x")))).toBe(true);
+  }
+  await frame.locator('[data-state="open"]').click();
+  await expect(frame.locator(".bar")).toHaveCount(1);
+  addPrs(daemon, [pr(14, "2026-09-30T00:00:00Z")]);
+  await collect(daemon, 4);
+  // The host's re-run, with the filter kept: the open ones, #13 and #14.
+  await expect(frame.locator(".bar")).toHaveCount(2);
+  await expect(frame.locator('.bar[data-ref="github_pr:14"]')).toHaveCount(1);
+  await expect(frame.locator('.bar[data-ref="github_pr:12"]')).toHaveCount(0);
+});
 
 test("PR lifetimes draws, filters and opens; it acts only once a person approves it", async ({ fresh }) => {
   const { page, daemon } = fresh;

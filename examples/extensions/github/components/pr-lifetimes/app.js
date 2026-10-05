@@ -13,18 +13,21 @@
   const LABEL = 260; // px for "#12 title"
   const DAY = 24 * 60 * 60 * 1000;
 
+  const status = document.getElementById("status");
+  const say = (e) => {
+    status.textContent = e && e.message ? e.message : String(e);
+  };
+
   oxplow.connect().then((component) => {
     component.applyTheme();
-    const status = document.getElementById("status");
-    const say = (e) => {
-      status.textContent = e && e.message ? e.message : String(e);
-    };
     let state = "all";
     const show = (run) => draw(run, (ref) => component.navigate(ref).catch(say));
     const refresh = () => component.query("pr-lifetimes", { state }).then(show, say);
 
     show(component.run);
-    component.onUpdate(show);
+    // The host runs the lens again when what it reads changes — at its own
+    // params, so with a filter selected it's asked again with the filter.
+    component.onUpdate((run) => ((run.params || {}).state === state ? show(run) : refresh()));
     for (const button of document.querySelectorAll("[data-state]")) {
       button.addEventListener("click", () => {
         state = button.dataset.state;
@@ -41,18 +44,29 @@
         refresh();
       }, say);
     });
-  });
+  }, (e) => say(new Error(`Couldn't connect to oxplow: ${e && e.message ? e.message : e}`)));
 
-  /** The run's pull requests as bars on one time axis. */
+  /** The run's pull requests as bars on one time axis — each whose dates
+   *  can be read; the note says how many couldn't. */
   function draw(run, open) {
     const columns = run.result.columns;
     const at = (row, name) => row[columns.indexOf(name)];
     const now = Date.now();
-    const prs = run.result.rows.map((row) => {
+    let unread = 0;
+    const prs = [];
+    for (const row of run.result.rows) {
       const opened = Date.parse(at(row, "opened_at"));
       const merged = at(row, "merged_at") ? Date.parse(at(row, "merged_at")) : null;
-      return { number: at(row, "number"), title: at(row, "title"), opened, merged, end: merged || now };
-    });
+      if (Number.isNaN(opened) || Number.isNaN(merged)) {
+        unread += 1;
+        continue;
+      }
+      prs.push({ number: at(row, "number"), title: at(row, "title"), opened, merged, end: merged || now });
+    }
+    document.getElementById("note").textContent =
+      unread === 0
+        ? ""
+        : `${unread} pull request${unread === 1 ? " has a date" : "s have dates"} that can't be read, not drawn`;
     const svg = document.getElementById("chart");
     svg.replaceChildren();
     document.getElementById("empty").hidden = prs.length > 0;
