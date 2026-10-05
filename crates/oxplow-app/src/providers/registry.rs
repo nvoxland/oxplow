@@ -1884,7 +1884,8 @@ impl ProviderRegistry {
     /// A person approved program `<extension>/<provider id>` as it is
     /// now: every running instance of it restarts on what was approved
     /// (its declarations may have changed, and a start checks them against
-    /// what it was enabled with).
+    /// what it was enabled with), and an enabled one that was down for want
+    /// of approval starts (tsk1062).
     pub async fn approved(&self, program: &str) {
         let of_it: Vec<String> = self
             .running
@@ -1894,13 +1895,10 @@ impl ProviderRegistry {
             .filter(|i| i.spec.approval_name(&i.ext.name) == program)
             .map(|i| i.name.clone())
             .collect();
-        let mut stopped = false;
         for name in of_it {
-            stopped |= self.stop(&name).await;
+            self.stop(&name).await;
         }
-        if stopped {
-            self.reconcile().await;
-        }
+        self.reconcile().await;
     }
 
     /// A person's Check / Enable / Disable on Settings → Integrations:

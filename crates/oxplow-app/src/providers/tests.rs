@@ -1345,6 +1345,32 @@ async fn an_unreadable_disable_record_keeps_the_instance_off() {
 /// tsk569: approving an updated provider restarts a running instance on
 /// what was approved, instead of leaving it to be disabled at its next
 /// start as changed.
+/// tsk1062: an enabled instance that's down for want of approval starts
+/// once a person approves its program — not only one already running.
+#[tokio::test]
+async fn approving_a_program_starts_its_enabled_instance() {
+    let fx = services_with_effort().await;
+    write_extension(&fx.svc.layout.project_dir, "");
+    let ext = extension(&fx.svc.layout.project_dir);
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    assert!(
+        fx.svc.providers.get(INSTANCE).await.is_none(),
+        "not approved yet"
+    );
+
+    approve(&fx, &ext);
+    fx.svc.providers.approved(INSTANCE).await;
+    assert!(
+        fx.svc.providers.get(INSTANCE).await.is_some(),
+        "started on approval"
+    );
+    assert_eq!(
+        fx.svc.providers.health(INSTANCE).unwrap().state,
+        InstanceState::Ready
+    );
+}
+
 #[tokio::test]
 async fn approving_updated_declarations_restarts_the_instance() {
     let (fx, _ext) = approved("").await;

@@ -413,7 +413,8 @@ Consent stays per program: its hash covers the folder, the entry, args
 and the *names* of its grants; two instances differ only in config and
 credential *values*, which it never covered, so a second approval would
 review nothing. Approving a program restarts every running instance of
-it (`ProviderRegistry::approved`).
+it, and starts an enabled one that was down for want of approval
+(`ProviderRegistry::approved` reconciles, tsk1062).
 
 `ProviderRegistry::resolve(instance)` is the one mapping from a name to
 `{ ext, spec, id }` (`enable` / `check` are the default instance's;
@@ -897,7 +898,8 @@ fake's service, and after Sync Now it is on the Board. Approving the
 program stays in Data → Programs; approving a provider restarts its
 running instance on what was approved (`ProviderRegistry::approved`,
 called by `approve_project_program`), so updated declarations take
-effect instead of disabling it at its next start as changed.
+effect instead of disabling it at its next start as changed — and starts
+an enabled instance that was waiting for the approval.
 
 **Tests** (`providers/tests.rs`) run the real fake binary (built beside
 the test binary by the workspace build) through a script entry in a
