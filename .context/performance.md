@@ -132,6 +132,29 @@ declined specs are the next place to look, not the cube.
 aggregation of those is its own task (tsk514; see the next section for what
 they cost the cube).
 
+## Bounded series reads, re-measured (P12, tsk202, 2026-10-05)
+
+The harness on a `VACUUM INTO` copy of the live DB (2.3 GB, **5,969,753
+facts**, 108,667 captures folded in 73.8 s), release build: every series
+identical to the oracle, **309,164 ms fact-served → 3,411 ms with the cube**
+for all 73 specs.
+
+| | ms |
+|---|---|
+| a cube-served spec | 0.4–75 (most 1–30) |
+| `oxplow.long_functions` (declined to facts) | 698 |
+| `oxplow.high_complexity_fns` (declined) | 685 |
+| `oxplow.coverage.untested_files` (declined) | 544 |
+
+So tsk202's shape — a series loading a measure's whole history for the
+renderer to filter — is gone: reads take a window, applied server-side, and
+the cube's whole-history read for the largest measure (`oxplow.tokens`, 45 k
+cube rows) is ~10 ms in SQLite. **Pushing the window into the cube's SQL
+isn't worth doing**: it would save at most that. More than half of what's
+left is three per-path *threshold counts* the cube declines; a time window
+can't cut them — an in-window point still folds per-path state from before
+it. They need per-capture counts built with the cube (tsk1019).
+
 ## The cube as an asset: what a burst costs (P7.B1, 2026-10-01; corrected 2026-10-02)
 
 `crates/oxplow-app/examples/cube_burst.rs` on a `VACUUM INTO` copy of the

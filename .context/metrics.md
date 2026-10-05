@@ -252,7 +252,9 @@ welded to collection.
 >
 > Still open: this makes repeated reads free but the FIRST read per generation still
 > folds. Eliminating that needs per-capture points materialized during the cube
-> build (which already holds the live partition) — see [[tsk202]].
+> build (which already holds the live partition) — re-measured in P12
+> (performance.md, "Bounded series reads, re-measured"): three threshold counts,
+> ~0.5–0.7 s each, are what's left (tsk1019).
 >
 > **Fact collectors must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree
