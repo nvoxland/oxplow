@@ -157,7 +157,8 @@ impl GridPlan {
             };
             let spec = engine.spec(key).await?.ok_or_else(|| {
                 invalid(format!(
-                    "MEASURE('{key}'): no metric `{key}` (see v_metric_spec)"
+                    "MEASURE('{key}'): {}",
+                    crate::metric_engine::missing_metric(key)
                 ))
             })?;
             let entity = crate::entity_metrics::entity_of(&spec);
@@ -508,6 +509,22 @@ mod tests {
                 .to_string();
             assert!(err.contains(says), "{sql}: {err}");
         }
+        // tsk1046: a built-in gauge that's off has no spec; it says so, and
+        // how to turn it on, instead of an empty grid.
+        let err = gateway
+            .query_sql(
+                "SELECT MEASURE('oxplow.doc_coverage') FROM metric_grid('day')",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("`oxplow.doc_coverage` is off in this project"),
+            "{err}"
+        );
+        assert!(err.contains("use: oxplow.doc_coverage"), "{err}");
         let plain = SqlGateway::new(Database::in_memory());
         let err = plain
             .query_sql("SELECT MEASURE('x') FROM metric_grid('day')", vec![], None)

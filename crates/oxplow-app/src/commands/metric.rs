@@ -173,12 +173,7 @@ fn record_tx(ctx: &TxCtx<'_>, input: &RecordInput, primary: StreamId) -> Result<
     let stream = stream_for(ctx.actor, input.stream.as_deref(), primary)?;
     let spec = get_spec_tx(ctx.conn, &input.key)
         .map_err(storage)?
-        .ok_or_else(|| {
-            invalid(
-                "/key",
-                format!("no metric `{}` (see v_metric_spec)", input.key),
-            )
-        })?;
+        .ok_or_else(|| invalid("/key", crate::metric_engine::missing_metric(&input.key)))?;
     let measure_key = spec.source_measure.as_deref().ok_or_else(|| {
         invalid(
             "/key",
@@ -590,6 +585,21 @@ mod tests {
     #[tokio::test]
     async fn a_recorded_value_reads_back_through_its_metric() {
         let (svc, _dir) = services().await;
+        // A built-in gauge has a spec only while it's on (tsk1046).
+        let off = run(
+            &svc,
+            RECORD,
+            json!({ "key": "oxplow.rust.unsafe_blocks", "value": 42.0 }),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(off.contains("is off in this project"), "{off}");
+        svc.config.write().unwrap().metrics = vec![oxplow_config::MetricEntry {
+            use_key: Some("oxplow.rust.unsafe_blocks".into()),
+            ..Default::default()
+        }];
+        svc.metrics.seed_catalog().await;
         run(
             &svc,
             RECORD,

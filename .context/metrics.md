@@ -1546,20 +1546,18 @@ just carries a Help blurb pointing there.
   navigates to the metric's **detail page** (via `onOpenDetail` → `metricRef`).
 > ### ⚠️ A seeded spec does NOT mean an enabled metric (tsk87)
 >
-> `seed_catalog` seeds **every** built-in spec (`builtin_metric_specs` /
-> `builtin_ast_specs` / `builtin_producer_specs`) unless a config `enabled: false`
-> marker explicitly prunes it. A built-in code metric that is merely **un-`use:`d keeps
-> its spec** — its collector just never RUNS (`fact_collectors` elides it). But `catalog()`
-> computes a built-in code metric's `enabled` as *"a non-disabled `use:` resolves it"*.
->
-> So `metric_spec` ⊋ "the enabled set", and **only the catalog knows about
-> `use:`**. Reading `v_metric_spec` alone and calling the result
-> "enabled metrics" is wrong: in this Rust/TS repo the bundled `oxplow.csharp.*`
-> and `oxplow.clojure.*` idiom specs are seeded, never run, and have no facts —
-> so Recorded Metrics listed them as permanent `—` rows while the (since-folded)
-> Metric Settings page showed the same rows *unchecked*. That's why the page's
-> row set is the **catalog**, with the spec joined in by key for presentation
-> metadata.
+> `seed_catalog` seeds a built-in **gauge's** spec (`builtin_metric_specs` /
+> `builtin_ast_specs`) only while its collector runs — `use:`d, or default-on
+> (`DEFAULT_ON`) and not disabled (tsk1046). It used to seed every built-in
+> spec, so an un-`use:`d gauge kept a spec nothing recorded into: `MEASURE()`
+> of it read an empty grid, silently, and the bundled `oxplow.csharp.*` /
+> `oxplow.clojure.*` idiom specs sat in this Rust/TS repo as permanent `—` rows.
+> Now `v_metric_spec` holds only metrics with a source, and a read or write of
+> an off built-in by key says so and how to turn it on
+> (`metric_engine::missing_metric`). Producer specs (`builtin_producer_specs`)
+> are still seeded unless an `enabled: false` marker prunes them. The page's
+> row set stays the **catalog** — it lists what can be turned on, too — with
+> the spec joined in by key for presentation metadata.
 >
 > (The "spec table = the enabled set" phrasing under the collection gate above is
 > about the **producer** measures, where disabling does prune. Don't generalize it

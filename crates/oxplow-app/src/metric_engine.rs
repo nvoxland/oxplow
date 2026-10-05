@@ -1263,6 +1263,23 @@ impl FoldMemo {
     }
 }
 
+/// Why there is no spec for metric `key`: a built-in gauge has one only
+/// while it's on, so it's "off — how to turn it on"; anything else isn't a
+/// metric (tsk1046). Every read and write of a metric by key says this.
+pub fn missing_metric(key: &str) -> String {
+    if oxplow_collect_plugin::builtin_metrics::builtin_metrics()
+        .iter()
+        .any(|m| m.key == key)
+    {
+        format!(
+            "`{key}` is off in this project — turn it on with `config.set` on `metrics` \
+             (add `- use: {key}`)"
+        )
+    } else {
+        format!("no metric `{key}` (see v_metric_spec)")
+    }
+}
+
 /// The engine over a fact store: fetches the right facts and applies the pure
 /// aggregation. A metric's facts are fetched by its `source_measure`.
 #[derive(Clone)]

@@ -705,12 +705,18 @@ impl MetricsService {
         };
         // Built-in metric SPECS — the bundled code/idiom gauge specs
         // (`builtin_metric_specs` + `builtin_ast_specs`) and the always-on producer
-        // specs. All are seeded UNLESS explicitly disabled by a `enabled: false`
-        // marker in config, in which case the row is pruned (so spec-driven reads
-        // go empty and, for producers, `measure_has_active_spec` closes the
-        // collection gate). Built-in gauges keep their spec seeded when merely
-        // un-`use:`d — its collector simply doesn't RUN (gated in `fact_collectors`) —
-        // so a disable is only ever an explicit marker.
+        // specs. A producer/entity spec is seeded UNLESS explicitly disabled by a
+        // `enabled: false` marker in config, in which case the row is pruned (so
+        // spec-driven reads go empty and `measure_has_active_spec` closes the
+        // collection gate). A built-in GAUGE's spec is seeded only while its
+        // collector runs (`use:`d, or default-on and not disabled — tsk1046): a
+        // spec nothing records into read as an empty metric, silently, so
+        // `v_metric_spec` is now exactly what has a source, and `MEASURE()` of
+        // an off one says how to turn it on.
+        let gauges_on: std::collections::HashSet<String> =
+            self.fact_collectors().into_iter().map(|c| c.key).collect();
+        let gauge_off =
+            |key: &str| builtin_metrics().iter().any(|m| m.key == key) && !gauges_on.contains(key);
         // A spec whose aggregation the engine cannot compute must not seed
         // (tsk108): the V44 CHECK reserves `p95`/`count_distinct` in the
         // schema vocabulary and config doesn't validate the string, but an
@@ -740,6 +746,7 @@ impl MetricsService {
         {
             let key = spec.key.clone();
             let res = if config_state(&key) != Some(false)
+                && !gauge_off(&key)
                 && computable(&spec)
                 && prepare_entity_spec(facts, &layer, &mut spec, &entity_dims).await
             {
@@ -3740,6 +3747,19 @@ mod tests {
         assert!(keys(&svc).iter().any(|k| k == "oxplow.fn_count"));
     }
 
+    /// Seed the catalog with every built-in gauge `use:`d: a built-in's spec
+    /// is seeded only while it's on (tsk1046).
+    async fn seed_with_every_builtin_on(svc: &crate::Services) {
+        svc.config.write().unwrap().metrics = builtin_metrics()
+            .iter()
+            .map(|m| MetricEntry {
+                use_key: Some(m.key.to_string()),
+                ..Default::default()
+            })
+            .collect();
+        svc.metrics.seed_catalog().await;
+    }
+
     fn starlark_gauge(key: &str, entry_file: &str) -> FactCollector {
         starlark_gauge_emits(key, entry_file, Vec::new())
     }
@@ -3844,7 +3864,7 @@ def transform(input):
         // from the SNAPSHOT, which is exactly why no zero-emission convention is
         // needed.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
+        seed_with_every_builtin_on(&svc).await;
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
             stream_val: 1,
@@ -4284,7 +4304,7 @@ def transform(input):
         // This is what read 0-instead-of-15: the old semi-additive fold took "the last
         // capture", which after the baseline is only ever a handful of changed files.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
+        seed_with_every_builtin_on(&svc).await;
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
             stream_val: 1,
@@ -4360,7 +4380,7 @@ def transform(input):
         // headline read 0 — which is how `oxplow.rust.unsafe_blocks` reported 0 while
         // the repo had 15 unsafe blocks.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
+        seed_with_every_builtin_on(&svc).await;
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
             stream_val: 1,
@@ -4906,7 +4926,7 @@ def transform(input):
         // collect-plugin golden tests). One capture per gauge; idioms share the
         // measure but never collide (the spec filters by rule).
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
+        seed_with_every_builtin_on(&svc).await;
 
         let mut corpus = HashMap::new();
         corpus.insert(
@@ -4996,7 +5016,7 @@ def transform(input):
         // sliceable by it (group_by / dim_eq). It is the key's one name
         // (tsk945): a bare `language` request is no alias.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
+        seed_with_every_builtin_on(&svc).await;
         let mut corpus = HashMap::new();
         corpus.insert(
             "src/lib.rs".to_string(),
@@ -5094,7 +5114,7 @@ def transform(input):
         // `NewMetricSpec::base` default (`None`) silently collapses every idiom
         // metric into the "General" bucket and the per-language split no-ops.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
+        seed_with_every_builtin_on(&svc).await;
         for (key, want) in [
             ("oxplow.rust.unsafe_blocks", "rust"),
             ("oxplow.rust.panic_macros", "rust"),
@@ -5134,7 +5154,7 @@ def transform(input):
     #[tokio::test]
     async fn duplicate_lines_is_a_sum_over_its_facts() {
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
+        seed_with_every_builtin_on(&svc).await;
         let spec = svc
             .fact_store
             .get_spec("oxplow.duplicate_lines")

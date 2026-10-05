@@ -91,7 +91,8 @@ impl FindingsPlan {
         let key = &self.key;
         let spec = engine.spec(key).await?.ok_or_else(|| {
             invalid(format!(
-                "metric_findings('{key}'): no metric `{key}` (see v_metric_spec)"
+                "metric_findings('{key}'): {}",
+                crate::metric_engine::missing_metric(key)
             ))
         })?;
         let measure = spec.source_measure.clone().ok_or_else(|| {
