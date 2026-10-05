@@ -96,6 +96,7 @@ describe("reportOpErrorTo", () => {
     };
     const store = createOpErrorsStore(reportOpErrorTo(run, () => {}));
     store.setActiveThread("thr3");
+    store.setActiveStream("str1");
     store.push({
       label: "List data",
       command: "query_sql",
@@ -121,7 +122,9 @@ describe("reportOpErrorTo", () => {
           duration_ms: 5012,
         },
       },
-      { name: "ui.report_error", input: { label: "Save note" } },
+      // tsk1079: from no thread, it names the stream on screen, so that
+      // stream's agent can read its output.
+      { name: "ui.report_error", input: { label: "Save note", stream: "str1" } },
     ]);
   });
 

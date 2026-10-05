@@ -12,7 +12,8 @@ use oxplow_db::event_log_store::anchors_for_thread_tx;
 use oxplow_domain::events::schema::{UiOpFailed, UiOpFailedV1};
 use oxplow_domain::refs::build::thread_ref;
 use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, ThreadId,
+    Anchors, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
+    StreamId, ThreadId,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -40,6 +41,11 @@ pub struct ReportErrorInput {
     /// The thread it was started from (`thr3`); absent, none.
     #[serde(default)]
     pub thread: Option<String>,
+    /// The stream the app was showing (`str1`), for an error from no
+    /// thread: its agent reads the output. A thread names its own stream,
+    /// so not with `thread` (tsk1079).
+    #[serde(default)]
+    pub stream: Option<String>,
     /// The signal that killed the process (`SIGKILL`).
     #[serde(default)]
     pub signal: Option<String>,
@@ -77,6 +83,19 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
             })
         })
         .transpose()?;
+    let stream = match input.stream.as_deref() {
+        Some(_) if thread.is_some() => {
+            return Err(CommandError::Invalid {
+                field: Some("/stream".into()),
+                message: "a thread names its own stream: give one or the other".into(),
+            });
+        }
+        Some(raw) => Some(raw.parse::<StreamId>().map_err(|e| CommandError::Invalid {
+            field: Some("/stream".into()),
+            message: e.to_string(),
+        })?),
+        None => None,
+    };
     let mut body = Map::new();
     for (key, text) in [
         ("stderr", given(input.stderr)),
@@ -105,6 +124,11 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
         event = event
             .with_anchors(anchors_for_thread_tx(ctx.conn, thread)?)
             .with_subject([thread_ref(thread)]);
+    } else if let Some(stream) = stream {
+        event = event.with_anchors(Anchors {
+            stream_id: Some(stream),
+            ..Anchors::default()
+        });
     }
     Ok(HandlerOutput {
         result: json!({ "event": event.id.as_str() }),
@@ -261,6 +285,54 @@ mod tests {
         assert!(rows[0]["thread"].is_null());
         assert!(rows[0]["stream_id"].is_null());
         assert!(rows[0]["command"].is_null());
+    }
+
+    /// tsk1079: an error from no thread names the stream the app showed, so
+    /// that stream's agent can read its output; a thread names its own, so
+    /// both together are refused.
+    #[tokio::test]
+    async fn a_report_from_no_thread_is_anchored_to_its_stream() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let stream = oxplow_domain::StreamId::new(1);
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                REPORT_ERROR,
+                json!({ "label": "List data", "stream": stream.to_string(), "stderr": "timed out" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let rows = op_errors(&fx.svc).await;
+        assert_eq!(rows[0]["stream_id"], stream.value());
+        assert!(rows[0]["thread"].is_null());
+        let event_id = rows[0]["event_id"].as_str().unwrap();
+        let body = event_bodies::read(&fx.svc, event_id, EventBodyKey::Output, Some(stream))
+            .await
+            .unwrap()
+            .expect("the stream's agent reads the output");
+        assert!(body.text.contains("timed out"));
+
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                REPORT_ERROR,
+                json!({
+                    "label": "x",
+                    "thread": fx.thread.to_string(),
+                    "stream": stream.to_string(),
+                }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/stream"),
+            "{err:?}"
+        );
     }
 
     /// tsk1072: once retention expires the payload (`{}`), the error stays a

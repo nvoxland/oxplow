@@ -957,6 +957,9 @@ export function App() {
   useEffect(() => {
     opErrorsStore.setActiveThread(selectedThreadId);
   }, [selectedThreadId, opErrorsStore]);
+  useEffect(() => {
+    opErrorsStore.setActiveStream(stream?.id ?? null);
+  }, [stream?.id, opErrorsStore]);
   // Toast each newly-recorded error (errors now surface via the status-bar
   // OpErrorIndicator; the toast gives the moment-of-failure heads-up). Seed
   // the known set on first run so pre-existing errors don't toast on boot.

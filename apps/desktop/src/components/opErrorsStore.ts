@@ -46,6 +46,8 @@ export interface OpError extends Required<Omit<OpErrorInput, "exitCode" | "threa
   id: string;
   exitCode: number | null;
   threadId: string | null;
+  /** The stream on screen when it happened (`str1`), if any. */
+  streamId: string | null;
   args: string[] | null;
   durationMs: number | null;
   signal: string | null;
@@ -68,6 +70,9 @@ export interface OpErrorsStore {
    *  the caller doesn't pass an explicit threadId. App.tsx wires this
    *  to the currently-selected thread. */
   setActiveThread(threadId: string | null): void;
+  /** The stream on screen: stamped on each entry, so one from no thread
+   *  still names where it happened (tsk1079). */
+  setActiveStream(streamId: string | null): void;
 }
 
 /** Called with each entry as it's pushed. */
@@ -90,7 +95,10 @@ export function reportOpErrorTo(
     if (entry.stderr) input.stderr = entry.stderr;
     if (entry.stdout) input.stdout = entry.stdout;
     if (entry.exitCode !== null) input.exit_code = entry.exitCode;
+    // A thread names its own stream; from no thread, the one on screen
+    // does, so its agent can read the output (tsk1079).
     if (entry.threadId !== null) input.thread = entry.threadId;
+    else if (entry.streamId !== null) input.stream = entry.streamId;
     if (entry.signal !== null) input.signal = entry.signal;
     if (entry.durationMs !== null) input.duration_ms = Math.round(entry.durationMs);
     run("ui.report_error", input).catch((error: unknown) => {
@@ -110,6 +118,7 @@ function makeId(): string {
 export function createOpErrorsStore(report?: OpErrorReporter): OpErrorsStore {
   let entries: OpError[] = [];
   let activeThreadId: string | null = null;
+  let activeStreamId: string | null = null;
   const listeners = new Set<() => void>();
 
   function emit() {
@@ -137,6 +146,7 @@ export function createOpErrorsStore(report?: OpErrorReporter): OpErrorsStore {
         message: input.message ?? "",
         exitCode: input.exitCode ?? null,
         threadId: input.threadId !== undefined ? input.threadId : activeThreadId,
+        streamId: activeStreamId,
         args: input.args ?? null,
         durationMs: input.durationMs ?? null,
         signal: input.signal ?? null,
@@ -177,6 +187,9 @@ export function createOpErrorsStore(report?: OpErrorReporter): OpErrorsStore {
     },
     setActiveThread(threadId) {
       activeThreadId = threadId;
+    },
+    setActiveStream(streamId) {
+      activeStreamId = streamId;
     },
   };
 }
