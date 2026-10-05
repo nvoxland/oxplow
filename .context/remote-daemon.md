@@ -194,8 +194,10 @@ can't take the token — a frame can't carry it — and needn't: it serves
 an extension's own files, never project data (the frame reaches that
 only through the host's bridged RPCs). It is mounted **outside the
 permissive CORS layer**, so a web page can't read a bundle with `fetch`,
-and it answers only a loopback `Host` (`127.0.0.1`, `localhost` or
-`[::1]`, optional port — `loopback_host`): without that, DNS rebinding (a
+and it answers only a loopback `Host` (`127.0.0.1` or `localhost`,
+optional port — `loopback_host`; not `[::1]`, since the page's
+`frame-src` can't name an IPv6 literal and a frame there would never load,
+tsk1048): without that, DNS rebinding (a
 page whose name flips to 127.0.0.1) would read bundles same-origin; the
 CSP's bundle-folder source is built from that validated `Host`. 404 for a
 foreign `Host`, a version that isn't loaded, or anything but exactly one
@@ -215,7 +217,7 @@ P11). `style-src` keeps `'unsafe-inline'` for the bundle's own inline
 styles — CSS there can fetch nothing from outside, every fetching
 directive being bounded to the bundle; inline scripts stay refused. The
 page bounds where a frame may go with `frame-src http://127.0.0.1:*
-http://localhost:* http://[::1]:*` — every loopback name the daemon
+http://localhost:*` — every loopback name the daemon
 serves a bundle to, since a browser builds its frames' URLs from the base
 it reached the daemon by (tsk1003):
 the main window's CSP (`tauri.conf.json`; with no `devCsp`, Tauri

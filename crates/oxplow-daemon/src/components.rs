@@ -125,7 +125,9 @@ pub fn content_type_for(path: &Path) -> &'static str {
 }
 
 /// The request's `Host` when it names this machine's loopback —
-/// `127.0.0.1`, `localhost` or `[::1]`, with an optional numeric port.
+/// `127.0.0.1` or `localhost`, with an optional numeric port. Not `[::1]`:
+/// the page's `frame-src` can't name an IPv6 literal, so a frame there
+/// could never load (tsk1048).
 pub fn loopback_host(headers: &HeaderMap) -> Option<&str> {
     let host = headers.get(header::HOST)?.to_str().ok()?;
     let (name, port) = match host.rsplit_once(':') {
@@ -133,7 +135,7 @@ pub fn loopback_host(headers: &HeaderMap) -> Option<&str> {
         _ => (host, None),
     };
     let port_ok = port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
-    (port_ok && matches!(name, "127.0.0.1" | "localhost" | "[::1]")).then_some(host)
+    (port_ok && matches!(name, "127.0.0.1" | "localhost")).then_some(host)
 }
 
 /// `/components/v/{version}`: the folder form, so the bundle's relative
@@ -263,13 +265,7 @@ mod tests {
             m.insert(header::HOST, HeaderValue::from_str(h).unwrap());
             loopback_host(&m).map(str::to_string)
         };
-        for ok in [
-            "127.0.0.1",
-            "127.0.0.1:7420",
-            "localhost:1",
-            "[::1]",
-            "[::1]:7420",
-        ] {
+        for ok in ["127.0.0.1", "127.0.0.1:7420", "localhost:1"] {
             assert_eq!(host(ok).as_deref(), Some(ok), "{ok}");
         }
         for bad in [
@@ -281,6 +277,10 @@ mod tests {
             "127.0.0.1:80x",
             "::1",
             "[::1",
+            // No CSP can bound a frame to an IPv6 literal (tsk1048), so a
+            // bundle is never served there.
+            "[::1]",
+            "[::1]:7420",
             "",
         ] {
             assert_eq!(host(bad), None, "{bad}");
