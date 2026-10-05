@@ -3,10 +3,11 @@
 #
 # input.report: the report's raw text (`format: text`), parsed defensively with
 # `try fromjson` — a missing or empty report (`target/type-coverage.json` not
-# generated yet) yields no fact instead of failing the collector. The tool's
-# shape:
+# generated yet) yields no fact instead of failing the collector. jaq's
+# `fromjson` of "" emits nothing rather than an error, so the parse is gathered
+# into an array and `.[0]` turns "nothing" into null. The tool's shape:
 #   { "correctCount": N, "totalCount": M, "percent": P, ... }
-((.report // "") | try fromjson catch null) as $r
+[(.report // "") | try fromjson catch null][0] as $r
 | { facts: (
     if ($r | type) == "object" and (($r.totalCount) // 0) > 0
     then [ {

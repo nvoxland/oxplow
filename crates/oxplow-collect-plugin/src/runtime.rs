@@ -1012,6 +1012,33 @@ mod tests {
         assert!(f.covered.contains(&1) && !f.covered.contains(&2));
     }
 
+    /// This repo's type-coverage collector reads `target/type-coverage.json`,
+    /// which only exists after `type-coverage` has run. Missing, empty or
+    /// garbled, the script must still emit one report with no facts.
+    #[test]
+    fn jaq_type_coverage_script_tolerates_a_missing_report() {
+        let program = include_str!("../../../oxplow/plugins/type_coverage.jq");
+        for input in [
+            json!({}),
+            json!({ "report": null }),
+            json!({ "report": "" }),
+            json!({ "report": "not json" }),
+        ] {
+            assert_eq!(
+                run_jaq(program, &input).unwrap_or_else(|e| panic!("{input}: {e:?}")),
+                json!({ "facts": [] }),
+                "{input}"
+            );
+        }
+        let report = json!({ "correctCount": 9, "totalCount": 10, "percent": 90.0 });
+        assert_eq!(
+            run_jaq(program, &json!({ "report": report.to_string() })).unwrap(),
+            json!({ "facts": [{
+                "measure": "repo.type_coverage", "value": 90.0, "num": 9, "den": 10
+            }] })
+        );
+    }
+
     #[test]
     fn jaq_errors_on_malformed_program() {
         assert!(matches!(
