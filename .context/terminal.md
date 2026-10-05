@@ -111,6 +111,17 @@ The component owns:
   padding the mount makes the computed row count oscillate (the text
   visibly jumps). The wrapper's `background` matches `XTERM_THEME.background`
   so the gutter reads as the terminal's own padding.
+- **It opens xterm only once the mono web font has loaded**
+  (`document.fonts.load`, tsk1042). xterm measures its cells when it opens
+  and again only *after* a resize, so a terminal opened while JetBrains
+  Mono was still loading measured the fallback's 15px rows. Its next fit —
+  the Answers strip appearing, which changes the pane but not the window —
+  sized the rows by those, then re-measured at 17px and overflowed the
+  pane, input line below the fold. (A window resize re-measured on its
+  own, which is why it looked fine after one.) The e2e holds the font back
+  and checks the face was loaded when `.xterm` appeared;
+  `document.fonts.check` can't, as it answers true while a face is still
+  loading.
 - A custom keydown handler (Cmd+V paste, Shift+Enter, PageUp/Down as a
   page of xterm's own scrollback, Escape interrupt detection).
 - Fast scroll is **Alt**+wheel (`fastScrollSensitivity: 4`). xterm 6

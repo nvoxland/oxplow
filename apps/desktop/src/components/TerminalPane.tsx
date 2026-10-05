@@ -19,6 +19,9 @@ import {
 import { formatContextMention } from "../agent-context-ref.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 
+/** The terminal's font size, px: its cells are measured in it. */
+const TERMINAL_FONT_SIZE = 13;
+
 const XTERM_THEME = {
   background: "#1c1f24",
   foreground: "#e6e8ec",
@@ -279,7 +282,7 @@ export function TerminalPane({
       "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace";
     const term = new Terminal({
       fontFamily: resolvedMono,
-      fontSize: 13,
+      fontSize: TERMINAL_FONT_SIZE,
       theme: XTERM_THEME,
       scrollback: 5000,
       cursorBlink: true,
@@ -537,7 +540,16 @@ export function TerminalPane({
       };
     };
     const cleanupRef: { current: (() => void) | null } = { current: null };
-    start();
+    // xterm measures its cells when it opens, and again only after a
+    // resize. Opened while the mono web font is still loading, it measures
+    // the fallback's cells, and its next fit — the Answers strip appearing
+    // — sizes the rows by them, then re-measures in the real font and
+    // overflows the pane (tsk1042). So it opens once the font is in.
+    const fontLoaded: Promise<unknown> =
+      typeof document !== "undefined" && document.fonts
+        ? document.fonts.load(`${TERMINAL_FONT_SIZE}px ${resolvedMono}`).catch(() => undefined)
+        : Promise.resolve();
+    void fontLoaded.then(start);
 
     return () => {
       disposed = true;
@@ -586,7 +598,7 @@ export function TerminalPane({
           display: "flex",
         }}
       >
-        <div ref={hostRef} style={{ flex: 1, minHeight: 0, minWidth: 0 }} />
+        <div ref={hostRef} data-testid="terminal-mount" style={{ flex: 1, minHeight: 0, minWidth: 0 }} />
       </div>
       {comments && term ? (
         <TerminalCommentLayer

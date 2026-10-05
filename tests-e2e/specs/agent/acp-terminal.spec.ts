@@ -17,20 +17,47 @@ test("the fake agent's reply streams into the thread's transcript", async ({ pag
 
 // The Terminal page is a plain shell in the stream's worktree.
 test("a terminal opens a shell in the project", async ({ page }) => {
+  // The terminal's web font arrives only once its pane is on screen, as on
+  // a first load. The terminal measures its rows once, when it opens, so it
+  // must open in that font, not in the fallback the font then replaces:
+  // rows measured in the fallback overflow the pane at its next fit
+  // (tsk1042, under the Answers strip).
+  let releaseFont = () => {};
+  const fontHeld = new Promise<void>((resolve) => (releaseFont = resolve));
+  await page.route("**/fonts/JetBrainsMonoVariable.woff2", async (route) => {
+    await fontHeld;
+    await route.continue();
+  });
+  await page.addInitScript(() => {
+    new MutationObserver((_, observer) => {
+      const term = document.querySelector(".xterm");
+      if (!term) return;
+      // The face's own status: `document.fonts.check` answers true while
+      // it is still loading.
+      (window as unknown as { openedInFont: boolean }).openedInFont = [...document.fonts]
+        .filter((f) => f.family === "JetBrains Mono" && f.style === "normal")
+        .every((f) => f.status === "loaded");
+      observer.disconnect();
+    }).observe(document, { childList: true, subtree: true });
+  });
   await page.goto("/");
   await openFromLauncher(page, "Terminal");
+  await expect(page.getByTestId("terminal-mount")).toBeVisible();
+  releaseFont();
   const terminal = page.locator(".xterm");
   await expect(terminal).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { openedInFont: boolean }).openedInFont)).toBe(true);
   await terminal.click();
   // The output, not the typed line: only the shell computes 42.
   await page.keyboard.type("echo e2e-$((6*7))");
   await page.keyboard.press("Enter");
   await expect(page.locator(".xterm-rows")).toContainText("e2e-42");
-  // It fits its pane: the screen's last row is inside the page, not
-  // clipped below it (tsk1042).
-  const screen = await page.locator(".xterm-screen").boundingBox();
-  const pageBox = await page.getByTestId("page-terminal").boundingBox();
-  expect(screen && pageBox && screen.y + screen.height <= pageBox.y + pageBox.height + 1).toBeTruthy();
+  // It fits its mount: the last row isn't clipped below it.
+  const fit = await terminal.evaluate((el) => ({
+    screen: el.getBoundingClientRect().height,
+    mount: (el.parentElement as HTMLElement).getBoundingClientRect().height,
+  }));
+  expect(fit.screen).toBeLessThanOrEqual(fit.mount + 1);
 });
 
 // tsk1026: a session whose process exited says so, takes no keys, and Start
