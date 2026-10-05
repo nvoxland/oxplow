@@ -1020,6 +1020,14 @@ namespace on top, the agent calls `mcp__oxplow__run_command` —
 not the legacy `mcp__oxplow__oxplow__run_command`. The long form
 still resolves on `tools/call` for back-compat.
 
+**The server's instructions** (`get_info`) are the one text every
+harness — Claude Code, Codex, opencode, ACP agents — shows its agent. They
+say what oxplow knows (`query_sql` over `v_*`), that writes are commands,
+and how to answer the person: when asked to see, list, compare or track
+something, show it with `show_lens` rather than printing it (tsk1033: the
+first acceptance walk's "Show me" got terminal text). They ship to users'
+projects, so they never name this repo's docs.
+
 ### The ServerHandler is hand-rolled — re-diff it on every rmcp bump
 
 `impl ServerHandler for OxplowMcp` writes out `list_tools` / `call_tool`

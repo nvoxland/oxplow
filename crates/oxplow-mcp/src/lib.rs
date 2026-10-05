@@ -2851,8 +2851,17 @@ impl ServerHandler for OxplowMcp {
         // the default and assign.
         let mut info = ServerConfig::default();
         info.instructions = Some(
-            "Oxplow MCP server. Exposes task, note, wiki, and stream surfaces \
-             for managing oxplow work items and project knowledge."
+            "Oxplow knows this project's work and code: work items, efforts, \
+             test runs and coverage, commits, metrics and the wiki, readable \
+             with `query_sql` over the read-only `v_*` models (`v_model` lists \
+             them). Every write is a command (`run_command`).\n\n\
+             Answering the person: when they ask to see, list, compare or \
+             track something about the work or the code (\"show me\", \
+             \"which files\", \"how well\"), answer from oxplow's data and \
+             show it with `show_lens` (an existing lens with params, or your \
+             own `spec`: a table, chart or tree). It lands beside the \
+             conversation, live, with Keep This. Keep the prose around it \
+             short, and don't repeat the table as text."
                 .into(),
         );
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
@@ -3969,6 +3978,17 @@ mod tests {
         let (_proj, _svc, server) = boot();
         let info = server.get_info();
         assert!(info.capabilities.tools.is_some());
+    }
+
+    /// tsk1033: asked to "show me", an agent printed text. The
+    /// instructions every harness reads say to show an answer in the
+    /// person's thread.
+    #[tokio::test]
+    async fn get_info_instructions_say_to_show_answers_in_the_thread() {
+        let (_proj, _svc, server) = boot();
+        let instructions = server.get_info().instructions.unwrap_or_default();
+        assert!(instructions.contains("show_lens"), "{instructions}");
+        assert!(instructions.contains("query_sql"), "{instructions}");
     }
 
     #[tokio::test]
