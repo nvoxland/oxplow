@@ -127,8 +127,8 @@ pub fn commit_edges(kinds: &KindRegistry, detail: &RevisionDetail) -> Vec<PageRe
 
 /// Walk the revisions reachable from workspace `ws`'s head, newest
 /// first and as deep as `depth` says, store each new one (`v_commit`,
-/// `v_commit_file`) and project it into `page_ref`. Returns the number
-/// newly indexed.
+/// `v_commit_file`) and project it into `page_ref`. Returns the ones
+/// newly indexed, with when each was committed.
 pub async fn index_recent(
     kinds: &KindRegistry,
     vcs: &dyn Vcs,
@@ -136,8 +136,9 @@ pub async fn index_recent(
     page_refs: &SqlitePageRefStore,
     git: &oxplow_db::SqliteGitStore,
     depth: IndexDepth,
-) -> usize {
+) -> Vec<(String, oxplow_domain::Timestamp)> {
     let mut this_pass: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut indexed = Vec::new();
     let mut limit = depth.window.min(depth.max);
     loop {
         let log = vcs
@@ -162,21 +163,23 @@ pub async fn index_recent(
             if git.has_commit(&info.id).await.unwrap_or(false) {
                 continue;
             }
-            if index_one(kinds, vcs, ws, page_refs, git, &info.id).await {
-                this_pass.insert(info.id);
+            if let Some(committed) = index_one(kinds, vcs, ws, page_refs, git, &info.id).await {
+                this_pass.insert(info.id.clone());
+                indexed.push((info.id, committed));
             }
         }
         // The walk goes on below the window only while its oldest
         // revision was new: new history is longer than the window.
         let oldest_was_new = oldest.is_some_and(|o| this_pass.contains(&o));
         if !oldest_was_new || exhausted || limit >= depth.max {
-            return this_pass.len();
+            return indexed;
         }
         limit = (limit * 2).min(depth.max);
     }
 }
 
-/// Store and project one revision; whether it was.
+/// Store and project one revision; when it was committed, if it was
+/// stored.
 async fn index_one(
     kinds: &KindRegistry,
     vcs: &dyn Vcs,
@@ -184,20 +187,22 @@ async fn index_one(
     page_refs: &SqlitePageRefStore,
     git: &oxplow_db::SqliteGitStore,
     sha: &str,
-) -> bool {
+) -> Option<oxplow_domain::Timestamp> {
     let Ok(Some(detail)) = vcs.revision(ws, sha).await else {
-        return false;
+        return None;
     };
     let edges = commit_edges(kinds, &detail);
     if let Err(e) = page_refs.replace_source(KIND_COMMIT, sha, edges).await {
         tracing::warn!(?e, %sha, "commit indexer write failed");
-        return false;
+        return None;
     }
     if let Err(e) = git.upsert_commit(commit_row(&detail)).await {
         tracing::warn!(?e, %sha, "commit indexer: storing the commit failed");
-        return false;
+        return None;
     }
-    true
+    Some(oxplow_domain::Timestamp::from_unix_ms(
+        detail.info.time * 1000,
+    ))
 }
 
 /// Index new revisions from every stream's head and restate the branch
@@ -219,7 +224,7 @@ pub async fn refresh(svc: &crate::Services) -> usize {
     let vocabulary = svc.vocabulary.current();
     let mut n = 0;
     for ws in &workspaces {
-        n += index_recent(
+        let indexed = index_recent(
             &vocabulary.kinds,
             &*svc.vcs,
             ws,
@@ -228,6 +233,14 @@ pub async fn refresh(svc: &crate::Services) -> usize {
             IndexDepth::DEFAULT,
         )
         .await;
+        n += indexed.len();
+        // Each new commit, to the tasks whose effort's work it holds
+        // (tsk1035).
+        for (sha, committed) in &indexed {
+            if let Err(e) = crate::commit_links::link_commit(svc, ws, sha, *committed).await {
+                tracing::warn!(?e, %sha, "linking a commit to its effort failed");
+            }
+        }
     }
     // Which stream has a branch checked out is its workspace's head —
     // not the stream row, which the branch reconciler updates later.
@@ -539,7 +552,8 @@ mod tests {
                 max: 50,
             },
         )
-        .await;
+        .await
+        .len();
         assert_eq!(n, 1, "should index the one commit");
 
         // The commit, its file and its task mention read through v_*.
@@ -588,7 +602,8 @@ mod tests {
                 max: 50,
             },
         )
-        .await;
+        .await
+        .len();
         assert_eq!(n2, 0, "second pass must skip already-indexed commits");
     }
 
@@ -622,6 +637,7 @@ mod tests {
                     IndexDepth { window: 3, max },
                 )
                 .await
+                .len()
             }
         };
         let stored = || {

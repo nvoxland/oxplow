@@ -78,6 +78,45 @@ impl SqliteGitStore {
             .await
     }
 
+    /// The paths `sha` changed, as stored.
+    pub async fn commit_paths(&self, sha: &str) -> Result<Vec<String>, DomainError> {
+        let sha = sha.to_string();
+        self.db
+            .call(move |c| {
+                let mut stmt =
+                    c.prepare("SELECT path FROM git_commit_file WHERE sha = ?1 ORDER BY path")?;
+                let rows = stmt.query_map([sha], |r| r.get(0))?;
+                rows.collect()
+            })
+            .await
+    }
+
+    /// The commits stored as committed at or after `since`, oldest first:
+    /// `(sha, committed_at)`.
+    pub async fn commits_since(
+        &self,
+        since: Timestamp,
+    ) -> Result<Vec<(String, Timestamp)>, DomainError> {
+        let since = ts_to_string(since);
+        self.db
+            .call(move |c| {
+                let mut stmt = c.prepare(
+                    "SELECT sha, committed_at FROM git_commit WHERE committed_at >= ?1
+                     ORDER BY committed_at, sha",
+                )?;
+                let rows = stmt.query_map([since], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .filter_map(|(sha, at)| Some((sha, Timestamp::parse(&at).ok()?)))
+                    .collect()
+            })
+    }
+
     /// Store (or restate) a commit and its files.
     pub async fn upsert_commit(&self, row: GitCommitRow) -> Result<(), DomainError> {
         let committed_at = ts_to_string(Timestamp::from_unix_ms(row.committed_secs * 1000));

@@ -539,6 +539,18 @@ commit into the unified `page_ref` graph (see
   same wikilink + inline-mention rules used by wiki bodies and
   task descriptions also apply to commit messages
   (`wi-…`, `[[architecture]]`, `finding:fnd-1`, bare 7-40 hex shas).
+- **Linked to the task by its work** (`commit_links.rs`, tsk1035). An
+  agent's commit rarely names its task (and agents name tasks by title),
+  so each new commit is checked against the efforts that closed in the
+  two weeks before it: it **holds** an effort's work when they share a
+  file and the commit's object for every shared file is the object the
+  effort's end-snapshot bytes would be (`Vcs::object_at` against
+  `ObjectStore::id_of`; a partial commit holds it too). It's linked by a
+  `(work_item:<id>) -- committed --> (commit:<sha>)` edge — the shape of
+  a declared impact, the effort in `source_extra` — which `v_commit_task`
+  (v2) and the commit's backlinks read. The other order (committed, then
+  the task closed) is the `effort.commits` reaction to `effort.finished`,
+  over the commits since the effort started.
 
 Idempotent. Each commit is keyed by its full sha, and a one-row
 existence probe before re-diffing skips already-indexed commits, so

@@ -81,6 +81,12 @@ pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
 /// kind already discriminates wiki vs task vs file vs etc.
 pub const RT_IMPACT: &str = "impact";
 
+/// A work item → the commit that holds its effort's work: the commit's
+/// version of every file they share is the effort's end version (tsk1035,
+/// `commit_links`). The effort is carried in `source_extra` as
+/// `{"effort": "eff12"}`.
+pub const RT_COMMITTED: &str = "committed";
+
 /// Ref-types written by the task store from a body (title +
 /// description + AC). Used by the slice-replace call so other
 /// writers' rows for the same `task:<id>` source survive.

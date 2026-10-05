@@ -282,8 +282,8 @@
     - { name: "additions", type: "INTEGER", doc: "Lines added." }
     - { name: "deletions", type: "INTEGER", doc: "Lines deleted." }
 - name: commit_task
-  version: 1
-  description: "Tasks a commit's message mentions (`tsk42`, `[[tsk42]]`)."
+  version: 2
+  description: "The tasks each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`), the ones that declared it as an impact, and the ones whose effort's work it holds (its version of every file they share is the effort's end version; tsk1035)."
   columns:
     - { name: "sha", type: "TEXT", doc: "The commit (v_commit.sha)." }
     - { name: "task_id", type: "INT", doc: "The task (v_task.id)." }

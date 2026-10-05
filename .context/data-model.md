@@ -1320,7 +1320,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
-| `effort.evidence` / `effort.decisions` | async | `effort.finished` | evidence rows, inferred decisions | boot.rs |
+| `effort.evidence` / `effort.decisions` / `effort.commits` | async | `effort.finished` | evidence rows, inferred decisions, the commits that hold its work linked to its task (`commit_links`, tsk1035) | boot.rs |
 | `search.index` | async | `snapshot.taken` | the search index's file contents (the other kinds are assets, `kind_search.rs`) | boot.rs |
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_models.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |

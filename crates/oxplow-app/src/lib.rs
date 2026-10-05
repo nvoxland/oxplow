@@ -38,6 +38,7 @@ pub mod collector_runner;
 pub mod collector_triggers;
 pub mod commands;
 pub mod commit_indexer;
+pub mod commit_links;
 pub mod component_bundles;
 pub mod config_reactors;
 pub mod config_service;

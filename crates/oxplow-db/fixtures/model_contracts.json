@@ -1623,6 +1623,21 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "sha",
+          "type": "TEXT",
+          "doc": "The commit (v_commit.sha)."
+        },
+        {
+          "name": "task_id",
+          "type": "INT",
+          "doc": "The task (v_task.id)."
+        }
+      ],
+      "key": []
     }
   },
   "context_read": {

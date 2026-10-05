@@ -830,6 +830,19 @@ impl SqliteEffortStore {
             .await
     }
 
+    /// The paths `effort` changed (its `effort_file` rows).
+    pub async fn paths(&self, effort: &EffortId) -> Result<Vec<String>, DomainError> {
+        let id = effort.value();
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn
+                    .prepare("SELECT path FROM effort_file WHERE effort_id = ?1 ORDER BY path")?;
+                let rows = stmt.query_map([id], |r| r.get(0))?;
+                rows.collect()
+            })
+            .await
+    }
+
     /// Every effort whose span overlaps the `[window_start, window_end]` time
     /// range — the efforts-as-overlay read powering the Metrics Explorer's
     /// effort bands (tsk233). An effort overlaps when it started before the
