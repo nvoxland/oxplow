@@ -5,7 +5,10 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 // panel back even when the person had hidden it.
 
 const realApi = await import("../../api.js");
-const realQuerySql = realApi.querySql;
+/** Any other read (the Go To section's wiki pages, …): no rows. Never the
+ *  real call — with no Tauri host it throws, and the test would pass only
+ *  where another file's mock answered first (tsk1012). */
+const noRows = { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
 const saved: unknown[] = [];
 mock.module("../../api.js", () => ({
   ...realApi,
@@ -20,7 +23,7 @@ mock.module("../../api.js", () => ({
   subscribeCommentEvents: () => () => {},
   subscribePageVisitEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},
-  querySql: async (sql: string, ...rest: unknown[]) => {
+  querySql: async (sql: string) => {
     if (sql.includes("FROM v_command_proposal")) {
       return {
         columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run"],
@@ -42,7 +45,7 @@ mock.module("../../api.js", () => ({
         freshness: {},
       };
     }
-    return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
+    return noRows;
   },
 }));
 const { RailHud } = await import("./RailHud.js");

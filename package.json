@@ -12,7 +12,7 @@
     "test": "bun run --cwd apps/desktop test && cargo test --workspace",
     "test:rust": "cargo test --workspace",
     "test:ts": "bun run --cwd apps/desktop test",
-    "test:collect": "cargo cov && bun run --cwd apps/desktop test:junit",
+    "test:collect": "sh scripts/test-collect.sh",
     "test:fast": "cargo nextest run",
     "test:fast:ts": "bun run --cwd apps/desktop test:junit",
     "lint:collect": "cargo clippy --workspace --all-targets --message-format=json -- -D warnings > target/clippy.json",

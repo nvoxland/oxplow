@@ -130,8 +130,9 @@ Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun run test` invokes both Rust and TS suites.
 
 **Closing a task → run `bun run test:collect`, not bare `cargo test` /
-`bun test`.** `test:collect` (`cargo cov && bun run --cwd apps/desktop
-test:junit`) is the configured `testing.command` — it's the only
+`bun test`.** `test:collect` (`scripts/test-collect.sh`: `cargo cov`,
+then `bun run --cwd apps/desktop test:junit` whether or not the Rust
+suite passed, failing if either did) is the configured `testing.command` — it's the only
 test run that emits the JUnit + lcov reports oxplow parses into the
 effort's "Coverage & tests" panel.
 
