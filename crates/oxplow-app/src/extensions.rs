@@ -1369,7 +1369,15 @@ pub async fn effects_between(
     after: &mut ReviewSide<'_>,
     commands: CommandSchemas<'_>,
 ) -> crate::extension_effects::EffectReport {
-    let prepared_after = prepare(layer, catalog, root, &mut after.extension, Some(commands)).await;
+    let prepared_after = prepare(
+        layer,
+        catalog,
+        root,
+        &mut after.extension,
+        after.read,
+        Some(commands),
+    )
+    .await;
     let prepared_before = match &before {
         Some(b) => Some(read_side(layer, catalog, root, &b.extension).await),
         None => None,
@@ -2680,7 +2688,9 @@ pub async fn validate_extension(
     commands: Option<CommandSchemas<'_>>,
 ) -> Result<Extension, DomainError> {
     let mut ext = catalog.named(root, name)?;
-    prepare(layer, catalog, root, &mut ext, commands).await;
+    let path = ext.path.clone();
+    let read = |rel: &str| files_at(root, &path).ok().and_then(|f| f.read(rel));
+    prepare(layer, catalog, root, &mut ext, &read, commands).await;
     Ok(ext)
 }
 
@@ -2770,8 +2780,12 @@ pub fn check_commands(ext: &mut Extension, root: &Path, commands: Option<Command
 /// A custom component's declared commands must exist; a `custom` lens
 /// that also fills a kit role block gets a nudge — the kit may already
 /// render it (the honest extent of a "this reimplements the kit" lint).
-fn check_components(ext: &mut Extension, root: &Path, commands: Option<CommandSchemas<'_>>) {
-    let pages = custom_components::bundle_problems(ext, root);
+fn check_components(
+    ext: &mut Extension,
+    read: &dyn Fn(&str) -> Option<String>,
+    commands: Option<CommandSchemas<'_>>,
+) {
+    let pages = custom_components::bundle_problems(ext, read);
     ext.errors.extend(pages);
     if let Some(schema_of) = commands {
         let missing: Vec<(String, String)> = ext
@@ -2929,17 +2943,19 @@ async fn read_side(
 
 /// Check `ext` — its commands, components, models, advisories and lenses —
 /// reading through its own models' overlay, and report what's wrong in
-/// `ext.errors`. Each side of a review prepares its own, so a lens renders
+/// `ext.errors`. `read` gives the files of the version under check (a
+/// component's page is linted as that version has it). Each side of a review prepares its own, so a lens renders
 /// against its version's models, whichever are published.
 async fn prepare(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     ext: &mut Extension,
+    read: &(dyn Fn(&str) -> Option<String> + Sync),
     commands: Option<CommandSchemas<'_>>,
 ) -> Prepared {
     check_commands(ext, root, commands);
-    check_components(ext, root, commands);
+    check_components(ext, read, commands);
     let (overlay, errors) = model_overlay(layer, catalog, root, ext).await;
     ext.errors.extend(errors);
     let layer = &layer.with_overlay(overlay.clone());
@@ -3088,7 +3104,15 @@ pub async fn review_extension(
     let effects = if load_errors > 0 {
         // A candidate that doesn't load has nothing reliable to compare;
         // its check still says what else is wrong.
-        prepare(layer, catalog, root, &mut extension, Some(commands)).await;
+        prepare(
+            layer,
+            catalog,
+            root,
+            &mut extension,
+            &read_candidate,
+            Some(commands),
+        )
+        .await;
         None
     } else {
         // The installed side through its own models, too: what's

@@ -1395,15 +1395,33 @@ bundle links it and calls `component.applyTheme()`, which sets each of
 text crosses the bridge. `init` used to carry the CSS as `kitCss`; that
 went, and the protocol is 2.
 
-**Check lints** (P11, tsk961): what a bundle's CSP refuses without a
-word is an error at check, at its file (`bundle_problems` /
-`page_problems`, from `check_components`): an inline `<script>` or event
-handler, a `type="module"` script, a `src` (or a `<link>`'s `href`)
-from outside the bundle — a scheme other than `data:`, or `//host` — and
-an `index.html` that never loads the client library. A component in an
-extension that comes with oxplow is an error too: the daemon never
-serves a bundled extension's bundle. The scan is a start-tag reader,
-comments skipped, not a full HTML parser.
+**Check lints** (P11, tsk961, tsk994): what a bundle's CSP refuses
+without a word, or what ends the component, is an error at check, at its
+file (`bundle_problems` / `page_problems`, from `check_components`):
+
+- an inline `<script>` that runs (no `type`, or a JavaScript one — a
+  `type="application/json"` data block is fine) or an event handler on a
+  standard element (a custom element's `on…` attribute is its own);
+- a `type="module"` script;
+- a load from outside the bundle (`src`, each `srcset` candidate, a
+  `<link>`'s `href`) — a scheme other than `data:`, `//host`, an absolute
+  path other than `/component-lib/` (matched before `?`/`#`), or `..`
+  past the folder;
+- a `<base>`, an `<iframe>`/`<frame>`, an `<object>`/`<embed>`, a
+  `<form>`, a refresh `<meta>`;
+- an `index.html` that never loads the client library.
+
+Only each bundle's **`index.html`** is linted — the one page a frame
+shows, since a nested frame is refused and navigating away ends the
+component — and it is read from the **version under check**: the
+candidate of a review (`ReviewSide::read`), the folder on disk for a
+plain check. A version without the built page (a revision's tree) has
+nothing to lint; loading reports a bundle with no `index.html`. A
+component in an extension that comes with oxplow is an error too: the
+daemon never serves a bundled extension's bundle. The scan is a
+start-tag reader, comments skipped and raw-text elements (`script`,
+`style`, `textarea`, `title`) read to their close, not a full HTML
+parser.
 
 ## Decorators
 

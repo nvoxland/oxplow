@@ -152,10 +152,18 @@ pub fn stat_bundle(dir: &Path) -> Option<BundleStat> {
 pub const LIB_SCRIPT: &str = "/component-lib/oxplow-component.js";
 
 /// What `ext`'s components ask for that their frame would refuse without a
-/// word (tsk961), as check errors at the file: each page of each bundle
-/// ([`page_problems`]), and any component in an extension that comes with
-/// oxplow — the daemon never serves a bundled extension's bundle.
-pub fn bundle_problems(ext: &super::Extension, root: &Path) -> Vec<String> {
+/// word (tsk961), as check errors at the file: each bundle's `index.html`
+/// ([`page_problems`]) — the one page a frame shows, since a nested frame
+/// is refused and navigating away ends the component — read through
+/// `read`, the files of the extension under check (tsk994: a candidate
+/// under review, a revision, or the folder on disk); and any component in
+/// an extension that comes with oxplow, whose bundle is never served. A
+/// page `read` can't find (a revision's tree rarely holds a built bundle)
+/// is skipped: loading says when a bundle has no `index.html`.
+pub fn bundle_problems(
+    ext: &super::Extension,
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
     let dir = ext.path.trim_end_matches('/');
     if ext.origin == "bundled" {
         return ext
@@ -170,87 +178,111 @@ pub fn bundle_problems(ext: &super::Extension, root: &Path) -> Vec<String> {
             })
             .collect();
     }
-    let Ok(files) = super::files_at(root, dir) else {
-        return Vec::new();
-    };
-    let paths = files.paths().unwrap_or_default();
     let mut out = Vec::new();
     for c in &ext.custom_components {
-        let bundle = c.bundle.trim_end_matches('/');
-        let prefix = format!("{bundle}/");
-        for rel in &paths {
-            let Some(inner) = rel.strip_prefix(&prefix) else {
-                continue;
-            };
-            let lower = inner.to_ascii_lowercase();
-            if !(lower.ends_with(".html") || lower.ends_with(".htm")) {
-                continue;
-            }
-            let Some(html) = files.read(rel) else {
-                continue;
-            };
-            out.extend(
-                page_problems(&html, inner == "index.html")
-                    .into_iter()
-                    .map(|p| format!("{dir}/{rel}: {p}")),
-            );
-        }
+        let rel = format!("{}/index.html", c.bundle.trim_end_matches('/'));
+        let Some(html) = read(&rel) else {
+            continue;
+        };
+        out.extend(
+            page_problems(&html, true)
+                .into_iter()
+                .map(|p| format!("{dir}/{rel}: {p}")),
+        );
     }
     out
 }
 
 /// What one of a bundle's pages asks for that the bundle's CSP refuses
-/// silently: an inline `<script>` or event handler, a `type="module"`
-/// script, a script or stylesheet from outside the bundle; and, for its
-/// `index.html`, never loading the client library. A link (`<a href>`) is
-/// a navigation, not a load, and isn't one.
+/// silently or that ends the component: an inline `<script>` or event
+/// handler, a `type="module"` script, a load from outside the bundle
+/// (`src`, `srcset`, a stylesheet), a `<base>`, a nested frame, a plugin,
+/// a form, a refresh; and, for its `index.html`, never loading the client
+/// library. A link (`<a href>`) is a navigation, not a load, and isn't one.
 pub fn page_problems(html: &str, index: bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut loads_lib = false;
+    let outside_bundle = |url: &str| {
+        format!(
+            "`{url}` is outside the bundle — the frame's CSP loads only the bundle's own \
+             files and oxplow's `/component-lib/`"
+        )
+    };
     for tag in tags(html) {
-        for (name, _) in &tag.attrs {
-            if name.len() > 2
-                && name.starts_with("on")
-                && name[2..].chars().all(|c| c.is_ascii_alphabetic())
-            {
-                out.push(format!(
-                    "an inline event handler (`{name}`) — the frame's CSP refuses it; add the \
-                     listener from a script file"
-                ));
-            }
-        }
         let attr = |n: &str| {
             tag.attrs
                 .iter()
                 .find(|(k, _)| k == n)
                 .map(|(_, v)| v.as_str())
         };
+        // A custom element's `on…` attribute is its own (`once`, `only`);
+        // on a standard element it's an event handler.
+        if !tag.name.contains('-') {
+            for (name, _) in &tag.attrs {
+                if name.len() > 2
+                    && name.starts_with("on")
+                    && name[2..].chars().all(|c| c.is_ascii_alphabetic())
+                {
+                    out.push(format!(
+                        "an inline event handler (`{name}`) — the frame's CSP refuses it; add \
+                         the listener from a script file"
+                    ));
+                }
+            }
+        }
+        let refused = match tag.name.as_str() {
+            "base" => Some("a <base> — the frame's CSP refuses one (`base-uri 'none'`)"),
+            "iframe" | "frame" => Some("a <iframe> — the frame's CSP refuses a nested frame"),
+            "object" => Some("an <object> — the frame's CSP refuses plugins"),
+            "embed" => Some("an <embed> — the frame's CSP refuses plugins"),
+            "form" => {
+                Some("a <form> — the frame's CSP refuses submitting one (`form-action 'none'`)")
+            }
+            "meta"
+                if attr("http-equiv").is_some_and(|v| v.trim().eq_ignore_ascii_case("refresh")) =>
+            {
+                Some("a refresh — it navigates the frame away, which ends the component")
+            }
+            _ => None,
+        };
+        out.extend(refused.map(str::to_string));
         let loaded = match tag.name.as_str() {
             "link" => attr("href"),
-            "a" => None,
+            "a" | "base" | "iframe" | "frame" | "object" | "embed" => None,
             _ => attr("src"),
         };
         if let Some(url) = loaded {
-            if url == LIB_SCRIPT && tag.name == "script" {
+            let path = url.trim().split(['?', '#']).next().unwrap_or_default();
+            if path == LIB_SCRIPT && tag.name == "script" {
                 loads_lib = true;
             }
             // An image or font may be a `data:` URL; a script or sheet can't.
             if outside(url, !matches!(tag.name.as_str(), "script" | "link")) {
-                out.push(format!(
-                    "`{url}` is outside the bundle — the frame's CSP loads only the bundle's own \
-                     files and oxplow's `/component-lib/`"
-                ));
+                out.push(outside_bundle(url));
+            }
+        }
+        for candidate in attr("srcset").unwrap_or_default().split(',') {
+            let url = candidate.split_whitespace().next().unwrap_or_default();
+            if !url.is_empty() && outside(url, true) {
+                out.push(outside_bundle(url));
             }
         }
         if tag.name == "script" {
-            if attr("type").is_some_and(|t| t.eq_ignore_ascii_case("module")) {
+            let kind = attr("type").map(|t| t.trim().to_ascii_lowercase());
+            if kind.as_deref() == Some("module") {
                 out.push(
                     "a `type=\"module\"` script — a sandboxed frame can't load modules; use a \
                      classic script"
                         .into(),
                 );
             }
-            if attr("src").is_none() && !tag.body.trim().is_empty() {
+            // A script of another type is a data block (JSON, a template):
+            // it never runs, so the CSP has nothing to refuse.
+            let runs = matches!(
+                kind.as_deref(),
+                None | Some("" | "text/javascript" | "application/javascript")
+            );
+            if runs && attr("src").is_none() && !tag.body.trim().is_empty() {
                 out.push(
                     "an inline <script> — the frame's CSP runs only script files; move it into a \
                      `.js` file"
@@ -307,7 +339,8 @@ fn outside(url: &str, data: bool) -> bool {
 }
 
 /// One start tag of a page: its lowercased name, its attributes
-/// (lowercased names, unquoted values) and, for a `<script>`, its text.
+/// (lowercased names, unquoted values) and, for a raw-text element
+/// (`<script>`, `<style>`, `<textarea>`, `<title>`), its text.
 struct Tag {
     name: String,
     attrs: Vec<(String, String)>,
@@ -370,16 +403,17 @@ fn tags(html: &str) -> Vec<Tag> {
                     }
                 }
             }
-            if key.is_empty() {
-                j += 1;
-            } else {
+            // An empty name is a stray `=`, its value consumed above.
+            if !key.is_empty() {
                 attrs.push((key, value));
             }
         }
         let open_end = (j + 1).min(html.len());
-        let body = if name == "script" {
+        // A raw-text element's content is text, not tags: skipped to its
+        // close (a script's kept, to tell an inline one).
+        let body = if matches!(name.as_str(), "script" | "style" | "textarea" | "title") {
             let close = lower[open_end..]
-                .find("</script")
+                .find(&format!("</{name}"))
                 .map_or(html.len(), |e| open_end + e);
             let text = html[open_end..close].to_string();
             i = close;
@@ -673,6 +707,58 @@ mod tests {
                 "{inside}"
             );
         }
+        // tsk994: no panic on an `=` attribute before a multibyte char, and
+        // it doesn't swallow the next tag.
+        assert_eq!(
+            page_problems(&format!("{LIB_TAG}<a =\"x\"é>"), true),
+            Vec::<String>::new()
+        );
+        assert!(
+            page_problems(&format!("{LIB_TAG}<a =\"x\"><script>evil()</script>"), true)
+                .join("\n")
+                .contains("an inline <script>")
+        );
+        // What the frame runs fine isn't reported…
+        for fine in [
+            "<script type=\"application/json\" id=data>{\"a\": 1}</script>",
+            "<my-chart once only></my-chart>",
+            "<style>a::before { content: \"<script>\"; }</style>",
+            "<textarea><script>not code</script></textarea>",
+            "<title>a <b> title</title>",
+        ] {
+            assert_eq!(
+                page_problems(&format!("{LIB_TAG}{fine}"), true),
+                Vec::<String>::new(),
+                "{fine}"
+            );
+        }
+        assert_eq!(
+            page_problems(
+                "<script src=\"/component-lib/oxplow-component.js?v=2\"></script>",
+                true
+            ),
+            Vec::<String>::new(),
+            "the library with a query"
+        );
+        // …and what it refuses is.
+        for (html, says) in [
+            (
+                "<img srcset=\"a.png 1x, https://x.example/b.png 2x\">",
+                "`https://x.example/b.png` is outside the bundle",
+            ),
+            ("<base href=\"x/\">", "a <base>"),
+            ("<iframe src=\"other.html\"></iframe>", "a <iframe>"),
+            ("<object data=\"x.swf\"></object>", "an <object>"),
+            ("<embed src=\"x.swf\">", "an <embed>"),
+            ("<form><input></form>", "a <form>"),
+            (
+                "<meta http-equiv=\"refresh\" content=\"0;url=x\">",
+                "a refresh",
+            ),
+        ] {
+            let problems = page_problems(&format!("{LIB_TAG}{html}"), true).join("\n");
+            assert!(problems.contains(says), "{html}: {problems}");
+        }
         assert!(page_problems("<script src=app.js></script>", true)
             .join("\n")
             .contains("doesn't load the client library"));
@@ -681,6 +767,29 @@ mod tests {
             Vec::<String>::new(),
             "only index.html must load it"
         );
+    }
+
+    /// tsk994: the lints read the files of the extension being checked —
+    /// a candidate under review is not what's installed — through the read
+    /// the check is given.
+    #[test]
+    fn a_bundles_page_is_read_from_the_files_being_checked() {
+        let d = tempfile::tempdir().unwrap();
+        let ext = load(d.path(), "private", "  - { id: burndown }\n");
+        let candidate = |rel: &str| {
+            (rel == "components/burndown/index.html")
+                .then(|| "<!doctype html><script>render()</script>".to_string())
+        };
+        let problems = bundle_problems(&ext, &candidate).join("\n");
+        assert!(
+            problems
+                .contains("oxplow/extensions/x/components/burndown/index.html: an inline <script>"),
+            "{problems}"
+        );
+        // A version without the built page (a revision's tree) has nothing
+        // to lint: loading says when a bundle has no `index.html`.
+        let missing = |_: &str| None;
+        assert_eq!(bundle_problems(&ext, &missing), Vec::<String>::new());
     }
 
     /// tsk961: the check reports a bundle's page problems at the page, and
@@ -709,7 +818,7 @@ mod tests {
         let mut ext = load(d.path(), "private", "  - { id: burndown }\n");
         ext.origin = "bundled".into();
         assert!(
-            bundle_problems(&ext, d.path())
+            bundle_problems(&ext, &|_: &str| None)
                 .join("\n")
                 .contains("comes with oxplow"),
             "{ext:?}"
