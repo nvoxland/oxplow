@@ -299,6 +299,11 @@ zone grouping); each appears only when it has content:
    / Code / Git / Activity / Knowledge / System) so the launcher empty
    state reads like a start menu. The ↗ opens the **Go To** page
    (`dashboardRef("visits")`) for the full hub + bookmark management.
+   With a query, pages rank by `pageRank` (tsk1031): every token starting
+   a word of the title, then the title as a subsequence, then the id, then
+   the `keywords` — where each token must start a word, since a lens's
+   keywords hold its whole description and a short subsequence ("todo")
+   is in almost any description.
 
 ## History: the IA redesign (complete)
 

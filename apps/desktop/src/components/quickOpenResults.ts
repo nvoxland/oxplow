@@ -72,6 +72,27 @@ function matchesAllTokens(haystack: string, tokens: string[]): boolean {
   return tokens.every((tok) => fuzzyMatches(haystack, tok));
 }
 
+/// Whether `token` starts a word of `text` (words split on anything but
+/// letters and digits).
+function startsAWord(text: string, token: string): boolean {
+  return text.split(/[^\p{L}\p{N}]+/u).some((w) => w.startsWith(token));
+}
+
+/// How well a page matches `tokens` — lower is better — or null when it
+/// doesn't (tsk1031): every token starting a word of its title, then its
+/// title as a subsequence, then its id, then its keywords, where each token
+/// must start a word (a description is long enough to hold any short
+/// subsequence: "todo" was found in "Planning"'s).
+export function pageRank(entry: PageDirectoryEntry, tokens: string[]): number | null {
+  const label = entry.label.toLowerCase();
+  if (tokens.every((t) => startsAWord(label, t))) return 0;
+  if (matchesAllTokens(label, tokens)) return 1;
+  if (matchesAllTokens(entry.id.toLowerCase(), tokens)) return 2;
+  const keywords = entry.keywords?.toLowerCase();
+  if (keywords && tokens.every((t) => startsAWord(keywords, t))) return 3;
+  return null;
+}
+
 /// Does a result's displayed identity exactly equal the query (case-
 /// insensitive)? Such a result is floated above every fuzzy section — the
 /// "type the thing, jump to it" affordance. tsk51's task-id case falls
@@ -150,15 +171,12 @@ export function buildQuickOpenResults(input: {
   const tokens = q.split(/\s+/).filter(Boolean);
   // Full (uncapped) matched sets. Pages also match their optional
   // `keywords` so e.g. the Tasks page (label "Tasks") is still found by
-  // typing "dashboard".
+  // typing "dashboard"; the best title match ranks first (`pageRank`).
   const matchedPages: QuickOpenResult[] = input.pages
-    .filter(
-      (entry) =>
-        matchesAllTokens(entry.label.toLowerCase(), tokens) ||
-        matchesAllTokens(entry.id, tokens) ||
-        (entry.keywords ? matchesAllTokens(entry.keywords.toLowerCase(), tokens) : false),
-    )
-    .map((entry) => ({ kind: "page", entry }));
+    .map((entry, at) => ({ entry, at, rank: pageRank(entry, tokens) }))
+    .filter((m): m is { entry: PageDirectoryEntry; at: number; rank: number } => m.rank !== null)
+    .sort((a, b) => a.rank - b.rank || a.at - b.at)
+    .map(({ entry }) => ({ kind: "page", entry }));
   const matchedCommands: QuickOpenResult[] = input.commands
     .filter((entry) => matchesAllTokens(entry.searchKey, tokens))
     .map((entry) => ({ kind: "command", entry }));

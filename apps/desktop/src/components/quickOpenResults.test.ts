@@ -203,6 +203,22 @@ describe("buildQuickOpenResults", () => {
     expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref_id: "meeting" } });
   });
 
+  // tsk1031: "todo" ranked Planning, Recent Decisions and Unbacked Claims
+  // first — t…o…d…o appears in order somewhere in their long descriptions.
+  // A keyword matches at a word's start; a title match ranks first.
+  test("a title match ranks first, and keywords match whole words", () => {
+    const planning: PageDirectoryEntry = {
+      ...page("lens:a/planning", "Planning"),
+      keywords: "lens oxplow-analytics planning what to do next, sorted by the oldest first",
+    };
+    const todos: PageDirectoryEntry = { ...page("lens:t/todos", "TODO comments"), keywords: "lens todo-watch todos every comment" };
+    const symbols: PageDirectoryEntry = { ...page("symbols", "Symbols"), keywords: "outline go to definition" };
+    const stale: PageDirectoryEntry = { ...page("lens:b/stale", "Stale Work"), keywords: "lens review todo items left open" };
+    const out = buildQuickOpenResults({ query: "todo", pages: [planning, symbols, stale, todos], commands: [], files: [], siteHits: [] });
+    const ids = out.results.filter((r) => r.kind === "page").map((r) => (r.kind === "page" ? r.entry.id : ""));
+    expect(ids).toEqual(["lens:t/todos", "lens:b/stale"]);
+  });
+
   test("a page is found by its keywords, not just label/id", () => {
     const tasksPage: PageDirectoryEntry = { ...page("tasks", "Tasks"), keywords: "dashboard" };
     const out = buildQuickOpenResults({ query: "dashboard", pages: [tasksPage], commands, files: [], siteHits: [] });
