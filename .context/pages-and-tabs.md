@@ -206,8 +206,15 @@ localStorage order and expanded keys are gone. The stored layout loads
 after the first render: an edit made before it arrives (a chevron, a
 drag) shows at once and is queued, then replayed on the loaded layout and
 saved — nothing is written over a layout not read yet, and a late load
-never undoes an edit (tsk972). So every edit is absolute where it can be
-(`setCollapsed(panel, collapsed)`, not a toggle).
+never undoes an edit (tsk972). So every edit means the same on any base:
+absolute (`setCollapsed(panel, collapsed)`, not a toggle) or relative to
+a panel (`movePanelBeside(panel, target, side)`, not an index). One
+`layoutSync` (`panelLayout.ts`, tsk998) owns the round trip: a **failed
+load** is reported and shows the defaults, but saves nothing over the
+layout it couldn't read — the next edit loads again and is replayed on
+what it finds; saves go **one at a time, the latest last**; and an edit
+**keeps the placement of a panel not available yet** (an extension's,
+before extensions load) right after the entry it followed.
 
 ## Body layouts
 

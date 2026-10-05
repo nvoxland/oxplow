@@ -17,11 +17,14 @@ import {
   CORE_PANELS,
   extensionPanelId,
   hidePanel,
-  movePanel,
+  layoutSync,
+  movePanelBeside,
   resolveLayout,
   revealPanel,
   setCollapsed,
   showPanel,
+  type LayoutEdit,
+  type LayoutSync,
 } from "../Panels/panelLayout.js";
 import { decide, useProposals, type Proposal } from "../../proposals.js";
 import { deliveryAlert, useUndelivered } from "../../delivery.js";
@@ -126,61 +129,31 @@ function useRailSections(available: string[]): {
   show(id: RailSectionId): void;
   reveal(id: RailSectionId): void;
 } {
-  const [stored, setStoredState] = useState<PanelPlacement[]>([]);
-  // The layout as last set, for an edit to build on without waiting for a
-  // render.
-  const current = useRef<PanelPlacement[]>([]);
-  const setStored = useCallback((next: PanelPlacement[]) => {
-    current.current = next;
-    setStoredState(next);
-  }, []);
+  const [stored, setStored] = useState<PanelPlacement[]>([]);
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
-  // Until the stored layout has loaded, the person's edits are shown at once
-  // and kept here; once it arrives they're replayed on it and saved — never
-  // a write over a layout not read yet, never a load undoing an edit
-  // (tsk972).
-  const loaded = useRef(false);
+  // Kept in step with `panel_layout` by `layoutSync` (tsk972, tsk998): an
+  // edit before the load is replayed on it, a failed load saves nothing,
+  // saves land in order.
   const [layoutLoaded, setLayoutLoaded] = useState(false);
-  const pending = useRef<Array<(base: PanelPlacement[]) => PanelPlacement[]>>([]);
+  const sync = useRef<LayoutSync | null>(null);
   useEffect(() => {
-    let live = true;
-    const arrive = (base: PanelPlacement[]) => {
-      if (!live) return;
-      loaded.current = true;
-      setLayoutLoaded(true);
-      const edits = pending.current.splice(0);
-      if (edits.length === 0) {
-        setStored(base);
-        return;
-      }
-      const next = edits.reduce((acc, edit) => edit(acc), base);
-      setStored(next);
-      void setPanelLayout(next).catch((e: unknown) =>
-        recordOpError({ label: "Save the panel layout", message: e instanceof Error ? e.message : String(e) }),
-      );
-    };
-    void getPanelLayout()
-      .then(arrive)
-      // No stored layout: the defaults.
-      .catch(() => arrive([]));
+    const s = layoutSync({
+      load: getPanelLayout,
+      save: setPanelLayout,
+      show: setStored,
+      ready: () => setLayoutLoaded(true),
+      failed: (label, e) => recordOpError({ label, message: e instanceof Error ? e.message : String(e) }),
+    });
+    sync.current = s;
     return () => {
-      live = false;
+      s.close();
+      sync.current = null;
     };
-  }, [setStored]);
+  }, []);
   const layout = useMemo(() => resolveLayout(available, stored), [available, stored]);
 
-  const edit = useCallback((change: (base: PanelPlacement[]) => PanelPlacement[]) => {
-    const next = change(current.current);
-    setStored(next);
-    if (!loaded.current) {
-      pending.current.push(change);
-      return;
-    }
-    void setPanelLayout(next).catch((e: unknown) =>
-      recordOpError({ label: "Save the panel layout", message: e instanceof Error ? e.message : String(e) }),
-    );
-  }, [setStored]);
+  const edit = useCallback((change: LayoutEdit) => sync.current?.edit(change), []);
 
   const isExpanded = useCallback((id: RailSectionId) => !layout.collapsed.has(id), [layout]);
   const collapse = useCallback(
@@ -230,13 +203,10 @@ function useRailSections(available: string[]): {
       setDropTarget(null);
       if (!sourceId || sourceId === id) return;
       const rect = e.currentTarget.getBoundingClientRect();
-      const after = e.clientY >= rect.top + rect.height / 2;
-      const without = layout.order.filter((o) => o !== sourceId);
-      const targetIdx = without.indexOf(id);
-      if (targetIdx < 0) return;
-      edit((base) => movePanel(available, base, sourceId, after ? targetIdx + 1 : targetIdx));
+      const side = e.clientY >= rect.top + rect.height / 2 ? "after" : "before";
+      edit((base) => movePanelBeside(available, base, sourceId, id, side));
     },
-  }), [draggingId, dropTarget, layout, available, edit]);
+  }), [draggingId, dropTarget, available, edit]);
 
   const dropSide = useCallback(
     (id: RailSectionId): "before" | "after" | null =>
