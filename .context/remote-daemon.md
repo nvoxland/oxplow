@@ -156,6 +156,11 @@ Daemon binds loopback only; reach it with
 `ssh -L 7420:127.0.0.1:7420 <host>`. No TLS. Multi-user is explicitly
 out of scope.
 
+Logging: the daemon logs to stderr at `info,rmcp=warn` unless `RUST_LOG`
+says otherwise (`run.rs::run_main`). A line that repeats per event or per
+connection is a bug to fix at its source, not noise to filter: in
+tsk1077, 91% of an hour's log was two such bugs (tsk1071, tsk1078).
+
 ## Auth (tsk345)
 
 Loopback is not a boundary: the agents the daemon runs, the sources it

@@ -86,10 +86,13 @@ fn parse_args(name: &str) -> Args {
 /// messages. The shipped `oxplow-daemon` passes the OS keychain, always;
 /// `oxplow-daemon-sim` (the browser suite's, dev-only) passes memory.
 pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretStore>) {
+    // The MCP library logs three INFO lines per agent tool connection
+    // (opened, input ended, finished): routine, so only its warnings show
+    // unless RUST_LOG asks (tsk1077).
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,rmcp=warn")),
         )
         .init();
 
