@@ -359,7 +359,7 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: effort
-  version: 1
+  version: 2
   description: "Efforts: one bracketed span of work on a work item (an oxplow task, or another provider's item), between a start and an end snapshot."
   columns:
     - { name: "id", type: "INTEGER", doc: "Effort id." }
