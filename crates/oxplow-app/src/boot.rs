@@ -381,6 +381,20 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         .clone()
         .spawn(state.extension_catalog.changes());
 
+    // The renderer hears the catalog's signal too (tsk1030): what it lists
+    // from extensions reloads on this, not on a guess from file paths.
+    {
+        let mut changes = state.extension_catalog.changes();
+        let events = state.events.clone();
+        tokio::spawn(async move {
+            while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
+                changes.recv().await
+            {
+                events.emit(crate::events::OxplowEvent::ExtensionsChanged);
+            }
+        });
+    }
+
     // Extensions' SQL models (P4.9): compiled now and on every change.
     state
         .extension_models

@@ -462,8 +462,13 @@ What a query read is what it subscribes to.
   slots, dashboard lens tiles, the rail's alerts and the explorer — keeps
   its last run's `reads` and re-runs through `useRerunOnChange` when
   `modelsChanged` names a model it read, `metricSamplesChanged` names one
-  of its measures (an empty list is "unknown", so it re-runs), or a lens
-  definition under `oxplow/extensions/` changed. Nothing else re-runs it:
+  of its measures (an empty list is "unknown", so it re-runs), or
+  `extensionsChanged` says the extension catalog changed (the daemon
+  relays the catalog's own signal: a file under `oxplow/extensions/` or the
+  `extensions` key; tsk1030 — a file path is not the signal). Hosts that
+  list what extensions contribute (`extensionsStore`, the launcher, the
+  prompt catalog) reload on it, on `configChanged`, and on a daemon
+  reconnect (a change while it was unreachable sent nothing). Nothing else re-runs it:
   the old everything-but-two deny-list (`shouldRerunLens`) and its 750 ms
   debounce are gone; a burst of commits coalesces into one re-run
   (100 ms).

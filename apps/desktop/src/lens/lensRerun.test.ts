@@ -17,15 +17,17 @@ describe("a lens re-runs on what it read", () => {
   });
   test("nothing else re-runs it but its own definition", () => {
     expect(readsChanged({ kind: "tasksChanged" }, task)).toBe(false);
-    expect(lensDefinitionChanged({ kind: "workspaceChanged", path: "oxplow/extensions/x/lenses/a.yaml" })).toBe(true);
-    expect(lensDefinitionChanged({ kind: "workspaceChanged", path: "src/a.ts" })).toBe(false);
+    // tsk1030: the daemon says when the extension catalog changed; a file
+    // path is not the signal.
+    expect(lensDefinitionChanged({ kind: "extensionsChanged" })).toBe(true);
+    expect(lensDefinitionChanged({ kind: "workspaceChanged", path: "oxplow/extensions/x/lenses/a.yaml" })).toBe(false);
     expect(lensDefinitionChanged({ kind: "configChanged" })).toBe(false);
   });
   // What an extension contributes (its panels, pages, lenses) changes when
-  // one of its files changes — and when the person enables or disables it,
+  // the catalog changes — and when the person enables or disables one,
   // which is a config change.
-  test("the set of enabled extensions' contributions changes with their files or the config", () => {
-    expect(extensionsChanged({ kind: "workspaceChanged", path: "oxplow/extensions/x/extension.yaml" })).toBe(true);
+  test("the set of enabled extensions' contributions changes with the catalog or the config", () => {
+    expect(extensionsChanged({ kind: "extensionsChanged" })).toBe(true);
     expect(extensionsChanged({ kind: "configChanged" })).toBe(true);
     expect(extensionsChanged({ kind: "workspaceChanged", path: "src/a.ts" })).toBe(false);
     expect(extensionsChanged({ kind: "modelsChanged", models: ["v_task"] })).toBe(false);

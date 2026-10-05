@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-import { listExtensions, subscribeOxplowEvents, type Extension } from "./api.js";
+import { listExtensions, onRemoteReconnect, subscribeOxplowEvents, type Extension } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { extensionsChanged } from "./lens/lensRerun.js";
 
@@ -47,10 +47,21 @@ function subscribe(key: string, listener: () => void): () => void {
     load(key, entry);
   }
   entry.listeners.add(listener);
-  offEvents ??= subscribeOxplowEvents((event) => {
-    if (!extensionsChanged(event as Record<string, unknown>)) return;
-    for (const [k, e] of entries) load(k, e);
-  });
+  if (!offEvents) {
+    const reloadAll = () => {
+      for (const [k, e] of entries) load(k, e);
+    };
+    const offChanges = subscribeOxplowEvents((event) => {
+      if (extensionsChanged(event as Record<string, unknown>)) reloadAll();
+    });
+    // A change while the daemon was unreachable sent no event: reload on
+    // reconnect (tsk1030).
+    const offReconnect = onRemoteReconnect(reloadAll);
+    offEvents = () => {
+      offChanges();
+      offReconnect();
+    };
+  }
   const mine = entry;
   return () => {
     mine.listeners.delete(listener);

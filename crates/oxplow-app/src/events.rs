@@ -132,6 +132,12 @@ pub enum OxplowEvent {
     /// running `/oxplow:configure`). The in-memory config has been swapped;
     /// the renderer refetches `get_config`.
     ConfigChanged,
+    /// The extension catalog may have changed: a file under the primary
+    /// worktree's `oxplow/extensions/` did, or the `extensions` config key
+    /// (the catalog's own signal, tsk1030). Every host listing what
+    /// extensions contribute — the launcher, pages, panels, slots —
+    /// reloads, and a lens re-runs its definition.
+    ExtensionsChanged,
     /// `.git` directory appeared/disappeared at the project root —
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.

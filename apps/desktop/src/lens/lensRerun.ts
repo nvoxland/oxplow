@@ -17,13 +17,11 @@ export function readsOf(...models: string[]): Reads {
   return { models, tables: [], measures: [] };
 }
 
-/** A file under `oxplow/extensions/` changed: a lens's own definition. */
+/** The extension catalog changed — the daemon's own signal (tsk1030),
+ *  sent when a file under `oxplow/extensions/` or the `extensions` config
+ *  changed: a lens's definition may have. */
 export function lensDefinitionChanged(event: Readonly<Record<string, unknown>>): boolean {
-  return (
-    event.kind === "workspaceChanged" &&
-    typeof event.path === "string" &&
-    event.path.startsWith("oxplow/extensions/")
-  );
+  return event.kind === "extensionsChanged";
 }
 
 /** What the enabled extensions contribute — lenses, panels, pages, slot
