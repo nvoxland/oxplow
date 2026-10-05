@@ -805,8 +805,9 @@ pub struct Anchored {
 
 /// The named parameters a collector's `input` may use: the trigger
 /// event's anchors (`:stream_id`, `:snapshot_id`, `:effort_id`,
-/// `:thread_id`, `:turn_id`), else what the run `known`, and the event's
-/// seq (`:event_id`); NULL when neither has one.
+/// `:thread_id`, `:turn_id`), else what the run `known`, and the event
+/// itself — `:event_id` its id, `:event_seq` its seq, as an effect's
+/// `input` binds them (tsk1002); NULL when neither has one.
 pub fn anchor_params(event: Option<&StoredEvent>, known: Anchored) -> Vec<(String, SqlCell)> {
     let a = event.map(|e| &e.envelope.anchors);
     let int = |v: Option<i64>| v.map_or(SqlCell::Null(()), SqlCell::Int);
@@ -837,7 +838,13 @@ pub fn anchor_params(event: Option<&StoredEvent>, known: Anchored) -> Vec<(Strin
                 .or(known.thread_id)),
         ),
         ("turn_id".into(), int(a.and_then(|a| a.turn_id))),
-        ("event_id".into(), int(event.map(|e| e.seq))),
+        (
+            "event_id".into(),
+            event.map_or(SqlCell::Null(()), |e| {
+                SqlCell::Text(e.envelope.id.to_string())
+            }),
+        ),
+        ("event_seq".into(), int(event.map(|e| e.seq))),
     ]
 }
 

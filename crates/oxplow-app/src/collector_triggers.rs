@@ -268,11 +268,11 @@ mod tests {
         }
     }
 
-    const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"effort\": r[\"effort\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
+    const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"id\": r[\"id\"], \"effort\": r[\"effort\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
 
     fn on_claims(filter: &str) -> String {
         format!(
-            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    trigger: {{ on: [effort.claim_verified]{filter} }}\n    input: \"SELECT :effort_id AS effort, :event_id AS ev\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, effort: int, kind: text }} }}\n"
+            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    trigger: {{ on: [effort.claim_verified]{filter} }}\n    input: \"SELECT :effort_id AS effort, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, effort: int, kind: text }} }}\n"
         )
     }
 
@@ -345,9 +345,16 @@ mod tests {
         assert!(consumer.handles(&ev.envelope.event_type));
         consumer.handle(&ev).await.unwrap();
         consumer.handle(&ev).await.unwrap();
+        // tsk1002: `:event_id` is the event's id and `:event_seq` its seq,
+        // as an effect's `input` binds them.
         assert_eq!(
-            rows(&fx.svc, "SELECT ev, effort, kind FROM v_work_seen").await,
-            json!([[ev.seq, fx.effort.value(), "effort.claim_verified"]])
+            rows(&fx.svc, "SELECT ev, id, effort, kind FROM v_work_seen").await,
+            json!([[
+                ev.seq,
+                ev.envelope.id.to_string(),
+                fx.effort.value(),
+                "effort.claim_verified"
+            ]])
         );
         assert_eq!(
             rows(

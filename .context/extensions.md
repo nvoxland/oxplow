@@ -1880,7 +1880,10 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    `skipped`;
 4. the script runs sandboxed over `{ event: { id, type, v, seq, source,
    subject, payload }, rows }` (`input` with the payload's fields bound,
-   and the event itself as `:event_id` and `:event_seq` — to read its own
+   and the event itself as `:event_id` (its id) and `:event_seq` (its
+   seq), the same names and meanings a collector's `input` binds — the
+   event's own win over payload fields of those names, and a dry run's
+   fixture without them binds NULL (tsk1002) — to read its own
    `v_event` row, its subject or cause; P11, tsk955 — one
    `effects::input_query` for the run and `dry_run` alike):
    `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs.

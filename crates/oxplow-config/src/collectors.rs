@@ -274,8 +274,9 @@ pub struct CollectorSpec {
     pub after: Vec<String>,
     /// A script's input query: read-only SQL over the semantic layer,
     /// handed over as `input.rows`. `:stream_id`, `:snapshot_id`,
-    /// `:effort_id`, `:thread_id`, `:turn_id` and `:event_id` bind the
-    /// triggering event's anchors (NULL otherwise).
+    /// `:effort_id`, `:thread_id` and `:turn_id` bind the triggering
+    /// event's anchors, `:event_id` its id and `:event_seq` its seq (NULL
+    /// otherwise).
     pub input: Option<String>,
     /// A report file handed over as `input.report`.
     pub report: Option<ReportInput>,

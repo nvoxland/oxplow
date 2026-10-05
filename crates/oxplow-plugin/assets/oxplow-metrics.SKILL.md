@@ -128,7 +128,7 @@ time. A count-over-threshold is `aggregation: count` + a `filter: { minValue: N 
 | `trigger` | when it runs: `{ on: [snapshot.taken] }` (after a snapshot that recorded files — tree scans), `{ on: [effort.finished] }` (over the effort's end snapshot), `{ on: [<other event types>], where?: { field: value } }`, `{ every: 15m }`, or `manual` (only via `collector.sync`) |
 | `facts` | the measure keys it may record facts on (declare-to-collect — a fact outside this list is dropped) |
 | `report` | `{ path, format }` — a tool's report file it reads (`text`\|`json`\|`xml`\|`lcov`\|`lines`), parsed into `input.report` |
-| `input` | (starlark/jaq) a SQL query whose rows arrive as `input.rows`; binds `:stream_id :snapshot_id :effort_id :thread_id :turn_id :event_id` |
+| `input` | (starlark/jaq) a SQL query whose rows arrive as `input.rows`; binds `:stream_id :snapshot_id :effort_id :thread_id :turn_id`, `:event_id` (the event's id) and `:event_seq` (its seq) |
 
 A collector with `entities:` instead of `facts:` is an **entity collector**
 (rows, not measurements) — that belongs in an extension, not the project.

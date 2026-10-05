@@ -787,7 +787,8 @@ type without a `trigger` field:
 
 - **Input.** The `input` SQL binds the event's anchors by name
   (`:stream_id`, `:snapshot_id`, `:effort_id`, `:thread_id`, `:turn_id`,
-  integers, and `:event_id`, its seq; NULL when absent), and the script
+  integers, and the event itself — `:event_id` its id, `:event_seq` its
+  seq, as an effect's `input` binds them (tsk1002); NULL when absent), and the script
   gets the event as `input.event` (`type`, `seq`, `id`, `at`, `subject`,
   `payload`, `anchors`).
 - **Once per event.** The run's `collector_run.last_event_id` is the

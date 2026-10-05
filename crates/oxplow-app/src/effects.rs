@@ -330,9 +330,11 @@ pub fn event_json(event: &oxplow_domain::StoredEvent) -> serde_json::Value {
 
 /// The query an effect's `input` runs for `event` (its [`event_json`]):
 /// the payload's top-level fields bound as named parameters, and the event
-/// itself as `:event_id` and `:event_seq` — so it can read the event's own
-/// row (its subject, its cause) from `v_event` (tsk955); a payload field of
-/// either name is the event's. Capped as a command's `input` is.
+/// itself as `:event_id` (its id) and `:event_seq` (its seq) — so it can
+/// read the event's own row (its subject, its cause) from `v_event`
+/// (tsk955). The event's own win over payload fields of those names, and
+/// what a dry run's fixture leaves out binds NULL (tsk1002). Capped as a
+/// command's `input` is.
 pub fn input_query(sql: &str, event: &serde_json::Value) -> oxplow_db::SqlQuery {
     let mut params: Vec<(String, oxplow_db::SqlCell)> = crate::extension_commands::input_params(
         event.get("payload").unwrap_or(&serde_json::Value::Null),
@@ -340,12 +342,18 @@ pub fn input_query(sql: &str, event: &serde_json::Value) -> oxplow_db::SqlQuery 
     .into_iter()
     .filter(|(name, _)| name != "event_id" && name != "event_seq")
     .collect();
-    if let Some(id) = event.get("id").and_then(serde_json::Value::as_str) {
-        params.push(("event_id".into(), oxplow_db::SqlCell::Text(id.into())));
-    }
-    if let Some(seq) = event.get("seq").and_then(serde_json::Value::as_i64) {
-        params.push(("event_seq".into(), oxplow_db::SqlCell::Int(seq)));
-    }
+    let id = event.get("id").and_then(serde_json::Value::as_str);
+    let seq = event.get("seq").and_then(serde_json::Value::as_i64);
+    params.push((
+        "event_id".into(),
+        id.map_or(oxplow_db::SqlCell::Null(()), |id| {
+            oxplow_db::SqlCell::Text(id.into())
+        }),
+    ));
+    params.push((
+        "event_seq".into(),
+        seq.map_or(oxplow_db::SqlCell::Null(()), oxplow_db::SqlCell::Int),
+    ));
     oxplow_db::SqlQuery::new(sql)
         .named(params)
         .limit(Some(crate::extension_commands::INPUT_ROW_CAP))
@@ -485,6 +493,31 @@ pub fn finished_tx(
 
 #[cfg(test)]
 pub(crate) mod tests {
+
+    /// tsk1002: an effect's `input` binds the event's own id and seq —
+    /// over a payload field of either name — and NULL for what a dry run's
+    /// fixture leaves out, rather than failing on an unbound name.
+    #[tokio::test]
+    async fn the_input_binds_the_events_own_id_and_seq() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let sql = "SELECT :event_id AS id, :event_seq AS seq";
+        let event = serde_json::json!({
+            "id": "ev-1",
+            "seq": 7,
+            "payload": { "event_id": "spoofed", "event_seq": 99 },
+        });
+        let bound = layer.run(super::input_query(sql, &event)).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(bound.rows).unwrap(),
+            serde_json::json!([["ev-1", 7]])
+        );
+        let fixture = serde_json::json!({ "payload": {} });
+        let bound = layer.run(super::input_query(sql, &fixture)).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(bound.rows).unwrap(),
+            serde_json::json!([[null, null]])
+        );
+    }
 
     /// tsk990: what a scheduled retry would send was composed by the
     /// script as it was when it failed. A new approval is of the script as
