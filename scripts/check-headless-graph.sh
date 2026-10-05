@@ -10,7 +10,7 @@
 # is generated for.
 set -euo pipefail
 
-crates=(oxplow-daemon oxplow-rpc oxplow-provider-fake oxplow-provider-linear oxplow-provider-mcp)
+crates=(oxplow-daemon oxplow-rpc oxplow-provider-fake oxplow-provider-mcp)
 targets=(aarch64-apple-darwin x86_64-unknown-linux-gnu)
 desktop='^(tauri|tauri-runtime|wry|webkit2gtk|webkit2gtk-sys|gtk|gtk-sys|objc2-app-kit|objc2-web-kit) '
 

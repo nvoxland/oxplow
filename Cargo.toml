@@ -31,7 +31,6 @@ members = [
     "crates/oxplow-acp-fake",
     "crates/oxplow-provider-protocol",
     "crates/oxplow-provider-fake",
-    "crates/oxplow-provider-linear",
     "crates/oxplow-provider-mcp",
     "crates/oxplow-oauth-sim",
     "crates/oxplow-oauth-redirect",
@@ -172,7 +171,6 @@ oxplow-ai = { path = "crates/oxplow-ai" }
 oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
 oxplow-provider-protocol = { path = "crates/oxplow-provider-protocol" }
 oxplow-provider-fake = { path = "crates/oxplow-provider-fake" }
-oxplow-provider-linear = { path = "crates/oxplow-provider-linear" }
 oxplow-provider-mcp = { path = "crates/oxplow-provider-mcp" }
 oxplow-oauth-sim = { path = "crates/oxplow-oauth-sim" }
 oxplow-oauth-redirect = { path = "crates/oxplow-oauth-redirect" }

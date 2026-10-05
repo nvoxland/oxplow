@@ -287,7 +287,7 @@ function AddInstance({ views, onChanged }: { views: ProviderInstanceView[]; onCh
         data-testid="integrations-add-name"
         style={{ flex: "1 1 220px", minWidth: 220 }}
         value={name}
-        placeholder="its name, e.g. linear_acme"
+        placeholder="its name, e.g. work_account"
         autoComplete="off"
         spellCheck={false}
         onChange={(e) => setName(e.target.value)}

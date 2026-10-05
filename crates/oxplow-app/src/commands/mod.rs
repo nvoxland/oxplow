@@ -225,7 +225,7 @@ pub enum Route {
     /// The `Tx` handler, in the bus's transaction.
     Tx,
     /// The `External` handler, against the named system (`provider
-    /// \`linear\``) — what a refusal to compose it names.
+    /// \`issues\``) — what a refusal to compose it names.
     External(String),
 }
 

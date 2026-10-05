@@ -835,7 +835,7 @@ mod tests {
             .transaction(|c| {
                 c.execute(
                     "INSERT INTO effort (work_item, thread_id, started_at)
-                       VALUES ('work_item:linear:ENG-1', 1, '2026-01-01T00:00:00.000000Z')",
+                       VALUES ('work_item:issues:ENG-1', 1, '2026-01-01T00:00:00.000000Z')",
                     [],
                 )
                 .map_err(|e| DomainError::Storage(e.to_string()))?;

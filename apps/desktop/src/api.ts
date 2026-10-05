@@ -338,7 +338,7 @@ export interface SnapshotSummary {
 export interface TaskEffort {
   id: string;
   /** The work item worked on (`work_item:oxplow:tsk42`, or another
-   *  provider's `work_item:linear:ENG-12`). */
+   *  provider's `work_item:issues:ENG-12`). */
   work_item: string;
   started_at: string;
   ended_at: string | null;

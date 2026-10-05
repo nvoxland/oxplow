@@ -963,13 +963,10 @@ The history graph and the conflict resolver §11.2 names wait for a
 provider that needs them. Every target has a label a person reads
 — its `label` in the same table ("board", "state control"), carried on
 each `UiReplacement` so the desktop names it from there (tsk935; no
-second list to keep in step). The Linear example replaces
-both: its Board by Linear's states, and the state control with its
-`state` lens — the Linear states a synced issue of the team is in (Linear
-publishes no list of them), each with **Move Here** (`work_item.transition`
-with the `native_state`). A state no synced issue is in has no row, so
-oxplow's Move To stays beside it: the canonical states every provider
-takes.
+second list to keep in step). A state control replacement lists the
+tracker's own states, each with **Move Here** (`work_item.transition` with
+the `native_state`); oxplow's Move To stays beside it: the canonical
+states every provider takes.
 
 **At load** (`parse_replacements`, errors at the entry's line): the
 target is in the table; the lens is one of the extension's and declares
@@ -1017,7 +1014,7 @@ when it changes) and `replacementsOff` (re-read on `configChanged`):
   start (`CustomComponentViz.onFailure` → `LensResultView.onCustomFailure`
   → `useReplacement`'s `fail`, which makes the replacement `failed`) →
   **the core component**, under a line saying whose it was and why
-  ("linear's board couldn't load: …. Showing oxplow's.",
+  ("beads's board couldn't load: …. Showing oxplow's.",
   `replacement-fallback`) — never the lens's table, and **outside** the
   replacement's frame: no badge, none of the lens's toolbar (tsk855);
 - while any of that isn't known yet, nothing renders, so the wrong
@@ -1035,10 +1032,11 @@ replacing it shows that only the active provider's does; a work item's
 state control, with two extensions replacing it, shows the item's own
 provider's, not the active one's.
 
-The first real one is the Linear example
-(`examples/extensions/linear`): `lenses/board.yaml` lists the team's
-issues under Linear's own workflow states, which oxplow's Board folds
-into "to do"; its kit test loads it with the replacement.
+No example declares one now. The first was Linear's board and state
+lenses, removed with the Linear provider (2026-10-05): a team's tracker
+isn't a backend ([providers.md](./providers.md) "Which trackers are
+backends"). The likely first real one is a beads backend's ready-work
+board.
 
 ## Reviewing by effect
 
@@ -2473,12 +2471,6 @@ Each loads clean (`documented_examples_load_without_errors`):
   `pull_request` (`ref`, `title`, `body`; it resolves and is searchable),
   page `pr` (the `pr` lens, given `?ref=`), `[[pr:12]]`. `crates/oxplow-
   sdk/tests/examples.rs` checks and tests it and opens a pull request.
-- **`linear`** (P7.A5) — the reference external **provider**: Linear
-  issues as work items, through `crates/oxplow-provider-linear`
-  (private, since `providers:` is experimental). `tests/kit.rs` in that
-  crate runs it through `oxplow plugin test`; `scripts/install-linear.sh`
-  installs it into a project. See [providers.md](./providers.md) →
-  "The Linear provider".
 
 ## The `oxplow-analytics` example extension
 

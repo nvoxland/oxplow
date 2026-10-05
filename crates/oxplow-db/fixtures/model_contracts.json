@@ -2310,7 +2310,7 @@
         {
           "name": "work_item",
           "type": "TEXT",
-          "doc": "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:linear:ENG-12`."
+          "doc": "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:issues:ENG-12`."
         },
         {
           "name": "task_id",

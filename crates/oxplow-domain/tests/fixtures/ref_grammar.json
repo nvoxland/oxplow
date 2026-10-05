@@ -14,7 +14,7 @@
     { "text": "file:docs/c%23.md", "kind": "file", "id": "docs/c#.md", "rev": null, "frag": null },
     { "text": "file:odd/100%25.txt", "kind": "file", "id": "odd/100%.txt", "rev": null, "frag": null },
     { "text": "work_item:oxplow:tsk42", "kind": "work_item", "id": "oxplow:tsk42", "rev": null, "frag": null },
-    { "text": "work_item:linear:ENG-12", "kind": "work_item", "id": "linear:ENG-12", "rev": null, "frag": null },
+    { "text": "work_item:issues:ENG-12", "kind": "work_item", "id": "issues:ENG-12", "rev": null, "frag": null },
     { "text": "lens:acme/blocked?stream_id=2&thread_id=5", "kind": "lens", "id": "acme/blocked?stream_id=2&thread_id=5", "rev": null, "frag": null },
     { "text": "symbol:rust/oxplow_app::extensions::run_lens", "kind": "symbol", "id": "rust/oxplow_app::extensions::run_lens", "rev": null, "frag": null },
     { "text": "page:settings", "kind": "page", "id": "settings", "rev": null, "frag": null },

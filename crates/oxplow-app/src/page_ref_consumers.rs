@@ -96,7 +96,7 @@ mod tests {
             Some(TaskId::new(42))
         );
         assert_eq!(
-            task_of(&core_kinds(), "work_item:linear:ENG-12").unwrap(),
+            task_of(&core_kinds(), "work_item:issues:ENG-12").unwrap(),
             None
         );
         assert!(task_of(&core_kinds(), "commit:abc").is_err());

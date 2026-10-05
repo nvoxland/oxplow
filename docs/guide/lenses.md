@@ -276,9 +276,7 @@ extension's provider is the one chosen as "Active for work items"; with
 any other provider active you see oxplow's Board. A small "replaced by"
 badge says whose it is, and if it can't load, oxplow's Board shows with a
 line saying why. To keep oxplow's Board regardless, tick "Always use
-oxplow's own board" on Settings → Integrations. The Linear example
-(`examples/extensions/linear`) does this to show issues under Linear's own
-workflow states.
+oxplow's own board" on Settings → Integrations.
 
 ## Sharing
 
@@ -291,7 +289,7 @@ workflow states.
 ## Collectors: bringing in outside data
 
 An extension can declare a **collector**: a script that fetches records from
-somewhere else (GitHub, Linear, your CI) and prints them as JSON. Oxplow
+somewhere else (GitHub, a team's tracker, your CI) and prints them as JSON. Oxplow
 stores them as a view like `v_github_pr` that lenses can join with tasks and
 efforts.
 

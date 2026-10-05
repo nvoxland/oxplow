@@ -153,7 +153,7 @@ pub fn impact_kind(kind: &str) -> Option<&'static str> {
 
 /// Edges contributed by the union of every effort's declared
 /// impacts, from the work item `source` (its provider-scoped id,
-/// `oxplow:tsk7` or `linear:ENG-12`). Self references are filtered out
+/// `oxplow:tsk7` or `issues:ENG-12`). Self references are filtered out
 /// (an effort on tsk7 declaring it "completed" tsk7 is implicit).
 pub fn effort_impact_edges(source: &str, impacts: &[TaskImpact]) -> Vec<PageRefEdge> {
     let mut out = Vec::new();

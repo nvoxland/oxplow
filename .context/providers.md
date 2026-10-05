@@ -5,8 +5,8 @@ docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D). This doc
 covers the protocol (D1), the fake provider (D2) and the host with its
 consent and spawn rules (D3), instances with health (D4), the
-conformance kit with `oxplow plugin test` (D5), the reference Linear
-provider (P7.A5) and the MCP adapter (P7.A6).
+conformance kit with `oxplow plugin test` (D5), which trackers are
+backends, and the MCP adapter (P7.A6).
 
 ## The protocol (`crates/oxplow-provider-protocol`)
 
@@ -128,140 +128,18 @@ handed out. Without it the fake forgets on exit, and a declared
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 
-## The Linear provider (`crates/oxplow-provider-linear`)
+## Which trackers are backends (decided 2026-10-05)
 
-The reference external provider (P7.A5): a native program, lib + bin in
-the fake's layout, speaking the protocol on stdio and Linear's GraphQL
-API over reqwest (`graphql.rs`: one POST per operation with its
-`operationName`, `Authorization: <LINEAR_API_KEY>`, `LINEAR_API_URL`
-overriding `https://api.linear.app/graphql`). Its example extension is
-`examples/extensions/linear` (`sharing: private`; `network:
-[api.linear.app]`, `credentials: [LINEAR_API_KEY]`, `env:
-[LINEAR_API_URL]`).
-
-- **An instance is one team**, optionally one project. `config_schema`
-  is `{ team, project?, blocked_state? }` with `additionalProperties:
-  false` — **the key is never config**: it is the credential, set on
-  Settings → Integrations into the keychain and handed over as env.
-  `check` needs the credential named and present (a problem at `""`
-  otherwise, or when Linear refuses the key), resolves the team by key
-  (`/team`), its workflow states, the blocked state (`/blocked_state`,
-  default "Blocked") and the project by name (`/project`); an unknown
-  config key is a problem at its path. The handle is `linear:<team>` or
-  `linear:<team>/<project>`, kept in the process (the host re-checks on
-  every start).
-- **Items**: `work_item:linear:<identifier>` (`ENG-12`), the issue's
-  uuid, url and priority under `native`, the description as `body`, the
-  parent's identifier as `parent_ref`, a trashed issue `deleted`.
-- **States** (`states.rs`): by type — triage, backlog, unstarted →
-  todo; started → in_progress; completed → done; canceled → canceled —
-  except the team state named by `blocked_state`, which is blocked. A
-  move to a canonical state lands on its first state by position (todo:
-  unstarted, then backlog, then triage); a `native_state` must be one of
-  the canonical state's (`/native_state` otherwise).
-- **Verbs** (all features: hierarchy, comments, links, delete):
-  `create` → `issueCreate` (the team, the project, `native.priority`);
-  `update` → `issueUpdate` (`parent_ref: ""` detaches); `transition` →
-  the issue's current state (for the inverse) then `issueUpdate`;
-  `link` → `issueRelationCreate` (`blocks`, `relates_to` → `related`,
-  `duplicates` → `duplicate`; other link types refused); `comment` →
-  `commentCreate`; `delete` → the issue then `issueDelete` (Linear's
-  trash). Each records the issue as it now stands. **A create sent with
-  an idempotency key carries a client `id`** (P10, `client_id`: a
-  v4-shaped UUID built from the bytes of a v5 UUID over the verb and the
-  key — stable per key, in the form a client-chosen Linear id takes,
-  tsk931) on `issueCreate`, `commentCreate` and `issueRelationCreate`; a
-  create refused whose id already names what it would make was sent
-  before and landed, so the provider looks it up (`issue` / `comment` /
-  `issueRelation` by id) and answers with it. When the lookup finds
-  nothing the refusal was the create's own — answered as Linear said it,
-  at no field when Linear names none (the parent was resolved before the
-  create was sent; `LinearSim::refuse_next_of`, tsk946) — and so is an
-  update's, a comment's, a transition's or a link's: any field it sent may
-  be what Linear refused, and the refs a comment, transition or link names
-  were resolved first, each blamed on its field when that fails (tsk1006);
-  only a delete, whose one input is its ref, blames its ref; when the lookup itself fails
-  (rate limited, unreachable) that is the answer, since only it could say
-  whether the write landed (`LinearSim::rate_limit_next_of`). It
-  does **not** declare `idempotent_writes` until a live run confirms
-  Linear refuses a repeated client id (`LinearSim` refuses one;
-  `a_repeated_create_is_one_issue`). A missing issue named
-  in an input object (looked up first, below) is `InvalidInput` at its
-  field; one named by a top-level `id` is whatever Linear answers —
-  `InvalidInput` only if it tags the error `INVALID_INPUT` (to verify
-  against a real workspace in the GUI walk, tsk469). A top-level `id` argument takes the
-  identifier, but **an input object's issue field takes the uuid**
-  (`parentId`, `issueId`, `relatedIssueId`), so a parent, a link's two
-  ends and a commented issue are looked up first (`uuid_of`, one `Issue`
-  query each; tsk717).
-- **Collector `issues`**: the team's (and project's) issues with
-  `updatedAt` after `state.since`, `includeArchived`, 50 a page from
-  `state.after`. Each page sends `$/progress` (`issues: page N`), its
-  records, then the checkpoint `{ since, after, until }` (`until`: the
-  latest update seen); the last page's is `{ since: until }`, so the next
-  read starts after everything this one saw. An issue that maps to no
-  record (no identifier or state, or a state type outside the table) is
-  skipped with a `$/progress` line and a stderr line, and the checkpoint
-  still moves past it — one odd issue never fails every read (tsk718).
-- **Errors**: HTTP 429 or GraphQL `RATELIMITED` → `RateLimited` with
-  `Retry-After` (else `X-RateLimit-Requests-Reset`); 401 or
-  `AUTHENTICATION_ERROR` → `Auth`; `INVALID_INPUT` → `InvalidInput`.
-
-**Tested against a simulator, not cassettes** — a deliberate change from
-the plan's recorded cassettes: there was no Linear workspace to record
-from, and a hand-written "recording" would claim a fidelity it doesn't
-have. `sim.rs` (`LinearSim`) is an HTTP server on localhost that
-answers the operations this provider sends, by `operationName`, over an
-in-memory team `ENG` (Linear's default workflow plus `Blocked`) and
-project `Roadmap`; it logs every request, checks the key and can refuse
-the next request as rate limited, and refuses an identifier where Linear
-takes only a uuid (an input object's issue field). `tests/linear.rs` pins what each verb
-sends (operation and variables) and records, `check`'s problems, the
-paging read and its cursor, and a rate limit; `tests/kit.rs` runs the
-example through `oxplow plugin test` — handshake, check, its `create`
-example, the read-back and the work-items suite through a throwaway host
-— with the copied manifest's `network` widened to the simulator's
-`localhost` (`OXPLOW_BLESS=1` rewrites the golden transcript). **What
-Linear actually accepts is checked by a person against a real
-workspace** (the P7 walk): the simulator encodes this provider's
-reading of Linear's schema (issue ids accept the identifier, `trashed`
-marks a deleted issue), not Linear.
-
-**Live** (P9.B5; `tests/live.rs`). The same `plugin test` run against a
-real workspace, when asked for:
-
-```text
-OXPLOW_LIVE_LINEAR=1 LINEAR_API_KEY=lin_api_… LINEAR_TEAM=ENG \
-    cargo test -p oxplow-provider-linear --test live -- --nocapture
-```
-
-Without all three the test prints that it was skipped and passes; CI
-never sets them. It copies the example into a throwaway repo, points its
-fixture config at `LINEAR_TEAM`, runs `test_extension_in` with `bless` (a
-workspace's ids, numbers and times can't match the golden, so the
-transcript is written into the copy, not compared) in an environment of
-its own — the key, and `LINEAR_API_URL` only for the simulator
-(`common::linear_env`; tsk832: the simulator's run and a live one share a
-binary, so neither may `set_var` what the other's provider reads) — and then
-**trashes exactly the issues the run reports it left** (`TestReport.left`;
-`issueDelete` by identifier) — whatever the run came to. Never a time
-window: an issue filed by hand meanwhile, or by another run with the same
-key, stays, and a clock that isn't Linear's doesn't matter (tsk833).
-The suite is one function, and `the_live_suite_runs_and_cleans_up_against_the_simulator`
-runs it against `LinearSim` on every build, so the path a live run takes
-is exercised, cleanup included (an issue filed beside the run is still
-there after it). **Nobody has run it against a workspace
-yet** (there is none; a decision, 2026-10-03): whether Linear accepts the
-`issueDelete` by identifier, and everything the simulator assumes, is what the first
-live run — or the GUI walk, tsk469 — will show.
-
-**Try it**: `scripts/install-linear.sh <project>` builds the binary into
-the project's copy of the example (consent hashes the folder, so the
-binary must live in it); enable the extension, approve its program on
-Settings → Data → Programs, then on Settings → Integrations set
-`LINEAR_API_KEY` and the team, Check and Enable. A second team or
-workspace is another instance of the same provider (`tracker/linear_acme:
-{ provider: linear, … }`, "Instances" below), with its own key.
+A work-items provider is a **backend for the project's own work**: when
+it's the active tracker, every new item goes to it ([work-items.md](./work-items.md)
+"One write surface"). So it should have the visibility the person wants
+for that work — usually still just theirs, like oxplow's own list or a
+local tracker such as beads (filed as the example to build). A team's
+tracker (Linear, GitHub Issues) isn't one: an agent's every small task
+would land in the team's tracker. At most it would be a separate view of
+work, read in through a collector. The reference Linear provider (P7.A5)
+was an experiment to prove the protocol and was removed; the fake
+provider and `tests-e2e/fixtures/extension` are the complete example.
 
 ## The MCP adapter (`crates/oxplow-provider-mcp`)
 
@@ -503,9 +381,9 @@ the provider are answered `MethodNotFound`.
 
 ```yaml
 extensionInstances:
-  tracker/linear: { enabled: true, config: { team: ENG } }
-  # A second workspace: its own id, saying which provider it is (P9.B1).
-  tracker/linear_acme: { enabled: true, provider: linear, config: { team: ACME } }
+  tracker/issues: { enabled: true, config: { team: ENG } }
+  # A second account: its own id, saying which provider it is (P9.B1).
+  tracker/issues_acme: { enabled: true, provider: issues, config: { team: ACME } }
 ```
 
 **An instance id** follows the provider id's rule — one rule,
@@ -524,8 +402,8 @@ One spelling everywhere, because the id is used as it stands:
 
 | Keyed on the **instance id** | Keyed on the **provider (program)** |
 |---|---|
-| the ref segment (`work_item:linear_acme:ENG-1`) and `check_subject` | the consent key `provider:<ext>/<provider id>` and its hash |
-| the bus namespace (`linear_acme.estimate`) | the approved copy (`copies/<ext>/<provider id>/<hash>`) |
+| the ref segment (`work_item:issues_acme:ENG-1`) and `check_subject` | the consent key `provider:<ext>/<provider id>` and its hash |
+| the bus namespace (`issues_acme.estimate`) | the approved copy (`copies/<ext>/<provider id>/<hash>`) |
 | the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | Data → Programs' row, `declaration_effects` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
 | `plugin_health.contribution`, `provider_collector_state.instance` (the name) | |
@@ -555,7 +433,7 @@ instance restarts on it) — RPCs `add_provider_instance`,
 `remove_provider_instance`, `set_instance_credential`, UI only. A
 provider's credential is its instance's: collectors keep the
 extension's `source:<project>:<ext>:<name>` accounts. An extension's
-`ui.commands` name the default instance's commands (`linear.estimate`);
+`ui.commands` name the default instance's commands (`issues.estimate`);
 another instance's are on the bus under its own namespace.
 
 **Scope** (P9.B2). An instance is the **project's** (above: shared with
@@ -1083,9 +961,8 @@ tell it is the same write. The contract (P10, built):
   declares it and doesn't keep it fails.
 
 The fake declares and keeps it, which proves the host and nothing about a
-service. Linear takes a client-chosen `id` on its creates, so the reference
-provider sends one derived from the key (see "The Linear provider"), but
-declares nothing until a live run confirms a repeated id is refused.
+service: a real provider declares it only once its service is known to do
+a keyed write once.
 
 ## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
 

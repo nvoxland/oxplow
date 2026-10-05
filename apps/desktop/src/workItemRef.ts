@@ -3,7 +3,7 @@
  * `oxplow_domain::refs::build` work-item helpers (`.context/refs.md`).
  *
  * An effort is on a WORK ITEM: an oxplow task (`work_item:oxplow:tsk42`)
- * or another provider's item (`work_item:linear:ENG-12`). Only the first
+ * or another provider's item (`work_item:issues:ENG-12`). Only the first
  * has a task page; everything else is shown by its label.
  */
 
@@ -21,7 +21,7 @@ export function taskIdOfWorkItemRef(ref: string): string | null {
 }
 
 /** How a person names a work item: `tsk42` for an oxplow task, the
- *  provider-scoped id (`linear:ENG-12`) otherwise. */
+ *  provider-scoped id (`issues:ENG-12`) otherwise. */
 export function workItemLabel(ref: string): string {
   const task = taskIdOfWorkItemRef(ref);
   if (task) return task;

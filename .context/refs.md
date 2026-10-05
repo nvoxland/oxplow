@@ -20,7 +20,7 @@ frag := kind-defined                file/dir: L10 or L10-20
 ```
 
 Examples: `effort:eff362`, `commit:4c44d495`, `work_item:oxplow:tsk42`,
-`work_item:linear:ENG-12`, `file:src/a.rs@git:HEAD#L10-20`,
+`work_item:issues:ENG-12`, `file:src/a.rs@git:HEAD#L10-20`,
 `lens:acme/blocked?stream_id=2`, `page:settings`.
 
 **Parsing rules,** in this order: the first `:` ends the kind; the first
@@ -60,7 +60,7 @@ revisioned, provider_scoped, wikilink_prefixes }` and
 kind, id shape and whether it may carry `@rev`). `core_kinds()` registers
 the §4.2 vocabulary plus `finding`, `task_note` and `run`. Only
 `work_item` is provider-scoped in P1 (`oxplow:tsk42`,
-`linear:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
+`issues:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
 capability's active provider.
 
 `config` (a config key, `config:zones`) is registered too (P2.4b, tsk450).

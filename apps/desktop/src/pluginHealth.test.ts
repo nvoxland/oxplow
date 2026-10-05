@@ -111,8 +111,8 @@ test("the repair mention names the repair item as a ref, on one line", () => {
 
 test("Repair with the Agent fills the agent input with the mention, and only that", () => {
   const inserted: string[] = [];
-  repairWithAgent("work_item:linear:ENG-12", (t) => inserted.push(t));
-  expect(inserted).toEqual(["Repair the extension described in [oxplow ref work_item:linear:ENG-12] — read it first."]);
+  repairWithAgent("work_item:issues:ENG-12", (t) => inserted.push(t));
+  expect(inserted).toEqual(["Repair the extension described in [oxplow ref work_item:issues:ENG-12] — read it first."]);
 });
 
 test("Enable Again runs plugin.enable as the person", async () => {

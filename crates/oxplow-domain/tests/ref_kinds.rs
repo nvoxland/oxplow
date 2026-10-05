@@ -127,7 +127,7 @@ fn wikilink_sugar_translates_to_canonical_refs() {
         ("src/a.rs@disk", "file:src/a.rs"),
         ("src/a.rs@local:7", "file:src/a.rs#L7"),
         // Already-canonical refs pass through, including provider-scoped ones.
-        ("work_item:linear:ENG-12", "work_item:linear:ENG-12"),
+        ("work_item:issues:ENG-12", "work_item:issues:ENG-12"),
         (
             "file:src/a%40b.rs@git:HEAD#L1",
             "file:src/a%40b.rs@git:HEAD#L1",

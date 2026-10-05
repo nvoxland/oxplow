@@ -4,12 +4,12 @@ import type { ProviderInstanceView } from "../tauri-bridge/generated/bindings.js
 import { canRemoveInstance, integrationRow, newInstanceProblem, providerPrograms, signInLine } from "./integrationsModel.js";
 
 const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
-  instance: "tracker/linear",
+  instance: "tracker/issues",
   scope: "project",
   overridden: false,
   extension: "tracker",
-  provider: "linear",
-  instanceId: "linear",
+  provider: "issues",
+  instanceId: "issues",
   capability: "work_items",
   enabled: false,
   config: {},
@@ -23,7 +23,7 @@ const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
 
 test("integrationRow says where an instance stands and what the person can do", () => {
   const off = integrationRow(view({}));
-  expect([off.label, off.status, off.enableLabel]).toEqual(["tracker/linear · work items", "Off", "Enable"]);
+  expect([off.label, off.status, off.enableLabel]).toEqual(["tracker/issues · work items", "Off", "Enable"]);
   expect(off.needsApproval).toBe(false);
 
   const unapproved = integrationRow(view({ approved: false, enabled: true, health: { ...view({}).health, state: { state: "unapproved" } } }));
@@ -59,14 +59,14 @@ test("integrationRow says where an instance stands and what the person can do", 
 test("work-items choices list oxplow then each declared provider, and name a provider that can't file", async () => {
   const { workItemsChoices, activeProviderProblem } = await import("./integrationsModel.js");
   const ready = view({ enabled: true, health: { ...view({}).health, state: { state: "ready" } } });
-  const choices = workItemsChoices([ready, view({ instance: "other/linear" })]);
+  const choices = workItemsChoices([ready, view({ instance: "other/issues" })]);
   expect(choices.map((c) => [c.id, c.running])).toEqual([
     ["oxplow", true],
-    ["linear", true],
+    ["issues", true],
   ]);
   expect(activeProviderProblem(choices, "oxplow")).toBeNull();
-  expect(activeProviderProblem(choices, "linear")).toBeNull();
-  expect(activeProviderProblem(workItemsChoices([view({})]), "linear")).toContain("isn't running");
+  expect(activeProviderProblem(choices, "issues")).toBeNull();
+  expect(activeProviderProblem(workItemsChoices([view({})]), "issues")).toContain("isn't running");
   expect(activeProviderProblem(choices, "jira")).toContain("No enabled extension declares `jira`");
 });
 
@@ -77,12 +77,12 @@ test("each instance of a provider is its own choice, by instance id", async () =
   const ready = { ...view({}).health, state: { state: "ready" as const } };
   const choices = workItemsChoices([
     view({ enabled: true, health: ready }),
-    view({ instance: "tracker/linear_acme", instanceId: "linear_acme", enabled: true, health: ready }),
+    view({ instance: "tracker/issues_acme", instanceId: "issues_acme", enabled: true, health: ready }),
   ]);
   expect(choices.map((c) => [c.id, c.label])).toEqual([
     ["oxplow", "oxplow's tasks"],
-    ["linear", "linear (tracker/linear)"],
-    ["linear_acme", "linear_acme (tracker/linear_acme)"],
+    ["issues", "issues (tracker/issues)"],
+    ["issues_acme", "issues_acme (tracker/issues_acme)"],
   ]);
 });
 
@@ -91,12 +91,12 @@ test("each instance of a provider is its own choice, by instance id", async () =
 test("a global instance's row says whose it is", () => {
   const ready = { ...view({}).health, state: { state: "ready" as const } };
   expect(integrationRow(view({ scope: "global", enabled: true, health: ready })).label).toBe(
-    "tracker/linear · work items · yours, in every project",
+    "tracker/issues · work items · yours, in every project",
   );
   // A project's own entry replacing a global one is the project's
   // (its credentials too, tsk838).
   expect(integrationRow(view({ scope: "project", overridden: true })).label).toBe(
-    "tracker/linear · work items · this project's, replacing yours",
+    "tracker/issues · work items · this project's, replacing yours",
   );
   const unapproved = integrationRow(
     view({ scope: "global", approved: false, enabled: true, health: { ...view({}).health, state: { state: "unapproved" } } }),
@@ -104,7 +104,7 @@ test("a global instance's row says whose it is", () => {
   expect(unapproved.status).toBe(
     "Not approved in this project: its program is approved per project, under Data → Programs",
   );
-  expect(integrationRow(view({})).label).toBe("tracker/linear · work items");
+  expect(integrationRow(view({})).label).toBe("tracker/issues · work items");
 });
 
 test("a missing instance says why, and what to add", () => {
@@ -112,10 +112,10 @@ test("a missing instance says why, and what to add", () => {
     view({
       instance: "tracker/acme",
       instanceId: "acme",
-      health: { ...view({}).health, state: { state: "missing", reason: "`tracker/acme`: add `provider: linear`" } },
+      health: { ...view({}).health, state: { state: "missing", reason: "`tracker/acme`: add `provider: issues`" } },
     }),
   );
-  expect(missing.status).toBe("`tracker/acme`: add `provider: linear`");
+  expect(missing.status).toBe("`tracker/acme`: add `provider: issues`");
   expect(missing.problem).toBe(true);
 });
 
@@ -166,29 +166,29 @@ test("signInLine says where a sign-in stands", () => {
 test("providerPrograms lists each provider once, whatever its instances", () => {
   const views = [
     view({}),
-    view({ instance: "tracker/linear_acme", instanceId: "linear_acme" }),
+    view({ instance: "tracker/issues_acme", instanceId: "issues_acme" }),
     view({ instance: "notes/notes", extension: "notes", provider: "notes", instanceId: "notes" }),
   ];
   expect(providerPrograms(views)).toEqual([
     { key: "notes/notes", extension: "notes", provider: "notes" },
-    { key: "tracker/linear", extension: "tracker", provider: "linear" },
+    { key: "tracker/issues", extension: "tracker", provider: "issues" },
   ]);
 });
 
 test("newInstanceProblem says what's wrong with a new instance's name", () => {
-  const views = [view({}), view({ instance: "tracker/linear_acme", instanceId: "linear_acme" })];
-  expect(newInstanceProblem(views, "linear_two")).toBeNull();
+  const views = [view({}), view({ instance: "tracker/issues_acme", instanceId: "issues_acme" })];
+  expect(newInstanceProblem(views, "issues_two")).toBeNull();
   expect(newInstanceProblem(views, "")).toBe("");
-  expect(newInstanceProblem(views, "Linear-Two")).toContain("lowercase letters, digits and underscores");
+  expect(newInstanceProblem(views, "Issues-Two")).toContain("lowercase letters, digits and underscores");
   expect(newInstanceProblem(views, "2nd")).toContain("starting with a letter");
-  expect(newInstanceProblem(views, "linear_acme")).toBe("`linear_acme` is already an instance");
-  expect(newInstanceProblem(views, "linear")).toBe("`linear` is already an instance");
+  expect(newInstanceProblem(views, "issues_acme")).toBe("`issues_acme` is already an instance");
+  expect(newInstanceProblem(views, "issues")).toBe("`issues` is already an instance");
   expect(newInstanceProblem(views, "oxplow")).toBe("`oxplow` is oxplow's own");
 });
 
 test("canRemoveInstance: a named instance, a project's replacement, or one whose provider is gone", () => {
   expect(canRemoveInstance(view({}))).toBe(false);
-  expect(canRemoveInstance(view({ instance: "tracker/linear_acme", instanceId: "linear_acme" }))).toBe(true);
+  expect(canRemoveInstance(view({ instance: "tracker/issues_acme", instanceId: "issues_acme" }))).toBe(true);
   expect(canRemoveInstance(view({ scope: "global", overridden: true }))).toBe(true);
   expect(canRemoveInstance(view({ health: { ...view({}).health, state: { state: "missing", reason: "gone" } } }))).toBe(true);
 });

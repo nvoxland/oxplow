@@ -363,7 +363,7 @@
   description: "Efforts: one bracketed span of work on a work item (an oxplow task, or another provider's item), between a start and an end snapshot."
   columns:
     - { name: "id", type: "INTEGER", doc: "Effort id." }
-    - { name: "work_item", type: "TEXT", doc: "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:linear:ENG-12`." }
+    - { name: "work_item", type: "TEXT", doc: "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:issues:ENG-12`." }
     - { name: "task_id", type: "", doc: "The oxplow task worked on (v_task.id); NULL for another provider's work item." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread that did the work." }
     - { name: "stream_id", type: "INTEGER", doc: "That thread's stream." }

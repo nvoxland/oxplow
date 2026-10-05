@@ -85,7 +85,7 @@ tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
 typenum = { version = "1", default-features = false, features = ["const-generics"] }
 url = { version = "2", features = ["serde"] }
-uuid = { version = "1", features = ["fast-rng", "serde", "v4", "v5", "v7"] }
+uuid = { version = "1", features = ["fast-rng", "serde", "v4", "v7"] }
 
 [build-dependencies]
 Inflector = { version = "0.11" }

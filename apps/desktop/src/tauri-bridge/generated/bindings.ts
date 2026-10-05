@@ -2473,8 +2473,8 @@ export type ExtensionInstanceConfig = {
 	syncMinutes?: number | null,
 	/**
 	 *  Which of the extension's providers this is an instance of, for an
-	 *  instance whose id isn't a provider's own (`tracker/linear_acme:
-	 *  { provider: linear }` — a second Linear workspace). Absent, the
+	 *  instance whose id isn't a provider's own (`tracker/issues_acme:
+	 *  { provider: issues }` — a second account on the same tracker). Absent, the
 	 *  instance id is the provider id.
 	 */
 	provider?: string | null,
@@ -4140,7 +4140,7 @@ export type OxplowConfig = {
 	extensionInstances: { [key in string]: ExtensionInstanceConfig },
 	/**
 	 *  Each swappable capability's active provider
-	 *  (`activeProviders: { work_items: linear }`); a capability absent
+	 *  (`activeProviders: { work_items: issues }`); a capability absent
 	 *  here keeps oxplow's own.
 	 */
 	activeProviders: { [key in string]: string },

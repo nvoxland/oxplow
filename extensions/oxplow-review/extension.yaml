@@ -140,7 +140,7 @@ commands:
         expect_commands: [work_item.comment, work_item.transition]
       - name: another provider's item
         input: { ref: "effort:eff2" }
-        rows: [{ work_item: "work_item:linear:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        rows: [{ work_item: "work_item:issues:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
         expect_commands: [work_item.comment, work_item.transition]
       - name: no work item
         input: { ref: "effort:eff3" }
@@ -179,7 +179,7 @@ commands:
         refuses: nothing to ask for
       - name: another provider's item
         input: { ref: "effort:eff2", note: "Add the migration." }
-        rows: [{ work_item: "work_item:linear:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        rows: [{ work_item: "work_item:issues:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
         expect_commands: [work_item.comment, work_item.transition]
       - name: no work item
         input: { ref: "effort:eff3", note: "x" }

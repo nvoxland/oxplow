@@ -155,7 +155,7 @@ layer everything else builds on.
   Sources produce entities and facts, dimensions slice them, metrics
   aggregate them, and read-only `v_*` SQL views are the contract. Core
   ships common sources (work, wiki, git, LSP, tests, agent sessions…);
-  users and their agents add more (GitHub, Linear…) and build **lenses** on
+  users and their agents add more (GitHub, CI…) and build **lenses** on
   top.
 - **One extension format for first- and third-party.** Oxplow's own
   analytics are the bundled `oxplow-analytics` example extension,

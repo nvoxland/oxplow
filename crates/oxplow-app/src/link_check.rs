@@ -305,7 +305,7 @@ mod tests {
         let services = Services::in_memory(dir.path()).unwrap();
         let warnings = check_links(
             &services,
-            "See [[effort:eff1]] and [[work_item:linear:ENG-12]].",
+            "See [[effort:eff1]] and [[work_item:issues:ENG-12]].",
         )
         .await;
         assert!(warnings.is_empty(), "got {warnings:?}");

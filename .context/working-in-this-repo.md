@@ -294,12 +294,12 @@ script asked for.
 
 What the hack leaves out, and why (tsk885):
 
-- **The providers stay out.** `oxplow-provider-{fake,linear,mcp}`,
+- **The providers stay out.** `oxplow-provider-{fake,mcp}`,
   `oxplow-provider-protocol` and the crates they're built from
   (`oxplow-domain`, `oxplow-collect-plugin`, `oxplow-code-dup`,
   `oxplow-code-metrics`, `oxplow-coverage`) are traversal-excluded and
   don't depend on the hack: a provider ships as its own binary
-  (`scripts/install-linear.sh` builds it with `-p`) and is built from its
+  (built with `-p`) and is built from its
   own dependencies only. Their second copy inside a workspace build is
   small.
 - **The desktop stack stays out.** Tauri and the crates only it pulls in
@@ -334,15 +334,6 @@ aws-lc-rs).
 - Debug info isn't the lever: a fresh workspace build is ~17 GB, its
   object files 1.8 GB (`debug = "line-tables-only"`, none for
   dependencies), so `split-debuginfo` isn't set.
-
-## Installing the Linear provider (`scripts/install-linear.sh`)
-
-`scripts/install-linear.sh <project>` builds `oxplow-provider-linear`
-(release) and copies `examples/extensions/linear` into the project's
-`oxplow/extensions/linear` with the binary at its entry. The binary must
-live in the extension folder: consent hashes the folder, so what a person
-approves is exactly what runs, and a rebuild shows up unapproved again
-(P7.A5, [providers.md](./providers.md) → "The Linear provider").
 
 ## Recording a fresh agent (`scripts/record-just-works.sh`)
 

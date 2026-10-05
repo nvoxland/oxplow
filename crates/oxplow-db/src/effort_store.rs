@@ -2,7 +2,7 @@
 //!
 //! An "effort" is one continuous push of agent work on a single work
 //! item (an oxplow task, `work_item:oxplow:tsk42`, or another provider's
-//! item, `work_item:linear:ENG-12`),
+//! item, `work_item:issues:ENG-12`),
 //! bounded by snapshots at start and end. This module owns:
 //!
 //! - `effort` (the effort row)
@@ -1714,7 +1714,7 @@ mod tests {
         assert_eq!(eff.work_item, ours);
         assert_eq!(eff.task_id(), Some(tid));
 
-        let foreign = "work_item:linear:ENG-12";
+        let foreign = "work_item:issues:ENG-12";
         store.finish(&eff.id, None, None).await.unwrap();
         let other = store.start(foreign, &t, None).await.unwrap();
         assert_eq!(other.task_id(), None);
@@ -1954,7 +1954,7 @@ mod tests {
     #[tokio::test]
     async fn effort_open_and_close_are_logged_with_the_write() {
         let (store, db, tid, t) = fixture_with_db().await;
-        let foreign = "work_item:linear:ENG-12";
+        let foreign = "work_item:issues:ENG-12";
         let eff = store.start(foreign, &t, Some(1)).await.ok();
         // No snapshot 1 exists; the FK refuses it and nothing is logged.
         assert!(eff.is_none());

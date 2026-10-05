@@ -89,14 +89,14 @@ fn errors_keep_their_meaning() {
 #[test]
 fn auth_carries_its_credential() {
     let named = ProtocolError::Auth {
-        message: "Linear refused it".into(),
-        credential: Some("LINEAR_API_KEY".into()),
+        message: "the tracker refused it".into(),
+        credential: Some("TRACKER_TOKEN".into()),
     };
     let wire = ErrorObject::from(&named);
     assert_eq!(wire.code, AUTH);
     assert_eq!(
         wire.data,
-        Some(serde_json::json!({ "credential": "LINEAR_API_KEY" }))
+        Some(serde_json::json!({ "credential": "TRACKER_TOKEN" }))
     );
     assert_eq!(ProtocolError::from(wire), named);
     let unnamed = ProtocolError::Auth {

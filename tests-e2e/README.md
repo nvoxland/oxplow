@@ -100,7 +100,7 @@ this machine sending no request).
 
 What stays a hand walk: the WKWebView window itself, shell-only surfaces
 (project setup, the native menu, the clipboard, external URLs), OAuth
-sign-in and a live Linear run.
+sign-in.
 
 ## Scripts
 

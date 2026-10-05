@@ -43,7 +43,7 @@ unchecked (any at all makes it forced). Read them in `v_event`, or react
 to one from another extension's effect (`on: [oxplow_review.accepted]`).
 
 Both work on any provider's item. On an oxplow task the comment and the
-move are one change you can undo; on another provider's item (Linear, …)
+move are one change you can undo; on another provider's item
 they run in order through the provider — if the move fails the comment
 stays — and can't be undone from oxplow. An effort with no work item is
 refused.

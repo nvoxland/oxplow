@@ -1771,7 +1771,7 @@ mod tests {
         conn.execute(
             &format!(
                 "INSERT INTO effort (id, work_item, thread_id, started_at)
-                   VALUES (2, 'work_item:linear:ENG-1', 1, '{now}')"
+                   VALUES (2, 'work_item:issues:ENG-1', 1, '{now}')"
             ),
             [],
         )
@@ -1787,7 +1787,7 @@ mod tests {
             .execute(
                 &format!(
                     "INSERT INTO effort (work_item, thread_id, started_at)
-                       VALUES ('work_item:linear:ENG-1', 1, '{now}')"
+                       VALUES ('work_item:issues:ENG-1', 1, '{now}')"
                 ),
                 [],
             )

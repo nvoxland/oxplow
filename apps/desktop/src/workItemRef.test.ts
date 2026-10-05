@@ -8,14 +8,14 @@ describe("work item refs", () => {
   });
 
   test("another provider's item has no task id", () => {
-    expect(taskIdOfWorkItemRef("work_item:linear:ENG-12")).toBeNull();
+    expect(taskIdOfWorkItemRef("work_item:issues:ENG-12")).toBeNull();
     expect(taskIdOfWorkItemRef("work_item:oxplow:nope")).toBeNull();
     expect(taskIdOfWorkItemRef("effort:eff1")).toBeNull();
   });
 
   test("labels name a task by its id and anything else by its provider id", () => {
     expect(workItemLabel("work_item:oxplow:tsk42")).toBe("tsk42");
-    expect(workItemLabel("work_item:linear:ENG-12")).toBe("linear:ENG-12");
+    expect(workItemLabel("work_item:issues:ENG-12")).toBe("issues:ENG-12");
     expect(workItemLabel("odd")).toBe("odd");
   });
 });

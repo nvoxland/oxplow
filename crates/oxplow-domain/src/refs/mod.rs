@@ -118,7 +118,7 @@ pub fn validate_ref(kinds: &KindRegistry, r: &str) -> Result<CanonicalRef, crate
 /// Translate one `[[…]]` interior (already `|`-split and trimmed) into
 /// the canonical ref it names, or `None` when it matches no known shape.
 /// Accepts the canonical form itself (`[[commit:abc1234]]`,
-/// `[[work_item:linear:ENG-12]]`) and the human sugar:
+/// `[[work_item:issues:ENG-12]]`) and the human sugar:
 /// - `tsk<digits>` → `work_item:oxplow:tsk<digits>`
 /// - `git:<sha>` or a bare 7–40 hex sha → `commit:<sha>`
 /// - `dir:<path>` → `dir:<path>`

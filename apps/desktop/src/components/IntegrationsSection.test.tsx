@@ -175,10 +175,10 @@ test("choosing a provider as active runs config.set as the person; oxplow unsets
 });
 
 test("an active provider that isn't running is said so", async () => {
-  active = { work_items: "linear" };
+  active = { work_items: "issues" };
   const view = render(<IntegrationsSection />);
   const problem = await waitFor(() => view.getByTestId("integrations-active-problem"));
-  expect(problem.textContent).toContain("No enabled extension declares `linear`");
+  expect(problem.textContent).toContain("No enabled extension declares `issues`");
 });
 
 // P7.A3: a running instance's collector shows its last read and records,

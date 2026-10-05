@@ -256,7 +256,7 @@ mod tests {
             .await
             .unwrap();
         let foreign = effort_writer
-            .start("work_item:linear:ENG-12", &ThreadId::new(1), None)
+            .start("work_item:issues:ENG-12", &ThreadId::new(1), None)
             .await
             .unwrap();
         effort_writer
@@ -267,7 +267,7 @@ mod tests {
         let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
         // Wipe the slices the writes just projected so the table looks
         // like a DB written before ref mirroring existed.
-        for source in [format!("oxplow:{task_id}"), "linear:ENG-12".to_string()] {
+        for source in [format!("oxplow:{task_id}"), "issues:ENG-12".to_string()] {
             page_refs
                 .replace_source("work_item", &source, Vec::new())
                 .await
@@ -314,7 +314,7 @@ mod tests {
                 .iter()
                 .map(|r| r.source_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["linear:ENG-12"]
+            vec!["issues:ENG-12"]
         );
         // … and a declared impact survives the backfill.
         let impacts = page_refs

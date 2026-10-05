@@ -320,8 +320,12 @@ names the file and line and says what to change.
    sign in or set a credential yourself.
    A person approves the provider in Settings → Data → Programs and
    enables it in Settings → Integrations; you can't do either.
-   `examples/extensions/linear/` in the oxplow repo (the Linear provider,
-   `crates/oxplow-provider-linear`) is a complete one: copy its shape.
+   A work-items provider is a **backend for the project's own work**,
+   with the visibility the person wants (a local tracker like beads), not
+   a team's tracker: when it's the active one, every new item goes there.
+   In the oxplow repo, `tests-e2e/fixtures/extension/` (its manifest and
+   `provider.json`) and `crates/oxplow-provider-fake` (the program) are a
+   complete one: copy their shape.
    An existing **MCP server** can be the provider instead of a program:
    `adapter: { mcp: { command: [bin/server] }, mapping: mcp/x.star,
    tools: mcp/tools.json }` in place of `entry` — oxplow's adapter runs
@@ -466,7 +470,7 @@ collectors:
 
 ## Bringing in outside data (collectors)
 
-When the user wants data oxplow doesn't have (GitHub PRs, Linear issues,
+When the user wants data oxplow doesn't have (GitHub PRs, a team's issues,
 CI runs), add a **collector** to the extension:
 
 - Write a script that prints

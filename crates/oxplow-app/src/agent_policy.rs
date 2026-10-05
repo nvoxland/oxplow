@@ -1158,7 +1158,7 @@ mod tests {
         let (svc, _dir) = services();
         let (_stream, writer) = primary_writer(&svc).await;
         svc.effort_store
-            .start("work_item:linear:ENG-12", &writer.id, None)
+            .start("work_item:issues:ENG-12", &writer.id, None)
             .await
             .unwrap();
         assert!(stream_has_open_effort(&svc, &writer).await);
@@ -1187,7 +1187,7 @@ mod tests {
             .await
             .unwrap();
         svc.effort_store
-            .start("work_item:linear:ENG-9", &other_thread_id, None)
+            .start("work_item:issues:ENG-9", &other_thread_id, None)
             .await
             .unwrap();
         assert!(!stream_has_open_effort(&svc, &writer).await);

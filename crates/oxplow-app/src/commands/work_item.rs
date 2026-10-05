@@ -520,7 +520,7 @@ pub const NAME: &str = "work_item.transition";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemTransitionInput {
-    /// The item's ref (`work_item:oxplow:tsk42`, `work_item:linear:ENG-12`).
+    /// The item's ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`).
     #[serde(rename = "ref")]
     pub item_ref: String,
     pub to: CanonicalState,
@@ -1371,15 +1371,15 @@ mod tests {
         for (name, input) in [
             (
                 NAME,
-                json!({ "ref": "work_item:linear:ENG-12", "to": "done" }),
+                json!({ "ref": "work_item:issues:ENG-12", "to": "done" }),
             ),
             (
                 UPDATE,
-                json!({ "ref": "work_item:linear:ENG-12", "title": "x" }),
+                json!({ "ref": "work_item:issues:ENG-12", "title": "x" }),
             ),
             (
                 COMMENT,
-                json!({ "ref": "work_item:linear:ENG-12", "body": "x" }),
+                json!({ "ref": "work_item:issues:ENG-12", "body": "x" }),
             ),
         ] {
             let err = fx
@@ -1392,7 +1392,7 @@ mod tests {
                 CommandError::Invalid { field, message } => {
                     assert_eq!(field.as_deref(), Some("/ref"), "{name}");
                     assert_eq!(
-                        message, "no work-items provider `linear`; registered: oxplow",
+                        message, "no work-items provider `issues`; registered: oxplow",
                         "{name}"
                     );
                 }
@@ -1589,7 +1589,7 @@ mod tests {
             .write()
             .unwrap()
             .active_providers
-            .insert("work_items".into(), "linear".into());
+            .insert("work_items".into(), "issues".into());
         let err = fx
             .svc
             .commands
@@ -1597,10 +1597,10 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { message, .. } if message.contains("linear")),
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("issues")),
             "{err:?}"
         );
-        assert_eq!(fx.svc.work_items.active(), "linear");
+        assert_eq!(fx.svc.work_items.active(), "issues");
     }
 
     /// P7.A2, tsk1058: every `create` files on the active tracker — oxplow's

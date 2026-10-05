@@ -1366,7 +1366,7 @@ mod tests {
     #[test]
     fn read_collectors_name_a_provider_collector() {
         let (out, errors) = parse(
-            "- { id: issues, runtime: read, provider: { instance: tracker/linear, collector: issues }, trigger: { every: 10m } }",
+            "- { id: issues, runtime: read, provider: { instance: tracker/issues, collector: issues }, trigger: { every: 10m } }",
         );
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(out[0].provider.as_ref().unwrap().collector, "issues");

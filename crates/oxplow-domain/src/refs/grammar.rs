@@ -8,7 +8,7 @@
 //! frag := kind-defined                 e.g. L10-20
 //! ```
 //!
-//! A ref names one thing (`effort:eff362`, `work_item:linear:ENG-12`,
+//! A ref names one thing (`effort:eff362`, `work_item:issues:ENG-12`,
 //! `file:src/a.rs@git:HEAD#L10-20`). Tabs, links, backlinks and agent
 //! context all use this one string identity. Only `@`, `#` and `%` are
 //! reserved in an id, so `work_item:oxplow:tsk42` and

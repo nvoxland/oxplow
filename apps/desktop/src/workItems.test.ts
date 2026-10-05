@@ -48,7 +48,7 @@ test("rows read as work items, with oxplow's own fields when the item is a task"
   const items = itemsFromResult(
     result([
       ["work_item:oxplow:tsk4", "oxplow", "Fix it", "", "in_progress", "in_progress", null, "t0", "t1", 4, 2, "in_progress", "high", 0, "agent", null, 3],
-      ["work_item:linear:ENG-1", "linear", "Theirs", "b", "todo", "Backlog", "work_item:oxplow:tsk4", "t0", "t1", null, null, null, null, null, null, null, 0],
+      ["work_item:issues:ENG-1", "issues", "Theirs", "b", "todo", "Backlog", "work_item:oxplow:tsk4", "t0", "t1", null, null, null, null, null, null, null, 0],
     ]),
   );
   expect(items[0]).toEqual({
@@ -197,7 +197,7 @@ test("capability providers read with their features; an unknown provider has non
   } as unknown as SqlQueryResult);
   expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true, in_progress_opens_effort: true });
   expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false, in_progress_opens_effort: false });
-  expect(featuresFor(providers, "linear")).toEqual({ hierarchy: false, comments: false, links: false, delete: false, in_progress_opens_effort: false });
+  expect(featuresFor(providers, "issues")).toEqual({ hierarchy: false, comments: false, links: false, delete: false, in_progress_opens_effort: false });
   expect(providers.find((p) => p.provider === "fake")?.extension).toBe("tracker");
 });
 

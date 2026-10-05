@@ -40,7 +40,7 @@ platforms = [
 # `.context/working-in-this-repo.md`).
 #
 # The providers are binaries of their own, shipped out of the workspace
-# (`scripts/install-linear.sh` builds one with `-p`): they and the crates
+# (built with `-p`, as the desktop's sidecars are): they and the crates
 # they're built from don't depend on the hack, so a provider is built from
 # its own dependencies only. Their features still count toward the union,
 # so a workspace build and a `-p` build of the core stay the same build.
@@ -52,7 +52,6 @@ workspace-members = [
     "oxplow-coverage",
     "oxplow-domain",
     "oxplow-provider-fake",
-    "oxplow-provider-linear",
     "oxplow-provider-mcp",
     "oxplow-provider-protocol",
 ]

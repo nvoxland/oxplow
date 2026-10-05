@@ -16,9 +16,9 @@ test("entityRows puts core first, formats counts and flags unsynced entities", (
     entity("v_github_pr", "github", "declared", null),
     entity("v_task", "core", "sql", 12345),
     entity("v_commit", "core", "sql", 0),
-    entity("v_linear_issue", "linear", "entity", 7),
+    entity("v_issues_issue", "issues", "entity", 7),
   ]);
-  expect(rows.map((r) => r.name)).toEqual(["v_commit", "v_task", "v_github_pr", "v_linear_issue"]);
+  expect(rows.map((r) => r.name)).toEqual(["v_commit", "v_task", "v_github_pr", "v_issues_issue"]);
   expect(rows[1]!.rows).toBe(new Intl.NumberFormat().format(12345));
   expect(rows[0]!.rows).toBe("0");
   expect(rows[2]!.rows).toBe("Not synced yet");
@@ -65,20 +65,20 @@ test("programRow shows a shared extension's advisories as what they'd say", () =
 test("programRow shows a provider with the secrets and hosts it gets", () => {
   const m = programRow({
     kind: "provider",
-    name: "tracker/linear",
+    name: "tracker/issues",
     program: "oxplow/extensions/tracker/bin/provider",
     args: ["--stdio"],
-    env: ["LINEAR_URL"],
+    env: ["ISSUES_URL"],
     credentials: ["token"],
-    network: ["api.linear.app"],
+    network: ["api.tracker.example"],
     tree: "oxplow/extensions/tracker",
     remote: false,
     approved: false,
     version: "abc",
   });
-  expect(m.label).toBe("Provider tracker/linear");
+  expect(m.label).toBe("Provider tracker/issues");
   expect(m.command).toBe(
-    "oxplow/extensions/tracker/bin/provider --stdio\nenv: LINEAR_URL\ncredentials: token\nreaches: api.linear.app",
+    "oxplow/extensions/tracker/bin/provider --stdio\nenv: ISSUES_URL\ncredentials: token\nreaches: api.tracker.example",
   );
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("every file in oxplow/extensions/tracker");

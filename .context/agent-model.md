@@ -820,7 +820,7 @@ unaffected.
 
 **The Stop audit walks the stream's open efforts** (P2.7):
 `open_efforts_in_stream` lists them (`list_open_for_stream`) as
-`[eff12] tsk42 — <title>`, or `[eff12] linear:ENG-12` for another
+`[eff12] tsk42 — <title>`, or `[eff12] issues:ENG-12` for another
 provider's item, and the directive says to close an oxplow task with
 `run_command command.sequence [work_item.transition → done,
 effort.report]` (or `work_item.transition` it to todo/blocked/canceled)

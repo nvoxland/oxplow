@@ -2,10 +2,14 @@
 
 Tasks, issues, tickets — whatever a provider tracks — behind one
 capability (P5.C). oxplow's own tasks are the
-built-in provider, `oxplow`; an issue tracker is another provider (P5.D
-brings external ones). Reads are SQL; writes are the `work_item.*`
-commands — **one write surface for every provider** (P7.A1), which the
-bus dispatches to the item's provider.
+built-in provider, `oxplow`; another provider (P5.D brings external ones)
+is a **backend that replaces it**: the person picks the active tracker,
+and every new item goes there (tsk1058). So it should have the
+visibility the person wants for their work — usually still just theirs,
+like a local tracker such as beads — not a team's tracker
+([providers.md](./providers.md) "Which trackers are backends"). Reads are
+SQL; writes are the `work_item.*` commands — **one write surface for every
+provider** (P7.A1), which the bus dispatches to the item's provider.
 
 ## The model
 

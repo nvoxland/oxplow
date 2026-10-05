@@ -1,5 +1,5 @@
 //! `effort.open` / `effort.close` (P2.6.4, tsk456): bracket work on a work
-//! item that isn't an oxplow task — `work_item:linear:ENG-12` — so it gets
+//! item that isn't an oxplow task — `work_item:issues:ENG-12` — so it gets
 //! the same snapshots, attribution and review an in_progress task does.
 //! An oxplow task's effort follows its status (`work_item.transition`),
 //! so these commands refuse `work_item:oxplow:…`: opening one directly
@@ -32,7 +32,7 @@ pub const CLOSE: &str = "effort.close";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortOpenInput {
-    /// The work item, as a canonical ref: `work_item:linear:ENG-12`. Not an
+    /// The work item, as a canonical ref: `work_item:issues:ENG-12`. Not an
     /// oxplow task — move the task to `in_progress` instead.
     pub work_item: String,
     /// The thread doing the work (`thr3`); defaults to the caller's. An
@@ -129,8 +129,8 @@ fn within_actor_stream(
 /// A free-standing effort is for items whose provider doesn't open one
 /// itself: refused when `work_item`'s provider is registered and declares
 /// `in_progress_opens_effort` (oxplow's tasks — their effort follows their
-/// status). An unregistered provider's item (`work_item:linear:ENG-12`
-/// with no Linear provider) takes one.
+/// status). An unregistered provider's item (`work_item:issues:ENG-12`
+/// with no provider registered for it) takes one.
 fn opens_its_own_effort(
     registry: &WorkItemsRegistry,
     work_item: &str,
@@ -293,14 +293,14 @@ mod tests {
         }
     }
 
-    const LINEAR: &str = "work_item:linear:ENG-12";
+    const ISSUES: &str = "work_item:issues:ENG-12";
 
     #[tokio::test]
     async fn open_and_close_bracket_a_foreign_work_item_with_their_audit() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let bus = &fx.svc.commands;
         let opened = bus
-            .run(&agent(&fx), OPEN, json!({ "work_item": LINEAR }), false)
+            .run(&agent(&fx), OPEN, json!({ "work_item": ISSUES }), false)
             .await
             .unwrap();
         let effort: EffortId = opened.result["effort"].as_str().unwrap().parse().unwrap();
@@ -311,7 +311,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(row.work_item, LINEAR);
+        assert_eq!(row.work_item, ISSUES);
         assert_eq!(row.thread_id, fx.thread);
         let executed = opened.event_id.clone().unwrap();
         let events = fx.svc.event_log_store.read_after(0, 100).await.unwrap();
@@ -322,7 +322,7 @@ mod tests {
 
         // A second open on the same item is refused, naming the open one.
         let again = bus
-            .run(&agent(&fx), OPEN, json!({ "work_item": LINEAR }), false)
+            .run(&agent(&fx), OPEN, json!({ "work_item": ISSUES }), false)
             .await
             .unwrap_err();
         assert!(again.to_string().contains(&effort.to_string()), "{again}");
@@ -391,7 +391,7 @@ mod tests {
             bus.run(
                 &agent(&fx),
                 OPEN,
-                json!({ "work_item": LINEAR, "thread": "thr999" }),
+                json!({ "work_item": ISSUES, "thread": "thr999" }),
                 false,
             )
             .await
@@ -418,7 +418,7 @@ mod tests {
             bus.run(
                 &agent(&fx),
                 OPEN,
-                json!({ "work_item": LINEAR, "thread": "thr2" }),
+                json!({ "work_item": ISSUES, "thread": "thr2" }),
                 false,
             )
             .await
@@ -443,7 +443,7 @@ mod tests {
             bus.run(
                 &Actor::Human,
                 OPEN,
-                json!({ "work_item": LINEAR, "thread": "thr3" }),
+                json!({ "work_item": ISSUES, "thread": "thr3" }),
                 false,
             )
             .await

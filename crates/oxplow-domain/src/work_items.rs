@@ -162,7 +162,7 @@ pub trait ExternalVerbs: Send + Sync {
     async fn restart(&self);
 }
 
-/// One source of work items: its ref segment (`oxplow`, `linear`), what
+/// One source of work items: its ref segment (`oxplow`, `issues`), what
 /// it supports, and — for a provider outside the bus's transaction — the
 /// verbs the dispatching commands call. `None` is oxplow's own: its verbs
 /// are the commands' `Tx` cores.
@@ -309,10 +309,10 @@ mod tests {
             registry.for_ref("work_item:oxplow:tsk1").unwrap().id,
             "oxplow"
         );
-        let err = registry.for_ref("work_item:linear:ENG-12").err().unwrap();
+        let err = registry.for_ref("work_item:issues:ENG-12").err().unwrap();
         assert_eq!(
             err.to_string(),
-            "no work-items provider `linear`; registered: fake, oxplow"
+            "no work-items provider `issues`; registered: fake, oxplow"
         );
         assert!(matches!(
             registry.for_ref("tsk1").err().unwrap(),
@@ -334,8 +334,8 @@ mod tests {
         let registry = WorkItemsRegistry::new(Arc::new(move || source.lock().unwrap().clone()));
         registry.register(named("oxplow"));
         assert_eq!(registry.active(), "oxplow");
-        *named_now.lock().unwrap() = "linear".into();
-        assert_eq!(registry.active(), "linear");
+        *named_now.lock().unwrap() = "issues".into();
+        assert_eq!(registry.active(), "issues");
         assert!(registry.get(&registry.active()).is_err());
     }
 

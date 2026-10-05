@@ -140,7 +140,7 @@ mod tests {
         store
             .upsert(CapabilityProvider {
                 capability: "work_items".into(),
-                provider: "linear".into(),
+                provider: "issues".into(),
                 extension: Some("tracker".into()),
                 features: json!({}),
                 active: false,
@@ -167,7 +167,7 @@ mod tests {
             .write()
             .unwrap()
             .active_providers
-            .insert("work_items".into(), "linear".into());
+            .insert("work_items".into(), "issues".into());
         let config = crate::config_service::read_config(&fx.svc.config);
         apply_active(&config, &fx.svc.db).await.unwrap();
         assert_eq!(
@@ -175,10 +175,10 @@ mod tests {
             vec![
                 pair("knowledge", "oxplow"),
                 pair("vcs", "git"),
-                pair("work_items", "linear")
+                pair("work_items", "issues")
             ]
         );
-        assert_eq!(fx.svc.work_items.active(), "linear");
+        assert_eq!(fx.svc.work_items.active(), "issues");
         assert!(is_active(&config, "vcs", "git"));
         assert!(!is_active(&config, "work_items", "oxplow"));
     }

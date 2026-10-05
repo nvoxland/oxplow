@@ -653,7 +653,7 @@ mod tests {
         let effort = f
             .svc
             .effort_store
-            .start("work_item:linear:ENG-1", &f.thread, None)
+            .start("work_item:issues:ENG-1", &f.thread, None)
             .await
             .unwrap();
         let rows = run_bundled_lens(
@@ -666,7 +666,7 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("no prompt: {rows}"));
         assert!(
-            prompt.contains("**work_item:linear:ENG-1**"),
+            prompt.contains("**work_item:issues:ENG-1**"),
             "missing the work item in:\n{prompt}"
         );
     }

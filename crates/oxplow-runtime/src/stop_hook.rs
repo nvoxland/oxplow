@@ -50,7 +50,7 @@ pub struct ThreadSnapshot<'a> {
 pub struct OpenEffort {
     /// `eff12`.
     pub effort_id: String,
-    /// `tsk42`, or `linear:ENG-12` for another provider's work item.
+    /// `tsk42`, or `issues:ENG-12` for another provider's work item.
     pub label: String,
     /// The task's title; the label for another provider's work item.
     pub title: String,

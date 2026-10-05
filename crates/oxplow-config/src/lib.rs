@@ -707,7 +707,7 @@ pub struct OxplowConfig {
     #[serde(rename = "extensionInstances")]
     pub extension_instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
     /// Each swappable capability's active provider
-    /// (`activeProviders: { work_items: linear }`); a capability absent
+    /// (`activeProviders: { work_items: issues }`); a capability absent
     /// here keeps oxplow's own.
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
@@ -922,7 +922,7 @@ struct RawConfig {
     /// Instances of extension providers, by `<extension>/<instance id>`: `{ enabled, config, provider? }` (the provider's instance config; `provider` names which of the extension's providers an instance with its own id is). Enabling one runs its program once this machine approved it.
     #[serde(rename = "extensionInstances", default)]
     extension_instances: Option<std::collections::BTreeMap<String, ExtensionInstanceConfig>>,
-    /// Each capability's active provider, by instance id: `{ work_items: linear }` (a provider's default instance has the provider's id). New work items file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
+    /// Each capability's active provider, by instance id: `{ work_items: issues }` (a provider's default instance has the provider's id). New work items file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
     #[serde(rename = "activeProviders", default)]
     active_providers: Option<std::collections::BTreeMap<String, String>>,
     /// Core components that stay oxplow's own, by target: `[work_item.board]`. Listed, an extension's replacement of it (the active provider's `ui.replacements`) isn't shown.
@@ -1496,8 +1496,8 @@ pub struct ExtensionInstanceConfig {
     #[serde(rename = "syncMinutes", default)]
     pub sync_minutes: Option<u32>,
     /// Which of the extension's providers this is an instance of, for an
-    /// instance whose id isn't a provider's own (`tracker/linear_acme:
-    /// { provider: linear }` — a second Linear workspace). Absent, the
+    /// instance whose id isn't a provider's own (`tracker/issues_acme:
+    /// { provider: issues }` — a second account on the same tracker). Absent, the
     /// instance id is the provider id.
     #[serde(default)]
     pub provider: Option<String>,
@@ -3088,17 +3088,17 @@ mod tests {
     #[test]
     fn active_providers_name_one_provider_per_capability() {
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
-        let config = parse("activeProviders: { work_items: linear }\n").unwrap();
-        assert_eq!(config.active_providers["work_items"], "linear");
+        let config = parse("activeProviders: { work_items: issues }\n").unwrap();
+        assert_eq!(config.active_providers["work_items"], "issues");
         let doc = render_project_config(&config, "demo");
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
         assert!(
-            yaml.contains("activeProviders:\n  work_items: linear"),
+            yaml.contains("activeProviders:\n  work_items: issues"),
             "{yaml}"
         );
         let err = parse("activeProviders: { vcs: jj }\n").unwrap_err();
         assert!(err.to_string().contains("work_items"), "{err}");
-        let err = parse("activeProviders: { work_items: Linear-App }\n").unwrap_err();
+        let err = parse("activeProviders: { work_items: Issues-App }\n").unwrap_err();
         assert!(err.to_string().contains("instance id"), "{err}");
         assert!(parse("agents: [claude]\n")
             .unwrap()
@@ -3215,35 +3215,35 @@ mod tests {
     fn an_instance_key_is_an_extension_and_a_snake_case_instance_id() {
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
         let config = parse(
-            "extensionInstances:\n  my-tracker/linear: { enabled: true }\n  my-tracker/linear_acme: { enabled: true, provider: linear }\n",
+            "extensionInstances:\n  my-tracker/issues: { enabled: true }\n  my-tracker/issues_acme: { enabled: true, provider: issues }\n",
         )
         .unwrap();
         assert_eq!(
-            config.extension_instances["my-tracker/linear"].provider,
+            config.extension_instances["my-tracker/issues"].provider,
             None
         );
         assert_eq!(
-            config.extension_instances["my-tracker/linear_acme"]
+            config.extension_instances["my-tracker/issues_acme"]
                 .provider
                 .as_deref(),
-            Some("linear")
+            Some("issues")
         );
         let doc = render_project_config(&config, "demo");
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
-        assert!(yaml.contains("provider: linear"), "{yaml}");
+        assert!(yaml.contains("provider: issues"), "{yaml}");
         assert_eq!(
             yaml.matches("provider:").count(),
             1,
             "absent, it isn't written: {yaml}"
         );
         for bad in [
-            "tracker/Linear",
-            "tracker/linear-acme",
+            "tracker/Issues",
+            "tracker/issues-acme",
             "tracker/1st",
             "tracker/",
-            "/linear",
+            "/issues",
             "tracker/a/b",
-            "linear",
+            "issues",
         ] {
             let err = parse(&format!(
                 "extensionInstances:\n  \"{bad}\": {{ enabled: true }}\n"
@@ -3272,12 +3272,12 @@ mod tests {
             .is_empty());
         let mut global = GlobalInstances::default();
         global.instances.insert(
-            "tracker/linear_acme".into(),
+            "tracker/issues_acme".into(),
             ExtensionInstanceConfig {
                 enabled: true,
                 config: serde_json::json!({ "team": "ACME" }),
                 sync_minutes: None,
-                provider: Some("linear".into()),
+                provider: Some("issues".into()),
             },
         );
         let written = global.instances.clone();
@@ -3289,7 +3289,7 @@ mod tests {
         .unwrap();
         let text = std::fs::read_to_string(dir.path().join(INSTANCES_FILE)).unwrap();
         assert!(
-            text.contains("tracker/linear_acme") && text.contains("provider: linear"),
+            text.contains("tracker/issues_acme") && text.contains("provider: issues"),
             "{text}"
         );
         assert!(
@@ -3300,12 +3300,12 @@ mod tests {
 
         std::fs::write(
             dir.path().join(INSTANCES_FILE),
-            "instances:\n  tracker/Linear: { enabled: true }\n",
+            "instances:\n  tracker/Issues: { enabled: true }\n",
         )
         .unwrap();
         let err = GlobalInstances::load(dir.path()).unwrap_err().to_string();
         assert!(
-            err.contains("instances.yaml") && err.contains("tracker/Linear"),
+            err.contains("instances.yaml") && err.contains("tracker/Issues"),
             "{err}"
         );
         assert!(!err.contains("project.yaml"), "{err}");
@@ -3337,7 +3337,7 @@ mod tests {
             all.insert(
                 format!("tracker/{id}"),
                 ExtensionInstanceConfig {
-                    provider: Some("linear".into()),
+                    provider: Some("issues".into()),
                     ..ExtensionInstanceConfig::default()
                 },
             );
@@ -3362,9 +3362,9 @@ mod tests {
                 std::thread::spawn(move || {
                     GlobalInstances::update(&dir, |all| {
                         all.insert(
-                            format!("tracker/linear_{n}"),
+                            format!("tracker/issues_{n}"),
                             ExtensionInstanceConfig {
-                                provider: Some("linear".into()),
+                                provider: Some("issues".into()),
                                 ..ExtensionInstanceConfig::default()
                             },
                         );

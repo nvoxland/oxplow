@@ -233,7 +233,7 @@ function refFor(kind: string, id: string): TabRef | null {
       return wikiPageRef(id);
     case "work_item":
       // Only oxplow's own tasks have a page; another provider's item
-      // (`linear:ENG-12`) is dropped until a provider renders it.
+      // (`issues:ENG-12`) is dropped until a provider renders it.
       return id.startsWith(OXPLOW_PROVIDER) ? taskRef(id.slice(OXPLOW_PROVIDER.length)) : null;
     case "file":
       return fileRef(id);
