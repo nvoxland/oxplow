@@ -77,6 +77,9 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
         ext_file!("oxplow-bundled", "lenses/tokens-by-day.yaml"),
         ext_file!("oxplow-bundled", "lenses/top-pages.yaml"),
         ext_file!("oxplow-bundled", "lenses/unbacked-claims.yaml"),
+        ext_file!("oxplow-bundled", "lenses/uncommitted-count.yaml"),
+        ext_file!("oxplow-bundled", "lenses/uncommitted-line.yaml"),
+        ext_file!("oxplow-bundled", "lenses/uncommitted.yaml"),
         ext_file!("oxplow-bundled", "lenses/unverified-claims.yaml"),
         ext_file!("oxplow-bundled", "lenses/usage.yaml"),
         ext_file!("oxplow-bundled", "lenses/verify-claim-with-evidence.yaml"),
@@ -906,6 +909,80 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["In progress".to_string(), "Ready".to_string()]
         );
+    }
+
+    /// tsk1088: the rail's Uncommitted panel is a lens over the working
+    /// tree's file list (change analysis's stage one): a folder tree with
+    /// A/M/D letters, collapsed to a one-line summary, counted by files.
+    #[tokio::test]
+    async fn uncommitted_is_a_panel_over_the_working_files() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let bundled = crate::extensions::load_extensions(f._dir.path())
+            .into_iter()
+            .find(|e| e.name == "oxplow-bundled")
+            .unwrap();
+        assert!(bundled.errors.is_empty(), "{:?}", bundled.errors);
+        let panel = bundled
+            .panels
+            .iter()
+            .find(|p| p.id == "oxplow-bundled/uncommitted")
+            .expect("an uncommitted panel");
+        assert_eq!(
+            (
+                panel.body.as_str(),
+                panel.collapsed.as_deref(),
+                panel.count.as_deref(),
+                panel.open.as_deref()
+            ),
+            (
+                "oxplow-bundled/uncommitted",
+                Some("oxplow-bundled/uncommitted-line"),
+                Some("oxplow-bundled/uncommitted-count"),
+                Some("page:uncommitted-changes")
+            )
+        );
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src/ui")).unwrap();
+        std::fs::write(root.join("src/ui/a.rs"), "fn a() {}\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("src/ui/a.rs"), "fn a() {}\nfn b() {}\n").unwrap();
+        std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
+        crate::change_analysis::refresh_files(
+            &f.svc,
+            crate::change_analysis::ChangeTarget::Working {
+                stream_id: oxplow_domain::StreamId::new(1).to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        f.svc.extension_models.sync().await.unwrap();
+        let tree = run_bundled_lens(&f, "oxplow-bundled/uncommitted", &[("stream_id", 1)]).await;
+        // (id, parent, label) per node.
+        let nodes: Vec<(String, Option<String>, String)> = tree
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r[0].as_str().unwrap().to_string(),
+                    r[1].as_str().map(str::to_string),
+                    r[2].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            nodes,
+            vec![
+                ("d:src".into(), None, "src/  AM".into()),
+                ("f:src/new.rs".into(), Some("d:src".into()), "new.rs  A".into()),
+                ("d:src/ui".into(), Some("d:src".into()), "ui/  M".into()),
+                ("f:src/ui/a.rs".into(), Some("d:src/ui".into()), "a.rs  M".into()),
+            ]
+        );
+        let line = run_bundled_lens(&f, "oxplow-bundled/uncommitted-line", &[("stream_id", 1)]).await;
+        assert_eq!(line[0][0], "1A 1M  +2 −0");
+        let count = run_bundled_lens(&f, "oxplow-bundled/uncommitted-count", &[("stream_id", 1)]).await;
+        assert_eq!(count, serde_json::json!([[2]]));
     }
 
     /// Waiting on Me sits in the rail and raises an alert while anything

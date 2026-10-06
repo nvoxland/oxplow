@@ -56,6 +56,7 @@ ui:
 panels:
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
   - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments, open: 'page:comments' }
+  - { id: uncommitted, title: Uncommitted, icon: git-branch, scope: stream, body: uncommitted, collapsed: uncommitted-line, count: uncommitted-count, open: 'page:uncommitted-changes' }
   - { id: work, title: Work, icon: list-checks, scope: thread, body: work, collapsed: work-line, count: work-count, open: 'page:tasks' }
 advisories:
   # Steer the agent to add tests when this effort's changed lines are poorly

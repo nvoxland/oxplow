@@ -23,34 +23,34 @@ test("no stored layout: every panel in default order, all open", () => {
 });
 
 test("the stored layout orders, hides and collapses; unknown ids drop, new ones append", () => {
-  const out = resolveLayout(["core:uncommitted", "core:bookmarks", "ext:gh/prs"], [
+  const out = resolveLayout(["core:approvals", "core:bookmarks", "ext:gh/prs"], [
     { panel: "ext:gh/prs", hidden: false, collapsed: true },
     { panel: "core:bookmarks", hidden: true, collapsed: false },
     { panel: "ext:gone/x", hidden: false, collapsed: false },
   ]);
-  expect(out.order).toEqual(["ext:gh/prs", "core:uncommitted"]);
+  expect(out.order).toEqual(["ext:gh/prs", "core:approvals"]);
   expect(out.hidden).toEqual(["core:bookmarks"]);
   expect(out.collapsed.has("ext:gh/prs")).toBe(true);
-  expect(out.collapsed.has("core:uncommitted")).toBe(false);
+  expect(out.collapsed.has("core:approvals")).toBe(false);
 });
 
 test("moving, hiding, showing and collapsing produce the next stored layout", () => {
-  const avail = ["core:alerts", "core:uncommitted", "ext:gh/prs"];
+  const avail = ["core:alerts", "core:approvals", "ext:gh/prs"];
   let layout = movePanelBeside(avail, [], "ext:gh/prs", "core:alerts", "before");
-  expect(resolveLayout(avail, layout).order).toEqual(["ext:gh/prs", "core:alerts", "core:uncommitted"]);
+  expect(resolveLayout(avail, layout).order).toEqual(["ext:gh/prs", "core:alerts", "core:approvals"]);
   layout = hidePanel(avail, layout, "core:alerts");
   expect(resolveLayout(avail, layout).hidden).toEqual(["core:alerts"]);
   layout = showPanel(avail, layout, "core:alerts");
-  expect(resolveLayout(avail, layout).order).toEqual(["ext:gh/prs", "core:uncommitted", "core:alerts"]);
-  layout = setCollapsed(avail, layout, "core:uncommitted", false);
-  expect(resolveLayout(avail, layout).collapsed.has("core:uncommitted")).toBe(false);
+  expect(resolveLayout(avail, layout).order).toEqual(["ext:gh/prs", "core:approvals", "core:alerts"]);
+  layout = setCollapsed(avail, layout, "core:approvals", false);
+  expect(resolveLayout(avail, layout).collapsed.has("core:approvals")).toBe(false);
 });
 
 // P6b.A4: proposals wait in their own core panel, right after Alerts.
 test("Approvals is a core panel after Alerts, appended to a layout stored before it existed", () => {
   expect(core.slice(0, 2)).toEqual(["core:alerts", "core:approvals"]);
   const out = resolveLayout(core, [
-    { panel: "core:uncommitted", hidden: false, collapsed: false },
+    { panel: "core:approvals", hidden: false, collapsed: false },
     { panel: "core:alerts", hidden: false, collapsed: false },
   ]);
   expect(out.order[out.order.length - 1]).toBe("core:bookmarks");
@@ -72,33 +72,33 @@ test("an edit keeps the placements of panels not available yet", () => {
   const stored = [
     { panel: "ext:gh/prs", hidden: false, collapsed: true },
     { panel: "core:alerts", hidden: false, collapsed: false },
-    { panel: "core:uncommitted", hidden: false, collapsed: false },
+    { panel: "core:approvals", hidden: false, collapsed: false },
   ];
-  const next = hidePanel(["core:alerts", "core:uncommitted"], stored, "core:alerts");
-  const all = resolveLayout(["core:alerts", "core:uncommitted", "ext:gh/prs"], next);
-  expect(all.order).toEqual(["ext:gh/prs", "core:uncommitted"]);
+  const next = hidePanel(["core:alerts", "core:approvals"], stored, "core:alerts");
+  const all = resolveLayout(["core:alerts", "core:approvals", "ext:gh/prs"], next);
+  expect(all.order).toEqual(["ext:gh/prs", "core:approvals"]);
   expect(all.hidden).toEqual(["core:alerts"]);
   expect(all.collapsed.has("ext:gh/prs")).toBe(true);
 });
 
 test("a move means beside its target, wherever the layout it's replayed on puts that", () => {
-  const avail = ["core:alerts", "core:uncommitted", "ext:gh/prs"];
+  const avail = ["core:alerts", "core:approvals", "ext:gh/prs"];
   // Dragged on the defaults (alerts, work, prs): prs before work. Replayed
   // on the stored layout, it still lands right before work.
   const stored = [
-    { panel: "core:uncommitted", hidden: false, collapsed: false },
+    { panel: "core:approvals", hidden: false, collapsed: false },
     { panel: "core:alerts", hidden: false, collapsed: false },
     { panel: "ext:gh/prs", hidden: false, collapsed: false },
   ];
-  expect(resolveLayout(avail, movePanelBeside(avail, stored, "ext:gh/prs", "core:uncommitted", "before")).order).toEqual([
+  expect(resolveLayout(avail, movePanelBeside(avail, stored, "ext:gh/prs", "core:approvals", "before")).order).toEqual([
     "ext:gh/prs",
-    "core:uncommitted",
+    "core:approvals",
     "core:alerts",
   ]);
-  expect(resolveLayout(avail, movePanelBeside(avail, stored, "core:uncommitted", "ext:gh/prs", "after")).order).toEqual([
+  expect(resolveLayout(avail, movePanelBeside(avail, stored, "core:approvals", "ext:gh/prs", "after")).order).toEqual([
     "core:alerts",
     "ext:gh/prs",
-    "core:uncommitted",
+    "core:approvals",
   ]);
 });
 
@@ -135,10 +135,10 @@ function fakeSync(loads: Array<PanelPlacement[] | Error>) {
   return { sync, saved, shown, errors, tick, settle, ready: () => ready, loadCalls: () => loadCalls };
 }
 
-const hideAlerts = (base: PanelPlacement[]) => hidePanel(["core:alerts", "core:uncommitted"], base, "core:alerts");
-const collapseWork = (base: PanelPlacement[]) => setCollapsed(["core:alerts", "core:uncommitted"], base, "core:uncommitted", true);
+const hideAlerts = (base: PanelPlacement[]) => hidePanel(["core:alerts", "core:approvals"], base, "core:alerts");
+const collapseWork = (base: PanelPlacement[]) => setCollapsed(["core:alerts", "core:approvals"], base, "core:approvals", true);
 const stored = [
-  { panel: "core:uncommitted", hidden: false, collapsed: false },
+  { panel: "core:approvals", hidden: false, collapsed: false },
   { panel: "core:alerts", hidden: false, collapsed: false },
 ];
 
@@ -146,7 +146,7 @@ test("an edit made before the layout loads is shown at once, then replayed on it
   const f = fakeSync([stored]);
   f.sync.edit(hideAlerts);
   expect(f.saved).toEqual([]);
-  expect(resolveLayout(["core:alerts", "core:uncommitted"], f.shown.at(-1)!).hidden).toEqual(["core:alerts"]);
+  expect(resolveLayout(["core:alerts", "core:approvals"], f.shown.at(-1)!).hidden).toEqual(["core:alerts"]);
   await f.tick();
   expect(f.ready()).toBe(1);
   expect(f.saved).toEqual([hideAlerts(stored)]);
@@ -169,7 +169,7 @@ test("saves go one at a time, and the latest layout is the last saved", async ()
   await f.tick();
   f.sync.edit(hideAlerts);
   f.sync.edit(collapseWork);
-  f.sync.edit((base) => showPanel(["core:alerts", "core:uncommitted"], base, "core:alerts"));
+  f.sync.edit((base) => showPanel(["core:alerts", "core:approvals"], base, "core:alerts"));
   expect(f.saved.length).toBe(1);
   await f.settle();
   expect(f.saved.length).toBe(2);

@@ -1,10 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { DiffEntry, FileStatus, InProgressOp } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, uncommittedChangesRef, refFromTabId, dashboardRef, lensRef, indexRef } from "../../tabs/pageRefs.js";
+import { refFromTabId, dashboardRef, lensRef, indexRef } from "../../tabs/pageRefs.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import { getPanelLayout, setPanelLayout } from "../../api.js";
 import { useExtensions } from "../../extensionsStore.js";
@@ -43,18 +42,6 @@ import { EmptyState } from "../Prompts/EmptyState.js";
 import { readWikiPages } from "../../knowledge.js";
 import { goToSettingsSection } from "../../pages/settingsSections.js";
 
-export interface UncommittedSummary {
-  added: number;
-  modified: number;
-  deleted: number;
-  additions: number;
-  deletions: number;
-  conflictedCount?: number;
-  inProgress?: InProgressOp | null;
-  /** The changed files — rendered as a tree when the section expands. */
-  files?: DiffEntry[];
-}
-
 export interface BookmarkRailEntry {
   ref: TabRef;
   label: string;
@@ -65,8 +52,6 @@ export interface RailHudProps {
   /** Current stream — scopes the open-comments section. */
   streamId?: string | null;
   bookmarks?: BookmarkRailEntry[];
-  /** Working-tree uncommitted summary; section hidden when null or empty. */
-  uncommitted?: UncommittedSummary | null;
   /** Open a page (or focus if already open) in the active thread's tab area. */
   onOpenPage(ref: TabRef): void;
   /** Optional: invoked when the user clicks the search affordance. */
@@ -397,7 +382,6 @@ export function RailHud({
   threadId,
   streamId,
   bookmarks,
-  uncommitted,
   onOpenPage,
   onOpenSearch,
 }: RailHudProps) {
@@ -440,8 +424,6 @@ export function RailHud({
         );
       case "core:approvals":
         return <ApprovalsSection key={id} proposals={proposals} reveal={revealApprovals} />;
-      case "core:uncommitted":
-        return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
       case "core:bookmarks":
         return <GoToSection key={id} entries={bookmarks ?? []} threadId={threadId} onOpenPage={onOpenPage} />;
       default: {
@@ -662,205 +644,6 @@ function RailEmpty({ label }: { label: string }) {
   );
 }
 
-type UStatus = "added" | "modified" | "deleted";
-const U_STATUS_META: Record<UStatus, { letter: string; color: string }> = {
-  added: { letter: "A", color: "var(--diff-add-fg, #2ea043)" },
-  modified: { letter: "M", color: "var(--status-waiting, #f59e0b)" },
-  deleted: { letter: "D", color: "var(--diff-del-fg, #f85149)" },
-};
-function uStatus(s: FileStatus): UStatus {
-  if (s === "deleted") return "deleted";
-  if (s === "added" || s === "untracked") return "added";
-  return "modified";
-}
-
-interface UDirNode { type: "dir"; name: string; path: string; statuses: Set<UStatus>; children: UNode[]; }
-interface UFileNode { type: "file"; name: string; path: string; status: UStatus; }
-type UNode = UDirNode | UFileNode;
-
-/** Folder>file tree, with each folder carrying the union of A/M/D
- *  statuses across its subtree. */
-function buildUncommittedTree(files: DiffEntry[]): UNode[] {
-  interface Raw { name: string; path: string; files: DiffEntry[]; dirs: Map<string, Raw>; }
-  const root: Raw = { name: "", path: "", files: [], dirs: new Map() };
-  for (const f of files) {
-    const segs = f.path.split("/");
-    let cur = root;
-    for (let i = 0; i < segs.length - 1; i++) {
-      const seg = segs[i]!;
-      let next = cur.dirs.get(seg);
-      if (!next) { const p = cur.path ? `${cur.path}/${seg}` : seg; next = { name: seg, path: p, files: [], dirs: new Map() }; cur.dirs.set(seg, next); }
-      cur = next;
-    }
-    cur.files.push(f);
-  }
-  const materialize = (node: Raw): { nodes: UNode[]; statuses: Set<UStatus> } => {
-    const out: UNode[] = [];
-    const agg = new Set<UStatus>();
-    for (const d of [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))) {
-      const sub = materialize(d);
-      for (const s of sub.statuses) agg.add(s);
-      out.push({ type: "dir", name: d.name, path: d.path, statuses: sub.statuses, children: sub.nodes });
-    }
-    for (const f of [...node.files].sort((a, b) => a.path.localeCompare(b.path))) {
-      const st = uStatus(f.status);
-      agg.add(st);
-      out.push({ type: "file", name: f.path.split("/").pop() ?? f.path, path: f.path, status: st });
-    }
-    return { nodes: out, statuses: agg };
-  };
-  return materialize(root).nodes;
-}
-
-const UStatusLetters = ({ statuses }: { statuses: Set<UStatus> }) => {
-  const order: UStatus[] = ["added", "modified", "deleted"];
-  return (
-    <span style={{ display: "inline-flex", gap: 3, flexShrink: 0 }}>
-      {order.filter((s) => statuses.has(s)).map((s) => (
-        <span key={s} style={{ color: U_STATUS_META[s].color, fontSize: 10, fontWeight: 700 }}>{U_STATUS_META[s].letter}</span>
-      ))}
-    </span>
-  );
-};
-
-const railTreeRowStyle: CSSProperties = {
-  display: "flex", alignItems: "center", gap: 6, width: "100%",
-  padding: "3px 8px", border: "none", background: "transparent",
-  color: "var(--text-primary)", cursor: "pointer", textAlign: "left",
-  fontSize: "var(--text-xs)",
-};
-const railTreeLabelStyle: CSSProperties = {
-  flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-};
-
-/** Compact uncommitted file tree for the rail — folders show their A/M/D
- *  union, files their status, with a floating expand/collapse-all toggle
- *  and a capped, scrollable height. */
-function UncommittedTree({ files, onOpenFile }: { files: DiffEntry[]; onOpenFile(path: string): void }) {
-  const tree = useMemo(() => buildUncommittedTree(files), [files]);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggle = (path: string) => setCollapsed((prev) => {
-    const n = new Set(prev);
-    if (n.has(path)) n.delete(path); else n.add(path);
-    return n;
-  });
-
-  const rows: ReactNode[] = [];
-  const walk = (nodes: UNode[], depth: number) => {
-    for (const node of nodes) {
-      const pad = 8 + depth * 12;
-      if (node.type === "dir") {
-        const isCollapsed = collapsed.has(node.path);
-        rows.push(
-          <button key={`d:${node.path}`} type="button" onClick={() => toggle(node.path)} title={node.path} style={{ ...railTreeRowStyle, paddingLeft: pad }}>
-            <span aria-hidden style={{ width: 14, flexShrink: 0, color: "var(--text-muted)", fontSize: 15, lineHeight: 1 }}>{isCollapsed ? "▸" : "▾"}</span>
-            <span style={railTreeLabelStyle}>{node.name}/</span>
-            <UStatusLetters statuses={node.statuses} />
-          </button>,
-        );
-        if (!isCollapsed) walk(node.children, depth + 1);
-      } else {
-        rows.push(
-          <button key={`f:${node.path}`} type="button" data-testid={`rail-uncommitted-file-${node.path}`} onClick={() => onOpenFile(node.path)} title={node.path} style={{ ...railTreeRowStyle, paddingLeft: pad + 12 }}>
-            <span style={railTreeLabelStyle}>{node.name}</span>
-            <span style={{ color: U_STATUS_META[node.status].color, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{U_STATUS_META[node.status].letter}</span>
-          </button>,
-        );
-      }
-    }
-  };
-  walk(tree, 0);
-
-  return (
-    <div data-testid="rail-uncommitted-tree" style={{ maxHeight: 300, overflowY: "auto", overflowX: "hidden", paddingBottom: 6 }}>
-      {rows}
-    </div>
-  );
-}
-
-function UncommittedSection({
-  summary,
-  onOpenPage,
-}: {
-  summary: UncommittedSummary | null;
-  onOpenPage(ref: TabRef): void;
-}) {
-  const added = summary?.added ?? 0;
-  const modified = summary?.modified ?? 0;
-  const deleted = summary?.deleted ?? 0;
-  const segs: { label: string; color: string }[] = [];
-  if (added > 0) segs.push({ label: `${added}A`, color: U_STATUS_META.added.color });
-  if (modified > 0) segs.push({ label: `${modified}M`, color: U_STATUS_META.modified.color });
-  if (deleted > 0) segs.push({ label: `${deleted}D`, color: U_STATUS_META.deleted.color });
-  const conflictedCount = summary?.conflictedCount ?? 0;
-  const op = summary?.inProgress ? summary.inProgress.replace("_", "-") : null;
-  const hasFileSummary = segs.length > 0;
-  const hasConflictRow = conflictedCount > 0 || op !== null;
-  const files = summary?.files ?? [];
-  const total = added + modified + deleted;
-
-  const summaryButton = hasFileSummary ? (
-    <button
-      type="button"
-      data-testid="rail-uncommitted"
-      onClick={() => onOpenPage(uncommittedChangesRef())}
-      title="Open uncommitted changes"
-      style={{ ...rowStyle, padding: "4px 14px 8px", gap: 8 }}
-    >
-      <span style={{ fontSize: "var(--text-xs)", display: "inline-flex", gap: 6, fontWeight: 600 }}>
-        {segs.map((s) => (
-          <span key={s.label} style={{ color: s.color }}>{s.label}</span>
-        ))}
-      </span>
-      <span style={{ flex: 1 }} />
-      <span style={{ color: "var(--diff-add-fg, #2ea043)", fontSize: 11 }}>+{summary?.additions ?? 0}</span>
-      <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 11 }}>−{summary?.deletions ?? 0}</span>
-    </button>
-  ) : null;
-
-  const conflictRow = hasConflictRow ? (
-    <button
-      type="button"
-      data-testid="rail-uncommitted-conflicts"
-      onClick={() => onOpenPage(uncommittedChangesRef())}
-      title={
-        op
-          ? `${op} in progress${conflictedCount > 0 ? ` — ${conflictedCount} conflicted file${conflictedCount === 1 ? "" : "s"}` : ""}`
-          : `${conflictedCount} conflicted file${conflictedCount === 1 ? "" : "s"}`
-      }
-      style={{ ...rowStyle, padding: "4px 14px 8px", gap: 8 }}
-    >
-      <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: "var(--text-xs)" }}>
-        {op ? `${op} in progress` : `${conflictedCount} conflict${conflictedCount === 1 ? "" : "s"}`}
-      </span>
-    </button>
-  ) : null;
-
-  const isEmpty = !hasFileSummary && !hasConflictRow;
-
-  return (
-    <RailSection
-      id="core:uncommitted"
-      title="Uncommitted"
-      count={total}
-      onOpen={() => onOpenPage(uncommittedChangesRef())}
-      openTitle="Open uncommitted changes"
-      collapsedContent={isEmpty ? <RailEmpty label="Working tree clean" /> : <>{summaryButton}{conflictRow}</>}
-    >
-      {conflictRow}
-      {files.length > 0 ? (
-        <UncommittedTree files={files} onOpenFile={(path) => onOpenPage(fileRef(path))} />
-      ) : isEmpty ? (
-        <RailEmpty label="Working tree clean" />
-      ) : null}
-    </RailSection>
-  );
-}
-
-/// Open-comments summary: counts of unresolved comments in the current
-/// stream, split by intent — "for me" (notes-to-self) and "for the
-/// agent" (follow-ups). Self-fetching + live like the history rows;
-/// hidden when there are none. Each row opens the Comments inbox.
 /** Alerts (a core panel, P6.G1): the proposals waiting for the person
  *  (one leading row that reveals Approvals), then every panel badge that
  *  fires, one row each with its message, opening the badge's lens; and

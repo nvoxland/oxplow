@@ -1,0 +1,39 @@
+title: Uncommitted (collapsed)
+description: The working tree's uncommitted changes in one line — how many files added, modified and deleted, and the lines — and a merge or rebase in progress.
+hidden: true
+params:
+  - { name: stream_id, label: Stream }
+query: |
+  WITH change AS (
+    SELECT id, conflicted, in_progress FROM v_change
+    WHERE stream_id = :stream_id AND kind = 'working'
+  ),
+  n AS (
+    SELECT sum(f.status IN ('added', 'untracked')) AS a,
+           sum(f.status NOT IN ('added', 'untracked', 'deleted')) AS m,
+           sum(f.status = 'deleted') AS d,
+           sum(f.additions) AS plus, sum(f.deletions) AS minus, count(*) AS files
+    FROM v_change_file f JOIN change c ON c.id = f.change_id
+  )
+  SELECT label, 'page:uncommitted-changes' AS page, tone FROM (
+    SELECT 0 AS ord,
+           rtrim(CASE WHEN a > 0 THEN a || 'A ' ELSE '' END || CASE WHEN m > 0 THEN m || 'M ' ELSE '' END
+                 || CASE WHEN d > 0 THEN d || 'D' ELSE '' END)
+             || '  +' || plus || ' −' || minus AS label,
+           NULL AS tone
+    FROM n WHERE files > 0
+    UNION ALL
+    SELECT 1,
+           CASE WHEN in_progress IS NOT NULL
+                THEN replace(in_progress, '_', '-') || ' in progress'
+                     || CASE WHEN conflicted > 0 THEN ' — ' || conflicted || ' conflicted' ELSE '' END
+                ELSE conflicted || ' conflict' || CASE conflicted WHEN 1 THEN '' ELSE 's' END
+           END,
+           'danger'
+    FROM change WHERE in_progress IS NOT NULL OR conflicted > 0
+  )
+  ORDER BY ord
+viz: list
+columns:
+  - { key: label, label: Changes, tone: tone, link: { kind: page, from: page } }
+empty: Working tree clean

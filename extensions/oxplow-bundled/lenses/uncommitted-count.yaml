@@ -1,0 +1,10 @@
+title: Uncommitted count
+description: How many files the working tree has uncommitted changes in.
+hidden: true
+params:
+  - { name: stream_id, label: Stream }
+query: |
+  SELECT count(*) AS files
+  FROM v_change_file f JOIN v_change c ON c.id = f.change_id
+  WHERE c.stream_id = :stream_id AND c.kind = 'working'
+viz: number

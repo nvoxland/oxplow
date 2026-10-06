@@ -1,0 +1,59 @@
+title: Uncommitted
+description: The working tree's uncommitted changes as a folder tree — each file's A/M/D, each folder the letters under it — and a merge or rebase in progress.
+params:
+  - { name: stream_id, label: Stream }
+query: |
+  WITH RECURSIVE
+  change AS (
+    SELECT id, conflicted, in_progress FROM v_change
+    WHERE stream_id = :stream_id AND kind = 'working'
+  ),
+  file AS (
+    SELECT f.path,
+           CASE f.status WHEN 'added' THEN 'A' WHEN 'untracked' THEN 'A' WHEN 'deleted' THEN 'D' ELSE 'M' END AS letter
+    FROM v_change_file f JOIN change c ON c.id = f.change_id
+  ),
+  -- Each file's folders, outermost first: `dir` is the folder, `parent` its own.
+  split(path, letter, parent, seg, rest) AS (
+    SELECT path, letter, '', NULL, path FROM file
+    UNION ALL
+    SELECT path, letter, parent || coalesce(seg || '/', ''),
+           substr(rest, 1, instr(rest, '/') - 1), substr(rest, instr(rest, '/') + 1)
+    FROM split WHERE instr(rest, '/') > 0
+  ),
+  folder AS (
+    SELECT parent || seg AS dir, rtrim(parent, '/') AS up, seg,
+           max(letter = 'A') AS a, max(letter = 'M') AS m, max(letter = 'D') AS d
+    FROM split WHERE seg IS NOT NULL
+    GROUP BY parent || seg
+  )
+  SELECT id, parent, label, file_path, tone FROM (
+    SELECT 0 AS ord, '' AS sort, 'op' AS id, NULL AS parent,
+           CASE WHEN in_progress IS NOT NULL
+                THEN replace(in_progress, '_', '-') || ' in progress'
+                     || CASE WHEN conflicted > 0 THEN ' — ' || conflicted || ' conflicted' ELSE '' END
+                ELSE conflicted || ' conflict' || CASE conflicted WHEN 1 THEN '' ELSE 's' END
+           END AS label,
+           NULL AS file_path, 'danger' AS tone
+    FROM change WHERE in_progress IS NOT NULL OR conflicted > 0
+    UNION ALL
+    SELECT 1, dir, 'd:' || dir, CASE up WHEN '' THEN NULL ELSE 'd:' || up END,
+           seg || '/  ' || CASE WHEN a THEN 'A' ELSE '' END || CASE WHEN m THEN 'M' ELSE '' END
+                         || CASE WHEN d THEN 'D' ELSE '' END,
+           NULL, NULL
+    FROM folder
+    UNION ALL
+    SELECT 1, path, 'f:' || path,
+           CASE WHEN parent || coalesce(seg || '/', '') = '' THEN NULL
+                ELSE 'd:' || rtrim(parent || coalesce(seg || '/', ''), '/') END,
+           rest || '  ' || letter,
+           CASE letter WHEN 'D' THEN NULL ELSE path END,
+           CASE letter WHEN 'A' THEN 'success' WHEN 'D' THEN 'danger' ELSE 'warning' END
+    FROM split WHERE instr(rest, '/') = 0
+  )
+  ORDER BY ord, sort
+viz: tree
+tree: { id: id, parent: parent, label: label }
+columns:
+  - { key: label, label: File, tone: tone, link: { kind: file, from: file_path } }
+empty: Working tree clean

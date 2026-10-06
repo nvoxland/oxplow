@@ -25,10 +25,6 @@ import {
   renameStream,
   subscribeWorkspaceEvents,
   openExternalUrl,
-  diffRevisions,
-  vcsHead,
-  vcsStatus,
-  subscribeGitRefsEvents,
   setGenerated,
   selectThread,
   promoteThread,
@@ -38,8 +34,6 @@ import {
   createDashboard,
   writeWorkspaceFile,
   type BacklogState,
-  type DiffEntry,
-  type InProgressOp,
   type ThreadWorkState,
   type ThreadState,
   type AgentKind,
@@ -170,7 +164,6 @@ import {
 import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportOpenPage } from "./api.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
-import { coalescedRefresh } from "./coalesced-refresh.js";
 import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING, shortRevisionLabel } from "./revision.js";
@@ -1735,55 +1728,6 @@ export function App() {
 
   const bookmarksStore = useBookmarksStore();
 
-  // Recently-finished work merged across closed tasks efforts
-  // (per-thread) and updated wiki notes (global). Refetched on
-  // tasks or wiki-page changes; sub-100ms IPC, so coarse
-  // invalidation is fine.
-  const [uncommittedSummary, setUncommittedSummary] = useState<{
-    added: number; modified: number; deleted: number; additions: number; deletions: number;
-    conflictedCount: number; inProgress: InProgressOp | null;
-    files: DiffEntry[];
-  } | null>(null);
-  useEffect(() => {
-    const sid = stream?.id;
-    if (!sid) { setUncommittedSummary(null); return; }
-    let cancelled = false;
-    // Returns the promise so `coalescedRefresh` can single-flight it: each
-    // call is a status walk plus a working-tree diff (tsk238).
-    const refresh = () =>
-      Promise.all([
-        vcsHead(sid).then((head) => diffRevisions(sid, head.revision, WORKING)),
-        vcsStatus(sid),
-      ])
-        .then(([files, status]) => {
-          if (cancelled) return;
-          let added = 0, modified = 0, deleted = 0, additions = 0, deletions = 0;
-          for (const f of files) {
-            if (f.status === "added" || f.status === "untracked") added++;
-            else if (f.status === "modified" || f.status === "renamed") modified++;
-            else if (f.status === "deleted") deleted++;
-            additions += f.additions;
-            deletions += f.deletions;
-          }
-          setUncommittedSummary({
-            added, modified, deleted, additions, deletions,
-            conflictedCount: status.entries.filter((e) => e.status === "conflicted").length,
-            inProgress: status.in_progress,
-            files,
-          });
-        })
-        .catch(() => { if (!cancelled) setUncommittedSummary(null); });
-    void refresh();
-    // Both streams feed one gate. The backend watchers each debounce 250ms,
-    // but nothing coalesced *across* them (a commit trips both) and nothing
-    // stopped a slow scan overlapping the next — agent edit storms drove a
-    // full rescan every 250ms.
-    const coalesced = coalescedRefresh(refresh);
-    const offGit = subscribeGitRefsEvents(sid, () => coalesced.schedule());
-    const offWs = subscribeWorkspaceEvents(sid, () => coalesced.schedule());
-    return () => { cancelled = true; coalesced.cancel(); offGit(); offWs(); };
-  }, [stream?.id]);
-
   const handleOpenPage = useCallback((ref: TabRef) => {
     // Page-visit recording lives in the central activation effect
     // below — it fires whenever `effectiveCenterActive` resolves to a
@@ -3321,7 +3265,6 @@ export function App() {
         <RailHud
           threadId={selectedThread?.id ?? null}
           streamId={stream?.id ?? null}
-          uncommitted={uncommittedSummary}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => ({
             ref: b.ref,
             label: b.label ?? b.ref.id,
