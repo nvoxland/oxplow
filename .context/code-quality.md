@@ -148,10 +148,11 @@ in the background. `DuplicationRecorder::record`
 The change's own `v_change_duplicate` rows are the findings anchored in
 its changed files. There is no manual "Scan now" any more.
 
-**Scans are coalesced per change (tsk364).**
-- `change_analysis::DupQueue` runs at most one scan per change; a newer
-  request replaces a queued one, so rapid agent edits don't pile up
-  whole-tree parses.
+**Scans are coalesced.**
+- `change_analysis::DupQueue` runs one scan at a time across every
+  change (a HEAD move or a turn's end analyzes the working tree and each
+  open effort together); a newer request for a change replaces its
+  queued one, so rapid agent edits don't pile up whole-tree parses.
 - A scan stores its rows only if its analysis generation is still the
   change's latest.
 - A failure while storing marks the scan and its task failed rather than

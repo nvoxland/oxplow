@@ -330,9 +330,10 @@ pub(crate) struct DupJob {
     changed: Vec<String>,
 }
 
-/// Coalesces duplicate scans per change (tsk364): a whole-tree parse per
-/// agent edit would pile up, so at most one runs per change, and the
-/// newest request replaces any queued one.
+/// Coalesces duplicate scans: each parses the whole tree, so one runs at
+/// a time across every change (a HEAD move or a turn's end analyzes the
+/// working tree and each open effort together), and the newest request for
+/// a change replaces its queued one.
 #[derive(Default)]
 pub(crate) struct DupQueue {
     inner: std::sync::Mutex<DupQueueState>,
@@ -340,27 +341,27 @@ pub(crate) struct DupQueue {
 
 #[derive(Default)]
 struct DupQueueState {
-    active: std::collections::HashSet<i64>,
-    queued: std::collections::HashMap<i64, DupJob>,
+    running: bool,
+    queued: std::collections::BTreeMap<i64, DupJob>,
 }
 
 impl DupQueue {
-    /// Queue `job` for `change`. True when the caller must start a worker
-    /// (none is running for it).
+    /// Queue `job` for `change`. True when the caller must start the
+    /// worker (none is running).
     fn submit(&self, change: i64, job: DupJob) -> bool {
         let mut st = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         st.queued.insert(change, job);
-        st.active.insert(change)
+        !std::mem::replace(&mut st.running, true)
     }
 
-    /// The next job for `change`'s worker; `None` ends the worker.
-    fn next(&self, change: i64) -> Option<DupJob> {
+    /// The worker's next job and its change; `None` ends the worker.
+    fn next(&self) -> Option<(i64, DupJob)> {
         let mut st = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let job = st.queued.remove(&change);
-        if job.is_none() {
-            st.active.remove(&change);
+        let next = st.queued.pop_first();
+        if next.is_none() {
+            st.running = false;
         }
-        job
+        next
     }
 }
 
@@ -721,13 +722,13 @@ fn spawn_duplicates(
         changed,
     };
     if !svc.change_analyzer.dup_queue.submit(change_id, job) {
-        return; // A worker is running; it picks this up next.
+        return; // The worker is running; it picks this up next.
     }
     let recorder = crate::duplication_scan::DuplicationRecorder::new(svc);
     let store = svc.change_store.clone();
     let analyzer = svc.change_analyzer.clone();
     tokio::spawn(async move {
-        while let Some(job) = analyzer.dup_queue.next(change_id) {
+        while let Some((change_id, job)) = analyzer.dup_queue.next() {
             let scope = format!("change {change_id}");
             let findings = match recorder
                 .record(job.root, job.revision, job.changed.clone(), scope)
@@ -1462,8 +1463,12 @@ mod tests {
         panic!("no duplicates stored");
     }
 
+    /// Duplicate scans parse the whole tree, so one runs at a time across
+    /// every change: a second change's request queues behind the first,
+    /// a newer request for a change replaces its queued one, and the
+    /// worker drains them before it stops.
     #[test]
-    fn duplicate_scans_run_one_at_a_time_per_change_and_only_the_latest_stores() {
+    fn duplicate_scans_run_one_at_a_time_and_only_the_latest_per_change() {
         let q = DupQueue::default();
         let job = |g: i64| DupJob {
             events_to: g,
@@ -1471,18 +1476,24 @@ mod tests {
             revision: Revision::Working,
             changed: vec!["a.rs".into()],
         };
-        assert!(q.submit(1, job(1)), "first request starts a worker");
+        assert!(q.submit(1, job(1)), "first request starts the worker");
+        assert!(!q.submit(1, job(2)), "the worker is running: queued");
         assert!(
-            !q.submit(1, job(2)),
-            "one already running: queued, not a second worker"
+            !q.submit(2, job(5)),
+            "another change queues too, no second worker"
         );
         assert!(
             !q.submit(1, job(3)),
             "a newer request replaces the queued one"
         );
-        assert!(q.submit(2, job(1)), "another change runs independently");
-        assert_eq!(q.next(1).map(|j| j.events_to), Some(3));
-        assert!(q.next(1).is_none(), "drained: the worker stops");
-        assert!(q.submit(1, job(4)), "and the next request starts a new one");
+        let mut drained: Vec<(i64, i64)> = std::iter::from_fn(|| q.next())
+            .map(|(change, j)| (change, j.events_to))
+            .collect();
+        drained.sort();
+        assert_eq!(drained, vec![(1, 3), (2, 5)]);
+        assert!(
+            q.submit(1, job(4)),
+            "drained: the next request starts a new worker"
+        );
     }
 }
