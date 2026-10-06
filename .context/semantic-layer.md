@@ -164,10 +164,10 @@ one transaction:
   promised — a changed contract at the same version fails naming the
   column ("bump its version"). A column's **doc is part of the contract**:
   rewording one is a bump too, else every database that recorded the
-  version refuses to open (`ai_result` went v3 for a reworded `caller` doc
-  in P7.B3's review, `claim` and `decision` v2 for P7.C4's; the test
-  `a_database_holding_an_earlier_published_contract_still_opens` replays
-  such a database). Because that check needs a database that recorded
+  version refuses to open. Every core model was reset to v1 with the
+  migration squash (tsk1081): existing databases had their
+  `model_contract` rows cleared, and the golden below started over.
+  Because that check needs a database that recorded
   the version, the core models' contracts are also **pinned in a golden**,
   `crates/oxplow-db/fixtures/model_contracts.json` (`{ name: { version:
   columns } }`, every version published): `every_core_model_contract_is_

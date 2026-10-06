@@ -104,7 +104,7 @@
     }
   },
   "ai_call": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "id",
@@ -171,77 +171,7 @@
     }
   },
   "ai_result": {
-    "2": {
-      "columns": [
-        {
-          "doc": "Row id.",
-          "name": "id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "sha256 of the canonical `{ op, args }`.",
-          "name": "input_hash",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result.",
-          "name": "provider",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The model that computed it.",
-          "name": "model",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The op's prompt version (`classify@1`); a new prompt is a new result.",
-          "name": "prompt_version",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`classify`, `score`, `summarize` or `extract`.",
-          "name": "op",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The role it ran on (`decide`, `summarize`, `main`).",
-          "name": "role",
-          "type": "TEXT"
-        },
-        {
-          "doc": "What first asked, e.g. `inferred-decisions`, `source:<ext>/<id>`.",
-          "name": "caller",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The result as JSON.",
-          "name": "output_json",
-          "type": "TEXT"
-        },
-        {
-          "doc": "Input tokens of the call that computed it.",
-          "name": "input_tokens",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Output tokens of that call.",
-          "name": "output_tokens",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "When it was computed (RFC 3339).",
-          "name": "at",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The call that computed it (v_ai_call.id).",
-          "name": "ai_call_id",
-          "type": "INTEGER"
-        }
-      ],
-      "key": []
-    },
-    "3": {
+    "1": {
       "columns": [
         {
           "name": "id",
@@ -312,140 +242,8 @@
       "key": []
     }
   },
-  "asset": {
-    "1": {
-      "columns": [
-        {
-          "doc": "The asset: `metric_cube`, or a materialized model's view (`v_<name>`).",
-          "name": "asset",
-          "type": "TEXT"
-        },
-        {
-          "doc": "When it was last recomputed (RFC 3339).",
-          "name": "computed_at",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The event log's highest seq when that recompute began: what its inputs had seen.",
-          "name": "events_to",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "The snapshot it was computed against, when it has one.",
-          "name": "snapshot_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "How long the recompute took.",
-          "name": "elapsed_ms",
-          "type": "INTEGER"
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "doc": "The asset: `metric_cube`, or a materialized model's view (`v_<name>`).",
-          "name": "asset",
-          "type": "TEXT"
-        },
-        {
-          "doc": "When it was last recomputed (RFC 3339).",
-          "name": "computed_at",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The event log's highest seq when that recompute began: what its inputs had seen.",
-          "name": "events_to",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "The snapshot it was computed against, when it has one.",
-          "name": "snapshot_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "How long the recompute took.",
-          "name": "elapsed_ms",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "For a materialized model: `full` (refilled whole) or `incremental` (rows past its watermark appended); NULL otherwise.",
-          "name": "mode",
-          "type": "TEXT"
-        },
-        {
-          "doc": "For an incremental model: the highest watermark value it holds.",
-          "name": "watermark",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "For a materialized model: how many rows it holds.",
-          "name": "row_count",
-          "type": "INTEGER"
-        }
-      ],
-      "key": []
-    },
-    "3": {
-      "columns": [
-        {
-          "name": "asset",
-          "type": "TEXT",
-          "doc": "The asset: `metric_cube`, or a materialized model's view (`v_<name>`)."
-        },
-        {
-          "name": "computed_at",
-          "type": "TEXT",
-          "doc": "When it was last recomputed (RFC 3339)."
-        },
-        {
-          "name": "events_to",
-          "type": "INTEGER",
-          "doc": "The event log's highest seq when that recompute began: what its inputs had seen."
-        },
-        {
-          "name": "snapshot_id",
-          "type": "INTEGER",
-          "doc": "The snapshot it was computed against, when it has one."
-        },
-        {
-          "name": "elapsed_ms",
-          "type": "INTEGER",
-          "doc": "How long the recompute took."
-        },
-        {
-          "name": "mode",
-          "type": "TEXT",
-          "doc": "For a materialized model: `full` (refilled whole) or `incremental` (rows past its watermark appended); NULL otherwise."
-        },
-        {
-          "name": "watermark",
-          "type": "INTEGER",
-          "doc": "For an incremental model: the highest watermark value it holds."
-        },
-        {
-          "name": "row_count",
-          "type": "INTEGER",
-          "doc": "For a materialized model: how many rows it holds."
-        },
-        {
-          "name": "failed_at",
-          "type": "TEXT",
-          "doc": "When its last recompute failed, while no later one has succeeded (RFC 3339); NULL otherwise. Its rows are the last good ones."
-        },
-        {
-          "name": "error",
-          "type": "TEXT",
-          "doc": "Why that recompute failed (a materialized model's SELECT emitting one key twice, a query error)."
-        }
-      ],
-      "key": []
-    }
-  },
   "branch": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "name",
@@ -486,120 +284,8 @@
       "key": []
     }
   },
-  "capability_provider": {
-    "1": {
-      "columns": [
-        {
-          "name": "capability",
-          "type": "TEXT",
-          "doc": "`work_items`, `vcs`, `knowledge`."
-        },
-        {
-          "name": "provider",
-          "type": "TEXT",
-          "doc": "The provider's name: a work item ref's segment (`work_item:<provider>:…`), `git`."
-        },
-        {
-          "name": "extension",
-          "type": "TEXT",
-          "doc": "The extension it comes from; NULL for oxplow's own."
-        },
-        {
-          "name": "features",
-          "type": "TEXT",
-          "doc": "The capability's feature flags as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `in_progress_opens_effort`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`)."
-        },
-        {
-          "name": "active",
-          "type": "INTEGER",
-          "doc": "1 when it's the capability's active provider: the project's `activeProviders` names it (oxplow's own when it names none); a capability no project swaps has its one provider active."
-        }
-      ],
-      "key": []
-    }
-  },
   "capture": {
-    "2": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Capture id."
-        },
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "Stream captured in."
-        },
-        {
-          "name": "thread_id",
-          "type": "INTEGER",
-          "doc": "Thread, if known."
-        },
-        {
-          "name": "effort_id",
-          "type": "INTEGER",
-          "doc": "Producing effort, when unambiguous."
-        },
-        {
-          "name": "producer",
-          "type": "TEXT",
-          "doc": "What produced it (collector, gauge, hook…)."
-        },
-        {
-          "name": "status",
-          "type": "TEXT",
-          "doc": "`running`, `done` or `failed`."
-        },
-        {
-          "name": "trigger",
-          "type": "TEXT",
-          "doc": "What started it."
-        },
-        {
-          "name": "provenance",
-          "type": "TEXT",
-          "doc": "`observed` (measured) or `asserted` (an agent claimed it)."
-        },
-        {
-          "name": "source",
-          "type": "TEXT",
-          "doc": "Source identifier."
-        },
-        {
-          "name": "snapshot_id",
-          "type": "INTEGER",
-          "doc": "Snapshot it was taken against, if any."
-        },
-        {
-          "name": "branch",
-          "type": "TEXT",
-          "doc": "Git branch at capture."
-        },
-        {
-          "name": "closest_vcs_rev",
-          "type": "TEXT",
-          "doc": "The VCS revision (a git sha) the capture's tree was at or nearest to."
-        },
-        {
-          "name": "captured_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        },
-        {
-          "name": "ended_at",
-          "type": "TEXT",
-          "doc": "When the capture finished."
-        },
-        {
-          "name": "scan_kind",
-          "type": "TEXT",
-          "doc": "`delta` or `full`."
-        }
-      ],
-      "key": []
-    },
-    "3": {
+    "1": {
       "columns": [
         {
           "name": "id",
@@ -686,7 +372,7 @@
     }
   },
   "change": {
-    "3": {
+    "1": {
       "columns": [
         {
           "name": "id",
@@ -795,7 +481,7 @@
     }
   },
   "change_file": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "change_id",
@@ -1041,61 +727,6 @@
     "1": {
       "columns": [
         {
-          "doc": "Claim id.",
-          "name": "id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Thread it was made in.",
-          "name": "thread_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Task, if known.",
-          "name": "task_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Effort, if one was open.",
-          "name": "effort_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Turn it happened in (v_agent_turn.id), when known.",
-          "name": "turn_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "The claim in words.",
-          "name": "statement",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`.",
-          "name": "kind",
-          "type": "TEXT"
-        },
-        {
-          "doc": "What backs it (`run:<id>`, a test, a file); NULL if nothing was cited.",
-          "name": "evidence_ref",
-          "type": "TEXT"
-        },
-        {
-          "doc": "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0.",
-          "name": "verified",
-          "type": ""
-        },
-        {
-          "doc": "RFC 3339 timestamp.",
-          "name": "created_at",
-          "type": "TEXT"
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
           "name": "id",
           "type": "INTEGER",
           "doc": "Claim id."
@@ -1207,7 +838,7 @@
     }
   },
   "code_quality_scan": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "id",
@@ -1253,185 +884,6 @@
           "name": "file_filter",
           "type": "TEXT",
           "doc": "Fingerprint of the file filter it ran with, if any."
-        }
-      ],
-      "key": []
-    }
-  },
-  "collector_run": {
-    "1": {
-      "columns": [
-        {
-          "doc": "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`.",
-          "name": "owner",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The collector's id within its owner (may be dotted: `repo.scan_clone`).",
-          "name": "id",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`ok`, `error`, or `needs_approval` (an exec collector a person hasn't approved).",
-          "name": "status",
-          "type": "TEXT"
-        },
-        {
-          "doc": "When it last ran (RFC 3339).",
-          "name": "last_run_at",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The last run's error, when it failed.",
-          "name": "error",
-          "type": "TEXT"
-        },
-        {
-          "doc": "Rows per entity after the last successful run, as JSON.",
-          "name": "row_counts_json",
-          "type": "TEXT"
-        },
-        {
-          "doc": "Its checkpoint: the opaque state its script or provider read returned last.",
-          "name": "cursor_json",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The seq of the last trigger event it ran for.",
-          "name": "last_event_id",
-          "type": "INTEGER"
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "owner",
-          "type": "TEXT",
-          "doc": "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`."
-        },
-        {
-          "name": "id",
-          "type": "TEXT",
-          "doc": "The collector's id within its owner (may be dotted: `repo.scan_clone`)."
-        },
-        {
-          "name": "status",
-          "type": "TEXT",
-          "doc": "`ok`, `error`, `needs_approval` (an exec collector a person hasn't approved), or `skipped` (the loop guard refused its run for an event; `error` says why)."
-        },
-        {
-          "name": "last_run_at",
-          "type": "TEXT",
-          "doc": "When it last ran (RFC 3339)."
-        },
-        {
-          "name": "error",
-          "type": "TEXT",
-          "doc": "The last run's error, when it failed."
-        },
-        {
-          "name": "row_counts_json",
-          "type": "TEXT",
-          "doc": "Rows per entity after the last successful run, as JSON."
-        },
-        {
-          "name": "cursor_json",
-          "type": "TEXT",
-          "doc": "Its checkpoint: the opaque state its script or provider read returned last."
-        },
-        {
-          "name": "last_event_id",
-          "type": "INTEGER",
-          "doc": "The seq of the last trigger event it ran for."
-        }
-      ],
-      "key": []
-    }
-  },
-  "command_proposal": {
-    "1": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Proposal id."
-        },
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`proposal:<id>`."
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        },
-        {
-          "name": "command",
-          "type": "TEXT",
-          "doc": "The command (`config.set`, `work_item.delete`)."
-        },
-        {
-          "name": "input",
-          "type": "TEXT",
-          "doc": "Its input (JSON)."
-        },
-        {
-          "name": "actor_kind",
-          "type": "TEXT",
-          "doc": "Who proposed it: `agent` or `lens`."
-        },
-        {
-          "name": "actor_id",
-          "type": "TEXT",
-          "doc": "The proposing thread (`thr3`) or lens, when known."
-        },
-        {
-          "name": "thread_id",
-          "type": "INTEGER",
-          "doc": "The thread it was proposed in (v_thread.id), if any."
-        },
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "The stream it was proposed in, if any."
-        },
-        {
-          "name": "key",
-          "type": "TEXT",
-          "doc": "What it supersedes on: `config:<key>` for a config change, else the command and its input."
-        },
-        {
-          "name": "preview",
-          "type": "TEXT",
-          "doc": "The confirmation preview (JSON: command, summary, input, destructive)."
-        },
-        {
-          "name": "dry_run",
-          "type": "TEXT",
-          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run."
-        },
-        {
-          "name": "decision",
-          "type": "TEXT",
-          "doc": "`pending`, `approved`, `declined` or `superseded`."
-        },
-        {
-          "name": "decided_at",
-          "type": "TEXT",
-          "doc": "When it was decided or superseded."
-        },
-        {
-          "name": "audit_id",
-          "type": "INTEGER",
-          "doc": "The approving run's command audit row."
-        },
-        {
-          "name": "superseded_by",
-          "type": "INTEGER",
-          "doc": "The proposal that replaced it."
         }
       ],
       "key": []
@@ -1525,7 +977,7 @@
     }
   },
   "commit": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "sha",
@@ -1623,21 +1075,6 @@
         }
       ],
       "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "sha",
-          "type": "TEXT",
-          "doc": "The commit (v_commit.sha)."
-        },
-        {
-          "name": "task_id",
-          "type": "INT",
-          "doc": "The task (v_task.id)."
-        }
-      ],
-      "key": []
     }
   },
   "context_read": {
@@ -1705,7 +1142,7 @@
     }
   },
   "dashboard_item": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "id",
@@ -1738,71 +1175,6 @@
   },
   "decision": {
     "1": {
-      "columns": [
-        {
-          "doc": "Decision id.",
-          "name": "id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Thread it was made in.",
-          "name": "thread_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Task being worked on, if known.",
-          "name": "task_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Effort it was made during, if one was open.",
-          "name": "effort_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "Turn it happened in (v_agent_turn.id), when known.",
-          "name": "turn_id",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "What had to be decided.",
-          "name": "question",
-          "type": "TEXT"
-        },
-        {
-          "doc": "What was chosen.",
-          "name": "choice",
-          "type": "TEXT"
-        },
-        {
-          "doc": "Options not taken, as a JSON array of strings.",
-          "name": "alternatives",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`low`, `medium` or `high`.",
-          "name": "confidence",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The reasoning.",
-          "name": "why",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`recorded` (the agent recorded it) or `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed).",
-          "name": "provenance",
-          "type": "TEXT"
-        },
-        {
-          "doc": "RFC 3339 timestamp.",
-          "name": "created_at",
-          "type": "TEXT"
-        }
-      ],
-      "key": []
-    },
-    "2": {
       "columns": [
         {
           "name": "id",
@@ -1935,427 +1307,8 @@
       "key": []
     }
   },
-  "dimension": {
-    "1": {
-      "columns": [
-        {
-          "name": "key",
-          "type": "TEXT",
-          "doc": "The dimension key, e.g. `zone`; `oxplow.*` keys are built in."
-        },
-        {
-          "name": "label",
-          "type": "TEXT",
-          "doc": "Display name."
-        },
-        {
-          "name": "value_type",
-          "type": "TEXT",
-          "doc": "`categorical`, `numeric`, `temporal` or `entity-ref`."
-        },
-        {
-          "name": "subject_kind",
-          "type": "TEXT",
-          "doc": "For an `entity-ref` dimension, the kind of thing it refers to."
-        },
-        {
-          "name": "vocabulary_json",
-          "type": "TEXT",
-          "doc": "The controlled set of values, as a JSON array; NULL when open."
-        },
-        {
-          "name": "scope",
-          "type": "TEXT",
-          "doc": "`built-in`, `global` or `project`."
-        },
-        {
-          "name": "promoted",
-          "type": "INTEGER",
-          "doc": "1 when facts carry it as a column (fast to group by), else 0."
-        },
-        {
-          "name": "entity_json",
-          "type": "TEXT",
-          "doc": "For an entity dimension, the view and expression it slices (`{\"view\", \"expr\"}`)."
-        },
-        {
-          "name": "extension",
-          "type": "TEXT",
-          "doc": "The extension that declared it; NULL for core."
-        }
-      ],
-      "key": []
-    }
-  },
-  "effect_run": {
-    "1": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Reaction id."
-        },
-        {
-          "name": "effect",
-          "type": "TEXT",
-          "doc": "The effect: `<extension>/<id>`."
-        },
-        {
-          "name": "extension",
-          "type": "",
-          "doc": "The extension that declares it."
-        },
-        {
-          "name": "event_id",
-          "type": "TEXT",
-          "doc": "The event it reacted to (`v_event.id`)."
-        },
-        {
-          "name": "event_seq",
-          "type": "INTEGER",
-          "doc": "That event's log position."
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`."
-        },
-        {
-          "name": "reason",
-          "type": "TEXT",
-          "doc": "Why it skipped or failed."
-        },
-        {
-          "name": "audit_id",
-          "type": "INTEGER",
-          "doc": "Its run's `command_audit` row, when its commands ran."
-        },
-        {
-          "name": "proposal_id",
-          "type": "INTEGER",
-          "doc": "The proposal it left, when a command asked a person."
-        },
-        {
-          "name": "started_at",
-          "type": "TEXT",
-          "doc": "When it started (RFC 3339)."
-        },
-        {
-          "name": "finished_at",
-          "type": "TEXT",
-          "doc": "When it ended; NULL while `started`."
-        }
-      ],
-      "key": [
-        "effect",
-        "event_id"
-      ]
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Attempt id."
-        },
-        {
-          "name": "effect",
-          "type": "TEXT",
-          "doc": "The effect: `<extension>/<id>`."
-        },
-        {
-          "name": "extension",
-          "type": "",
-          "doc": "The extension that declares it."
-        },
-        {
-          "name": "event_id",
-          "type": "TEXT",
-          "doc": "The event it reacted to (`v_event.id`)."
-        },
-        {
-          "name": "event_seq",
-          "type": "INTEGER",
-          "doc": "That event's log position."
-        },
-        {
-          "name": "attempt",
-          "type": "INTEGER",
-          "doc": "Which attempt at the reaction, from 1."
-        },
-        {
-          "name": "origin",
-          "type": "TEXT",
-          "doc": "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`) or `backfill` (a person's `effect.backfill`)."
-        },
-        {
-          "name": "latest",
-          "type": "",
-          "doc": "1 when it is the reaction's latest attempt: its state is where the reaction stands."
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`."
-        },
-        {
-          "name": "reason",
-          "type": "TEXT",
-          "doc": "Why it skipped or failed."
-        },
-        {
-          "name": "audit_id",
-          "type": "INTEGER",
-          "doc": "Its run's `command_audit` row, when its commands ran."
-        },
-        {
-          "name": "proposal_id",
-          "type": "INTEGER",
-          "doc": "The proposal it left, when a command asked a person."
-        },
-        {
-          "name": "started_at",
-          "type": "TEXT",
-          "doc": "When it started (RFC 3339)."
-        },
-        {
-          "name": "finished_at",
-          "type": "TEXT",
-          "doc": "When it ended; NULL while `started`."
-        }
-      ],
-      "key": [
-        "effect",
-        "event_id",
-        "attempt"
-      ]
-    },
-    "3": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Attempt id."
-        },
-        {
-          "name": "effect",
-          "type": "TEXT",
-          "doc": "The effect: `<extension>/<id>`."
-        },
-        {
-          "name": "extension",
-          "type": "",
-          "doc": "The extension that declares it."
-        },
-        {
-          "name": "event_id",
-          "type": "TEXT",
-          "doc": "The event it reacted to (`v_event.id`)."
-        },
-        {
-          "name": "event_seq",
-          "type": "INTEGER",
-          "doc": "That event's log position."
-        },
-        {
-          "name": "attempt",
-          "type": "INTEGER",
-          "doc": "Which attempt at the reaction, from 1."
-        },
-        {
-          "name": "origin",
-          "type": "TEXT",
-          "doc": "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself, P10)."
-        },
-        {
-          "name": "latest",
-          "type": "",
-          "doc": "1 when it is the reaction's latest attempt: its state is where the reaction stands."
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`."
-        },
-        {
-          "name": "reason",
-          "type": "TEXT",
-          "doc": "Why it skipped or failed."
-        },
-        {
-          "name": "audit_id",
-          "type": "INTEGER",
-          "doc": "Its run's `command_audit` row, when its commands ran."
-        },
-        {
-          "name": "proposal_id",
-          "type": "INTEGER",
-          "doc": "The proposal it left, when a command asked a person."
-        },
-        {
-          "name": "started_at",
-          "type": "TEXT",
-          "doc": "When it started (RFC 3339)."
-        },
-        {
-          "name": "finished_at",
-          "type": "TEXT",
-          "doc": "When it ended; NULL while `started`."
-        },
-        {
-          "name": "retry_at",
-          "type": "TEXT",
-          "doc": "A failed attempt sent again by itself at this time (RFC 3339); NULL when it waits for a person, or wasn't failed."
-        }
-      ],
-      "key": [
-        "effect",
-        "event_id",
-        "attempt"
-      ]
-    },
-    "4": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Attempt id."
-        },
-        {
-          "name": "effect",
-          "type": "TEXT",
-          "doc": "The effect: `<extension>/<id>`."
-        },
-        {
-          "name": "extension",
-          "type": "",
-          "doc": "The extension that declares it."
-        },
-        {
-          "name": "event_id",
-          "type": "TEXT",
-          "doc": "The event it reacted to (`v_event.id`)."
-        },
-        {
-          "name": "event_seq",
-          "type": "INTEGER",
-          "doc": "That event's log position."
-        },
-        {
-          "name": "attempt",
-          "type": "INTEGER",
-          "doc": "Which attempt at the reaction, from 1."
-        },
-        {
-          "name": "origin",
-          "type": "TEXT",
-          "doc": "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself)."
-        },
-        {
-          "name": "latest",
-          "type": "",
-          "doc": "1 when it is the reaction's latest attempt: its state is where the reaction stands."
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`."
-        },
-        {
-          "name": "reason",
-          "type": "TEXT",
-          "doc": "Why it skipped or failed."
-        },
-        {
-          "name": "audit_id",
-          "type": "INTEGER",
-          "doc": "Its run's `command_audit` row, when its commands ran."
-        },
-        {
-          "name": "proposal_id",
-          "type": "INTEGER",
-          "doc": "The proposal it left, when a command asked a person."
-        },
-        {
-          "name": "started_at",
-          "type": "TEXT",
-          "doc": "When it started (RFC 3339)."
-        },
-        {
-          "name": "finished_at",
-          "type": "TEXT",
-          "doc": "When it ended; NULL while `started`."
-        },
-        {
-          "name": "retry_at",
-          "type": "TEXT",
-          "doc": "A failed attempt sent again by itself at this time (RFC 3339); NULL when it waits for a person, or wasn't failed."
-        }
-      ],
-      "key": [
-        "effect",
-        "event_id",
-        "attempt"
-      ]
-    }
-  },
   "effort": {
     "1": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Effort id."
-        },
-        {
-          "name": "work_item",
-          "type": "TEXT",
-          "doc": "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:linear:ENG-12`."
-        },
-        {
-          "name": "task_id",
-          "type": "",
-          "doc": "The oxplow task worked on (v_task.id); NULL for another provider's work item."
-        },
-        {
-          "name": "thread_id",
-          "type": "INTEGER",
-          "doc": "Thread that did the work."
-        },
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "That thread's stream."
-        },
-        {
-          "name": "started_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        },
-        {
-          "name": "ended_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp; NULL while the effort is open."
-        },
-        {
-          "name": "start_snapshot_id",
-          "type": "INTEGER",
-          "doc": "Snapshot at the start (v_snapshot.id)."
-        },
-        {
-          "name": "end_snapshot_id",
-          "type": "INTEGER",
-          "doc": "Snapshot at the end; NULL while open."
-        },
-        {
-          "name": "summary",
-          "type": "TEXT",
-          "doc": "Closing summary written when the effort closed."
-        }
-      ],
-      "key": []
-    },
-    "2": {
       "columns": [
         {
           "name": "id",
@@ -2412,7 +1365,7 @@
     }
   },
   "effort_file": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "effort_id",
@@ -2571,7 +1524,7 @@
         {
           "name": "seq",
           "type": "INTEGER",
-          "doc": "Order within the effort."
+          "doc": "Order within the effort, oldest first: the highest is the latest."
         },
         {
           "name": "kind",
@@ -2610,53 +1563,35 @@
         }
       ],
       "key": []
-    },
-    "2": {
+    }
+  },
+  "effort_unattributed_file": {
+    "1": {
       "columns": [
         {
           "name": "effort_id",
           "type": "INTEGER",
-          "doc": "Effort (v_effort.id)."
+          "doc": "The effort (v_effort.id)."
         },
         {
-          "name": "seq",
-          "type": "INTEGER",
-          "doc": "Order within the effort, oldest first: the highest is the latest."
-        },
-        {
-          "name": "kind",
+          "name": "work_item",
           "type": "TEXT",
-          "doc": "`test-run`, `diff-coverage`, `static-analysis`, …"
+          "doc": "That effort's work item ref."
         },
         {
-          "name": "provenance",
+          "name": "task_id",
+          "type": "",
+          "doc": "That effort's oxplow task (v_task.id); NULL for another provider's work item."
+        },
+        {
+          "name": "path",
           "type": "TEXT",
-          "doc": "`observed` (oxplow saw it) or `asserted` (the agent reported it)."
+          "doc": "Repo-relative file path."
         },
         {
-          "name": "source",
+          "name": "recorded_at",
           "type": "TEXT",
-          "doc": "Where it came from, e.g. `post-tool-bash`."
-        },
-        {
-          "name": "metric_value",
-          "type": "REAL",
-          "doc": "Headline number, e.g. coverage %."
-        },
-        {
-          "name": "payload_json",
-          "type": "TEXT",
-          "doc": "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines)."
-        },
-        {
-          "name": "local_snapshot_id",
-          "type": "INTEGER",
-          "doc": "Snapshot it was captured against."
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
+          "doc": "When the close recorded it (RFC 3339)."
         }
       ],
       "key": []
@@ -2860,101 +1795,72 @@
       "key": []
     }
   },
-  "event_type": {
+  "op_error": {
     "1": {
       "columns": [
         {
-          "doc": "`namespace.name`; an extension's namespace is its name with `-` read as `_`.",
-          "name": "event_type",
-          "type": "TEXT"
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `ui.op_failed` event (v_event.id); read its output with `read_event_content`."
         },
         {
-          "doc": "The schema version.",
-          "name": "v",
-          "type": "INTEGER"
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it failed (RFC 3339)."
         },
         {
-          "doc": "The extension that declares it; NULL for a core type.",
-          "name": "extension",
-          "type": "TEXT"
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream of the thread it was started from, if any."
         },
         {
-          "doc": "What it records, as its extension declares; NULL for a core type.",
-          "name": "summary",
-          "type": "TEXT"
+          "name": "thread",
+          "type": "TEXT",
+          "doc": "The thread it was started from (`thr3`), if any."
         },
         {
-          "doc": "1 while the running vocabulary has it (it can be appended); 0 once its extension is gone.",
-          "name": "registered",
-          "type": "INTEGER"
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What the person was doing (\"Merge bugfixes into current\")."
         },
         {
-          "doc": "1 for the newest registered version of its type: what consumers read rows at.",
-          "name": "latest",
-          "type": ""
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command it ran, shell-style (\"git merge bugfixes\"), if known."
         },
         {
-          "doc": "The payload's JSON Schema, as first registered: a declared type's schema at a recorded version never changes.",
-          "name": "schema_json",
-          "type": "TEXT"
+          "name": "message",
+          "type": "TEXT",
+          "doc": "The error message, when there was no captured output to show."
         },
         {
-          "doc": "When it was first registered (RFC 3339).",
-          "name": "recorded_at",
-          "type": "TEXT"
+          "name": "exit_code",
+          "type": "INT",
+          "doc": "The process's exit code, if known."
+        },
+        {
+          "name": "signal",
+          "type": "TEXT",
+          "doc": "The signal that killed the process (`SIGKILL`), if any."
+        },
+        {
+          "name": "duration_ms",
+          "type": "INT",
+          "doc": "How long it ran, in milliseconds, if measured."
+        },
+        {
+          "name": "output_size",
+          "type": "INT",
+          "doc": "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured."
+        },
+        {
+          "name": "payload_expired_at",
+          "type": "TEXT",
+          "doc": "When retention expired its details (they read NULL); NULL while kept."
         }
       ],
       "key": [
-        "event_type",
-        "v"
-      ]
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "event_type",
-          "type": "TEXT",
-          "doc": "`namespace.name`; an extension's namespace is its name with `-` read as `_`."
-        },
-        {
-          "name": "v",
-          "type": "INTEGER",
-          "doc": "The schema version."
-        },
-        {
-          "name": "extension",
-          "type": "TEXT",
-          "doc": "The extension that declares it; NULL for a core type."
-        },
-        {
-          "name": "summary",
-          "type": "TEXT",
-          "doc": "What it records, as its extension declares; NULL for a core type."
-        },
-        {
-          "name": "registered",
-          "type": "INTEGER",
-          "doc": "1 while the running vocabulary has it (it can be appended); 0 once its extension is gone, or while its extension's declaration of it is refused (a schema changed at a recorded version, a namespace collision)."
-        },
-        {
-          "name": "latest",
-          "type": "",
-          "doc": "1 for the newest registered version of its type: what consumers read rows at."
-        },
-        {
-          "name": "schema_json",
-          "type": "TEXT",
-          "doc": "The payload's JSON Schema, as first registered: a declared type's schema at a recorded version never changes."
-        },
-        {
-          "name": "recorded_at",
-          "type": "TEXT",
-          "doc": "When it was first registered (RFC 3339)."
-        }
-      ],
-      "key": [
-        "event_type",
-        "v"
+        "event_id"
       ]
     }
   },
@@ -3060,238 +1966,6 @@
       "key": []
     }
   },
-  "file_metric": {
-    "1": {
-      "columns": [
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "The stream (worktree) whose tree it's in."
-        },
-        {
-          "name": "path",
-          "type": "TEXT",
-          "doc": "The file."
-        },
-        {
-          "name": "measure_key",
-          "type": "TEXT",
-          "doc": "The measure (v_measure.key)."
-        },
-        {
-          "name": "value",
-          "type": "REAL",
-          "doc": "Its value for the file."
-        },
-        {
-          "name": "numerator",
-          "type": "REAL",
-          "doc": "Ratio numerator, for ratio measures."
-        },
-        {
-          "name": "denominator",
-          "type": "REAL",
-          "doc": "Ratio denominator, for ratio measures."
-        },
-        {
-          "name": "captured_at",
-          "type": "TEXT",
-          "doc": "When its latest capture ran."
-        }
-      ],
-      "key": []
-    }
-  },
-  "function": {
-    "1": {
-      "columns": [
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "The stream (worktree) whose tree it's in."
-        },
-        {
-          "name": "symbol",
-          "type": "TEXT",
-          "doc": "`symbol:<path>::<name>`."
-        },
-        {
-          "name": "path",
-          "type": "TEXT",
-          "doc": "The file it's in."
-        },
-        {
-          "name": "name",
-          "type": "",
-          "doc": "The function's name."
-        },
-        {
-          "name": "line",
-          "type": "",
-          "doc": "Its first line."
-        },
-        {
-          "name": "language",
-          "type": "",
-          "doc": "Its language (`rust`, `typescript`, …)."
-        },
-        {
-          "name": "complexity",
-          "type": "",
-          "doc": "Cyclomatic complexity; NULL when not measured."
-        },
-        {
-          "name": "length",
-          "type": "",
-          "doc": "Length in lines; NULL when not measured."
-        },
-        {
-          "name": "parameters",
-          "type": "",
-          "doc": "Parameter count; NULL when not measured."
-        },
-        {
-          "name": "captured_at",
-          "type": "",
-          "doc": "When its latest capture ran."
-        }
-      ],
-      "key": []
-    }
-  },
-  "knowledge_body": {
-    "1": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`wiki:<slug>` (v_knowledge_page.ref)."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "The page's markdown, as its file holds it."
-        }
-      ],
-      "key": []
-    }
-  },
-  "knowledge_page": {
-    "1": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`wiki:<slug>`."
-        },
-        {
-          "name": "provider",
-          "type": "TEXT",
-          "doc": "The knowledge provider (`oxplow`)."
-        },
-        {
-          "name": "slug",
-          "type": "TEXT",
-          "doc": "Page slug (link with [[slug]])."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "The page's first `# ` heading, else its slug."
-        },
-        {
-          "name": "excerpt",
-          "type": "TEXT",
-          "doc": "Start of the body."
-        },
-        {
-          "name": "body_size",
-          "type": "INTEGER",
-          "doc": "Size of the full body, bytes."
-        },
-        {
-          "name": "outbound_refs",
-          "type": "TEXT",
-          "doc": "JSON array of every ref the page links to (`file:src/lib.rs`, `wiki:other`, `work_item:oxplow:tsk42`)."
-        },
-        {
-          "name": "stale_ref_count",
-          "type": "INT",
-          "doc": "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold."
-        },
-        {
-          "name": "updated_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        }
-      ],
-      "key": []
-    }
-  },
-  "knowledge_ref": {
-    "2": {
-      "columns": [
-        {
-          "name": "page",
-          "type": "TEXT",
-          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
-        },
-        {
-          "name": "path",
-          "type": "TEXT",
-          "doc": "The file it relies on (workspace-relative)."
-        },
-        {
-          "name": "pinned_snapshot_id",
-          "type": "INTEGER",
-          "doc": "The snapshot the ref was pinned to (written or verified against); NULL if never pinned."
-        },
-        {
-          "name": "pinned_vcs_rev",
-          "type": "TEXT",
-          "doc": "The VCS revision nearest the pin (v_commit.sha for git); NULL without one."
-        },
-        {
-          "name": "pinned_vcs_rev_exact",
-          "type": "INT",
-          "doc": "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0."
-        },
-        {
-          "name": "latest_snapshot_id",
-          "type": "INT",
-          "doc": "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there."
-        },
-        {
-          "name": "stale",
-          "type": "INT",
-          "doc": "1 when the file changed after the pin (or was captured but never pinned)."
-        }
-      ],
-      "key": []
-    }
-  },
-  "knowledge_touch": {
-    "1": {
-      "columns": [
-        {
-          "name": "page",
-          "type": "TEXT",
-          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
-        },
-        {
-          "name": "thread_id",
-          "type": "INTEGER",
-          "doc": "The thread (v_thread.id)."
-        },
-        {
-          "name": "last_seen_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp of that thread's latest write to it."
-        }
-      ],
-      "key": []
-    }
-  },
   "measure": {
     "1": {
       "columns": [
@@ -3334,65 +2008,8 @@
       "key": []
     }
   },
-  "metric_catalog": {
-    "1": {
-      "columns": [
-        {
-          "name": "key",
-          "type": "TEXT",
-          "doc": "The metric key."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "Display name."
-        },
-        {
-          "name": "kind",
-          "type": "TEXT",
-          "doc": "How it displays (`gauge`, …)."
-        },
-        {
-          "name": "language",
-          "type": "TEXT",
-          "doc": "The language a code gauge reads; NULL for the rest."
-        },
-        {
-          "name": "scope",
-          "type": "TEXT",
-          "doc": "`built-in`, `global` or `project`."
-        },
-        {
-          "name": "enabled",
-          "type": "INTEGER",
-          "doc": "1 when it's on in this project."
-        },
-        {
-          "name": "target",
-          "type": "REAL",
-          "doc": "The target value, when set."
-        },
-        {
-          "name": "trigger",
-          "type": "TEXT",
-          "doc": "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer."
-        },
-        {
-          "name": "toggleable",
-          "type": "INTEGER",
-          "doc": "1 when `metric.enable` can switch it."
-        },
-        {
-          "name": "category",
-          "type": "TEXT",
-          "doc": "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it."
-        }
-      ],
-      "key": []
-    }
-  },
   "metric_spec": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "key",
@@ -3478,314 +2095,6 @@
       "key": []
     }
   },
-  "model": {
-    "3": {
-      "columns": [
-        {
-          "doc": "The view to query (`v_task`).",
-          "name": "view",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The model's name within its owner (`task`).",
-          "name": "name",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`core`, or the extension that declares it.",
-          "name": "owner",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`sql` (compiled from a model file) or `entity` (an extension's synced entity).",
-          "name": "kind",
-          "type": "TEXT"
-        },
-        {
-          "doc": "Contract version: a change to the columns bumps it.",
-          "name": "version",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "What the view holds.",
-          "name": "description",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The SELECT the view was compiled from, references resolved.",
-          "name": "sql",
-          "type": "TEXT"
-        },
-        {
-          "doc": "RFC 3339 time of the open that compiled it.",
-          "name": "compiled_at",
-          "type": "TEXT"
-        },
-        {
-          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes.",
-          "name": "materialize",
-          "type": "TEXT"
-        },
-        {
-          "doc": "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise.",
-          "name": "computed_at",
-          "type": "TEXT"
-        },
-        {
-          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen.",
-          "name": "events_to",
-          "type": "INTEGER"
-        }
-      ],
-      "key": []
-    },
-    "4": {
-      "columns": [
-        {
-          "doc": "The view to query (`v_task`).",
-          "name": "view",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The model's name within its owner (`task`).",
-          "name": "name",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`core`, or the extension that declares it.",
-          "name": "owner",
-          "type": "TEXT"
-        },
-        {
-          "doc": "`sql` (compiled from a model file) or `entity` (an extension's synced entity).",
-          "name": "kind",
-          "type": "TEXT"
-        },
-        {
-          "doc": "Contract version: a change to the columns bumps it.",
-          "name": "version",
-          "type": "INTEGER"
-        },
-        {
-          "doc": "What the view holds.",
-          "name": "description",
-          "type": "TEXT"
-        },
-        {
-          "doc": "The SELECT the view was compiled from, references resolved.",
-          "name": "sql",
-          "type": "TEXT"
-        },
-        {
-          "doc": "RFC 3339 time of the open that compiled it.",
-          "name": "compiled_at",
-          "type": "TEXT"
-        },
-        {
-          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock.",
-          "name": "materialize",
-          "type": "TEXT"
-        },
-        {
-          "doc": "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise.",
-          "name": "computed_at",
-          "type": "TEXT"
-        },
-        {
-          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen.",
-          "name": "events_to",
-          "type": "INTEGER"
-        }
-      ],
-      "key": []
-    },
-    "5": {
-      "columns": [
-        {
-          "name": "view",
-          "type": "TEXT",
-          "doc": "The view to query (`v_task`)."
-        },
-        {
-          "name": "name",
-          "type": "TEXT",
-          "doc": "The model's name within its owner (`task`)."
-        },
-        {
-          "name": "owner",
-          "type": "TEXT",
-          "doc": "`core`, or the extension that declares it."
-        },
-        {
-          "name": "kind",
-          "type": "TEXT",
-          "doc": "`sql` (compiled from a model file) or `entity` (an extension's synced entity)."
-        },
-        {
-          "name": "version",
-          "type": "INTEGER",
-          "doc": "Contract version: a change to the columns bumps it."
-        },
-        {
-          "name": "description",
-          "type": "TEXT",
-          "doc": "What the view holds."
-        },
-        {
-          "name": "sql",
-          "type": "TEXT",
-          "doc": "The SELECT the view was compiled from, references resolved."
-        },
-        {
-          "name": "compiled_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 time of the open that compiled it."
-        },
-        {
-          "name": "materialize",
-          "type": "TEXT",
-          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark."
-        },
-        {
-          "name": "computed_at",
-          "type": "TEXT",
-          "doc": "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise."
-        },
-        {
-          "name": "events_to",
-          "type": "INTEGER",
-          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen."
-        },
-        {
-          "name": "mode",
-          "type": "TEXT",
-          "doc": "For a materialized model: how its last recompute ran — `full` or `incremental`."
-        }
-      ],
-      "key": []
-    }
-  },
-  "model_column": {
-    "1": {
-      "columns": [
-        {
-          "doc": "The model's view (`v_model.view`).",
-          "name": "view",
-          "type": "TEXT"
-        },
-        {
-          "doc": "0-based column position.",
-          "name": "position",
-          "type": "INT"
-        },
-        {
-          "doc": "Column name.",
-          "name": "name",
-          "type": ""
-        },
-        {
-          "doc": "The column's SQLite declared type; empty for a computed column.",
-          "name": "sql_type",
-          "type": ""
-        },
-        {
-          "doc": "What the column holds.",
-          "name": "doc",
-          "type": ""
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "view",
-          "type": "TEXT",
-          "doc": "The model's view (`v_model.view`)."
-        },
-        {
-          "name": "position",
-          "type": "INT",
-          "doc": "0-based column position."
-        },
-        {
-          "name": "name",
-          "type": "",
-          "doc": "Column name."
-        },
-        {
-          "name": "sql_type",
-          "type": "",
-          "doc": "The column's SQLite declared type; empty for a computed column."
-        },
-        {
-          "name": "doc",
-          "type": "",
-          "doc": "What the column holds."
-        },
-        {
-          "name": "key_part",
-          "type": "",
-          "doc": "Its 1-based place in the model's key; null when it isn't part of the key."
-        }
-      ],
-      "key": []
-    }
-  },
-  "model_lineage": {
-    "1": {
-      "columns": [
-        {
-          "name": "view",
-          "type": "TEXT",
-          "doc": "The reading model's view."
-        },
-        {
-          "name": "input",
-          "type": "TEXT",
-          "doc": "The view (`ref`) or table (`source`) it reads."
-        },
-        {
-          "name": "kind",
-          "type": "TEXT",
-          "doc": "`ref` or `source`."
-        }
-      ],
-      "key": []
-    }
-  },
-  "model_test": {
-    "1": {
-      "columns": [
-        {
-          "name": "view",
-          "type": "TEXT",
-          "doc": "The tested model's view."
-        },
-        {
-          "name": "test",
-          "type": "TEXT",
-          "doc": "The test, e.g. `unique(id)`."
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "doc": "`passed`, `failed` (rows break it) or `error` (it didn't run)."
-        },
-        {
-          "name": "detail",
-          "type": "TEXT",
-          "doc": "How many rows broke it, or the error; NULL when passed."
-        },
-        {
-          "name": "ran_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 time it ran."
-        }
-      ],
-      "key": []
-    }
-  },
   "page_visit": {
     "1": {
       "columns": [
@@ -3828,83 +2137,338 @@
       "key": []
     }
   },
-  "plugin_health": {
-    "2": {
+  "search_comment": {
+    "1": {
       "columns": [
         {
-          "name": "plugin",
+          "name": "ref",
           "type": "TEXT",
-          "doc": "The extension it belongs to."
+          "doc": "The comment's canonical ref (`comment:cmt<n>`): what a hit opens."
         },
         {
-          "name": "contribution",
+          "name": "title",
           "type": "TEXT",
-          "doc": "The provider's or collector's id within it."
+          "doc": "The quote it's anchored to."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The quote, then every message, a line each."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its stream (`str1`)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_note": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The note's canonical ref (`task_note:not<n>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Empty: a note has no title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The note's markdown."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_task": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The task's canonical ref (`work_item:oxplow:tsk<n>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The task's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its id (so typing `tsk42` finds it), then its description."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`); NULL for a backlog task."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_wiki": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`wiki:<slug>`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The page's full markdown."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: wiki pages are project-global."
+        }
+      ],
+      "key": []
+    }
+  },
+  "usage_event": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Use id."
         },
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`provider` or `collector`."
+          "doc": "What was used (`wiki`, …)."
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "doc": "What the renderer recorded about it (JSON; a `key` / `slug` / `path` / `id` names the thing)."
+        },
+        {
+          "name": "occurred_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
+  },
+  "effect_run": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Attempt id."
+        },
+        {
+          "name": "effect",
+          "type": "TEXT",
+          "doc": "The effect: `<extension>/<id>`."
+        },
+        {
+          "name": "extension",
+          "type": "",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The event it reacted to (`v_event.id`)."
+        },
+        {
+          "name": "event_seq",
+          "type": "INTEGER",
+          "doc": "That event's log position."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Which attempt at the reaction, from 1."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "What started the attempt: `live` (the event's delivery), `retry` (a person's `effect.retry`), `backfill` (a person's `effect.backfill`) or `auto` (sent again by itself)."
+        },
+        {
+          "name": "latest",
+          "type": "",
+          "doc": "1 when it is the reaction's latest attempt: its state is where the reaction stands."
         },
         {
           "name": "state",
           "type": "TEXT",
-          "doc": "`ok`, `failing` or `disabled`."
+          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`."
         },
         {
           "name": "reason",
           "type": "TEXT",
-          "doc": "Why it's disabled."
+          "doc": "Why it skipped or failed."
         },
         {
-          "name": "consecutive_failures",
+          "name": "audit_id",
           "type": "INTEGER",
-          "doc": "Failures since its last success."
+          "doc": "Its run's `command_audit` row, when its commands ran."
         },
         {
-          "name": "last_ok_at",
+          "name": "proposal_id",
+          "type": "INTEGER",
+          "doc": "The proposal it left, when a command asked a person."
+        },
+        {
+          "name": "started_at",
           "type": "TEXT",
-          "doc": "When it last succeeded (RFC 3339)."
+          "doc": "When it started (RFC 3339)."
         },
         {
-          "name": "last_error",
+          "name": "finished_at",
           "type": "TEXT",
-          "doc": "Its last failure."
+          "doc": "When it ended; NULL while `started`."
         },
         {
-          "name": "mean_ms",
-          "type": "REAL",
-          "doc": "A moving average of its successful runs or calls, in milliseconds."
-        },
-        {
-          "name": "next_due_at",
+          "name": "retry_at",
           "type": "TEXT",
-          "doc": "When it should next run (a schedule's next slot), if it runs on one."
-        },
-        {
-          "name": "updated_at",
-          "type": "TEXT",
-          "doc": "When this row last changed."
-        },
-        {
-          "name": "dead_letters",
-          "type": "",
-          "doc": "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<plugin>/<contribution>`) or of events about the plugin."
-        },
-        {
-          "name": "fresh",
-          "type": "",
-          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed)."
-        },
-        {
-          "name": "repair_item",
-          "type": "TEXT",
-          "doc": "The open repair work item filed when it was disabled (P7.C2); NULL once that item is done or canceled."
+          "doc": "A failed attempt sent again by itself at this time (RFC 3339); NULL when it waits for a person, or wasn't failed."
         }
       ],
-      "key": []
-    },
-    "3": {
+      "key": [
+        "effect",
+        "event_id",
+        "attempt"
+      ]
+    }
+  },
+  "event_type": {
+    "1": {
+      "columns": [
+        {
+          "name": "event_type",
+          "type": "TEXT",
+          "doc": "`namespace.name`; an extension's namespace is its name with `-` read as `_`."
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "doc": "The schema version."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it; NULL for a core type."
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "doc": "What it records, as its extension declares; NULL for a core type."
+        },
+        {
+          "name": "registered",
+          "type": "INTEGER",
+          "doc": "1 while the running vocabulary has it (it can be appended); 0 once its extension is gone, or while its extension's declaration of it is refused (a schema changed at a recorded version, a namespace collision)."
+        },
+        {
+          "name": "latest",
+          "type": "",
+          "doc": "1 for the newest registered version of its type: what consumers read rows at."
+        },
+        {
+          "name": "schema_json",
+          "type": "TEXT",
+          "doc": "The payload's JSON Schema, as first registered: a declared type's schema at a recorded version never changes."
+        },
+        {
+          "name": "recorded_at",
+          "type": "TEXT",
+          "doc": "When it was first registered (RFC 3339)."
+        }
+      ],
+      "key": [
+        "event_type",
+        "v"
+      ]
+    }
+  },
+  "ref_kind": {
+    "1": {
+      "columns": [
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "The kind (`work_item`, `acme_pr`)."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it; NULL for a core kind."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What one is called (`Pull request`); NULL for a core kind."
+        },
+        {
+          "name": "id_pattern",
+          "type": "TEXT",
+          "doc": "The regex its ids match."
+        },
+        {
+          "name": "revisioned",
+          "type": "INTEGER",
+          "doc": "1 when a ref to one may carry `@rev`."
+        },
+        {
+          "name": "wikilinks",
+          "type": "TEXT",
+          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)."
+        },
+        {
+          "name": "resolve",
+          "type": "TEXT",
+          "doc": "The view whose `title` names one, by its `ref` column; NULL for a core kind."
+        },
+        {
+          "name": "page",
+          "type": "TEXT",
+          "doc": "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind."
+        },
+        {
+          "name": "icon",
+          "type": "TEXT",
+          "doc": "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind."
+        },
+        {
+          "name": "searchable",
+          "type": "TEXT",
+          "doc": "The view whose rows (`ref`, `title`, `body`) the site-wide search indexes under the kind; NULL for a core kind (core indexes its own) and for a plugin kind that isn't searchable."
+        }
+      ],
+      "key": [
+        "kind"
+      ]
+    }
+  },
+  "plugin_health": {
+    "1": {
       "columns": [
         {
           "name": "plugin",
@@ -3980,119 +2544,8 @@
       "key": []
     }
   },
-  "ref_kind": {
-    "1": {
-      "columns": [
-        {
-          "name": "kind",
-          "type": "TEXT",
-          "doc": "The kind (`work_item`, `acme_pr`)."
-        },
-        {
-          "name": "extension",
-          "type": "TEXT",
-          "doc": "The extension that declares it; NULL for a core kind."
-        },
-        {
-          "name": "label",
-          "type": "TEXT",
-          "doc": "What one is called (`Pull request`); NULL for a core kind."
-        },
-        {
-          "name": "id_pattern",
-          "type": "TEXT",
-          "doc": "The regex its ids match."
-        },
-        {
-          "name": "revisioned",
-          "type": "INTEGER",
-          "doc": "1 when a ref to one may carry `@rev`."
-        },
-        {
-          "name": "wikilinks",
-          "type": "TEXT",
-          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)."
-        },
-        {
-          "name": "resolve",
-          "type": "TEXT",
-          "doc": "The view whose `title` names one, by its `ref` column; NULL for a core kind."
-        },
-        {
-          "name": "page",
-          "type": "TEXT",
-          "doc": "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind."
-        },
-        {
-          "name": "icon",
-          "type": "TEXT",
-          "doc": "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind."
-        }
-      ],
-      "key": [
-        "kind"
-      ]
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "kind",
-          "type": "TEXT",
-          "doc": "The kind (`work_item`, `acme_pr`)."
-        },
-        {
-          "name": "extension",
-          "type": "TEXT",
-          "doc": "The extension that declares it; NULL for a core kind."
-        },
-        {
-          "name": "label",
-          "type": "TEXT",
-          "doc": "What one is called (`Pull request`); NULL for a core kind."
-        },
-        {
-          "name": "id_pattern",
-          "type": "TEXT",
-          "doc": "The regex its ids match."
-        },
-        {
-          "name": "revisioned",
-          "type": "INTEGER",
-          "doc": "1 when a ref to one may carry `@rev`."
-        },
-        {
-          "name": "wikilinks",
-          "type": "TEXT",
-          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)."
-        },
-        {
-          "name": "resolve",
-          "type": "TEXT",
-          "doc": "The view whose `title` names one, by its `ref` column; NULL for a core kind."
-        },
-        {
-          "name": "page",
-          "type": "TEXT",
-          "doc": "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind."
-        },
-        {
-          "name": "icon",
-          "type": "TEXT",
-          "doc": "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind."
-        },
-        {
-          "name": "searchable",
-          "type": "TEXT",
-          "doc": "The view whose rows (`ref`, `title`, `body`) the site-wide search indexes under the kind; NULL for a core kind (core indexes its own) and for a plugin kind that isn't searchable."
-        }
-      ],
-      "key": [
-        "kind"
-      ]
-    }
-  },
   "snapshot": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "id",
@@ -4123,6 +2576,53 @@
           "name": "tree_hash",
           "type": "TEXT",
           "doc": "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96."
+        }
+      ],
+      "key": []
+    }
+  },
+  "snapshot_file": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "The captured file's id (a `file_snapshot` id, as `get_file_snapshot` takes)."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot that captured it (v_snapshot.id)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose worktree it was captured in."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative file path."
+        },
+        {
+          "name": "storage",
+          "type": "TEXT",
+          "doc": "`oxplow` (bytes in oxplow's blob store), `git` (a clean file, read from git), `oversize` (too large to keep) or `deleted` (the file was removed)."
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "doc": "Its size in bytes."
+        },
+        {
+          "name": "content_hash",
+          "type": "TEXT",
+          "doc": "The identity of its bytes: two rows with the same hash hold the same content. NULL when oversize or deleted, and for a `git` row not yet compared."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When it was captured (RFC 3339)."
         }
       ],
       "key": []
@@ -4280,7 +2780,7 @@
     }
   },
   "symbol": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "ref",
@@ -4357,7 +2857,7 @@
     }
   },
   "symbol_capture": {
-    "2": {
+    "1": {
       "columns": [
         {
           "name": "snapshot_id",
@@ -4422,76 +2922,6 @@
   },
   "task": {
     "1": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Task id (shown as tsk<id>)."
-        },
-        {
-          "name": "thread_id",
-          "type": "INTEGER",
-          "doc": "Owning thread (v_thread.id); NULL = backlog."
-        },
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "The thread's stream; NULL for backlog tasks."
-        },
-        {
-          "name": "parent_id",
-          "type": "INTEGER",
-          "doc": "Parent task (an epic); NULL at top level."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "Task title."
-        },
-        {
-          "name": "description",
-          "type": "TEXT",
-          "doc": "Markdown body."
-        },
-        {
-          "name": "status",
-          "type": "TEXT",
-          "doc": "`ready`, `in_progress`, `blocked`, `done`, `canceled` or `archived`."
-        },
-        {
-          "name": "priority",
-          "type": "TEXT",
-          "doc": "`low`, `medium`, `high` or `urgent`."
-        },
-        {
-          "name": "author",
-          "type": "TEXT",
-          "doc": "Who the task came from: `user` or `agent`."
-        },
-        {
-          "name": "sort_index",
-          "type": "INTEGER",
-          "doc": "Order within its list."
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        },
-        {
-          "name": "updated_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        },
-        {
-          "name": "completed_at",
-          "type": "TEXT",
-          "doc": "When the task reached `done`; kept if it is then archived, cleared if reopened."
-        }
-      ],
-      "key": []
-    },
-    "2": {
       "columns": [
         {
           "name": "id",
@@ -4673,180 +3103,8 @@
       "key": []
     }
   },
-  "test_case_stat": {
-    "1": {
-      "columns": [
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "Stream it ran in (v_stream.id)."
-        },
-        {
-          "name": "branch",
-          "type": "TEXT",
-          "doc": "Branch checked out when it ran; empty when unknown."
-        },
-        {
-          "name": "producer",
-          "type": "TEXT",
-          "doc": "What recorded the runs (`tests`)."
-        },
-        {
-          "name": "subject",
-          "type": "TEXT",
-          "doc": "The test: `test:<classname>::<name>`."
-        },
-        {
-          "name": "last_status",
-          "type": "TEXT",
-          "doc": "`passed`, `failed` or `skipped` in its latest run."
-        },
-        {
-          "name": "last_ms",
-          "type": "REAL",
-          "doc": "Its duration in its latest timed run, in milliseconds."
-        },
-        {
-          "name": "max_ms",
-          "type": "REAL",
-          "doc": "Its longest duration in any run."
-        },
-        {
-          "name": "mean_ms",
-          "type": "",
-          "doc": "Its mean duration across its timed runs."
-        },
-        {
-          "name": "runs",
-          "type": "INTEGER",
-          "doc": "Runs it was part of."
-        },
-        {
-          "name": "failures",
-          "type": "INTEGER",
-          "doc": "Runs it failed in."
-        },
-        {
-          "name": "flips",
-          "type": "INTEGER",
-          "doc": "Times its status changed from one run to the next: how flaky it is."
-        },
-        {
-          "name": "first_seen_at",
-          "type": "TEXT",
-          "doc": "Its first run here (RFC 3339)."
-        },
-        {
-          "name": "last_seen_at",
-          "type": "TEXT",
-          "doc": "Its latest run here (RFC 3339)."
-        },
-        {
-          "name": "last_failed_at",
-          "type": "TEXT",
-          "doc": "When it last failed; NULL if never."
-        },
-        {
-          "name": "last_passed_at",
-          "type": "TEXT",
-          "doc": "When it last passed; NULL if never."
-        },
-        {
-          "name": "last_run_id",
-          "type": "INTEGER",
-          "doc": "Its latest run (v_test_run.id)."
-        }
-      ],
-      "key": []
-    }
-  },
   "test_run": {
-    "2": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "Run id; `run:<id>` is how claims and decisions cite it."
-        },
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "Stream it ran in (v_stream.id)."
-        },
-        {
-          "name": "thread_id",
-          "type": "INTEGER",
-          "doc": "Thread whose agent ran it, if known."
-        },
-        {
-          "name": "effort_id",
-          "type": "",
-          "doc": "Effort it belongs to: the one that claimed it, else the one open when it ran."
-        },
-        {
-          "name": "command",
-          "type": "",
-          "doc": "The command that was run."
-        },
-        {
-          "name": "exit_code",
-          "type": "",
-          "doc": "Its exit code, if known."
-        },
-        {
-          "name": "passed",
-          "type": "",
-          "doc": "Tests passed (NULL when not reported)."
-        },
-        {
-          "name": "failed",
-          "type": "",
-          "doc": "Tests failed (NULL when not reported)."
-        },
-        {
-          "name": "skipped",
-          "type": "",
-          "doc": "Tests skipped (NULL when not reported)."
-        },
-        {
-          "name": "total",
-          "type": "",
-          "doc": "Tests run in total (NULL when not reported)."
-        },
-        {
-          "name": "duration_ms",
-          "type": "",
-          "doc": "Wall-clock duration, if known."
-        },
-        {
-          "name": "provenance",
-          "type": "TEXT",
-          "doc": "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)."
-        },
-        {
-          "name": "source",
-          "type": "TEXT",
-          "doc": "What recorded it (`hook`, `mcp`, …)."
-        },
-        {
-          "name": "branch",
-          "type": "TEXT",
-          "doc": "Branch checked out when it ran."
-        },
-        {
-          "name": "closest_vcs_rev",
-          "type": "TEXT",
-          "doc": "The VCS revision (a git sha) the tested tree was at or nearest to."
-        },
-        {
-          "name": "captured_at",
-          "type": "TEXT",
-          "doc": "When it was recorded (RFC 3339)."
-        }
-      ],
-      "key": []
-    },
-    "3": {
+    "1": {
       "columns": [
         {
           "name": "id",
@@ -4994,6 +3252,316 @@
           "name": "acp_agent",
           "type": "TEXT",
           "doc": "For an `acp` thread, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise."
+        }
+      ],
+      "key": []
+    }
+  },
+  "asset": {
+    "1": {
+      "columns": [
+        {
+          "name": "asset",
+          "type": "TEXT",
+          "doc": "The asset: `metric_cube`, or a materialized model's view (`v_<name>`)."
+        },
+        {
+          "name": "computed_at",
+          "type": "TEXT",
+          "doc": "When it was last recomputed (RFC 3339)."
+        },
+        {
+          "name": "events_to",
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when that recompute began: what its inputs had seen."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it was computed against, when it has one."
+        },
+        {
+          "name": "elapsed_ms",
+          "type": "INTEGER",
+          "doc": "How long the recompute took."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "For a materialized model: `full` (refilled whole) or `incremental` (rows past its watermark appended); NULL otherwise."
+        },
+        {
+          "name": "watermark",
+          "type": "INTEGER",
+          "doc": "For an incremental model: the highest watermark value it holds."
+        },
+        {
+          "name": "row_count",
+          "type": "INTEGER",
+          "doc": "For a materialized model: how many rows it holds."
+        },
+        {
+          "name": "failed_at",
+          "type": "TEXT",
+          "doc": "When its last recompute failed, while no later one has succeeded (RFC 3339); NULL otherwise. Its rows are the last good ones."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why that recompute failed (a materialized model's SELECT emitting one key twice, a query error)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "test_case_stat": {
+    "1": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran; empty when unknown."
+        },
+        {
+          "name": "producer",
+          "type": "TEXT",
+          "doc": "What recorded the runs (`tests`)."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "The test: `test:<classname>::<name>`."
+        },
+        {
+          "name": "last_status",
+          "type": "TEXT",
+          "doc": "`passed`, `failed` or `skipped` in its latest run."
+        },
+        {
+          "name": "last_ms",
+          "type": "REAL",
+          "doc": "Its duration in its latest timed run, in milliseconds."
+        },
+        {
+          "name": "max_ms",
+          "type": "REAL",
+          "doc": "Its longest duration in any run."
+        },
+        {
+          "name": "mean_ms",
+          "type": "",
+          "doc": "Its mean duration across its timed runs."
+        },
+        {
+          "name": "runs",
+          "type": "INTEGER",
+          "doc": "Runs it was part of."
+        },
+        {
+          "name": "failures",
+          "type": "INTEGER",
+          "doc": "Runs it failed in."
+        },
+        {
+          "name": "flips",
+          "type": "INTEGER",
+          "doc": "Times its status changed from one run to the next: how flaky it is."
+        },
+        {
+          "name": "first_seen_at",
+          "type": "TEXT",
+          "doc": "Its first run here (RFC 3339)."
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "Its latest run here (RFC 3339)."
+        },
+        {
+          "name": "last_failed_at",
+          "type": "TEXT",
+          "doc": "When it last failed; NULL if never."
+        },
+        {
+          "name": "last_passed_at",
+          "type": "TEXT",
+          "doc": "When it last passed; NULL if never."
+        },
+        {
+          "name": "last_run_id",
+          "type": "INTEGER",
+          "doc": "Its latest run (v_test_run.id)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "collector_run": {
+    "1": {
+      "columns": [
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The collector's id within its owner (may be dotted: `repo.scan_clone`)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`ok`, `error`, `needs_approval` (an exec collector a person hasn't approved), or `skipped` (the loop guard refused its run for an event; `error` says why)."
+        },
+        {
+          "name": "last_run_at",
+          "type": "TEXT",
+          "doc": "When it last ran (RFC 3339)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The last run's error, when it failed."
+        },
+        {
+          "name": "row_counts_json",
+          "type": "TEXT",
+          "doc": "Rows per entity after the last successful run, as JSON."
+        },
+        {
+          "name": "cursor_json",
+          "type": "TEXT",
+          "doc": "Its checkpoint: the opaque state its script or provider read returned last."
+        },
+        {
+          "name": "last_event_id",
+          "type": "INTEGER",
+          "doc": "The seq of the last trigger event it ran for."
+        }
+      ],
+      "key": []
+    }
+  },
+  "capability_provider": {
+    "1": {
+      "columns": [
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "`work_items`, `vcs`, `knowledge`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider's name: a work item ref's segment (`work_item:<provider>:…`), `git`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it comes from; NULL for oxplow's own."
+        },
+        {
+          "name": "features",
+          "type": "TEXT",
+          "doc": "The capability's feature flags as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `in_progress_opens_effort`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`)."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 when it's the capability's active provider: the project's `activeProviders` names it (oxplow's own when it names none); a capability no project swaps has its one provider active."
+        }
+      ],
+      "key": []
+    }
+  },
+  "command_proposal": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Proposal id."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`proposal:<id>`."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command (`config.set`, `work_item.delete`)."
+        },
+        {
+          "name": "input",
+          "type": "TEXT",
+          "doc": "Its input (JSON)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who proposed it: `agent` or `lens`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The proposing thread (`thr3`) or lens, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was proposed in (v_thread.id), if any."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it was proposed in, if any."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What it supersedes on: `config:<key>` for a config change, else the command and its input."
+        },
+        {
+          "name": "preview",
+          "type": "TEXT",
+          "doc": "The confirmation preview (JSON: command, summary, input, destructive)."
+        },
+        {
+          "name": "dry_run",
+          "type": "TEXT",
+          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run."
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "doc": "`pending`, `approved`, `declined` or `superseded`."
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "doc": "When it was decided or superseded."
+        },
+        {
+          "name": "audit_id",
+          "type": "INTEGER",
+          "doc": "The approving run's command audit row."
+        },
+        {
+          "name": "superseded_by",
+          "type": "INTEGER",
+          "doc": "The proposal that replaced it."
         }
       ],
       "key": []
@@ -5195,6 +3763,505 @@
       "key": []
     }
   },
+  "wiki_page": {
+    "1": {
+      "columns": [
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "doc": "Page slug (link with [[slug]])."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Page title."
+        },
+        {
+          "name": "body_excerpt",
+          "type": "TEXT",
+          "doc": "Start of the body."
+        },
+        {
+          "name": "body_size_bytes",
+          "type": "INTEGER",
+          "doc": "Size of the full body."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
+  },
+  "work_item": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider it comes from (`oxplow`)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`. oxplow: `ready` is `todo`; `archived` is `done` when it was completed, else `canceled`."
+        },
+        {
+          "name": "native_state",
+          "type": "TEXT",
+          "doc": "The provider's own state (oxplow: the task status, `archived` included)."
+        },
+        {
+          "name": "native",
+          "type": "TEXT",
+          "doc": "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at)."
+        },
+        {
+          "name": "parent_ref",
+          "type": "TEXT",
+          "doc": "The parent work item's ref (an epic); NULL at top level or when the parent is deleted."
+        },
+        {
+          "name": "thread_id",
+          "type": "INT",
+          "doc": "The thread it belongs to: an oxplow task's own thread; an outside tracker's item, the thread that filed it. NULL for the backlog / filed by a person."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
+  },
+  "knowledge_page": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`wiki:<slug>`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The knowledge provider (`oxplow`)."
+        },
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "doc": "Page slug (link with [[slug]])."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's first `# ` heading, else its slug."
+        },
+        {
+          "name": "excerpt",
+          "type": "TEXT",
+          "doc": "Start of the body."
+        },
+        {
+          "name": "body_size",
+          "type": "INTEGER",
+          "doc": "Size of the full body, bytes."
+        },
+        {
+          "name": "outbound_refs",
+          "type": "TEXT",
+          "doc": "JSON array of every ref the page links to (`file:src/lib.rs`, `wiki:other`, `work_item:oxplow:tsk42`)."
+        },
+        {
+          "name": "stale_ref_count",
+          "type": "INT",
+          "doc": "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
+  },
+  "knowledge_ref": {
+    "1": {
+      "columns": [
+        {
+          "name": "page",
+          "type": "TEXT",
+          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file it relies on (workspace-relative)."
+        },
+        {
+          "name": "pinned_snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot the ref was pinned to (written or verified against); NULL if never pinned."
+        },
+        {
+          "name": "pinned_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision nearest the pin (v_commit.sha for git); NULL without one."
+        },
+        {
+          "name": "pinned_vcs_rev_exact",
+          "type": "INT",
+          "doc": "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0."
+        },
+        {
+          "name": "latest_snapshot_id",
+          "type": "INT",
+          "doc": "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there."
+        },
+        {
+          "name": "stale",
+          "type": "INT",
+          "doc": "1 when the file changed after the pin (or was captured but never pinned)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "knowledge_body": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`wiki:<slug>` (v_knowledge_page.ref)."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The page's markdown, as its file holds it."
+        }
+      ],
+      "key": []
+    }
+  },
+  "knowledge_touch": {
+    "1": {
+      "columns": [
+        {
+          "name": "page",
+          "type": "TEXT",
+          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread (v_thread.id)."
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of that thread's latest write to it."
+        }
+      ],
+      "key": []
+    }
+  },
+  "model": {
+    "1": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The view to query (`v_task`)."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The model's name within its owner (`task`)."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "`core`, or the extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`sql` (compiled from a model file) or `entity` (an extension's synced entity)."
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "doc": "Contract version: a change to the columns bumps it."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What the view holds."
+        },
+        {
+          "name": "sql",
+          "type": "TEXT",
+          "doc": "The SELECT the view was compiled from, references resolved."
+        },
+        {
+          "name": "compiled_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 time of the open that compiled it."
+        },
+        {
+          "name": "materialize",
+          "type": "TEXT",
+          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark."
+        },
+        {
+          "name": "computed_at",
+          "type": "TEXT",
+          "doc": "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise."
+        },
+        {
+          "name": "events_to",
+          "type": "INTEGER",
+          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "For a materialized model: how its last recompute ran — `full` or `incremental`."
+        }
+      ],
+      "key": []
+    }
+  },
+  "model_column": {
+    "1": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The model's view (`v_model.view`)."
+        },
+        {
+          "name": "position",
+          "type": "INT",
+          "doc": "0-based column position."
+        },
+        {
+          "name": "name",
+          "type": "",
+          "doc": "Column name."
+        },
+        {
+          "name": "sql_type",
+          "type": "",
+          "doc": "The column's SQLite declared type; empty for a computed column."
+        },
+        {
+          "name": "doc",
+          "type": "",
+          "doc": "What the column holds."
+        },
+        {
+          "name": "key_part",
+          "type": "",
+          "doc": "Its 1-based place in the model's key; null when it isn't part of the key."
+        }
+      ],
+      "key": []
+    }
+  },
+  "model_lineage": {
+    "1": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The reading model's view."
+        },
+        {
+          "name": "input",
+          "type": "TEXT",
+          "doc": "The view (`ref`) or table (`source`) it reads."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`ref` or `source`."
+        }
+      ],
+      "key": []
+    }
+  },
+  "model_test": {
+    "1": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The tested model's view."
+        },
+        {
+          "name": "test",
+          "type": "TEXT",
+          "doc": "The test, e.g. `unique(id)`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`passed`, `failed` (rows break it) or `error` (it didn't run)."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "How many rows broke it, or the error; NULL when passed."
+        },
+        {
+          "name": "ran_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 time it ran."
+        }
+      ],
+      "key": []
+    }
+  },
+  "dimension": {
+    "1": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "The dimension key, e.g. `zone`; `oxplow.*` keys are built in."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "value_type",
+          "type": "TEXT",
+          "doc": "`categorical`, `numeric`, `temporal` or `entity-ref`."
+        },
+        {
+          "name": "subject_kind",
+          "type": "TEXT",
+          "doc": "For an `entity-ref` dimension, the kind of thing it refers to."
+        },
+        {
+          "name": "vocabulary_json",
+          "type": "TEXT",
+          "doc": "The controlled set of values, as a JSON array; NULL when open."
+        },
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`built-in`, `global` or `project`."
+        },
+        {
+          "name": "promoted",
+          "type": "INTEGER",
+          "doc": "1 when facts carry it as a column (fast to group by), else 0."
+        },
+        {
+          "name": "entity_json",
+          "type": "TEXT",
+          "doc": "For an entity dimension, the view and expression it slices (`{\"view\", \"expr\"}`)."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declared it; NULL for core."
+        }
+      ],
+      "key": []
+    }
+  },
+  "metric_catalog": {
+    "1": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "The metric key."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "How it displays (`gauge`, …)."
+        },
+        {
+          "name": "language",
+          "type": "TEXT",
+          "doc": "The language a code gauge reads; NULL for the rest."
+        },
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`built-in`, `global` or `project`."
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "doc": "1 when it's on in this project."
+        },
+        {
+          "name": "target",
+          "type": "REAL",
+          "doc": "The target value, when set."
+        },
+        {
+          "name": "trigger",
+          "type": "TEXT",
+          "doc": "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer."
+        },
+        {
+          "name": "toggleable",
+          "type": "INTEGER",
+          "doc": "1 when `metric.enable` can switch it."
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "doc": "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it."
+        }
+      ],
+      "key": []
+    }
+  },
   "tree_fact": {
     "1": {
       "columns": [
@@ -5297,516 +4364,103 @@
       "key": []
     }
   },
-  "usage_event": {
+  "function": {
     "1": {
       "columns": [
         {
-          "name": "id",
+          "name": "stream_id",
           "type": "INTEGER",
-          "doc": "Use id."
+          "doc": "The stream (worktree) whose tree it's in."
         },
         {
-          "name": "kind",
+          "name": "symbol",
           "type": "TEXT",
-          "doc": "What was used (`wiki`, …)."
+          "doc": "`symbol:<path>::<name>`."
         },
         {
-          "name": "payload_json",
+          "name": "path",
           "type": "TEXT",
-          "doc": "What the renderer recorded about it (JSON; a `key` / `slug` / `path` / `id` names the thing)."
+          "doc": "The file it's in."
         },
         {
-          "name": "occurred_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        }
-      ],
-      "key": []
-    }
-  },
-  "wiki_page": {
-    "1": {
-      "columns": [
-        {
-          "name": "slug",
-          "type": "TEXT",
-          "doc": "Page slug (link with [[slug]])."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "Page title."
-        },
-        {
-          "name": "body_excerpt",
-          "type": "TEXT",
-          "doc": "Start of the body."
-        },
-        {
-          "name": "body_size_bytes",
-          "type": "INTEGER",
-          "doc": "Size of the full body."
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        },
-        {
-          "name": "updated_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        }
-      ],
-      "key": []
-    }
-  },
-  "work_item": {
-    "1": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)."
-        },
-        {
-          "name": "provider",
-          "type": "TEXT",
-          "doc": "The provider it comes from (`oxplow`)."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "Title."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "Markdown body."
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "doc": "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`. oxplow: `ready` is `todo`; `archived` is `done` when it was completed, else `canceled`."
-        },
-        {
-          "name": "native_state",
-          "type": "TEXT",
-          "doc": "The provider's own state (oxplow: the task status, `archived` included)."
-        },
-        {
-          "name": "native",
-          "type": "TEXT",
-          "doc": "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at)."
-        },
-        {
-          "name": "parent_ref",
-          "type": "TEXT",
-          "doc": "The parent work item's ref (an epic); NULL at top level or when the parent is deleted."
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        },
-        {
-          "name": "updated_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)."
-        },
-        {
-          "name": "provider",
-          "type": "TEXT",
-          "doc": "The provider it comes from (`oxplow`)."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "Title."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "Markdown body."
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "doc": "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`. oxplow: `ready` is `todo`; `archived` is `done` when it was completed, else `canceled`."
-        },
-        {
-          "name": "native_state",
-          "type": "TEXT",
-          "doc": "The provider's own state (oxplow: the task status, `archived` included)."
-        },
-        {
-          "name": "native",
-          "type": "TEXT",
-          "doc": "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at)."
-        },
-        {
-          "name": "parent_ref",
-          "type": "TEXT",
-          "doc": "The parent work item's ref (an epic); NULL at top level or when the parent is deleted."
-        },
-        {
-          "name": "thread_id",
-          "type": "INT",
-          "doc": "The thread it belongs to: an oxplow task's own thread; an outside tracker's item, the thread that filed it. NULL for the backlog / filed by a person."
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        },
-        {
-          "name": "updated_at",
-          "type": "TEXT",
-          "doc": "RFC 3339 timestamp."
-        }
-      ],
-      "key": []
-    }
-  },
-  "search_comment": {
-    "1": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`comment:cmt<n>`: the search kind and the comment."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "The quote it's anchored to."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "The quote, then every message, a line each."
-        },
-        {
-          "name": "stream_id",
-          "type": "TEXT",
-          "doc": "Its stream (`str1`)."
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "The comment's canonical ref (`comment:cmt<n>`): what a hit opens."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "The quote it's anchored to."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "The quote, then every message, a line each."
-        },
-        {
-          "name": "stream_id",
-          "type": "TEXT",
-          "doc": "Its stream (`str1`)."
-        }
-      ],
-      "key": []
-    }
-  },
-  "search_note": {
-    "1": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`note:not<n>`: the search kind and the note."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "Empty: a note has no title."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "The note's markdown."
-        },
-        {
-          "name": "stream_id",
-          "type": "TEXT",
-          "doc": "Its thread's stream (`str1`)."
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "The note's canonical ref (`task_note:not<n>`): what a hit opens."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "Empty: a note has no title."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "The note's markdown."
-        },
-        {
-          "name": "stream_id",
-          "type": "TEXT",
-          "doc": "Its thread's stream (`str1`)."
-        }
-      ],
-      "key": []
-    }
-  },
-  "search_task": {
-    "1": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`task:tsk<n>`: the search kind and the task."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "The task's title."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "Its id (so typing `tsk42` finds it), then its description."
-        },
-        {
-          "name": "stream_id",
-          "type": "TEXT",
-          "doc": "Its thread's stream (`str1`); NULL for a backlog task."
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "The task's canonical ref (`work_item:oxplow:tsk<n>`): what a hit opens."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "The task's title."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "Its id (so typing `tsk42` finds it), then its description."
-        },
-        {
-          "name": "stream_id",
-          "type": "TEXT",
-          "doc": "Its thread's stream (`str1`); NULL for a backlog task."
-        }
-      ],
-      "key": []
-    }
-  },
-  "search_wiki": {
-    "1": {
-      "columns": [
-        {
-          "name": "ref",
-          "type": "TEXT",
-          "doc": "`wiki:<slug>`."
-        },
-        {
-          "name": "title",
-          "type": "TEXT",
-          "doc": "The page's title."
-        },
-        {
-          "name": "body",
-          "type": "TEXT",
-          "doc": "The page's full markdown."
-        },
-        {
-          "name": "stream_id",
-          "type": "TEXT",
-          "doc": "Always NULL: wiki pages are project-global."
-        }
-      ],
-      "key": []
-    }
-  },
-  "effort_unattributed_file": {
-    "1": {
-      "columns": [
-        {
-          "name": "effort_id",
-          "type": "INTEGER",
-          "doc": "The effort (v_effort.id)."
-        },
-        {
-          "name": "work_item",
-          "type": "TEXT",
-          "doc": "That effort's work item ref."
-        },
-        {
-          "name": "task_id",
+          "name": "name",
           "type": "",
-          "doc": "That effort's oxplow task (v_task.id); NULL for another provider's work item."
+          "doc": "The function's name."
         },
         {
-          "name": "path",
-          "type": "TEXT",
-          "doc": "Repo-relative file path."
+          "name": "line",
+          "type": "",
+          "doc": "Its first line."
         },
         {
-          "name": "recorded_at",
-          "type": "TEXT",
-          "doc": "When the close recorded it (RFC 3339)."
+          "name": "language",
+          "type": "",
+          "doc": "Its language (`rust`, `typescript`, …)."
+        },
+        {
+          "name": "complexity",
+          "type": "",
+          "doc": "Cyclomatic complexity; NULL when not measured."
+        },
+        {
+          "name": "length",
+          "type": "",
+          "doc": "Length in lines; NULL when not measured."
+        },
+        {
+          "name": "parameters",
+          "type": "",
+          "doc": "Parameter count; NULL when not measured."
+        },
+        {
+          "name": "captured_at",
+          "type": "",
+          "doc": "When its latest capture ran."
         }
       ],
       "key": []
     }
   },
-  "snapshot_file": {
+  "file_metric": {
     "1": {
       "columns": [
         {
-          "name": "id",
-          "type": "INTEGER",
-          "doc": "The captured file's id (a `file_snapshot` id, as `get_file_snapshot` takes)."
-        },
-        {
-          "name": "snapshot_id",
-          "type": "INTEGER",
-          "doc": "The snapshot that captured it (v_snapshot.id)."
-        },
-        {
           "name": "stream_id",
           "type": "INTEGER",
-          "doc": "The stream whose worktree it was captured in."
+          "doc": "The stream (worktree) whose tree it's in."
         },
         {
           "name": "path",
           "type": "TEXT",
-          "doc": "Repo-relative file path."
+          "doc": "The file."
         },
         {
-          "name": "storage",
+          "name": "measure_key",
           "type": "TEXT",
-          "doc": "`oxplow` (bytes in oxplow's blob store), `git` (a clean file, read from git), `oversize` (too large to keep) or `deleted` (the file was removed)."
+          "doc": "The measure (v_measure.key)."
         },
         {
-          "name": "size_bytes",
-          "type": "INTEGER",
-          "doc": "Its size in bytes."
+          "name": "value",
+          "type": "REAL",
+          "doc": "Its value for the file."
         },
         {
-          "name": "content_hash",
-          "type": "TEXT",
-          "doc": "The identity of its bytes: two rows with the same hash hold the same content. NULL when oversize or deleted, and for a `git` row not yet compared."
+          "name": "numerator",
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
+        },
+        {
+          "name": "denominator",
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
         },
         {
           "name": "captured_at",
           "type": "TEXT",
-          "doc": "When it was captured (RFC 3339)."
+          "doc": "When its latest capture ran."
         }
       ],
       "key": []
-    }
-  },
-  "op_error": {
-    "1": {
-      "columns": [
-        {
-          "name": "event_id",
-          "type": "TEXT",
-          "doc": "The `ui.op_failed` event (v_event.id); read its output with `read_event_content`."
-        },
-        {
-          "name": "at",
-          "type": "TEXT",
-          "doc": "When it failed (RFC 3339)."
-        },
-        {
-          "name": "stream_id",
-          "type": "INTEGER",
-          "doc": "The stream of the thread it was started from, if any."
-        },
-        {
-          "name": "thread",
-          "type": "TEXT",
-          "doc": "The thread it was started from (`thr3`), if any."
-        },
-        {
-          "name": "label",
-          "type": "TEXT",
-          "doc": "What the person was doing (\"Merge bugfixes into current\")."
-        },
-        {
-          "name": "command",
-          "type": "TEXT",
-          "doc": "The command it ran, shell-style (\"git merge bugfixes\"), if known."
-        },
-        {
-          "name": "message",
-          "type": "TEXT",
-          "doc": "The error message, when there was no captured output to show."
-        },
-        {
-          "name": "exit_code",
-          "type": "INT",
-          "doc": "The process's exit code, if known."
-        },
-        {
-          "name": "signal",
-          "type": "TEXT",
-          "doc": "The signal that killed the process (`SIGKILL`), if any."
-        },
-        {
-          "name": "duration_ms",
-          "type": "INT",
-          "doc": "How long it ran, in milliseconds, if measured."
-        },
-        {
-          "name": "output_size",
-          "type": "INT",
-          "doc": "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured."
-        },
-        {
-          "name": "payload_expired_at",
-          "type": "TEXT",
-          "doc": "When retention expired its details (they read NULL); NULL while kept."
-        }
-      ],
-      "key": [
-        "event_id"
-      ]
     }
   }
 }
