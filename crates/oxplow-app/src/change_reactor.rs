@@ -36,6 +36,48 @@ pub const NAME: &str = "change.analyze";
 const SNAPSHOT_TAKEN: &str = "snapshot.taken";
 const HEAD_MOVED: &str = "vcs.head.moved";
 const EFFORT_FINISHED: &str = "effort.finished";
+const TURN_ENDED: &str = "agent.turn.ended";
+
+/// When a mutable change's deep analysis runs (tsk1093): its file list is
+/// listed on every move (stage one); the deep analysis once a burst of
+/// takes settles (20 s), at most every 2 minutes, and at once when HEAD
+/// moves or an agent's turn ends. A finishing effort's runs at once.
+pub fn deep_pacing() -> oxplow_config::collectors::Pacing {
+    oxplow_config::collectors::Pacing {
+        settle_secs: Some(20),
+        at_most_secs: Some(120),
+        idle_secs: None,
+        force: vec![HEAD_MOVED.into(), TURN_ENDED.into()],
+    }
+}
+
+/// The paced job of `target`'s deep analysis in `pending_run`: owner
+/// `core`, id `change/working/<stream>` or `change/effort/<effort>`.
+pub fn job_id(target: &ChangeTarget) -> Option<String> {
+    match target {
+        ChangeTarget::Working { stream_id } => Some(format!("change/working/{stream_id}")),
+        ChangeTarget::Effort { effort_id } => Some(format!("change/effort/{effort_id}")),
+        _ => None,
+    }
+}
+
+/// The target a `change/…` job id names.
+pub fn target_of(job: &str) -> Option<ChangeTarget> {
+    let rest = job.strip_prefix("change/")?;
+    let (kind, id) = rest.split_once('/')?;
+    match kind {
+        "working" => Some(ChangeTarget::Working {
+            stream_id: id.to_string(),
+        }),
+        "effort" => Some(ChangeTarget::Effort {
+            effort_id: id.to_string(),
+        }),
+        _ => None,
+    }
+}
+
+/// The owner of core's paced jobs.
+pub const CORE: &str = "core";
 
 pub struct ChangeReactor {
     services: Weak<Services>,
@@ -93,7 +135,10 @@ impl AsyncEventConsumer for ChangeReactor {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        matches!(event_type, SNAPSHOT_TAKEN | HEAD_MOVED | EFFORT_FINISHED)
+        matches!(
+            event_type,
+            SNAPSHOT_TAKEN | HEAD_MOVED | EFFORT_FINISHED | TURN_ENDED
+        )
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
@@ -102,14 +147,14 @@ impl AsyncEventConsumer for ChangeReactor {
         };
         if event.envelope.event_type == EFFORT_FINISHED {
             let effort = crate::effort_lifecycle::effort_of(event)?;
-            return crate::change_analysis::refresh_change(
+            return deep_now(
                 &svc,
                 ChangeTarget::Effort {
                     effort_id: effort.to_string(),
                 },
+                event.seq,
             )
             .await
-            .map(|_| ())
             .map_err(|e| match e {
                 DomainError::Busy(_) => e,
                 e => DomainError::Invalid(format!("analyzing finished {effort}: {e}")),
@@ -118,7 +163,10 @@ impl AsyncEventConsumer for ChangeReactor {
         let Some(stream) = event.envelope.anchors.stream_id else {
             return Ok(());
         };
-        if !moves_the_stream(event) || superseded(&svc, stream.value(), event.seq).await? {
+        let turn_ended = event.envelope.event_type == TURN_ENDED;
+        if !turn_ended
+            && (!moves_the_stream(event) || superseded(&svc, stream.value(), event.seq).await?)
+        {
             return Ok(());
         }
         let failed = |e: DomainError| match e {
@@ -135,37 +183,47 @@ impl AsyncEventConsumer for ChangeReactor {
             // An effort with no start snapshot has nothing to diff.
             .filter(|e| e.start_snapshot_id.is_some())
             .collect();
-        let working = ChangeTarget::Working {
+        let targets: Vec<ChangeTarget> = std::iter::once(ChangeTarget::Working {
             stream_id: stream.to_string(),
-        };
-        crate::change_analysis::refresh_files(&svc, working.clone())
-            .await
-            .map_err(failed)?;
-        for effort in &open {
-            crate::change_analysis::refresh_files(
-                &svc,
-                ChangeTarget::Effort {
-                    effort_id: effort.id.to_string(),
-                },
-            )
-            .await
-            .map_err(failed)?;
+        })
+        .chain(open.into_iter().map(|e| ChangeTarget::Effort {
+            effort_id: e.id.to_string(),
+        }))
+        .collect();
+        // A turn's end doesn't move the tree (its take does): its lists
+        // are as current as the last take left them.
+        if !turn_ended {
+            for target in &targets {
+                crate::change_analysis::refresh_files(&svc, target.clone())
+                    .await
+                    .map_err(failed)?;
+            }
         }
-        crate::change_analysis::refresh_change(&svc, working)
-            .await
-            .map_err(failed)?;
-        for effort in open {
-            crate::change_analysis::refresh_change(
-                &svc,
-                ChangeTarget::Effort {
-                    effort_id: effort.id.to_string(),
-                },
-            )
-            .await
-            .map_err(failed)?;
+        // The deep analysis: at once when this event forces it, else
+        // paced (`crate::pacing` runs it once due).
+        let forced = !deep_pacing().defers(&event.envelope.event_type);
+        let now = oxplow_domain::Timestamp::now().to_text();
+        for target in targets {
+            if forced {
+                deep_now(&svc, target, event.seq).await.map_err(failed)?;
+            } else if let Some(job) = job_id(&target) {
+                svc.collector_store
+                    .mark_pending(CORE, &job, event.seq, &now)
+                    .await?;
+            }
         }
         Ok(())
     }
+}
+
+/// Analyze `target` now and clear its paced job: this run covers it.
+async fn deep_now(svc: &Services, target: ChangeTarget, seq: i64) -> Result<(), DomainError> {
+    let job = job_id(&target);
+    crate::change_analysis::refresh_change(svc, target).await?;
+    if let Some(job) = job {
+        svc.collector_store.clear_pending(CORE, &job, seq).await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -267,18 +325,18 @@ mod tests {
         crate::change_analysis::hold_running_for_tests(&f.svc, id);
         std::fs::write(f.svc.layout.project_dir.join("src/other.rs"), "fn x() {}\n").unwrap();
         let ev = log(&f.svc, taken(false, 1)).await;
-        let err = reactor.handle(&ev).await.unwrap_err();
-        assert!(matches!(err, DomainError::Busy(_)), "{err:?}");
+        reactor.handle(&ev).await.unwrap();
         assert_eq!(
             working_paths(&f.svc).await,
             serde_json::json!([["src/lib.rs"], ["src/other.rs"]])
         );
     }
 
-    /// A take that recorded files recomputes the stream's working change,
-    /// stamping it with how far into the log its inputs were.
+    /// tsk1093: a take that recorded files lists the working tree's files
+    /// at once and paces the deep analysis (`pending_run`, core's job):
+    /// it runs once settled, stamping what its inputs had seen.
     #[tokio::test]
-    async fn a_snapshot_recomputes_the_working_change() {
+    async fn a_snapshot_lists_files_and_paces_the_deep_analysis() {
         let f = crate::test_fixtures::services_with_effort().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
@@ -289,27 +347,76 @@ mod tests {
             working_paths(&f.svc).await,
             serde_json::json!([["src/lib.rs"]])
         );
-
-        std::fs::write(f.svc.layout.project_dir.join("src/other.rs"), "fn x() {}\n").unwrap();
-        let ev = log(&f.svc, taken(false, 1)).await;
-        reactor.handle(&ev).await.unwrap();
+        let deep = |svc: Arc<Services>| async move {
+            let out = svc
+                .sql
+                .query_sql(
+                    "SELECT events_to IS NOT NULL, (SELECT count(*) FROM v_pending_run WHERE owner = 'core')
+                     FROM v_change WHERE kind = 'working'",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap();
+            serde_json::to_value(out.rows).unwrap()
+        };
         assert_eq!(
-            working_paths(&f.svc).await,
-            serde_json::json!([["src/lib.rs"], ["src/other.rs"]])
+            deep(f.svc.clone()).await,
+            serde_json::json!([[0, 1]]),
+            "paced"
         );
-        let row = f
+        let later = oxplow_domain::Timestamp::from_unix_ms(
+            oxplow_domain::Timestamp::now().unix_ms() + 21_000,
+        );
+        assert_eq!(crate::pacing::run_due(&f.svc, later).await.unwrap(), 1);
+        assert_eq!(
+            deep(f.svc.clone()).await,
+            serde_json::json!([[1, 0]]),
+            "ran and cleared"
+        );
+    }
+
+    /// tsk1093: an agent's turn ending analyzes at once — the moment a
+    /// person looks at what it did — and clears the paced job.
+    #[tokio::test]
+    async fn a_turn_ending_analyzes_at_once() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        repo(&f.svc.layout.project_dir);
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        reactor
+            .handle(&log(&f.svc, taken(false, 1)).await)
+            .await
+            .unwrap();
+        let ended = log(
+            &f.svc,
+            Envelope::typed::<oxplow_domain::events::schema::AgentTurnEnded>(
+                "system",
+                &oxplow_domain::events::schema::AgentTurnEndedV2 {
+                    turn: "agent_turn:1".into(),
+                    thread: "thread:thr1".into(),
+                    outcome: oxplow_domain::hook::TurnOutcome::Completed,
+                    transcript_path: None,
+                    usage: None,
+                },
+            ),
+        )
+        .await;
+        assert!(reactor.handles(&ended.envelope.event_type));
+        reactor.handle(&ended).await.unwrap();
+        let out = f
             .svc
             .sql
             .query_sql(
-                "SELECT events_to FROM v_change WHERE kind = 'working'",
+                "SELECT events_to IS NOT NULL, (SELECT count(*) FROM v_pending_run)
+                 FROM v_change WHERE kind = 'working'",
                 vec![],
                 None,
             )
             .await
             .unwrap();
-        assert!(
-            row.rows[0][0] != oxplow_db::SqlCell::Null(()),
-            "events_to is stamped"
+        assert_eq!(
+            serde_json::to_value(out.rows).unwrap(),
+            serde_json::json!([[1, 0]])
         );
     }
 

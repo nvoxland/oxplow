@@ -959,10 +959,14 @@ Durations are `30s` / `5m` / `2h` (`parse_duration`). Checked at load
 
 - **Deferring.** The `collector.triggers` consumer runs the collectors an
   event triggers that don't defer it (`FactCollector::defers`, the passes'
-  `select`), and records the rest in `collector_pending` (V3; one row per
+  `select`), and records the rest in `pending_run` (V3; one row per
   collector: the latest `event_seq`, `since`, `touched`), readable as
-  `v_collector_pending` — a view showing a collector's result can say
+  `v_pending_run` — a view showing a collector's result can say
   it's updating while its row is there.
+- **Core's jobs too.** Change analysis's deep stage is paced the same
+  way, as `pending_run` rows owned by `core` (semantic-layer.md "Change
+  analysis"); `run_due` runs them through `refresh_change` (a `Busy` one
+  waits for the next pass).
 - **Running** (`crate::pacing`, spawned at boot, every 5 s): `run_due(now)`
   runs each pending collector once `due()` holds — settled since
   `touched`, `at_most` since its last `collector_run`, idle (`idle_for`:

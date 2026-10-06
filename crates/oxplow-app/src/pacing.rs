@@ -1,6 +1,6 @@
 //! Paced collector runs (tsk1092): an `on:` collector whose trigger sets
 //! `settle`, `at_most` or `idle` doesn't run as its event arrives. The
-//! `collector.triggers` consumer records it pending (`collector_pending`,
+//! `collector.triggers` consumer records it pending (`pending_run`,
 //! the latest event it'll run for) and this module runs it once every
 //! condition holds, then clears it. See `.context/metrics.md` → "Pacing".
 
@@ -74,6 +74,9 @@ fn between(then: oxplow_domain::Timestamp, now: oxplow_domain::Timestamp) -> Dur
 enum Paced {
     Entity(String, oxplow_config::collectors::CollectorSpec),
     Fact(crate::metrics_service::FactCollector),
+    /// Core's deep change analysis of a working tree or open effort
+    /// (`crate::change_reactor`, tsk1093).
+    Change(crate::change_analysis::ChangeTarget, Pacing),
 }
 
 impl Paced {
@@ -81,6 +84,7 @@ impl Paced {
         let trigger = match self {
             Paced::Entity(_, spec) => &spec.trigger,
             Paced::Fact(c) => &c.trigger,
+            Paced::Change(_, pacing) => return Some(pacing),
         };
         match trigger {
             oxplow_config::collectors::Trigger::On { pacing, .. } => Some(pacing),
@@ -89,8 +93,60 @@ impl Paced {
     }
 }
 
-/// The collector `owner`/`id` names, if one still runs `on:` events.
+/// How long since `paced` last ran: a collector's last `collector_run`, a
+/// change's last finished analysis.
+async fn since_run(
+    svc: &crate::Services,
+    paced: &Paced,
+    owner: &str,
+    id: &str,
+    now: oxplow_domain::Timestamp,
+) -> Result<Option<Duration>, oxplow_domain::DomainError> {
+    let last = match paced {
+        Paced::Change(target, _) => {
+            let (kind, key) = match target {
+                crate::change_analysis::ChangeTarget::Working { stream_id } => (
+                    "working",
+                    oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value()),
+                ),
+                crate::change_analysis::ChangeTarget::Effort { effort_id } => (
+                    "effort",
+                    oxplow_domain::EffortId::try_from_str(effort_id).map(|e| e.value()),
+                ),
+                _ => return Ok(None),
+            };
+            let Some(key) = key else { return Ok(None) };
+            svc.db
+                .read(move |c| {
+                    c.query_row(
+                        "SELECT max(computed_at) FROM change
+                          WHERE kind = ?1 AND (CASE ?1 WHEN 'working' THEN stream_id
+                                                       ELSE CAST(target AS INTEGER) END) = ?2",
+                        rusqlite::params![kind, key],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await?
+        }
+        _ => svc
+            .collector_store
+            .run_of(owner, id)
+            .await?
+            .map(|r| r.last_run_at),
+    };
+    Ok(last
+        .and_then(|t| oxplow_domain::Timestamp::parse(&t).ok())
+        .map(|t| between(t, now)))
+}
+
+/// The job `owner`/`id` names, if it's still paced: a collector that runs
+/// `on:` events, or core's change analysis.
 fn find(svc: &crate::Services, owner: &str, id: &str) -> Option<Paced> {
+    if owner == crate::change_reactor::CORE {
+        return crate::change_reactor::target_of(id)
+            .map(|t| Paced::Change(t, crate::change_reactor::deep_pacing()));
+    }
     if let Some(c) = svc
         .metrics
         .fact_collectors()
@@ -123,8 +179,13 @@ pub async fn run_due(
     let idle = idle_for(svc, now).await?;
     let mut ran = 0;
     for p in pending {
-        let paced = find(svc, &p.owner, &p.id);
-        let Some(pacing) = paced.as_ref().and_then(Paced::pacing) else {
+        let Some(paced) = find(svc, &p.owner, &p.id) else {
+            svc.collector_store
+                .clear_pending(&p.owner, &p.id, i64::MAX)
+                .await?;
+            continue;
+        };
+        let Some(pacing) = paced.pacing() else {
             svc.collector_store
                 .clear_pending(&p.owner, &p.id, i64::MAX)
                 .await?;
@@ -133,40 +194,73 @@ pub async fn run_due(
         let since_touched = oxplow_domain::Timestamp::parse(&p.touched)
             .map(|t| between(t, now))
             .unwrap_or(Duration::MAX);
-        let since_run = svc
-            .collector_store
-            .run_of(&p.owner, &p.id)
-            .await?
-            .and_then(|r| oxplow_domain::Timestamp::parse(&r.last_run_at).ok())
-            .map(|t| between(t, now));
+        let since_run = since_run(svc, &paced, &p.owner, &p.id, now).await?;
         if !due(pacing, since_touched, since_run, idle) {
             continue;
         }
-        let Some(event) = svc.event_log_store.get_by_seq(p.event_seq).await? else {
-            svc.collector_store
-                .clear_pending(&p.owner, &p.id, p.event_seq)
-                .await?;
-            continue;
-        };
-        let event = std::sync::Arc::new(event);
-        match paced.expect("paced above") {
-            Paced::Fact(c) => svc.metrics.run_paced(&c.owner, &c.key, event).await,
-            Paced::Entity(owner, spec) => {
-                let root = svc.layout.project_dir.clone();
-                let ctx = crate::collector_runner::Collectors::of(svc, &root);
-                if let crate::collector_runner::EventRun::Ran(Err(error)) =
-                    crate::collector_runner::run_for_event(&ctx, &owner, &spec.id, event).await?
-                {
-                    tracing::warn!(collector = %format!("{owner}/{}", spec.id), %error, "paced collector failed");
-                }
-            }
+        match run_one(svc, paced, &p).await {
+            Ok(true) => ran += 1,
+            Ok(false) => {}
+            Err(oxplow_domain::DomainError::Busy(_)) => continue,
+            Err(e) => return Err(e),
         }
         svc.collector_store
             .clear_pending(&p.owner, &p.id, p.event_seq)
             .await?;
-        ran += 1;
     }
     Ok(ran)
+}
+
+/// Run one due job. Whether it ran — a job with nothing to run (a closed
+/// effort's analysis, an expired event's collector) is just cleared. A
+/// change analysis already running is `Busy`: the row stays for the next
+/// pass.
+async fn run_one(
+    svc: &crate::Services,
+    paced: Paced,
+    p: &oxplow_db::PendingRun,
+) -> Result<bool, oxplow_domain::DomainError> {
+    use oxplow_domain::DomainError;
+    let event = || async {
+        Ok::<_, DomainError>(
+            svc.event_log_store
+                .get_by_seq(p.event_seq)
+                .await?
+                .map(std::sync::Arc::new),
+        )
+    };
+    match paced {
+        Paced::Change(target, _) => match crate::change_analysis::refresh_change(svc, target).await
+        {
+            Ok(_) => Ok(true),
+            Err(DomainError::NotFound) => Ok(false),
+            Err(DomainError::Busy(m)) => Err(DomainError::Busy(m)),
+            Err(e) => {
+                tracing::warn!(job = %p.id, error = %e, "paced change analysis failed");
+                Ok(false)
+            }
+        },
+        Paced::Fact(c) => {
+            let Some(event) = event().await? else {
+                return Ok(false);
+            };
+            svc.metrics.run_paced(&c.owner, &c.key, event).await;
+            Ok(true)
+        }
+        Paced::Entity(owner, spec) => {
+            let Some(event) = event().await? else {
+                return Ok(false);
+            };
+            let root = svc.layout.project_dir.clone();
+            let ctx = crate::collector_runner::Collectors::of(svc, &root);
+            if let crate::collector_runner::EventRun::Ran(Err(error)) =
+                crate::collector_runner::run_for_event(&ctx, &owner, &spec.id, event).await?
+            {
+                tracing::warn!(collector = %format!("{owner}/{}", spec.id), %error, "paced collector failed");
+            }
+            Ok(true)
+        }
+    }
 }
 
 /// Check the pending runs every few seconds (boot).

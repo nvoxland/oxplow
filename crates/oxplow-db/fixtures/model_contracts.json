@@ -511,6 +511,91 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Change id (the change_id in v_change_*)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream whose repo it's in."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`commit`, `effort`, `turn` or `working`."
+        },
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The commit sha, the effort row id, the turn row id, or '' for the working tree."
+        },
+        {
+          "name": "base_revision",
+          "type": "TEXT",
+          "doc": "What it's compared against, as a revision: `git:<sha>`, `git:HEAD`, `snap:<id>`; NULL for a root commit."
+        },
+        {
+          "name": "head_revision",
+          "type": "TEXT",
+          "doc": "The newer side, as a revision: `git:<sha>`, `snap:<id>` or `working`."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`pending`, `running`, `done` or `failed`."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it failed, if it did."
+        },
+        {
+          "name": "computed_at",
+          "type": "TEXT",
+          "doc": "When the analysis last finished (RFC 3339)."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The stream's snapshot it was computed against (the head's for a turn or a closed effort); NULL for a commit."
+        },
+        {
+          "name": "events_to",
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when the last analysis began: what its inputs had seen."
+        },
+        {
+          "name": "files_at",
+          "type": "TEXT",
+          "doc": "When its changed files (stage one: v_change_file's paths, status and line counts) were last listed (RFC 3339); kept current on every move, apart from the deeper analysis."
+        },
+        {
+          "name": "files_events_to",
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when the files were last listed: what that list had seen."
+        },
+        {
+          "name": "conflicted",
+          "type": "INTEGER",
+          "doc": "For a working tree, how many files git reports conflicted; NULL for other kinds."
+        },
+        {
+          "name": "in_progress",
+          "type": "TEXT",
+          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds."
+        },
+        {
+          "name": "elapsed_ms",
+          "type": "INTEGER",
+          "doc": "How long its last deep analysis took (ms). Its duplicate scan is timed in v_code_quality_scan (scope `change <id>`)."
+        }
+      ],
+      "key": []
     }
   },
   "change_duplicate": {
@@ -4543,18 +4628,18 @@
       "key": []
     }
   },
-  "collector_pending": {
+  "pending_run": {
     "1": {
       "columns": [
         {
           "name": "owner",
           "type": "TEXT",
-          "doc": "The extension that declares it, `project` or `built-in`."
+          "doc": "Whose job: a collector's extension, `project` or `built-in`; `core` for change analysis."
         },
         {
           "name": "id",
           "type": "TEXT",
-          "doc": "The collector's id within its owner."
+          "doc": "The collector's id within its owner, or `change/working/<stream>` / `change/effort/<effort>`."
         },
         {
           "name": "event_seq",

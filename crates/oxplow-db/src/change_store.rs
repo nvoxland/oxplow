@@ -237,6 +237,7 @@ impl SqliteChangeStore {
         results: ChangeResults,
         snapshot_id: Option<i64>,
         events_to: i64,
+        elapsed_ms: i64,
     ) -> Result<(), DomainError> {
         let at = serde_json::to_value(oxplow_domain::Timestamp::now())
             .ok()
@@ -289,8 +290,8 @@ impl SqliteChangeStore {
                 }
                 tx.execute(
                     "UPDATE change SET status = 'done', error = NULL, computed_at = ?2,
-                       snapshot_id = ?3, events_to = ?4 WHERE id = ?1",
-                    rusqlite::params![id, at, snapshot_id, events_to],
+                       snapshot_id = ?3, events_to = ?4, elapsed_ms = ?5 WHERE id = ?1",
+                    rusqlite::params![id, at, snapshot_id, events_to, elapsed_ms],
                 )
                 .map_err(map_sql_err)?;
                 Ok(())
@@ -538,11 +539,11 @@ mod tests {
             test_files: Vec::new(),
         };
         store
-            .store_results(c.id, results("a.rs"), Some(3), 10)
+            .store_results(c.id, results("a.rs"), Some(3), 10, 1)
             .await
             .unwrap();
         store
-            .store_results(c.id, results("b.rs"), Some(4), 11)
+            .store_results(c.id, results("b.rs"), Some(4), 11, 1)
             .await
             .unwrap();
         let dup = || {

@@ -2640,4 +2640,4 @@ available to every extension:
 - Collector pacing: an `on:` trigger's `settle` / `at_most` / `idle` /
   `force` (tsk1092, metrics.md "Pacing"), so an expensive collector runs
   once a burst settles or the project is idle — never losing a skipped
-  snapshot's files — with `v_collector_pending` saying it's updating.
+  snapshot's files — with `v_pending_run` saying it's updating.

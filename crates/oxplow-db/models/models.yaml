@@ -107,7 +107,7 @@
     - { name: "scan_kind", type: "TEXT", doc: "`delta` or `full`." }
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it was measured in (v_agent_turn.id), when one produced it." }
 - name: change
-  version: 2
+  version: 3
   description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; a working tree's and an open effort's are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
   columns:
     - { name: "id", type: "INTEGER", doc: "Change id (the change_id in v_change_*)." }
@@ -125,6 +125,7 @@
     - { name: "files_events_to", type: "INTEGER", doc: "The event log's highest seq when the files were last listed: what that list had seen." }
     - { name: "conflicted", type: "INTEGER", doc: "For a working tree, how many files git reports conflicted; NULL for other kinds." }
     - { name: "in_progress", type: "TEXT", doc: "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds." }
+    - { name: "elapsed_ms", type: "INTEGER", doc: "How long its last deep analysis took (ms). Its duplicate scan is timed in v_code_quality_scan (scope `change <id>`)." }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -960,13 +961,13 @@
   tests:
     - { not_null: owner }
     - { not_null: id }
-- name: collector_pending
+- name: pending_run
   version: 1
   key: [owner, id]
-  description: "Collector runs deferred by their trigger's pacing (`settle`, `at_most`, `idle`): each waiting collector, the latest event it'll run for, and since when. A view showing a collector's result can say it's updating while its row is here; the row goes once the run happens."
+  description: "Runs deferred by pacing: a collector whose trigger sets `settle`, `at_most` or `idle`, or core's change analysis of a working tree or open effort (`owner` `core`, `id` `change/<kind>/<target>`). Each waiting job, the latest event it'll run for, and since when; a view showing its result can say it's updating while the row is here, and the row goes once the run happens."
   columns:
-    - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` or `built-in`." }
-    - { name: "id", type: "TEXT", doc: "The collector's id within its owner." }
+    - { name: "owner", type: "TEXT", doc: "Whose job: a collector's extension, `project` or `built-in`; `core` for change analysis." }
+    - { name: "id", type: "TEXT", doc: "The collector's id within its owner, or `change/working/<stream>` / `change/effort/<effort>`." }
     - { name: "event_seq", type: "INTEGER", doc: "The latest triggering event it will run for (v_event.seq)." }
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }

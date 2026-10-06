@@ -1064,8 +1064,16 @@ oxplow-bundled change cards) only read them.
   `snapshot.taken` that recorded files (not `unchanged`) or a
   `vcs.head.moved`, it first runs stage one for the stream's `working`
   change and every open effort's (one without a start snapshot is
-  skipped), then `refresh_change` re-analyzes them — so the lists are
-  current even while a deep analysis is still running (it defers `Busy`). On `effort.finished` it recomputes that effort's change
+  skipped) — so the lists are always current. The deep analysis is
+  **paced** (tsk1093, `change_reactor::deep_pacing`, the same mechanism as
+  collectors' — metrics.md "Pacing"): a take records core's job in
+  `pending_run` (`owner` `core`, `id` `change/working/<stream>` or
+  `change/effort/<effort>`) and `crate::pacing` runs `refresh_change`
+  once 20 s pass with no further take, at most every 2 minutes; a HEAD move
+  or an `agent.turn.ended` (the moment someone looks at a turn's work)
+  analyzes at once and clears the job. Each analysis records
+  `change.elapsed_ms`; its duplicate scan is timed in
+  `v_code_quality_scan` (scope `change <id>`). On `effort.finished` it recomputes that effort's change
   against its end snapshot: the effort closes before its end take, so no
   take event reaches it while open, and an effort that edited and
   finished within one turn would otherwise keep a stale (or no) analysis

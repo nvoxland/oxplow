@@ -411,11 +411,7 @@ mod tests {
             "not run yet"
         );
         assert_eq!(
-            rows(
-                &fx.svc,
-                "SELECT owner, id, event_seq FROM v_collector_pending"
-            )
-            .await,
+            rows(&fx.svc, "SELECT owner, id, event_seq FROM v_pending_run").await,
             json!([["work", "seen", latest.seq]])
         );
         let now = oxplow_domain::Timestamp::now();
@@ -432,7 +428,7 @@ mod tests {
             "once, for the latest event"
         );
         assert_eq!(
-            rows(&fx.svc, "SELECT count(*) FROM v_collector_pending").await,
+            rows(&fx.svc, "SELECT count(*) FROM v_pending_run").await,
             json!([[0]])
         );
     }

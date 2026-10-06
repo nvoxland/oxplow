@@ -167,10 +167,10 @@ impl SqliteCollectorStore {
         self.db
             .transaction(move |tx| {
                 tx.execute(
-                    "INSERT INTO collector_pending (owner, id, event_seq, since, touched)
+                    "INSERT INTO pending_run (owner, id, event_seq, since, touched)
                      VALUES (?1, ?2, ?3, ?4, ?4)
                      ON CONFLICT (owner, id) DO UPDATE SET
-                       event_seq = max(collector_pending.event_seq, excluded.event_seq),
+                       event_seq = max(pending_run.event_seq, excluded.event_seq),
                        touched = excluded.touched",
                     rusqlite::params![owner, id, seq, now],
                 )
@@ -186,7 +186,7 @@ impl SqliteCollectorStore {
             .read(|c| {
                 let mut stmt = c
                     .prepare(
-                        "SELECT owner, id, event_seq, since, touched FROM collector_pending
+                        "SELECT owner, id, event_seq, since, touched FROM pending_run
                          ORDER BY since, owner, id",
                     )
                     .map_err(map_sql_err)?;
@@ -219,7 +219,7 @@ impl SqliteCollectorStore {
         self.db
             .transaction(move |tx| {
                 tx.execute(
-                    "DELETE FROM collector_pending WHERE owner = ?1 AND id = ?2 AND event_seq <= ?3",
+                    "DELETE FROM pending_run WHERE owner = ?1 AND id = ?2 AND event_seq <= ?3",
                     rusqlite::params![owner, id, seq],
                 )
                 .map_err(map_sql_err)
@@ -344,7 +344,7 @@ pub fn record_run_in(conn: &rusqlite::Connection, run: &CollectorRun) -> rusqlit
     .map(|_| ())
 }
 
-/// A collector run deferred by its trigger's pacing (`v_collector_pending`).
+/// A collector run deferred by its trigger's pacing (`v_pending_run`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingRun {
     pub owner: String,
@@ -803,7 +803,7 @@ mod tests {
         assert!(store.list_pending().await.unwrap().is_empty());
         let rows = db
             .read(|c| {
-                c.query_row("SELECT count(*) FROM v_collector_pending", [], |r| {
+                c.query_row("SELECT count(*) FROM v_pending_run", [], |r| {
                     r.get::<_, i64>(0)
                 })
                 .map_err(crate::map_sql_err)

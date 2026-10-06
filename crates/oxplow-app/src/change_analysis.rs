@@ -661,13 +661,15 @@ async fn analyze(
         Revision::Vcs { .. } => None,
     };
     let dup_head = head.clone();
+    let started = std::time::Instant::now();
     let result = compute(svc, &root, base, head).await;
+    let elapsed_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
     drop(running);
     match result {
         Ok(results) => {
             let changed: Vec<String> = results.files.iter().map(|f| f.path.clone()).collect();
             svc.change_store
-                .store_results(row.id, results, snapshot_id, events_to)
+                .store_results(row.id, results, snapshot_id, events_to, elapsed_ms)
                 .await?;
             spawn_duplicates(svc, row.id, events_to, &root, &dup_head, changed);
         }
