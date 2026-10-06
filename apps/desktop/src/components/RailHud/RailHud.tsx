@@ -1,17 +1,11 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { refFromTabId, dashboardRef } from "../../tabs/pageRefs.js";
-import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import { getPanelLayout, setPanelLayout } from "../../api.js";
-import { useExtensions } from "../../extensionsStore.js";
-import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { LensResultView } from "../../lens/LensResultView.js";
-import type { ExtensionPanel, LensRun, PanelPlacement, Reads } from "../../tauri-bridge/generated/bindings.js";
+import type { ExtensionPanel, LensRun, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
 import {
-  CORE_PANELS,
   extensionPanelId,
   panelOpenRef,
   hidePanel,
@@ -28,27 +22,11 @@ import { panelChoices, type PanelChoice, type PanelRuns } from "../Panels/usePan
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../opErrorsStore.js";
-import { readFailed } from "../../logger.js";
-import {
-  listRecentPageVisits,
-  subscribePageVisitEvents,
-  topVisitedPages,
-  type PageVisitApi,
-  type TopVisitedRowApi,
-} from "../../api.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
-import { readWikiPages } from "../../knowledge.js";
-
-export interface BookmarkRailEntry {
-  ref: TabRef;
-  label: string;
-}
 
 export interface RailHudProps {
-  threadId: string | null;
-  /** Current stream — scopes the open-comments section. */
+  /** Current stream — what a panel's lens actions run in. */
   streamId?: string | null;
-  bookmarks?: BookmarkRailEntry[];
   /** Open a page (or focus if already open) in the active thread's tab area. */
   onOpenPage(ref: TabRef): void;
   /** Optional: invoked when the user clicks the search affordance. */
@@ -64,9 +42,8 @@ export interface RailHudProps {
 // (`get/set_panel_layout`). The Search box is
 // pinned at the top and is not part of this set.
 
-// A panel id: core's (`core:alerts`, …) or an extension's (`ext:<ext>/<id>`).
-// "core:bookmarks" is the combined Bookmarks + History pane: collapsed it
-// shows bookmarks only; expanded it adds the page-visit History list.
+// A panel id: an extension's (`ext:<ext>/<id>`) — core has no panels of
+// its own.
 type RailSectionId = string;
 
 interface RailSectionsValue {
@@ -373,47 +350,34 @@ function RailSection({
  * - Active item summary
  * - Since you last looked  (TBD; placeholder for now)
  * - Ready
- * - Bookmarks (the user-curated pinned set; replaced the old Pages list)
  */
 export function RailHud({
-  threadId,
   streamId,
-  bookmarks,
   onOpenPage,
   onOpenSearch,
 }: RailHudProps) {
   const width = useRailWidth();
   // One owner for every panel's lens runs, shared with the bell and the
-  // Alerts page (`PanelRunsProvider`, tsk1097).
+  // Alerts page (`PanelRunsProvider`).
   const { panels: extPanels, runs: panelRuns } = usePanelRuns();
-  const available = useMemo(
-    () => [...CORE_PANELS.map((p) => p.id), ...extPanels.map(extensionPanelId)],
-    [extPanels],
-  );
+  const available = useMemo(() => extPanels.map(extensionPanelId), [extPanels]);
   const sections = useRailSections(available);
   const addMenu = useContextMenu();
-  const titleOf = (id: string) =>
-    CORE_PANELS.find((p) => p.id === id)?.title ?? extPanels.find((p) => extensionPanelId(p) === id)?.title ?? id;
+  const titleOf = (id: string) => extPanels.find((p) => extensionPanelId(p) === id)?.title ?? id;
 
   // Every visible panel always renders (a stable list); each shows its own
   // empty state when it has no content.
   function renderSection(id: RailSectionId): ReactNode {
-    switch (id) {
-      case "core:bookmarks":
-        return <GoToSection key={id} entries={bookmarks ?? []} threadId={threadId} onOpenPage={onOpenPage} />;
-      default: {
-        const panel = extPanels.find((p) => extensionPanelId(p) === id);
-        return panel ? (
-          <ExtensionPanelSection
-            key={id}
-            panel={panel}
-            runs={panelRuns[panel.id] ?? { body: null, badge: null, collapsed: null, count: null }}
-            streamId={streamId ?? null}
-            onOpenPage={onOpenPage}
-          />
-        ) : null;
-      }
-    }
+    const panel = extPanels.find((p) => extensionPanelId(p) === id);
+    return panel ? (
+      <ExtensionPanelSection
+        key={id}
+        panel={panel}
+        runs={panelRuns[panel.id] ?? { body: null, badge: null, collapsed: null, count: null }}
+        streamId={streamId ?? null}
+        onOpenPage={onOpenPage}
+      />
+    ) : null;
   }
 
   return (
@@ -532,41 +496,6 @@ function RailResizeHandle({ onChange }: { onChange(phase: "start" | "move" | "en
   );
 }
 
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "12px 14px 4px",
-        fontSize: 11,
-        fontWeight: 600,
-        color: "var(--text-secondary)",
-        textTransform: "uppercase",
-        letterSpacing: 0.4,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-const rowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "6px 14px",
-  fontSize: "var(--text-sm)",
-  color: "var(--text-primary)",
-  cursor: "pointer",
-  border: "none",
-  background: "transparent",
-  textAlign: "left",
-  width: "100%",
-  borderRadius: 0,
-};
-
-function rowHoverStyle(): CSSProperties {
-  return { ...rowStyle };
-}
 
 function SearchTrigger({ onOpenSearch }: { onOpenSearch?: () => void }) {
   return (
@@ -670,7 +599,7 @@ function ExtensionPanelSection({
   );
 }
 
-/** A panel's choice param in its header (tsk1100): one small button per
+/** A panel's choice param in its header: one small button per
  *  option, the one in force pressed. */
 function PanelChoiceToggle({ choice, onPick }: { choice: PanelChoice; onPick(value: string): void }) {
   return (
@@ -705,242 +634,3 @@ function PanelChoiceToggle({ choice, onPick }: { choice: PanelChoice; onPick(val
   );
 }
 
-/** The "Go To" pane — the rail's combined bookmarks + history surface.
- *  Collapsed it shows the bookmark rows only; expanded it labels them
- *  under a "Bookmarks" subheading and adds the page-visit History list
- *  (recent / most-visited, toggled inline). The ↗ opens the full
- *  "Go To" page where bookmarks are managed. */
-function GoToSection({
-  entries,
-  threadId,
-  onOpenPage,
-}: {
-  entries: BookmarkRailEntry[];
-  threadId: string | null;
-  onOpenPage(ref: TabRef): void;
-}) {
-  const history = useHistoryRows(threadId);
-
-  const bookmarkRows = (
-    <>
-      {entries.length === 0 ? <RailEmpty label="No bookmarks" /> : null}
-      <div data-testid="rail-bookmarks" style={{ paddingBottom: 8 }}>
-        {entries.map((entry) => (
-          <button
-            key={entry.ref.id}
-            type="button"
-            data-testid={`rail-bookmark-${entry.ref.id}`}
-            title={entry.label}
-            onClick={() => onOpenPage(entry.ref)}
-            style={rowHoverStyle()}
-          >
-            <PageKindIcon kind={entry.ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {entry.label}
-            </span>
-          </button>
-        ))}
-      </div>
-    </>
-  );
-
-  return (
-    <RailSection
-      id="core:bookmarks"
-      title="Go To"
-      onOpen={() => onOpenPage(dashboardRef("visits"))}
-      openTitle="Open Go To"
-      collapsedContent={bookmarkRows}
-    >
-      <SectionHeading>Bookmarks</SectionHeading>
-      {bookmarkRows}
-      <HistoryRows {...history} onOpenPage={onOpenPage} />
-    </RailSection>
-  );
-}
-
-interface HistoryRowsState {
-  mode: "recent" | "top";
-  toggleMode(): void;
-  recent: PageVisitApi[];
-  top: TopVisitedRowApi[];
-  wikiTitles: Record<string, string>;
-}
-
-/** Page-visit history data for the combined Bookmarks pane: recent +
- *  most-visited rows, kept live, plus a fresh wiki slug→title map. */
-function useHistoryRows(threadId: string | null): HistoryRowsState {
-  const [mode, setMode] = useState<"recent" | "top">("recent");
-  const [recent, setRecent] = useState<PageVisitApi[]>([]);
-  const [top, setTop] = useState<TopVisitedRowApi[]>([]);
-  // Wiki visit rows carry the title that was current when the page
-  // was activated. That snapshot can be stale ("" for pages activated
-  // before their summary loaded; outdated when titles change later).
-  // Resolve fresh slug → title here and prefer it over `e.label`
-  // whenever the entry is a wiki page.
-  const [wikiTitles, setWikiTitles] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      void listRecentPageVisits({
-        threadId,
-        limit: 10,
-        dedupeByRef: true,
-        excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
-      }).then((rows) => {
-        if (!cancelled) setRecent(rows);
-      }, readFailed("recent pages"));
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      void topVisitedPages({
-        threadId,
-        sinceT: since,
-        limit: 10,
-        excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
-      }).then((rows) => {
-        if (!cancelled) setTop(rows);
-      }, readFailed("most visited pages"));
-    };
-    refresh();
-    const off = subscribePageVisitEvents(refresh);
-    return () => {
-      cancelled = true;
-      off();
-    };
-  }, [threadId]);
-
-  // Maintain the slug → title map, re-read when a model it read changes
-  // (a page created, renamed or deleted) so a renamed page updates in
-  // the history list without waiting for the next visit.
-  const [titleReads, setTitleReads] = useState<Reads>(NO_READS);
-  const refreshTitles = useCallback(() => {
-    let cancelled = false;
-    void readWikiPages().then(({ pages, reads }) => {
-      if (cancelled) return;
-      const map: Record<string, string> = {};
-      for (const p of pages) map[p.slug] = p.title;
-      setWikiTitles(map);
-      setTitleReads(reads);
-    }, readFailed("wiki page titles"));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  useEffect(() => refreshTitles(), [refreshTitles]);
-  useRerunOnChange(titleReads, () => void refreshTitles());
-
-  const toggleMode = useCallback(() => setMode((m) => (m === "recent" ? "top" : "recent")), []);
-  return { mode, toggleMode, recent, top, wikiTitles };
-}
-
-/** History block rendered inside the expanded Bookmarks pane: a
- *  "History" / "Most Visited" subheading with an inline recent/top
- *  toggle, then the visit rows. */
-function HistoryRows({
-  mode,
-  toggleMode,
-  recent,
-  top,
-  wikiTitles,
-  onOpenPage,
-}: HistoryRowsState & { onOpenPage(ref: TabRef): void }) {
-  // If the user has data in only one of the two modes, fall back to
-  // that one so the toggle doesn't render an empty list.
-  const effectiveMode = mode === "recent" && recent.length === 0 && top.length > 0
-    ? "top"
-    : mode === "top" && top.length === 0 && recent.length > 0
-    ? "recent"
-    : mode;
-  const source = effectiveMode === "recent" ? recent : top;
-  const entries = source.slice(0, 10);
-  const hasHistory = recent.length > 0 || top.length > 0;
-
-  return (
-    <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "12px 14px 4px",
-        }}
-      >
-        <span
-          style={{
-            flex: 1,
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--text-secondary)",
-            textTransform: "uppercase",
-            letterSpacing: 0.4,
-          }}
-        >
-          {effectiveMode === "recent" ? "History" : "Most Visited"}
-        </span>
-        {hasHistory ? (
-          <button
-            type="button"
-            data-testid="rail-history-mode"
-            onClick={toggleMode}
-            title={effectiveMode === "recent" ? "Show most visited (last 30d)" : "Show recent"}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              fontSize: 10,
-              padding: "0 4px",
-            }}
-          >
-            {effectiveMode === "recent" ? "top" : "recent"}
-          </button>
-        ) : null}
-      </div>
-      {!hasHistory ? <RailEmpty label="No history yet" /> : null}
-      <div data-testid="rail-history" style={{ paddingBottom: 4 }}>
-        {entries.map((e) => {
-          // Reconstruct the full ref (with payload) from the id —
-          // page-visit rows don't persist payload, so a file ref needs
-          // its `path` rebuilt or it won't open. See refFromTabId.
-          const ref = refFromTabId(e.refId);
-          if (!ref) return null;
-          const trailing = effectiveMode === "top" ? (e as TopVisitedRowApi).count : null;
-          // Wiki: prefer the live title over the stored visit label.
-          // Falls back to a non-empty stored label, then to the slug,
-          // so the row always renders something.
-          const liveWikiTitle =
-            ref.kind === "wiki" ? wikiTitles[e.refId]?.trim() : null;
-          const display =
-            liveWikiTitle || (e.label?.trim() ?? "") || e.refId;
-          return (
-            <button
-              key={e.refId}
-              type="button"
-              data-testid={`rail-history-${e.refId}`}
-              title={display}
-              onClick={() => onOpenPage(ref)}
-              style={rowHoverStyle()}
-            >
-              <PageKindIcon kind={ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {display}
-              </span>
-              {trailing != null ? (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: "var(--text-secondary)",
-                    background: "var(--surface-tab-inactive)",
-                    padding: "1px 6px",
-                    borderRadius: 999,
-                  }}
-                >
-                  {trailing}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
-    </>
-  );
-}

@@ -1,21 +1,11 @@
 /// The left nav's panels and the person's layout of them (P6.G1,
-/// `.context/pages-and-tabs.md` → "Left-nav panels"): core's built-in
-/// panels and every enabled extension's `panels:`, ordered, hidden and
+/// `.context/pages-and-tabs.md` → "Left-nav panels"): every enabled
+/// extension's `panels:` — core has none of its own — ordered, hidden and
 /// collapsed as `panel_layout` says. Pure: the rail reads and writes the
 /// layout through `get_panel_layout` / `set_panel_layout`.
 import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
 import { lensRef, refFromTabId } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
-
-export interface CorePanel {
-  id: string;
-  title: string;
-}
-
-/** Core's panels, in their default order. */
-export const CORE_PANELS: readonly CorePanel[] = [
-  { id: "core:bookmarks", title: "Bookmarks" },
-];
 
 /** Every panel starts open: a collapsed Work hid the task a person had just
  *  added (tsk1045). */
@@ -27,7 +17,7 @@ export function extensionPanelId(panel: ExtensionPanel): string {
 }
 
 /** What an extension panel's header opens: the page it names (`open`,
- *  as Comments opens the inbox, tsk1086), else its body lens. */
+ *  as Comments opens the inbox), else its body lens. */
 export function panelOpenRef(panel: ExtensionPanel): TabRef {
   return (panel.open ? refFromTabId(panel.open) : null) ?? lensRef(panel.body);
 }

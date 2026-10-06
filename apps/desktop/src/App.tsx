@@ -3176,7 +3176,7 @@ export function App() {
 
   return (
     // One owner of every extension panel's runs, read by the rail, the
-    // status bar's bell and the Alerts page (tsk1097).
+    // status bar's bell and the Alerts page.
     <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
     <AlertToasts onReview={() => handleOpenPage(alertsRef())} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
@@ -3247,9 +3247,7 @@ export function App() {
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <RailHud
-          threadId={selectedThread?.id ?? null}
           streamId={stream?.id ?? null}
-          bookmarks={bookmarks.map((b) => ({ ref: b.ref, label: b.label ?? b.ref.id }))}
           onOpenPage={handleOpenPage}
           onOpenSearch={() => setQuickOpenVisible(true)}
         />

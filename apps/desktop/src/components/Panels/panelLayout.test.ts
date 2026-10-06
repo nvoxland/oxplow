@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 
 import type { PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
 import {
-  CORE_PANELS,
   hidePanel,
   layoutSync,
   movePanelBeside,
@@ -12,24 +11,22 @@ import {
   showPanel,
 } from "./panelLayout.js";
 
-const core = CORE_PANELS.map((p) => p.id);
-
 test("no stored layout: every panel in default order, all open", () => {
-  const out = resolveLayout([...core, "ext:gh/prs"], []);
-  expect(out.order).toEqual([...core, "ext:gh/prs"]);
+  const out = resolveLayout(["ext:acme/inbox", "ext:gh/prs"], []);
+  expect(out.order).toEqual(["ext:acme/inbox", "ext:gh/prs"]);
   expect(out.hidden).toEqual([]);
   // Work too (tsk1045): collapsed, it hid the task a person had just added.
   expect([...out.collapsed]).toEqual([]);
 });
 
 test("the stored layout orders, hides and collapses; unknown ids drop, new ones append", () => {
-  const out = resolveLayout(["ext:acme/inbox", "core:bookmarks", "ext:gh/prs"], [
+  const out = resolveLayout(["ext:acme/inbox", "ext:bundled/go-to", "ext:gh/prs"], [
     { panel: "ext:gh/prs", hidden: false, collapsed: true },
-    { panel: "core:bookmarks", hidden: true, collapsed: false },
+    { panel: "ext:bundled/go-to", hidden: true, collapsed: false },
     { panel: "ext:gone/x", hidden: false, collapsed: false },
   ]);
   expect(out.order).toEqual(["ext:gh/prs", "ext:acme/inbox"]);
-  expect(out.hidden).toEqual(["core:bookmarks"]);
+  expect(out.hidden).toEqual(["ext:bundled/go-to"]);
   expect(out.collapsed.has("ext:gh/prs")).toBe(true);
   expect(out.collapsed.has("ext:acme/inbox")).toBe(false);
 });

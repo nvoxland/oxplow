@@ -54,6 +54,7 @@ ui:
     - { model: verdict, kind: effort, placement: ref-chip, label: label, color: color }
     - { model: verdict, kind: effort, placement: row-badge, label: label, color: color }
 panels:
+  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to, collapsed: go-to-bookmarks, open: 'page:dashboard?variant=visits' }
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
   - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments, open: 'page:comments' }
   - { id: uncommitted, title: Uncommitted, icon: git-branch, scope: stream, body: uncommitted, collapsed: uncommitted-line, count: uncommitted-count, open: 'page:uncommitted-changes' }

@@ -84,7 +84,7 @@ Things I keep forgetting. Read this before adding any UI.
   `CommandConfirm` (`PersonCommandConfirm`, mounted once in `App`). The
   task page's and wiki page's rail Delete use `InlineConfirm`; the wiki
   pane's right-click Delete uses `personCommands`.
-- **What needs the person isn't in the rail (tsk1097).** One status-bar
+- **What needs the person isn't in the rail.** One status-bar
   bell (`components/Alerts/AlertsIndicator.tsx`) counts everything that
   needs them — red while something failed, the accent while decisions or
   notices wait, quiet otherwise — and opens the **Alerts page**
@@ -98,7 +98,7 @@ Things I keep forgetting. Read this before adding any UI.
 - **Async-op failures don't `alert`.** Push a record into
   `opErrorsStore` (`recordOpError({ label, command?, stderr?, stdout?,
   exitCode?, message? })`). A failure is one of the things that need the
-  person (tsk1097, below): a toast as it happens ("<label> — Review"),
+  person (below): a toast as it happens ("<label> — Review"),
   the status bar's bell counts it (red), and the **Alerts page** lists
   it under Problems, each row opening to its full output. For ops that
   already have a page focus when they fail (e.g. `runOp` in
@@ -181,7 +181,7 @@ Things I keep forgetting. Read this before adding any UI.
   approved before it runs and goes back to waiting if the run fails
   (tsk858). Only the thread's own
   proposals show: a ref the transcript merely quotes shows nothing. The
-  Alerts page stays the cross-thread list (its proposal cards, tsk1097).
+  Alerts page stays the cross-thread list (its proposal cards).
 
 ## Menus a page or row gets from extensions
 
@@ -668,8 +668,8 @@ declaring *what it is* and mounting the generic layer.
     and Enter / click the result; assert via `page-<kind>` on the body
     (e.g. `page-git-history`, `page-local-history`, etc.). The old
     `rail-page-<entry-id>` / `rail-pages` testids are gone — the rail no
-    longer has a "Pages" section (Bookmarks is the pinned set; `rail-
-    bookmark-<refId>` opens a bookmarked page). The `dock-tab-*` testids
+    longer has a "Pages" section (the Go To panel's bookmarks are the
+    pinned set; its rows open them). The `dock-tab-*` testids
     were likewise removed earlier in the IA cleanup.
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
     agent tab, `file:<path>` for open-file tabs);

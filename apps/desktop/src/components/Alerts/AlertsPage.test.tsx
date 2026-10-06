@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, within, fireEvent, render, waitFor } from "@testing-library/react";
 
-// tsk1097: everything that needs the person is on the Alerts page,
+// Everything that needs the person is on the Alerts page,
 // counted by the status bar's bell, and announced by a toast once.
 
 const realApi = await import("../../api.js");
@@ -18,10 +18,7 @@ mock.module("../../api.js", () => ({
   },
   listExtensions: async () => [],
   listCommentsForStream: async () => [],
-  listRecentPageVisits: async () => [],
-  topVisitedPages: async () => [],
   subscribeCommentEvents: () => () => {},
-  subscribePageVisitEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},
   querySql: async (sql: string) => {
     if (sql.includes("FROM v_command_proposal")) {

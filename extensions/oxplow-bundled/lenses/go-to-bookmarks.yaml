@@ -1,0 +1,22 @@
+title: Go To (collapsed)
+description: The pages you bookmarked, as the thread sees them — the Go To panel collapsed.
+hidden: true
+params:
+  - { name: thread_id, label: Thread }
+query: |
+  SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(b.label), ''), b.ref) AS title, b.page_kind, b.ref
+  FROM (
+    SELECT bk.*, row_number() OVER (PARTITION BY bk.ref ORDER BY
+             CASE bk.scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
+    FROM v_bookmark bk
+    WHERE (bk.scope = 'thread' AND bk.thread_id = :thread_id)
+       OR (bk.scope = 'stream' AND bk.stream_id = (SELECT stream_id FROM v_thread WHERE id = :thread_id))
+       OR bk.scope = 'project'
+  ) b
+  LEFT JOIN v_wiki_page w ON b.page_kind = 'wiki' AND b.ref = 'wiki:' || w.slug
+  WHERE b.n = 1
+  ORDER BY b.added_at DESC, b.id DESC
+viz: list
+columns:
+  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: ref } }
+empty: No bookmarks

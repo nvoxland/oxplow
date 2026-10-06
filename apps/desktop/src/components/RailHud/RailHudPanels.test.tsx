@@ -3,11 +3,11 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { ExtensionPanel, Lens, LensRun, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 
-// tsk1089: an extension panel can name a lens its collapsed header shows
+// An extension panel can name a lens its collapsed header shows
 // (a summary, compact) and a lens whose row count is its header count.
 
 const realApi = await import("../../api.js");
-// The body lens has a choice param (tsk1100): the panel's header toggle.
+// The body lens has a choice param: the panel's header toggle.
 const MODE = {
   name: "mode",
   label: "Show",
@@ -50,9 +50,6 @@ mock.module("../../api.js", () => ({
       warnings: [],
     } as unknown as LensRun;
   },
-  listRecentPageVisits: async () => [],
-  topVisitedPages: async () => [],
-  subscribePageVisitEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
 }));
@@ -64,7 +61,7 @@ afterEach(cleanup);
 test("a collapsed panel shows its collapsed lens; its header counts the count lens's rows", async () => {
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null}>
-      <RailHud threadId={null} streamId="str1" onOpenPage={() => {}} />
+      <RailHud streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
   const section = await waitFor(() => view.getByTestId("rail-section-ext:x/w"));
@@ -83,7 +80,7 @@ test("a body lens's choice param is a header toggle; picking re-runs the body wi
   bodyRuns.length = 0;
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null}>
-      <RailHud threadId={null} streamId="str1" onOpenPage={() => {}} />
+      <RailHud streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
   const top = await waitFor(() => view.getByTestId("rail-panel-choice-mode-top"));

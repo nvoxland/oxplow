@@ -1,7 +1,7 @@
 // Moves a person makes in the shell, shared by specs.
 import { expect, type Page } from "@playwright/test";
 
-/** Expand the rail section `id` (`core:bookmarks`, `ext:oxplow-bundled/work`) unless it already is — once
+/** Expand the rail section `id` (`ext:oxplow-bundled/go-to`, `ext:oxplow-bundled/work`) unless it already is — once
  *  the rail shows the person's stored layout (it's `aria-busy` until then),
  *  so the state read is the one the click acts on. */
 export async function expandRailSection(page: Page, id: string): Promise<void> {

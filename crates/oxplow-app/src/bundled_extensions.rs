@@ -56,6 +56,8 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
         ext_file!("oxplow-bundled", "lenses/effort-untested-files.yaml"),
         ext_file!("oxplow-bundled", "lenses/file-co-change.yaml"),
         ext_file!("oxplow-bundled", "lenses/findings.yaml"),
+        ext_file!("oxplow-bundled", "lenses/go-to-bookmarks.yaml"),
+        ext_file!("oxplow-bundled", "lenses/go-to.yaml"),
         ext_file!("oxplow-bundled", "lenses/inferred-decisions.yaml"),
         ext_file!("oxplow-bundled", "lenses/page-visits-by-day.yaml"),
         ext_file!("oxplow-bundled", "lenses/planning.yaml"),
@@ -317,10 +319,23 @@ mod tests {
         id: &str,
         params: &[(&str, i64)],
     ) -> serde_json::Value {
+        let params: Vec<(&str, oxplow_db::SqlCell)> = params
+            .iter()
+            .map(|(k, v)| (*k, oxplow_db::SqlCell::Int(*v)))
+            .collect();
+        run_bundled_lens_with(f, id, &params).await
+    }
+
+    /// `run_bundled_lens`, with any param values.
+    async fn run_bundled_lens_with(
+        f: &crate::test_fixtures::EffortFixture,
+        id: &str,
+        params: &[(&str, oxplow_db::SqlCell)],
+    ) -> serde_json::Value {
         let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         let params = params
             .iter()
-            .map(|(k, v)| (k.to_string(), oxplow_db::SqlCell::Int(*v)))
+            .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
         let run = crate::extensions::run_lens(
             &layer,
@@ -751,7 +766,7 @@ mod tests {
         );
     }
 
-    /// tsk1086: the rail's Comments panel is a lens: the stream's open
+    /// The rail's Comments panel is a lens: the stream's open
     /// comments for the person and for the agent, each row and the header
     /// opening the inbox.
     #[tokio::test]
@@ -816,7 +831,7 @@ mod tests {
         assert_eq!(none, serde_json::json!([]));
     }
 
-    /// tsk1087: the rail's Work panel is a lens: per thread, what's in
+    /// The rail's Work panel is a lens: per thread, what's in
     /// progress, what's ready and what finished since the person last
     /// cleared it (an extension command recording an event), grouped
     /// under headings; collapsed, just the active item; counted without
@@ -911,7 +926,120 @@ mod tests {
         );
     }
 
-    /// tsk1088: the rail's Uncommitted panel is a lens over the working
+    /// The rail's Go To panel is a lens: the thread's bookmarks,
+    /// then its recent (or most visited) pages, each once; collapsed, the
+    /// bookmarks alone.
+    #[tokio::test]
+    async fn go_to_is_a_panel_of_bookmarks_and_history() {
+        use oxplow_db::analytics_stores::PageVisitStore;
+        use oxplow_db::SqlCell;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let bundled = crate::extensions::load_extensions(f._dir.path())
+            .into_iter()
+            .find(|e| e.name == "oxplow-bundled")
+            .unwrap();
+        assert!(bundled.errors.is_empty(), "{:?}", bundled.errors);
+        let panel = bundled
+            .panels
+            .iter()
+            .find(|p| p.id == "oxplow-bundled/go-to")
+            .expect("a go-to panel");
+        assert_eq!(
+            (
+                panel.body.as_str(),
+                panel.collapsed.as_deref(),
+                panel.open.as_deref()
+            ),
+            (
+                "oxplow-bundled/go-to",
+                Some("oxplow-bundled/go-to-bookmarks"),
+                Some("page:dashboard?variant=visits")
+            )
+        );
+        let thread = f.thread.to_string();
+        for (r, kind, label, scope) in [
+            ("page:git-dashboard", "git-dashboard", "Git", "thread"),
+            ("file:a.rs", "file", "a.rs", "project"),
+        ] {
+            f.svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    crate::commands::bookmark::SET,
+                    serde_json::json!({ "ref": r, "page_kind": kind, "label": label,
+                                        "scope": scope, "thread": thread }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        for (kind, id, label) in [
+            ("file", "file:DEV.md", "DEV.md"),
+            ("file", "file:DEV.md", "DEV.md"),
+            ("file", "file:DEV.md", "DEV.md"),
+            ("settings", "page:settings", "Settings"),
+            ("agent", "page:agent", "Agent"),
+        ] {
+            f.svc
+                .page_visit_store
+                .record(kind, id, Some(label), None, Some(&thread))
+                .await
+                .unwrap();
+        }
+        let tid = SqlCell::Int(f.thread.value());
+        // (group, title, visits) per row, in display order.
+        let rows = |mode: &str| {
+            let tid = tid.clone();
+            let mode = SqlCell::Text(mode.into());
+            let f = &f;
+            async move {
+                let rows = run_bundled_lens_with(
+                    f,
+                    "oxplow-bundled/go-to",
+                    &[("thread_id", tid), ("mode", mode)],
+                )
+                .await;
+                rows.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| (r[0].to_string(), r[1].to_string(), r[4].to_string()))
+                    .collect::<Vec<_>>()
+            }
+        };
+        let row =
+            |g: &str, t: &str, n: &str| (format!("\"{g}\""), format!("\"{t}\""), n.to_string());
+        assert_eq!(
+            rows("recent").await,
+            vec![
+                row("Bookmarks", "a.rs", "null"),
+                row("Bookmarks", "Git", "null"),
+                row("History", "Settings", "null"),
+                row("History", "DEV.md", "null"),
+            ]
+        );
+        assert_eq!(
+            rows("top").await[2..],
+            [
+                row("Most visited", "DEV.md", "3"),
+                row("Most visited", "Settings", "1"),
+            ]
+        );
+        let collapsed = run_bundled_lens_with(
+            &f,
+            "oxplow-bundled/go-to-bookmarks",
+            &[("thread_id", tid.clone())],
+        )
+        .await;
+        assert_eq!(
+            collapsed,
+            serde_json::json!([
+                ["a.rs", "file", "file:a.rs"],
+                ["Git", "git-dashboard", "page:git-dashboard"]
+            ])
+        );
+    }
+
+    /// The rail's Uncommitted panel is a lens over the working
     /// tree's file list (change analysis's stage one): a folder tree with
     /// A/M/D letters, collapsed to a one-line summary, counted by files.
     #[tokio::test]

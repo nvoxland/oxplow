@@ -40,9 +40,9 @@ pages are THE shell.
 | `apps/desktop/src/pages/DiffPage.tsx` | Thin Page wrapper around `DiffPane` for diff tabs. Calls `usePageTitle(basename + (label))`. |
 | `apps/desktop/src/pages/DiffViewPage.tsx` | The **explicit start→end diff view** (`diff-view` kind). Three modes via `DiffViewSpec`: `snapshot` (legacy `snapshotRef(N)` prev→N drill-in); `effort` (`effortDiffRef(effortId)` — resolves the effort's own start/end snapshot bracket via the `get_effort` IPC on load, carrying the `taskId`/`effortId`, with an "Effort is in progress" notice when the end is null); `turn` (`turnRef(turnId)` — the turn's start snapshot → end snapshot via `get_agent_turn`, start → working tree with a "Turn is still running" notice while it runs; a turn with no start snapshot shows an explanation instead of diffing the empty tree, `resolveTurnEndpoints`, tsk467 — the notice wording is `inProgressNotice(subject)`); `endpoints` (`endpointDiffRef(start, end)` — an explicit pair of revisions, `working` / `snap:<id>` / `git:<rev>`). All modes list the changed files through the `diff` RPC (`Trees`, `.context/vcs.md`) via `useChangedFiles({ kind: "endpoints" })` (`components/ChangedFiles/`), which also gives the two sides' `Revision`s for opening a file's diff. **Page shape (tsk343–346/370):** the page uses the `Page` **`layout="details"`** (center column + right rail). The `<h1>` title is `Changes: <effort title>` *when the diff is for an effort* (effort passed, OR the start/end snapshots line up exactly with an overlapping effort's bracket), else a comparison label — **`Commit comparison`** when both endpoints are git versions (commit / commit-pinned snapshot), else **`Snapshot comparison`**. The date/commit **range** is passed as the `rightRail`. When the diff **lines up with an effort** (effort passed, or a snapshot range matching an overlapping effort's bracket — `primaryTaskId`/`effortTitle`), the rail **leads with a "Task" row** (`diff-view-task-link`) naming the effort's task and linking to its `taskRef` (in-tab via `onOpenPage`); it self-hides for a non-effort range. Below it: a **date header** (`rangeDateLabel` in `diffViewModel.ts` — a single date when both endpoints fall on the same calendar day, a "start – end" range when they span multiple days, the single known date when only one endpoint is time-based, hidden when neither is) above two **selectable** fields — a "Start"/"End" caption beside an `EndpointPicker` dropdown (`apps/desktop/src/components/Diff/EndpointPicker.tsx`). The closed trigger shows a **time-only** label (so it fits on one line next to the caption); opening it lists the **20 newest snapshots on the same branch as the diffed endpoints** (`pickerBranch` / `snapshotsOnBranch` in `diffViewModel.ts` — reference branch is end snapshot's `git_branch` → start's → `stream.branch`; only snapshots *known* to be on a different branch are dropped, while unrecorded-branch snapshots (pre-V42 rows / detached HEAD) are kept so the picker stays populated on existing data — a branch switch within the stream's worktree never mixes other branches' snapshots in), **constrained per side so the range stays valid** (`rangeEndpointOptions` — the Start list only offers snapshots *before* the current End, the End list only snapshots *after* the current Start, so you can't pick an inverted range; no constraint when the opposite endpoint isn't a snapshot), plus whichever snapshot the current endpoint sits on (so the selection is always present), with the **full date+time** and, for snapshots that pinned a commit, the short commit sha. Picking a snapshot rescopes the diff in place — `onOpenPage(endpointDiffRef(newStart, end))` / `endpointDiffRef(start, newEnd)`, which `navOpen` routes as an **in-tab navigation** (Back returns to the prior range) — so the user can expand/collapse the diff range. The picker's popover is `position:fixed` (escapes the rail panel's overflow), closes on pick / Escape / outside-click, and is disabled when there are no candidate snapshots. The rail shows in the details rail (or, when the rail collapses on narrow widths, as the same panel stacked at the top of the center column — handled by the `Page` base, see below). Then an optional **Concurrent Efforts** `<ul>` (every effort overlapping the range — `listEffortsOverlappingRange`, **scoped to the diffed snapshot's own stream** so other streams'/branches' efforts whose global snapshot-id windows merely overlap don't leak in — other than the one the diff is for, each linked to its `taskRef`), a **Files Changed** `<h2>` section rendering the shared collapsible `ChangedFilesTree` (A/M/D + zone badges + Expand/Collapse all) — *all* changed files, or only the effort's claimed files (`listEffortFiles`) when the diff was opened **for** an effort. The section says so when there are no test changes. Sections are **boxless** (h2 + content, no card); `ChangedFilesTree` takes `showFileCount={false}` here. **Section order (tsk356/358/365/366/367):** title → (effort **description**) → the **`effort.review.details` slot** → Concurrent Efforts → Files Changed. When the diff is **for an effort** (passed or lined-up): the effort's task **description** renders just under the title (`MarkdownView` via `getTask`), and the `effort.review.details` slot (`LensSlots`, params `effort_id` + the effort's `change_id`) mounts extension lenses — oxplow-bundled's decisions/claims and oxplow-bundled's change analysis (`change-review`: summary, look-here-first, churn treemap, function and test changes, co-change, duplication, cross-zone imports), coverage and tests, metric deltas and agent nudges. Both self-hide for a non-effort range. Chrome/tab title is driven by `usePageTitle` (plain-text mirror of the h1). Pure endpoint-resolution logic (`resolveEffortEndpoints`, `resolveTurnEndpoints`, `inProgressNotice`, `resolveSnapshotEndpoints`, `previousSnapshotId`, `snapshotRange`) lives React-free in `apps/desktop/src/diffViewModel.ts`. `Trees` (`.context/vcs.md`) handles mixed snapshot↔commit (normalizing the snapshot side into VCS object ids), the working-tree side, and per-file line counts (via `similar`). |
 | `apps/desktop/src/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it. Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
-| `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: a pinned search trigger at the top, then a set of **uniform collapsible panels** (Go To, and extensions' panels — Uncommitted, Comments and Work among them, from `oxplow-bundled`). Each renders through the shared `RailSection` wrapper — drag handle (⠿) + expand/collapse chevron + title + optional count badge + optional header action. (What needs the person — proposals, failed operations, undelivered events, firing badges — isn't a rail section: it's the status bar's bell, the Alerts page and toasts; see `.context/usability.md`.) Sections **drag-to-reorder** (MIME `application/x-oxplow-rail-section`, the layout — order, collapsed, hidden — persisted in `panel_layout`; see "Left-nav panels" below). An extension panel with a `collapsed` lens (Work) keeps that summary when collapsed; the rest hide their body. Every section **always renders** (stable list) with an empty-state line ("Working tree clean", "No open comments", …) when it has no content. Passive — never auto-opens tabs. **The Bookmarks slot (section id `bookmarks`) is the combined "Go To" pane** (`GoToSection`, titled **"Go To"**): collapsed it shows the bookmark rows only; expanded it labels them under a "Bookmarks" subheading and adds a "History" / "Most Visited" subsection (page-visit rows via `useHistoryRows`, with an inline recent/top toggle). Bookmark rows carry no scope badge and no remove button; the section's ↗ opens the **Go To** page (`dashboardRef("visits")`) where bookmarks are managed (re-scoped / removed). |
+| `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: a pinned search trigger at the top, then a set of **uniform collapsible panels** (every one an extension's — Go To, Uncommitted, Comments and Work from `oxplow-bundled`). Each renders through the shared `RailSection` wrapper — drag handle (⠿) + expand/collapse chevron + title + optional count badge + optional header action. (What needs the person — proposals, failed operations, undelivered events, firing badges — isn't a rail section: it's the status bar's bell, the Alerts page and toasts; see `.context/usability.md`.) Sections **drag-to-reorder** (MIME `application/x-oxplow-rail-section`, the layout — order, collapsed, hidden — persisted in `panel_layout`; see "Left-nav panels" below). An extension panel with a `collapsed` lens (Work) keeps that summary when collapsed; the rest hide their body. Every section **always renders** (stable list) with an empty-state line ("Working tree clean", "No open comments", …) when it has no content. Passive — never auto-opens tabs. Go To is the `oxplow-bundled` panel `go-to` (bookmarks, then recent or most visited pages). |
 | `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator**: a 40px always-visible strip of letter glyphs (`navigator-strip-stream-<id>` / `navigator-strip-thread-<id>`); clicking a glyph navigates directly — a thread glyph selects that thread, a stream glyph switches streams via `onSwitchStream`. **Hovering a glyph shows its full title as a native tooltip and nothing else (tsk269).** The `navigator-overlay` panel (~280px, covering the strip *and* the rail HUD to its right) expands only on an explicit click: the bottom-pinned `navigator-expand` chevron, or dead space in the strip (`navigator-strip-empty`, `e.target === e.currentTarget`). The chevron is pinned *outside* the scroll container and is the load-bearing affordance — once the list scrolls there is no dead space left, and `+ Add stream` lives only in the panel. The open/close state machine — click-to-open, geometric pointer-leave, Escape, outside-press, background-click, and the passive-vs-explicit guard — lives in the shared `apps/desktop/src/components/useSlideoutStrip.ts` hook (chevron in `SlideoutChevron.tsx`), which the Terminal page's `TerminalTabStrip` also runs on; a new slide-out strip adopts the hook rather than re-deriving it. It dismisses on a click in its own **dead background** (anything resolving to `button/input/select/textarea/a/label/[role=button]` is left alone so controls behave normally), on the pointer leaving its bounds (180ms grace), on Escape, and on any pointerdown outside it. The last two are *explicit* dismissals and beat the mid-rename / mid-new-thread form guard; the first two don't. **Pointer departure is measured geometrically** (document `pointermove` vs. the panel's rect), never `mouseleave` — the panel covers the rail and sits in the same DOM subtree as the strip, so the pointer never "leaves" the wrapper while parked over the covered region, which is what used to strand it open on top of the rail and swallow clicks meant for it (tsk131). Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard). **Thread menu:** a read-only (non-writer / queued) thread leads with **"Make writer"** (`menu-item-thread.promote`) → runs the `thread.promote` command (via `onPromoteThread` → `App.handlePromoteThread`), making it the stream's single active writer and demoting the prior one; the active writer omits the item (its accent pill already signals it). Then Rename / Settings / Close. The write guard makes every non-active thread read-only, so this is the discoverable path out of "project file edits are blocked" (tsk132). |
-| `apps/desktop/src/tabs/bookmarks.ts` | The person's bookmarks, project data (tsk1099, data-model.md "bookmark"): `useBookmarks(threadId, streamId)` reads `v_bookmark` — a page once, at the narrowest scope the thread sees (thread / stream / project) — and `setBookmark` / `removeBookmark` run `bookmark.set` / `bookmark.remove`. Pages bookmark via the `PageNavigationContext.bookmark` binding (one `scope`; the star's menu moves it or, on its current scope, takes it off); the Go To page's manager re-scopes and removes (its toast's Undo is the command's undo). |
+| `apps/desktop/src/tabs/bookmarks.ts` | The person's bookmarks, project data (data-model.md "bookmark"): `useBookmarks(threadId, streamId)` reads `v_bookmark` — a page once, at the narrowest scope the thread sees (thread / stream / project) — and `setBookmark` / `removeBookmark` run `bookmark.set` / `bookmark.remove`. Pages bookmark via the `PageNavigationContext.bookmark` binding (one `scope`; the star's menu moves it or, on its current scope, takes it off); the Go To page's manager re-scopes and removes (its toast's Undo is the command's undo). |
 | ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_kind` writer in the backend instead. |
 | `apps/desktop/src/pages/WorkItemPage.tsx` | Another provider's work item (`work_item:<provider>:<id>`; oxplow's tasks are `TaskPage`), P6b.C3: title, state, body and Move To; Parent / Comment… / Link… only as the provider's features allow (`v_capability_provider`); the `work_item.detail.body` / `.sidebar` slots. See [work-items.md](./work-items.md). |
 | `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`commit:<sha>`): commit metadata (collapsing a long body behind "Show more") with cherry-pick / revert, the changed files (`ChangedFilesTree`, parent → commit diffs) and the `vcs.commit.details` lens slot (`change_id` from `useChange`). Routed via `gitCommitRef(sha)`. |
@@ -135,7 +135,7 @@ There are no sentinel ids: the agent tab is `AGENT_TAB_ID`
 **No compatibility layer for old ids.** When a kind is renamed or a page
 moves into an extension, its saved tabs/bookmarks/history are dropped
 (the `oxplow.layout.v2.*` keys started fresh on 2026-09-28; bookmarks
-moved into the project DB with tsk1099 and started fresh again) — see the decision in [refs.md](./refs.md).
+moved into the project DB and started fresh again) — see the decision in [refs.md](./refs.md).
 
 | Kind | Id format | Example |
 |---|---|---|
@@ -164,8 +164,9 @@ moved into the project DB with tsk1099 and started fresh again) — see the deci
 ## Left-nav panels (P6.G1)
 
 The rail's sections are **panels** (`components/Panels/panelLayout.ts`):
-core's (`core:bookmarks`, the Go To pane) and every enabled
-extension's `panels:`
+every enabled extension's `panels:` — core has none of its own since Go
+To moved into `oxplow-bundled`; with it disabled the rail is
+the search box and + Add Panel
 (`ext:<extension>/<id>`, rendered by `ExtensionPanelSection`: the body
 lens compact; the header's count — the `count` lens's row count (or
 `number`), else the badge lens's alert count while it fires
@@ -173,13 +174,11 @@ lens compact; the header's count — the `count` lens's row count (or
 else nothing; the header's ↗
 opening the panel's `open` page or else its body lens, `panelOpenRef`).
 A compact lens keeps its `group` headings and group actions (the
-toolbar is hidden), and its linked rows drag into the agent's context
-(tsk1089).
-The rail's panels are moving out of core into `oxplow-bundled` (epic
-tsk1085): only their UI moves, as lenses over the existing views and
+toolbar is hidden), and its linked rows drag into the agent's context.
+The rail's panels are moving out of core into `oxplow-bundled`: only their UI moves, as lenses over the existing views and
 commands; all three are done (`ext:oxplow-bundled/comments`, `ext:oxplow-bundled/work`, `ext:oxplow-bundled/uncommitted`). One owner
 holds every panel's runs — `PanelRunsProvider`
-(`components/Panels/PanelRunsContext.tsx`, around the app; tsk1097),
+(`components/Panels/PanelRunsContext.tsx`, around the app),
 read by the rail, the status bar's bell and the Alerts page — through
 `components/Panels/usePanelRuns.ts` → `useExtensionPanelRuns`: it binds each panel's scope — `stream_id` /
 `thread_id` as row ids, from `panelParams` — for the stream and thread it
@@ -188,8 +187,7 @@ distinct lens of a panel once whatever roles it plays, and hands each
 section its runs. The firing badges come from the same runs
 (`panelAlerts`), so a badge never runs twice. What needs the person —
 proposals, failed operations, undelivered events, firing badges — isn't
-a rail panel: it's the status bar's bell and the Alerts page (tsk1097;
-see usability.md). A
+a rail panel: it's the status bar's bell and the Alerts page (see usability.md). A
 layout stored before a core panel existed gets it appended at the bottom.
 The set of extension panels (like extension pages, slot mounts and the
 prompt catalog) reloads on `lensRerun.extensionsChanged`: a file under
@@ -265,7 +263,7 @@ zone grouping); each appears only when it has content:
 
 1. **Search trigger** — opens the launcher (`QuickOpenOverlay`), the
    single discovery surface. Always visible.
-2. **Work** — an `oxplow-bundled` panel (tsk1087), thread-scoped, over
+2. **Work** — an `oxplow-bundled` panel, thread-scoped, over
    its model `thread_work` (one row per line, per thread). The body lens
    `work` groups the lines (`group`): "In progress" (the active task; under
    its epic, with the epic's other children indented and the active one
@@ -279,7 +277,7 @@ zone grouping); each appears only when it has content:
    The header count (`work-count`) is in progress + ready + outside, never
    an alert. Rows link (Cmd-click opens a new tab) and drag into the
    agent's context.
-3. **Uncommitted** — an `oxplow-bundled` panel (tsk1088), stream-scoped,
+3. **Uncommitted** — an `oxplow-bundled` panel, stream-scoped,
    over the working change's stage-one file list (`v_change_file` /
    `v_change.conflicted` / `in_progress`, kept current by `change.analyze`
    on every move — the app no longer polls git for it). The body lens
@@ -288,17 +286,20 @@ zone grouping); each appears only when it has content:
    progress as a red row on top. Collapsed, `uncommitted-line`: `3A 2M 1D
    +10 −4` and the conflict line, opening the Uncommitted page; the count
    (`uncommitted-count`) is the changed files.
-4. **Comments** — an `oxplow-bundled` panel (tsk1086): the stream-scoped
+4. **Comments** — an `oxplow-bundled` panel: the stream-scoped
    lens `comments` over `v_comment` shows two open-comment count rows split
    by intent — "For me" (`note`) and "For the agent" (`followup`) — each
    row and the header (`open: page:comments`) opening the Comments inbox.
-5. **Go To** (section id `bookmarks`) — the user-curated pinned set
-   merged with page-visit history. Collapsed shows the bookmarks only;
-   expanded labels them under a "Bookmarks" subheading and adds a
-   "History" / "Most Visited" subsection. There is **no "Pages"
+5. **Go To** — an `oxplow-bundled` panel (`ext:oxplow-bundled/go-to`):
+   the thread-scoped lens `go-to` lists the bookmarks the thread sees
+   (`v_bookmark`), then its History — or, through the header's
+   Recent / Most visited toggle (the lens's `mode` choice param), its most
+   visited pages over 30 days with their counts — from `v_page_visit`,
+   each row with its page's icon; collapsed, `go-to-bookmarks` shows the
+   bookmarks alone. There is **no "Pages"
    section**: the launcher is the one discovery surface for all pages,
    and users pin what they want always-visible by starring (the ☆ on each
-   page's nav bar, scoped thread / stream / global).
+   page's nav bar, scoped thread / stream / project).
    `computePagesDirectory` is the launcher's page list (the old
    `RAIL_PAGE_IDS` filter is gone); every page carries a `category` (Work
    / Code / Git / Activity / Knowledge / System) so the launcher empty
@@ -377,7 +378,7 @@ reachable — that supersedes the old "wire each page as a menu command"
 approach (tsk147).
 
 The rail no longer has a "Pages" section (the `rail-page-*` / `rail-pages`
-testids are gone); **Bookmarks** is the always-visible curated nav. E2e
+testids are gone); Go To's bookmarks are the always-visible curated nav. E2e
 probes that used to click `rail-page-*` should drive `rail-search` → the
 launcher (type, then assert `page-<kind>` on the body).
 

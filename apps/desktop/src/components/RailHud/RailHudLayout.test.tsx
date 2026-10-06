@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 // tsk972: the stored panel layout loads after the first render. A toggle
 // the person makes before it arrives is theirs: the late load doesn't
@@ -18,13 +18,16 @@ mock.module("../../api.js", () => ({
   setPanelLayout: async (layout: Placement[]) => {
     saved.push(layout);
   },
-  // An extension panel beside Go To, so one can be toggled and the other
-  // hidden by the stored layout.
+  // Two extension panels, so one can be toggled and the other hidden by
+  // the stored layout.
   listExtensions: async () => [
     {
       name: "x",
       enabled: true,
-      panels: [{ id: "x/w", extension: "x", title: "W", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null }],
+      panels: [
+        { id: "x/v", extension: "x", title: "V", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
+        { id: "x/w", extension: "x", title: "W", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
+      ],
       lenses: [],
       ui: { slots: [], commands: [], decorators: [], replacements: [] },
     },
@@ -37,10 +40,7 @@ mock.module("../../api.js", () => ({
     warnings: [],
   }),
   listCommentsForStream: async () => [],
-  listRecentPageVisits: async () => [],
-  topVisitedPages: async () => [],
   subscribeCommentEvents: () => () => {},
-  subscribePageVisitEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
 }));
@@ -52,23 +52,23 @@ afterEach(cleanup);
 test("a toggle made before the stored layout loads survives it, and keeps what was stored", async () => {
   const view = render(
     <PanelRunsProvider streamId={null} threadId={null}>
-      <RailHud threadId={null} streamId={null} onOpenPage={() => {}} />
+      <RailHud streamId={null} onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
-  const toggle = view.getByTestId("rail-section-toggle-core:bookmarks");
+  const toggle = await waitFor(() => view.getByTestId("rail-section-toggle-ext:x/v"));
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(saved, "nothing is written over a layout not loaded yet").toEqual([]);
   await act(async () => {
     deliverLayout([
-      { panel: "core:bookmarks", hidden: false, collapsed: false },
+      { panel: "ext:x/v", hidden: false, collapsed: false },
       { panel: "ext:x/w", hidden: true, collapsed: false },
     ]);
   });
-  expect(view.getByTestId("rail-section-toggle-core:bookmarks").getAttribute("aria-expanded")).toBe("false");
+  expect(view.getByTestId("rail-section-toggle-ext:x/v").getAttribute("aria-expanded")).toBe("false");
   expect(view.queryByTestId("rail-section-ext:x/w"), "the stored hide stands").toBeNull();
   const last = saved.at(-1)!;
-  expect(last.find((p) => p.panel === "core:bookmarks")).toMatchObject({ collapsed: true });
+  expect(last.find((p) => p.panel === "ext:x/v")).toMatchObject({ collapsed: true });
   expect(last.find((p) => p.panel === "ext:x/w")).toMatchObject({ hidden: true });
 });

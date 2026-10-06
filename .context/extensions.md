@@ -136,12 +136,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     count? }]` put a lens in the
     left nav (`open`, a `page:<kind>` ref, is the page its header opens —
     a core page it summarizes, as Comments opens the inbox; absent, the
-    body lens, tsk1086). `collapsed` is a lens shown compact while the
+    body lens). `collapsed` is a lens shown compact while the
     panel is collapsed, as its summary (absent, a collapsed panel is just
     its header). `count` is a lens whose row count — a `number` lens's
     value — is the header's count, raising no alert; with a `badge` too,
     the count lens's number shows and the badge still feeds Alerts
-    (`panelCount`, tsk1089). (`Extension.panels`, `ExtensionPanel`; checked at load in
+    (`panelCount`). (`Extension.panels`, `ExtensionPanel`; checked at load in
     `parse_panels`: a kebab-case id, lenses that exist — body, badge,
     collapsed, count — a badge with an
     `alert`, and a `stream` / `thread` scope's lenses declaring
@@ -151,7 +151,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     the backend to infer the thread from the selection, and runs every
     panel's lenses from one owner (`useExtensionPanelRuns`), each distinct
     lens once per refresh whatever roles it plays. The body renders compact; the badge's
-    alert count shows on the panel, and the core **Alerts** panel lists
+    alert count shows on the panel, and the **Alerts** page (status-bar bell) lists
     every firing badge. oxplow-bundled's Waiting on You is a panel
     whose badge is its own lens.
   - **Actions are commands** (P6.B1, target §11.4): `actions:` declares
@@ -873,7 +873,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 
 - `params`: `name`, `label`, `default`, `options`. Untyped: a value is
   bound as-is.
-- **Choice params (tsk1100).** `options: [{ value, label }]` makes a
+- **Choice params.** `options: [{ value, label }]` makes a
   param a choice: a lens page shows a select, and an extension panel
   whose body lens has one shows it as a toggle in the panel's header
   (one small button per option). The default must be one of the options
@@ -917,7 +917,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `compare`), and `unit` — another column of the row holding this one's
   unit, so a number shows as a metric value (`16.4 s`, `42.5%`; tsk1038).
   A timestamp cell shows in local time, its full time on hover.
-- `columns` also take `icon` and `tone` (tsk1089): each names another
+- `columns` also take `icon` and `tone`: each names another
   column of the row. `icon`'s value names an icon drawn before the cell
   from a fixed vocabulary (`lens/lensIcons.tsx`): the work glyphs
   `ready` / `todo` ☐, `in_progress` ◐, `blocked` ⚠, `done` ✓,
@@ -926,7 +926,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `dashboard`, `comment` (their pages' icons); and the ref-kind icon
   names (`bug`, `git-pull-request`, … — `REF_KIND_ICONS`); past those,
   any page kind (`git-dashboard`, `alerts`, `work_item`, …) draws its
-  page's icon (tsk1101), so a row of pages — a bookmark, a visit — can
+  page's icon, so a row of pages — a bookmark, a visit — can
   pass its `page_kind`. `tone`'s value
   is `accent`, `success`, `warning`, `danger` or `muted`, drawn with theme
   variables (`--accent`, `--status-done`, `--status-waiting`,
@@ -934,7 +934,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   over an icon's own tone. Values come from the query, so the loader
   can't check them: an unknown name draws nothing, an unknown tone is
   plain.
-- **Row styling** (tsk1089), each naming a result column:
+- **Row styling**, each naming a result column:
   - `group: { by, link? }` (`list` / `table`): the rows under a heading
     per distinct `by` value, in the order each first appears — a group
     with no rows doesn't appear. The heading looks like the rail's
@@ -953,7 +953,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   - Copy (`lens_text`) renders a grouped lens as a section per group.
   - Pure shaping: `rowGroups`, `rowEmphasized`, `rowDepth` in
     `lensModel.ts`.
-- **Rows drag into the agent's context** (tsk1089): a `list`, `table` or
+- **Rows drag into the agent's context**: a `list`, `table` or
   `tree` row whose first linked column resolves (`rowRef`) is draggable
   with the agent-context drag (`CONTEXT_REF_MIME`, `setContextRefDrag`) —
   a working-tree file or wiki page as its `@` mention, any other ref as
@@ -2565,7 +2565,7 @@ What moves out of core, and what it becomes:
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
-| Rail panels (epic tsk1085): Comments, Work, Uncommitted | **done:** Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move — tsk1095/tsk1088). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" (tsk1089) — the pattern for any panel an extension builds |
+| Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is
@@ -2603,7 +2603,8 @@ and lenses under a range/branch filter ([dashboards.md](./dashboards.md)).
 
 **Also stays in core** (it is substrate other features need): snapshots,
 collection ingest, attribution, token ingest, page visits (the rail and
-launcher use them), the fact store and engine, Go To / bookmarks, the Git
+launcher use them), the fact store and engine, the Go To page and
+bookmarks (`v_bookmark`; the rail's Go To pane is the extension's), the Git
 dashboard. diff-view shrinks to title + file list + diff + the
 `effort.review.details` slot; TaskPage keeps the `work_item.detail.body` slot.
 
@@ -2641,12 +2642,12 @@ available to every extension:
   so a slot lens's heading opens its page with the slot's values, and
   history and bookmarks keep them.
 - Panel `collapsed:` — a lens shown as a collapsed panel's summary
-  (tsk1089, for the Work panel).
+  (for the Work panel).
 - Panel `count:` — a lens whose row count (or `number`) is the panel's
   header count without raising an alert.
-- Column `icon:` naming any page kind draws that page's icon (tsk1101).
+- Column `icon:` naming any page kind draws that page's icon.
 - Lens param `options:` — a choice, shown as a toggle in a panel's
-  header and a select on a lens page (tsk1100, for Go To's Recent / Most
+  header and a select on a lens page (for Go To's Recent / Most
   visited).
 - Lens `group: { by, link? }` on `list` / `table` — rows under linked
   sub-headings, also in compact panels — and actions with `group:` in a
@@ -2656,6 +2657,6 @@ available to every extension:
 - List, table and tree rows that link somewhere drag into the agent's
   context; tree labels honour their column's `link`.
 - Collector pacing: an `on:` trigger's `settle` / `at_most` / `idle` /
-  `force` (tsk1092, metrics.md "Pacing"), so an expensive collector runs
+  `force` (metrics.md "Pacing"), so an expensive collector runs
   once a burst settles or the project is idle — never losing a skipped
   snapshot's files — with `v_pending_run` saying it's updating.
