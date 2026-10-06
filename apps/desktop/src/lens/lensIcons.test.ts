@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { LENS_ICON_NAMES, LENS_TONES, lensIcon, toneColor } from "./lensIcons.js";
+import { pageKindIconComponent } from "../pageKinds.js";
 
 // tsk1089: a column's `icon` names one from a fixed vocabulary — the work
 // glyphs the rail draws today, the page kinds' icons and the ref-kind
@@ -26,4 +27,14 @@ test("tones map to theme variables; anything else is plain", () => {
   for (const t of LENS_TONES) expect(toneColor(t)).toMatch(/^var\(--[a-z-]+\)$/);
   expect(toneColor("chartreuse")).toBeNull();
   expect(toneColor(null)).toBeNull();
+});
+
+// tsk1101: any page kind names its page's icon, so a row of pages (a
+// bookmark, a visit) shows each one's own.
+test("a page kind draws its page's icon", () => {
+  for (const kind of ["git-dashboard", "alerts", "work_item", "dir", "settings"]) {
+    const spec = lensIcon(kind);
+    expect(spec, kind).not.toBeNull();
+    expect(spec && "Icon" in spec ? spec.Icon : null, kind).toBe(pageKindIconComponent(kind));
+  }
 });

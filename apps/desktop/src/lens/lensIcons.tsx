@@ -8,7 +8,7 @@
 import { Layers, MessageSquare, type LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactElement } from "react";
 
-import { pageKindIconComponent } from "../pageKinds.js";
+import { pageKindIconComponent, pageKindLabel } from "../pageKinds.js";
 import { REF_KIND_ICONS } from "../refKinds.js";
 
 /** A semantic tone, drawn with a theme variable (`.context/theming.md`). */
@@ -70,7 +70,9 @@ export const LENS_ICON_NAMES: readonly string[] = [
   ...Object.keys(REF_KIND_ICONS).filter((n) => !(n in KINDS)),
 ];
 
-/** The icon `name` draws, or null when it isn't in the vocabulary. */
+/** The icon `name` draws, or null when it isn't in the vocabulary. Past
+ *  the names above, any page kind draws its page's icon (tsk1101), so a
+ *  row of pages — a bookmark, a visit — can pass its `page_kind`. */
 export function lensIcon(name: unknown): LensIconSpec | null {
   if (typeof name !== "string") return null;
   const status = STATUS[name];
@@ -78,7 +80,9 @@ export function lensIcon(name: unknown): LensIconSpec | null {
   const kind = KINDS[name];
   if (kind?.Icon) return { Icon: kind.Icon, tone: null, label: kind.label };
   const ref = REF_KIND_ICONS[name];
-  return ref ? { Icon: ref, tone: null, label: name } : null;
+  if (ref) return { Icon: ref, tone: null, label: name };
+  const page = pageKindIconComponent(name);
+  return page ? { Icon: page, tone: null, label: pageKindLabel(name) } : null;
 }
 
 /** A cell's icon. `tone` (the column's) wins over the glyph's own. */

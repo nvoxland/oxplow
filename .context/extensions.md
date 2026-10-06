@@ -924,7 +924,10 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `canceled` ✗, `archived` ▣ (each with its own tone); the kinds `epic`,
   `task`, `wiki`, `file`, `folder`, `commit`, `diff`, `lens`, `metric`,
   `dashboard`, `comment` (their pages' icons); and the ref-kind icon
-  names (`bug`, `git-pull-request`, … — `REF_KIND_ICONS`). `tone`'s value
+  names (`bug`, `git-pull-request`, … — `REF_KIND_ICONS`); past those,
+  any page kind (`git-dashboard`, `alerts`, `work_item`, …) draws its
+  page's icon (tsk1101), so a row of pages — a bookmark, a visit — can
+  pass its `page_kind`. `tone`'s value
   is `accent`, `success`, `warning`, `danger` or `muted`, drawn with theme
   variables (`--accent`, `--status-done`, `--status-waiting`,
   `--severity-critical`, `--text-muted`); it colours the cell and wins
@@ -2641,6 +2644,7 @@ available to every extension:
   (tsk1089, for the Work panel).
 - Panel `count:` — a lens whose row count (or `number`) is the panel's
   header count without raising an alert.
+- Column `icon:` naming any page kind draws that page's icon (tsk1101).
 - Lens param `options:` — a choice, shown as a toggle in a panel's
   header and a select on a lens page (tsk1100, for Go To's Recent / Most
   visited).
