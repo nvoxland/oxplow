@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { DiffEntry, FinishedEntry, FileStatus, InProgressOp, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef, lensRef, indexRef, workItemTabRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, taskRef, refFromTabId, dashboardRef, lensRef, indexRef, workItemTabRef } from "../../tabs/pageRefs.js";
 import { readWorkItems, type WorkItem } from "../../workItems.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
@@ -17,6 +17,7 @@ import type { ExtensionPanel, PanelPlacement, Reads } from "../../tauri-bridge/g
 import {
   CORE_PANELS,
   extensionPanelId,
+  panelOpenRef,
   hidePanel,
   layoutSync,
   movePanelBeside,
@@ -35,9 +36,7 @@ import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../opErrorsStore.js";
 import { readFailed } from "../../logger.js";
 import {
-  listCommentsForStream,
   listRecentPageVisits,
-  subscribeCommentEvents,
   subscribePageVisitEvents,
   topVisitedPages,
   type PageVisitApi,
@@ -460,8 +459,6 @@ export function RailHud({
         return <ApprovalsSection key={id} proposals={proposals} reveal={revealApprovals} />;
       case "core:uncommitted":
         return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
-      case "core:comments":
-        return <CommentsSection key={id} streamId={streamId ?? null} onOpenPage={onOpenPage} />;
       case "core:work":
         return (
           <WorkSection
@@ -1329,7 +1326,7 @@ function ExtensionPanelSection({
       id={extensionPanelId(panel)}
       title={panel.title}
       count={runs.count ?? undefined}
-      onOpen={() => onOpenPage(lensRef(panel.body))}
+      onOpen={() => onOpenPage(panelOpenRef(panel))}
       openTitle={`Open ${panel.title}`}
     >
       <div style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
@@ -1348,89 +1345,6 @@ function ExtensionPanelSection({
 function useExtensionPanels(streamId: string | null): ExtensionPanel[] {
   const exts = useExtensions(streamId);
   return useMemo(() => (exts ?? []).filter((e) => e.enabled).flatMap((e) => e.panels), [exts]);
-}
-
-function CommentsSection({
-  streamId,
-  onOpenPage,
-}: {
-  streamId: string | null;
-  onOpenPage(ref: TabRef): void;
-}) {
-  const [notes, setNotes] = useState(0);
-  const [followups, setFollowups] = useState(0);
-
-  useEffect(() => {
-    if (!streamId) {
-      setNotes(0);
-      setFollowups(0);
-      return;
-    }
-    let cancelled = false;
-    const refresh = () => {
-      void listCommentsForStream(streamId).then((threads) => {
-        if (cancelled) return;
-        let n = 0;
-        let f = 0;
-        for (const t of threads) {
-          if (t.comment.status !== "open") continue;
-          if (t.comment.intent === "followup") f += 1;
-          else n += 1;
-        }
-        setNotes(n);
-        setFollowups(f);
-      });
-    };
-    refresh();
-    const off = subscribeCommentEvents(refresh);
-    return () => {
-      cancelled = true;
-      off();
-    };
-  }, [streamId]);
-
-  const isEmpty = notes === 0 && followups === 0;
-
-  return (
-    <RailSection
-      id="core:comments"
-      title="Comments"
-      onOpen={() => onOpenPage(commentsRef())}
-      openTitle="Open the Comments inbox"
-    >
-      {isEmpty ? <RailEmpty label="No open comments" /> : null}
-      {notes > 0 ? (
-        <button
-          type="button"
-          data-testid="rail-comments-notes"
-          onClick={() => onOpenPage(commentsRef())}
-          title="Open the Comments inbox"
-          style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
-        >
-          <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>
-            For me
-          </span>
-          <span style={{ flex: 1 }} />
-          <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{notes}</span>
-        </button>
-      ) : null}
-      {followups > 0 ? (
-        <button
-          type="button"
-          data-testid="rail-comments-followups"
-          onClick={() => onOpenPage(commentsRef())}
-          title="Open the Comments inbox"
-          style={{ ...rowStyle, padding: "4px 14px 12px", gap: 8 }}
-        >
-          <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>
-            For the agent
-          </span>
-          <span style={{ flex: 1 }} />
-          <span style={{ color: "var(--accent)", fontSize: 11 }}>{followups}</span>
-        </button>
-      ) : null}
-    </RailSection>
-  );
 }
 
 /** The thread's open items on another provider — an outside tracker the

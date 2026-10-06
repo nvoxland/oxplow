@@ -1,0 +1,19 @@
+title: Comments
+description: The stream's open comments, for you and for the agent to act on. Each opens the Comments inbox.
+params:
+  - { name: stream_id, label: Stream }
+query: |
+  SELECT who, open, 'page:comments' AS inbox FROM (
+    SELECT 'For me' AS who, 0 AS ord, count(*) AS open
+    FROM v_comment WHERE stream_id = :stream_id AND status = 'open' AND intent <> 'followup'
+    UNION ALL
+    SELECT 'For the agent', 1, count(*)
+    FROM v_comment WHERE stream_id = :stream_id AND status = 'open' AND intent = 'followup'
+  )
+  WHERE open > 0
+  ORDER BY ord
+viz: table
+columns:
+  - { key: who, label: Who, link: { kind: page, from: inbox } }
+  - { key: open, label: Open, link: { kind: page, from: inbox } }
+empty: No open comments

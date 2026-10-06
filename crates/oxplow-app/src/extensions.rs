@@ -777,6 +777,10 @@ pub struct ExtensionPanel {
     pub body: String,
     /// The badge lens, which declares an `alert`.
     pub badge: Option<String>,
+    /// The page its header opens (`page:<kind>`, a canonical ref): a core
+    /// page the panel summarizes, as Comments opens the inbox (tsk1086).
+    /// Absent, the body lens's own page.
+    pub open: Option<String>,
 }
 
 /// A page an extension contributes (P6.G2, target §11.3): a lens shown
@@ -820,6 +824,8 @@ struct PanelFile {
     body: String,
     #[serde(default)]
     badge: Option<String>,
+    #[serde(default)]
+    open: Option<String>,
 }
 
 /// A lens an extension mounts into a core page.
@@ -2159,7 +2165,7 @@ fn parse_panels(
                     .and_then(|i| i.as_str())
                     .unwrap_or_default()
                     .to_string();
-                errors.push((needle, format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge? }}`)")));
+                errors.push((needle, format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge?, open? }}`)")));
                 continue;
             }
         };
@@ -2181,6 +2187,16 @@ fn parse_panels(
             PanelScope::Thread => Some("thread_id"),
         };
         let mut ok = true;
+        if let Some(open) = &p.open {
+            let page = oxplow_domain::refs::grammar::CanonicalRef::parse(open)
+                .is_ok_and(|r| r.kind == "page");
+            if !page {
+                errors.push(err(format!(
+                    "`open` must be a page ref (`page:<kind>`), not `{open}`"
+                )));
+                ok = false;
+            }
+        }
         for (role, slug) in [("body", Some(&p.body)), ("badge", p.badge.as_ref())] {
             let Some(slug) = slug else { continue };
             let Some(lens) = lenses.iter().find(|l| &l.slug == slug) else {
@@ -2217,6 +2233,7 @@ fn parse_panels(
                 scope: p.scope,
                 body: format!("{extension}/{}", p.body),
                 badge: p.badge.map(|b| format!("{extension}/{b}")),
+                open: p.open,
             });
         }
     }
@@ -5891,9 +5908,26 @@ commands:
                 scope: PanelScope::Stream,
                 body: "x/open".into(),
                 badge: Some("x/count".into()),
+                open: None,
             }]
         );
+        // tsk1086: a panel may name the page its header opens (a core page,
+        // as the Comments panel opens the inbox); without one, its body lens.
+        let (_d, ext) = load_x(
+            &lenses,
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: c, title: C, scope: project, body: quiet, open: 'page:comments' }\n",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.panels[0].open.as_deref(), Some("page:comments"));
         for (panel, says) in [
+            (
+                "{ id: a, title: A, scope: project, body: quiet, open: comments }",
+                "`open` must be a page ref",
+            ),
+            (
+                "{ id: a, title: A, scope: project, body: quiet, open: 'task:1' }",
+                "`open` must be a page ref",
+            ),
             (
                 "{ id: a, title: A, scope: project, body: nope }",
                 "isn't in lenses/",

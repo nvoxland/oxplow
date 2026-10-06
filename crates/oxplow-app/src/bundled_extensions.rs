@@ -40,6 +40,7 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
         ext_file!("oxplow-bundled", "lenses/change-summary.yaml"),
         ext_file!("oxplow-bundled", "lenses/change-test-files.yaml"),
         ext_file!("oxplow-bundled", "lenses/change-treemap.yaml"),
+        ext_file!("oxplow-bundled", "lenses/comments.yaml"),
         ext_file!("oxplow-bundled", "lenses/context-read.yaml"),
         ext_file!("oxplow-bundled", "lenses/decisions.yaml"),
         ext_file!("oxplow-bundled", "lenses/duplicate-blocks.yaml"),
@@ -738,6 +739,68 @@ mod tests {
             first("oxplow-bundled/unbacked-claims", elsewhere).await,
             serde_json::json!([])
         );
+    }
+
+    /// tsk1086: the rail's Comments panel is a lens: the stream's open
+    /// comments for the person and for the agent, each row and the header
+    /// opening the inbox.
+    #[tokio::test]
+    async fn comments_is_a_panel_counting_open_comments_by_who_acts() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let bundled = crate::extensions::load_extensions(f._dir.path())
+            .into_iter()
+            .find(|e| e.name == "oxplow-bundled")
+            .unwrap();
+        let panel = bundled
+            .panels
+            .iter()
+            .find(|p| p.id == "oxplow-bundled/comments")
+            .expect("a comments panel");
+        assert_eq!(
+            (panel.body.as_str(), panel.open.as_deref()),
+            ("oxplow-bundled/comments", Some("page:comments"))
+        );
+        let run = |name: &'static str, input: serde_json::Value| {
+            let svc = f.svc.clone();
+            async move {
+                svc.commands
+                    .run(&oxplow_domain::Actor::Human, name, input, false)
+                    .await
+                    .unwrap()
+            }
+        };
+        for intent in ["note", "note", "followup", "note"] {
+            run(
+                crate::commands::comment::ADD,
+                serde_json::json!({
+                    "stream": "stream:str1",
+                    "target": { "kind": "wiki", "id": "some-page" },
+                    "intent": intent,
+                    "body": "b",
+                }),
+            )
+            .await;
+        }
+        // The last note is resolved: it no longer counts.
+        let last = f
+            .svc
+            .sql
+            .query_sql("SELECT max(id) FROM v_comment", vec![], None)
+            .await
+            .unwrap();
+        let last = serde_json::to_value(&last.rows[0][0]).unwrap();
+        run(
+            crate::commands::comment::UPDATE,
+            serde_json::json!({ "comment": format!("cmt{last}"), "status": "resolved" }),
+        )
+        .await;
+        let rows = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 1)]).await;
+        assert_eq!(
+            rows,
+            serde_json::json!([["For me", 2, "page:comments"], ["For the agent", 1, "page:comments"]])
+        );
+        let none = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 2)]).await;
+        assert_eq!(none, serde_json::json!([]));
     }
 
     /// Waiting on Me sits in the rail and raises an alert while anything

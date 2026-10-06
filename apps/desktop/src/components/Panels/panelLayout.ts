@@ -4,6 +4,8 @@
 /// collapsed as `panel_layout` says. Pure: the rail reads and writes the
 /// layout through `get_panel_layout` / `set_panel_layout`.
 import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
+import { lensRef, refFromTabId } from "../../tabs/pageRefs.js";
+import type { TabRef } from "../../tabs/tabState.js";
 
 export interface CorePanel {
   id: string;
@@ -15,7 +17,6 @@ export const CORE_PANELS: readonly CorePanel[] = [
   { id: "core:alerts", title: "Alerts" },
   { id: "core:approvals", title: "Approvals" },
   { id: "core:uncommitted", title: "Uncommitted" },
-  { id: "core:comments", title: "Comments" },
   { id: "core:work", title: "Work" },
   { id: "core:bookmarks", title: "Bookmarks" },
 ];
@@ -27,6 +28,12 @@ const DEFAULT_COLLAPSED = new Set<string>();
 /** An extension panel's id in the layout. */
 export function extensionPanelId(panel: ExtensionPanel): string {
   return `ext:${panel.id}`;
+}
+
+/** What an extension panel's header opens: the page it names (`open`,
+ *  as Comments opens the inbox, tsk1086), else its body lens. */
+export function panelOpenRef(panel: ExtensionPanel): TabRef {
+  return (panel.open ? refFromTabId(panel.open) : null) ?? lensRef(panel.body);
 }
 
 export interface ResolvedLayout {

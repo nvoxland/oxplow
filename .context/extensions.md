@@ -132,8 +132,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     category, a lens that exists), listed in the launcher under its
     category (`components/extensionLauncher.ts`).
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
-    scope: project | stream | thread, body, badge? }]` put a lens in the
-    left nav (`Extension.panels`, `ExtensionPanel`; checked at load in
+    scope: project | stream | thread, body, badge?, open? }]` put a lens in the
+    left nav (`open`, a `page:<kind>` ref, is the page its header opens —
+    a core page it summarizes, as Comments opens the inbox; absent, the
+    body lens, tsk1086) (`Extension.panels`, `ExtensionPanel`; checked at load in
     `parse_panels`: a kebab-case id, lenses that exist, a badge with an
     `alert`, and a `stream` / `thread` scope's lenses declaring
     `stream_id` / `thread_id`). The nav binds those itself

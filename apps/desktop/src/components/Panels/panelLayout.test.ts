@@ -23,13 +23,13 @@ test("no stored layout: every panel in default order, all open", () => {
 });
 
 test("the stored layout orders, hides and collapses; unknown ids drop, new ones append", () => {
-  const out = resolveLayout(["core:work", "core:comments", "ext:gh/prs"], [
+  const out = resolveLayout(["core:work", "core:bookmarks", "ext:gh/prs"], [
     { panel: "ext:gh/prs", hidden: false, collapsed: true },
-    { panel: "core:comments", hidden: true, collapsed: false },
+    { panel: "core:bookmarks", hidden: true, collapsed: false },
     { panel: "ext:gone/x", hidden: false, collapsed: false },
   ]);
   expect(out.order).toEqual(["ext:gh/prs", "core:work"]);
-  expect(out.hidden).toEqual(["core:comments"]);
+  expect(out.hidden).toEqual(["core:bookmarks"]);
   expect(out.collapsed.has("ext:gh/prs")).toBe(true);
   expect(out.collapsed.has("core:work")).toBe(false);
 });

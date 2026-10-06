@@ -2511,6 +2511,12 @@ export type ExtensionPanel = {
 	body: string,
 	// The badge lens, which declares an `alert`.
 	badge: string | null,
+	/**
+	 *  The page its header opens (`page:<kind>`, a canonical ref): a core
+	 *  page the panel summarizes, as Comments opens the inbox (tsk1086).
+	 *  Absent, the body lens's own page.
+	 */
+	open: string | null,
 };
 
 /**
