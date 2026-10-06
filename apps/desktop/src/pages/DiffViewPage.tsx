@@ -6,6 +6,7 @@ import { EffectReportView } from "../components/EffectReportView.js";
 import { readTask, readTasksById } from "../workItems.js";
 import {
   extensionEffectsBetween,
+  querySql,
   getAgentTurn,
   getEffort,
   listEffortFiles,
@@ -52,6 +53,7 @@ import { EffortVerdict } from "./EffortVerdictStrip.js";
 import { EndpointPicker, type EndpointSnapshotOption } from "../components/Diff/EndpointPicker.js";
 import { formatFullDateTime, formatTimeOnly } from "../components/format.js";
 import { workItemLabel } from "../workItemRef.js";
+import { EffortHeader } from "./EffortHeader.js";
 
 /**
  * What a diff view renders. Reached four ways, all via `DiffViewPage`:
@@ -392,6 +394,20 @@ function ResolvedEndpointDiff({
           .then((r) => r.tasks)
           .catch(() => [] as Array<{ id: string; title: string }>);
         const titleByTask = new Map(titles.map((t) => [t.id, t.title] as const));
+        // An unlinked effort is named by its own title (`v_effort.title`).
+        const unlinked = overlapping
+          .map((o) => (o.workItem ? null : effortRowId(o.effortId)))
+          .filter((id): id is number => id !== null);
+        const titleByEffort = new Map<number, string>();
+        if (unlinked.length > 0) {
+          const result = await querySql(
+            `SELECT id, title FROM v_effort WHERE id IN (${unlinked.map((_, i) => `?${i + 1}`).join(", ")})`,
+            unlinked,
+          ).catch(() => null);
+          for (const row of result?.rows ?? []) {
+            if (row[1] !== null && row[1] !== undefined) titleByEffort.set(Number(row[0]), String(row[1]));
+          }
+        }
         if (cancelled) return;
         setEffortRows(
           overlapping.map((o) => ({
@@ -407,7 +423,9 @@ function ResolvedEndpointDiff({
             },
             taskTitle: o.taskId
               ? titleByTask.get(o.taskId) ?? `task ${o.taskId}`
-              : workItemLabel(o.workItem),
+              : o.workItem
+                ? workItemLabel(o.workItem)
+                : titleByEffort.get(effortRowId(o.effortId) ?? -1) ?? "Unlinked work",
             endedAt: o.endedAt,
           })),
         );
@@ -464,7 +482,9 @@ function ResolvedEndpointDiff({
   // The effort's stored change analysis, for effort-review lenses that
   // read v_change* (none when the effort has no start snapshot).
   const { change: effortChange } = useChange(primaryEffortId ? { kind: "effort", effortId: primaryEffortId } : null);
-  const effortTitle = effortPassed ? taskTitle : linedUpEffort?.taskTitle ?? null;
+  // In effort mode the header reads the effort's own title (`v_effort`).
+  const [ownTitle, setOwnTitle] = useState<string | null>(null);
+  const effortTitle = effortPassed ? ownTitle ?? taskTitle : linedUpEffort?.taskTitle ?? null;
   const primaryTaskId = effortPassed ? taskId : linedUpEffort?.effort.tasksId ?? null;
 
   // The effort's task description, rendered at the top when the diff is for
@@ -657,7 +677,11 @@ function ResolvedEndpointDiff({
       rightRail={rail}
     >
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <h1 style={pageH1Style} data-testid="diff-view-title">{plainTitle}</h1>
+      {effortPassed && effortId ? (
+        <EffortHeader effortId={effortId} onOpenPage={(ref) => onOpenPage(ref)} onTitle={setOwnTitle} />
+      ) : (
+        <h1 style={pageH1Style} data-testid="diff-view-title">{plainTitle}</h1>
+      )}
 
       {effortDescription && effortDescription.trim() ? (
         <div data-testid="diff-view-effort-description" style={{ fontSize: "var(--text-sm)" }}>

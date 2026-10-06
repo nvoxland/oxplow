@@ -2032,8 +2032,8 @@ export async function listEffortFiles(
 export interface EffortAtSnapshot {
   snapshotId: number;
   effortId: string;
-  /** The effort's work item ref. */
-  workItem: string;
+  /** The effort's work item ref; `null` while it's unlinked. */
+  workItem: string | null;
   /** The oxplow task behind `workItem`; `null` for another provider's item. */
   tasksId: string | null;
   threadId: string;
@@ -2054,6 +2054,19 @@ export async function listWikiSlugsForSnapshots(
   return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
 }
 
+/** Efforts' titles (`v_effort.title`: their own, else their item's, else
+ *  their first prompt's first line), by effort id (`eff12`). */
+export async function effortTitles(effortIds: string[]): Promise<Map<string, string>> {
+  const ids = effortIds.map((id) => Number(id.replace(/^eff/, ""))).filter((n) => Number.isFinite(n));
+  if (ids.length === 0) return new Map();
+  const res = await querySql(
+    `SELECT id, title FROM v_effort WHERE id IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
+    [JSON.stringify(ids)],
+    10_000,
+  );
+  return new Map(res.rows.map((r) => [`eff${String(r[0])}`, String(r[1])] as [string, string]));
+}
+
 export async function listEffortsAtSnapshots(
   snapshotIds: number[],
 ): Promise<EffortAtSnapshot[]> {
@@ -2063,7 +2076,7 @@ export async function listEffortsAtSnapshots(
     snapshot_id: number;
     effort: {
       id: string;
-      work_item: string;
+      work_item: string | null;
       thread_id: string;
       start_snapshot_id: number | null;
       end_snapshot_id: number | null;
@@ -2073,7 +2086,7 @@ export async function listEffortsAtSnapshots(
     snapshotId: r.snapshot_id,
     effortId: r.effort.id,
     workItem: r.effort.work_item,
-    tasksId: taskIdOfWorkItemRef(r.effort.work_item),
+    tasksId: r.effort.work_item ? taskIdOfWorkItemRef(r.effort.work_item) : null,
     threadId: r.effort.thread_id,
     startSnapshotId: r.effort.start_snapshot_id,
     endSnapshotId: r.effort.end_snapshot_id,
@@ -2085,7 +2098,7 @@ export async function listEffortsAtSnapshots(
  *  `Effort` binding). */
 interface RawEffort {
   id: string;
-  work_item: string;
+  work_item: string | null;
   thread_id: string;
   started_at: string;
   ended_at: string | null;
@@ -2098,7 +2111,7 @@ function toOverlappingEffort(r: RawEffort): OverlappingEffort {
   return {
     effortId: r.id,
     workItem: r.work_item,
-    taskId: taskIdOfWorkItemRef(r.work_item),
+    taskId: r.work_item ? taskIdOfWorkItemRef(r.work_item) : null,
     threadId: r.thread_id,
     startedAt: r.started_at,
     endedAt: r.ended_at,
@@ -2110,8 +2123,8 @@ function toOverlappingEffort(r: RawEffort): OverlappingEffort {
 
 export interface OverlappingEffort {
   effortId: string;
-  /** The effort's work item ref. */
-  workItem: string;
+  /** The effort's work item ref; `null` while it's unlinked. */
+  workItem: string | null;
   /** The oxplow task behind `workItem`; `null` for another provider's item. */
   taskId: string | null;
   threadId: string;

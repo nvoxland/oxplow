@@ -198,6 +198,10 @@ The three in progress:
   (`stream.archive`, end snapshot first); `effort.report` is optional and
   never creates an effort, and the summary defaults to the last turn's
   final message. "Waiting on you" is derived; `await_user` is gone.
-- Next, in order: the Work panel and a Thread activity page; hints;
-  skills and repo rules.
+  The Work panel shows the thread's open effort even when unlinked (In
+  progress) and its closed ones (Finished, which opens Thread activity);
+  the Thread activity lens lists the thread's turns under the effort each
+  fell in, with question-only turns "Between efforts"; an effort's page
+  header renames, links, unlinks and closes it.
+- Next, in order: hints; skills and repo rules.
   Then the capability framework and the three swappable pieces.

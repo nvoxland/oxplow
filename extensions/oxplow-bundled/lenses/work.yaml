@@ -4,7 +4,7 @@ params:
   - { name: thread_id, label: Thread }
 query: |
   SELECT grp, title, icon, ref, depth, active,
-         CASE grp WHEN 'Finished' THEN 'page:tasks' END AS grp_ref
+         CASE grp WHEN 'Finished' THEN 'lens:oxplow-bundled/thread-activity?thread_id=' || thread_id END AS grp_ref
   FROM v_oxplow_bundled_thread_work
   WHERE thread_id = :thread_id
   ORDER BY g, ord

@@ -73,6 +73,7 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
         ext_file!("oxplow-bundled", "lenses/task-tokens.yaml"),
         ext_file!("oxplow-bundled", "lenses/task-turns.yaml"),
         ext_file!("oxplow-bundled", "lenses/tests-weakened.yaml"),
+        ext_file!("oxplow-bundled", "lenses/thread-activity.yaml"),
         ext_file!("oxplow-bundled", "lenses/thread-tokens.yaml"),
         ext_file!("oxplow-bundled", "lenses/token-total.yaml"),
         ext_file!("oxplow-bundled", "lenses/tokens-by-agent.yaml"),
@@ -911,6 +912,88 @@ mod tests {
                 .map(|(g, _)| g)
                 .collect::<Vec<_>>(),
             vec!["In progress".to_string(), "Ready".to_string()]
+        );
+
+        // An effort no item names shows too: in progress while open, then
+        // finished.
+        let opened = run(
+            "effort.open",
+            serde_json::json!({ "thread": thread, "title": "Tidy the shell scripts" }),
+        )
+        .await;
+        let effort = opened.result["effort"].as_str().unwrap().to_string();
+        let work = lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
+        assert!(
+            work.contains(&("In progress".into(), "Tidy the shell scripts".into())),
+            "{work:?}"
+        );
+        run("effort.close", serde_json::json!({ "effort": effort })).await;
+        let work = lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
+        assert!(
+            work.contains(&("Finished".into(), "Tidy the shell scripts".into())),
+            "{work:?}"
+        );
+    }
+
+    /// Thread activity: each turn under the effort it fell in, the turns
+    /// outside any effort (questions, talk) under their own heading.
+    #[tokio::test]
+    async fn thread_activity_lists_turns_by_effort() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let turn = |prompt: &'static str| {
+            let svc = f.svc.clone();
+            let thread = f.thread;
+            async move {
+                use oxplow_domain::hook::HookKind;
+                for kind in [HookKind::UserPromptSubmit, HookKind::Stop] {
+                    svc.hook_ingest
+                        .ingest(crate::hook_ingest::HookEnvelope {
+                            kind,
+                            thread_id: Some(thread),
+                            stream_id: None,
+                            session_id: None,
+                            payload_json: "{}".into(),
+                            prompt: Some(prompt.into()),
+                            decision: None,
+                        })
+                        .await
+                        .unwrap();
+                }
+            }
+        };
+        turn("Build the parser").await;
+        {
+            use oxplow_db::EffortStore as _;
+            f.svc
+                .effort_store
+                .finish(&f.effort, None, None)
+                .await
+                .unwrap();
+        }
+        turn("What does the lexer do?").await;
+        let rows = run_bundled_lens(
+            &f,
+            "oxplow-bundled/thread-activity",
+            &[("thread_id", f.thread.value())],
+        )
+        .await;
+        let got: Vec<(String, String)> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r[0].as_str().unwrap().to_string(),
+                    r[1].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("Between efforts".into(), "What does the lexer do?".into()),
+                ("t".into(), "Build the parser".into()),
+            ]
         );
     }
 

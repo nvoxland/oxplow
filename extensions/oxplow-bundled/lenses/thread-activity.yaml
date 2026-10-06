@@ -1,0 +1,43 @@
+title: Thread Activity
+description: What a thread's agent did, turn by turn, under the effort each turn fell in — its prompt, the files it touched, the test runs and the tokens — with the turns outside any effort (questions, talk) between them. Open an effort to rename it, link it to a task or close it.
+params:
+  - { name: thread_id, label: Thread }
+query: |
+  WITH turns AS (
+    SELECT t.id, t.thread_id, t.started_at, t.ended_at,
+           trim(CASE WHEN instr(t.prompt, char(10)) > 0
+                     THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
+                     ELSE t.prompt END) AS prompt,
+           -- The latest effort the turn overlaps (one may open mid-turn).
+           (SELECT e.id FROM v_effort e
+             WHERE e.thread_id = t.thread_id
+               AND e.started_at <= coalesce(t.ended_at, t.started_at)
+               AND (e.ended_at IS NULL OR e.ended_at >= t.started_at)
+             ORDER BY e.started_at DESC LIMIT 1) AS effort_id
+    FROM v_agent_turn t
+    WHERE t.thread_id = :thread_id
+  )
+  SELECT coalesce(e.title, CASE WHEN u.effort_id IS NULL THEN 'Between efforts' ELSE 'Work' END) AS section,
+         coalesce(nullif(u.prompt, ''), '(no prompt)') AS prompt,
+         (SELECT count(DISTINCT c.path) FROM v_tool_call c WHERE c.turn_id = u.id AND c.path IS NOT NULL) AS files,
+         (SELECT count(*) FROM v_test_run r WHERE r.turn_id = u.id) AS runs,
+         (SELECT sum(k.input_tokens + k.output_tokens + k.cache_creation_input_tokens + k.cache_read_input_tokens)
+            FROM v_token_usage k WHERE k.turn_id = u.id) AS tokens,
+         u.started_at AS at,
+         'turn:trn' || u.id AS turn_ref,
+         CASE WHEN u.effort_id IS NOT NULL THEN 'effort:eff' || u.effort_id END AS effort_ref,
+         CASE WHEN u.effort_id IS NOT NULL THEN 'eff' || u.effort_id END AS effort
+  FROM turns u
+  LEFT JOIN v_effort e ON e.id = u.effort_id
+  ORDER BY u.started_at DESC
+viz: list
+group: { by: section, link: { kind: page, from: effort_ref } }
+columns:
+  - { key: prompt, label: Turn, link: { kind: page, from: turn_ref } }
+  - { key: files, label: Files }
+  - { key: runs, label: Runs }
+  - { key: tokens, label: Tokens }
+  - { key: at, label: When }
+actions:
+  - { id: close, label: Close Effort, command: effort.close, input: { effort: "{{row.effort}}" }, row: true }
+empty: No turns on this thread yet.

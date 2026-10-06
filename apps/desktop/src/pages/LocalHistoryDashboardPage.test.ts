@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatSnapshotSubject } from "./LocalHistoryDashboardPage.js";
+import { effortLabel, formatSnapshotSubject } from "./LocalHistoryDashboardPage.js";
 
 describe("formatSnapshotSubject", () => {
   test("completed efforts win over the isInitial flag", () => {
@@ -50,5 +50,24 @@ describe("formatSnapshotSubject", () => {
 
   test("hasOtherBadges does NOT suppress Initial Snapshot", () => {
     expect(formatSnapshotSubject([], [], true, true)).toBe("Initial Snapshot");
+  });
+});
+
+describe("effortLabel", () => {
+  const tasks = new Map([["tsk4", "Fix the parser"]]);
+  const efforts = new Map([["eff9", "Tidy the lexer"]]);
+  test("a task's effort is its task", () => {
+    expect(effortLabel({ effortId: "eff1", workItem: "work_item:oxplow:tsk4", tasksId: "tsk4" }, tasks, efforts)).toBe(
+      "Fix the parser",
+    );
+  });
+  test("another tracker's item by its ref", () => {
+    expect(effortLabel({ effortId: "eff2", workItem: "work_item:issues:ENG-1", tasksId: null }, tasks, efforts)).toBe(
+      "issues:ENG-1",
+    );
+  });
+  test("an unlinked effort by its own title", () => {
+    expect(effortLabel({ effortId: "eff9", workItem: null, tasksId: null }, tasks, efforts)).toBe("Tidy the lexer");
+    expect(effortLabel({ effortId: "eff8", workItem: null, tasksId: null }, tasks, efforts)).toBe("Unlinked work");
   });
 });

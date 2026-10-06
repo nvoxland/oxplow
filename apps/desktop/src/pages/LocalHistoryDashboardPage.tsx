@@ -3,6 +3,7 @@ import type { CommitRefLabel, EffortAtSnapshot, Snapshot, Stream } from "../api.
 import { readTasksById } from "../workItems.js";
 import type { SnapshotTrigger } from "../tauri-bridge/generated/bindings.js";
 import {
+  effortTitles,
   getSnapshotStats,
   listEffortsAtSnapshots,
   listSnapshots,
@@ -76,6 +77,18 @@ interface SnapshotRow {
    *  when the window we fetched is smaller than RECENT_LIMIT (i.e.
    *  no older snapshots scrolled off). */
   isInitial: boolean;
+}
+
+/** What a Local History row calls an effort: its task's title, another
+ *  tracker's item, or — unlinked — its own title. */
+export function effortLabel(
+  e: Pick<EffortAtSnapshot, "effortId" | "workItem" | "tasksId">,
+  titleByTaskId: Map<string, string>,
+  titleByEffort: Map<string, string>,
+): string {
+  if (e.tasksId) return titleByTaskId.get(e.tasksId) ?? `task ${e.tasksId}`;
+  if (e.workItem) return workItemLabel(e.workItem);
+  return titleByEffort.get(e.effortId) ?? "Unlinked work";
 }
 
 /** Pure label resolver for the snapshot row subject text. Extracted
@@ -192,6 +205,13 @@ export function LocalHistoryDashboardPage({
       const titleByTaskId = new Map<string, string>(
         taskSummaries.map((t) => [t.id, t.title] as [string, string]),
       );
+      // An unlinked effort is named by its own title (`v_effort.title`:
+      // its own, else its first prompt's first line).
+      const unlinked = Array.from(new Set(effortsAt.filter((e) => !e.workItem).map((e) => e.effortId)));
+      const titleByEffort = await effortTitles(unlinked).catch((err) => {
+        logUi("warn", "effort titles fetch failed", { error: String(err) });
+        return new Map<string, string>();
+      });
       const completedBySnap = new Map<number, SnapshotRowEffort[]>();
       const inFlightBySnap = new Map<number, SnapshotRowEffort[]>();
       for (const e of effortsAt) {
@@ -200,9 +220,7 @@ export function LocalHistoryDashboardPage({
         list.push({
           effortId: e.effortId,
           tasksId: e.tasksId,
-          title: e.tasksId
-            ? titleByTaskId.get(e.tasksId) ?? `task ${e.tasksId}`
-            : workItemLabel(e.workItem),
+          title: effortLabel(e, titleByTaskId, titleByEffort),
         });
         target.set(e.snapshotId, list);
       }
