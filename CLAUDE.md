@@ -28,13 +28,9 @@ or exact mechanics.
 - **`.context/usability.md`** — UI rules (Enter submits, Escape cancels,
   drop-target highlighting, right-click for destructive actions, etc.).
   Read before adding *any* UI.
-- **Filing enforcement (PreToolUse hook).** Every Edit / Write /
-  MultiEdit / NotebookEdit on project files requires an `in_progress`
-  task first — no trivial-edit carve-out. File one (or flip a `ready`
-  row to in_progress), then re-issue the edit. Bash and edits made mid
-  git-operation (`MERGE_HEAD` / `REBASE_HEAD` / `CHERRY_PICK_HEAD` /
-  `REVERT_HEAD`) are exempt. Full rationale:
-  `.context/working-in-this-repo.md` + `.context/agent-model.md`.
+- **Filing (convention).** File a durable `in_progress` task before
+  editing. oxplow no longer enforces it (no edit or stop is refused);
+  the rule is being reworked (`.context/work-tracking.md`).
 - **Asking the user a question.** When your reply ends with a real
   clarifying question, A/B/C choice, or any ask where the user owns the
   next move, call `mcp__oxplow__await_user({ threadId, question })` and

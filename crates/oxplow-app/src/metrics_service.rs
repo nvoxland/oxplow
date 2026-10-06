@@ -1126,7 +1126,7 @@ impl MetricsService {
     /// `collectors:` entry (`<key>`, the producer) and a `metrics:` spec
     /// (`<key>`, a `sum` over that measure) as a `.oxplow/project.yaml`
     /// snippet. Writes nothing: the agent writes the script and merges the
-    /// snippet with its own file tools, so the write guard, filing and its
+    /// snippet with its own file tools, so the write guard and its
     /// worktree apply (the extensions "no scaffold tools" rule). A config
     /// change reseeds the catalog once they land.
     pub fn metric_scaffold(
@@ -6222,7 +6222,7 @@ def transform(input):
 
     /// A metric scaffold writes nothing: the agent writes the returned
     /// script and pastes the entries with its own tools, under the write
-    /// guard and filing (tsk391). Done that way, the metric seeds.
+    /// guard. Done that way, the metric seeds.
     #[tokio::test]
     async fn metric_scaffold_is_a_template_that_seeds_once_written() {
         let (svc, dir) = fixture().await;

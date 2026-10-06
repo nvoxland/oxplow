@@ -265,8 +265,8 @@ details.
   bridge translates opencode plugin hooks into the same Claude-shaped
   payloads the control plane parses: `chat.message` →
   `UserPromptSubmit`, `tool.execute.before` → `PreToolUse` (a deny
-  response throws inside opencode, which blocks the tool call — so
-  write-guard + filing enforcement work; opencode's lowercase tool
+  response throws inside opencode, which blocks the tool call — so the
+  write guard works; opencode's lowercase tool
   names and `filePath` arg are mapped to Claude's `Edit`/`Write`/… and
   `file_path`), `tool.execute.after` → `PostToolUse`, and the
   `session.idle` event → `Stop`. Subagent sessions (`parentID` set) are filtered out of
@@ -419,10 +419,9 @@ to `runtime.handleHookEnvelope`, which:
    `turn_end` snapshot (see "Snapshot tracking" below). Per-effort
    attribution stays anchored to `effort`.
 4. For `PreToolUse`: asks the shared **`AgentPolicy`** (see "Agent
-   policy" below). The write guard runs first (read-only thread; see
-   Write guard below), then filing enforcement (Edit / Write /
-   MultiEdit / NotebookEdit on a writer thread without an in_progress
-   item). A deny is rendered as Claude's `hookSpecificOutput`.
+   policy" below): the write guard (see Write guard below). It never
+   asks for tracked work. A deny is rendered as Claude's
+   `hookSpecificOutput`.
    `claude_intent(body)` returns `None` for any tool outside the four
    worktree-mutating edits, so `pre_tool_check` short-circuits
    *before* any DB read or git-state stat — the common case (Read / Grep
@@ -664,20 +663,20 @@ the same JSON.
 
 ## Agent policy (shared by every transport, tsk333)
 
-The write guard and filing enforcement are one policy that every agent
-transport asks, not logic in the hook route.
+The write guard is one policy that every agent transport asks, not logic
+in the hook route. It is isolation only; nothing waits on tracked work
+([work-tracking.md](./work-tracking.md)).
 
 - **Pure rules** live in `crates/oxplow-runtime/src/policy.rs`.
   `decide_tool(ToolIntent{label, kind, paths}, PolicyFacts)` returns
-  `Allow`, or `Deny { layer: WriteGuard | Filing, reason }`.
+  `Allow`, or `Deny { layer: WriteGuard, reason }`.
   - **Scope:** the thread's own stream worktree (`PolicyFacts.worktree_root`). For a worktree stream that's its sibling directory, not the daemon's project dir (tsk350; before that, worktree streams were unguarded).
   - **Normalization:** paths are normalized first (`normalize_path`: resolve `..`, canonicalize the deepest existing ancestor), so `..` or a symlink can't spell a guarded path as an outside one.
   - **Other streams:** a path in another stream's worktree (the primary checkout included) is denied for every thread, writer or not (workspace isolation). The primary project's `.oxplow/wiki` is shared and exempt.
   - **Outside every stream:** any other absolute path is allowed.
   - With several paths, the first refused path wins.
   - The reason text comes from the same cores the Claude builders use
-    (`write_guard::read_only_reason`, `filing::filing_reason`), so the
-    wording can't drift.
+    (`write_guard::read_only_reason`), so the wording can't drift.
 - **I/O and state** live in `crates/oxplow-app/src/agent_policy.rs`,
   exposed as `Services.agent_policy`:
   - `check_tool(svc, thread, intent)` gathers the thread, the stream's
@@ -1466,17 +1465,14 @@ in-progress changes.
   absolute path. Containment checks live alongside the write guard
   in `crates/oxplow-runtime/` and reuse `AppLayout` from
   `crates/oxplow-app/src/lib.rs`.
-- **Wiki-notes carve-out.** Writes to `.oxplow/wiki/<slug>.md` are
-  allowed even on non-writer threads — the per-project wiki is not
-  committed to git and doesn't collide with the writer's in-progress
-  code, so capture is safe from any thread. Other `.oxplow/` paths
-  (`local.sqlite`, `snapshots/`, `runtime/`) stay blocked.
-- **Prompt enforcement.** `NON_WRITER_PROMPT_BLOCK` (same file) is
-  appended to the system prompt for non-writer threads, telling the agent
-  to avoid Bash mutations too (the hook can't reliably classify shell
-  commands, so the prompt is the only line of defence there). The
-  block also documents the wiki-notes carve-out so the agent knows it
-  CAN capture exploration findings via Write.
+- **Wiki pages are written by command.** A direct write to
+  `.oxplow/wiki/` is denied for every thread (`write_guard::wiki_page_reason`);
+  pages go through `knowledge.write_page`, which any thread may run.
+  Other `.oxplow/` paths (`local.sqlite`, `snapshots/`, `runtime/`) stay
+  blocked.
+- **Bash isn't classified.** A non-writer's shell commands aren't
+  checked; the session context's Access line says the thread is
+  read-only.
 - MCP tools (`mcp__oxplow__*`) are always allowed: they write to the state
   DB, not the worktree.
 
@@ -1979,8 +1975,7 @@ auto-complete / adoption. Per-effort attribution and snapshots are
 anchored to `effort`, which opens and closes in the same transaction as
 a task's status change (`work_item.create` / `.update` / `.transition`,
 all audited to the actor); work tracked outside oxplow brackets itself
-with `effort.open` / `effort.close`. The filing guard's claim is an open
-effort in the stream (see "Filing enforcement").
+with `effort.open` / `effort.close`. No edit waits on an open effort.
 
 Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
 

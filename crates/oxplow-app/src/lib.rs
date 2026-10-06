@@ -602,8 +602,8 @@ pub struct Services {
     pub lsp_sessions: lsp_sessions::LspSessionManager,
     /// Code intelligence from the language servers (`.context/lsp.md`).
     pub code_intel: Arc<dyn oxplow_domain::code_intel::CodeIntelligence>,
-    /// Write guard, filing and the Stop directive, shared by every agent
-    /// transport (the hook route, ACP).
+    /// The write guard, shared by every agent transport (the hook route,
+    /// ACP).
     pub agent_policy: Arc<agent_policy::AgentPolicy>,
     /// Recording and prompt context shared by every agent transport.
     pub agent_context: Arc<agent_context::AgentContext>,

@@ -542,7 +542,6 @@ impl CommandBus {
                         source: actor.source(),
                         cause: Some(cause.clone()),
                     },
-                    may_claim: gates.may_claim,
                     confirmed,
                     may_write: gates.may_write,
                     depth: 1,

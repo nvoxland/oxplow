@@ -1,8 +1,8 @@
 //! Hook events + agent status + agent turn types.
 //!
 //! These cross the wire from the Claude Code hook subprocess into the
-//! oxplow daemon, get persisted, and feed every Stop / write-guard /
-//! filing decision. Pure data — no IO.
+//! oxplow daemon, get persisted, and feed the write guard. Pure data —
+//! no IO.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;

@@ -96,8 +96,7 @@ pub enum Atomicity {
 /// still run it. A `Write` is refused outright to an agent thread that
 /// isn't its stream's writer. A `Record` changes oxplow's own records
 /// (filing and editing tasks) and is audited like a `Write`, but any
-/// thread may run it: the handler refuses only the part that would claim
-/// the worktree — opening an effort — when `TxCtx::may_claim` is false.
+/// thread may run it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandEffect {

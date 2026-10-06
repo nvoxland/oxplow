@@ -87,7 +87,7 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
 }
 
 /// An `in_progress` task filed the way the app files one: its effort opens
-/// in the same transaction (the filing guard's claim).
+/// in the same transaction.
 async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> TaskId {
     let now = Timestamp::from_unix_ms(1);
     services
@@ -153,30 +153,11 @@ async fn write_guard_denies() {
     golden("pre_tool_write_guard_no_path", &no_path, &root);
 }
 
-#[tokio::test]
-async fn filing_denies() {
-    let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
-    let edit_body = post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
-    golden("pre_tool_filing_edit", &edit_body, &root);
-    let notebook = post(
-        &cp,
-        "PreToolUse",
-        tid,
-        serde_json::json!({
-            "tool_name": "NotebookEdit",
-            "tool_input": { "notebook_path": root.join("n.ipynb").to_string_lossy() },
-        }),
-    )
-    .await;
-    golden("pre_tool_filing_notebook", &notebook, &root);
-}
-
+/// The writer's edit is allowed with nothing tracked.
 #[tokio::test]
 async fn allowed_edit_and_post_tool_ack() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
-    seed_task(&svc, tid, "ship the thing").await;
     let allowed = post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
     golden("pre_tool_allowed", &allowed, &root);
     let mut after = edit(&root.join("src/x.rs"));

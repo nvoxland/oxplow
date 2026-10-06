@@ -399,7 +399,6 @@ mod tests {
             conn: &conn,
             actor: &actor,
             events: oxplow_db::EventCtx::system(&vocabulary, "test"),
-            may_claim: true,
             confirmed: true,
             may_write: None,
             depth: 0,

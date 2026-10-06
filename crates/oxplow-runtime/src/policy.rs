@@ -1,19 +1,19 @@
-//! The tool policy every agent transport asks (tsk333): may this thread
-//! run this tool now? It combines the write guard (read-only threads
-//! can't touch the worktree) and filing enforcement (the writer needs an
-//! `in_progress` task). The hook route asks it with Claude-shaped
-//! payloads; the ACP client asks it with ACP tool calls. The answer
-//! carries the reason text only; each transport renders it in its own
-//! wire shape. See `.context/agent-model.md` → "Write guard".
+//! The tool policy every agent transport asks: may this thread run this
+//! tool now? It is isolation only — the write guard (a read-only thread
+//! can't touch its worktree; no thread touches another stream's; wiki
+//! pages are written by command). It never asks for tracked work
+//! (`.context/work-tracking.md`). The hook route asks it with
+//! Claude-shaped payloads; the ACP client asks it with ACP tool calls. The
+//! answer carries the reason text only; each transport renders it in its
+//! own wire shape. See `.context/agent-model.md` → "Write guard".
 //!
-//! Pure: the facts (thread, whether the stream has a claim, git state)
-//! are gathered by the caller (`oxplow_app::agent_policy`).
+//! Pure: the facts (the thread, the worktrees) are gathered by the caller
+//! (`oxplow_app::agent_policy`).
 
 use std::path::{Path, PathBuf};
 
 use oxplow_domain::Thread;
 
-use crate::filing::filing_reason;
 use crate::write_guard::read_only_reason;
 
 /// What a tool call would do, as far as the policy cares.
@@ -41,7 +41,6 @@ pub struct ToolIntent<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DenyLayer {
     WriteGuard,
-    Filing,
     /// The command bus: the command does not admit agents.
     Command,
 }
@@ -55,8 +54,8 @@ pub enum PolicyDecision {
 /// The facts a decision needs, gathered by the caller.
 pub struct PolicyFacts<'a> {
     pub thread: &'a Thread,
-    /// The thread's own stream worktree: where its write guard and filing
-    /// apply, and what relative paths resolve against.
+    /// The thread's own stream worktree: where its write guard applies, and
+    /// what relative paths resolve against.
     pub worktree_root: &'a Path,
     /// Every other stream's worktree (the primary checkout included). No
     /// thread edits them (workspace isolation).
@@ -64,14 +63,6 @@ pub struct PolicyFacts<'a> {
     /// The primary project, whose `.oxplow/wiki` pages every stream shares
     /// (written by `knowledge.write_page`, never by a tool).
     pub project_dir: &'a Path,
-    /// Some thread in the stream has an `in_progress` task.
-    pub has_open_effort: bool,
-    /// A merge / rebase / cherry-pick / revert is underway.
-    pub git_operation_in_progress: bool,
-    /// The project's active work-items provider (`oxplow` unless
-    /// `activeProviders` names another): where the filing directive sends
-    /// new work.
-    pub active_work_items: &'a str,
 }
 
 /// An absolute path outside the project: not oxplow's concern (it can't
@@ -138,8 +129,8 @@ fn foreign_root<'a>(path: &str, facts: &'a PolicyFacts<'_>) -> Option<&'a Path> 
         .find(|root| p.starts_with(root))
 }
 
-/// Decide whether `intent` may run. The write guard is checked before
-/// filing; with several paths, the first path either rule refuses wins.
+/// Decide whether `intent` may run; with several paths, the first path
+/// refused wins.
 pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDecision {
     if intent.kind != IntentKind::WorktreeWrite {
         return PolicyDecision::Allow;
@@ -166,9 +157,6 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
         worktree_root: &own,
         other_roots: &others,
         project_dir: &project,
-        has_open_effort: facts.has_open_effort,
-        git_operation_in_progress: facts.git_operation_in_progress,
-        active_work_items: facts.active_work_items,
     };
     let intent = &ToolIntent {
         label: intent.label,
@@ -218,21 +206,6 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
             };
         }
     }
-    for t in &targets {
-        if let Some(reason) = filing_reason(
-            facts.thread,
-            intent.label,
-            facts.has_open_effort,
-            *t,
-            facts.git_operation_in_progress,
-            facts.active_work_items,
-        ) {
-            return PolicyDecision::Deny {
-                layer: DenyLayer::Filing,
-                reason,
-            };
-        }
-    }
     PolicyDecision::Allow
 }
 
@@ -264,7 +237,6 @@ mod tests {
 
     fn decide(
         status: ThreadStatus,
-        claim: bool,
         label: &str,
         kind: IntentKind,
         paths: &[&str],
@@ -282,9 +254,6 @@ mod tests {
                 worktree_root: Path::new("/proj"),
                 other_roots: &[std::path::PathBuf::from("/proj-wt")],
                 project_dir: Path::new("/proj"),
-                has_open_effort: claim,
-                git_operation_in_progress: false,
-                active_work_items: "oxplow",
             },
         )
     }
@@ -300,7 +269,6 @@ mod tests {
     fn a_read_only_thread_cannot_write_inside_the_worktree() {
         let d = decide(
             ThreadStatus::Queued,
-            true,
             "Edit",
             IntentKind::WorktreeWrite,
             &["/proj/src/a.rs"],
@@ -316,7 +284,6 @@ mod tests {
         // No path at all: the generic read-only reason.
         let d = decide(
             ThreadStatus::Queued,
-            true,
             "Write",
             IntentKind::WorktreeWrite,
             &[],
@@ -324,27 +291,12 @@ mod tests {
         assert_eq!(layer(&d), Some(DenyLayer::WriteGuard));
     }
 
+    /// The writer edits its worktree with nothing tracked.
     #[test]
-    fn the_writer_needs_a_claim_and_the_reason_names_the_tool() {
-        let d = decide(
-            ThreadStatus::Active,
-            false,
-            "Delete",
-            IntentKind::WorktreeWrite,
-            &["src/a.rs"],
-        );
-        let PolicyDecision::Deny { layer, reason } = d else {
-            panic!("should deny")
-        };
-        assert_eq!(layer, DenyLayer::Filing);
-        assert!(
-            reason.starts_with("BLOCKED: Delete requires open, tracked work"),
-            "{reason}"
-        );
+    fn the_writer_edits_without_tracked_work() {
         assert_eq!(
             decide(
                 ThreadStatus::Active,
-                true,
                 "Delete",
                 IntentKind::WorktreeWrite,
                 &["src/a.rs"]
@@ -358,7 +310,6 @@ mod tests {
         assert_eq!(
             decide(
                 ThreadStatus::Queued,
-                false,
                 "Edit",
                 IntentKind::WorktreeWrite,
                 &["/tmp/x"]
@@ -368,7 +319,6 @@ mod tests {
         assert_eq!(
             decide(
                 ThreadStatus::Queued,
-                false,
                 "Read",
                 IntentKind::Other,
                 &["/proj/a"]
@@ -382,7 +332,6 @@ mod tests {
         // A move from outside into the worktree still writes the worktree.
         let d = decide(
             ThreadStatus::Queued,
-            true,
             "Move",
             IntentKind::WorktreeWrite,
             &["/tmp/x", "/proj/y"],
@@ -390,30 +339,9 @@ mod tests {
         assert_eq!(layer(&d), Some(DenyLayer::WriteGuard));
     }
 
-    #[test]
-    fn a_git_operation_exempts_filing_but_not_the_write_guard() {
-        let t = thread(ThreadStatus::Active);
-        let paths = vec!["src/a.rs".to_string()];
-        let intent = ToolIntent {
-            label: "Edit",
-            kind: IntentKind::WorktreeWrite,
-            paths: &paths,
-        };
-        let facts = PolicyFacts {
-            thread: &t,
-            worktree_root: Path::new("/proj"),
-            other_roots: &[],
-            project_dir: Path::new("/proj"),
-            has_open_effort: false,
-            git_operation_in_progress: true,
-            active_work_items: "oxplow",
-        };
-        assert_eq!(decide_tool(&intent, &facts), PolicyDecision::Allow);
-    }
-
     /// A thread in a worktree stream: its worktree is a sibling of the
     /// primary checkout (`/proj-wt` next to `/proj`).
-    fn decide_in_worktree(status: ThreadStatus, claim: bool, paths: &[&str]) -> PolicyDecision {
+    fn decide_in_worktree(status: ThreadStatus, paths: &[&str]) -> PolicyDecision {
         let t = thread(status);
         let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
         decide_tool(
@@ -427,9 +355,6 @@ mod tests {
                 worktree_root: Path::new("/proj-wt"),
                 other_roots: &[std::path::PathBuf::from("/proj")],
                 project_dir: Path::new("/proj"),
-                has_open_effort: claim,
-                git_operation_in_progress: false,
-                active_work_items: "oxplow",
             },
         )
     }
@@ -439,29 +364,21 @@ mod tests {
         // Read-only: denied inside its own worktree (relative or absolute).
         for p in ["/proj-wt/src/a.rs", "src/a.rs"] {
             assert_eq!(
-                layer(&decide_in_worktree(ThreadStatus::Queued, true, &[p])),
+                layer(&decide_in_worktree(ThreadStatus::Queued, &[p])),
                 Some(DenyLayer::WriteGuard),
                 "{p}"
             );
         }
-        // The writer still needs a claim there.
+        // The writer edits it.
         assert_eq!(
-            layer(&decide_in_worktree(
-                ThreadStatus::Active,
-                false,
-                &["/proj-wt/src/a.rs"]
-            )),
-            Some(DenyLayer::Filing)
-        );
-        assert_eq!(
-            decide_in_worktree(ThreadStatus::Active, true, &["/proj-wt/src/a.rs"]),
+            decide_in_worktree(ThreadStatus::Active, &["/proj-wt/src/a.rs"]),
             PolicyDecision::Allow
         );
     }
 
     #[test]
     fn no_thread_edits_another_streams_worktree() {
-        let d = decide_in_worktree(ThreadStatus::Active, true, &["/proj/src/a.rs"]);
+        let d = decide_in_worktree(ThreadStatus::Active, &["/proj/src/a.rs"]);
         let PolicyDecision::Deny { layer: lyr, reason } = d else {
             panic!("should deny")
         };
@@ -471,7 +388,6 @@ mod tests {
         assert_eq!(
             layer(&decide(
                 ThreadStatus::Active,
-                true,
                 "Edit",
                 IntentKind::WorktreeWrite,
                 &["/proj-wt/src/a.rs"]
@@ -481,7 +397,7 @@ mod tests {
         // The shared wiki is written by command, not by a tool, whatever
         // the thread.
         for status in [ThreadStatus::Queued, ThreadStatus::Active] {
-            let d = decide_in_worktree(status, true, &["/proj/.oxplow/wiki/x.md"]);
+            let d = decide_in_worktree(status, &["/proj/.oxplow/wiki/x.md"]);
             assert!(
                 matches!(&d, PolicyDecision::Deny { layer: DenyLayer::WriteGuard, reason }
                     if reason.contains("knowledge.write_page")),
@@ -516,9 +432,6 @@ mod tests {
                     worktree_root: &root,
                     other_roots: &[],
                     project_dir: &root,
-                    has_open_effort: true,
-                    git_operation_in_progress: false,
-                    active_work_items: "oxplow",
                 },
             );
             assert_eq!(layer(&d), Some(DenyLayer::WriteGuard), "{p}");

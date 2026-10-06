@@ -173,8 +173,10 @@ async fn pre_tool_use_on_read_only_thread_denies_with_write_guard_shape() {
     assert!(reason.contains("read-only"), "unexpected reason: {reason}");
 }
 
+/// The writer edits with nothing tracked: no task, no effort. oxplow
+/// never asks for tracked work before an edit (inferred work tracking).
 #[tokio::test]
-async fn pre_tool_use_without_in_progress_task_denies_with_filing_shape() {
+async fn the_writer_edits_without_any_tracked_work() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     let target = root.join("src/x.rs");
@@ -188,42 +190,11 @@ async fn pre_tool_use_without_in_progress_task_denies_with_filing_shape() {
         }),
     )
     .await;
-    assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = resp.json().await.unwrap();
-    let out = &body["hookSpecificOutput"];
-    assert_eq!(out["hookEventName"], "PreToolUse");
-    assert_eq!(out["permissionDecision"], "deny");
-    let reason = out["permissionDecisionReason"].as_str().unwrap();
-    assert!(
-        reason.contains("requires open, tracked work") && reason.contains("effort.open"),
-        "unexpected reason: {reason}"
-    );
-}
-
-#[tokio::test]
-async fn pre_tool_use_with_in_progress_task_is_allowed() {
-    let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
-    seed_in_progress_task(&svc, tid).await;
-    let target = root.join("src/x.rs");
-    let resp = post_hook(
-        &cp,
-        "PreToolUse",
-        Some(tid),
-        serde_json::json!({
-            "tool_name": "Edit",
-            "tool_input": { "file_path": target.to_string_lossy() },
-        }),
-    )
-    .await;
-    // Allowed calls fall through to the generic ack.
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body, serde_json::json!({}));
 }
 
-/// A Stop is never refused, whatever is open (inferred work tracking): it
-/// acks `{}` and keeps the agent's final message as the turn's answer.
 #[tokio::test]
 async fn a_stop_is_never_refused_and_keeps_the_final_message() {
     let (cp, svc, root, _dir) = boot().await;

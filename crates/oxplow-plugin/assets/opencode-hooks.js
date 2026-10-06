@@ -43,8 +43,8 @@ export const OxplowHooks = async ({ client }) => {
     }
   }
 
-  // opencode tool names are lowercase; the control plane's write-guard
-  // and filing-enforcement match Claude's names (Edit/Write/Bash/...).
+  // opencode tool names are lowercase; the control plane's write guard
+  // matches Claude's names (Edit/Write/Bash/...).
   const TOOL_NAMES = {
     bash: "Bash",
     edit: "Edit",

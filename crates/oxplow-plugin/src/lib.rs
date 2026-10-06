@@ -941,7 +941,7 @@ mod tests {
         let js = fs::read_to_string(&paths.hooks_plugin).unwrap();
         // The bridge reads its routing identity from env, posts the
         // Claude-shaped lifecycle events, and maps tool names so the
-        // write-guard / filing enforcement match.
+        // write guard matches.
         assert!(js.contains("OXPLOW_HOOK_BASE_URL"));
         assert!(js.contains("OXPLOW_HOOK_TOKEN"));
         assert!(js.contains("X-Oxplow-Thread"));

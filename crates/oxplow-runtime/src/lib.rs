@@ -1,4 +1,4 @@
-//! Runtime services: the write guard and filing enforcement. Pure logic on top of store
+//! Runtime services: the write guard. Pure logic on top of store
 //! traits — no IO, no Tauri awareness.
 //!
 //! This crate is callable from both `oxplow-tauri-ipc` (when a
@@ -7,15 +7,9 @@
 //! rules). Do not put DB calls, file IO, or HTTP here — wrap those at
 //! the `oxplow-app` layer.
 
-pub mod filing;
 pub mod policy;
 pub mod write_guard;
 
-pub use filing::{
-    build_filing_enforcement_pre_tool_deny, build_filing_enforcement_pre_tool_reason,
-    is_plan_mode_plan_file, FilingEnforcementContext, FilingEnforcementDeny,
-    ALWAYS_WRITE_INTENT_TOOL_NAMES,
-};
 pub use policy::{
     decide_tool, path_outside_worktree, DenyLayer, IntentKind, PolicyDecision, PolicyFacts,
     ToolIntent,

@@ -103,19 +103,18 @@ pub fn build_session_context_block_with_role(
 
 fn role_description(role: RoleMode) -> &'static str {
     match role {
-        RoleMode::Writer => "may edit project files after starting an `in_progress` task",
+        RoleMode::Writer => "may edit project files",
         RoleMode::ReadOnly => "may inspect the project, but project file edits are blocked",
     }
 }
 
 /// Loud banner emitted when the thread's role flipped mid-session.
-/// Phrased so the agent treats it as a direct override of the
-/// frozen `NON_WRITER_PROMPT_BLOCK` (or absence thereof) in the
-/// initial system prompt.
+/// Phrased so the agent treats it as a direct override of the Access line
+/// in the session context it started with.
 pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
     match (initial, current) {
-        (RoleMode::ReadOnly, RoleMode::Writer) => "**Access changed:** This thread was promoted to writer after the session started. It may now edit the worktree after starting an `in_progress` task; the earlier read-only instruction no longer applies.".to_string(),
-        (RoleMode::Writer, RoleMode::ReadOnly) => "**Access changed:** This thread was changed to read-only after the session started. Project file edits are now blocked, though wiki captures under `.oxplow/wiki/` remain allowed.".to_string(),
+        (RoleMode::ReadOnly, RoleMode::Writer) => "**Access changed:** This thread was promoted to writer after the session started. It may now edit the worktree; the earlier read-only instruction no longer applies.".to_string(),
+        (RoleMode::Writer, RoleMode::ReadOnly) => "**Access changed:** This thread was changed to read-only after the session started. Project file edits are now blocked; wiki pages are still written with `knowledge.write_page`.".to_string(),
         // Same-role pairs never reach this fn — caller skips.
         _ => String::new(),
     }

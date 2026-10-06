@@ -326,10 +326,10 @@ fn otlp_ok() -> Response {
 /// Upper bound on hook decision time. Claude Code blocks on the hook
 /// response, so a wedged backend (DB writer held by a snapshot flush,
 /// a slow store query) must not stall the agent indefinitely. On
-/// expiry we return the generic ack — i.e. allow the tool call / emit
-/// no directive. Availability over enforcement: a missed deny on one
-/// pathological turn beats a frozen agent, and the MCP tools re-check
-/// write-guard + filing at the call site anyway.
+/// expiry we return the generic ack — i.e. allow the tool call.
+/// Availability over enforcement: a missed deny on one pathological turn
+/// beats a frozen agent, and the MCP tools re-check the write guard at
+/// the call site anyway.
 const HOOK_HANDLING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 async fn handle_hook(
@@ -590,7 +590,7 @@ fn pre_tool_deny(reason: String) -> serde_json::Value {
     .unwrap_or_default()
 }
 
-/// Run the shared agent policy (write guard, then filing) against the
+/// Run the shared agent policy (the write guard) against the
 /// PreToolUse payload. `Some(reason)` refuses; `None` allows. Tools
 /// neither rule can refuse skip the policy's I/O (`claude_intent`
 /// returns `None` for them).

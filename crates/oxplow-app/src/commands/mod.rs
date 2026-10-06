@@ -127,10 +127,6 @@ pub struct TxCtx<'a> {
     pub conn: &'a rusqlite::Connection,
     pub actor: &'a Actor,
     pub events: oxplow_db::EventCtx<'a>,
-    /// May this run open an effort (claim the worktree)? False only for
-    /// an agent thread that isn't its stream's writer; a `Record`
-    /// handler checks it with [`TxCtx::claim`].
-    pub may_claim: bool,
     /// Step 4's answer: a person confirmed this call. A handler that
     /// learns only while running that a confirmation is needed — a
     /// composite whose child asks (`CommandBus::run_nested`) — checks it
@@ -152,23 +148,7 @@ pub struct TxCtx<'a> {
 /// commands composing one another).
 pub const MAX_NESTING: usize = 8;
 
-impl TxCtx<'_> {
-    /// Refuse the run when it opened an effort (`opened`) and the actor
-    /// may not claim. The bus rolls the transaction back and audits the
-    /// refusal as denied.
-    pub fn claim(&self, opened: bool, what: &str) -> Result<(), CommandError> {
-        if opened && !self.may_claim {
-            return Err(CommandError::Denied {
-                reason: format!(
-                    "{what} opens an effort — a claim on the worktree — and only the \
-                     stream's writer thread may claim; file or edit it without \
-                     `in_progress`, or run this from the writer thread"
-                ),
-            });
-        }
-        Ok(())
-    }
-}
+impl TxCtx<'_> {}
 
 pub type TxHandler = dyn Fn(&TxCtx<'_>, Value) -> Result<HandlerOutput, CommandError> + Send + Sync;
 pub type ExternalFuture = Pin<Box<dyn Future<Output = Result<HandlerOutput, CommandError>> + Send>>;
@@ -448,7 +428,6 @@ impl Registry {
 /// doesn't apply).
 #[derive(Debug, Clone, Copy)]
 struct Gates {
-    may_claim: bool,
     may_write: Option<bool>,
 }
 
@@ -797,12 +776,9 @@ impl CommandBus {
         }
         // 3. …and an agent (or a lens acting for one) must also pass the
         // agent policy.
-        // A `Record` command isn't refused here; its handler refuses a
-        // claim (see `TxCtx::may_claim`).
-        let mut gates = Gates {
-            may_claim: true,
-            may_write: None,
-        };
+        // A `Record` command isn't refused here: any thread may change
+        // oxplow's own records.
+        let mut gates = Gates { may_write: None };
         if let Some(thread_id) = actor.agent_thread() {
             use oxplow_domain::CommandEffect;
             let may_write = match (spec.effect, &thread_id, &self.write_gate) {
@@ -812,9 +788,6 @@ impl CommandBus {
                 _ => None,
             };
             gates.may_write = may_write;
-            if spec.effect == CommandEffect::Record {
-                gates.may_claim = may_write != Some(false);
-            }
             let gated = may_write.filter(|_| spec.effect == CommandEffect::Write);
             if let PolicyDecision::Deny { reason, .. } =
                 self.policy.check_command(thread_id.as_ref(), spec, gated)
@@ -940,7 +913,6 @@ impl CommandBus {
                                 source: actor_c.source(),
                                 cause: Some(executed_id.clone()),
                             },
-                            may_claim: gates.may_claim,
                             confirmed,
                             may_write: gates.may_write,
                             depth: 0,
@@ -1260,7 +1232,6 @@ impl CommandBus {
                         source: actor.source(),
                         cause: None,
                     },
-                    may_claim: gates.may_claim,
                     confirmed: true,
                     may_write: gates.may_write,
                     depth: 0,
@@ -1489,7 +1460,6 @@ impl CommandBus {
             conn: ctx.conn,
             actor: ctx.actor,
             events: ctx.events.clone(),
-            may_claim: ctx.may_claim,
             confirmed: ctx.confirmed,
             may_write: ctx.may_write,
             depth: ctx.depth + 1,
@@ -1567,7 +1537,6 @@ impl CommandBus {
                                 source: actor.source(),
                                 cause: None,
                             },
-                            may_claim: false,
                             confirmed: false,
                             may_write: None,
                             depth: 0,

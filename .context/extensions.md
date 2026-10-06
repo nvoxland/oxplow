@@ -2497,10 +2497,9 @@ tool list stable no matter how many extensions are installed.
 
 - Agents author extensions and lenses **by editing files** under
   `oxplow/extensions/<name>/` with their normal Edit tool, under the usual
-  filing guard. The loader hot-reloads.
+  write guard. The loader hot-reloads.
 - **No scaffold tools (decided).** A scaffold tool would write project
-  files outside the filing guard (and the write guard, and the caller's
-  worktree). The skill carries the templates instead, and humans have
+  files outside the write guard and the caller's worktree. The skill carries the templates instead, and humans have
   Save as Lens in Explore Data. The same rule holds for metrics:
   the `metric.scaffold` command returns a template the agent writes itself
   (tsk391).

@@ -42,8 +42,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use oxplow_db::task_store::EffortTransition;
-
 use super::{Command, Dispatch, Handler, HandlerOutput, Invocation, Route, TxCtx, TxHandler};
 
 /// oxplow's status for a canonical state.
@@ -587,10 +585,6 @@ fn tx_transition(registry: WorkItemsRegistry) -> Arc<TxHandler> {
         if let Some(before) = before {
             change.before = before;
         }
-        ctx.claim(
-            matches!(change.effort, EffortTransition::Opened(_)),
-            &format!("moving {id} to in_progress"),
-        )?;
         Ok(HandlerOutput {
             result: serde_json::to_value(&change.after).expect("Task serializes"),
             inverse: Some(CommandCall {
@@ -740,9 +734,8 @@ fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             note_count: 0,
             author: task_author(ctx.actor),
         };
-        let (id, effort) = oxplow_db::task_store::insert_logged_tx(ctx.conn, &ctx.events, &item)
+        let (id, _) = oxplow_db::task_store::insert_logged_tx(ctx.conn, &ctx.events, &item)
             .map_err(CommandError::from)?;
-        ctx.claim(effort.is_some(), "filing a task in_progress")?;
         let row = oxplow_db::task_store::get_task_tx(ctx.conn, id)
             .map_err(CommandError::from)?
             .ok_or_else(|| CommandError::Failed {
@@ -850,13 +843,9 @@ fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             item.parent_id = p;
         }
         item.updated_at = now;
-        let (after, effort) =
+        let (after, _) =
             oxplow_db::task_store::update_with_status_tx(ctx.conn, &ctx.events, &item, status, now)
                 .map_err(not_found)?;
-        ctx.claim(
-            matches!(effort, EffortTransition::Opened(_)),
-            &format!("moving {id} to in_progress"),
-        )?;
         let inverse = WorkItemUpdateInput {
             item_ref: input.item_ref.clone(),
             title: input.title.as_ref().map(|_| before.title.clone()),
@@ -1233,12 +1222,6 @@ fn place(
                 },
                 other => CommandError::from(other),
             })?;
-    ctx.claim(
-        placed.from_thread != dest
-            && dest.is_some()
-            && placed.task.status == TaskStatus::InProgress,
-        &format!("moving {id}, which is in progress, onto a thread"),
-    )?;
     Ok(placed)
 }
 
@@ -2019,45 +2002,35 @@ mod tests {
         );
     }
 
-    /// Moving a task to `in_progress` opens an effort — a claim — which
-    /// only the stream's writer thread may take. A refused run writes
-    /// nothing, not the fields either, and is audited as denied.
+    /// Any thread may start a task: a task's state is a record, not a
+    /// claim on the worktree (only edits are guarded, by isolation).
     #[tokio::test]
-    async fn a_queued_thread_cannot_claim() {
+    async fn a_queued_thread_starts_and_files_tasks_in_progress() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let queued = queued_agent(&fx).await;
         let later = file_on(&fx, "later", Some(fx.thread)).await;
-        for (name, input) in [
-            (
-                UPDATE,
-                json!({ "ref": later, "title": "renamed", "state": "in_progress" }),
-            ),
-            (NAME, json!({ "ref": later, "to": "in_progress" })),
-        ] {
-            let err = fx
-                .svc
-                .commands
-                .run(&queued, name, input, false)
-                .await
-                .unwrap_err();
-            assert!(
-                matches!(err, CommandError::Denied { .. }),
-                "{name}: {err:?}"
-            );
-        }
-        let id = task_of_work_item_ref(&later).unwrap();
-        use oxplow_domain::stores::TaskStore as _;
-        let row = fx.svc.task_store.get(id).await.unwrap().unwrap();
-        assert_eq!(
-            (row.title.as_str(), row.status),
-            ("later", TaskStatus::Ready)
-        );
-        let recent = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
-        let denied = recent
-            .iter()
-            .filter(|r| r.outcome == oxplow_domain::events::schema::CommandOutcome::Denied)
-            .count();
-        assert_eq!(denied, 2, "{recent:?}");
+        fx.svc
+            .commands
+            .run(
+                &queued,
+                NAME,
+                json!({ "ref": later, "to": "in_progress" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &queued,
+                CREATE,
+                json!({ "title": "mine now", "thread": "thr9", "state": "in_progress" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["status"], "in_progress");
     }
 
     /// `work_item.create` (tsk463): filing a task is audited to the actor;
@@ -2116,52 +2089,6 @@ mod tests {
             .await
             .unwrap();
         assert!(!out_refs.is_empty(), "the body mention was projected");
-    }
-
-    /// A queued thread files tasks (tsk466), but not straight into
-    /// `in_progress`: that would open an effort.
-    #[tokio::test]
-    async fn a_queued_thread_files_but_cannot_file_a_claim() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let queued = queued_agent(&fx).await;
-        let out = fx
-            .svc
-            .commands
-            .run(
-                &queued,
-                CREATE,
-                json!({ "title": "noted", "thread": "thr9" }),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(out.result["status"], "ready");
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &queued,
-                CREATE,
-                json!({ "title": "mine now", "thread": "thr9", "state": "in_progress" }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        let n: i64 = fx
-            .svc
-            .db
-            .transaction(|c| {
-                c.query_row(
-                    "SELECT COUNT(*) FROM task WHERE title = 'mine now'",
-                    [],
-                    |r| r.get(0),
-                )
-                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-            })
-            .await
-            .unwrap();
-        assert_eq!(n, 0);
     }
 
     /// Thread 9, queued, in stream 1, as its agent.

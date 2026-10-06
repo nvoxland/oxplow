@@ -772,24 +772,7 @@ impl SqliteEffortStore {
         Ok(effort_id)
     }
 
-    /// Whether any thread in `stream` has an open effort — the filing
-    /// guard's claim (`.context/agent-model.md`, "Filing enforcement").
-    pub async fn stream_has_open_effort(&self, stream: StreamId) -> Result<bool, DomainError> {
-        self.db
-            .call(move |conn| {
-                conn.query_row(
-                    "SELECT EXISTS (
-                       SELECT 1 FROM effort e JOIN threads th ON th.id = e.thread_id
-                        WHERE th.stream_id = ?1 AND e.ended_at IS NULL)",
-                    params![stream.value()],
-                    |r| r.get(0),
-                )
-            })
-            .await
-    }
-
-    /// The open efforts on `stream`'s threads, oldest first — what the
-    /// Stop audit walks.
+    /// The open efforts on `stream`'s threads, oldest first.
     pub async fn list_open_for_stream(&self, stream: StreamId) -> Result<Vec<Effort>, DomainError> {
         self.db
             .call(move |conn| {

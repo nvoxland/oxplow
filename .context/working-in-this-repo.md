@@ -52,24 +52,12 @@ Use plan mode for multi-subsystem work (3+ areas touched) or ambiguous
 requirements. Skip it for single-file changes, typos, renames, or narrow
 refactors — go straight to TDD or a subagent dispatch.
 
-## Filing enforcement (full)
+## Filing tasks (convention, not enforced)
 
-**No trivial-edit carve-out for filing.** Every Edit / Write /
-MultiEdit / NotebookEdit on project files requires a tracked work
-item — typos, single-line CSS tweaks, and one-file fixes included.
-Enforcement is a **PreToolUse hook**: when the writer thread has no
-`in_progress` item AND no filing call has fired this turn, the edit
-tool is denied at the moment it's invoked, not at end-of-turn. File
-the item (or flip a ready row to in_progress), then re-issue the edit.
-Bash is intentionally exempt — `git merge`, `git pull`, codegen, and
-formatters mutate the worktree as a side effect without representing
-authored change worth filing. Edits made while the worktree is mid
-git operation (merge / rebase / cherry-pick / revert — i.e. when
-`MERGE_HEAD` / `REBASE_HEAD` / `CHERRY_PICK_HEAD` / `REVERT_HEAD`
-exists in the gitdir) are also exempt: the authored change is the
-merge commit itself, and conflict resolution would otherwise dead-
-lock against the filing rule. The `.context/` read rule still gets a
-soft pass for tiny mechanical edits — just don't skip the task.
+oxplow no longer refuses an edit or a stop over tracked work
+([work-tracking.md](./work-tracking.md)). Filing an `in_progress` task
+before working is still this repo's convention until its rules are
+reworked; nothing checks it.
 
 **`touched_files` declares AUTHORED work, and the same exemption
 applies.** A path listed in `generated.exclude` (`.oxplow/project.yaml`)
@@ -104,7 +92,7 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
   `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
-  `oxplow-runtime` (write guard + filing enforcement),
+  `oxplow-runtime` (the write guard),
   `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
   `oxplow-coverage` (pure report-parse data types),
   `oxplow-collect-plugin` (the bundled report parsers + host parse
