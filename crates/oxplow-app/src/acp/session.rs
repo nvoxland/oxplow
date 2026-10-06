@@ -771,8 +771,8 @@ impl Actor {
     async fn on_turn_end(&mut self, result: Result<TurnEnd, String>) {
         // The turn is over (its prompt is on the `agent_turn` row).
         self.turn.take();
-        // Clear "awaiting you" BEFORE the Stop is ingested: Stop keeps an
-        // AwaitingUser status (for `await_user`), which would strand it.
+        // Clear the cards' "awaiting you" BEFORE the Stop is ingested, so
+        // the Stop decides the status from the turn's final message.
         if !self.pending.is_empty() {
             self.cancel_pending();
             self.host.awaiting_user(self.thread(), None).await;

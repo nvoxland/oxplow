@@ -252,12 +252,6 @@ pub struct FollowupIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AwaitUserParams {
-    pub thread_id: String,
-    pub question: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GetThreadContextParams {
     pub thread_id: String,
 }
@@ -2205,36 +2199,6 @@ impl OxplowMcp {
 
     // ---------- task orchestration ----------
 
-    #[tool(
-        description = "Park this thread on the person: logs that the agent is awaiting their answer (the question shows on the rail), so the Stop that follows adds no directive."
-    )]
-    async fn await_user(
-        &self,
-        params: Parameters<AwaitUserParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        expect_id_kind("await_user", "thread_id", &p.thread_id, ID_THREAD)?;
-        let tid = parse_thread_id(&p.thread_id)?;
-        let question = p.question.trim().to_string();
-        // Detail carries the question text (not a bare marker) so the
-        // rail agent-status dot can show it in a tooltip. Empty questions
-        // fall back to None — the dot still flips to "awaiting you",
-        // just without tooltip text.
-        let detail = (!question.is_empty()).then(|| question.clone());
-        // Park the thread on the person: the status is logged as
-        // `agent.status.changed{awaiting_user}` (what the derived status and
-        // the Stop pipeline read — P3.9), stored, and announced, so the rail
-        // dot turns "awaiting you" (with the question tooltip) immediately.
-        self.services
-            .hook_ingest
-            .set_status(&tid, oxplow_domain::AgentStatusState::AwaitingUser, detail)
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            "awaiting",
-        )]))
-    }
-
     #[tool(description = "Bundle of thread state, tasks, and recent activity.")]
     async fn get_thread_context(
         &self,
@@ -2803,8 +2767,6 @@ const WRITE_TOOLS: &[&str] = &[
     "switch_stream",
     "add_followup",
     "remove_followup",
-    // Agent-session activity, born as an `agent.*` event.
-    "await_user",
 ];
 
 /// Stamp `read_only_hint = true` on tools in [`READ_ONLY_TOOLS`], leaving any

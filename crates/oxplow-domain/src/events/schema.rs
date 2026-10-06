@@ -1190,7 +1190,8 @@ impl From<crate::agent::AgentKind> for Harness {
 pub enum LoggedAgentStatus {
     Idle,
     Running,
-    /// Parked on the person (`await_user`, a question).
+    /// Parked on the person: a question or plan put to them, a permission
+    /// prompt, a final message ending in a question.
     AwaitingUser,
     Stopped,
     Error,
@@ -1413,7 +1414,8 @@ impl EventType for AgentToolFinished {
 pub struct AgentStatusChangedV1 {
     pub thread: String,
     pub state: LoggedAgentStatus,
-    /// The `await_user` question, or why it stopped.
+    /// What it's waiting on (the question, the permission asked), or why
+    /// it stopped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }

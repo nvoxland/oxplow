@@ -1,23 +1,12 @@
 title: Waiting on Me
 description: Questions your agents are waiting on you to answer, blocked tasks, and open notes-to-self across the project.
 query: |
-  WITH asked AS (
-    SELECT thread_id, detail, at,
-           row_number() OVER (PARTITION BY thread_id ORDER BY at DESC, id DESC) AS rn
-    FROM v_tool_call
-    WHERE tool LIKE '%await_user'
-  ),
-  last_turn AS (
-    SELECT thread_id, max(started_at) AS started_at FROM v_agent_turn GROUP BY thread_id
-  )
   SELECT * FROM (
-  SELECT 'Waiting for your answer' AS what, coalesce(a.detail, 'A question') AS title,
-         NULL AS task_id, t.title AS thread, a.at AS since
-  FROM asked a
+  SELECT 'Waiting for your answer' AS what, coalesce(a.detail, 'Waiting on you') AS title,
+         NULL AS task_id, t.title AS thread, a.since AS since
+  FROM v_agent_status a
   JOIN v_thread t ON t.id = a.thread_id
-  LEFT JOIN last_turn lt ON lt.thread_id = a.thread_id
-  WHERE a.rn = 1 AND t.status <> 'closed'
-    AND (lt.started_at IS NULL OR lt.started_at < a.at)
+  WHERE a.state = 'awaiting_user' AND t.status <> 'closed'
   UNION ALL
   SELECT 'Blocked task', title, id, NULL, updated_at
   FROM v_task WHERE status = 'blocked'

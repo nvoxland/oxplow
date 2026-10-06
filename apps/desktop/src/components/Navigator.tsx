@@ -19,7 +19,7 @@ interface NavigatorProps {
   threadStates: Record<string, ThreadState>;
   streamStatuses: Record<string, AgentStatusDotState>;
   agentStatuses: Record<string, AgentStatusDotState>;
-  /// Per-thread await_user question, shown as the rail dot's tooltip
+  /// Per-thread question the agent is waiting on, shown as the rail dot's tooltip
   /// while that thread's status is "awaiting". Absent for every other
   /// state. Keyed by thread id, parallel to agentStatuses.
   agentQuestions?: Record<string, string | undefined>;

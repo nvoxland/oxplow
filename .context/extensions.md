@@ -501,11 +501,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   `the_bundled_extensions_answer_their_questions` (oxplow-sdk).
 
   It also has a Waiting on Me lens, reachable from the launcher:
-  questions agents are waiting on you to answer (the latest `await_user`
-  call per thread, with the question in `v_tool_call.detail`, when no
-  turn started after it), blocked tasks, and open notes. Agent status
-  itself is in memory only (V2 dropped `agent_status`), so this reads
-  the durable tool-call log instead. Each empty state says what's *good*, e.g.
+  what your agents are waiting on you for (`v_agent_status` with
+  `awaiting_user`: a question or plan they put to you, a permission
+  prompt, a final message ending in a question), blocked tasks, and open
+  notes. Each empty state says what's *good*, e.g.
   "Every claim for this effort is backed by evidence."
 
   The slot lenses above need `effort_id` / `change_id`, so they're

@@ -19,6 +19,14 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: agent_status
+  version: 1
+  description: "Each thread's agent status as last logged: `running`, `idle`, `awaiting_user` (waiting on the person — a question it put to them, a plan to approve, a permission prompt, or a final message ending in a question), `stopped`, `error`. A dead turn's `stalled` is derived live, never logged."
+  columns:
+    - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
+    - { name: "state", type: "", doc: "`running`, `idle`, `awaiting_user`, `stopped` or `error`." }
+    - { name: "detail", type: "", doc: "What it's waiting on (the question, the permission asked), or why it stopped." }
+    - { name: "since", type: "TEXT", doc: "When it moved to this status (RFC 3339)." }
 - name: agent_turn
   version: 1
   description: "Agent turns: each human prompt and the agent's answer, per thread. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
@@ -1055,7 +1063,7 @@
     - { not_null: id }
     - { unique: id }
 - name: tool_call
-  version: 1
+  version: 2
   description: "Every tool call the agent made (from the PostToolUse hook): reads, edits, commands."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -1064,7 +1072,7 @@
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
     - { name: "tool", type: "TEXT", doc: "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …)." }
     - { name: "path", type: "TEXT", doc: "File it touched, repo-relative when inside the project." }
-    - { name: "detail", type: "TEXT", doc: "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, …" }
+    - { name: "detail", type: "TEXT", doc: "Short context: the Bash command (truncated), a search pattern, …" }
     - { name: "ok", type: "INTEGER", doc: "1 succeeded, 0 failed, NULL unknown (Bash often reports no exit code)." }
     - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "event_id", type: "TEXT", doc: "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls." }

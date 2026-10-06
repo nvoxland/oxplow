@@ -82,9 +82,9 @@ pub enum OxplowEvent {
         thread_id: ThreadId,
         state: AgentStatusState,
         /// The status detail, when meaningful to the renderer. Carries
-        /// the `await_user` question text when `state` is
-        /// `AwaitingUser` so the rail dot's tooltip can show what the
-        /// agent is asking — `None` for every other transition.
+        /// what the agent is waiting on (its question, the permission it
+        /// asked) when `state` is `AwaitingUser`, so the rail dot's tooltip
+        /// can show it — `None` for every other transition.
         detail: Option<String>,
     },
     /// A snapshot take recorded something new: a new snapshot (its

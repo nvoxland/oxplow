@@ -121,7 +121,9 @@ the thread has none open; a later item start links it (rule 1).
   (else latest) effort; `v_effort.summary` defaults to the effort's last
   turn's final message.
 - "Waiting on you" is derived (a pending question or plan approval, the
-  Notification hook, a final message ending in a question), not declared.
+  Notification hook's permission prompt, a final message ending in a
+  question), not declared; the next prompt clears it. It's the thread's
+  logged `agent.status.changed`, read as `v_agent_status`.
 
 ## Hints
 
@@ -195,7 +197,7 @@ The three in progress:
   Efforts close with their thread (`thread.close`) and stream
   (`stream.archive`, end snapshot first); `effort.report` is optional and
   never creates an effort, and the summary defaults to the last turn's
-  final message.
-- Next, in order: waiting derived; the
-  Work panel and a Thread activity page; hints; skills and repo rules.
+  final message. "Waiting on you" is derived; `await_user` is gone.
+- Next, in order: the Work panel and a Thread activity page; hints;
+  skills and repo rules.
   Then the capability framework and the three swappable pieces.

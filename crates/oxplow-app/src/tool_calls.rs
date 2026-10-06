@@ -32,9 +32,6 @@ pub fn parse_tool_call(payload_json: &str, project_dir: &Path) -> Option<ToolCal
         .or_else(|| str_field("pattern"))
         .or_else(|| str_field("query"))
         .or_else(|| str_field("url"))
-        // `await_user`: the question the agent is waiting on (read by the
-        // oxplow-bundled Waiting on Me lens).
-        .or_else(|| str_field("question"))
         .map(|d| d.chars().take(MAX_DETAIL).collect());
 
     let response = v.get("tool_response");
@@ -133,15 +130,5 @@ mod tests {
         assert_eq!(p.ok, Some(false));
         assert_eq!(parse(json!({"tool_input": {}})), None);
         assert_eq!(parse_tool_call("not json", Path::new("/repo")), None);
-    }
-
-    #[test]
-    fn an_await_user_call_keeps_its_question() {
-        let p = parse(json!({
-            "tool_name": "mcp__oxplow__await_user",
-            "tool_input": {"threadId": "thr1", "question": "Pick A or B?"}
-        }))
-        .unwrap();
-        assert_eq!(p.detail.as_deref(), Some("Pick A or B?"));
     }
 }

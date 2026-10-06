@@ -275,7 +275,7 @@ export function App() {
   threadWorkStatesRef.current = threadWorkStates;
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
-  // Parallel to agentStatuses: the await_user question per thread, set
+  // Parallel to agentStatuses: the question each thread is waiting on, set
   // only while that thread's status is "awaiting". Feeds the rail dot's
   // tooltip so a thread parked on your answer says WHAT it's asking.
   const [agentQuestions, setAgentQuestions] = useState<Record<string, string | undefined>>({});

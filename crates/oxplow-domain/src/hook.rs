@@ -28,6 +28,9 @@ pub enum HookKind {
     SessionStart,
     /// A harness session ended — `reason: "clear"` for `/clear`.
     SessionEnd,
+    /// The harness told the person something (Claude's `Notification`):
+    /// a permission prompt waits on them.
+    Notification,
 }
 
 #[derive(

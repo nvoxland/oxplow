@@ -14,7 +14,7 @@
         },
         {
           "const": "awaiting_user",
-          "description": "Parked on the person (`await_user`, a question).",
+          "description": "Parked on the person: a question or plan put to them, a permission\nprompt, a final message ending in a question.",
           "type": "string"
         }
       ]
@@ -25,7 +25,7 @@
   "description": "`agent.status.changed@1`: a thread's agent moved to another state.\nLogged on a transition only.",
   "properties": {
     "detail": {
-      "description": "The `await_user` question, or why it stopped.",
+      "description": "What it's waiting on (the question, the permission asked), or why\nit stopped.",
       "type": [
         "string",
         "null"

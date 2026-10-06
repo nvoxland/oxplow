@@ -3025,7 +3025,12 @@ export type HookKind =
  */
 "session_start" | 
 // A harness session ended — `reason: "clear"` for `/clear`.
-"session_end";
+"session_end" | 
+/**
+ *  The harness told the person something (Claude's `Notification`):
+ *  a permission prompt waits on them.
+ */
+"notification";
 
 // An operation paused mid-way, waiting on its conflicts.
 export type InProgressOp = "merge" | "rebase" | "cherry_pick" | "revert";
@@ -4276,9 +4281,9 @@ export type OxplowEvent =
 { kind: "agentStatusChanged"; threadId: ThreadId; state: AgentStatusState; 
 /**
  *  The status detail, when meaningful to the renderer. Carries
- *  the `await_user` question text when `state` is
- *  `AwaitingUser` so the rail dot's tooltip can show what the
- *  agent is asking — `None` for every other transition.
+ *  what the agent is waiting on (its question, the permission it
+ *  asked) when `state` is `AwaitingUser`, so the rail dot's tooltip
+ *  can show it — `None` for every other transition.
  */
 detail: string | null } | 
 /**

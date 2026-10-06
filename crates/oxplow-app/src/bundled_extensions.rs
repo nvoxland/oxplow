@@ -446,42 +446,32 @@ mod tests {
         assert_eq!(tests[0][0], serde_json::json!("tests/it.rs"));
     }
 
-    /// Waiting on Me lists threads whose agent asked the user a question
-    /// (`await_user`) that no later prompt has answered.
+    /// Waiting on Me lists threads whose agent waits on the person (its
+    /// final message asked them something) until a prompt moves it on.
     #[tokio::test]
     async fn waiting_on_me_lists_unanswered_questions() {
-        use oxplow_domain::stores::AgentTurnStore as _;
         let f = crate::test_fixtures::services_with_effort().await;
-        let turn = |at: oxplow_domain::Timestamp| oxplow_domain::AgentTurn {
-            id: oxplow_domain::AgentTurnId::placeholder(),
-            thread_id: f.thread,
-            prompt: "do it".into(),
-            answer: None,
+        let hook = |kind, payload: serde_json::Value| crate::hook_ingest::HookEnvelope {
+            kind,
+            thread_id: Some(f.thread),
+            stream_id: None,
             session_id: None,
-            started_at: at,
-            ended_at: None,
-            start_snapshot_id: None,
-            snapshot_id: None,
+            payload_json: payload.to_string(),
+            prompt: Some("go".into()),
+            decision: None,
         };
-        let now = oxplow_domain::Timestamp::now();
+        use oxplow_domain::hook::HookKind;
         f.svc
-            .agent_turn_store
-            .open(&turn(oxplow_domain::Timestamp::from_unix_ms(
-                now.unix_ms() - 60_000,
-            )))
+            .hook_ingest
+            .ingest(hook(HookKind::UserPromptSubmit, serde_json::json!({})))
             .await
             .unwrap();
         f.svc
-            .tool_call_store
-            .record(oxplow_db::NewToolCall {
-                thread_id: f.thread.value(),
-                effort_id: None,
-                tool: "mcp__oxplow__await_user".into(),
-                path: None,
-                detail: Some("Pick A or B?".into()),
-                ok: Some(true),
-                ..Default::default()
-            })
+            .hook_ingest
+            .ingest(hook(
+                HookKind::Stop,
+                serde_json::json!({ "last_assistant_message": "Pick A or B?" }),
+            ))
             .await
             .unwrap();
         let waiting = |rows: serde_json::Value| {
@@ -495,12 +485,10 @@ mod tests {
         let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
         assert_eq!(waiting(rows), vec![serde_json::json!("Pick A or B?")]);
 
-        // The user answers: a new turn starts after the question.
+        // The person answers: a new turn starts.
         f.svc
-            .agent_turn_store
-            .open(&turn(oxplow_domain::Timestamp::from_unix_ms(
-                now.unix_ms() + 60_000,
-            )))
+            .hook_ingest
+            .ingest(hook(HookKind::UserPromptSubmit, serde_json::json!({})))
             .await
             .unwrap();
         let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;

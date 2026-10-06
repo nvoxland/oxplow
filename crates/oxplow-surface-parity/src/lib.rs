@@ -22,7 +22,7 @@
 //! - [`Exposure::Model`] — a UI read whose agent counterpart is published
 //!   models: an agent reads the same rows with `query_sql`. Each model
 //!   named must be published (`tests/parity.rs`).
-//! - [`Exposure::AgentOnly`] — intentionally agent-only (dispatch, await_user,
+//! - [`Exposure::AgentOnly`] — intentionally agent-only (dispatch,
 //!   batch/orchestration affordances).
 //!
 //! Every row is decided: there is no "build the MCP tool later" exposure.
@@ -334,7 +334,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("read_task_options"),
     agent("dispatch_task"),
     agent("get_thread_context"),
-    agent("await_user"),
     agent("wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----
     agent("get_open_effort"),

@@ -44,8 +44,9 @@ pub enum ActivityKind {
     TurnInterrupted,
     /// A harness session began (`agent.session.started`).
     SessionStarted,
-    /// The agent parked on the person (`agent.status.changed{awaiting_user}`,
-    /// e.g. `await_user`, an ACP permission card).
+    /// The agent parked on the person (`agent.status.changed{awaiting_user}`:
+    /// a final message ending in a question, a permission prompt, an ACP
+    /// permission card).
     AwaitingUser,
     /// A status that ends such a wait (`agent.status.changed`, other states).
     StatusOther,
@@ -190,7 +191,7 @@ pub fn derive_thread_status_with_activity(
     // silence thresholds below (tsk130).
     let mut open_tools: i32 = 0;
 
-    // Parked on the person by `await_user` / a permission card, until a
+    // Parked on the person (a final question, a permission prompt), until a
     // prompt or another status moves it on.
     let mut awaiting = false;
     for ev in &sorted {
@@ -295,7 +296,7 @@ pub fn derive_thread_status_with_activity(
 /// Built-in tools that block the turn waiting on a human answer. A
 /// PreToolUse for one of these with no matching PostToolUse means the
 /// agent is parked on the user, not working and not dead.
-fn is_user_input_tool(tool_name: &str) -> bool {
+pub(crate) fn is_user_input_tool(tool_name: &str) -> bool {
     matches!(tool_name, "ExitPlanMode" | "AskUserQuestion")
 }
 
@@ -739,8 +740,8 @@ mod tests {
         }
     }
 
-    /// P3.9 (tsk479): `await_user` parks the thread on the person through
-    /// the turn's Stop, and only the next prompt moves it on.
+    /// A logged `awaiting_user` parks the thread on the person through the
+    /// turn's Stop, and only the next prompt moves it on.
     #[test]
     fn awaiting_user_holds_until_the_next_prompt() {
         let parked = [

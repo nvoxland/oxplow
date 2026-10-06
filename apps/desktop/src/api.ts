@@ -2294,7 +2294,7 @@ export interface AgentStatusEntry {
   streamId: string;
   threadId: string;
   status: AgentStatus;
-  /// The `await_user` question text, present only when `status` is
+  /// What the agent is waiting on (its question, a permission), present only when `status` is
   /// "awaiting". Surfaced as the rail dot's tooltip so you can see what
   /// a (possibly different) thread is asking without switching to it.
   question?: string;
@@ -2305,7 +2305,7 @@ export interface AgentStatusEntry {
 /// goes silent past the stall threshold — the agent died without ever
 /// emitting a Stop hook) stays distinct so the dot can render it as a
 /// failure rather than ordinary waiting; "awaiting_user" (the agent
-/// called `mcp__oxplow__await_user`) stays distinct so the dot can
+/// asked the person something) stays distinct so the dot can
 /// render "waiting on you"; everything else (idle / stopped / error) →
 /// waiting.
 export function collapseAgentStatusState(raw: string | undefined): AgentStatus {
@@ -2349,7 +2349,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
     return {
       streamId: "",
       threadId: row.thread_id,
-      // detail is the await_user question only while awaiting; other
+      // detail is what it waits on only while awaiting; other
       // states reuse detail for markers ("boot"/"interrupt") the dot
       // shouldn't surface, so scope the tooltip to the awaiting state.
       status,

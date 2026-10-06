@@ -31,11 +31,9 @@ or exact mechanics.
 - **Filing (convention).** File a durable `in_progress` task before
   editing. oxplow no longer enforces it (no edit or stop is refused);
   the rule is being reworked (`.context/work-tracking.md`).
-- **Asking the user a question.** When your reply ends with a real
-  clarifying question, A/B/C choice, or any ask where the user owns the
-  next move, call `mcp__oxplow__await_user({ threadId, question })` and
-  end your turn — the Stop hook suppresses every directive until they
-  reply. Not for rhetorical asides.
+- **Asking the user a question.** When your reply needs the user's
+  answer, end it with the question itself: a final message that ends in
+  a question shows the thread as waiting on them.
 - **Closing a task → `bun run test:collect`** (not bare `cargo test` /
   `bun test`): it's the only run that emits the JUnit + lcov reports
   oxplow parses into the effort's coverage panel. See

@@ -4216,6 +4216,61 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort open at the time, if any."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "tool",
+          "type": "TEXT",
+          "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File it touched, repo-relative when inside the project."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "Short context: the Bash command (truncated), a search pattern, …"
+        },
+        {
+          "name": "ok",
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed, NULL unknown (Bash often reports no exit code)."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls."
+        }
+      ],
+      "key": []
     }
   },
   "wiki_page": {
@@ -4995,6 +5050,33 @@
           "name": "added_at",
           "type": "TEXT",
           "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
+  },
+  "agent_status": {
+    "1": {
+      "columns": [
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread (v_thread.id)."
+        },
+        {
+          "name": "state",
+          "type": "",
+          "doc": "`running`, `idle`, `awaiting_user`, `stopped` or `error`."
+        },
+        {
+          "name": "detail",
+          "type": "",
+          "doc": "What it's waiting on (the question, the permission asked), or why it stopped."
+        },
+        {
+          "name": "since",
+          "type": "TEXT",
+          "doc": "When it moved to this status (RFC 3339)."
         }
       ],
       "key": []

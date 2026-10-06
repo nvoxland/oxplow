@@ -66,13 +66,10 @@ build output oxplow deliberately doesn't snapshot, so no effort owns it —
 e.g. `apps/desktop/src/tauri-bridge/generated/bindings.ts`, which Tauri
 Specta rewrites on nearly every build.
 
-**Asking the user a question.** When your reply ends with a real
-clarifying question, A/B/C choice, or any ask where the user owns the
-next move, call `mcp__oxplow__await_user({ threadId, question })` and
-end your turn. The Stop hook honours this and suppresses every
-directive (no dispatch nudge, no audit, no filing-enforcement) until
-the user replies. Don't call it for rhetorical asides — only genuine
-open questions.
+**Asking the user a question.** When your reply needs the user's
+answer, end it with the question itself. A final message that ends in
+a question shows the thread as waiting on them (`.context/work-tracking.md`
+"No gates"), until their next prompt.
 
 ## Repo layout (post-Tauri rewrite)
 

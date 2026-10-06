@@ -216,8 +216,8 @@ impl HookIngestService {
         Ok(outcome)
     }
 
-    /// Log and announce a thread's status outside a hook (`await_user`,
-    /// the ACP session's permission cards).
+    /// Log and announce a thread's status outside a hook (the ACP session's
+    /// permission cards).
     pub async fn set_status(
         &self,
         thread: &ThreadId,
@@ -256,7 +256,7 @@ impl HookIngestService {
     /// Tool hooks set no status of their own, but they change what the
     /// renderer derives (an open `Task` keeps a thread working). Re-derive
     /// from the thread's logged activity and announce it, keeping an
-    /// `await_user` that parked the thread this turn.
+    /// status that parked the thread on the person.
     async fn announce_derived_status(&self, thread: &ThreadId, kind: HookKind) {
         if !matches!(kind, HookKind::PreToolUse | HookKind::PostToolUse) {
             return;
@@ -446,6 +446,38 @@ fn record_tx(
         }
         HookKind::PreToolUse | HookKind::PostToolUse => {
             log_tool_tx(conn, ev, thread, &row.worktree, env, &body, session)?;
+            let tool = body
+                .get("tool_name")
+                .and_then(|t| t.as_str())
+                .unwrap_or_default();
+            let asks = crate::agent_status_derive::is_user_input_tool(tool);
+            if env.kind == HookKind::PreToolUse && asks {
+                // A question or a plan put to the person waits on them.
+                status = Some((AgentStatusState::AwaitingUser, Some(asked_of(tool, &body))));
+            } else if env.kind == HookKind::PostToolUse
+                && (asks
+                    || last_status_tx(conn, ev.vocabulary, thread)?
+                        .is_some_and(|s| s.state == AgentStatusState::AwaitingUser))
+            {
+                // Answered, or the tool it was waiting on permission for ran.
+                status = Some((AgentStatusState::Running, None));
+            }
+        }
+        HookKind::Notification => {
+            // A permission prompt (or a form to fill) waits on the person;
+            // an idle reminder says nothing new.
+            let waits = matches!(
+                body.get("notification_type").and_then(|t| t.as_str()),
+                Some("permission_prompt" | "elicitation_dialog")
+            );
+            if waits {
+                let message = body
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Waiting on you")
+                    .to_string();
+                status = Some((AgentStatusState::AwaitingUser, Some(message)));
+            }
         }
         HookKind::Stop | HookKind::Interrupt => {
             let (answer, outcome) = if env.kind == HookKind::Stop {
@@ -471,7 +503,7 @@ fn record_tx(
             status = Some(if env.kind == HookKind::Interrupt {
                 (AgentStatusState::Stopped, Some("interrupt".to_string()))
             } else {
-                stop_status(last_status_tx(conn, ev.vocabulary, thread)?.as_ref())
+                stop_status(answer)
             });
         }
         HookKind::SessionEnd => {
@@ -519,15 +551,31 @@ fn record_tx(
     Ok(applied)
 }
 
-/// A Stop parks the thread on the person when the agent asked them
-/// something this turn (`await_user` logged `awaiting_user`, and a fresh
-/// prompt clears it first) — keeping the question — else it goes idle.
-fn stop_status(current: Option<&AgentStatus>) -> (AgentStatusState, Option<String>) {
-    match current {
-        Some(s) if s.state == AgentStatusState::AwaitingUser => {
-            (AgentStatusState::AwaitingUser, s.detail.clone())
-        }
-        _ => (AgentStatusState::Idle, None),
+/// A Stop parks the thread on the person when the agent's final message
+/// ends in a question — its last line is the detail — else it goes idle.
+/// The next prompt moves it on.
+fn stop_status(answer: Option<&str>) -> (AgentStatusState, Option<String>) {
+    let asked = answer
+        .map(str::trim)
+        .filter(|a| a.ends_with('?'))
+        .and_then(|a| a.lines().map(str::trim).rfind(|l| !l.is_empty()));
+    match asked {
+        Some(question) => (AgentStatusState::AwaitingUser, Some(question.to_string())),
+        None => (AgentStatusState::Idle, None),
+    }
+}
+
+/// What a question tool asks: AskUserQuestion's first question, or that a
+/// plan waits for approval (ExitPlanMode).
+fn asked_of(tool: &str, body: &serde_json::Value) -> String {
+    let input = &body["tool_input"];
+    let question = input["questions"][0]["question"]
+        .as_str()
+        .or_else(|| input["question"].as_str());
+    match (tool, question) {
+        (_, Some(q)) => q.to_string(),
+        ("ExitPlanMode", None) => "A plan to approve".to_string(),
+        _ => "A question".to_string(),
     }
 }
 
@@ -1523,96 +1571,128 @@ mod tests {
         assert_eq!(of_type(&logged(&svc).await, "agent.session.ended").len(), 2);
     }
 
+    /// A turn whose final message ends in a question waits on the person,
+    /// the question as the detail, across a restart; the next prompt
+    /// moves it on.
     #[tokio::test]
-    async fn real_stop_preserves_awaiting_user_set_by_mcp() {
-        // The `await_user` MCP tool flips agent_status to AwaitingUser
-        // (question as detail) mid-turn. The real Claude Stop that
-        // follows carries no await_user sentinel — it must NOT clobber
-        // that state back to Idle, or the rail "awaiting you" dot would
-        // vanish the instant the turn ends.
+    async fn a_final_question_waits_on_the_person() {
         let (svc, tid) = fixture().await;
-        svc.ingest(HookEnvelope {
-            kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: Some("do".into()),
-            decision: None,
-        })
-        .await
-        .unwrap();
-        // The MCP await_user call parks the thread; then the daemon
-        // restarts before the Stop lands — nothing held in memory survives.
-        svc.set_status(
-            &tid,
-            AgentStatusState::AwaitingUser,
-            Some("Ship A or B?".into()),
-        )
+        svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::Stop,
+            tid,
+            None,
+            json!({ LAST_ASSISTANT_MESSAGE: "Done with the parser.\n\nShould I also fix the lexer?" }),
+        ))
         .await
         .unwrap();
         let svc = restarted(&svc);
-        svc.ingest(HookEnvelope {
-            kind: HookKind::Stop,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: None,
-            decision: None,
-        })
+        let s = status(&svc, tid).await.unwrap();
+        assert_eq!(s.state, AgentStatusState::AwaitingUser);
+        assert_eq!(s.detail.as_deref(), Some("Should I also fix the lexer?"));
+        svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
+            .await
+            .unwrap();
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::Running
+        );
+        svc.ingest(hook(
+            HookKind::Stop,
+            tid,
+            None,
+            json!({ LAST_ASSISTANT_MESSAGE: "All done." }),
+        ))
         .await
         .unwrap();
-        let status = status(&svc, tid).await.unwrap();
-        assert_eq!(status.state, AgentStatusState::AwaitingUser);
-        assert_eq!(status.detail.as_deref(), Some("Ship A or B?"));
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::Idle
+        );
     }
 
+    /// A question or plan the agent puts to the person (AskUserQuestion,
+    /// ExitPlanMode) waits on them until it's answered.
     #[tokio::test]
-    async fn post_tool_use_does_not_clobber_awaiting_user() {
-        // await_user set AwaitingUser (with a question). A PostToolUse
-        // that follows — e.g. the await_user tool call's own PostToolUse
-        // — must NOT flicker the rail dot off "awaiting you": the derive
-        // can't see the synthetic marker and would return Running.
+    async fn a_pending_question_tool_waits_until_answered() {
         let (svc, tid) = fixture().await;
-        svc.ingest(HookEnvelope {
-            kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: Some("do".into()),
-            decision: None,
-        })
+        svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::PreToolUse,
+            tid,
+            None,
+            json!({ "tool_name": "AskUserQuestion",
+                    "tool_input": { "questions": [{ "question": "Which store?" }] } }),
+        ))
         .await
         .unwrap();
-        svc.set_status(
-            &tid,
-            AgentStatusState::AwaitingUser,
-            Some("Pick A or B?".into()),
-        )
+        let s = status(&svc, tid).await.unwrap();
+        assert_eq!(s.state, AgentStatusState::AwaitingUser);
+        assert_eq!(s.detail.as_deref(), Some("Which store?"));
+        svc.ingest(hook(
+            HookKind::PostToolUse,
+            tid,
+            None,
+            json!({ "tool_name": "AskUserQuestion" }),
+        ))
         .await
         .unwrap();
-        let mut rx = svc.events.subscribe_ui();
-        svc.ingest(HookEnvelope {
-            kind: HookKind::PostToolUse,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: None,
-            decision: None,
-        })
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::Running
+        );
+    }
+
+    /// A permission prompt (Claude's Notification hook) waits on the
+    /// person until the tool runs; an idle reminder doesn't.
+    #[tokio::test]
+    async fn a_permission_prompt_waits_until_the_tool_runs() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::Notification,
+            tid,
+            None,
+            json!({ "notification_type": "idle_prompt", "message": "Claude is waiting for your input" }),
+        ))
         .await
         .unwrap();
-        let mut emitted = None;
-        while let Ok(ev) = rx.try_recv() {
-            if let OxplowEvent::AgentStatusChanged { state, detail, .. } = ev {
-                emitted = Some((state, detail));
-            }
-        }
-        let (state, detail) = emitted.expect("PostToolUse should emit AgentStatusChanged");
-        assert_eq!(state, AgentStatusState::AwaitingUser);
-        assert_eq!(detail.as_deref(), Some("Pick A or B?"));
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::Running
+        );
+        svc.ingest(hook(
+            HookKind::Notification,
+            tid,
+            None,
+            json!({ "notification_type": "permission_prompt",
+                    "message": "Claude needs your permission to use Bash" }),
+        ))
+        .await
+        .unwrap();
+        let s = status(&svc, tid).await.unwrap();
+        assert_eq!(s.state, AgentStatusState::AwaitingUser);
+        assert_eq!(
+            s.detail.as_deref(),
+            Some("Claude needs your permission to use Bash")
+        );
+        svc.ingest(hook(
+            HookKind::PostToolUse,
+            tid,
+            None,
+            json!({ "tool_name": "Bash" }),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::Running
+        );
     }
 }

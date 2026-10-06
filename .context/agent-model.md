@@ -117,8 +117,8 @@ oxplow agent:
   each thread's glyph in the Navigator and on the agent center tab
   (`AgentStatusDot`) — yellow pulsing for `working`, neutral grey for
   `waiting` (idle, ready for the next prompt; it was pale red, which read
-  as an error — tsk1045) (plus red `stalled` and blue `awaiting` for a pending
-  `await_user`).
+  as an error) (plus red `stalled` and blue `awaiting` when the thread
+  waits on the person).
   Poll for the transition *out* of `working` to know a turn finished.
   Looking at terminal rows alone is fragile (scrollback, progress
   indicators, partial lines).
@@ -361,11 +361,11 @@ to `runtime.handleHookEnvelope`, which:
      session-start Idle) is logged as `agent.status.changed` when it differs from the
      thread's newest logged one, read in the same transaction
      (`last_status_tx`). **The log is the status** (tsk499): there is no
-     in-memory copy, so a restarted daemon still knows a thread was parked
-     on `await_user` when its Stop lands. `SqliteAgentStatusStore` is the
-     read side (`get`, `list_all` = every thread that has logged one);
-     `HookIngestService::set_status` (`await_user`, ACP permission cards)
-     is the only other writer and logs through the same compare. One lock
+     in-memory copy, so a restarted daemon still knows a thread waits on
+     the person. `SqliteAgentStatusStore` is the read side (`get`,
+     `list_all` = every thread that has logged one; `v_agent_status` is
+     each thread's latest); `HookIngestService::set_status` (ACP
+     permission cards) is the only other writer and logs through the same compare. One lock
      spans each status-deciding transaction and its `AgentStatusChanged`
      emit, so announcements reach the UI in commit order. What the rail
      *shows* is still derived from activity (`list_agent_statuses`), so a
@@ -581,8 +581,8 @@ the same JSON.
   - **Deny:** answered `reject_once` (or `cancelled` when no reject option exists) with a policy-denied item. The model sees only the rejection; a reason can't be carried.
   - **Allow:** a permission card waits for the person, with no timeout. "Always allow" is dropped for writes, the status is AwaitingPermission, and the thread status is `AwaitingUser`.
 - Cancel answers every open card `cancelled`, as the protocol requires.
-- "Awaiting" is cleared BEFORE the Stop is ingested; Stop keeps an `AwaitingUser` status for `await_user`.
-- **Status after the cards (tsk361).** When the cards are answered or cancelled, the host restores what the first card interrupted: an earlier `await_user` question survives, and otherwise the status is Running if a turn is open, else Idle. The view likewise goes to Running inside a turn and Idle outside one.
+- The cards' "awaiting" is cleared BEFORE the Stop is ingested, so the Stop decides the status from the turn's final message.
+- **Status after the cards.** When the cards are answered or cancelled, the host restores what the first card interrupted: a question the thread was already waiting on survives, and otherwise the status is Running if a turn is open, else Idle. The view likewise goes to Running inside a turn and Idle outside one.
 - **Teardown is one path (tsk361).** `session::Teardown` cancels unanswered cards, adds the error item, records the Interrupt (only while the session is current) and emits Stopped/Closed. The actor runs it on a clean exit. The task driving the connection runs it again afterwards, which is a no-op once stopped, so a transport error that drops the actor mid-loop still ends the session.
 
 **fs and bypass.**
@@ -1561,7 +1561,12 @@ prompt, re-prompts too), `tool.requested{allowed}` (a refused request never
 runs, so it opens no tool), `tool.finished`, `turn.ended` (completed vs
 interrupted/restart), `session.started`, and `status.changed`
 (`awaiting_user` parks the thread until a prompt or another status moves
-it; `await_user` logs it through `HookIngestService::set_status`). It
+it). Hook ingest logs it from what it sees: a Stop whose final message
+ends in a question (its last line is the detail), a pending
+`AskUserQuestion` / `ExitPlanMode` (until its PostToolUse), and Claude's
+`Notification` hook with `notification_type` `permission_prompt` or
+`elicitation_dialog` (until the tool's PostToolUse); ACP permission
+cards log it through `HookIngestService::set_status`. It
 survives a restart, unlike the in-memory ring it replaced. The stall watch
 and `list_agent_statuses` derive from the same reads. The runtime
 recomputes on every tool hook and emits `agent-status.changed`. The UI shows it as a colored dot on each thread

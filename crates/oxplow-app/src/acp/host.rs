@@ -63,7 +63,8 @@ pub struct ServicesAcpHost {
     svc: Weak<Services>,
     stream_id: Option<StreamId>,
     /// The thread status a permission card interrupted, restored when the
-    /// cards are answered (so an `await_user` question survives one).
+    /// cards are answered (so a question the thread was waiting on survives
+    /// one).
     before_card: parking_lot::Mutex<Option<(AgentStatusState, Option<String>)>>,
 }
 

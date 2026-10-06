@@ -34,7 +34,7 @@ export function AgentStatusDot({
 }: {
   status: AgentStatusDotState;
   size?: number;
-  /// The await_user question, shown as the tooltip when `status` is
+  /// What the agent is waiting on, shown as the tooltip when `status` is
   /// "awaiting". Falls back to the generic label when absent (e.g. the
   /// stream-level aggregate dot, which has no single question).
   question?: string;

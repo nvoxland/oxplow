@@ -408,16 +408,18 @@ async fn handle_hook_inner(
     // session drops it — see `hook_ingest`). A startup/resume/clear/compact
     // also gives the agent a fresh system prompt, so discard the context
     // baselines and let the next prompt inject one fresh block.
-    if event == "SessionStart" || event == "SessionEnd" {
+    // Notification: a permission prompt waits on the person (the ingest
+    // records it as the thread's status). None of these carry policy.
+    if event == "SessionStart" || event == "SessionEnd" || event == "Notification" {
         if event == "SessionStart" {
             ctx.services
                 .agent_context
                 .reset_session(session_id.as_deref());
         }
-        let kind = if event == "SessionStart" {
-            HookKind::SessionStart
-        } else {
-            HookKind::SessionEnd
+        let kind = match event.as_str() {
+            "SessionStart" => HookKind::SessionStart,
+            "SessionEnd" => HookKind::SessionEnd,
+            _ => HookKind::Notification,
         };
         let envelope = HookEnvelope {
             kind,
@@ -626,8 +628,8 @@ fn parse_hook_kind(event: &str) -> Option<HookKind> {
         "PostToolUse" => Some(HookKind::PostToolUse),
         "UserPromptSubmit" => Some(HookKind::UserPromptSubmit),
         "Stop" => Some(HookKind::Stop),
-        // SessionStart / SessionEnd are routed before this (they carry
-        // no policy); anything else (Notification, …) is acked unread.
+        // SessionStart / SessionEnd / Notification are routed before this
+        // (they carry no policy); anything else is acked unread.
         _ => None,
     }
 }

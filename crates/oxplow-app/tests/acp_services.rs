@@ -406,7 +406,7 @@ async fn a_permission_card_restores_the_status_it_interrupted() {
         let s = svc.agent_status_store.get(&thread).await.unwrap().unwrap();
         (s.state, s.detail)
     };
-    // The agent already parked on the person (`await_user`).
+    // The agent already parked on the person (it asked them something).
     svc.hook_ingest
         .set_status(
             &thread,
