@@ -25,7 +25,7 @@ use crate::page_ref_projections::{
     KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
-use oxplow_domain::events::schema::{EffortClosed, EffortClosedV1, EffortOpened, EffortOpenedV1};
+use oxplow_domain::events::schema::{EffortClosed, EffortClosedV2, EffortOpened, EffortOpenedV2};
 use oxplow_domain::refs::build::{
     effort_ref, snapshot_ref, task_of_work_item_ref, thread_ref, validate_work_item_ref,
     work_item_id_of_ref,
@@ -43,8 +43,14 @@ pub enum EffortFileChange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Effort {
     pub id: EffortId,
-    /// The work item worked on, as a canonical `work_item` ref.
-    pub work_item: String,
+    /// The work item it's linked to, as a canonical `work_item` ref; `None`
+    /// while unlinked (oxplow opens efforts itself).
+    pub work_item: Option<String>,
+    /// Its own title, when one was set; `None` means the default
+    /// (`v_effort.title`).
+    pub title: Option<String>,
+    /// What closed it (`commit`, `switch`, `person`, `agent`, `system`).
+    pub closed_by: Option<String>,
     pub thread_id: ThreadId,
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,
@@ -58,7 +64,7 @@ impl Effort {
     /// The oxplow task this effort is on; `None` for another provider's
     /// work item.
     pub fn task_id(&self) -> Option<TaskId> {
-        task_of_work_item_ref(&self.work_item)
+        task_of_work_item_ref(self.work_item.as_deref()?)
     }
 }
 
@@ -163,38 +169,48 @@ pub struct EffortAtSnapshot {
 // "Transactions".
 // ---------------------------------------------------------------------------
 
-/// Opens an effort on `work_item`, which the caller has validated
-/// (`validate_work_item_ref`) or built with `work_item_ref`, and logs
-/// `effort.opened@1` in the same transaction — every open, whichever path
-/// made it (lifecycle, `record_effort_atomic`, recovery, a command).
+/// Opens an effort on `thread`, linked to `work_item` when given (which
+/// the caller has validated with `validate_work_item_ref` or built with
+/// `work_item_ref`), and logs `effort.opened` in the same transaction —
+/// every open, whichever path made it. A thread holds one open effort, so
+/// the one it had open closes first (`switch`). A `retroactive` effort is
+/// recorded already closed ([`record_retroactive_tx`]) and never opens.
 pub fn start_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
-    work_item: &str,
+    work_item: Option<&str>,
     thread: ThreadId,
     start_snapshot_id: Option<i64>,
     now: Timestamp,
     retroactive: bool,
 ) -> Result<EffortId, DomainError> {
+    if !retroactive {
+        if let Some(open) = open_for_thread_tx(conn, thread).map_err(map_sql_err)? {
+            finish_tx(conn, ev, open, &EffortEnd::at(now, ClosedBy::Switch))?;
+        }
+    }
     conn.execute(
         "INSERT INTO effort
            (id, work_item, thread_id, started_at, ended_at,
             start_snapshot_id, end_snapshot_id, summary)
-         VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL)",
+         VALUES (?1, ?2, ?3, ?4, ?6, ?5, NULL, NULL)",
         params![
             None::<i64>,
             work_item,
             thread.value(),
             ts_to_string(now),
             start_snapshot_id,
+            // Recorded after the fact: closed as it's made, so it never
+            // takes the thread's one open slot.
+            retroactive.then(|| ts_to_string(now)),
         ],
     )
     .map_err(map_sql_err)?;
     let id = EffortId::new(conn.last_insert_rowid());
     let env = ev
-        .typed::<EffortOpened>(&EffortOpenedV1 {
+        .typed::<EffortOpened>(&EffortOpenedV2 {
             effort: effort_ref(id),
-            work_item: work_item.to_string(),
+            work_item: work_item.map(str::to_string),
             thread: thread_ref(thread),
             start_snapshot: start_snapshot_id.map(snapshot_ref),
             retroactive,
@@ -204,31 +220,121 @@ pub fn start_tx(
             snapshot_id: start_snapshot_id,
             ..anchors_for_thread_tx(conn, thread)?
         })
-        .with_subject([effort_ref(id), work_item.to_string()]);
+        .with_subject(std::iter::once(effort_ref(id)).chain(work_item.map(str::to_string)));
     ev.append(conn, &env)?;
     Ok(id)
 }
 
-/// Closes an open effort and logs `effort.closed@1` in the same
+/// Log the close of an effort recorded after the fact (already closed
+/// by [`start_tx`] with `retroactive`).
+fn log_retroactive_close_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    id: EffortId,
+    work_item: &str,
+    thread: ThreadId,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE effort SET closed_by = 'agent' WHERE id = ?1",
+        params![id.value()],
+    )
+    .map_err(map_sql_err)?;
+    let env = ev
+        .typed::<EffortClosed>(&EffortClosedV2 {
+            effort: effort_ref(id),
+            work_item: Some(work_item.to_string()),
+            end_snapshot: None,
+            retroactive: true,
+            closed_by: Some(ClosedBy::Agent.as_str().to_string()),
+        })
+        .with_anchors(Anchors {
+            effort_id: Some(id),
+            ..anchors_for_thread_tx(conn, thread)?
+        })
+        .with_subject([effort_ref(id), work_item.to_string()]);
+    ev.append(conn, &env)?;
+    Ok(())
+}
+
+/// How an effort is closed ([`finish_tx`]).
+#[derive(Debug, Clone, Copy)]
+pub struct EffortEnd<'a> {
+    pub end_snapshot_id: Option<i64>,
+    pub summary: Option<&'a str>,
+    pub at: Timestamp,
+    /// Recorded after the fact: there is no bracket to snapshot.
+    pub retroactive: bool,
+    pub closed_by: ClosedBy,
+}
+
+impl<'a> EffortEnd<'a> {
+    /// A close now-ish at `at`, by `closed_by`, with nothing else.
+    pub fn at(at: Timestamp, closed_by: ClosedBy) -> Self {
+        Self {
+            end_snapshot_id: None,
+            summary: None,
+            at,
+            retroactive: false,
+            closed_by,
+        }
+    }
+}
+
+/// How an effort ended (`effort.closed_by`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosedBy {
+    /// A commit landed its changes.
+    Commit,
+    /// The thread moved on to other work, or its item finished.
+    Switch,
+    Person,
+    Agent,
+    /// oxplow itself (its thread closed, a migration).
+    System,
+}
+
+impl ClosedBy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Commit => "commit",
+            Self::Switch => "switch",
+            Self::Person => "person",
+            Self::Agent => "agent",
+            Self::System => "system",
+        }
+    }
+}
+
+/// Closes an open effort and logs `effort.closed` in the same
 /// transaction. An effort that is already closed (or gone) is left alone
 /// and nothing is logged; returns whether this call closed it.
 pub fn finish_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     id: EffortId,
-    end_snapshot_id: Option<i64>,
-    summary: Option<&str>,
-    now: Timestamp,
-    retroactive: bool,
+    end: &EffortEnd<'_>,
 ) -> Result<bool, DomainError> {
+    let EffortEnd {
+        end_snapshot_id,
+        summary,
+        at: now,
+        retroactive,
+        closed_by,
+    } = *end;
     use rusqlite::OptionalExtension;
-    let closed: Option<(String, i64)> = conn
+    let closed: Option<(Option<String>, i64)> = conn
         .query_row(
             "UPDATE effort
-             SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
+             SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4, closed_by = ?5
              WHERE id = ?1 AND ended_at IS NULL
              RETURNING work_item, thread_id",
-            params![id.value(), ts_to_string(now), end_snapshot_id, summary],
+            params![
+                id.value(),
+                ts_to_string(now),
+                end_snapshot_id,
+                summary,
+                closed_by.as_str()
+            ],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
@@ -237,18 +343,19 @@ pub fn finish_tx(
         return Ok(false);
     };
     let env = ev
-        .typed::<EffortClosed>(&EffortClosedV1 {
+        .typed::<EffortClosed>(&EffortClosedV2 {
             effort: effort_ref(id),
             work_item: work_item.clone(),
             end_snapshot: end_snapshot_id.map(snapshot_ref),
             retroactive,
+            closed_by: Some(closed_by.as_str().to_string()),
         })
         .with_anchors(Anchors {
             effort_id: Some(id),
             snapshot_id: end_snapshot_id,
             ..anchors_for_thread_tx(conn, ThreadId::new(thread))?
         })
-        .with_subject([effort_ref(id), work_item]);
+        .with_subject(std::iter::once(effort_ref(id)).chain(work_item));
     ev.append(conn, &env)?;
     Ok(true)
 }
@@ -353,6 +460,20 @@ fn str_to_change(s: &str) -> Result<EffortFileChange, DomainError> {
     })
 }
 
+/// The thread's open effort, if any (at most one is open per thread).
+pub fn open_for_thread_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+) -> rusqlite::Result<Option<EffortId>> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT id FROM effort WHERE thread_id = ?1 AND ended_at IS NULL",
+        params![thread.value()],
+        |r| r.get(0).map(EffortId::new),
+    )
+    .optional()
+}
+
 /// The thread's open effort when exactly one is open (in the caller's
 /// transaction); `None` for zero or two-plus, so attribution never guesses.
 pub fn find_single_open_for_thread_tx(
@@ -380,7 +501,9 @@ pub fn find_single_open_for_thread_tx(
 
 fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<Effort> {
     let id: i64 = row.get("id")?;
-    let work_item: String = row.get("work_item")?;
+    let work_item: Option<String> = row.get("work_item")?;
+    let title: Option<String> = row.get("title")?;
+    let closed_by: Option<String> = row.get("closed_by")?;
     let thread_id: i64 = row.get("thread_id")?;
     let started_at: String = row.get("started_at")?;
     let ended_at: Option<String> = row.get("ended_at")?;
@@ -393,6 +516,8 @@ fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<Effort> {
     Ok(Effort {
         id: EffortId::new(id),
         work_item,
+        title,
+        closed_by,
         thread_id: ThreadId::new(thread_id),
         started_at: string_to_ts(&started_at).map_err(map_err)?,
         ended_at: ended_at
@@ -727,7 +852,7 @@ impl SqliteEffortStore {
                         start_tx(
                             tx,
                             &ev,
-                            &a.work_item,
+                            Some(&a.work_item),
                             a.thread,
                             None,
                             Timestamp::now(),
@@ -746,19 +871,26 @@ impl SqliteEffortStore {
                     })?;
                     set_impacts_json_tx(tx, effort_id, Some(&json)).map_err(map_sql_err)?;
                 }
-                if open {
-                    // No lifecycle close happened (or this is the
-                    // freshly-started fallback) — close with the
+                if existing.is_none() {
+                    // Synthesized: recorded closed; log its close with the
+                    // summary.
+                    set_summary_tx(tx, effort_id, a.summary.as_deref()).map_err(map_sql_err)?;
+                    log_retroactive_close_tx(tx, &ev, effort_id, &a.work_item, a.thread)?;
+                } else if open {
+                    // No lifecycle close happened — close with the
                     // summary; end_snapshot_id stays NULL because this
                     // is attribution, not a status transition.
                     finish_tx(
                         tx,
                         &ev,
                         effort_id,
-                        None,
-                        a.summary.as_deref(),
-                        Timestamp::now(),
-                        existing.is_none(),
+                        &EffortEnd {
+                            end_snapshot_id: None,
+                            summary: a.summary.as_deref(),
+                            at: Timestamp::now(),
+                            retroactive: false,
+                            closed_by: ClosedBy::Agent,
+                        },
                     )?;
                 } else if a.summary.is_some() {
                     // Lifecycle finish already closed the row but left
@@ -916,12 +1048,14 @@ impl EffortStore for SqliteEffortStore {
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
                 let ev = EventCtx::system(&vocabulary, "effort_store");
-                start_tx(tx, &ev, &w, thread, start_snapshot_id, now, false)
+                start_tx(tx, &ev, Some(&w), thread, start_snapshot_id, now, false)
             })
             .await?;
         Ok(Effort {
             id,
-            work_item,
+            work_item: Some(work_item),
+            title: None,
+            closed_by: None,
             thread_id: thread,
             started_at: now,
             ended_at: None,
@@ -952,10 +1086,13 @@ impl EffortStore for SqliteEffortStore {
                     tx,
                     &ev,
                     id_for_sql,
-                    end_snapshot_id,
-                    summary.as_deref(),
-                    now,
-                    false,
+                    &EffortEnd {
+                        end_snapshot_id,
+                        summary: summary.as_deref(),
+                        at: now,
+                        retroactive: false,
+                        closed_by: ClosedBy::Agent,
+                    },
                 )
             })
             .await?;
@@ -1483,6 +1620,45 @@ mod tests {
         (store, tid, thread)
     }
 
+    /// An effort needs no work item: unlinked, its title is the first
+    /// line of the thread's first prompt in it; a thread holds one open.
+    #[tokio::test]
+    async fn an_unlinked_effort_takes_its_first_prompts_title() {
+        let (_store, db, _tid, thread) = fixture_with_db().await;
+        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
+        let (title, second) = db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at)
+                     VALUES (?1, 'Fix the login page\nIt 500s.', 's', '2026-01-01T00:00:00Z')",
+                    params![thread.value()],
+                )
+                .map_err(map_sql_err)?;
+                let ev = EventCtx::system(&vocabulary, "test");
+                let id = start_tx(tx, &ev, None, thread, None, Timestamp::now(), false)?;
+                let title: String = tx
+                    .query_row(
+                        "SELECT title FROM v_effort WHERE id = ?1",
+                        [id.value()],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                start_tx(tx, &ev, None, thread, None, Timestamp::now(), false)?;
+                let open: i64 = tx
+                    .query_row(
+                        "SELECT count(*) FROM effort WHERE thread_id = ?1 AND ended_at IS NULL",
+                        [thread.value()],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                Ok((title, open == 1))
+            })
+            .await
+            .unwrap();
+        assert_eq!(title, "Fix the login page");
+        assert!(second, "opening another switches: one stays open");
+    }
+
     #[tokio::test]
     async fn intervening_efforts_claims_overlapping_window() {
         // self effort spans snapshots (10, 30]. We report a path when
@@ -1694,7 +1870,7 @@ mod tests {
         let (store, tid, t) = fixture().await;
         let ours = work_item_ref(tid);
         let eff = store.start(&ours, &t, None).await.unwrap();
-        assert_eq!(eff.work_item, ours);
+        assert_eq!(eff.work_item.as_deref(), Some(ours.as_str()));
         assert_eq!(eff.task_id(), Some(tid));
 
         let foreign = "work_item:issues:ENG-12";
@@ -2037,25 +2213,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn second_open_effort_for_same_task_is_a_constraint() {
-        // The V31 partial unique index enforces the lifecycle
-        // invariant: at most one open effort per task. A double-open
-        // must surface as a typed Constraint, never silently diverge.
+    async fn opening_another_effort_switches_the_thread() {
+        // A thread holds one open effort (V5): opening another closes the
+        // one it had, as a switch.
         let (store, tid, t) = fixture().await;
-        store.start(&work_item_ref(tid), &t, None).await.unwrap();
-        let err = store
-            .start(&work_item_ref(tid), &t, None)
+        let first = store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let second = store
+            .start("work_item:issues:ENG-1", &t, None)
             .await
-            .unwrap_err();
-        assert!(matches!(err, DomainError::Constraint(_)), "got {err:?}");
-        // Finishing the open row frees the slot.
-        let open = store
-            .find_open_for_work_item(&work_item_ref(tid))
-            .await
-            .unwrap()
             .unwrap();
-        store.finish(&open.id, None, None).await.unwrap();
-        store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let open = store.list_open_for_thread(&t).await.unwrap();
+        assert_eq!(
+            open.iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![second.id]
+        );
+        let closed = store.get_effort(&first.id).await.unwrap().unwrap();
+        assert_eq!(closed.closed_by.as_deref(), Some("switch"));
     }
 
     #[tokio::test]
@@ -2077,43 +2250,17 @@ mod tests {
             .await
             .unwrap()
             .is_some());
-        // A second task's effort open on the same thread (parallel sub-agents)
-        // → ambiguous → None: attribution must not guess.
-        let now = Timestamp::from_unix_ms(2);
-        let tid2 = SqliteTaskStore::new(db.clone())
-            .insert(&Task {
-                id: TaskId::placeholder(),
-                thread_id: Some(thread),
-                parent_id: None,
-                title: "x2".into(),
-                description: String::new(),
-                status: TaskStatus::Ready,
-                priority: TaskPriority::Medium,
-                sort_index: 0,
-                created_by: TaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(TaskAuthor::User),
-            })
-            .await
-            .unwrap();
+        // Opening another moves the thread on: still exactly one open.
+        let _ = db;
         store
-            .start(&work_item_ref(tid2), &thread, None)
+            .start("work_item:issues:ENG-1", &thread, None)
             .await
             .unwrap();
-        assert!(
-            store
-                .find_single_open_for_thread(&thread)
-                .await
-                .unwrap()
-                .is_none(),
-            "two open efforts on one thread → no single attribution"
-        );
-        // The legacy lookup still returns one (the silent guess we're replacing).
-        assert!(store.find_open_for_thread(&thread).await.unwrap().is_some());
+        assert!(store
+            .find_single_open_for_thread(&thread)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]

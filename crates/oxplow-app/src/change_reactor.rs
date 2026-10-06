@@ -587,10 +587,10 @@ mod tests {
         assert!(reactor.handles("effort.finished"));
         let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
             "system",
-            &oxplow_domain::events::schema::EffortFinishedV1 {
+            &oxplow_domain::events::schema::EffortFinishedV2 {
                 // The ref, as `effort.lifecycle` logs it (tsk1025).
                 effort: oxplow_domain::refs::build::effort_ref(f.effort),
-                work_item: "work_item:oxplow:tsk1".into(),
+                work_item: Some("work_item:oxplow:tsk1".into()),
                 end_snapshot: Some(format!("snapshot:{end}")),
                 retroactive: false,
             },

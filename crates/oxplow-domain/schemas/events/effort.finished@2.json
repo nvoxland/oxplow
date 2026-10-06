@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.finished@2`: a closed effort's bracket is pinned — v1, with the\nwork item optional. A v1 payload is a v2 one as is.",
+  "properties": {
+    "effort": {
+      "type": "string"
+    },
+    "end_snapshot": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "retroactive": {
+      "description": "Recorded after the fact; there was no bracket to snapshot.",
+      "type": "boolean"
+    },
+    "work_item": {
+      "description": "The linked work item, when there is one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effort"
+  ],
+  "title": "EffortFinishedV2",
+  "type": "object"
+}

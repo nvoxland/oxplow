@@ -1527,6 +1527,71 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Effort id."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it's linked to, as a canonical ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`); NULL while unlinked. (v2: nullable)"
+        },
+        {
+          "name": "task_id",
+          "type": "",
+          "doc": "The oxplow task worked on (v_task.id); NULL for another provider's work item."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread that did the work."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "That thread's stream."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while the effort is open."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the start (v_snapshot.id)."
+        },
+        {
+          "name": "end_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the end; NULL while open."
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "doc": "Closing summary written when the effort closed."
+        },
+        {
+          "name": "title",
+          "type": "",
+          "doc": "Its own title, else its work item's, else the first line of its first prompt. (v2)"
+        },
+        {
+          "name": "closed_by",
+          "type": "TEXT",
+          "doc": "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "effort_file": {

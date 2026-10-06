@@ -11,7 +11,7 @@
 
 use async_trait::async_trait;
 use oxplow_db::SqliteEventLogStore;
-use oxplow_domain::events::schema::{EffortFinished, EffortFinishedV1};
+use oxplow_domain::events::schema::{EffortFinished, EffortFinishedV2};
 use oxplow_domain::refs::build::{snapshot_ref, system_source};
 use oxplow_domain::{DomainError, EffortId, Envelope, StoredEvent};
 
@@ -67,7 +67,7 @@ impl EffortLifecycleConsumer {
     ) -> Result<(), DomainError> {
         let env = Envelope::typed::<EffortFinished>(
             system_source(NAME),
-            &EffortFinishedV1 {
+            &EffortFinishedV2 {
                 effort: closed.envelope.payload["effort"]
                     .as_str()
                     .unwrap_or_default()

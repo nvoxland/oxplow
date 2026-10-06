@@ -1294,6 +1294,67 @@ mod tests {
     /// untouched. This test asserts an `effort` row created
     /// AFTER all migrations have run (including V18) coexists with
     /// its parent and the `acceptance_criteria` column is gone.
+    /// V5: an effort's work item becomes optional and at most one effort
+    /// is open per thread. A V4 database with two open efforts on one
+    /// thread (and an unlinked one stored as `''`) keeps every effort and
+    /// its files; only the newest open one per thread stays open.
+    #[test]
+    fn v5_keeps_efforts_and_leaves_one_open_per_thread() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(4))
+            .run(&mut conn)
+            .unwrap();
+        let now = "2026-04-29T00:00:00Z";
+        conn.execute_batch(&format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{now}', '{now}');
+             INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+               VALUES (1, 1, 't', 'active', '{now}', '{now}');
+             INSERT INTO effort (id, work_item, thread_id, started_at)
+               VALUES (1, 'work_item:oxplow:tsk1', 1, '2026-04-29T00:00:01Z'),
+                      (2, '', 1, '2026-04-29T00:00:02Z');
+             INSERT INTO effort_file (effort_id, path, change_kind)
+               VALUES (1, 'src/a.rs', 'updated');"
+        ))
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let efforts: Vec<(i64, Option<String>, bool, Option<String>)> = conn
+            .prepare("SELECT id, work_item, ended_at IS NULL, closed_by FROM effort ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            efforts,
+            vec![
+                (
+                    1,
+                    Some("work_item:oxplow:tsk1".to_string()),
+                    false,
+                    Some("system".to_string())
+                ),
+                (2, None, true, None),
+            ]
+        );
+        let files: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM effort_file WHERE effort_id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(files, 1);
+        // A second open effort on the thread is refused.
+        let err = conn.execute(
+            "INSERT INTO effort (thread_id, started_at) VALUES (1, '2026-04-29T00:00:03Z')",
+            [],
+        );
+        assert!(err.is_err(), "one open effort per thread");
+    }
+
     #[test]
     fn v18_does_not_cascade_to_task_effort() {
         let db = Database::in_memory();

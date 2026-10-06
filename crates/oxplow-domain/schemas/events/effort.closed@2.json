@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.closed@2`: a span of work ended — v1, with the work item\noptional and what closed it. A v1 payload is a v2 one as is.",
+  "properties": {
+    "closed_by": {
+      "description": "What closed it: `commit`, `switch`, `person`, `agent` or `system`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "effort": {
+      "type": "string"
+    },
+    "end_snapshot": {
+      "description": "`snapshot:N`, when the close already had its end snapshot.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "retroactive": {
+      "description": "Recorded after the fact (attribution for work on an item that was\nnever opened), so there is no bracket to snapshot.",
+      "type": "boolean"
+    },
+    "work_item": {
+      "description": "The linked work item, when there is one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effort"
+  ],
+  "title": "EffortClosedV2",
+  "type": "object"
+}

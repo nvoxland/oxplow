@@ -252,15 +252,18 @@ fn effort_for_status_tx(
                 // Adopted, not an error: the unique open index makes a true
                 // double-open impossible.
                 Some(open) => EffortTransition::Opened(open.id),
-                None => EffortTransition::Opened(crate::effort_store::start_tx(
-                    conn,
-                    ev,
-                    &work_item,
-                    thread,
-                    None,
-                    Timestamp::now(),
-                    false,
-                )?),
+                None => {
+                    // Opening moves the thread on from what it had open.
+                    EffortTransition::Opened(crate::effort_store::start_tx(
+                        conn,
+                        ev,
+                        Some(&work_item),
+                        thread,
+                        None,
+                        Timestamp::now(),
+                        false,
+                    )?)
+                }
             }
         }
         Some(_) if crossed_out => {
@@ -272,10 +275,10 @@ fn effort_for_status_tx(
                         conn,
                         ev,
                         open.id,
-                        None,
-                        None,
-                        Timestamp::now(),
-                        false,
+                        &crate::effort_store::EffortEnd::at(
+                            Timestamp::now(),
+                            crate::effort_store::ClosedBy::Switch,
+                        ),
                     )?;
                     EffortTransition::Finished(open.id)
                 }
@@ -462,7 +465,12 @@ pub fn soft_delete_tx(
     if let Some(open) = crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
         .map_err(crate::database::map_sql_err)?
     {
-        crate::effort_store::finish_tx(conn, ev, open.id, None, None, now, false)?;
+        crate::effort_store::finish_tx(
+            conn,
+            ev,
+            open.id,
+            &crate::effort_store::EffortEnd::at(now, crate::effort_store::ClosedBy::Switch),
+        )?;
     }
     crate::page_ref_store::replace_source_for_ref_types_tx(
         conn,
@@ -591,10 +599,15 @@ pub fn place_task_tx(
         if let Some(open) = crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
             .map_err(crate::database::map_sql_err)?
         {
-            crate::effort_store::finish_tx(conn, ev, open.id, None, None, now, false)?;
+            crate::effort_store::finish_tx(
+                conn,
+                ev,
+                open.id,
+                &crate::effort_store::EffortEnd::at(now, crate::effort_store::ClosedBy::Switch),
+            )?;
         }
         if let (Some(thread), TaskStatus::InProgress) = (dest, item.status) {
-            crate::effort_store::start_tx(conn, ev, &work_item, thread, None, now, false)?;
+            crate::effort_store::start_tx(conn, ev, Some(&work_item), thread, None, now, false)?;
         }
     }
     Ok(Placed {

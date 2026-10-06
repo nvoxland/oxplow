@@ -186,7 +186,7 @@ pub fn open_command(registry: WorkItemsRegistry) -> Command {
         let effort = oxplow_db::effort_store::start_tx(
             ctx.conn,
             &ctx.events,
-            &input.work_item,
+            Some(&input.work_item),
             thread,
             None,
             Timestamp::now(),
@@ -232,7 +232,7 @@ pub fn close_command(registry: WorkItemsRegistry) -> Command {
                 format!("`{}` is not an effort id (`eff12`)", input.effort),
             )
         })?;
-        let row: Option<(String, i64)> = ctx
+        let row: Option<(Option<String>, i64)> = ctx
             .conn
             .query_row(
                 "SELECT work_item, thread_id FROM effort WHERE id = ?1",
@@ -243,16 +243,25 @@ pub fn close_command(registry: WorkItemsRegistry) -> Command {
             .map_err(storage)?;
         let (work_item, thread) =
             row.ok_or_else(|| invalid("/effort", format!("no effort `{id}`")))?;
-        opens_its_own_effort(&registry, &work_item, "/effort")?;
+        if let Some(work_item) = &work_item {
+            opens_its_own_effort(&registry, work_item, "/effort")?;
+        }
         within_actor_stream(ctx, ThreadId::new(thread), "/effort", false)?;
+        let closed_by = match ctx.actor {
+            oxplow_domain::Actor::Agent { .. } => oxplow_db::effort_store::ClosedBy::Agent,
+            _ => oxplow_db::effort_store::ClosedBy::Person,
+        };
         let closed = oxplow_db::effort_store::finish_tx(
             ctx.conn,
             &ctx.events,
             id,
-            None,
-            input.summary.as_deref(),
-            Timestamp::now(),
-            false,
+            &oxplow_db::effort_store::EffortEnd {
+                end_snapshot_id: None,
+                summary: input.summary.as_deref(),
+                at: Timestamp::now(),
+                retroactive: false,
+                closed_by,
+            },
         )
         .map_err(CommandError::from)?;
         if !closed {
@@ -311,7 +320,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(row.work_item, ISSUES);
+        assert_eq!(row.work_item.as_deref(), Some(ISSUES));
         assert_eq!(row.thread_id, fx.thread);
         let executed = opened.event_id.clone().unwrap();
         let events = fx.svc.event_log_store.read_after(0, 100).await.unwrap();

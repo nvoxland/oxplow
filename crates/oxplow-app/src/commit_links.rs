@@ -123,9 +123,14 @@ async fn holds_effort(
     Ok(holds(&pairs))
 }
 
-/// The `work_item → commit` edge saying `sha` holds `effort`'s work.
+/// The `work_item → commit` edge saying `sha` holds `effort`'s work; none
+/// while the effort is unlinked.
 async fn link(svc: &crate::Services, sha: &str, effort: &Effort) -> Result<(), DomainError> {
-    let Some(work_item) = oxplow_domain::refs::build::work_item_id_of_ref(&effort.work_item) else {
+    let Some(work_item) = effort
+        .work_item
+        .as_deref()
+        .and_then(oxplow_domain::refs::build::work_item_id_of_ref)
+    else {
         return Ok(());
     };
     let edge = PageRefEdge::new(KIND_WORK_ITEM, work_item, KIND_COMMIT, sha, RT_COMMITTED)

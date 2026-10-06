@@ -2069,7 +2069,11 @@ mod tests {
             .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
             .map(|e| e.envelope.event_type.as_str())
             .collect();
-        assert_eq!(caused, vec!["effort.opened", "work_item.created"]);
+        // The fixture's effort closes as the thread switches to this one.
+        assert_eq!(
+            caused,
+            vec!["effort.closed", "effort.opened", "work_item.created"]
+        );
         assert!(fx
             .svc
             .effort_store

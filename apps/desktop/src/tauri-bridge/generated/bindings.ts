@@ -665,8 +665,18 @@ export const commands = {
 	 */
 	getEffort: (effortId: EffortId) => typedError<{
 	id: EffortId,
-	// The work item worked on, as a canonical `work_item` ref.
-	work_item: string,
+	/**
+	 *  The work item it's linked to, as a canonical `work_item` ref; `None`
+	 *  while unlinked (oxplow opens efforts itself).
+	 */
+	work_item: string | null,
+	/**
+	 *  Its own title, when one was set; `None` means the default
+	 *  (`v_effort.title`).
+	 */
+	title: string | null,
+	// What closed it (`commit`, `switch`, `person`, `agent`, `system`).
+	closed_by: string | null,
 	thread_id: ThreadId,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
@@ -2218,8 +2228,18 @@ export type EffectiveSetting = {
 
 export type Effort = {
 	id: EffortId,
-	// The work item worked on, as a canonical `work_item` ref.
-	work_item: string,
+	/**
+	 *  The work item it's linked to, as a canonical `work_item` ref; `None`
+	 *  while unlinked (oxplow opens efforts itself).
+	 */
+	work_item: string | null,
+	/**
+	 *  Its own title, when one was set; `None` means the default
+	 *  (`v_effort.title`).
+	 */
+	title: string | null,
+	// What closed it (`commit`, `switch`, `person`, `agent`, `system`).
+	closed_by: string | null,
 	thread_id: ThreadId,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,

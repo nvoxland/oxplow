@@ -500,6 +500,25 @@ reverse-chronological, capped at 100.
 
 ### `effort` — `EffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 
+**V5 (inferred work tracking, [work-tracking.md](./work-tracking.md)).**
+An effort is a span of one thread's work, and oxplow is moving to open
+and close it itself. V5 made `work_item` nullable (NULL = unlinked; the
+`''` the old default stored became NULL), allowed **at most one open
+effort per thread** (`idx_effort_open_per_thread`; the migration closed
+every older open one per thread as `system`) and dropped the
+one-open-per-work-item index. It added `title` (an override; `v_effort.title`
+is it, else the item's title, else the first line of the thread's first
+prompt in the span) and `closed_by` (`commit`, `switch`, `person`,
+`agent`, `system`). Done by column — add, copy, drop, rename — never by
+rebuilding the table, which would cascade away the child rows. In Rust
+`Effort.work_item` is `Option<String>`; `start_tx(conn, ev,
+work_item: Option<&str>, …)` and `finish_tx(conn, ev, id, &EffortEnd)`;
+the events are `effort.opened@2` / `effort.closed@2` (with `closed_by`) /
+`effort.finished@2`, each v1 upcast as is. A task going in progress on a
+thread that has another effort open closes that one first (`switch`).
+What follows describes the task-driven lifecycle still in place until
+the effort policy lands.
+
 An **effort** is one bracketed span of work on a **work item**, today
 one `in_progress → done` (or blocked/canceled) cycle of a task. V100
 (P2.5a, tsk427) renamed `task_effort` → `effort` and `task_effort_file`
@@ -554,7 +573,7 @@ completion via `effort.report` (the second half of the close's
 `command.sequence`). (A `summary_variants` column existed
 V27–V28 for the audience-variant feature; dropped in V29.)
 
-Re-opening a task (done → in_progress) produces a second effort. At most one open effort per task at a time.
+Re-opening a task (done → in_progress) produces a second effort. At most one effort is open per thread.
 
 `effort_file` (v22) records per-effort write paths so parallel
 subagents in one thread get distinct file lists instead of the union via

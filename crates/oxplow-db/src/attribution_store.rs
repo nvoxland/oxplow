@@ -181,9 +181,16 @@ mod tests {
                      VALUES (2, 1, 't2', 'in_progress', 'medium', 'user', ?1, ?1)",
                     [now],
                 )?;
+                // A second thread for the second effort: a thread holds one
+                // open effort.
+                conn.execute(
+                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                     VALUES (2, 1, 't2', 'queued', ?1, ?1)",
+                    [now],
+                )?;
                 conn.execute(
                     "INSERT INTO effort (id, work_item, thread_id, started_at)
-                     VALUES (1, 'work_item:oxplow:tsk1', 1, ?1), (2, 'work_item:oxplow:tsk2', 1, ?1)",
+                     VALUES (1, 'work_item:oxplow:tsk1', 1, ?1), (2, 'work_item:oxplow:tsk2', 2, ?1)",
                     [now],
                 )?;
                 Ok(())

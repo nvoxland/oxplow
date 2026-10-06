@@ -535,12 +535,16 @@ impl TaskService {
             return; // not actually closed — nothing to measure
         };
         let cycle_ms = (ended_at.unix_ms() - effort.started_at.unix_ms()).max(0);
-        let efforts_so_far = match effort_store.list_for_work_item(&effort.work_item).await {
-            Ok(rows) => rows.len() as i64,
-            Err(e) => {
-                tracing::warn!(error = %e, "effort lifecycle metrics: list_for_item failed");
-                return;
-            }
+        // Efforts so far on its work item (none while unlinked).
+        let efforts_so_far = match effort.work_item.as_deref() {
+            None => 0,
+            Some(w) => match effort_store.list_for_work_item(w).await {
+                Ok(rows) => rows.len() as i64,
+                Err(e) => {
+                    tracing::warn!(error = %e, "effort lifecycle metrics: list_for_item failed");
+                    return;
+                }
+            },
         };
         // Capture branch best-effort (process fact, tied to the worktree's
         // current branch). NULL when the stream has no capture service.
@@ -1132,8 +1136,8 @@ impl TaskService {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EffortFileReview {
     pub effort_id: String,
-    /// The effort's work item (`work_item:oxplow:tsk42`).
-    pub work_item: String,
+    /// The effort's work item (`work_item:oxplow:tsk42`), when linked.
+    pub work_item: Option<String>,
     /// Paths the agent claimed but the auto-diff doesn't see as
     /// changed. Disclaim via `effort.amend { remove_files }` if not
     /// actually touched.
@@ -1181,7 +1185,7 @@ pub async fn compute_effort_file_review(
         .ok()?;
     review_from_lists(
         &effort.id,
-        &effort.work_item,
+        effort.work_item.as_deref(),
         claimed,
         &changed,
         &acknowledged,
@@ -1222,7 +1226,7 @@ pub async fn recompute_effort_file_review(
         .ok()?;
     review_from_lists(
         effort_id,
-        &effort.work_item,
+        effort.work_item.as_deref(),
         &claimed,
         &changed,
         &acknowledged,
@@ -1235,7 +1239,7 @@ pub async fn recompute_effort_file_review(
 /// onto the shared reconciliation core.
 pub(crate) fn review_from_lists(
     effort_id: &EffortId,
-    work_item: &str,
+    work_item: Option<&str>,
     claimed: &[String],
     changed: &[String],
     acknowledged: &[String],
@@ -1251,7 +1255,7 @@ pub(crate) fn review_from_lists(
         crate::attribution::diff(&sets, MAX_UNCLAIMED_FOR_REVIEW)?;
     Some(EffortFileReview {
         effort_id: effort_id.to_string(),
-        work_item: work_item.to_string(),
+        work_item: work_item.map(str::to_string),
         claimed_but_not_changed,
         changed_but_not_claimed,
         unclaimed_overflow,
@@ -1425,12 +1429,12 @@ mod tests {
         let task = "work_item:oxplow:tsk1";
         let claimed = vec!["claimed.rs".to_string()];
         let changed = vec!["claimed.rs".to_string(), "extra.rs".to_string()];
-        let no_ack = review_from_lists(&effort, task, &claimed, &changed, &[], &[]);
+        let no_ack = review_from_lists(&effort, Some(task), &claimed, &changed, &[], &[]);
         let r = no_ack.expect("unclaimed extra.rs should produce a review");
         assert_eq!(r.changed_but_not_claimed, vec!["extra.rs".to_string()]);
         let with_ack = review_from_lists(
             &effort,
-            task,
+            Some(task),
             &claimed,
             &changed,
             &["extra.rs".to_string()],
@@ -1443,7 +1447,7 @@ mod tests {
         // Same effect when another effort already claimed the path.
         let with_other = review_from_lists(
             &effort,
-            task,
+            Some(task),
             &claimed,
             &changed,
             &[],
@@ -2635,113 +2639,6 @@ mod tests {
         assert_eq!(efforts.len(), 1);
         assert!(efforts[0].ended_at.is_some());
         assert_eq!(efforts[0].summary.as_deref(), Some("retro"));
-    }
-
-    #[tokio::test]
-    async fn claim_open_effort_file_resolves_which_effort_under_concurrency() {
-        // tsk186: with several efforts open this used to decline outright, so
-        // nothing got claimed in exactly the case where attribution is hardest —
-        // and because run scoring reads claimed files, that also left test runs
-        // unattributed and forced a close-time reconcile by hand.
-        //
-        // Now the edited path is scored against each open effort's claimed files
-        // ∪ its task's named paths. Neither task has claimed a file here, so the
-        // task text is what decides — the realistic case, since a claim happens
-        // on the FIRST edit of an effort.
-        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let mk = |title: &str, description: &str| {
-            let svc = svc.clone();
-            let (title, description) = (title.to_string(), description.to_string());
-            async move {
-                svc.create(
-                    Some(tid),
-                    CreateTaskInput {
-                        title,
-                        description: Some(description),
-                        status: Some(TaskStatus::InProgress),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap()
-            }
-        };
-        let api = mk("api work", "Rework `[[crates/oxplow-api/src/routes.rs]]`.").await;
-        let ui = mk("ui work", "Restyle `[[apps/desktop/src/pages/Home.tsx]]`.").await;
-
-        // Both efforts are open, so the old single-open rule declines.
-        assert!(
-            effort_store
-                .find_single_open_for_thread(&tid)
-                .await
-                .unwrap()
-                .is_none(),
-            "fixture must have two open efforts"
-        );
-
-        let claimed = svc
-            .claim_open_effort_file(&effort_store, &tid, "crates/oxplow-api/src/routes.rs", None)
-            .await
-            .unwrap();
-        assert!(claimed, "the edited path names one effort's area");
-
-        let api_effort = effort_store
-            .find_open_for_work_item(&work_item_ref(api.id))
-            .await
-            .unwrap()
-            .unwrap();
-        let ui_effort = effort_store
-            .find_open_for_work_item(&work_item_ref(ui.id))
-            .await
-            .unwrap()
-            .unwrap();
-        let api_files = effort_store.list_files(&api_effort.id).await.unwrap();
-        let ui_files = effort_store.list_files(&ui_effort.id).await.unwrap();
-        assert_eq!(
-            api_files
-                .iter()
-                .map(|f| f.path.as_str())
-                .collect::<Vec<_>>(),
-            vec!["crates/oxplow-api/src/routes.rs"],
-            "claimed by the effort whose task names it"
-        );
-        assert!(ui_files.is_empty(), "and NOT by the other one");
-    }
-
-    #[tokio::test]
-    async fn claim_open_effort_file_declines_when_the_path_names_no_one() {
-        // The safety property: a wrong claim misreports what an effort did, so
-        // an ambiguous path must still claim nothing rather than pick.
-        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        for (title, description) in [
-            ("a", "Touches `[[crates/oxplow-api/src/routes.rs]]`."),
-            ("b", "Also touches `[[crates/oxplow-api/src/routes.rs]]`."),
-        ] {
-            svc.create(
-                Some(tid),
-                CreateTaskInput {
-                    title: title.into(),
-                    description: Some(description.into()),
-                    status: Some(TaskStatus::InProgress),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        }
-        // Both name the same file → tie → decline.
-        let claimed = svc
-            .claim_open_effort_file(&effort_store, &tid, "crates/oxplow-api/src/routes.rs", None)
-            .await
-            .unwrap();
-        assert!(!claimed, "a tie must not be broken by guessing");
-
-        // A path neither names → no overlap → decline.
-        let unrelated = svc
-            .claim_open_effort_file(&effort_store, &tid, "docs/unrelated.md", None)
-            .await
-            .unwrap();
-        assert!(!unrelated, "no overlap must decline");
     }
 
     #[tokio::test]
