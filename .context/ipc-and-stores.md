@@ -92,10 +92,10 @@ into such a read: one slow query fails the whole call (tsk1065).
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
 
-1. **Migration** — `crates/oxplow-db/migrations/V1__initial_schema.sql`. Append a new entry to
-   `MIGRATIONS` with the next version number. Migrations are append-only;
-   never edit a prior entry. `runMigrations` runs them inside a
-   transaction and updates `PRAGMA user_version`.
+1. **Migration** — a new `crates/oxplow-db/migrations/V<next>__<name>.sql`
+   after `V1__baseline.sql` (see data-model.md). Migrations are
+   append-only; never edit a prior one. refinery runs each in a
+   transaction and records it in `refinery_schema_history`.
 
 2. **Store class** — `crates/oxplow-db/src/<thing>_store.rs`. Wraps a
    `Database` handle (`Database::open(...)`). Exposes typed read/write

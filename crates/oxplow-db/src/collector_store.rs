@@ -683,35 +683,6 @@ mod tests {
         assert!(registered(&db).await.is_empty());
     }
 
-    /// V109: an entity view made before the registry is registered as its
-    /// extension's model — found through the extension's source state —
-    /// so the next write sees it as its own.
-    #[test]
-    fn v109_registers_existing_entity_views() {
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::database::migrate_to_for_tests(&mut conn, 108);
-        conn.execute_batch(
-            "INSERT INTO ext_source_state (extension, source_id, status, last_run_at)
-               VALUES ('my-gh', 'prs', 'ok', '2026-01-01T00:00:00Z');
-             CREATE TABLE ext__my_gh__pr (number INTEGER, PRIMARY KEY (number));
-             CREATE VIEW v_my_gh_pr AS SELECT number FROM ext__my_gh__pr;",
-        )
-        .unwrap();
-        crate::database::migrate_and_compile(&mut conn).unwrap();
-        let row: (String, String, String) = conn
-            .query_row(
-                "SELECT m.owner, m.kind, i.input FROM model m JOIN model_input i USING (view)
-                 WHERE m.view = 'v_my_gh_pr'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            row,
-            ("my-gh".into(), "entity".into(), "ext__my_gh__pr".into())
-        );
-    }
-
     #[tokio::test]
     async fn upsert_adds_updates_and_tombstones_by_key() {
         let db = Database::in_memory();

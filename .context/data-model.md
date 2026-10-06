@@ -10,11 +10,17 @@ read [ipc-and-stores.md](./ipc-and-stores.md).
 All persistence lives in one SQLite file under `.oxplow/local.sqlite`, opened
 through `Database::open` (`crates/oxplow-db/src/database.rs`). Every store is
 a thin class wrapping that connection. Schema changes go through versioned
-migrations (`crates/oxplow-db/migrations/V1__initial_schema.sql`) gated by `PRAGMA user_version`
-— migrations are append-only; never edit a prior version. (One sanctioned
-exception so far: the entity-id scheme change edited the historical
-migrations in place and reset the dev DB, since there was no back-compat
-to preserve and only a single instance existed.)
+refinery migrations in `crates/oxplow-db/migrations/`, append-only; never
+edit a prior version. **The history was squashed (tsk1080):** V1..V168
+became one `V1__baseline.sql`, the schema they built, dumped from
+`sqlite_master` with the rows they seeded; the next migration is V2. The
+`V<n>` names elsewhere in these docs are that history — which step brought
+a table in — not files that exist. Existing databases were converted by a
+one-off tool that checked their tables, indexes and triggers equal the
+baseline's (materialized `m_v_*` tables aside) and rewrote
+`refinery_schema_history` to the baseline row. With no other users, a
+squash like that is the sanctioned way to drop history; editing a
+migration in place is not.
 
 > ⚠️ Migrations are **embedded at compile time** (`refinery::embed_migrations!`,
 > a proc macro cargo knows nothing about). `crates/oxplow-db/build.rs` declares
@@ -506,8 +512,7 @@ CASCADE`), not its task: deleting a stream cascades through its threads
 to their tasks and efforts, but an effort another stream's thread
 recorded against one of those tasks (`record_effort_atomic`) survives
 as history about a work item that no longer exists — readers LEFT JOIN
-`v_task`. The V100 migration header says tasks are only soft-deleted;
-that was wrong, and the file stays as applied (refinery checksums it).
+`v_task`.
 
 In Rust (P2.5b, tsk428) the row is `Effort { work_item, … }` with
 `task_id() -> Option<TaskId>`; `EffortStore` (was `TaskEffortStore`)
