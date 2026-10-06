@@ -248,7 +248,7 @@ refused (`CommandBus::unconfirmed`):
 3. **`Proposed { proposal: "proposal:N", preview, supersedes }`** — IPC
    code `PROPOSED`; MCP `run_command` turns it into a *successful*
    result `{ kind: "proposed", proposal, message }` (`proposed_message`: it waits
-   for the person in this thread and in Approvals, and on the setting's
+   for the person in this thread and in Alerts, and on the setting's
    row; "It replaces proposal:M" when it did; tell the person; don't run
    it again; its `decision` is in `v_command_proposal`). Other MCP
    tools that run a command report the same message as an error. The

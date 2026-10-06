@@ -393,8 +393,6 @@ export function RailHud({
   const alerts = useMemo(() => panelAlerts(extPanels, panelRuns), [extPanels, panelRuns]);
   const proposals = useProposals();
   const undelivered = useUndelivered();
-  // Bumped by the Alerts row; Approvals scrolls itself into view.
-  const [revealApprovals, setRevealApprovals] = useState(0);
   const available = useMemo(
     () => [...CORE_PANELS.map((p) => p.id), ...extPanels.map(extensionPanelId)],
     [extPanels],
@@ -413,17 +411,11 @@ export function RailHud({
           <AlertsSection
             key={id}
             alerts={alerts}
-            proposals={proposals.length}
+            proposals={proposals}
             undelivered={undelivered.length}
-            onShowApprovals={() => {
-              sections.reveal("core:approvals");
-              setRevealApprovals((n) => n + 1);
-            }}
             onOpenPage={onOpenPage}
           />
         );
-      case "core:approvals":
-        return <ApprovalsSection key={id} proposals={proposals} reveal={revealApprovals} />;
       case "core:bookmarks":
         return <GoToSection key={id} entries={bookmarks ?? []} threadId={threadId} onOpenPage={onOpenPage} />;
       default: {
@@ -644,43 +636,36 @@ function RailEmpty({ label }: { label: string }) {
   );
 }
 
-/** Alerts (a core panel, P6.G1): the proposals waiting for the person
- *  (one leading row that reveals Approvals), then every panel badge that
- *  fires, one row each with its message, opening the badge's lens; and
- *  one row while events couldn't be delivered, opening Settings (Data →
- *  Delivery). Live. */
+/** Alerts (a core panel, P6.G1): everything that needs the person. The
+ *  proposals waiting for them, newest first, each its card with Approve
+ *  and Decline (tsk1096: there's no separate Approvals panel); one row
+ *  while events couldn't be delivered, opening Settings (Data →
+ *  Delivery); then every panel badge that fires, one row each with its
+ *  message, opening the badge's lens. Live. */
 function AlertsSection({
   alerts,
   proposals,
   undelivered,
-  onShowApprovals,
   onOpenPage,
 }: {
   alerts: PanelAlert[];
-  /** How many proposals are pending. */
-  proposals: number;
+  /** The proposals waiting for the person. */
+  proposals: Proposal[];
   /** How many events wait in the dead-letter queue. */
   undelivered: number;
-  onShowApprovals(): void;
   onOpenPage(ref: TabRef): void;
 }) {
   const delivery = deliveryAlert(undelivered);
-  const count = alerts.length + (proposals > 0 ? 1 : 0) + (delivery ? 1 : 0);
+  const count = alerts.length + proposals.length + (delivery ? 1 : 0);
   return (
     <RailSection id="core:alerts" title="Alerts" count={count || undefined}>
       {count === 0 ? <RailEmpty label="Nothing needs you" /> : null}
-      {proposals > 0 ? (
-        <button
-          type="button"
-          data-testid="rail-alert-proposals"
-          onClick={onShowApprovals}
-          title="Show Approvals"
-          style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
-        >
-          <span style={{ color: "var(--accent)", fontSize: "var(--text-xs)" }}>
-            {proposals === 1 ? "1 proposal awaits your approval" : `${proposals} proposals await your approval`}
-          </span>
-        </button>
+      {proposals.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 8px 8px" }}>
+          {proposals.map((p) => (
+            <ProposalCard key={p.id} proposal={p} onDecide={decide} />
+          ))}
+        </div>
       ) : null}
       {delivery ? (
         <button
@@ -711,29 +696,6 @@ function AlertsSection({
         </button>
       ))}
     </RailSection>
-  );
-}
-
-/** Approvals (a core panel, P6b.A4): the agent's runs that wait for the
- *  person, newest first, each with Approve and Decline. */
-function ApprovalsSection({ proposals, reveal }: { proposals: Proposal[]; reveal: number }) {
-  // Asked to show itself (the Alerts row): once mounted with the new
-  // layout, scroll it into view.
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (reveal > 0) ref.current?.scrollIntoView?.({ block: "nearest" });
-  }, [reveal]);
-  return (
-    <div ref={ref}>
-      <RailSection id="core:approvals" title="Approvals" count={proposals.length || undefined}>
-        {proposals.length === 0 ? <RailEmpty label="Nothing waits for your approval" /> : null}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: proposals.length ? "6px 8px 8px" : 0 }}>
-          {proposals.map((p) => (
-            <ProposalCard key={p.id} proposal={p} onDecide={decide} />
-          ))}
-        </div>
-      </RailSection>
-    </div>
   );
 }
 

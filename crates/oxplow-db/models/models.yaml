@@ -985,7 +985,7 @@
     - { not_null: provider }
 - name: command_proposal
   version: 1
-  description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Approvals panel lists the pending ones."
+  description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."
   columns:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
     - { name: "ref", type: "TEXT", doc: "`proposal:<id>`." }

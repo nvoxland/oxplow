@@ -15,7 +15,6 @@ export interface CorePanel {
 /** Core's panels, in their default order. */
 export const CORE_PANELS: readonly CorePanel[] = [
   { id: "core:alerts", title: "Alerts" },
-  { id: "core:approvals", title: "Approvals" },
   { id: "core:bookmarks", title: "Bookmarks" },
 ];
 

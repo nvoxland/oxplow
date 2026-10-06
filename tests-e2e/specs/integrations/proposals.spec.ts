@@ -6,12 +6,12 @@ import { expandRailSection } from "../../support/ui.js";
 // destructive step oxplow never runs for an effect, so it waits as a
 // proposal for a person.
 
-test("an effect's destructive step waits in Approvals until a person approves it", async ({ fresh }) => {
+test("an effect's destructive step waits in Alerts until a person approves it", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
   await run(daemon, "work_item.create", { title: "Pear [delete]", thread: daemon.thread });
-  await expandRailSection(page, "core:approvals");
+  await expandRailSection(page, "core:alerts");
   const card = page.locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   await expect(card).toBeVisible();
   const id = (await card.getAttribute("data-testid"))!.replace("proposal-", "");

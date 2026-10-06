@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
 // A pending-proposals read that fails says so (the op-error tray), rather
-// than leaving the Approvals panel silently stale.
+// than leaving the Alerts panel's proposal cards silently stale.
 
 const realApi = await import("./api.js");
 const realQuerySql = realApi.querySql;

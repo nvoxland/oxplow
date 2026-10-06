@@ -173,7 +173,8 @@ Things I keep forgetting. Read this before adding any UI.
   approved before it runs and goes back to waiting if the run fails
   (tsk858). Only the thread's own
   proposals show: a ref the transcript merely quotes shows nothing. The
-  Approvals panel stays the cross-thread list.
+  rail's Alerts panel stays the cross-thread list (its proposal cards,
+  tsk1096: there's no separate Approvals panel).
 
 ## Menus a page or row gets from extensions
 

@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, within, fireEvent, render, waitFor } from "@testing-library/react";
 
 // P6b.A4: Alerts says when proposals wait; its row brings the Approvals
 // panel back even when the person had hidden it.
@@ -56,16 +56,15 @@ afterEach(() => {
   cleanup();
 });
 
-test("the Alerts row for waiting proposals reveals a hidden Approvals panel", async () => {
+// tsk1096: Alerts is the one "needs you" surface — a waiting proposal is
+// its card right there, with Approve and Decline; there's no Approvals
+// panel.
+test("a waiting proposal is a card in Alerts", async () => {
   const view = render(<RailHud threadId={null} streamId={null} onOpenPage={() => {}} />);
-  const row = await waitFor(() => view.getByTestId("rail-alert-proposals"));
-  expect(row.textContent).toContain("1 proposal awaits your approval");
+  const alerts = view.getByTestId("rail-section-core:alerts");
+  await waitFor(() => expect(within(alerts).getByTestId("proposal-7")).toBeTruthy());
   expect(view.queryByTestId("rail-section-core:approvals")).toBeNull();
-  fireEvent.click(row);
-  await waitFor(() => expect(view.getByTestId("rail-section-core:approvals")).toBeTruthy());
-  expect(view.getByTestId("proposal-7")).toBeTruthy();
-  const last = saved.at(-1) as Array<{ panel: string; hidden: boolean; collapsed: boolean }>;
-  expect(last.find((p) => p.panel === "core:approvals")).toMatchObject({ hidden: false, collapsed: false });
+  expect(view.queryByTestId("rail-alert-proposals")).toBeNull();
 });
 
 // P7.C3: one Alerts row while events couldn't be delivered; it opens

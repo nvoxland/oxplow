@@ -341,6 +341,6 @@ is validated, policy-checked, audited to your thread and logged as
 
 Invalid input names the failing field; a denial says why. A run that
 needs a person's confirmation returns `{ kind: "proposed", proposal, message }`: it is
-recorded as `proposal:N` and waits in the person's Approvals panel (and on
+recorded as `proposal:N` and waits in the person's Alerts panel (and on
 the setting's row in Settings). Tell the person what you proposed and why;
 don't run it again or look for another way to make the change.

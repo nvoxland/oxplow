@@ -2395,7 +2395,7 @@ impl OxplowMcp {
                        failing field; a denied command says why. A command that needs a \
                        person's confirmation is not run: it is recorded as a proposal and \
                        this returns `{ proposal, message }` — tell the person it waits for \
-                       them in this thread and in Approvals, and don't run it again; its \
+                       them in this thread and in Alerts, and don't run it again; its \
                        `decision` is in `v_command_proposal`. \
                        Requires the connection's thread identity: an anonymous connection may \
                        not write."
@@ -3420,7 +3420,7 @@ fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> Str
     };
     format!(
         "`{command}` needs a person's approval; it is recorded as {proposal} and waits for \
-         them in this thread and in Approvals (and on the setting's row in Settings).{replaces} \
+         them in this thread and in Alerts (and on the setting's row in Settings).{replaces} \
          Tell the person; don't run it again. To see what they decided, read its `decision` \
          from `v_command_proposal` (`WHERE ref = '{proposal}'`)."
     )
@@ -4424,7 +4424,7 @@ mod tests {
         assert!(proposal.starts_with("proposal:"), "{proposed}");
         let message = proposed["message"].as_str().unwrap();
         assert!(message.contains(&proposal), "{message}");
-        assert!(message.contains("Approvals"), "{message}");
+        assert!(message.contains("Alerts"), "{message}");
         assert!(message.contains("in this thread"), "{message}");
         assert!(message.contains("v_command_proposal"), "{message}");
         assert!(message.contains("don't run it again"), "{message}");
