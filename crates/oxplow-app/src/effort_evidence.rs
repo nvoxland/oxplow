@@ -3,8 +3,8 @@
 //! core stores them: when an effort closes (the `effort.evidence` reaction
 //! to `effort.finished`), and for every open effort as an **asset** over
 //! the tables the evidence reads ([`OpenEffortEvidence`], P7.B6) — a commit
-//! to a capture, a fact, a run claim or a token row recomputes it once its
-//! inputs go quiet. The same asset recomputes a **closed** effort whose
+//! to a capture, a fact or a run claim recomputes it once its inputs go
+//! quiet. The same asset recomputes a **closed** effort whose
 //! claims moved since its evidence was stored (`effort_evidence_state`,
 //! tsk889): a run claimed after the close lands. Its own tables aren't inputs, so it can't loop. The
 //! renderer hears the rows move as `ModelsChanged`. See
@@ -18,13 +18,11 @@ use crate::assets::{Materializer, Recomputed};
 pub const ASSET: &str = "effort_evidence";
 
 /// What the evidence reads: metric captures and facts (deltas and
-/// observations), run claims (`effort_attribution`), token usage.
-const INPUTS: [&str; 4] = [
-    "metric_capture",
-    "fact",
-    "effort_attribution",
-    "agent_token_usage",
-];
+/// observations) and run claims (`effort_attribution`). Token usage reaches
+/// it as facts; the `agent_token_usage` rows themselves aren't read, so
+/// they aren't an input — listing them recomputed every open effort's
+/// evidence a second time on every agent turn.
+const INPUTS: [&str; 3] = ["metric_capture", "fact", "effort_attribution"];
 
 /// Recompute one effort's evidence; failures are logged.
 pub(crate) async fn refresh(state: &crate::Services, effort_id: i64) {

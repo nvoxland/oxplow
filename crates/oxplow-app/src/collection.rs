@@ -2961,12 +2961,8 @@ impl CollectionService {
         use crate::attribution::{classify_effort_attribution, EffortAttributionFamily};
         // Per-call memo: several File-family specs share one `source_measure`
         // (e.g. the count-over-threshold specs over `oxplow.complexity`), so
-        // load each measure's full history once instead of once per spec
-        // (tsk17). Rebuilt every call — no cross-call staleness.
-        let mut fact_cache: std::collections::HashMap<
-            i64,
-            std::sync::Arc<Vec<oxplow_db::FactRow>>,
-        > = std::collections::HashMap::new();
+        // each capture list and capture pair is read once per call.
+        let mut fact_cache = FileDeltaCache::default();
         let mut out: Vec<oxplow_db::EffortMetricDelta> = Vec::new();
         for spec in &specs {
             // Entity metrics (tsk322) measure the project's data, not an
@@ -3023,7 +3019,7 @@ impl CollectionService {
         effort: &Effort,
         claimed: &[String],
         stream: Option<i64>,
-        fact_cache: &mut std::collections::HashMap<i64, std::sync::Arc<Vec<oxplow_db::FactRow>>>,
+        cache: &mut FileDeltaCache,
     ) -> Option<oxplow_db::EffortMetricDelta> {
         let measure_key = spec.source_measure.as_deref()?;
         let measure = self.facts.get_measure(measure_key).await.ok().flatten()?;
@@ -3036,165 +3032,120 @@ impl CollectionService {
         // `sum` gauges; the min/avg-style aggregations have no meaningful
         // per-file Σ and don't reach the File family today).
         let agg = crate::metric_engine::Aggregation::parse(&spec.aggregation)?;
-        let contribution = |f: &&oxplow_db::FactRow| -> f64 {
+        let contribution = |f: &oxplow_db::FactRow| -> f64 {
             match agg {
                 crate::metric_engine::Aggregation::Count => 1.0,
                 _ => f.value,
             }
         };
-        // Load this measure's history once per `effort_metric_deltas` call and
-        // reuse it across every spec sharing the measure (tsk17) — bounded to
-        // the effort's stream SQL-side when known (tsk75): the delta is
-        // per-worktree by definition, so other streams' rows are pure load.
-        let facts = match fact_cache.get(&measure.id) {
-            Some(cached) => cached.clone(),
+        // The baseline and current captures come from capture metadata —
+        // the captures of the producers that emit this spec's slice, in the
+        // effort's stream (EMPTY zero-hit scans included: "scanned, found
+        // nothing" is a real baseline or current, or a drop-to-zero is
+        // invisible). Only those two captures' facts are then loaded: the
+        // measure's whole history was the cost (millions of facts per read).
+        let producers = self.producers_of_slice(measure.id, &filter).await;
+        if producers.is_empty() {
+            return None;
+        }
+        let key: Vec<String> = producers.iter().cloned().collect();
+        let all_caps = match cache.captures.get(&key) {
+            Some(c) => c.clone(),
             None => {
-                let loaded = std::sync::Arc::new(match stream {
-                    Some(s) => self
-                        .facts
-                        .facts_for_measure_in_stream(measure.id, s)
+                let loaded = std::sync::Arc::new(
+                    self.facts
+                        .captures_for_producers(key.clone())
                         .await
-                        .ok()?,
-                    None => self.facts.facts_for_measure(measure.id).await.ok()?,
-                });
-                fact_cache.insert(measure.id, loaded.clone());
+                        .ok()?
+                        .into_iter()
+                        .filter(|c| stream.is_none_or(|s| c.stream_id == s))
+                        .collect::<Vec<_>>(),
+                );
+                cache.captures.insert(key, loaded.clone());
                 loaded
             }
         };
-        let kept: Vec<&oxplow_db::FactRow> = facts
+        // Oldest first, as the store returns them.
+        let baseline_cap = all_caps
+            .iter()
+            .rev()
+            .find(|c| c.captured_at < effort.started_at)
+            .map(|c| c.id);
+        let current_cap = all_caps
+            .iter()
+            .rev()
+            .find(|c| match effort.ended_at {
+                Some(end) => c.captured_at <= end || c.effort_id == Some(effort.id.value()),
+                None => true,
+            })
+            .map(|c| c.id);
+        // A closed effort with no capture in (or stamped into) its window has
+        // nothing attributable — never fabricate a drop-to-zero against a
+        // pre-effort baseline, and never read a post-close capture.
+        let current_id = current_cap?;
+        let wanted: Vec<i64> = baseline_cap.into_iter().chain([current_id]).collect();
+        let facts = match cache.facts.get(&(measure.id, wanted.clone())) {
+            Some(f) => f.clone(),
+            None => {
+                let loaded = std::sync::Arc::new(
+                    self.facts
+                        .facts_for_captures(measure.id, wanted.clone())
+                        .await
+                        .ok()?,
+                );
+                cache.facts.insert((measure.id, wanted), loaded.clone());
+                loaded
+            }
+        };
+        // Index the two captures' kept facts once: per capture, and per
+        // (capture, path).
+        let mut by_capture: std::collections::HashMap<i64, f64> = Default::default();
+        let mut by_path: std::collections::HashMap<(i64, &str), f64> = Default::default();
+        let mut kept = 0i64;
+        let mut path_grained = false;
+        for f in facts
             .iter()
             .filter(|f| filter.matches(f))
             .filter(|f| stream.is_none_or(|s| f.stream_id == s))
-            .collect();
-        if kept.is_empty() {
-            return None;
-        }
-        // Distinct captures in time-ascending order (facts arrive oldest-first),
-        // plus which of them this effort stamped (on-effort-complete gauges).
-        let mut caps: Vec<(i64, oxplow_domain::Timestamp)> = Vec::new();
-        let mut stamped: std::collections::HashSet<i64> = std::collections::HashSet::new();
-        for f in &kept {
-            if !caps.iter().any(|(id, _)| *id == f.capture_id) {
-                caps.push((f.capture_id, f.captured_at));
-            }
-            if f.effort_id == Some(effort.id.value()) {
-                stamped.insert(f.capture_id);
-            }
-        }
-        // Splice in the producers' remaining captures — including EMPTY zero-hit
-        // scans (tsk44): "scanned, found nothing" must be eligible as the
-        // baseline/current capture, or a drop-to-zero during the effort is
-        // invisible (every kept fact predates it). Stream-scoped like the facts.
-        let producers: std::collections::BTreeSet<String> =
-            kept.iter().map(|f| f.producer.clone()).collect();
-        if let Ok(all_caps) = self
-            .facts
-            .captures_for_producers(producers.into_iter().collect())
-            .await
         {
-            for c in all_caps {
-                if stream.is_none_or(|s| c.stream_id == s)
-                    && !caps.iter().any(|(id, _)| *id == c.id)
-                {
-                    caps.push((c.id, c.captured_at));
-                    if c.effort_id == Some(effort.id.value()) {
-                        stamped.insert(c.id);
-                    }
-                }
+            kept += 1;
+            *by_capture.entry(f.capture_id).or_default() += contribution(f);
+            if let Some(path) = f.path.as_deref() {
+                path_grained = true;
+                *by_path.entry((f.capture_id, path)).or_default() += contribution(f);
             }
-            caps.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
         }
-        let baseline_cap = caps
-            .iter()
-            .rev()
-            .find(|(_, at)| *at < effort.started_at)
-            .map(|(id, _)| *id);
-        let current_cap = caps
-            .iter()
-            .rev()
-            .find(|(id, at)| match effort.ended_at {
-                Some(end) => *at <= end || stamped.contains(id),
-                None => true,
-            })
-            .map(|(id, _)| *id);
-        // A closed effort with no capture in (or stamped into) its window has
-        // nothing attributable — never fabricate a drop-to-zero against a
-        // pre-effort baseline, and never read a post-close capture (tsk43).
-        current_cap?;
-        // A claimed file's value in a capture: the kept facts on that path,
-        // combined per the spec's aggregation (count ⇒ each fact is 1), else 0.
+        // A claimed file's value in a capture: its kept facts there, combined
+        // per the spec's aggregation (count ⇒ each fact is 1), else 0.
         let file_value = |cap: Option<i64>, path: &str| -> f64 {
-            cap.map(|c| {
-                kept.iter()
-                    .filter(|f| f.capture_id == c && f.path.as_deref() == Some(path))
-                    .map(contribution)
-                    .sum()
-            })
-            .unwrap_or(0.0)
+            cap.and_then(|c| by_path.get(&(c, path)).copied())
+                .unwrap_or(0.0)
         };
-        // Repo total AS OF a capture.
-        //
-        // For a `complete` measure a capture restates the whole population, so the
-        // repo total in it is just its own kept facts. For a **per-path** measure a
-        // capture is a DELTA — summing its own facts would call "the 8 files this
-        // commit touched" the repo, which is the bug tsk41 fixes in the large. The
-        // repo total as of a capture is the folded tree state at that point, which is
-        // exactly what `tree_state_series` yields per capture, so we index it by
-        // capture id.
+        // Repo total AS OF a capture. For a `complete` measure a capture
+        // restates the whole population, so it's the capture's own kept facts.
+        // For a **per-path** measure a capture is a DELTA, and the repo total
+        // as of it is the folded tree state there — the metric engine's
+        // series point for that capture (cube-backed, so it doesn't replay the
+        // history).
         let per_path = measure.capture_scope == "per-path";
         let tree_totals: std::collections::HashMap<i64, f64> = if per_path {
-            let cap_list = self
-                .facts
-                .captures_for_producers(
-                    kept.iter()
-                        .map(|f| f.producer.clone())
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .into_iter()
-                        .collect(),
-                )
+            let engine = crate::metric_engine::MetricEngine::new((*self.facts).clone())
+                .with_visibility(self.metric_visibility.clone());
+            engine
+                .series_in_stream(measure_key, agg, &filter, None, stream, None)
                 .await
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|c| stream.is_none_or(|s| c.stream_id == s))
-                .collect::<Vec<_>>();
-            let mut scanned: std::collections::HashMap<i64, Vec<String>> = Default::default();
-            if let Ok(rows) = self
-                .facts
-                .scanned_paths_for_captures(cap_list.iter().map(|c| c.id).collect())
-                .await
-            {
-                for (cid, path) in rows {
-                    scanned.entry(cid).or_default().push(path);
-                }
-            }
-            let visibility = self.metric_visibility.for_captures(&cap_list).await;
-            crate::metric_engine::tree_state_series(
-                &cap_list,
-                &facts,
-                &scanned,
-                &crate::metric_engine::FoldRead {
-                    agg,
-                    filter: &filter,
-                    group_by: None,
-                    visibility: &visibility,
-                    // This branch IS the per-path arm (`per_path` guard above).
-                    scope: crate::metric_engine::CaptureScope::PerPath,
-                },
-            )
-            .into_iter()
-            .map(|p| (p.capture_id, p.value))
-            .collect()
+                .filter(|p| p.capture_id == current_id || Some(p.capture_id) == baseline_cap)
+                .map(|p| (p.capture_id, p.value))
+                .collect()
         } else {
             Default::default()
         };
         let repo_total = |cap: Option<i64>| -> f64 {
             match cap {
                 Some(c) if per_path => tree_totals.get(&c).copied().unwrap_or(0.0),
-                Some(c) => kept
-                    .iter()
-                    .filter(|f| f.capture_id == c)
-                    .map(contribution)
-                    .sum(),
+                Some(c) => by_capture.get(&c).copied().unwrap_or(0.0),
                 None => 0.0,
             }
         };
@@ -3208,8 +3159,7 @@ impl CollectionService {
 
         // Per-file attribution needs path-grained facts. A repo-scalar gauge
         // (facts with no path) sums 0/0 over the claimed paths and would
-        // silently drop the row — its movement is the repo-wide window (tsk43).
-        let path_grained = kept.iter().any(|f| f.path.is_some());
+        // silently drop the row — its movement is the repo-wide window.
         if claimed.is_empty() || !path_grained {
             // No claimed files (an early effort) or no per-file grain → the
             // repo-wide before→after, so the movement still surfaces.
@@ -3228,7 +3178,7 @@ impl CollectionService {
                     delta: changed.then_some(current - baseline),
                     changed,
                     attributed_files: None,
-                    sample_count: kept.len() as i64,
+                    sample_count: kept,
                     latest_run_id: current_cap,
                     crossing,
                 },
@@ -3261,11 +3211,60 @@ impl CollectionService {
                 delta: changed.then_some(current - baseline),
                 changed,
                 attributed_files: Some(attributed),
-                sample_count: kept.len() as i64,
+                sample_count: kept,
                 latest_run_id: current_cap,
                 crossing,
             },
         ))
+    }
+
+    /// Which producers emit the slice of `measure` that `filter` keeps,
+    /// answered as cheaply as the filter allows. All three branches agree;
+    /// they differ only in how much of the measure's history they touch, and
+    /// on a 900k-fact measure that gap was 38% of backend CPU.
+    async fn producers_of_slice(
+        &self,
+        measure_id: i64,
+        filter: &crate::metric_engine::FactFilter,
+    ) -> std::collections::BTreeSet<String> {
+        if filter.is_unconstrained() {
+            // Nothing is filtered out, so "producers of the matching
+            // slices" IS "producers of the measure" — memoized, no
+            // scan at all.
+            self.facts
+                .producers_for_measure(measure_id)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .collect()
+        } else if filter.slice_key_only() {
+            // The predicate reads only (rule, severity, dims_json), and
+            // every fact of a slice agrees on those — so the slice key
+            // decides it and no representative row is needed. Same
+            // scan, ~half the cost: 4 columns through the sorter, no
+            // join-back.
+            self.facts
+                .distinct_slice_keys(measure_id)
+                .await
+                .unwrap_or_default()
+                .iter()
+                .filter(|k| filter.matches_slice(k))
+                .map(|k| k.producer.clone())
+                .collect()
+        } else {
+            // The predicate reads a column outside the slice key
+            // (`value`, or a `package`/`branch`/`subject`/`model` dim),
+            // so it needs a real fact: one representative — the lowest-id
+            // member — per slice.
+            self.facts
+                .representative_facts_by_slice(measure_id)
+                .await
+                .unwrap_or_default()
+                .iter()
+                .filter(|f| filter.matches(f))
+                .map(|f| f.producer.clone())
+                .collect()
+        }
     }
 
     /// Before→after (or `sum` flow) for a run/operational metric over the facts of
@@ -3314,44 +3313,7 @@ impl CollectionService {
                 // only in how much of the measure's history they have to touch,
                 // and on a 900k-fact measure that gap was 38% of backend CPU
                 // (tsk239).
-                producers = if filter.is_unconstrained() {
-                    // Nothing is filtered out, so "producers of the matching
-                    // slices" IS "producers of the measure" — memoized (tsk153),
-                    // no scan at all.
-                    self.facts
-                        .producers_for_measure(measure.id)
-                        .await
-                        .unwrap_or_default()
-                        .into_iter()
-                        .collect()
-                } else if filter.slice_key_only() {
-                    // The predicate reads only (rule, severity, dims_json), and
-                    // every fact of a slice agrees on those — so the slice key
-                    // decides it and no representative row is needed. Same
-                    // scan, ~half the cost: 4 columns through the sorter, no
-                    // join-back.
-                    self.facts
-                        .distinct_slice_keys(measure.id)
-                        .await
-                        .unwrap_or_default()
-                        .iter()
-                        .filter(|k| filter.matches_slice(k))
-                        .map(|k| k.producer.clone())
-                        .collect()
-                } else {
-                    // The predicate reads a column outside the slice key
-                    // (`value`, or a `package`/`branch`/`subject`/`model` dim),
-                    // so it needs a real fact: one representative — the lowest-id
-                    // member — per slice (tsk75).
-                    self.facts
-                        .representative_facts_by_slice(measure.id)
-                        .await
-                        .unwrap_or_default()
-                        .iter()
-                        .filter(|f| filter.matches(f))
-                        .map(|f| f.producer.clone())
-                        .collect()
-                };
+                producers = self.producers_of_slice(measure.id, &filter).await;
             }
             let have: std::collections::HashSet<i64> =
                 series.iter().map(|p| p.capture_id).collect();
@@ -3682,6 +3644,15 @@ fn effort_delta_row_spec(
 /// A spec's `filter_json` as a [`FactFilter`](crate::metric_engine::FactFilter)
 /// (the empty filter when absent) — the effort-read counterpart of the engine's
 /// private `spec_filter`. A malformed predicate is surfaced, never ignored.
+/// What one `effort_metric_deltas` call reads once and every File-family
+/// spec sharing it reuses: a producer set's captures, and a measure's facts
+/// in the captures a delta compares. Rebuilt every call — never stale.
+#[derive(Default)]
+struct FileDeltaCache {
+    captures: std::collections::HashMap<Vec<String>, std::sync::Arc<Vec<oxplow_db::MetricCapture>>>,
+    facts: std::collections::HashMap<(i64, Vec<i64>), std::sync::Arc<Vec<oxplow_db::FactRow>>>,
+}
+
 fn spec_fact_filter(
     spec: &oxplow_db::MetricSpec,
 ) -> Result<crate::metric_engine::FactFilter, DomainError> {
