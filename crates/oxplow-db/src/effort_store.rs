@@ -141,19 +141,6 @@ impl OwnedFileRefVersion {
     }
 }
 
-/// One user-visible attribution action for
-/// [`SqliteEffortStore::record_effort_atomic`]: merge files,
-/// impacts, and a summary into the work item's current effort (opening
-/// one if none exists) — committed as a single transaction.
-#[derive(Debug, Clone)]
-pub struct RecordEffortAtomic {
-    /// A `work_item` ref (validated before the transaction).
-    pub work_item: String,
-    pub thread: ThreadId,
-    pub impacts: Vec<TaskImpact>,
-    pub summary: Option<String>,
-}
-
 /// One (snapshot, effort) pair returned from
 /// `list_efforts_at_snapshots`. The renderer derives
 /// `completed_here` as `effort.end_snapshot_id == Some(snapshot_id)`;
@@ -168,8 +155,8 @@ pub struct EffortAtSnapshot {
 // Sync `_tx` cores — connection-parameterized so they compose inside a
 // single `Database::transaction` closure (a `rusqlite::Transaction`
 // derefs to `Connection`). The async trait methods below are thin
-// wrappers over these; multi-write actions like `record_effort_atomic`
-// compose several cores in one transaction. See `.context/data-model.md`,
+// wrappers over these; a multi-write action composes several cores in one
+// transaction. See `.context/data-model.md`,
 // "Transactions".
 // ---------------------------------------------------------------------------
 
@@ -200,9 +187,6 @@ pub struct EffortStart<'a> {
     pub adopt_since: Option<Timestamp>,
     /// Its start snapshot, when the opener already has one.
     pub start_snapshot_id: Option<i64>,
-    /// Recorded after the fact: stored already closed, so it never takes
-    /// the thread's open slot or adopts anything.
-    pub retroactive: bool,
 }
 
 impl<'a> EffortStart<'a> {
@@ -214,7 +198,6 @@ impl<'a> EffortStart<'a> {
             at,
             adopt_since: None,
             start_snapshot_id: None,
-            retroactive: false,
         }
     }
 }
@@ -254,16 +237,13 @@ pub fn start_tx(
         at: now,
         adopt_since,
         start_snapshot_id,
-        retroactive,
     } = *start;
-    if !retroactive {
-        if let Some(open) = open_for_thread_tx(conn, thread).map_err(map_sql_err)? {
-            finish_tx(conn, ev, open, &EffortEnd::at(now, ClosedBy::Switch))?;
-        }
+    if let Some(open) = open_for_thread_tx(conn, thread).map_err(map_sql_err)? {
+        finish_tx(conn, ev, open, &EffortEnd::at(now, ClosedBy::Switch))?;
     }
     // Where it starts: back to `adopt_since`, never before the thread's
     // previous effort ended, never after now.
-    let started_at = match adopt_since.filter(|_| !retroactive) {
+    let started_at = match adopt_since {
         None => now,
         Some(since) => {
             let previous_end: Option<String> = conn
@@ -284,32 +264,27 @@ pub fn start_tx(
         "INSERT INTO effort
            (id, work_item, thread_id, started_at, ended_at,
             start_snapshot_id, end_snapshot_id, summary)
-         VALUES (?1, ?2, ?3, ?4, ?6, ?5, NULL, NULL)",
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL)",
         params![
             None::<i64>,
             work_item,
             thread.value(),
             ts_to_string(started_at),
             start_snapshot_id,
-            // Recorded after the fact: closed as it's made, so it never
-            // takes the thread's one open slot.
-            retroactive.then(|| ts_to_string(now)),
         ],
     )
     .map_err(map_sql_err)?;
     let id = EffortId::new(conn.last_insert_rowid());
-    if !retroactive {
-        let since = ts_to_string(started_at);
-        for (table, time) in EFFORT_STAMPED {
-            conn.execute(
-                &format!(
-                    "UPDATE {table} SET effort_id = ?1
-                      WHERE thread_id = ?2 AND effort_id IS NULL AND {time} >= ?3"
-                ),
-                params![id.value(), thread.value(), since],
-            )
-            .map_err(map_sql_err)?;
-        }
+    let since = ts_to_string(started_at);
+    for (table, time) in EFFORT_STAMPED {
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET effort_id = ?1
+                  WHERE thread_id = ?2 AND effort_id IS NULL AND {time} >= ?3"
+            ),
+            params![id.value(), thread.value(), since],
+        )
+        .map_err(map_sql_err)?;
     }
     let env = ev
         .typed::<EffortOpened>(&EffortOpenedV2 {
@@ -317,7 +292,6 @@ pub fn start_tx(
             work_item: work_item.map(str::to_string),
             thread: thread_ref(thread),
             start_snapshot: start_snapshot_id.map(snapshot_ref),
-            retroactive,
         })
         .with_anchors(Anchors {
             effort_id: Some(id),
@@ -327,37 +301,6 @@ pub fn start_tx(
         .with_subject(std::iter::once(effort_ref(id)).chain(work_item.map(str::to_string)));
     ev.append(conn, &env)?;
     Ok(id)
-}
-
-/// Log the close of an effort recorded after the fact (already closed
-/// by [`start_tx`] with `retroactive`).
-fn log_retroactive_close_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    id: EffortId,
-    work_item: &str,
-    thread: ThreadId,
-) -> Result<(), DomainError> {
-    conn.execute(
-        "UPDATE effort SET closed_by = 'agent' WHERE id = ?1",
-        params![id.value()],
-    )
-    .map_err(map_sql_err)?;
-    let env = ev
-        .typed::<EffortClosed>(&EffortClosedV2 {
-            effort: effort_ref(id),
-            work_item: Some(work_item.to_string()),
-            end_snapshot: None,
-            retroactive: true,
-            closed_by: Some(ClosedBy::Agent.as_str().to_string()),
-        })
-        .with_anchors(Anchors {
-            effort_id: Some(id),
-            ..anchors_for_thread_tx(conn, thread)?
-        })
-        .with_subject([effort_ref(id), work_item.to_string()]);
-    ev.append(conn, &env)?;
-    Ok(())
 }
 
 /// Link `id` to `work_item` (or unlink it, with `None`) and log
@@ -441,8 +384,6 @@ pub struct EffortEnd<'a> {
     pub end_snapshot_id: Option<i64>,
     pub summary: Option<&'a str>,
     pub at: Timestamp,
-    /// Recorded after the fact: there is no bracket to snapshot.
-    pub retroactive: bool,
     pub closed_by: ClosedBy,
 }
 
@@ -453,7 +394,6 @@ impl<'a> EffortEnd<'a> {
             end_snapshot_id: None,
             summary: None,
             at,
-            retroactive: false,
             closed_by,
         }
     }
@@ -497,7 +437,6 @@ pub fn finish_tx(
         end_snapshot_id,
         summary,
         at: now,
-        retroactive,
         closed_by,
     } = *end;
     use rusqlite::OptionalExtension;
@@ -535,7 +474,6 @@ pub fn finish_tx(
             effort: effort_ref(id),
             work_item: work_item.clone(),
             end_snapshot: end_snapshot_id.map(snapshot_ref),
-            retroactive,
             closed_by: Some(closed_by.as_str().to_string()),
         })
         .with_anchors(Anchors {
@@ -962,84 +900,6 @@ impl SqliteEffortStore {
             .await
     }
 
-    /// One attribution action — start-if-missing + files + impacts +
-    /// finish/summary — committed as a single transaction (composing
-    /// the `_tx` cores above), then ONE post-commit page_ref slice
-    /// projection. Replaces the old 3+N separate statements where a
-    /// crash mid-way left files recorded with no summary/finish.
-    /// Returns the effort the action landed on.
-    pub async fn record_effort_atomic(
-        &self,
-        args: RecordEffortAtomic,
-    ) -> Result<EffortId, DomainError> {
-        use crate::database::map_sql_err;
-        validate_work_item_ref(&args.work_item)?;
-        let work_item = args.work_item.clone();
-        let a = std::sync::Arc::new(args);
-        let vocabulary = self.vocabulary.clone();
-        let effort_id = self
-            .db
-            .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "effort_attribution");
-                let existing =
-                    most_recent_for_work_item_tx(tx, &a.work_item).map_err(map_sql_err)?;
-                let (effort_id, open) = match &existing {
-                    Some(e) => (e.id, e.ended_at.is_none()),
-                    None => (
-                        // Synthesized: the item was never opened, so this
-                        // effort is recorded after the fact.
-                        start_tx(
-                            tx,
-                            &ev,
-                            &EffortStart {
-                                work_item: Some(&a.work_item),
-                                retroactive: true,
-                                ..EffortStart::at(a.thread, Timestamp::now())
-                            },
-                        )?,
-                        true,
-                    ),
-                };
-                if !a.impacts.is_empty() {
-                    let json = serde_json::to_string(&a.impacts).map_err(|e| {
-                        DomainError::Invalid(format!("impacts serialize failed: {e}"))
-                    })?;
-                    set_impacts_json_tx(tx, effort_id, Some(&json)).map_err(map_sql_err)?;
-                }
-                if existing.is_none() {
-                    // Synthesized: recorded closed; log its close with the
-                    // summary.
-                    set_summary_tx(tx, effort_id, a.summary.as_deref()).map_err(map_sql_err)?;
-                    log_retroactive_close_tx(tx, &ev, effort_id, &a.work_item, a.thread)?;
-                } else if open {
-                    // No lifecycle close happened — close with the
-                    // summary; end_snapshot_id stays NULL because this
-                    // is attribution, not a status transition.
-                    finish_tx(
-                        tx,
-                        &ev,
-                        effort_id,
-                        &EffortEnd {
-                            end_snapshot_id: None,
-                            summary: a.summary.as_deref(),
-                            at: Timestamp::now(),
-                            retroactive: false,
-                            closed_by: ClosedBy::Agent,
-                        },
-                    )?;
-                } else if a.summary.is_some() {
-                    // Lifecycle finish already closed the row but left
-                    // summary NULL — backfill it.
-                    set_summary_tx(tx, effort_id, a.summary.as_deref()).map_err(map_sql_err)?;
-                }
-                Ok(effort_id)
-            })
-            .await?;
-        self.project_effort_slice(&work_item).await?;
-        Ok(effort_id)
-    }
-
     /// The open efforts on `stream`'s threads, oldest first.
     /// The end snapshot of `thread`'s effort that closed exactly at `at`:
     /// where an effort that starts there (adopting no further back than
@@ -1063,6 +923,46 @@ impl SqliteEffortStore {
                 .optional()
             })
             .await
+    }
+
+    /// `thread`'s most recently started effort.
+    pub async fn latest_for_thread(&self, thread: ThreadId) -> Result<Option<Effort>, DomainError> {
+        self.db
+            .call(move |c| {
+                let mut stmt = c.prepare(
+                    "SELECT * FROM effort WHERE thread_id = ?1
+                      ORDER BY started_at DESC, id DESC LIMIT 1",
+                )?;
+                let mut rows = stmt.query_map(params![thread.value()], row_to_effort)?;
+                rows.next().transpose()
+            })
+            .await
+    }
+
+    /// Close `id` now at `end_snapshot_id`, as `by` closed it.
+    pub async fn close(
+        &self,
+        id: EffortId,
+        end_snapshot_id: Option<i64>,
+        by: ClosedBy,
+    ) -> Result<(), DomainError> {
+        let vocabulary = self.vocabulary.clone();
+        self.db
+            .transaction(move |tx| {
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "effort_store");
+                finish_tx(
+                    tx,
+                    &ev,
+                    id,
+                    &EffortEnd {
+                        end_snapshot_id,
+                        ..EffortEnd::at(Timestamp::now(), by)
+                    },
+                )
+            })
+            .await
+            .map(|_| ())
     }
 
     pub async fn list_open_for_stream(&self, stream: StreamId) -> Result<Vec<Effort>, DomainError> {
@@ -1258,7 +1158,6 @@ impl EffortStore for SqliteEffortStore {
                         end_snapshot_id,
                         summary: summary.as_deref(),
                         at: now,
-                        retroactive: false,
                         closed_by: ClosedBy::Agent,
                     },
                 )
@@ -1280,8 +1179,9 @@ impl EffortStore for SqliteEffortStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT work_item FROM effort WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, String>(0))?;
-                rows.next().transpose()
+                let mut rows =
+                    stmt.query_map(params![id.value()], |r| r.get::<_, Option<String>>(0))?;
+                Ok(rows.next().transpose()?.flatten())
             })
             .await
     }
@@ -1976,15 +1876,6 @@ mod tests {
         assert_eq!(list[0].summary.as_deref(), Some("done"));
     }
 
-    fn atomic_args(tid: TaskId, thread: ThreadId, summary: Option<&str>) -> RecordEffortAtomic {
-        RecordEffortAtomic {
-            work_item: work_item_ref(tid),
-            thread,
-            impacts: Vec::new(),
-            summary: summary.map(|s| s.to_string()),
-        }
-    }
-
     /// A turn's observed files: a file another thread's overlapping effort
     /// claimed stays that thread's; one this effort already claimed stays
     /// claimed; a second observation adds nothing.
@@ -2059,52 +1950,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn record_effort_atomic_opens_and_closes_in_one_action() {
-        let (store, tid, t) = fixture().await;
-        let eff = store
-            .record_effort_atomic(atomic_args(tid, t, Some("shipped")))
-            .await
-            .unwrap();
-        let row = store.get_effort(&eff).await.unwrap().unwrap();
-        assert!(row.ended_at.is_some(), "fresh effort is closed");
-        assert_eq!(row.summary.as_deref(), Some("shipped"));
-        assert!(store
-            .find_open_for_work_item(&work_item_ref(tid))
-            .await
-            .unwrap()
-            .is_none());
-    }
-
-    #[tokio::test]
-    async fn record_effort_atomic_merges_into_open_lifecycle_effort() {
-        let (store, tid, t) = fixture().await;
-        let lifecycle = store.start(&work_item_ref(tid), &t, None).await.unwrap();
-        let eff = store
-            .record_effort_atomic(atomic_args(tid, t, Some("done")))
-            .await
-            .unwrap();
-        // Merged into the lifecycle row, not a duplicate.
-        assert_eq!(eff, lifecycle.id);
-        let row = store.get_effort(&eff).await.unwrap().unwrap();
-        assert!(row.ended_at.is_some());
-        assert_eq!(row.summary.as_deref(), Some("done"));
-    }
-
-    #[tokio::test]
-    async fn record_effort_atomic_backfills_summary_on_closed_effort() {
-        let (store, tid, t) = fixture().await;
-        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
-        store.finish(&eff.id, None, None).await.unwrap();
-        let landed = store
-            .record_effort_atomic(atomic_args(tid, t, Some("late summary")))
-            .await
-            .unwrap();
-        assert_eq!(landed, eff.id);
-        let row = store.get_effort(&eff.id).await.unwrap().unwrap();
-        assert_eq!(row.summary.as_deref(), Some("late summary"));
-    }
-
     /// A task's status is the task's: moving it in and out of progress
     /// opens and closes no effort (efforts are a policy's business). Each
     /// change logs one `work_item.transitioned`, naming the task.
@@ -2146,11 +1991,11 @@ mod tests {
         assert_eq!(all[1].envelope.payload["to"], "done");
     }
 
-    /// P2.6.1 (tsk453): every effort open and close is logged in the
-    /// write's own transaction, whichever path made it.
+    /// Every effort open and close is logged in the write's own
+    /// transaction.
     #[tokio::test]
     async fn effort_open_and_close_are_logged_with_the_write() {
-        let (store, db, tid, t) = fixture_with_db().await;
+        let (store, db, _tid, t) = fixture_with_db().await;
         let foreign = "work_item:issues:ENG-12";
         let eff = store.start(foreign, &t, Some(1)).await.ok();
         // No snapshot 1 exists; the FK refuses it and nothing is logged.
@@ -2162,16 +2007,6 @@ mod tests {
             .unwrap();
         // Finishing an already-closed effort changes nothing and logs nothing.
         store.finish(&eff.id, None, None).await.unwrap();
-        // A synthesized effort (no lifecycle open) logs both.
-        let synthesized = store
-            .record_effort_atomic(RecordEffortAtomic {
-                work_item: work_item_ref(tid),
-                thread: t,
-                impacts: vec![],
-                summary: Some("s".into()),
-            })
-            .await
-            .unwrap();
 
         let events = db
             .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
@@ -2181,7 +2016,6 @@ mod tests {
             .iter()
             .map(|e| (e.envelope.event_type.clone(), e.envelope.subject.clone()))
             .collect();
-        let ours = work_item_ref(tid);
         assert_eq!(
             seen,
             vec![
@@ -2192,14 +2026,6 @@ mod tests {
                 (
                     "effort.closed".into(),
                     vec![format!("effort:{}", eff.id), foreign.into()]
-                ),
-                (
-                    "effort.opened".into(),
-                    vec![format!("effort:{synthesized}"), ours.clone()]
-                ),
-                (
-                    "effort.closed".into(),
-                    vec![format!("effort:{synthesized}"), ours]
                 ),
             ]
         );
@@ -2213,11 +2039,6 @@ mod tests {
             events[1].envelope.payload["effort"],
             format!("effort:{}", eff.id)
         );
-        // A lifecycle effort has a bracket to snapshot; a synthesized one
-        // was recorded after the fact.
-        assert!(opened.payload.get("retroactive").is_none());
-        assert_eq!(events[2].envelope.payload["retroactive"], true);
-        assert_eq!(events[3].envelope.payload["retroactive"], true);
     }
 
     #[tokio::test]

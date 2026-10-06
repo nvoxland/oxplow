@@ -1032,28 +1032,10 @@ Landed:
 | effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort). **Also (tsk38)** emits four `oxplow.effort_test_outcome` facts per close, sliced by `oxplow.tests_stat` — `at_close` (failed count of the last run = quality gate), `peak` (max failed in any run), `distinct_failed` (distinct cases red in ≥1 run), `red_runs` (# runs with ≥1 failure). Computed by the pure `test_outcome::{runs_from_case_facts, compute_effort_test_outcome}` from the effort's `oxplow.test_case` facts (grouped per capture): these "within-effort" aggregates are **not expressible** as a spec (the engine's temporal collapse is only sum/last/Σn÷Σd), so they're materialized here. Gated by `measure_has_active_spec("oxplow.effort_test_outcome")` |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 
-**Every close, one place (tsk172, P2.6.2).** `project_effort_lifecycle_metrics`
-runs from the effort-lifecycle pump consumer on `effort.closed` — so for a
-status transition out of `in_progress`, for an effort `record_effort`
-synthesizes when `effort.report` closes out a task that was never `in_progress`
-(its close is `retroactive`: no cycle time), for recovery and for
-`effort.close` alike — once per effort (it stops at an existing
-`effort-lifecycle` capture). Only the transition path existed originally,
-so synthesized efforts produced files but **no lifecycle facts at all** — the
-work was invisible to exactly the measures that answer "how is the driving
-going", and the bias ran toward small/quick tasks (the ones most likely to be
-closed this way), so the numbers skewed optimistic.
-
-The two paths are mutually exclusive by construction: `record_effort` projects
-only when there was NO prior effort for the task, and a task that was
-`in_progress` always has one — so `task.efforts` can't double-count.
-
-A synthesized effort passes `synthesized: true`, which suppresses **only** the
-`oxplow.cycle_time` fact. Its `started_at == ended_at`, so the honest reading is
-"unknown duration", and emitting 0 would drag the mean cycle time down with a
-number describing bookkeeping rather than work. Every other lifecycle fact still
-lands. Note this also means such an effort can never own a test run: it has no
-open window for a run to land in.
+**Every close, one place.** `project_effort_lifecycle_metrics` runs from the
+effort-lifecycle pump consumer on `effort.closed` — however the effort closed
+(the policy, `effort.close`, a thread closing, a stream archived) — once per
+effort (it stops at an existing `effort-lifecycle` capture).
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage (tsk123)** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files (tsk124)** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
 | test cases | `collection.rs::record_test_run` → `SqliteFactStore::record_test_run` (tsk733) | **change-only** per-case facts on `oxplow.test_case` (status as the `oxplow.status` dim, + `oxplow.test_suite`) and `oxplow.test_duration`: every **failure**, every run; a pass or skip only when the test is new on the branch or changed status; a duration when it moved more than `DURATION_MOVE_RATIO` (50%) **and** `DURATION_MOVE_MIN_MS` (20 ms) from the last one written (constants, not settings — a compression tolerance that changes no pass/fail number). The per-subject fold carries an unchanged test's last fact forward, so every `oxplow.tests.*` number is the same as recording all cases (durations within the tolerance). In the same transaction it upserts each case's `test_case_stat` row (`v_test_case_stat`: last status and duration, runs, failures, flips, last failed / passed, max and mean duration) — where per-test history lives. A replayed run (same idempotency key) changes nothing. Measured on sample usage (tsk732): ~2.6% of per-case results are written. Effort outcomes (`test_outcome`) take the effort's runs from its run records, not its facts, since an all-green repeat run writes none. MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |

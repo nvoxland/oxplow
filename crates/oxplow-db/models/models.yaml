@@ -380,7 +380,7 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: effort
-  version: 2
+  version: 3
   description: "Efforts: one span of a thread's work between a start and an end snapshot, opened and closed by oxplow and linked to a work item when there is one (.context/work-tracking.md). At most one is open per thread."
   columns:
     - { name: "id", type: "INTEGER", doc: "Effort id." }
@@ -392,7 +392,7 @@
     - { name: "ended_at", type: "TEXT", doc: "RFC 3339 timestamp; NULL while the effort is open." }
     - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot at the start (v_snapshot.id)." }
     - { name: "end_snapshot_id", type: "INTEGER", doc: "Snapshot at the end; NULL while open." }
-    - { name: "summary", type: "TEXT", doc: "Closing summary written when the effort closed." }
+    - { name: "summary", type: "", doc: "What shipped: the summary `effort.report` recorded, else the final message of the last agent turn in the effort." }
     - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of its first prompt. (v2)" }
     - { name: "closed_by", type: "TEXT", doc: "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)" }
 - name: effort_file

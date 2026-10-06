@@ -170,19 +170,13 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<WorkItemDeleted>()
             .expect("core type registers");
-        r.register::<EffortOpenedAtV1>()
-            .expect("core type registers");
         r.register::<EffortOpened>().expect("core type registers");
-        r.register::<EffortClosedAtV1>()
-            .expect("core type registers");
         r.register::<EffortClosed>().expect("core type registers");
         r.register::<EffortLinked>().expect("core type registers");
         r.register::<EffortRetitled>().expect("core type registers");
         r.register::<EffortClaimVerified>()
             .expect("core type registers");
         r.register::<EffortDecisionReviewed>()
-            .expect("core type registers");
-        r.register::<EffortFinishedAtV1>()
             .expect("core type registers");
         r.register::<EffortFinished>().expect("core type registers");
         r.register::<CollectorSynced>()
@@ -1478,36 +1472,8 @@ impl EventType for TestCoverageRecorded {
     type Payload = TestCoverageRecordedV1;
 }
 
-/// `effort.opened@1`: a bracket of work on a work item began.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortOpenedV1 {
-    /// `effort:eff12`.
-    pub effort: String,
-    /// `work_item:oxplow:tsk42`, or another provider's item.
-    pub work_item: String,
-    /// `thread:thr3` — the thread doing the work.
-    pub thread: String,
-    /// `snapshot:N`, when the open already had its start snapshot.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_snapshot: Option<String>,
-    /// Recorded after the fact (attribution for work on an item that was
-    /// never opened), so there is no bracket to snapshot.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub retroactive: bool,
-}
-
-/// The v1 shape of `effort.opened`, as a registry entry.
-pub struct EffortOpenedAtV1;
-impl EventType for EffortOpenedAtV1 {
-    const TYPE: &'static str = "effort.opened";
-    const V: u32 = 1;
-    type Payload = EffortOpenedV1;
-}
-
-/// `effort.opened@2`: a span of a thread's work began — v1, with the work
-/// item optional: oxplow opens efforts itself, linked to an item or not
-/// (`.context/work-tracking.md`). A v1 payload is a v2 one as is.
+/// `effort.opened@2`: a span of a thread's work began, linked to a work
+/// item or not (`.context/work-tracking.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortOpenedV2 {
@@ -1521,10 +1487,6 @@ pub struct EffortOpenedV2 {
     /// `snapshot:N`, when the open already had its start snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_snapshot: Option<String>,
-    /// Recorded after the fact (attribution for work on an item that was
-    /// never opened), so there is no bracket to snapshot.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub retroactive: bool,
 }
 
 pub struct EffortOpened;
@@ -1532,29 +1494,6 @@ impl EventType for EffortOpened {
     const TYPE: &'static str = "effort.opened";
     const V: u32 = 2;
     type Payload = EffortOpenedV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of effort.opened from v{from_v}"
-            ))),
-        }
-    }
-}
-
-/// `effort.closed@1`: a bracket of work ended.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortClosedV1 {
-    pub effort: String,
-    pub work_item: String,
-    /// `snapshot:N`, when the close already had its end snapshot.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_snapshot: Option<String>,
-    /// Recorded after the fact (attribution for work on an item that was
-    /// never opened), so there is no bracket to snapshot.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub retroactive: bool,
 }
 
 /// `effort.claim_verified@1` (P7.C4): a reviewer verified one of an
@@ -1753,16 +1692,8 @@ impl EventType for EffortRetitled {
     type Payload = EffortRetitledV1;
 }
 
-/// The v1 shape of `effort.closed`, as a registry entry.
-pub struct EffortClosedAtV1;
-impl EventType for EffortClosedAtV1 {
-    const TYPE: &'static str = "effort.closed";
-    const V: u32 = 1;
-    type Payload = EffortClosedV1;
-}
-
-/// `effort.closed@2`: a span of work ended — v1, with the work item
-/// optional and what closed it. A v1 payload is a v2 one as is.
+/// `effort.closed@2`: a span of a thread's work ended, linked to a work
+/// item or not, and what closed it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortClosedV2 {
@@ -1773,10 +1704,6 @@ pub struct EffortClosedV2 {
     /// `snapshot:N`, when the close already had its end snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_snapshot: Option<String>,
-    /// Recorded after the fact (attribution for work on an item that was
-    /// never opened), so there is no bracket to snapshot.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub retroactive: bool,
     /// What closed it: `commit`, `switch`, `person`, `agent` or `system`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed_by: Option<String>,
@@ -1787,14 +1714,6 @@ impl EventType for EffortClosed {
     const TYPE: &'static str = "effort.closed";
     const V: u32 = 2;
     type Payload = EffortClosedV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of effort.closed from v{from_v}"
-            ))),
-        }
-    }
 }
 
 /// `work_item.created@1`: a task was filed, in `status`.
@@ -2191,34 +2110,12 @@ impl EventType for KnowledgeCommentDeleted {
     type Payload = KnowledgeCommentDeletedV1;
 }
 
-/// `effort.finished@1`: an effort's close is fully handled — its end
-/// snapshot pinned, unclaimed work reconciled, lifecycle metrics projected.
-/// Logged once per effort by the effort-lifecycle consumer (dedupe key
-/// `effort.finished:<effort>`), caused by the `effort.closed` it handled;
-/// what the effort reactors (evidence, inferred decisions) and the
-/// `effort.finished` collectors consume.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortFinishedV1 {
-    pub effort: String,
-    pub work_item: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_snapshot: Option<String>,
-    /// Recorded after the fact; there was no bracket to snapshot.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub retroactive: bool,
-}
-
-/// The v1 shape of `effort.finished`, as a registry entry.
-pub struct EffortFinishedAtV1;
-impl EventType for EffortFinishedAtV1 {
-    const TYPE: &'static str = "effort.finished";
-    const V: u32 = 1;
-    type Payload = EffortFinishedV1;
-}
-
-/// `effort.finished@2`: a closed effort's bracket is pinned — v1, with the
-/// work item optional. A v1 payload is a v2 one as is.
+/// `effort.finished@2`: a closed effort has its end snapshot
+/// pinned and its lifecycle metrics projected. Logged once per effort by the
+/// effort-lifecycle consumer (dedupe key `effort.finished:<effort>`),
+/// caused by the `effort.closed` it handled; what the effort reactors
+/// (evidence, inferred decisions) and the `effort.finished` collectors
+/// consume.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortFinishedV2 {
@@ -2228,9 +2125,6 @@ pub struct EffortFinishedV2 {
     pub work_item: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_snapshot: Option<String>,
-    /// Recorded after the fact; there was no bracket to snapshot.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub retroactive: bool,
 }
 
 pub struct EffortFinished;
@@ -2238,14 +2132,6 @@ impl EventType for EffortFinished {
     const TYPE: &'static str = "effort.finished";
     const V: u32 = 2;
     type Payload = EffortFinishedV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of effort.finished from v{from_v}"
-            ))),
-        }
-    }
 }
 
 /// Whether `event_type` is one of core's types (any version) — what a
@@ -2301,14 +2187,11 @@ mod tests {
                 ("effect.result", 3),
                 ("effect.result", 4),
                 ("effort.claim_verified", 1),
-                ("effort.closed", 1),
                 ("effort.closed", 2),
                 ("effort.decision_reviewed", 1),
-                ("effort.finished", 1),
                 ("effort.finished", 2),
                 ("effort.landed", 1),
                 ("effort.linked", 1),
-                ("effort.opened", 1),
                 ("effort.opened", 2),
                 ("effort.retitled", 1),
                 ("knowledge.comment.deleted", 1),

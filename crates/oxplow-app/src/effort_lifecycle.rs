@@ -1,7 +1,7 @@
-//! The effort-lifecycle consumer (P2.6.2, tsk454; `.context/data-model.md`
-//! "event_log"): the post-commit half of opening and closing an effort,
-//! driven by the `effort.opened@1` / `effort.closed@1` events the effort
-//! store logs in the same transaction as the write.
+//! The effort-lifecycle consumer (`.context/data-model.md` "event_log"):
+//! the post-commit half of opening and closing an effort, driven by the
+//! `effort.opened` / `effort.closed` events the effort store logs in the
+//! same transaction as the write.
 //!
 //! It runs on the event pump as an async consumer, so the work is durable:
 //! a crash between the commit and the snapshot re-delivers the event on
@@ -31,13 +31,12 @@ impl EffortLifecycleConsumer {
         Self { tasks, log }
     }
 
-    /// Log `effort.finished@1` for a close this consumer finished handling.
+    /// Log `effort.finished` for a close this consumer finished handling.
     /// Its dedupe key makes a re-delivery's second append a no-op.
     async fn log_finished(
         &self,
         closed: &StoredEvent,
         effort: &oxplow_db::Effort,
-        retroactive: bool,
     ) -> Result<(), DomainError> {
         let env = Envelope::typed::<EffortFinished>(
             system_source(NAME),
@@ -48,7 +47,6 @@ impl EffortLifecycleConsumer {
                     .to_string(),
                 work_item: effort.work_item.clone(),
                 end_snapshot: effort.end_snapshot_id.map(snapshot_ref),
-                retroactive,
             },
         )
         .with_anchors(oxplow_domain::Anchors {
@@ -66,7 +64,7 @@ impl EffortLifecycleConsumer {
 }
 
 /// The effort an `effort.*` event is about (its `effort` payload ref): what
-/// every consumer of `effort.closed` / `effort.finished` reads (tsk1025).
+/// every consumer of `effort.closed` / `effort.finished` reads.
 pub(crate) fn effort_of(event: &StoredEvent) -> Result<EffortId, DomainError> {
     let r = event.envelope.payload["effort"]
         .as_str()
@@ -91,15 +89,10 @@ impl AsyncEventConsumer for EffortLifecycleConsumer {
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         let effort = effort_of(event)?;
-        let retroactive = event.envelope.payload["retroactive"]
-            .as_bool()
-            .unwrap_or(false);
         match event.envelope.event_type.as_str() {
-            // A retroactive open is closed in the same transaction; only its
-            // close has work (the metrics).
-            "effort.opened" if !retroactive => self.tasks.on_effort_opened(effort).await,
-            "effort.closed" => match self.tasks.on_effort_closed(effort, retroactive).await? {
-                Some(finished) => self.log_finished(event, &finished, retroactive).await,
+            "effort.opened" => self.tasks.on_effort_opened(effort).await,
+            "effort.closed" => match self.tasks.on_effort_closed(effort).await? {
+                Some(finished) => self.log_finished(event, &finished).await,
                 None => Ok(()),
             },
             _ => Ok(()),

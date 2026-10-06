@@ -108,7 +108,7 @@ so the log and the state can never disagree (the outbox pattern; see
 snapshot requests — runs AFTER commit, never inside the closure. Don't
 convert existing single-op methods preemptively — extract a `_tx` core
 the first time an op needs to join a transaction. Current users:
-`record_effort_atomic`, the task-store status cores (`set_status_tx`,
+the task-store status cores (`set_status_tx`,
 `update_with_status_tx`, `insert_logged_tx`), the effort cores
 (`start_tx` / `finish_tx`), `record_take`, and every `Tx` command
 handler (which runs in the bus's transaction).
@@ -542,9 +542,8 @@ ref (`work_item:oxplow:tsk42`, or another provider's
 providers). An effort goes with its thread (`thread_id … ON DELETE
 CASCADE`), not its task: deleting a stream cascades through its threads
 to their tasks and efforts, but an effort another stream's thread
-recorded against one of those tasks (`record_effort_atomic`) survives
-as history about a work item that no longer exists — readers LEFT JOIN
-`v_task`.
+linked to one of those tasks survives as history about a work item that
+no longer exists — readers LEFT JOIN `v_task`.
 
 In Rust (P2.5b, tsk428) the row is `Effort { work_item, … }` with
 `task_id() -> Option<TaskId>`; `EffortStore` (was `TaskEffortStore`)
@@ -558,9 +557,9 @@ provider's item gets edges too. The UI mirrors the helpers in
 `workItemLabel`); an effort on another provider's item shows its label
 and has no task page. Columns: `work_item`,
 `thread_id`, `started_at`, `ended_at`,
-`start_snapshot_id`, `end_snapshot_id`, `summary` (v35 — free-form text
-written by `effort.report` describing what shipped in this effort; one
-summary per effort, replaces the old per-item note-history append),
+`start_snapshot_id`, `end_snapshot_id`, `summary` (free-form text
+an optional `effort.report` wrote describing what shipped; `v_effort`
+(v3) reads it, else the final message of the effort's last turn),
 `impacts_json` (V12 — nullable TEXT holding a JSON array of declared
 `TaskImpact` rows of the form `{kind, id, action?}`; the LLM uses this
 to call out wiki pages it created, tasks it completed, commits it
@@ -578,10 +577,12 @@ them as items start and finish; `.context/work-tracking.md`):
   It is null only while the effort is open: `end_snapshot_id` null ⇔
   effort in progress. There is no time-based minimum gap.
 
-`summary` is the effort's single canonical prose body, written once on
-completion via `effort.report` (the second half of the close's
-`command.sequence`). (A `summary_variants` column existed
-V27–V28 for the audience-variant feature; dropped in V29.)
+`summary` is the effort's single canonical prose body, written by
+`effort.report` on the thread's open (else latest) effort; nothing writes
+it otherwise — `v_effort.summary` falls back to the last turn's
+`agent_turn.answer` at read. Closing a thread (`thread.close`) or
+archiving its stream (`stream.archive`, end snapshot taken first) closes
+its open effort, `closed_by` `system`.
 
 Re-opening a task (done → in_progress) on a thread gives it a second effort. At most one effort is open per thread.
 
@@ -965,8 +966,8 @@ write cascades: both `effort_file` and `page_ref` rows
 pointing at that snapshot get their `closest_vcs_rev` set and
 `vcs_rev_exact` flipped to 1. The capture-time resolver lives
 in `oxplow_app::file_ref_version`; callers don't pass any of these
-fields by hand — `task_service::record_effort` and the wiki
-sync watcher fill them automatically.
+fields by hand — the effort claim / observe paths and the wiki sync
+watcher fill them automatically.
 
 **Wiki sync preserves unchanged pins.** `sync_from_disk_with_refs_versioned`
 calls `SqlitePageRefStore::merge_source` (NOT `replace_source`).
@@ -1328,13 +1329,12 @@ pins the stream's last snapshot at or before `started_at` instead
 effort's own work. `on_effort_closed` takes and pins the
 `effort_end` snapshot (falling back to the start pin), projects the
 lifecycle metrics, then logs
-**`effort.finished@1 { effort, work_item, end_snapshot?, retroactive? }`**
+**`effort.finished@2 { effort, work_item?, end_snapshot? }`**
 (caused by the `effort.closed`, dedupe key `effort.finished:<effort>` so a
 re-delivery's second append is a no-op). `effort` is the ref
 (`effort:eff12`), never a bare id: every consumer reads it through
 `effort_lifecycle::effort_of` (over `refs::build::effort_of_ref`), so no
-consumer parses it its own way (tsk1025). A `retroactive` effort (recorded
-by `record_effort_atomic` for an item never opened) gets only the metrics. Re-delivery is safe (review of P2.6, tsk462): pins are stamped only
+consumer parses it its own way. Re-delivery is safe: pins are stamped only
 while NULL (`set_start_snapshot` / `set_end_snapshot`), the lifecycle
 metrics stop when the effort already has its `effort-lifecycle` capture,
 `effort.finished` is deduped, and
@@ -1346,15 +1346,12 @@ consume `effort.finished`, each its own async consumer registered at boot:
 decisions — a model call; failures logged). (`effort.gauges` is gone:
 `{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
 They hold `Services` weakly (the pump is part
-of it). The in-memory `OxplowEvent::EffortFinished` is gone — it dropped on
-lag and never fired for synthesized or recovered efforts, which now reach
-every reactor.
-`TaskService::update` / `create` / the record path (and so
-`effort.report`), and MCP `run_command` after any write call `settle` on `effort.lifecycle`
-(up to 10 min — the inline capture it replaced waited without limit; a
-start baseline on a huge repo waits for the startup sweep) so
-the close's `effort.report` file review sees the end pin and a batch's opens pin
-before its closes; the consumer holds
+of it).
+`TaskService::update` / `create`, `effort.report`, and MCP `run_command`
+after any write call `settle` on `effort.lifecycle` (up to 10 min; a
+start baseline on a huge repo waits for the startup sweep) so a report
+lands on the effort a close just before it closed and a batch's opens
+pin before its closes; the consumer holds
 `TaskService::without_event_pump()` so there's no reference cycle.
 Letters are `pending | retried | discarded`; the
 person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
@@ -1421,12 +1418,14 @@ no dedupe key: a transactional producer's retry has already rolled back,
 so keys are for at-least-once producers. `TaskService` keeps its
 post-commit `TasksChanged` broadcast as the UI wake-up.
 
-**Effort events (P2.6.1, tsk453).** `effort_store::start_tx` and
-`finish_tx` — the only cores that open or close an effort — append
-`effort.opened@1 { effort, work_item, thread, start_snapshot? }` and
-`effort.closed@1 { effort, work_item, end_snapshot? }` themselves, so
-every path logs: the `effort.*` commands, `record_effort_atomic`'s
-synthesized efforts, and the async `start` / `finish`. Subject `[effort:effN, <work_item ref>]`; anchors
+**Effort events.** `effort_store::start_tx` and `finish_tx` — the only
+cores that open or close an effort — append
+`effort.opened@2 { effort, work_item?, thread, start_snapshot? }` and
+`effort.closed@2 { effort, work_item?, end_snapshot?, closed_by? }`
+themselves, so every path logs: the `effort.*` commands, `thread.close`,
+`stream.archive`, and the async `start` / `finish` / `close`. They are
+v2 only (V8 moved logged v1 rows to v2 and stripped the old
+`retroactive` flag). Subject `[effort:effN, <work_item ref>]`; anchors
 stream / thread / effort (+ `snapshot` when pinned at open or close). A
 `finish_tx` on an already-closed effort changes nothing and logs nothing
 (`UPDATE … RETURNING`). Cores take an `EventCtx { schemas, source, cause

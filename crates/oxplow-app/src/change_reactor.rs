@@ -699,7 +699,6 @@ mod tests {
                 effort: oxplow_domain::refs::build::effort_ref(f.effort),
                 work_item: Some("work_item:oxplow:tsk1".into()),
                 end_snapshot: Some(format!("snapshot:{end}")),
-                retroactive: false,
             },
         );
         reactor.handle(&log(&f.svc, finished).await).await.unwrap();

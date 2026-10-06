@@ -1,15 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`effort.opened@2`: a span of a thread's work began — v1, with the work\nitem optional: oxplow opens efforts itself, linked to an item or not\n(`.context/work-tracking.md`). A v1 payload is a v2 one as is.",
+  "description": "`effort.opened@2`: a span of a thread's work began, linked to a work\nitem or not (`.context/work-tracking.md`).",
   "properties": {
     "effort": {
       "description": "`effort:eff12`.",
       "type": "string"
-    },
-    "retroactive": {
-      "description": "Recorded after the fact (attribution for work on an item that was\nnever opened), so there is no bracket to snapshot.",
-      "type": "boolean"
     },
     "start_snapshot": {
       "description": "`snapshot:N`, when the open already had its start snapshot.",

@@ -1,20 +1,19 @@
-//! Reporting on an effort: `effort.report` — what an agent says it did
-//! when it finishes a work item: a summary and the impacts beyond its edits.
-//! Which files and runs were its is observed, never reported
-//! (`.context/work-tracking.md`). `External`: it checks the summary's links
-//! against the worktree, so it can't run in the bus's transaction.
-//! Finishing a task is `command.sequence [work_item.transition,
-//! effort.report]`: one audit row.
+//! Reporting on an effort: `effort.report` — optional words on the
+//! thread's current (else latest) effort: a summary and the impacts beyond
+//! its edits. It opens and closes nothing; which files and runs were the
+//! effort's is observed, and an effort closed without a summary takes its
+//! last turn's final message (`.context/work-tracking.md`). `External`: it
+//! checks the summary's links against the worktree, so it can't run in the
+//! bus's transaction.
 //!
 //! An agent reports only on its own thread. The result carries
-//! `link_warnings` and a `decision_hint` for a big effort with no recorded
-//! decisions.
+//! `link_warnings`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxplow_db::{Database, EffortStore as _, SqliteEffortStore};
-use oxplow_domain::refs::build::{thread_ref, validate_work_item_ref};
+use oxplow_domain::refs::build::thread_ref;
 use oxplow_domain::vcs::Vcs;
 use oxplow_domain::{
     Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
@@ -34,10 +33,8 @@ pub const REPORT: &str = "effort.report";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReportInput {
-    /// The work item (`work_item:oxplow:tsk42`).
-    pub work_item: String,
-    /// The thread that did it (`thread:thr3`); an agent's is always its
-    /// own; a person's defaults to the item's last effort's.
+    /// The thread whose effort it is (`thread:thr3`): an agent's is always
+    /// its own; a person names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// What shipped (markdown; `[[…]]` links are checked).
@@ -133,7 +130,6 @@ async fn report(
     actor: Actor,
     input: ReportInput,
 ) -> Result<Value, CommandError> {
-    validate_work_item_ref(&input.work_item).map_err(|e| invalid("/work_item", e.to_string()))?;
     use oxplow_db::page_ref_projections::{impact_kind, IMPACT_KINDS};
     if let Some((i, imp)) = input
         .impacts
@@ -150,63 +146,48 @@ async fn report(
             ),
         ));
     }
-    // The report reads the settled effort: a transition just before it
-    // (the close's) has its snapshot bracket pinned.
-    deps.tasks.settle_lifecycle().await;
     let named = input.thread.as_deref().map(parse_thread_ref).transpose()?;
-    let last = deps
-        .efforts
-        .most_recent_for_work_item(&input.work_item)
-        .await
-        .map_err(failed)?;
     let thread = match agents_thread(&actor, named)? {
-        Some(own) => {
-            if let Some(e) = last.as_ref().filter(|e| e.thread_id != own) {
-                return Err(CommandError::Denied {
-                    reason: format!(
-                        "`{}` was worked on `{}`, not this agent's thread",
-                        input.work_item,
-                        thread_ref(e.thread_id)
-                    ),
-                });
-            }
-            own
-        }
-        None => named
-            .or(last.as_ref().map(|e| e.thread_id))
+        Some(own) => own,
+        None => named.ok_or_else(|| invalid("/thread", "name the thread".into()))?,
+    };
+    // A close just before (the policy's, on the item finishing) settles
+    // first, so the report lands on the effort it closed.
+    deps.tasks.settle_lifecycle().await;
+    let effort = match deps
+        .efforts
+        .find_open_for_thread(&thread)
+        .await
+        .map_err(failed)?
+    {
+        Some(e) => e,
+        None => deps
+            .efforts
+            .latest_for_thread(thread)
+            .await
+            .map_err(failed)?
             .ok_or_else(|| {
                 invalid(
                     "/thread",
-                    format!("`{}` has no effort yet — name the thread", input.work_item),
+                    format!("`{}` has no effort to report on", thread_ref(thread)),
                 )
             })?,
     };
     let summary = input.summary.filter(|s| !s.trim().is_empty());
-    if summary.is_some() || !input.impacts.is_empty() {
-        deps.tasks
-            .record_effort(
-                &deps.efforts,
-                &input.work_item,
-                &thread,
-                summary.clone(),
-                &input.impacts,
-            )
+    if summary.is_some() {
+        deps.efforts
+            .set_summary(&effort.id, summary.clone())
             .await
             .map_err(failed)?;
     }
-    let effort = deps
-        .efforts
-        .most_recent_for_work_item(&input.work_item)
-        .await
-        .map_err(failed)?
-        .map(|e| e.id);
-    let decision_hint = match effort {
-        Some(effort) => crate::reasoning::missing_decisions_hint(&deps.sql, effort.value()).await,
-        None => None,
-    };
+    if !input.impacts.is_empty() {
+        deps.efforts
+            .set_impacts(&effort.id, &input.impacts)
+            .await
+            .map_err(failed)?;
+    }
     let link_warnings = match &summary {
         Some(body) => {
-            // Files in the thread's worktree (tsk895).
             let root = worktree_of(&deps.db, thread)
                 .await
                 .unwrap_or_else(|| deps.project_dir.clone());
@@ -216,21 +197,20 @@ async fn report(
         None => Vec::new(),
     };
     Ok(json!({
-        "effort": effort.map(|e| e.to_string()),
+        "effort": effort.id.to_string(),
         "link_warnings": link_warnings,
-        "decision_hint": decision_hint,
     }))
 }
 
-/// `effort.report { work_item, thread?, summary?, impacts? }`.
+/// `effort.report { thread?, summary?, impacts? }`.
 pub fn report_command(deps: EffortDeps) -> Command {
     Command::new(
         spec(
             REPORT,
-            "Report what you did on a work item: a `summary` and any `impacts` beyond the \
-             edits (a wiki page, a task, a commit, a finding). Optional: the files and test \
-             runs that were yours are observed. Returns `{ effort, link_warnings, \
-             decision_hint }`.",
+            "Optional: describe the thread's current (else latest) effort — a `summary` of \
+             what shipped, and any `impacts` beyond the edits (a wiki page, a task, a commit, \
+             a finding). Without one, the summary is your last turn's final message; files \
+             and test runs are observed. Returns `{ effort, link_warnings }`.",
             schema::<ReportInput>(),
         ),
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
@@ -270,9 +250,8 @@ mod tests {
     /// What an agent runs to finish its task: the transition to done and
     /// the report, as one `command.sequence`. Returns the task's row and
     /// the report's result.
-    async fn complete(fx: &EffortFixture, mut report: Value) -> (Value, Value) {
+    async fn complete(fx: &EffortFixture, report: Value) -> (Value, Value) {
         let item = work_item_ref(fx.task);
-        report["work_item"] = item.clone().into();
         let out = fx
             .svc
             .commands
@@ -309,14 +288,72 @@ mod tests {
         assert_eq!(rows.len(), before + 1, "one audit row for the whole close");
         assert_eq!(rows[0].command, crate::commands::compose::SEQUENCE);
 
+        use oxplow_db::EffortStore as _;
         let effort = fx
             .svc
             .effort_store
-            .most_recent_for_work_item(&work_item_ref(fx.task))
+            .get_effort(&fx.effort)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(effort.summary.as_deref(), Some("shipped it"));
+    }
+
+    /// A report lands on the thread's latest effort once it closed; a
+    /// thread with none has nothing to report on, and a person names the
+    /// thread.
+    #[tokio::test]
+    async fn a_report_lands_on_the_threads_latest_effort() {
+        use oxplow_db::EffortStore as _;
+        let fx = services_with_effort().await;
+        fx.svc
+            .effort_store
+            .finish(&fx.effort, None, None)
+            .await
+            .unwrap();
+        let thread = oxplow_domain::refs::build::thread_ref(fx.thread);
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                REPORT,
+                json!({ "thread": thread, "summary": "late words" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let effort = fx
+            .svc
+            .effort_store
+            .get_effort(&fx.effort)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(effort.summary.as_deref(), Some("late words"));
+
+        let err = fx
+            .svc
+            .commands
+            .run(&Actor::Human, REPORT, json!({ "summary": "s" }), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/thread"),
+            "{err:?}"
+        );
+        let other = new_thread(&fx.svc, StreamId::new(1), "other").await;
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                REPORT,
+                json!({ "thread": oxplow_domain::refs::build::thread_ref(other.id), "summary": "s" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no effort"), "{err}");
     }
 
     /// An agent reports only on its own thread's work.
@@ -334,7 +371,7 @@ mod tests {
             .run(
                 &stranger,
                 REPORT,
-                json!({ "work_item": work_item_ref(fx.task), "summary": "mine" }),
+                json!({ "thread": oxplow_domain::refs::build::thread_ref(fx.thread), "summary": "mine" }),
                 false,
             )
             .await
@@ -356,7 +393,6 @@ mod tests {
                     &agent(&fx),
                     REPORT,
                     json!({
-                        "work_item": work_item_ref(fx.task),
                         "summary": "s",
                         "impacts": [
                             { "kind": "wiki", "id": "a-page" },
@@ -375,29 +411,60 @@ mod tests {
         }
     }
 
-    /// A big effort with no recorded decisions is nudged to record them.
+    /// With no report, an effort's summary is its last turn's final
+    /// message; a report's summary wins.
     #[tokio::test]
-    async fn a_big_report_without_decisions_is_nudged() {
+    async fn the_summary_defaults_to_the_last_turns_final_message() {
         let fx = services_with_effort().await;
-        use oxplow_db::EffortStore as _;
-        for i in 0..9 {
-            fx.svc
-                .effort_store
-                .record_file(
-                    &fx.effort,
-                    &format!("src/f{i}.rs"),
-                    oxplow_db::EffortFileChange::Updated,
-                    oxplow_db::effort_store::FileRefVersion {
-                        local_snapshot_id: 0,
-                        closest_vcs_rev: None,
-                        vcs_rev_exact: false,
-                    },
+        let turn = |payload: &'static str| {
+            let svc = fx.svc.clone();
+            let thread = fx.thread;
+            async move {
+                for (kind, body) in [
+                    (oxplow_domain::hook::HookKind::UserPromptSubmit, "{}"),
+                    (oxplow_domain::hook::HookKind::Stop, payload),
+                ] {
+                    svc.hook_ingest
+                        .ingest(crate::hook_ingest::HookEnvelope {
+                            kind,
+                            thread_id: Some(thread),
+                            stream_id: None,
+                            session_id: Some("s".into()),
+                            payload_json: body.into(),
+                            prompt: Some("go".into()),
+                            decision: None,
+                        })
+                        .await
+                        .unwrap();
+                }
+            }
+        };
+        turn(r#"{"last_assistant_message":"first answer"}"#).await;
+        turn(r#"{"last_assistant_message":"Fixed the parser."}"#).await;
+        let summary = || async {
+            let out = fx
+                .svc
+                .sql
+                .query_sql(
+                    "SELECT summary FROM v_effort WHERE id = ?1",
+                    vec![oxplow_db::SqlCell::Int(fx.effort.value())],
+                    None,
                 )
                 .await
                 .unwrap();
-        }
-        let (_, report) = complete(&fx, json!({ "summary": "done" })).await;
-        let hint = report["decision_hint"].as_str().expect("a hint");
-        assert!(hint.contains("effort.record_decision"), "{hint}");
+            serde_json::to_value(&out.rows[0][0]).unwrap()
+        };
+        assert_eq!(summary().await, json!("Fixed the parser."));
+        fx.svc
+            .commands
+            .run(
+                &agent(&fx),
+                REPORT,
+                json!({ "summary": "Rewrote the parser." }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(summary().await, json!("Rewrote the parser."));
     }
 }

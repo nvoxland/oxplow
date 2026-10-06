@@ -116,9 +116,10 @@ the thread has none open; a later item start links it (rule 1).
   stream's worktree, wiki pages (written through `knowledge.write_page`).
   It never asks for tracked work.
 - The Stop hook never refuses a stop.
-- Nothing the agent must call to close work. `effort.report {summary?,
-  impacts?}` is optional; the default summary is the last turn's final
-  message.
+- Nothing the agent must call to close work. `effort.report {thread?,
+  summary?, impacts?}` is optional and only annotates the thread's open
+  (else latest) effort; `v_effort.summary` defaults to the effort's last
+  turn's final message.
 - "Waiting on you" is derived (a pending question or plan approval, the
   Notification hook, a final message ending in a question), not declared.
 
@@ -191,6 +192,10 @@ The three in progress:
   their causing tool call. An effort's start pin is where its span began:
   the predecessor's end snapshot when it starts at that close, else the
   stream's last snapshot before it when it adopted work already taken.
-- Next, in order: efforts close with their thread and stream; waiting derived; the
+  Efforts close with their thread (`thread.close`) and stream
+  (`stream.archive`, end snapshot first); `effort.report` is optional and
+  never creates an effort, and the summary defaults to the last turn's
+  final message.
+- Next, in order: waiting derived; the
   Work panel and a Thread activity page; hints; skills and repo rules.
   Then the capability framework and the three swappable pieces.

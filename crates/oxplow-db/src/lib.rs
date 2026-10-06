@@ -83,7 +83,7 @@ pub use effort_evidence_store::EffortObservation;
 pub use effort_evidence_store::SqliteEffortEvidenceStore;
 pub use effort_store::{
     Effort, EffortAtSnapshot, EffortFile, EffortFileChange, EffortStore, FileRefVersion,
-    FileSource, OwnedFileRefVersion, RecordEffortAtomic, SqliteEffortStore,
+    FileSource, OwnedFileRefVersion, SqliteEffortStore,
 };
 pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};
 pub use fact_store::{

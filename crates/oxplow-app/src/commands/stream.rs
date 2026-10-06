@@ -94,6 +94,7 @@ pub struct StreamDeps {
     pub log: Arc<oxplow_db::SqliteEventLogStore>,
     pub search: Arc<oxplow_db::SqliteSearchStore>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
+    pub efforts: Arc<oxplow_db::SqliteEffortStore>,
 }
 
 fn invalid(field: &str, message: String) -> CommandError {
@@ -257,8 +258,9 @@ pub fn adopt_worktree_command(deps: StreamDeps) -> Command {
 }
 
 /// `stream.archive { stream, delete_worktree? }`: refused while an agent
-/// runs in one of its threads; its threads go with it, and its working
-/// copy when asked. Destructive: a person confirms it.
+/// runs in one of its threads; its threads go with it — their open efforts
+/// close at a snapshot taken first — and its working copy when asked.
+/// Destructive: a person confirms it.
 pub fn archive_command(deps: StreamDeps) -> Command {
     Command::new(
         person_external(
@@ -289,6 +291,33 @@ pub fn archive_command(deps: StreamDeps) -> Command {
                             "an agent is still running in one of this stream's threads".into(),
                         ));
                     }
+                }
+                // Its threads' work ends: each open effort closes at a
+                // snapshot taken now, while the working copy is still there.
+                for t in &threads {
+                    use oxplow_db::EffortStore as _;
+                    let Some(effort) = deps.efforts.find_open_for_thread(&t.id).await? else {
+                        continue;
+                    };
+                    let end = match deps.snapshot_captures.get(&id) {
+                        Some(capture) => capture
+                            .request_snapshot(crate::snapshot_capture::TakeRequest {
+                                trigger: oxplow_domain::snapshot::SnapshotTrigger::EffortEnd,
+                                thread_id: Some(t.id),
+                                turn_id: None,
+                                effort_id: Some(effort.id),
+                                budget: None,
+                            })
+                            .await
+                            .map_err(|e| CommandError::Failed {
+                                message: format!("the end snapshot of {}: {e}", effort.id),
+                            })?
+                            .or(effort.start_snapshot_id),
+                        None => None,
+                    };
+                    deps.efforts
+                        .close(effort.id, end, oxplow_db::effort_store::ClosedBy::System)
+                        .await?;
                 }
                 deps.streams
                     .archive_stream(&id, input.delete_worktree)
@@ -507,5 +536,76 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("primary"), "{err}");
         assert!(primary(&fx).await.archived_at.is_none());
+    }
+
+    /// Archiving a stream closes its threads' open efforts with an end
+    /// snapshot taken before its working copy goes.
+    #[tokio::test]
+    async fn archiving_closes_its_efforts_before_the_worktree_goes() {
+        use oxplow_db::EffortStore as _;
+        let fx = services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        std::fs::write(root.join("base.txt"), "b\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        let main = fx.svc.vcs.head(&root).await.unwrap().branch.unwrap();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE_WORKTREE,
+                json!({ "slug": "arch", "title": "Arch", "branch": "arch", "branch_source": main }),
+                false,
+            )
+            .await
+            .unwrap();
+        let side = serde_json::from_value::<oxplow_domain::Stream>(out.result)
+            .unwrap()
+            .id;
+        let thread = crate::test_fixtures::new_thread(&fx.svc, side, "t").await;
+        let side_dir = fx.svc.worktrees.resolve(Some(&side.to_string())).await;
+        let capture = fx.svc.snapshot_captures.get(&side).unwrap();
+        capture.enqueue_startup_diff().await.unwrap();
+        let start = capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        let effort = fx
+            .svc
+            .effort_store
+            .start("work_item:issues:A-1", &thread.id, start)
+            .await
+            .unwrap();
+        std::fs::write(side_dir.join("work.txt"), "w\n").unwrap();
+        capture.enqueue_startup_diff().await.unwrap();
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                ARCHIVE,
+                json!({ "stream": stream_ref(side), "delete_worktree": true }),
+                true,
+            )
+            .await
+            .unwrap();
+        let closed = fx
+            .svc
+            .effort_store
+            .get_effort(&effort.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(closed.closed_by.as_deref(), Some("system"));
+        let end = closed.end_snapshot_id.expect("an end snapshot");
+        let changed: Vec<String> = fx
+            .svc
+            .snapshot_store
+            .diff_snapshots(closed.start_snapshot_id, end)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.path)
+            .collect();
+        assert_eq!(changed, vec!["work.txt".to_string()]);
     }
 }

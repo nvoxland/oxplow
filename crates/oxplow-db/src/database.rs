@@ -1385,6 +1385,47 @@ mod tests {
         );
     }
 
+    /// V8: effort events are v2 only and lose `retroactive`.
+    #[test]
+    fn v8_moves_effort_events_to_v2_without_retroactive() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(7))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload) VALUES
+                 ('a', 'effort.opened', 1, '2026-04-29T00:00:00Z', 'human', '[]',
+                  '{"effort":"effort:eff1","work_item":"work_item:oxplow:tsk1","thread":"thread:thr1"}'),
+                 ('b', 'effort.closed', 2, '2026-04-29T00:00:01Z', 'human', '[]',
+                  '{"effort":"effort:eff1","retroactive":true}'),
+                 ('c', 'effort.finished', 2, '2026-04-29T00:00:02Z', 'human', '[]',
+                  '{"effort":"effort:eff1"}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(i64, String)> = conn
+            .prepare("SELECT v, payload FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    2,
+                    r#"{"effort":"effort:eff1","work_item":"work_item:oxplow:tsk1","thread":"thread:thr1"}"#
+                        .to_string()
+                ),
+                (2, r#"{"effort":"effort:eff1"}"#.to_string()),
+                (2, r#"{"effort":"effort:eff1"}"#.to_string()),
+            ]
+        );
+    }
+
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every

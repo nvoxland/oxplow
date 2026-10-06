@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow runtime — task filing, status transitions, closing work with effort.report, work items across providers (v_work_item, work_item.* commands), and orchestrator dispatch. Loads on mcp__oxplow__run_command with work_item.*, effort.* or knowledge.add_note, on read_task_options, dispatch_task or v_work_item, and when composing a subagent brief.
+description: Oxplow runtime — task filing, status transitions, closing work (effort.report is optional), work items across providers (v_work_item, work_item.* commands), and orchestrator dispatch. Loads on mcp__oxplow__run_command with work_item.*, effort.* or knowledge.add_note, on read_task_options, dispatch_task or v_work_item, and when composing a subagent brief.
 ---
 
 # Filing oxplow tasks
@@ -102,33 +102,27 @@ about it.
 
 **Close the row in the same turn the work actually ships.** An
 `in_progress` row with finished work parked in it looks stuck to the
-user. The moment the code change lands, run the transition and the
-report as one `command.sequence` (one audited run):
+user. The moment the code change lands, move it to done:
+`work_item.transition { ref, to: "done" }`. That closes the thread's
+effort.
+
+**`effort.report` is optional.** An effort's summary defaults to your last
+turn's final message. Report when you want other words, or impacts beyond
+the edits:
 
 ```json
-{ "name": "command.sequence",
-  "input": { "calls": [
-    { "name": "work_item.transition",
-      "input": { "ref": "work_item:oxplow:tsk42", "to": "done" } },
-    { "name": "effort.report",
-      "input": { "work_item": "work_item:oxplow:tsk42",
-                 "summary": "…",
-                 "impacts": [{ "kind": "wiki", "id": "some-slug", "action": "updated" }] } }
-  ] } }
+{ "name": "effort.report",
+  "input": { "summary": "…",
+             "impacts": [{ "kind": "wiki", "id": "some-slug", "action": "updated" }] } }
 ```
 
-The report's result (under the sequence's `children[1].result`) is your
-feedback: `link_warnings` flags `[[…]]` links in the summary that don't
-resolve; `decision_hint` asks for the decisions a big effort didn't
-record.
+It lands on your thread's current (else latest) effort; its result's
+`link_warnings` flags `[[…]]` links in the summary that don't resolve.
 
 **Your files and test runs are observed, not declared.** A file an edit
 tool named is claimed; any other file that changed during your turns
 (shell edits, formatters, generators) is observed; a test run is the
-effort's whose tool call ran it. There's no file list to pass. A task
-filed straight into `done` / `blocked` has no effort until a report
-records one — run `effort.report` for it too for "file and close in one
-call" rows.
+effort's whose tool call ran it. There's no file list to pass.
 
 **When build output keeps showing among your effort's files, ask whether
 it's generated.** Many observed paths are **build output**, and those
@@ -161,12 +155,11 @@ committed, or that git doesn't ignore.
 
 **Declare `impacts` for non-file outcomes.** `effort.report` accepts
 `impacts: { kind, id, action? }[]` — one per cross-page outcome beyond
-raw edits: a wiki page (`kind:"wiki"`), task (`"work_item"`, id
-`tsk42`), commit (`"commit"`), finding (`"finding"`), or directory
-(`"dir"`) you created/updated/completed/resolved. The older spellings
-`task`, `git_commit` and `directory` are still accepted as input. Each becomes a `page_ref`
-backlink so the target lists this task as the cause without parsing the
-summary body. In particular, name any wiki page you touched mid-turn.
+raw edits: a wiki page (`kind:"wiki"`), task (`"task"`, id `tsk42`),
+commit (`"git_commit"`), finding (`"finding"`), file (`"file"`) or
+directory (`"directory"`) you created/updated/completed/resolved. Each
+becomes a `page_ref` backlink so the target lists this task as the cause
+without parsing the summary body. In particular, name any wiki page you touched mid-turn.
 
 Legitimate reasons to *stay* `in_progress` across a stop boundary:
 

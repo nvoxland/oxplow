@@ -547,7 +547,7 @@ the same JSON.
   - `open` reserves the thread's slot under one lock before spawning anything, so concurrent opens start one agent.
   - `close` marks the handle closed at once.
   - A closed session still winding down is replaced and marked not current; its actor then records no Interrupt over the new session's status.
-- **Thread lifecycle (tsk360, P8.A3).** Closing an ACP thread (`thread.close`) stops its session and agent process once the close commits. A fork (`thread.create { from }`) keeps the source's `acp_agent`.
+- **Thread lifecycle.** Closing a thread (`thread.close`) closes its open effort in the same transaction; closing an ACP thread also stops its session and agent process once the close commits. A fork (`thread.create { from }`) keeps the source's `acp_agent`.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
 **Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:
@@ -738,10 +738,9 @@ that, the orchestrator has two modes:
    just skip the subagent round-trip.
 2. **Subagent dispatch for bigger work.** For multi-file/multi-step/
    risky changes, the orchestrator calls `oxplow__read_work_options`,
-   launches one `general-purpose` subagent with the brief, and
-   closes the item via the `command.sequence` of `work_item.transition`
-   (done) and `effort.report` (whose `summary` lands on the matching
-   `effort.summary` row). Subagents run in isolated
+   launches one `general-purpose` subagent with the brief, and the
+   subagent moves the item to done (its final message is the effort's
+   summary unless it runs `effort.report`). Subagents run in isolated
    context windows — their tokens don't count against the orchestrator,
    so main context stays flat regardless of queue depth.
 
@@ -945,12 +944,16 @@ is `{ to: done|canceled, native_state: archived }`.
   `work_item.link` / `work_item.comment`. There is no agent delete —
   `work_item.delete` is destructive, and an agent never confirms one:
   cancel or archive instead. `dispatch_task` is read-only (it composes
-  the brief). Closing is `command.sequence [work_item.transition → done,
-  effort.report]` — one audited run.
-- `effort.report { work_item, thread?, summary?, impacts? }` returns
-  `{ effort, link_warnings, decision_hint }`. It records a summary and
-  the impacts beyond the edits; it takes no files or runs — those are
-  observed (`.context/work-tracking.md`).
+  the brief). Closing is `work_item.transition → done`; the effort
+  policy closes the thread's effort.
+- `effort.report { thread?, summary?, impacts? }` is optional and returns
+  `{ effort, link_warnings }`. It records a summary and the impacts
+  beyond the edits on the thread's open effort, else its latest
+  (`SqliteEffortStore::latest_for_thread`) — never opening, closing or
+  creating one. A person names the thread; a thread with no effort is
+  refused at `/thread`. It takes no files or runs — those are observed
+  (`.context/work-tracking.md`) — and without a report `v_effort.summary`
+  is the final message of the effort's last turn.
 - **An effort's files are claimed or observed, never declared.**
   `effort_file.source` is `claimed` when an edit tool named the path
   (the `effort.claim` reactor, "Per-effort write log" below) and
@@ -995,9 +998,9 @@ is `{ to: done|canceled, native_state: archived }`.
   the item description/AC/notes into chat context. Without `item_id` it
   picks the thread's first ready non-epic item. It is **read-only** (P8.A10
   dropped its old `autoStart` transition): the brief tells the sub-agent to
-  `work_item.transition` the item to `in_progress` itself on entry, and to
-  close with the `command.sequence` of `work_item.transition` (done) and
-  `effort.report`. Callers pass the returned `prompt` directly to
+  `work_item.transition` the item to `in_progress` itself on entry and to
+  done on exit (its files and runs are observed, its final message is the
+  summary). Callers pass the returned `prompt` directly to
   Agent(prompt=…). Pure composition lives in `compose_dispatch_brief`
   (same file) so tests can exercise it without spinning up MCP.
 - `add_followup({ threadId, note })` / `remove_followup({ threadId, id })` /
@@ -1506,15 +1509,6 @@ are guesses for the reviewer, never presented to the agent as its own.
   is the point: agents otherwise forget their own choices across
   compaction.
 
-**In the `effort.report` result**
-
-- `decision_hint` is set when the effort touched 8 or more files and
-  recorded no decisions, asking the agent to record the forks it
-  resolved (`missing_decisions_hint`).
-- It lives on the tool response, not on the Stop hook, because the agent
-  reads it at the exact moment it closes the effort, and it needs none
-  of the Stop-directive dedupe machinery.
-
 ## Preamble vs skill split
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer
@@ -1770,13 +1764,6 @@ each path the turn's snapshot bracket changed as `observed` on the
 effort holding the turn (see "MCP tools" above for the rules: another
 thread's claim wins, a shared unclaimed change goes to both, changes
 between turns go to none). Nothing is reconciled at close.
-
-**File-and-close shortcut.** An item that was never `in_progress` has
-no effort; `effort.report` on it (after a `work_item.transition` straight
-to `done`, or a `work_item.create` with `state: done`) makes
-`record_effort` SYNTHESIZE one — opened and closed `retroactive`, with no
-snapshot pin — so its summary has an effort to land on. A report with no
-`summary` or `impacts` records nothing.
 
 **Redo nudges are gone.** The UserPromptSubmit `<recent-done-reminder>`
 and the MCP `create_task` `redoHint` (a soft warning when a new row was

@@ -3196,9 +3196,8 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
     out.push("## Protocol".into());
     out.push(
         "Follow the `oxplow-subagent-work-protocol` skill: `work_item.transition` it to \
-         in_progress on entry; on exit run the `command.sequence` of `work_item.transition` \
-         (done) and `effort.report` with your summary; the files and test runs you made are \
-         observed. Return ONE line: `oxplow-result: {\"ok\":true,\"itemId\":\"<id>\",…}`."
+         in_progress on entry and to done on exit; the files and test runs you made are \
+         observed, and your final message is the summary. Return ONE line: `oxplow-result: {\"ok\":true,\"itemId\":\"<id>\",…}`."
             .into(),
     );
     out.join("\n")

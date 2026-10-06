@@ -28,8 +28,8 @@ use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
 use oxplow_domain::EffortId;
 use oxplow_domain::{
-    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskImpact, TaskLinkType, TaskPriority,
-    TaskStatus, ThreadId, Timestamp,
+    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskLinkType, TaskPriority, TaskStatus,
+    ThreadId, Timestamp,
 };
 
 use crate::events::EventBus;
@@ -440,17 +440,14 @@ impl TaskService {
         Ok(())
     }
 
-    /// `effort.closed` (the effort-lifecycle consumer, P2.6.2): take and
-    /// pin the `effort_end` snapshot, reconcile unclaimed files and runs,
-    /// and project the lifecycle metrics. A retroactive effort (recorded
-    /// after the fact) has no bracket, so it gets the metrics only.
-    /// Re-delivery re-pins nothing (the pin is checked) and re-reconciles
-    /// idempotently. Returns the finished effort (the consumer then logs
-    /// `effort.finished`), or `None` when there is nothing to finish.
+    /// `effort.closed` (the effort-lifecycle consumer): take and pin the
+    /// `effort_end` snapshot and project the lifecycle metrics.
+    /// Re-delivery re-pins nothing (the pin is checked). Returns the
+    /// finished effort (the consumer then logs `effort.finished`), or
+    /// `None` when there is nothing to finish.
     pub(crate) async fn on_effort_closed(
         &self,
         effort_id: EffortId,
-        retroactive: bool,
     ) -> Result<Option<Effort>, DomainError> {
         let Some(effort_store) = self.effort_store.as_ref() else {
             return Ok(None);
@@ -461,32 +458,29 @@ impl TaskService {
         if effort.ended_at.is_none() {
             return Ok(None);
         }
-        if !retroactive {
-            if let Some(snapshot) = self.service_for_thread(&effort.thread_id).await {
-                if effort.end_snapshot_id.is_none() {
-                    let captured = snapshot
-                        .request_snapshot(crate::snapshot_capture::TakeRequest {
-                            trigger: oxplow_domain::snapshot::SnapshotTrigger::EffortEnd,
-                            thread_id: Some(effort.thread_id),
-                            turn_id: None,
-                            effort_id: Some(effort_id),
-                            budget: None,
-                        })
-                        .await
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(error = %e, effort = %effort_id, "effort lifecycle: end snapshot failed");
-                            None
-                        });
-                    // Keep "end_snapshot_id null ⇔ effort open": a close
-                    // that captured nothing falls back to the start pin.
-                    if let Some(id) = close_end_snapshot(captured, effort.start_snapshot_id) {
-                        effort_store.set_end_snapshot(&effort_id, id).await?;
-                    }
+        if let Some(snapshot) = self.service_for_thread(&effort.thread_id).await {
+            if effort.end_snapshot_id.is_none() {
+                let captured = snapshot
+                    .request_snapshot(crate::snapshot_capture::TakeRequest {
+                        trigger: oxplow_domain::snapshot::SnapshotTrigger::EffortEnd,
+                        thread_id: Some(effort.thread_id),
+                        turn_id: None,
+                        effort_id: Some(effort_id),
+                        budget: None,
+                    })
+                    .await
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(error = %e, effort = %effort_id, "effort lifecycle: end snapshot failed");
+                        None
+                    });
+                // Keep "end_snapshot_id null ⇔ effort open": a close that
+                // captured nothing falls back to the start pin.
+                if let Some(id) = close_end_snapshot(captured, effort.start_snapshot_id) {
+                    effort_store.set_end_snapshot(&effort_id, id).await?;
                 }
             }
         }
-        self.project_effort_lifecycle_metrics(&effort, retroactive)
-            .await;
+        self.project_effort_lifecycle_metrics(&effort).await;
         effort_store.get_effort(&effort_id).await
     }
 
@@ -496,14 +490,7 @@ impl TaskService {
     /// redo-rate signal). Reads `effort` as the source of truth; the
     /// table is untouched. Best-effort — a metric write error is logged and
     /// never blocks the status transition.
-    /// `synthesized` marks an effort that `record_effort` created and closed in
-    /// one action because the task was never `in_progress` (tsk172). Such an
-    /// effort has no real duration — `started_at == ended_at` — so its
-    /// `cycle_time` is suppressed rather than reported as 0, which would drag
-    /// the mean down with a number that describes bookkeeping, not work. Every
-    /// other lifecycle fact still lands, so the work stops being invisible to
-    /// the pairing metrics.
-    async fn project_effort_lifecycle_metrics(&self, effort: &Effort, synthesized: bool) {
+    async fn project_effort_lifecycle_metrics(&self, effort: &Effort) {
         let Some(effort_store) = self.effort_store.as_ref() else {
             return;
         };
@@ -568,11 +555,10 @@ impl TaskService {
                 // Stop-collecting gate (tsk31): only emit each lifecycle fact when
                 // an enabled metric consumes its measure (`effort.cycle_time_ms` /
                 // `task.efforts`).
-                if !synthesized
-                    && facts
-                        .measure_has_active_spec("oxplow.cycle_time")
-                        .await
-                        .unwrap_or(true)
+                if facts
+                    .measure_has_active_spec("oxplow.cycle_time")
+                    .await
+                    .unwrap_or(true)
                 {
                     if let Some(measure) = facts.get_measure("oxplow.cycle_time").await? {
                         rows.push(NewFact {
@@ -873,35 +859,6 @@ impl TaskService {
 
     pub async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, TaskServiceError> {
         Ok(self.store.list_for_thread(thread).await?)
-    }
-
-    /// Record an effort's `summary` and `impacts` for `work_item` (a
-    /// canonical `work_item:…` ref) on `thread`, closing it if it's open.
-    /// Impacts are persisted before the close so the page_ref projection
-    /// runs once with the full payload.
-    pub async fn record_effort(
-        &self,
-        effort_store: &SqliteEffortStore,
-        work_item: &str,
-        thread: &ThreadId,
-        summary: Option<String>,
-        impacts: &[TaskImpact],
-    ) -> Result<(), TaskServiceError> {
-        // No prior effort means the atomic op SYNTHESIZES one: its
-        // `effort.opened` / `closed` are logged `retroactive`, and the
-        // effort-lifecycle consumer projects its metrics.
-        effort_store
-            .record_effort_atomic(oxplow_db::RecordEffortAtomic {
-                work_item: work_item.to_string(),
-                thread: *thread,
-                impacts: impacts.to_vec(),
-                summary,
-            })
-            .await?;
-        // A synthesized effort's lifecycle metrics come from the
-        // effort-lifecycle consumer (its `effort.closed` is retroactive).
-        self.settle_lifecycle().await;
-        Ok(())
     }
 
     /// Claim a single file an edit tool just named onto the thread's OPEN
@@ -1566,73 +1523,6 @@ mod tests {
             .is_none());
     }
 
-    #[tokio::test]
-    async fn closing_a_never_started_task_still_counts_toward_efforts_per_task() {
-        // The close (`effort.report`) on a task that was never `in_progress`
-        // synthesizes the effort its summary lands on — but the status
-        // transition never crosses OUT of the in-progress band, so
-        // `project_effort_lifecycle_metrics` never ran and the work was invisible
-        // to the pairing metrics. Verified in a real DB: two such efforts had
-        // files recorded but ZERO facts on `oxplow.cycle_time` /
-        // `oxplow.effort_steering`, where properly-opened efforts all had them.
-        //
-        // The bias mattered: this shape is most common for small, quick tasks,
-        // so the redo-rate signal skewed optimistic.
-        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "closed without ever starting".into(),
-                    status: Some(TaskStatus::Ready),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-
-        svc.record_effort(
-            &effort_store,
-            &work_item_ref(item.id),
-            &tid,
-            Some("done".into()),
-            &[],
-        )
-        .await
-        .unwrap();
-
-        let facts = svc.fact_store.as_ref().expect("fact store attached");
-        let effort_measure = facts
-            .get_measure("oxplow.task_effort")
-            .await
-            .unwrap()
-            .expect("effort measure seeded by V43");
-        let effort_facts = facts.facts_for_measure(effort_measure.id).await.unwrap();
-        assert_eq!(
-            effort_facts.len(),
-            1,
-            "the synthesized effort must count toward efforts-per-task"
-        );
-        assert_eq!(effort_facts[0].subject_kind.as_deref(), Some("task"));
-
-        // Cycle time is deliberately NOT emitted: `started_at == ended_at` on a
-        // synthesized effort, so a fact here would report 0 and drag the mean
-        // down with a number that describes bookkeeping rather than work.
-        let cycle_measure = facts
-            .get_measure("oxplow.cycle_time")
-            .await
-            .unwrap()
-            .expect("cycle_time measure seeded by V43");
-        assert!(
-            facts
-                .facts_for_measure(cycle_measure.id)
-                .await
-                .unwrap()
-                .is_empty(),
-            "a synthesized effort has no real duration — better absent than 0"
-        );
-    }
-
     /// Re-delivering a close (a crash before the
     /// checkpoint, a dead-letter retry) projects the lifecycle facts once
     /// and keeps the first end pin.
@@ -1679,7 +1569,7 @@ mod tests {
             project.path().join("later.txt"),
             oxplow_fs_watch::WatchEventKind::Other,
         );
-        svc.on_effort_closed(effort.id, false).await.unwrap();
+        svc.on_effort_closed(effort.id).await.unwrap();
         let after = lifecycle(facts.captures_for_effort(effort.id.value()).await.unwrap());
         assert_eq!(after, 1, "no second lifecycle capture");
         let again = effort_store.get_effort(&effort.id).await.unwrap().unwrap();
@@ -2059,41 +1949,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn record_effort_merges_into_lifecycle_effort() {
-        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "merge".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
-        close_effort(&svc, &effort_store, effort.id).await;
-        // A summary recorded after the close attaches to that effort,
-        // NOT a second row.
-        svc.record_effort(
-            &effort_store,
-            &work_item_ref(item.id),
-            &tid,
-            Some("did the thing".into()),
-            &[],
-        )
-        .await
-        .unwrap();
-        let efforts = effort_store
-            .list_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap();
-        assert_eq!(efforts.len(), 1, "should still be a single effort row");
-        let row = &efforts[0];
-        assert_eq!(row.summary.as_deref(), Some("did the thing"));
-    }
-
     /// The PostToolUse auto-claim gets the same treatment — writing a
     /// generated file mid-effort records nothing rather than seeding a
     /// claim the diff can never confirm.
@@ -2137,39 +1992,6 @@ mod tests {
             .claim_open_effort_file(&effort_store, &tid, "src/authored.rs", None)
             .await
             .unwrap());
-    }
-
-    #[tokio::test]
-    async fn record_effort_creates_fresh_effort_when_no_lifecycle() {
-        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "direct".into(),
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        // No lifecycle ran — task filed directly as done.
-        svc.record_effort(
-            &effort_store,
-            &work_item_ref(item.id),
-            &tid,
-            Some("retro".into()),
-            &[],
-        )
-        .await
-        .unwrap();
-        let efforts = effort_store
-            .list_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap();
-        assert_eq!(efforts.len(), 1);
-        assert!(efforts[0].ended_at.is_some());
-        assert_eq!(efforts[0].summary.as_deref(), Some("retro"));
     }
 
     #[tokio::test]

@@ -13,7 +13,7 @@ automatic; your job is small and is about making sure the data exists,
 ## The one rule
 
 When you finish work on a task, **run the project's tests before you
-close it** (`work_item.transition` + `effort.report`), so fresh test + coverage reports exist for oxplow to
+close it** (`work_item.transition` to done), so fresh test + coverage reports exist for oxplow to
 attribute to the effort. The test command is recorded in the
 `testing:` block of `.oxplow/project.yaml` (`command`).
 

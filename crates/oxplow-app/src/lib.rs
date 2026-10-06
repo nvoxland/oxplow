@@ -1167,6 +1167,7 @@ impl Services {
             log: event_log_store.clone(),
             search: search_store.clone(),
             worktrees: worktrees.clone(),
+            efforts: effort_store.clone(),
         })) {
             commands.register(command).expect("core commands register");
         }

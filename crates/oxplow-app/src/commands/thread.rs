@@ -531,14 +531,17 @@ pub fn demote_command() -> Command {
     .expect("thread.demote is a valid command")
 }
 
-/// `thread.close { thread }`: an ACP thread's session stops once the close
-/// commits. An agent closes only its own thread. Undone by reopening it.
+/// `thread.close { thread }`: its open effort closes in the same
+/// transaction (by `system`), and an ACP thread's session stops once the
+/// close commits. An agent closes only its own thread. Undone by reopening
+/// it (the effort stays closed).
 pub fn close_command(acp: Arc<crate::acp::manager::AcpManager>) -> Command {
     Command::new(
         spec(
             CLOSE,
-            "Close a thread (`thread:thr12`) — history, reopenable. An ACP thread's agent \
-             session stops with it. An agent closes only its own thread.",
+            "Close a thread (`thread:thr12`) — history, reopenable. Its open effort closes, \
+             and an ACP thread's agent session stops with it. An agent closes only its own \
+             thread.",
             schema::<ThreadInput>(),
             Invokers::ALL,
             true,
@@ -556,6 +559,23 @@ pub fn close_command(acp: Arc<crate::acp::manager::AcpManager>) -> Command {
             thread.closed_at = Some(now);
             thread.updated_at = now;
             save(ctx, &thread)?;
+            // Its work ended with it: its open effort closes too.
+            if let Some(effort) = oxplow_db::effort_store::open_for_thread_tx(ctx.conn, id)
+                .map_err(|e| CommandError::Failed {
+                    message: e.to_string(),
+                })?
+            {
+                oxplow_db::effort_store::finish_tx(
+                    ctx.conn,
+                    &ctx.events,
+                    effort,
+                    &oxplow_db::effort_store::EffortEnd::at(
+                        now,
+                        oxplow_db::effort_store::ClosedBy::System,
+                    ),
+                )
+                .map_err(CommandError::from)?;
+            }
             let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> =
                 (thread.agent == AgentKind::Acp).then(|| {
                     let acp = acp.clone();
@@ -677,6 +697,32 @@ mod tests {
     use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_domain::stores::ThreadStore as _;
     use oxplow_domain::Actor;
+
+    /// Closing a thread closes its open effort: the thread's work ended.
+    #[tokio::test]
+    async fn closing_a_thread_closes_its_effort() {
+        use oxplow_db::EffortStore as _;
+        let fx = services_with_effort().await;
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                CLOSE,
+                json!({ "thread": oxplow_domain::refs::build::thread_ref(fx.thread) }),
+                false,
+            )
+            .await
+            .unwrap();
+        let effort = fx
+            .svc
+            .effort_store
+            .get_effort(&fx.effort)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(effort.ended_at.is_some());
+        assert_eq!(effort.closed_by.as_deref(), Some("system"));
+    }
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {

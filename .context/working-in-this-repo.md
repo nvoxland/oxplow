@@ -374,9 +374,9 @@ should describe the real piece of work you're committing to ship, not
 a placeholder. Every task write is `mcp__oxplow__run_command`: file
 with `work_item.create { title, body, state: "in_progress", native: {
 thread } }` (without `native.thread` it lands on the backlog). When it's
-settled, close it with one `command.sequence` of `work_item.transition`
-(`to: "done"`) and `effort.report` (`summary`) to ship an explicit
-summary.
+settled, close it with `work_item.transition` (`to: "done"`); add
+`effort.report { summary }` only for words other than your final
+message.
 
 **File one task for one coherent change**, even if it spans a few
 files. Make an epic (file the parent, then each child with
