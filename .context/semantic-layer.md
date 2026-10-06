@@ -1048,12 +1048,24 @@ oxplow-bundled change cards) only read them.
   turns and closed efforts are computed once (an effort that closes since
   is recomputed: its head moved). `ensure_change` reads a working tree's
   or an open effort's stored analysis, computing it the first time.
+- **Two stages (tsk1095).** Stage one is the file list alone:
+  `refresh_files(target)` diffs through `Trees` and stores `change_file`
+  (status, +/−, zone, `is_test`) — no file is parsed — stamping
+  `v_change.files_at` / `files_events_to`, and for a working tree git's
+  `in_progress` operation and `conflicted` count (`v_change` v2, migration
+  V2). Stage two is everything else (functions, imports, tests,
+  duplicates), stamped `computed_at` / `events_to`. Both write the file
+  rows; a list that saw older events than the stored one is dropped
+  (`change_store::write_files`). Readers of the file list (the
+  Uncommitted panel) read stage one; readers of the deep rows compare
+  `events_to` with `files_events_to` to know whether it's caught up.
 - **Keeping it current (P7.B4).** The `change.analyze` async pump consumer
   (`change_reactor.rs`) recomputes them as the stream moves: on a
   `snapshot.taken` that recorded files (not `unchanged`) or a
-  `vcs.head.moved`, `refresh_change` re-analyzes the stream's `working`
+  `vcs.head.moved`, it first runs stage one for the stream's `working`
   change and every open effort's (one without a start snapshot is
-  skipped). On `effort.finished` it recomputes that effort's change
+  skipped), then `refresh_change` re-analyzes them — so the lists are
+  current even while a deep analysis is still running (it defers `Busy`). On `effort.finished` it recomputes that effort's change
   against its end snapshot: the effort closes before its end take, so no
   take event reaches it while open, and an effort that edited and
   finished within one turn would otherwise keep a stale (or no) analysis

@@ -13,7 +13,8 @@ a thin class wrapping that connection. Schema changes go through versioned
 refinery migrations in `crates/oxplow-db/migrations/`, append-only; never
 edit a prior version. **The history was squashed (tsk1080):** V1..V168
 became one `V1__baseline.sql`, the schema they built, dumped from
-`sqlite_master` with the rows they seeded; the next migration is V2. The
+`sqlite_master` with the rows they seeded; V2 (`change_file_stage`) is the
+first after it. The
 `V<n>` names elsewhere in these docs are that history — which step brought
 a table in — not files that exist. Existing databases were converted by a
 one-off tool that checked their tables, indexes and triggers equal the

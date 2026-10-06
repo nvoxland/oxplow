@@ -244,25 +244,11 @@ impl SqliteChangeStore {
             .unwrap_or_default();
         self.db
             .transaction(move |tx| {
-                for t in [
-                    "change_file",
-                    "change_function",
-                    "change_import",
-                    "change_test_file",
-                ] {
+                for t in ["change_function", "change_import", "change_test_file"] {
                     tx.execute(&format!("DELETE FROM {t} WHERE change_id = ?1"), [id])
                         .map_err(map_sql_err)?;
                 }
-                for f in &results.files {
-                    tx.execute(
-                        "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        rusqlite::params![
-                            id, f.path, f.status, f.additions, f.deletions, f.zone, i64::from(f.is_test)
-                        ],
-                    )
-                    .map_err(map_sql_err)?;
-                }
+                write_files(tx, id, &results.files, &at, events_to)?;
                 for f in &results.functions {
                     tx.execute(
                         "INSERT OR REPLACE INTO change_function (change_id, path, container, name, status, signature_changed,
@@ -312,6 +298,36 @@ impl SqliteChangeStore {
             .await
     }
 
+    /// Stage one (tsk1095): replace the change's files — status and line
+    /// counts — alone, stamped with what they saw, and for a working tree
+    /// git's in-progress operation and conflict count. The deep analysis
+    /// is left as it was. A list older than the stored one is dropped.
+    pub async fn store_files(
+        &self,
+        id: i64,
+        files: Vec<ChangeFileRow>,
+        events_to: i64,
+        conflicted: Option<i64>,
+        in_progress: Option<String>,
+    ) -> Result<(), DomainError> {
+        let at = serde_json::to_value(oxplow_domain::Timestamp::now())
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        self.db
+            .transaction(move |tx| {
+                if write_files(tx, id, &files, &at, events_to)? {
+                    tx.execute(
+                        "UPDATE change SET conflicted = ?2, in_progress = ?3 WHERE id = ?1",
+                        rusqlite::params![id, conflicted, in_progress],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                Ok(())
+            })
+            .await
+    }
+
     /// Replace the change's duplicates (they arrive later, from a slower
     /// scan) — when they belong to its latest analysis (`events_to`); a
     /// newer analysis supersedes them. Whether they were stored.
@@ -349,6 +365,54 @@ impl SqliteChangeStore {
             })
             .await
     }
+}
+
+/// Replace `id`'s file rows and stamp their freshness, unless the stored
+/// list saw later events (stage one and the deep analysis both write it).
+/// Whether they were written.
+fn write_files(
+    tx: &rusqlite::Transaction<'_>,
+    id: i64,
+    files: &[ChangeFileRow],
+    at: &str,
+    events_to: i64,
+) -> Result<bool, DomainError> {
+    let stored: Option<i64> = tx
+        .query_row(
+            "SELECT files_events_to FROM change WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?
+        .flatten();
+    if stored.is_some_and(|s| s > events_to) {
+        return Ok(false);
+    }
+    tx.execute("DELETE FROM change_file WHERE change_id = ?1", [id])
+        .map_err(map_sql_err)?;
+    for f in files {
+        tx.execute(
+            "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                id,
+                f.path,
+                f.status,
+                f.additions,
+                f.deletions,
+                f.zone,
+                i64::from(f.is_test)
+            ],
+        )
+        .map_err(map_sql_err)?;
+    }
+    tx.execute(
+        "UPDATE change SET files_at = ?2, files_events_to = ?3 WHERE id = ?1",
+        rusqlite::params![id, at, events_to],
+    )
+    .map_err(map_sql_err)?;
+    Ok(true)
 }
 
 #[cfg(test)]

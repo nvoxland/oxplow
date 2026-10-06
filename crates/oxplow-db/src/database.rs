@@ -1261,8 +1261,12 @@ mod tests {
         {
             // Recorded by some other build.
             let conn = rusqlite::Connection::open(&path).unwrap();
-            conn.execute("UPDATE refinery_schema_history SET version = 99", [])
-                .unwrap();
+            conn.execute(
+                "UPDATE refinery_schema_history SET version = 99
+                 WHERE version = (SELECT max(version) FROM refinery_schema_history)",
+                [],
+            )
+            .unwrap();
         }
         let err = match Database::open_read_only(&path) {
             Ok(_) => panic!("another schema version must be refused"),

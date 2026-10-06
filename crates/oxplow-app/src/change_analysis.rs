@@ -185,17 +185,7 @@ pub fn build_results(
         });
     }
 
-    let files: Vec<ChangeFileRow> = files
-        .iter()
-        .map(|f| ChangeFileRow {
-            path: f.path.clone(),
-            status: f.status.clone(),
-            additions: f.additions,
-            deletions: f.deletions,
-            zone: Some(zones.classify(&f.path)),
-            is_test: is_test_path(&f.path),
-        })
-        .collect();
+    let files = file_rows(files, zones);
 
     let mut imports = Vec::new();
     for d in &analysis.import_deltas {
@@ -226,6 +216,22 @@ pub fn build_results(
         imports,
         test_files: Vec::new(),
     }
+}
+
+/// The stored row of each changed file: its status and line counts, its
+/// zone and whether it's a test — what both stages write.
+fn file_rows(files: &[ChangedFile], zones: &ZoneRules) -> Vec<ChangeFileRow> {
+    files
+        .iter()
+        .map(|f| ChangeFileRow {
+            path: f.path.clone(),
+            status: f.status.clone(),
+            additions: f.additions,
+            deletions: f.deletions,
+            zone: Some(zones.classify(&f.path)),
+            is_test: is_test_path(&f.path),
+        })
+        .collect()
 }
 
 /// Test functions, assertions and skip markers on each side of every
@@ -378,6 +384,13 @@ struct AnalyzerState {
     running: std::collections::HashSet<i64>,
 }
 
+/// Hold change `id` as being analyzed, as a long deep analysis would — a
+/// test's stand-in for one still running.
+#[cfg(test)]
+pub(crate) fn hold_running_for_tests(svc: &crate::Services, id: i64) {
+    svc.change_analyzer.state.lock().unwrap().running.insert(id);
+}
+
 /// Analyze `target` if it hasn't been (or its head moved — an effort
 /// closed), store the results, and return the change. A working tree's
 /// and an open effort's analysis is kept current by the `change.analyze`
@@ -402,11 +415,79 @@ pub async fn refresh_change(
     analyze(svc, target, true).await
 }
 
-async fn analyze(
+/// What `target` compares: its stream, kind and key, and its two
+/// revisions.
+/// Stage one (tsk1095): list `target`'s changed files — status and line
+/// counts — and, for a working tree, git's operation in progress and how
+/// many files conflict, and store them alone, stamped with what they saw.
+/// Cheap: no file is parsed, so the `change.analyze` consumer runs it on
+/// every move and the list (the Uncommitted panel's) stays current; the
+/// deep analysis keeps its own freshness (`events_to`).
+pub async fn refresh_files(
     svc: &crate::Services,
     target: ChangeTarget,
-    force: bool,
 ) -> Result<oxplow_db::ChangeRow, oxplow_domain::DomainError> {
+    use oxplow_domain::DomainError;
+    let (stream, kind, key, base, head) = resolve(svc, target).await?;
+    let (row, _) = svc
+        .change_store
+        .get_or_create(stream.value(), kind, &key, base.as_ref(), &head)
+        .await?;
+    let root = svc.worktrees.resolve(Some(&stream.to_string())).await;
+    let events_to = events_to(svc).await?;
+    let entries = svc.trees.diff(&root, base.as_ref(), &head).await?;
+    let files: Vec<ChangedFile> = entries
+        .into_iter()
+        .map(|e| ChangedFile {
+            path: e.path,
+            status: e.status.as_str().to_string(),
+            additions: e.additions as i64,
+            deletions: e.deletions as i64,
+            base: None,
+            head: None,
+        })
+        .collect();
+    let rows = {
+        let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
+        file_rows(&files, &ZoneRules::from_config(&cfg.zones))
+    };
+    let (conflicted, in_progress) = if kind == "working" {
+        let status = svc.vcs.status(&root).await?;
+        let conflicted = status
+            .entries
+            .iter()
+            .filter(|e| e.status == oxplow_domain::vcs::FileStatus::Conflicted)
+            .count() as i64;
+        let op = status
+            .in_progress
+            .and_then(|op| serde_json::to_value(op).ok())
+            .and_then(|v| v.as_str().map(str::to_string));
+        (Some(conflicted), op)
+    } else {
+        (None, None)
+    };
+    svc.change_store
+        .store_files(row.id, rows, events_to, conflicted, in_progress)
+        .await?;
+    svc.change_store
+        .get(row.id)
+        .await?
+        .ok_or(DomainError::NotFound)
+}
+
+async fn resolve(
+    svc: &crate::Services,
+    target: ChangeTarget,
+) -> Result<
+    (
+        oxplow_domain::StreamId,
+        &'static str,
+        String,
+        Option<Revision>,
+        Revision,
+    ),
+    oxplow_domain::DomainError,
+> {
     use oxplow_db::EffortStore as _;
     use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
     use oxplow_domain::DomainError;
@@ -427,7 +508,7 @@ async fn analyze(
         kind: svc.vcs.rev_kind().into(),
         rev,
     };
-    let (stream, kind, key, base, head) = match target {
+    Ok(match target {
         ChangeTarget::Working { stream_id } => {
             let sid = oxplow_domain::StreamId::try_from_str(&stream_id)
                 .ok_or_else(|| invalid(format!("not a stream id: {stream_id}")))?;
@@ -522,7 +603,18 @@ async fn analyze(
                 head,
             )
         }
-    };
+    })
+}
+
+async fn analyze(
+    svc: &crate::Services,
+    target: ChangeTarget,
+    force: bool,
+) -> Result<oxplow_db::ChangeRow, oxplow_domain::DomainError> {
+    use oxplow_domain::DomainError;
+
+    let invalid = |m: String| DomainError::Invalid(m);
+    let (stream, kind, key, base, head) = resolve(svc, target).await?;
     let stream_val = stream.value();
     let (row, head_moved) = svc
         .change_store
@@ -1231,6 +1323,76 @@ mod tests {
             )
             .await,
             serde_json::json!([["src/lib.rs"], ["src/other.rs"]])
+        );
+    }
+
+    /// tsk1095: stage one — which files changed, with status and line
+    /// counts, and for the working tree git's in-progress operation and
+    /// conflicts — is stored on its own, stamped with what it saw, and
+    /// leaves the deep analysis alone.
+    #[tokio::test]
+    async fn refreshing_files_stores_the_file_list_alone() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
+        std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
+        let target = ChangeTarget::Working {
+            stream_id: oxplow_domain::StreamId::new(1).to_string(),
+        };
+        let c = refresh_files(&f.svc, target.clone()).await.unwrap();
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, status, additions > 0 FROM v_change_file WHERE change_id = ?1 ORDER BY path",
+                c.id
+            )
+            .await,
+            serde_json::json!([["src/lib.rs", "modified", 1], ["src/new.rs", "added", 1]])
+        );
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT files_at IS NOT NULL, files_events_to IS NOT NULL, conflicted, in_progress,
+                        (SELECT count(*) FROM v_change_function WHERE change_id = ?1)
+                 FROM v_change WHERE id = ?1",
+                c.id
+            )
+            .await,
+            serde_json::json!([[1, 1, 0, null, 0]]),
+            "stamped; no conflicts; the deep analysis untouched"
+        );
+
+        // A merge that stopped on a conflict: the operation and the
+        // conflicted file show.
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .unwrap()
+        };
+        git(&["checkout", "-q", "--", "src/lib.rs"]);
+        std::fs::remove_file(root.join("src/new.rs")).unwrap();
+        git(&["checkout", "-q", "-b", "other"]);
+        std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    3\n}\n").unwrap();
+        git(&["commit", "-qam", "other"]);
+        git(&["checkout", "-q", "-"]);
+        std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    4\n}\n").unwrap();
+        git(&["commit", "-qam", "mine"]);
+        git(&["merge", "-q", "other"]);
+        let c = refresh_files(&f.svc, target).await.unwrap();
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT conflicted, in_progress FROM v_change WHERE id = ?1",
+                c.id
+            )
+            .await,
+            serde_json::json!([[1, "merge"]])
         );
     }
 

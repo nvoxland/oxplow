@@ -3,8 +3,11 @@
 //! stream moves.
 //!
 //! On a `snapshot.taken` that recorded files (not `unchanged`) or a
-//! `vcs.head.moved`, it recomputes the event's stream's `working` change
-//! and each open effort's change on it
+//! `vcs.head.moved`, it first lists the changed files of the event's
+//! stream's `working` change and each open effort's change on it (stage
+//! one, [`change_analysis::refresh_files`](crate::change_analysis::refresh_files):
+//! cheap, so the lists are current before anything slow runs), then
+//! recomputes their deep analysis
 //! ([`change_analysis::refresh_change`](crate::change_analysis::refresh_change)).
 //! A burst analyzes once: an event is skipped when a newer one that would
 //! trigger it for the same stream is already logged — that one recomputes.
@@ -122,19 +125,36 @@ impl AsyncEventConsumer for ChangeReactor {
             DomainError::Busy(_) => e,
             e => DomainError::Invalid(format!("analyzing stream {stream}: {e}")),
         };
-        crate::change_analysis::refresh_change(
-            &svc,
-            ChangeTarget::Working {
-                stream_id: stream.to_string(),
-            },
-        )
-        .await
-        .map_err(failed)?;
-        for effort in svc.effort_store.list_open_for_stream(stream).await? {
+        // Stage one first, for every mutable change: the file lists are
+        // current before any deep analysis begins (tsk1095).
+        let open: Vec<_> = svc
+            .effort_store
+            .list_open_for_stream(stream)
+            .await?
+            .into_iter()
             // An effort with no start snapshot has nothing to diff.
-            if effort.start_snapshot_id.is_none() {
-                continue;
-            }
+            .filter(|e| e.start_snapshot_id.is_some())
+            .collect();
+        let working = ChangeTarget::Working {
+            stream_id: stream.to_string(),
+        };
+        crate::change_analysis::refresh_files(&svc, working.clone())
+            .await
+            .map_err(failed)?;
+        for effort in &open {
+            crate::change_analysis::refresh_files(
+                &svc,
+                ChangeTarget::Effort {
+                    effort_id: effort.id.to_string(),
+                },
+            )
+            .await
+            .map_err(failed)?;
+        }
+        crate::change_analysis::refresh_change(&svc, working)
+            .await
+            .map_err(failed)?;
+        for effort in open {
             crate::change_analysis::refresh_change(
                 &svc,
                 ChangeTarget::Effort {
@@ -218,6 +238,41 @@ mod tests {
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
         crate::test_fixtures::commit_all(root, "base");
         std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    2\n}\n").unwrap();
+    }
+
+    /// tsk1095: a move lists the working tree's files first, on their own:
+    /// even while a deep analysis of it is still running (the deep step
+    /// defers, `Busy`), the file list is current.
+    #[tokio::test]
+    async fn a_move_lists_the_files_even_while_the_analysis_runs() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        repo(&f.svc.layout.project_dir);
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        let ev = log(&f.svc, taken(false, 1)).await;
+        reactor.handle(&ev).await.unwrap();
+        let id = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT id FROM v_change WHERE kind = 'working'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        let id = match id.rows[0][0] {
+            oxplow_db::SqlCell::Int(n) => n,
+            ref other => panic!("{other:?}"),
+        };
+        crate::change_analysis::hold_running_for_tests(&f.svc, id);
+        std::fs::write(f.svc.layout.project_dir.join("src/other.rs"), "fn x() {}\n").unwrap();
+        let ev = log(&f.svc, taken(false, 1)).await;
+        let err = reactor.handle(&ev).await.unwrap_err();
+        assert!(matches!(err, DomainError::Busy(_)), "{err:?}");
+        assert_eq!(
+            working_paths(&f.svc).await,
+            serde_json::json!([["src/lib.rs"], ["src/other.rs"]])
+        );
     }
 
     /// A take that recorded files recomputes the stream's working change,
