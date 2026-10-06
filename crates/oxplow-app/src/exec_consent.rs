@@ -881,19 +881,19 @@ mod tests {
     /// approved, and its approval means what a folder's would.
     #[test]
     fn a_folder_and_its_embedded_copy_hash_alike() {
-        let review = crate::bundled_extensions::BUNDLED
+        let bundled = crate::bundled_extensions::BUNDLED
             .iter()
-            .find(|b| b.name == "oxplow-review")
+            .find(|b| b.name == "oxplow-bundled")
             .unwrap();
         let dir = tempfile::tempdir().unwrap();
-        for (rel, body) in review.files {
+        for (rel, body) in bundled.files {
             let path = dir.path().join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, body).unwrap();
         }
         let none = |_: &Path| false;
         let embedded = files_hash(
-            &*crate::extensions::files_at(dir.path(), "bundled:oxplow-review").unwrap(),
+            &*crate::extensions::files_at(dir.path(), "bundled:oxplow-bundled").unwrap(),
             &none,
         )
         .unwrap();
@@ -910,14 +910,14 @@ mod tests {
         // An effect program in a bundled extension has a version to approve.
         let program = ProjectProgram {
             kind: ProgramKind::Effect,
-            name: "oxplow-review/x".into(),
-            program: "bundled:oxplow-review/extension.yaml".into(),
+            name: "oxplow-bundled/x".into(),
+            program: "bundled:oxplow-bundled/extension.yaml".into(),
             args: Vec::new(),
             env: Vec::new(),
             credentials: Vec::new(),
             network: Vec::new(),
             commands: Vec::new(),
-            tree: Some("bundled:oxplow-review".into()),
+            tree: Some("bundled:oxplow-bundled".into()),
             remote: false,
             approved: false,
             version: None,
@@ -932,14 +932,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bundled = ProjectProgram {
             kind: ProgramKind::Effect,
-            name: "oxplow-review/x".into(),
-            program: "bundled:oxplow-review/extension.yaml".into(),
+            name: "oxplow-bundled/x".into(),
+            program: "bundled:oxplow-bundled/extension.yaml".into(),
             args: Vec::new(),
             env: Vec::new(),
             credentials: Vec::new(),
             network: Vec::new(),
             commands: Vec::new(),
-            tree: Some("bundled:oxplow-review".into()),
+            tree: Some("bundled:oxplow-bundled".into()),
             remote: false,
             approved: false,
             version: None,
@@ -947,7 +947,7 @@ mod tests {
         assert!(bundled
             .source(dir.path())
             .unwrap()
-            .contains("name: oxplow-review"));
+            .contains("name: oxplow-bundled"));
         std::fs::create_dir_all(dir.path().join("oxplow/extensions/acme/effects")).unwrap();
         std::fs::write(
             dir.path().join("oxplow/extensions/acme/effects/run.star"),

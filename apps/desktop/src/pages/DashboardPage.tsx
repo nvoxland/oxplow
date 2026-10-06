@@ -22,7 +22,7 @@ export interface DashboardPageProps {
 
 /**
  * The "Go To" page: bookmarks, recently and most visited pages. (Planning,
- * Review and Quality moved to oxplow-analytics lenses.)
+ * Review and Quality moved to oxplow-bundled lenses.)
  */
 export function DashboardPage({ stream, threadId = null, onOpenPage }: DashboardPageProps) {
   return (

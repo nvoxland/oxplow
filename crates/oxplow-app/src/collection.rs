@@ -303,7 +303,7 @@ pub fn parse_bash_post_tool(payload_json: &str) -> Option<BashInvocation> {
 
 /// Diff-coverage thresholds (tsk220), stored as the `oxplow.coverage.diff_pct`
 /// definition's `target`/`fail_at` so the renderer colors from DATA rather than
-/// a hardcoded 50/80 ramp. oxplow-analytics' `coverage-target` advisory
+/// a hardcoded 50/80 ramp. oxplow-bundled's `coverage-target` advisory
 /// uses the same 80%.
 pub const COVERAGE_TARGET_PCT: f64 = 80.0;
 pub const COVERAGE_FAIL_PCT: f64 = 50.0;
@@ -2436,7 +2436,7 @@ impl CollectionService {
         // Coverage ride-along (OBSERVE-ALWAYS, tsk270): record the ABSOLUTE
         // report regardless of effort; the effort-relative diff is derived with
         // the effort's evidence (it lands in v_effort_observation,
-        // where oxplow-analytics' coverage-target advisory reads it).
+        // where oxplow-bundled's coverage-target advisory reads it).
         // A transient error here used to silently drop the run's coverage
         // (tsk79) — now it retries once and, when both attempts (or the parse
         // of a fresh report) lose, records a durable `failed` capture.
@@ -2884,7 +2884,7 @@ impl CollectionService {
     }
 
     /// Roll every metric up over a single effort for the task/effort page — the
-    /// structured sibling of the oxplow-analytics `metric-deltas` advisory
+    /// structured sibling of the oxplow-bundled `metric-deltas` advisory
     /// (which builds the agent-prompt text). Reads the spec catalog and, per
     /// family, aggregates the effort's own facts (epic tsk12, T-D; see metrics.md):
     /// - **per-file gauges** (`File`): Σ over the effort's *claimed* files

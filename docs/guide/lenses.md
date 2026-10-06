@@ -150,10 +150,10 @@ slots:
 ### Turning an extension off
 
 Settings → Extensions → **Disable** turns an extension off for the
-project, including the ones that ship with oxplow. `oxplow-analytics`
-is one of those: it holds the Usage, Planning, Review, and Quality
-lenses, Change Analysis, the effort's tests and coverage, and the token
-panels. With it off, oxplow is the plain workbench: the pages keep
+project, including the ones that ship with oxplow. Oxplow
+ships one, `oxplow-bundled`: it holds the Usage, Planning, Review, and
+Quality lenses, Change Analysis, the effort's tests and coverage, the
+review packet, and the token panels. With it off, oxplow is the plain workbench: the pages keep
 their file lists and diffs, and the Metrics pages and dashboards still
 work. It writes
 `extensions: { disabled: [name] }` to `.oxplow/project.yaml`; commit that

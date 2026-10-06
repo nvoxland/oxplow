@@ -175,7 +175,7 @@ mod tests {
             ),
             (
                 "set_extension_enabled",
-                json!({ "name": "oxplow-analytics", "enabled": false }),
+                json!({ "name": "oxplow-bundled", "enabled": false }),
             ),
         ] {
             crate::dispatch(command, args, &svc)
@@ -201,7 +201,7 @@ mod tests {
             ]
         );
         let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
-        for expected in ["codex", "Be brief.", "m1", "dist", "oxplow-analytics"] {
+        for expected in ["codex", "Be brief.", "m1", "dist", "oxplow-bundled"] {
             assert!(file.contains(expected), "{expected} missing from:\n{file}");
         }
         // Clearing a value unsets its key.

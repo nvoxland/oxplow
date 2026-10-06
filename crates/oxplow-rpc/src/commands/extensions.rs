@@ -494,13 +494,13 @@ mod tests {
             list.as_array()
                 .unwrap()
                 .iter()
-                .find(|e| e["name"] == "oxplow-review")
+                .find(|e| e["name"] == "oxplow-bundled")
                 .unwrap()["enabled"]
                 .clone()
         };
         let list = crate::dispatch(
             "set_extension_enabled",
-            json!({ "name": "oxplow-review", "enabled": false }),
+            json!({ "name": "oxplow-bundled", "enabled": false }),
             &svc,
         )
         .await
@@ -508,10 +508,10 @@ mod tests {
         assert_eq!(enabled(&list), json!(false));
         let yaml =
             std::fs::read_to_string(svc.layout.project_dir.join(".oxplow/project.yaml")).unwrap();
-        assert!(yaml.contains("oxplow-review"), "{yaml}");
+        assert!(yaml.contains("oxplow-bundled"), "{yaml}");
         let list = crate::dispatch(
             "set_extension_enabled",
-            json!({ "name": "oxplow-review", "enabled": true }),
+            json!({ "name": "oxplow-bundled", "enabled": true }),
             &svc,
         )
         .await

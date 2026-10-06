@@ -140,7 +140,7 @@ that specific piece of work. Configure it once with
 emit reports oxplow can parse.
 
 An effort's tests, coverage, metric changes, and agent nudges show on
-its diff page, from the bundled `oxplow-analytics` extension.
+its diff page, from `oxplow-bundled`, the extension that ships with oxplow.
 
 The catch worth knowing: only test runs oxplow can see get recorded.
 If your project's configured command is `bun run test:collect`, a

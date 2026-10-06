@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(catalog.loads(), 3);
         // A bundled extension resolves under every root without a project.
         assert_eq!(
-            catalog.named(b.path(), "oxplow-review").unwrap().origin,
+            catalog.named(b.path(), "oxplow-bundled").unwrap().origin,
             "bundled"
         );
     }

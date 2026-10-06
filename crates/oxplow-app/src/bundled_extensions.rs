@@ -19,83 +19,75 @@ macro_rules! ext_file {
     };
 }
 
-pub const BUNDLED: &[BundledExtension] = &[
-    BundledExtension {
-        name: "oxplow-analytics",
-        files: &[
-            ext_file!("oxplow-analytics", "extension.yaml"),
-            ext_file!("oxplow-analytics", "collectors/effort_churn.star"),
-            ext_file!("oxplow-analytics", "lenses/backlog-tasks.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-co-change.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-cross-zone-imports.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-duplicates.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-functions.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-look-here.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-review.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-summary.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-test-files.yaml"),
-            ext_file!("oxplow-analytics", "lenses/change-treemap.yaml"),
-            ext_file!("oxplow-analytics", "lenses/duplicate-blocks.yaml"),
-            ext_file!("oxplow-analytics", "lenses/effort-analysis-findings.yaml"),
-            ext_file!("oxplow-analytics", "lenses/effort-coverage.yaml"),
-            ext_file!("oxplow-analytics", "lenses/effort-failed-tests.yaml"),
-            ext_file!("oxplow-analytics", "lenses/effort-metric-deltas.yaml"),
-            ext_file!("oxplow-analytics", "lenses/effort-nudges.yaml"),
-            ext_file!("oxplow-analytics", "lenses/effort-test-runs.yaml"),
-            ext_file!("oxplow-analytics", "lenses/effort-tests.yaml"),
-            ext_file!("oxplow-analytics", "lenses/effort-untested-files.yaml"),
-            ext_file!("oxplow-analytics", "lenses/file-co-change.yaml"),
-            ext_file!("oxplow-analytics", "lenses/findings.yaml"),
-            ext_file!("oxplow-analytics", "lenses/page-visits-by-day.yaml"),
-            ext_file!("oxplow-analytics", "lenses/planning.yaml"),
-            ext_file!("oxplow-analytics", "lenses/quality.yaml"),
-            ext_file!("oxplow-analytics", "lenses/ready-tasks.yaml"),
-            ext_file!("oxplow-analytics", "lenses/recent-notes.yaml"),
-            ext_file!("oxplow-analytics", "lenses/recent-snapshots.yaml"),
-            ext_file!("oxplow-analytics", "lenses/review.yaml"),
-            ext_file!("oxplow-analytics", "lenses/task-token-summary.yaml"),
-            ext_file!("oxplow-analytics", "lenses/task-tokens.yaml"),
-            ext_file!("oxplow-analytics", "lenses/task-turns.yaml"),
-            ext_file!("oxplow-analytics", "lenses/thread-tokens.yaml"),
-            ext_file!("oxplow-analytics", "lenses/token-total.yaml"),
-            ext_file!("oxplow-analytics", "lenses/tokens-by-agent.yaml"),
-            ext_file!("oxplow-analytics", "lenses/tokens-by-day.yaml"),
-            ext_file!("oxplow-analytics", "lenses/top-pages.yaml"),
-            ext_file!("oxplow-analytics", "lenses/usage.yaml"),
-            ext_file!("oxplow-analytics", "models/change_co_change.sql"),
-            ext_file!("oxplow-analytics", "models/change_interest.sql"),
-            ext_file!("oxplow-analytics", "models/co_change_pair.sql"),
-        ],
-    },
-    BundledExtension {
-        name: "oxplow-review",
-        files: &[
-            ext_file!("oxplow-review", "README.md"),
-            ext_file!("oxplow-review", "extension.yaml"),
-            ext_file!("oxplow-review", "event_types/accepted.v1.json"),
-            ext_file!("oxplow-review", "event_types/changes_requested.v1.json"),
-            ext_file!("oxplow-review", "effects/verify_unchecked.star"),
-            ext_file!("oxplow-review", "handlers/accept.star"),
-            ext_file!("oxplow-review", "handlers/request_changes.star"),
-            ext_file!("oxplow-review", "models/deviation.sql"),
-            ext_file!("oxplow-review", "models/verdicts.sql"),
-            ext_file!("oxplow-review", "models/verdict.sql"),
-            ext_file!("oxplow-review", "lenses/context-read.yaml"),
-            ext_file!("oxplow-review", "lenses/decisions.yaml"),
-            ext_file!("oxplow-review", "lenses/inferred-decisions.yaml"),
-            ext_file!("oxplow-review", "lenses/recent-decisions.yaml"),
-            ext_file!("oxplow-review", "lenses/review-prompt.yaml"),
-            ext_file!("oxplow-review", "lenses/struggled.yaml"),
-            ext_file!("oxplow-review", "lenses/tests-weakened.yaml"),
-            ext_file!("oxplow-review", "lenses/unbacked-claims.yaml"),
-            ext_file!("oxplow-review", "lenses/unverified-claims.yaml"),
-            ext_file!("oxplow-review", "lenses/verify-claim-with-evidence.yaml"),
-            ext_file!("oxplow-review", "lenses/waiting-on-me.yaml"),
-            ext_file!("oxplow-review", "lenses/what-deviated.yaml"),
-            ext_file!("oxplow-review", "questions.yaml"),
-        ],
-    },
-];
+pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
+    name: "oxplow-bundled",
+    files: &[
+        ext_file!("oxplow-bundled", "README.md"),
+        ext_file!("oxplow-bundled", "extension.yaml"),
+        ext_file!("oxplow-bundled", "collectors/effort_churn.star"),
+        ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
+        ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
+        ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
+        ext_file!("oxplow-bundled", "handlers/accept.star"),
+        ext_file!("oxplow-bundled", "handlers/request_changes.star"),
+        ext_file!("oxplow-bundled", "lenses/backlog-tasks.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-co-change.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-cross-zone-imports.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-duplicates.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-functions.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-look-here.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-review.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-summary.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-test-files.yaml"),
+        ext_file!("oxplow-bundled", "lenses/change-treemap.yaml"),
+        ext_file!("oxplow-bundled", "lenses/context-read.yaml"),
+        ext_file!("oxplow-bundled", "lenses/decisions.yaml"),
+        ext_file!("oxplow-bundled", "lenses/duplicate-blocks.yaml"),
+        ext_file!("oxplow-bundled", "lenses/effort-analysis-findings.yaml"),
+        ext_file!("oxplow-bundled", "lenses/effort-coverage.yaml"),
+        ext_file!("oxplow-bundled", "lenses/effort-failed-tests.yaml"),
+        ext_file!("oxplow-bundled", "lenses/effort-metric-deltas.yaml"),
+        ext_file!("oxplow-bundled", "lenses/effort-nudges.yaml"),
+        ext_file!("oxplow-bundled", "lenses/effort-test-runs.yaml"),
+        ext_file!("oxplow-bundled", "lenses/effort-tests.yaml"),
+        ext_file!("oxplow-bundled", "lenses/effort-untested-files.yaml"),
+        ext_file!("oxplow-bundled", "lenses/file-co-change.yaml"),
+        ext_file!("oxplow-bundled", "lenses/findings.yaml"),
+        ext_file!("oxplow-bundled", "lenses/inferred-decisions.yaml"),
+        ext_file!("oxplow-bundled", "lenses/page-visits-by-day.yaml"),
+        ext_file!("oxplow-bundled", "lenses/planning.yaml"),
+        ext_file!("oxplow-bundled", "lenses/quality.yaml"),
+        ext_file!("oxplow-bundled", "lenses/ready-tasks.yaml"),
+        ext_file!("oxplow-bundled", "lenses/recent-decisions.yaml"),
+        ext_file!("oxplow-bundled", "lenses/recent-notes.yaml"),
+        ext_file!("oxplow-bundled", "lenses/recent-snapshots.yaml"),
+        ext_file!("oxplow-bundled", "lenses/review-prompt.yaml"),
+        ext_file!("oxplow-bundled", "lenses/review.yaml"),
+        ext_file!("oxplow-bundled", "lenses/struggled.yaml"),
+        ext_file!("oxplow-bundled", "lenses/task-token-summary.yaml"),
+        ext_file!("oxplow-bundled", "lenses/task-tokens.yaml"),
+        ext_file!("oxplow-bundled", "lenses/task-turns.yaml"),
+        ext_file!("oxplow-bundled", "lenses/tests-weakened.yaml"),
+        ext_file!("oxplow-bundled", "lenses/thread-tokens.yaml"),
+        ext_file!("oxplow-bundled", "lenses/token-total.yaml"),
+        ext_file!("oxplow-bundled", "lenses/tokens-by-agent.yaml"),
+        ext_file!("oxplow-bundled", "lenses/tokens-by-day.yaml"),
+        ext_file!("oxplow-bundled", "lenses/top-pages.yaml"),
+        ext_file!("oxplow-bundled", "lenses/unbacked-claims.yaml"),
+        ext_file!("oxplow-bundled", "lenses/unverified-claims.yaml"),
+        ext_file!("oxplow-bundled", "lenses/usage.yaml"),
+        ext_file!("oxplow-bundled", "lenses/verify-claim-with-evidence.yaml"),
+        ext_file!("oxplow-bundled", "lenses/waiting-on-me.yaml"),
+        ext_file!("oxplow-bundled", "lenses/what-deviated.yaml"),
+        ext_file!("oxplow-bundled", "models/change_co_change.sql"),
+        ext_file!("oxplow-bundled", "models/change_interest.sql"),
+        ext_file!("oxplow-bundled", "models/co_change_pair.sql"),
+        ext_file!("oxplow-bundled", "models/deviation.sql"),
+        ext_file!("oxplow-bundled", "models/verdict.sql"),
+        ext_file!("oxplow-bundled", "models/verdicts.sql"),
+        ext_file!("oxplow-bundled", "questions.yaml"),
+    ],
+}];
 
 pub fn find(name: &str) -> Option<&'static BundledExtension> {
     BUNDLED.iter().find(|b| b.name == name)
@@ -162,15 +154,14 @@ mod tests {
                 shown.push(l.id.clone());
             }
         }
-        assert!(shown.contains(&"oxplow-review/waiting-on-me".to_string()));
-        assert!(
-            shown
-                .iter()
-                .filter(|id| id.starts_with("oxplow-review/"))
-                .count()
-                >= 2,
-            "the review category has something to open: {shown:?}"
-        );
+        // The review starters are there to open.
+        for id in [
+            "oxplow-bundled/waiting-on-me",
+            "oxplow-bundled/recent-decisions",
+            "oxplow-bundled/unbacked-claims",
+        ] {
+            assert!(shown.contains(&id.to_string()), "{id}: {shown:?}");
+        }
     }
 
     /// The analytics effort-review lenses unnest the stored observation
@@ -298,14 +289,14 @@ mod tests {
         assert!(checked > 30, "only {checked} bundled queries found");
     }
 
-    /// Run an oxplow-analytics lens with one integer param; its rows as JSON.
+    /// Run an oxplow-bundled lens with one integer param; its rows as JSON.
     async fn run_analytics_lens(
         f: &crate::test_fixtures::EffortFixture,
         slug: &str,
         param: &str,
         value: i64,
     ) -> serde_json::Value {
-        run_bundled_lens(f, &format!("oxplow-analytics/{slug}"), &[(param, value)]).await
+        run_bundled_lens(f, &format!("oxplow-bundled/{slug}"), &[(param, value)]).await
     }
 
     /// Run any bundled lens (`<extension>/<slug>`) with integer params; its
@@ -475,7 +466,7 @@ mod tests {
                 .map(|r| r[1].clone())
                 .collect::<Vec<_>>()
         };
-        let rows = run_bundled_lens(&f, "oxplow-review/waiting-on-me", &[]).await;
+        let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
         assert_eq!(waiting(rows), vec![serde_json::json!("Pick A or B?")]);
 
         // The user answers: a new turn starts after the question.
@@ -486,7 +477,7 @@ mod tests {
             )))
             .await
             .unwrap();
-        let rows = run_bundled_lens(&f, "oxplow-review/waiting-on-me", &[]).await;
+        let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
         assert!(waiting(rows).is_empty());
     }
 
@@ -522,7 +513,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let lens = "oxplow-review/what-deviated";
+        let lens = "oxplow-bundled/what-deviated";
         let effort = [("effort_id", f.effort.value())];
 
         describe("Fix the hover state in [[src/ui/button.ts]].").await;
@@ -564,7 +555,7 @@ mod tests {
         .unwrap();
         let rows = run_bundled_lens(
             &f,
-            "oxplow-review/tests-weakened",
+            "oxplow-bundled/tests-weakened",
             &[("change_id", change.id)],
         )
         .await;
@@ -625,7 +616,7 @@ mod tests {
             .unwrap();
         let rows = run_bundled_lens(
             &f,
-            "oxplow-review/review-prompt",
+            "oxplow-bundled/review-prompt",
             &[("effort_id", f.effort.value())],
         )
         .await;
@@ -658,7 +649,7 @@ mod tests {
             .unwrap();
         let rows = run_bundled_lens(
             &f,
-            "oxplow-review/review-prompt",
+            "oxplow-bundled/review-prompt",
             &[("effort_id", effort.id.value())],
         )
         .await;
@@ -734,9 +725,9 @@ mod tests {
                 serde_json::to_value(&run.result.rows).unwrap()
             }
         };
-        let decisions = first("oxplow-review/recent-decisions", ctx).await;
+        let decisions = first("oxplow-bundled/recent-decisions", ctx).await;
         assert_eq!(decisions[0][0], "Where does export live?");
-        let claims = first("oxplow-review/unbacked-claims", ctx).await;
+        let claims = first("oxplow-bundled/unbacked-claims", ctx).await;
         assert_eq!(claims.as_array().unwrap().len(), 1);
         assert_eq!(claims[0][0], "tests pass");
         let elsewhere = crate::extensions::LensContext {
@@ -744,7 +735,7 @@ mod tests {
             thread_id: None,
         };
         assert_eq!(
-            first("oxplow-review/unbacked-claims", elsewhere).await,
+            first("oxplow-bundled/unbacked-claims", elsewhere).await,
             serde_json::json!([])
         );
     }
@@ -756,17 +747,20 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let review = crate::extensions::load_extensions(f._dir.path())
             .into_iter()
-            .find(|e| e.name == "oxplow-review")
+            .find(|e| e.name == "oxplow-bundled")
             .unwrap();
-        assert!(review.panels.iter().any(|p| p.id == "oxplow-review/waiting"
-            && p.badge.as_deref() == Some("oxplow-review/waiting-on-me")));
+        assert!(review
+            .panels
+            .iter()
+            .any(|p| p.id == "oxplow-bundled/waiting"
+                && p.badge.as_deref() == Some("oxplow-bundled/waiting-on-me")));
         let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         let alert = |run: crate::extensions::LensRun| run.alert.unwrap();
         let run = crate::extensions::run_lens(
             &layer,
             &f.svc.extension_catalog,
             f._dir.path(),
-            "oxplow-review/waiting-on-me",
+            "oxplow-bundled/waiting-on-me",
             Default::default(),
             &crate::extensions::LensContext::default(),
         )
@@ -782,7 +776,7 @@ mod tests {
             &layer,
             &f.svc.extension_catalog,
             f._dir.path(),
-            "oxplow-review/waiting-on-me",
+            "oxplow-bundled/waiting-on-me",
             Default::default(),
             &crate::extensions::LensContext::default(),
         )
@@ -795,7 +789,7 @@ mod tests {
 
     /// An effort with one unverified claim and one inferred decision, its
     /// task naming `src/ui/` as its area and the effort touching
-    /// `crates/db/store.rs` outside it; oxplow-review's commands registered.
+    /// `crates/db/store.rs` outside it; oxplow-bundled's commands registered.
     async fn review_fixture() -> crate::test_fixtures::EffortFixture {
         use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::TaskStore as _;
@@ -901,7 +895,7 @@ mod tests {
             .to_string()
     }
 
-    /// P7.C5: oxplow-review loads with no errors, its examples dry-run
+    /// P7.C5: oxplow-bundled loads with no errors, its examples dry-run
     /// clean against the running registry, and its verbs register at boot
     /// as a person's (and a lens's), never an agent's, each confirmed.
     #[tokio::test(flavor = "multi_thread")]
@@ -911,14 +905,14 @@ mod tests {
             &f.svc.sql,
             &f.svc.extension_catalog,
             f._dir.path(),
-            "oxplow-review",
+            "oxplow-bundled",
             Some(f.svc.commands.as_ref()),
         )
         .await
         .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
         assert!(v.warnings.is_empty(), "{:?}", v.warnings);
-        for name in ["oxplow_review.accept", "oxplow_review.request_changes"] {
+        for name in ["oxplow_bundled.accept", "oxplow_bundled.request_changes"] {
             let spec = f
                 .svc
                 .commands
@@ -939,14 +933,14 @@ mod tests {
         // closes a command closed to agents to an agent through a lens
         // too — denied, not turned into a proposal for a person.
         let through_lens = oxplow_domain::Actor::Lens {
-            lens_id: "oxplow-review/packet".into(),
+            lens_id: "oxplow-bundled/packet".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
         for actor in [&agent, &through_lens] {
             let err = review(
                 &f,
                 actor,
-                "oxplow_review.accept",
+                "oxplow_bundled.accept",
                 serde_json::json!({ "ref": effort_ref(&f), "force": true }),
             )
             .await
@@ -969,7 +963,7 @@ mod tests {
         let err = review(
             &f,
             &human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": effort_ref(&f) }),
         )
         .await
@@ -987,7 +981,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -1037,7 +1031,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": effort_ref(&f) }),
         )
         .await
@@ -1049,9 +1043,9 @@ mod tests {
         );
     }
 
-    const VERIFY: &str = "oxplow-review/verify-unchecked";
+    const VERIFY: &str = "oxplow-bundled/verify-unchecked";
 
-    /// The latest `oxplow_review.accepted`, delivered to the effects as
+    /// The latest `oxplow_bundled.accepted`, delivered to the effects as
     /// the pump would.
     async fn deliver_acceptance(f: &crate::test_fixtures::EffortFixture) {
         let seq: i64 = f
@@ -1059,7 +1053,7 @@ mod tests {
             .db
             .read(|c| {
                 c.query_row(
-                    "SELECT max(seq) FROM event_log WHERE type = 'oxplow_review.accepted'",
+                    "SELECT max(seq) FROM event_log WHERE type = 'oxplow_bundled.accepted'",
                     [],
                     |r| r.get(0),
                 )
@@ -1147,7 +1141,7 @@ mod tests {
         review(
             &f,
             &oxplow_domain::Actor::Human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -1168,7 +1162,7 @@ mod tests {
             review(
                 &f,
                 &oxplow_domain::Actor::Human,
-                "oxplow_review.accept",
+                "oxplow_bundled.accept",
                 serde_json::json!({ "ref": effort_ref(&f), "force": true }),
             )
         };
@@ -1225,7 +1219,7 @@ mod tests {
             review(
                 &f,
                 &oxplow_domain::Actor::Human,
-                "oxplow_review.accept",
+                "oxplow_bundled.accept",
                 serde_json::json!({ "ref": effort_ref(&f), "force": true }),
             )
         };
@@ -1265,7 +1259,7 @@ mod tests {
         review(
             &f,
             &oxplow_domain::Actor::Human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -1317,7 +1311,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": effort_ref(&f) }),
         )
         .await
@@ -1345,7 +1339,7 @@ mod tests {
         review(
             &f,
             &oxplow_domain::Actor::Human,
-            "oxplow_review.request_changes",
+            "oxplow_bundled.request_changes",
             serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
         )
         .await
@@ -1371,11 +1365,11 @@ mod tests {
     #[test]
     fn the_review_lenses_declare_their_row_actions() {
         let exts = crate::extensions::load_extensions(std::path::Path::new("/nonexistent"));
-        let ext = exts.iter().find(|e| e.name == "oxplow-review").unwrap();
+        let ext = exts.iter().find(|e| e.name == "oxplow-bundled").unwrap();
         let actions = |slug: &str| {
             ext.lenses
                 .iter()
-                .find(|l| l.id == format!("oxplow-review/{slug}"))
+                .find(|l| l.id == format!("oxplow-bundled/{slug}"))
                 .unwrap_or_else(|| panic!("{slug}"))
                 .actions
                 .iter()
@@ -1400,15 +1394,15 @@ mod tests {
         assert!(ext
             .lenses
             .iter()
-            .any(|l| l.id == "oxplow-review/verify-claim-with-evidence"));
+            .any(|l| l.id == "oxplow-bundled/verify-claim-with-evidence"));
         assert!(ext
             .ui
             .commands
             .iter()
-            .any(|c| c.command == "oxplow_review.accept" && c.label == "Accept Review"));
+            .any(|c| c.command == "oxplow_bundled.accept" && c.label == "Accept Review"));
     }
 
-    /// P7.B5: the "look here first" score is oxplow-analytics' model over
+    /// P7.B5: the "look here first" score is oxplow-bundled's model over
     /// core's change rows, the same formula core used to store — size,
     /// complexity spikes, parameter growth and long new functions,
     /// multiplied — and it has left `v_change_file`.
@@ -1440,7 +1434,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT path, interest, reasons FROM v_oxplow_analytics_change_interest
+                "SELECT path, interest, reasons FROM v_oxplow_bundled_change_interest
                  WHERE change_id = 90 ORDER BY path",
                 vec![],
                 None,
@@ -1482,7 +1476,7 @@ mod tests {
         assert!(gone.is_err(), "v_change_file still has interest");
     }
 
-    /// P7.B5: co-change surprises are oxplow-analytics' models over the
+    /// P7.B5: co-change surprises are oxplow-bundled's models over the
     /// commit index — `co_change_pair` (materialized: files committed
     /// together at least 3 times in 180 days, commits of 50 files or
     /// fewer) and `change_co_change` (a change's files whose usual
@@ -1534,7 +1528,7 @@ mod tests {
             f.svc
                 .sql
                 .query_sql(
-                    "SELECT path, reason, expected, dormant_days FROM v_oxplow_analytics_change_co_change
+                    "SELECT path, reason, expected, dormant_days FROM v_oxplow_bundled_change_co_change
                      WHERE change_id = 91 ORDER BY path",
                     vec![],
                     None,
@@ -1572,7 +1566,7 @@ mod tests {
         assert!(gone.is_err(), "core still has v_change_co_change");
     }
 
-    /// P7.B5: an effort's churn is a fact oxplow-analytics records when the
+    /// P7.B5: an effort's churn is a fact oxplow-bundled records when the
     /// effort finishes, from the effort's change rows (its collector
     /// `effort_churn`, `on: effort.finished`, after `change.analyze`).
     #[tokio::test]
@@ -1606,7 +1600,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT value FROM v_fact WHERE measure_key = 'oxplow_analytics.effort_churn_lines'",
+                "SELECT value FROM v_fact WHERE measure_key = 'oxplow_bundled.effort_churn_lines'",
                 vec![],
                 None,
             )
@@ -1619,7 +1613,7 @@ mod tests {
     }
 
     /// P9.D6: a verdict is a typed event, not only a comment's text. Each
-    /// review verb logs its own type (`oxplow_review.accepted@1`,
+    /// review verb logs its own type (`oxplow_bundled.accepted@1`,
     /// `.changes_requested@1`) with its run — caused by its
     /// `command.executed`, about the effort and its work item — so the
     /// effort's timeline carries who decided what, and other extensions
@@ -1634,7 +1628,7 @@ mod tests {
             .listed_extensions(f._dir.path())
             .await
             .into_iter()
-            .find(|e| e.name == "oxplow-review")
+            .find(|e| e.name == "oxplow-bundled")
             .unwrap();
         assert_eq!(review_ext.errors, Vec::<String>::new());
         assert_eq!(
@@ -1645,8 +1639,8 @@ mod tests {
                 .map(|t| (t.event_type.as_str(), t.v))
                 .collect::<Vec<_>>(),
             vec![
-                ("oxplow_review.accepted", 1),
-                ("oxplow_review.changes_requested", 1)
+                ("oxplow_bundled.accepted", 1),
+                ("oxplow_bundled.changes_requested", 1)
             ],
             "a shared extension's event types load"
         );
@@ -1658,7 +1652,7 @@ mod tests {
                 .query_sql(
                     "SELECT v.payload, v.source, v.subject, \
                             (SELECT c.type FROM v_event c WHERE c.id = v.cause), v.type \
-                       FROM v_event v WHERE v.type LIKE 'oxplow_review.%' ORDER BY v.seq",
+                       FROM v_event v WHERE v.type LIKE 'oxplow_bundled.%' ORDER BY v.seq",
                     vec![],
                     None,
                 )
@@ -1671,7 +1665,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_review.request_changes",
+            "oxplow_bundled.request_changes",
             serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
         )
         .await
@@ -1685,10 +1679,10 @@ mod tests {
                 "note": "Keep it to the UI."
             })
         );
-        assert_eq!(logged[0][4], "oxplow_review.changes_requested");
+        assert_eq!(logged[0][4], "oxplow_bundled.changes_requested");
         assert_eq!(
             logged[0][1],
-            "extension:oxplow-review/oxplow_review.request_changes"
+            "extension:oxplow-bundled/oxplow_bundled.request_changes"
         );
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[0][2].as_str().unwrap()).unwrap(),
@@ -1699,7 +1693,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -1710,8 +1704,11 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(logged[1][0].as_str().unwrap()).unwrap(),
             serde_json::json!({ "unverified": 1, "inferred": 1, "deviated": 1 })
         );
-        assert_eq!(logged[1][1], "extension:oxplow-review/oxplow_review.accept");
-        assert_eq!(logged[1][4], "oxplow_review.accepted");
+        assert_eq!(
+            logged[1][1],
+            "extension:oxplow-bundled/oxplow_bundled.accept"
+        );
+        assert_eq!(logged[1][4], "oxplow_bundled.accepted");
         let subject: Vec<String> = serde_json::from_str(logged[1][2].as_str().unwrap()).unwrap();
         assert_eq!(subject[..2], [effort_ref(&f), item.clone()]);
         assert!(
@@ -1723,7 +1720,7 @@ mod tests {
         let again = review(
             &f,
             &human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": "effort:eff999" }),
         )
         .await;
@@ -1731,7 +1728,7 @@ mod tests {
         assert_eq!(verdicts().await.as_array().unwrap().len(), 2);
     }
 
-    /// P10 (K1): oxplow-review shows the verdict where the effort is shown
+    /// P10 (K1): oxplow-bundled shows the verdict where the effort is shown
     /// — the first bundled use of `ui.decorators`, which made it stable.
     /// Its `verdict` model is each effort's latest verdict (over
     /// `verdicts`, appended as each lands), as a label and a color the
@@ -1744,7 +1741,7 @@ mod tests {
             .listed_extensions(f._dir.path())
             .await
             .into_iter()
-            .find(|e| e.name == "oxplow-review")
+            .find(|e| e.name == "oxplow-bundled")
             .unwrap();
         assert_eq!(review_ext.errors, Vec::<String>::new());
         use crate::extensions::decorators::DecoratorPlacement;
@@ -1758,12 +1755,12 @@ mod tests {
             decorators,
             vec![
                 (
-                    "v_oxplow_review_verdict",
+                    "v_oxplow_bundled_verdict",
                     "effort",
                     DecoratorPlacement::RefChip
                 ),
                 (
-                    "v_oxplow_review_verdict",
+                    "v_oxplow_bundled_verdict",
                     "effort",
                     DecoratorPlacement::RowBadge
                 )
@@ -1782,7 +1779,7 @@ mod tests {
             f.svc
                 .sql
                 .query_sql(
-                    "SELECT ref, label, color FROM v_oxplow_review_verdict",
+                    "SELECT ref, label, color FROM v_oxplow_bundled_verdict",
                     vec![],
                     None,
                 )
@@ -1807,7 +1804,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_review.request_changes",
+            "oxplow_bundled.request_changes",
             serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
         )
         .await
@@ -1821,7 +1818,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_review.accept",
+            "oxplow_bundled.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -1849,7 +1846,7 @@ mod tests {
                 .transaction(|tx| {
                     tx.query_row(
                         "SELECT computed_at FROM asset_state \
-                         WHERE asset = 'v_oxplow_review_verdicts'",
+                         WHERE asset = 'v_oxplow_bundled_verdicts'",
                         [],
                         |r| r.get::<_, String>(0),
                     )

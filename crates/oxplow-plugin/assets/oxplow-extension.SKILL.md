@@ -209,7 +209,7 @@ empty: Nothing is waiting on you.
   (what the `input` query would return) so it doesn't depend on the
   project's data, and `expect_commands: [...]` or `refuses: <part of the
   reason>`. A command on a ref's menu (`ui.commands`) gets `{ ref }`, so
-  name its input field `ref`. `extensions/oxplow-review/` (bundled) is a
+  name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
   working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a
   `viz: custom` lens renders: `{ id, title?, bundle?: components/<id>,

@@ -3,7 +3,7 @@ description: The files that most often changed in the same commits as this one o
 params: [{ name: path }]
 query: |
   SELECT p.other AS path, p.together
-  FROM v_oxplow_analytics_co_change_pair p
+  FROM v_oxplow_bundled_co_change_pair p
   WHERE p.path = :path
   ORDER BY p.together DESC, p.other
   LIMIT 5

@@ -145,19 +145,19 @@ test("programRow shows a component with the commands it may run", () => {
 test("programRow says a bundled effect asks again when a new oxplow changes it", () => {
   const m = programRow({
     kind: "effect",
-    name: "oxplow-review/verify-unchecked",
-    program: "bundled:oxplow-review/effects/verify.star",
+    name: "oxplow-bundled/verify-unchecked",
+    program: "bundled:oxplow-bundled/effects/verify.star",
     args: [],
     env: [],
     credentials: [],
     network: [],
-    tree: "bundled:oxplow-review",
+    tree: "bundled:oxplow-bundled",
     remote: false,
     approved: false,
     version: "abc",
   });
   expect(m.bundled).toBe(true);
-  expect(m.command).toBe("effects/verify.star, part of oxplow-review (comes with oxplow)");
+  expect(m.command).toBe("effects/verify.star, part of oxplow-bundled (comes with oxplow)");
   expect(m.approveTitle).toContain("comes with oxplow");
   expect(m.approveTitle).toContain("A new oxplow that changes it asks again");
 });

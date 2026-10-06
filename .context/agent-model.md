@@ -442,7 +442,7 @@ to `runtime.handleHookEnvelope`, which:
    launch-time system prompt no longer win. The same `additionalContext`
    also carries any **prompt advisories** that fire for the thread's open
    effort (`oxplow_app::advisories::for_thread`, see
-   `.context/extensions.md` → "Advisories"): with `oxplow-analytics`
+   `.context/extensions.md` → "Advisories"): with `oxplow-bundled`
    enabled, the metric deltas block and one-shot threshold crossings. The
    pieces are joined with a blank line; any may be absent.
 6. For `Stop`: runs `computeStopDirective` (below).
@@ -1552,8 +1552,8 @@ nudge" section in `.context/collection.md`.
 ### Nudge persistence
 
 The PostToolUse nudges — the report-less-run nudge above and any
-post-tool-use **advisory** that fires (e.g. oxplow-analytics'
-`coverage-target`, kind `oxplow-analytics/coverage-target`) — are written by
+post-tool-use **advisory** that fires (e.g. oxplow-bundled's
+`coverage-target`, kind `oxplow-bundled/coverage-target`) — are written by
 the pump reactors (`collection`, `advisories.post_tool` —
 `crates/oxplow-app/src/post_tool_reactors.rs`, P3.6) to the `agent_nudge`
 table (`crates/oxplow-db/src/agent_nudge_store.rs`, see
@@ -1668,7 +1668,7 @@ The cursor is **persisted** (not in-memory) so a daemon restart never
 re-sums already-recorded usage. Display is **tokens-only** for now; the
 stored `model` lets cost be layered on later. Everything reads it through
 `v_token_usage` (which carries each turn's `prompt`, V82): the
-oxplow-analytics `task-tokens` lens in the task page's `work_item.detail.body` slot
+oxplow-bundled `task-tokens` lens in the task page's `work_item.detail.body` slot
 (a total plus a per-turn log of prompt, model and tokens across the task's
 efforts), the `thread-tokens` strip in the Work panel's `thread.plan.header` slot, and
 the `usage` lenses. Tables: see `.context/data-model.md`

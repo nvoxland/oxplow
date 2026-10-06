@@ -4155,13 +4155,13 @@ lsp:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "extensions:\n  disabled: [oxplow-analytics]\n",
+            "extensions:\n  disabled: [oxplow-bundled]\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.extensions_disabled, vec!["oxplow-analytics"]);
+        assert_eq!(cfg.extensions_disabled, vec!["oxplow-bundled"]);
         write_rendered(dir.path(), &cfg);
-        assert_eq!(disabled_extensions(dir.path()), vec!["oxplow-analytics"]);
+        assert_eq!(disabled_extensions(dir.path()), vec!["oxplow-bundled"]);
         assert!(disabled_extensions(tempdir().unwrap().path()).is_empty());
     }
 

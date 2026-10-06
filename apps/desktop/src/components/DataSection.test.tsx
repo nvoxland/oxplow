@@ -89,13 +89,13 @@ mock.module("../api.js", () => ({
     },
     {
       kind: "effect",
-      name: "oxplow-review/verify-unchecked",
-      program: "bundled:oxplow-review/verify_unchecked.star",
+      name: "oxplow-bundled/verify-unchecked",
+      program: "bundled:oxplow-bundled/verify_unchecked.star",
       args: [],
       env: [],
       credentials: [],
       network: [],
-      tree: "bundled:oxplow-review",
+      tree: "bundled:oxplow-bundled",
       remote: false,
       approved: true,
       version: "h3",
@@ -209,7 +209,7 @@ test("Escape closes Backfill's nothing-to-backfill note", async () => {
 test("a bundled program's script toggle says whether it's shown", async () => {
   answer = () => new Promise(() => {});
   const view = render(<DataSection />);
-  const key = "effect:oxplow-review/verify-unchecked";
+  const key = "effect:oxplow-bundled/verify-unchecked";
   const toggle = await waitFor(() => view.getByTestId(`program-source-toggle-${key}`));
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(toggle);

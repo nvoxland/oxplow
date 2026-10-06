@@ -13,7 +13,7 @@
 //!   - id: burndown
 //!     title: Burndown
 //!     bundle: components/burndown        # default components/<id>; holds index.html
-//!     assets: [open-tasks, oxplow-analytics/visits]   # a bare slug is this extension's
+//!     assets: [open-tasks, oxplow-bundled/visits]   # a bare slug is this extension's
 //!     commands: [work_item.transition]
 //! ```
 
@@ -834,12 +834,12 @@ mod tests {
         let ext = load(
             d.path(),
             "private",
-            "  - { id: burndown, title: Burndown, assets: [open-tasks, oxplow-analytics/visits], commands: [work_item.transition] }\n",
+            "  - { id: burndown, title: Burndown, assets: [open-tasks, oxplow-bundled/visits], commands: [work_item.transition] }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let c = &ext.custom_components[0];
         assert_eq!(c.bundle, "components/burndown");
-        assert_eq!(c.assets, vec!["x/open-tasks", "oxplow-analytics/visits"]);
+        assert_eq!(c.assets, vec!["x/open-tasks", "oxplow-bundled/visits"]);
         let lens = ext.lenses.iter().find(|l| l.slug == "burn").unwrap();
         assert_eq!(lens.viz, LensViz::Custom);
         assert_eq!(

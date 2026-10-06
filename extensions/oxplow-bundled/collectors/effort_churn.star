@@ -8,4 +8,4 @@ def transform(x):
     lines = 0
     for r in x["rows"]:
         lines += r["additions"] + r["deletions"]
-    return {"facts": [{"measure": "oxplow_analytics.effort_churn_lines", "value": lines}]}
+    return {"facts": [{"measure": "oxplow_bundled.effort_churn_lines", "value": lines}]}

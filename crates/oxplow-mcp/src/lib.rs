@@ -935,11 +935,11 @@ impl OxplowMcp {
         description = "Analyze a change and return its row (`v_change`): a commit vs its parent, an \
                        effort (start → end), or a stream's uncommitted work vs HEAD. Then read the \
                        analysis with query_sql: v_change_file (files, zones), \
-                       v_oxplow_analytics_change_interest (look-here-first scores, when \
-                       oxplow-analytics is on), v_change_function (added/deleted/modified functions, deltas, \
+                       v_oxplow_bundled_change_interest (look-here-first scores, when \
+                       oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, \
                        churn), v_change_import (cross-zone imports), \
-                       v_oxplow_analytics_change_co_change (files whose usual partners are missing, \
-                       or that were dormant; oxplow-analytics), v_change_duplicate (copied blocks; \
+                       v_oxplow_bundled_change_co_change (files whose usual partners are missing, \
+                       or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; \
                        arrives a little later). Cached: commits and closed efforts are analyzed once."
     )]
     async fn ensure_change(
@@ -3739,13 +3739,13 @@ mod tests {
             .iter()
             .map(|l| l["id"].as_str().unwrap())
             .collect();
-        // Project lenses, plus the bundled oxplow-review ones.
+        // Project lenses, plus the bundled ones.
         assert!(
             ids.contains(&"demo/broken") && ids.contains(&"demo/streams"),
             "{ids:?}"
         );
         assert!(
-            ids.iter().any(|i| i.starts_with("oxplow-review/")),
+            ids.iter().any(|i| i.starts_with("oxplow-bundled/")),
             "{ids:?}"
         );
 

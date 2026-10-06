@@ -107,7 +107,7 @@ fn init_connection(c: &Connection) -> rusqlite::Result<()> {
 }
 
 /// Refuse a SQLite built without its math functions (`log2`, `ln`, `pow`,
-/// …): SQL models and lenses may use them (P7.B5: oxplow-analytics'
+/// …): SQL models and lenses may use them (P7.B5: oxplow-bundled's
 /// `change_interest` scores with `log2`), and without them such a model
 /// only surfaces as an extension's compile error. The bundled SQLite gets
 /// them from `LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS` in

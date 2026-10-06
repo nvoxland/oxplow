@@ -265,7 +265,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 "config.set",
-                json!({ "key": "extensions", "value": { "disabled": ["oxplow-analytics"] } }),
+                json!({ "key": "extensions", "value": { "disabled": ["oxplow-bundled"] } }),
                 true,
             )
             .await

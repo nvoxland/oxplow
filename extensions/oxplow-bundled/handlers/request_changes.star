@@ -1,8 +1,8 @@
-# oxplow_review.request_changes { ref, note? }: comment a checklist of
+# oxplow_bundled.request_changes { ref, note? }: comment a checklist of
 # what to fix on the effort's work item — each unverified claim, each
 # inferred decision, each file outside the item's area — and move it back
 # to todo (oxplow: ready). The verdict is logged as
-# `oxplow_review.changes_requested` with the run, about the effort and
+# `oxplow_bundled.changes_requested` with the run, about the effort and
 # the item.
 
 def _list(text):
@@ -42,6 +42,6 @@ def transform(x):
             {"name": "work_item.comment", "input": {"ref": item, "body": "\n".join(lines)}},
             {"name": "work_item.transition", "input": {"ref": item, "to": "todo"}},
         ],
-        "events": [{"type": "oxplow_review.changes_requested", "subject": [ref, item], "payload": payload}],
+        "events": [{"type": "oxplow_bundled.changes_requested", "subject": [ref, item], "payload": payload}],
         "result": {"work_item": item},
     }

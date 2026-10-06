@@ -317,7 +317,7 @@ What a recompute records and what the clock waits on are one clock,
 `Assets`' `Now` (`Timestamp::now`; tests pass one that follows tokio's
 paused clock with `with_now`, so the `every:` tests run hours of virtual
 time instead of sleeping, tsk794). `model.materialize` records `every 1h` (V142 rebuilt `model` for the
-wider CHECK); `v_model` is v4. oxplow-analytics' `co_change_pair` is
+wider CHECK); `v_model` is v4. oxplow-bundled's `co_change_pair` is
 `every: 1h`.
 
 **Incremental** (P8.B4). `materialize: { incremental: <column> }` keeps
@@ -999,7 +999,7 @@ V101) or a stream's `working` tree (vs HEAD). V101 rebuilt `change` to
 widen its kind CHECK, emptying the cache first (rows are recomputed on
 demand). `crates/oxplow-app/src/change_analysis.rs`
 analyzes it and stores the rows behind `v_change*`; lenses (the
-oxplow-analytics change cards) only read them.
+oxplow-bundled change cards) only read them.
 
 - **Getting one.** `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis, tsk371) returns
   the `v_change` row, computing first if needed. It diffs its two
@@ -1009,8 +1009,8 @@ oxplow-analytics change cards) only read them.
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
   - files: status, +/−, zone (project zone rules), `is_test`. The "look
     here first" score left core (P7.B5, V137 dropped its columns,
-    `v_change_file` v2): oxplow-analytics' model `change_interest`
-    (`v_oxplow_analytics_change_interest { change_id, path, interest,
+    `v_change_file` v2): oxplow-bundled's model `change_interest`
+    (`v_oxplow_bundled_change_interest { change_id, path, interest,
     reasons }`) computes it in SQL over `change_file` and
     `change_function` — `(1 + log2(1+lines)) × (1 + 0.6·Σcomplexity↑) ×
     (1 + 0.4·Σparams↑) × (1 + (longest new fn − 60)/40)` — using SQLite's
@@ -1022,7 +1022,7 @@ oxplow-analytics change cards) only read them.
   - imports: added/removed with zones, `cross_zone` for new boundary
     crossings;
   - co-change left core (P7.B5, V138 dropped `change_co_change`):
-    oxplow-analytics' `co_change_pair` (materialized over the commit
+    oxplow-bundled's `co_change_pair` (materialized over the commit
     index: pairs sharing ≥ 3 commits of ≤ 50 files in 180 days) and
     `change_co_change` (a change's files dormant 90+ days, or whose top
     three co-changers are all absent) compute it in SQL;
@@ -1075,8 +1075,8 @@ oxplow-analytics change cards) only read them.
 
 Deleted / skipped tests and removed assertions are `v_change_function`
 (deleted `is_test` rows) plus `v_change_test_file`, read by the
-oxplow-review Tests Weakened lens. Missing co-change is oxplow-analytics'
-`v_oxplow_analytics_change_co_change`.
+oxplow-bundled Tests Weakened lens. Missing co-change is oxplow-bundled's
+`v_oxplow_bundled_change_co_change`.
 
 **Still target:** network enforcement off macOS; AI-role columns.
 (Extension-declared metrics and dimensions, fact and entity, are current:

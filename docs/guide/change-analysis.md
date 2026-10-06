@@ -9,8 +9,8 @@ first, and why?" It shows up on three pages:
   end, or to the working tree while it's still open).
 
 Each of those pages shows the change's files. Below that sits the
-**Change Analysis** section, a grid of lenses from the bundled
-`oxplow-analytics` extension. Turn the extension off and the pages
+**Change Analysis** section, a grid of lenses from
+`oxplow-bundled`, the extension that ships with oxplow. Turn the extension off and the pages
 keep just their file lists (see [Lenses](lenses.md)).
 
 ## What's in it

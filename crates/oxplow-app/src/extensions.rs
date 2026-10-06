@@ -5083,60 +5083,80 @@ commands:
         );
     }
 
+    /// Oxplow ships one bundled extension, `oxplow-bundled`: the review
+    /// packet, the analytics lenses and the agent's advisories together
+    /// (tsk1084). It loads clean and every lens's SQL runs.
     #[tokio::test]
-    async fn bundled_extensions_load_validate_and_mount_slots() {
+    async fn one_bundled_extension_ships_and_loads_clean() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
-        let review = exts
-            .iter()
-            .find(|e| e.name == "oxplow-review")
-            .expect("bundled extension present");
-        assert_eq!(review.origin, "bundled");
-        assert!(review.errors.is_empty(), "{:?}", review.errors);
-        // Bundled manifests are v2, shared, with an intent, and clean.
-        for e in exts.iter().filter(|e| e.origin == "bundled") {
-            assert!(e.warnings.is_empty(), "{}: {:?}", e.name, e.warnings);
-            assert_eq!(e.manifest_version, 2, "{}", e.name);
-            assert_eq!(e.sharing, Sharing::Shared, "{}", e.name);
+        let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
+        assert_eq!(
+            bundled.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["oxplow-bundled"]
+        );
+        let b = bundled[0];
+        assert!(b.errors.is_empty(), "{:?}", b.errors);
+        // Its manifest is v2, shared, with an intent, and clean.
+        assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+        assert_eq!(b.manifest_version, 2);
+        assert_eq!(b.sharing, Sharing::Shared);
+        assert!(!b.intent.as_ref().unwrap().examples.is_empty());
+        // The review packet and the analytics lenses, mounted together.
+        for (slot, lens) in [
+            ("effort.review.details", "oxplow-bundled/decisions"),
+            ("effort.review.details", "oxplow-bundled/inferred-decisions"),
+            ("effort.review.details", "oxplow-bundled/change-review"),
+            ("effort.review.details", "oxplow-bundled/effort-tests"),
+            ("vcs.commit.details", "oxplow-bundled/tests-weakened"),
+            ("work_item.detail.body", "oxplow-bundled/task-tokens"),
+            ("diff.file.header", "oxplow-bundled/file-co-change"),
+        ] {
             assert!(
-                !e.intent.as_ref().unwrap().examples.is_empty(),
-                "{}",
-                e.name
+                b.ui.slots
+                    .iter()
+                    .any(|s| s.slot == slot && s.lens_id == lens),
+                "{slot} {lens}"
             );
         }
-        assert!(review
-            .lenses
+        assert!(b.panels.iter().any(|p| p.id == "oxplow-bundled/waiting"));
+        let commands: Vec<&str> = b.commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            commands,
+            ["oxplow_bundled.accept", "oxplow_bundled.request_changes"]
+        );
+        let advisories: Vec<&str> = b.advisories.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(
+            advisories,
+            ["coverage-target", "metric-deltas", "threshold-crossed"]
+        );
+        let mut models: Vec<&str> = b.models.iter().map(|m| m.decl.name.as_str()).collect();
+        models.sort();
+        assert_eq!(
+            models,
+            [
+                "change_co_change",
+                "change_interest",
+                "co_change_pair",
+                "deviation",
+                "verdict",
+                "verdicts"
+            ]
+        );
+        let effects: Vec<&str> = b.effects.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(effects, ["verify-unchecked"]);
+        assert!(b
+            .collectors
             .iter()
-            .any(|l| l.id == "oxplow-review/decisions"));
-        assert!(review
-            .ui
-            .slots
-            .iter()
-            .any(|s| s.slot == "effort.review.details" && s.lens_id == "oxplow-review/decisions"));
-        assert!(review
-            .ui
-            .slots
-            .iter()
-            .any(|s| s.slot == "effort.review.details"
-                && s.lens_id == "oxplow-review/inferred-decisions"));
-        // P9.A2: the file diff's header strip has its first user.
-        let analytics = exts.iter().find(|e| e.name == "oxplow-analytics").unwrap();
-        assert!(analytics.ui.slots.iter().any(
-            |s| s.slot == "diff.file.header" && s.lens_id == "oxplow-analytics/file-co-change"
-        ));
-        // The analytics extension's advisory and lens SQL runs too.
-        let a = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-analytics", None)
-            .await
-            .unwrap();
-        assert!(a.errors.is_empty(), "{:?}", a.errors);
-        // Every bundled lens's SQL runs against a real schema — its own
-        // models compiled for the check, nothing published.
-        let v = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-review", None)
+            .any(|c| c.id == "oxplow_bundled.effort_churn"));
+        // Every bundled lens's SQL and advisory runs against a real schema —
+        // its own models compiled for the check, nothing published.
+        let v = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-bundled", None)
             .await
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
         assert_eq!(
-            find_lens(&cat(), dir.path(), "oxplow-review/decisions")
+            find_lens(&cat(), dir.path(), "oxplow-bundled/decisions")
                 .unwrap()
                 .title,
             "Decisions Made"
@@ -5160,11 +5180,11 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/oxplow-review/extension.yaml",
-            "manifest: 2\nname: oxplow-review\nintent:\n  purpose: test\n",
+            "oxplow/extensions/oxplow-bundled/extension.yaml",
+            "manifest: 2\nname: oxplow-bundled\nintent:\n  purpose: test\n",
         );
         let exts = load_extensions(dir.path());
-        let named: Vec<&Extension> = exts.iter().filter(|e| e.name == "oxplow-review").collect();
+        let named: Vec<&Extension> = exts.iter().filter(|e| e.name == "oxplow-bundled").collect();
         assert_eq!(named.len(), 2);
         let project = named.iter().find(|e| e.origin == "project").unwrap();
         assert!(
@@ -5174,14 +5194,14 @@ commands:
         );
         // The bundled one still wins lookups.
         assert_eq!(
-            find_lens(&cat(), dir.path(), "oxplow-review/decisions")
+            find_lens(&cat(), dir.path(), "oxplow-bundled/decisions")
                 .unwrap()
                 .title,
             "Decisions Made"
         );
         let err = save_lens(
             dir.path(),
-            "oxplow-review",
+            "oxplow-bundled",
             "x",
             &LensSpec {
                 title: "X".into(),
@@ -6024,10 +6044,10 @@ commands:
         write(
             dir.path(),
             ".oxplow/project.yaml",
-            "extensions:\n  disabled: [review, oxplow-review]\n",
+            "extensions:\n  disabled: [review, oxplow-bundled]\n",
         );
         let exts = load_extensions(dir.path());
-        for name in ["review", "oxplow-review"] {
+        for name in ["review", "oxplow-bundled"] {
             let e = exts.iter().find(|e| e.name == name).unwrap();
             assert!(!e.enabled, "{name}");
             assert!(

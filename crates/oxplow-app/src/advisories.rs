@@ -473,11 +473,11 @@ mod tests {
             first,
             vec![
                 AdvisoryHit {
-                    id: "oxplow-analytics/metric-deltas".into(),
+                    id: "oxplow-bundled/metric-deltas".into(),
                     text: "# Metric deltas (this effort)\n- ratio: 1.5 → 1 (Δ -0.5)\n- unsafe blocks: 3 → 12 (Δ +9)\n(Advisory — for awareness, not gating.)".into(),
                 },
                 AdvisoryHit {
-                    id: "oxplow-analytics/threshold-crossed".into(),
+                    id: "oxplow-bundled/threshold-crossed".into(),
                     text: "# Metric thresholds\n⚠ unsafe blocks crossed its fail threshold (10)".into(),
                 },
             ]
@@ -488,7 +488,7 @@ mod tests {
             1,
             "the crossing is once per metric: {second:?}"
         );
-        assert_eq!(second[0].id, "oxplow-analytics/metric-deltas");
+        assert_eq!(second[0].id, "oxplow-bundled/metric-deltas");
     }
 
     #[tokio::test]
@@ -531,7 +531,7 @@ mod tests {
         assert_eq!(
             hits,
             vec![AdvisoryHit {
-                id: "oxplow-analytics/coverage-target".into(),
+                id: "oxplow-bundled/coverage-target".into(),
                 text: "Diff coverage on this effort's changed lines is 42%, below the 80% target. Add tests for the uncovered changed lines before closing (advisory — oxplow won't block you). See the effort's coverage panel for which lines are uncovered.".into(),
             }]
         );

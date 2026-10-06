@@ -5,8 +5,8 @@
     core (streams, threads, tasks, agents, comments, wiki, diff,
     navigation) plus a data layer that every chart and report reads
     from. Anything that measures or visualizes is an extension:
-    oxplow's own analytics ship as the bundled `oxplow-analytics`
-    extension, in the same format you'd write one in (see
+    oxplow's own analytics and review ship as one bundled
+    extension, `oxplow-bundled`, in the same format you'd write one in (see
     [Lenses](../guide/lenses.md)). Agents can run as terminal
     harnesses or over ACP, and oxplow can call models directly for
     small jobs ([AI models](../guide/ai-models.md)).
@@ -54,8 +54,8 @@ shipped today; most is not.
 - **MCP control plane.** Oxplow exposes its primitives (work
   items, wiki pages, threads, dispatch, LSP) over MCP so the
   agent can drive them directly.
-- **Change Analysis.** Lenses from the bundled `oxplow-analytics`
-  extension, shown on diff and commit pages, that rank files
+- **Change Analysis.** Lenses from `oxplow-bundled`, the
+  extension that ships with oxplow, shown on diff and commit pages, that rank files
   by interestingness (churn × complexity × tests-missing ×
   duplication) and supports drilldown by extension / directory /
   status. Per-function before/after metrics come from

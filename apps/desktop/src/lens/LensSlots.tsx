@@ -14,7 +14,7 @@ const MAX_ROWS = 25;
 /**
  * A slot in a core page: every lens extensions mount at `slot`, run with
  * `params` (the slot's bound values, e.g. `{ effort_id }`). Oxplow's own
- * review packet (`oxplow-review`, bundled) arrives this way too. See
+ * review packet (bundled `oxplow-bundled`) arrives this way too. See
  * `.context/extensions.md` → "Slots".
  *
  * `section` (default) gives each lens a heading; `strip` is a compact

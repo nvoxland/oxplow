@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "oxplow_review.changes_requested",
+  "title": "oxplow_bundled.changes_requested",
   "description": "A person sent an effort's work back with changes requested. Its subject (kept with the envelope) is the effort (first) and its work item.",
   "type": "object",
   "additionalProperties": false,

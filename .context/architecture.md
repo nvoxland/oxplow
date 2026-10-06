@@ -132,8 +132,8 @@ A new way for config to start a program must go through the same gate.
 > phase.
 
 > **Status (epic tsk275, recorded 2026-09).** Analytics pages no longer
-> ship in core: they are lenses in the bundled `oxplow-analytics`
-> extension (`extensions/oxplow-analytics/`, compiled in by
+> ship in core: they are lenses in the bundled `oxplow-bundled`
+> extension (`extensions/oxplow-bundled/`, compiled in by
 > `crates/oxplow-app/src/bundled_extensions.rs`), and core works with it
 > disabled. The engine they read stays in core: the fact store, metrics
 > and fact collectors, the cube, collection ingest, snapshots, plus the basic
@@ -158,7 +158,7 @@ layer everything else builds on.
   users and their agents add more (GitHub, CI…) and build **lenses** on
   top.
 - **One extension format for first- and third-party.** Oxplow's own
-  analytics are the bundled `oxplow-analytics` example extension,
+  analytics and review are the bundled `oxplow-bundled` extension,
   written the same way a user would write one.
 - **Declarative and scripted, no in-app user code.** See
   [extensions.md](./extensions.md) for why.

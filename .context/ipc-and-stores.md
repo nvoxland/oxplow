@@ -654,7 +654,7 @@ schema in [data-model.md](./data-model.md), migration `V33`).
 
 - **IPC** (UI-only — the agent never reads nudges back):
   `list_nudges_for_thread(threadId)`. Per-effort nudges are read through
-  `v_agent_nudge` (the oxplow-analytics `effort-nudges` lens)
+  `v_agent_nudge` (the oxplow-bundled `effort-nudges` lens)
   (`crates/oxplow-rpc/src/commands/effort.rs`, adapters in
   `crates/oxplow-tauri-ipc/src/commands/effort.rs`, registered in the
   `rpc_dispatch!` registry and the surface-parity manifest as `ui()`).

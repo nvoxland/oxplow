@@ -1,4 +1,4 @@
-# oxplow-review/verify-unchecked: after an acceptance that left claims
+# oxplow-bundled/verify-unchecked: after an acceptance that left claims
 # unverified or decisions inferred (a forced one), file one item to verify
 # them — a checklist naming each, on the active tracker like every new
 # item. Its

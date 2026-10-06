@@ -138,7 +138,7 @@
     - { name: "peer_end_line", type: "INTEGER", doc: "Last line of the copy." }
 - name: change_file
   version: 1
-  description: "Each file a change touched, with its zone and whether it's a test. (v2: the \"look here first\" score moved to oxplow-analytics' `v_oxplow_analytics_change_interest`.)"
+  description: "Each file a change touched, with its zone and whether it's a test. (v2: the \"look here first\" score moved to oxplow-bundled's `v_oxplow_bundled_change_interest`.)"
   columns:
     - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
     - { name: "path", type: "TEXT", doc: "Repo-relative path." }

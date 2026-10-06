@@ -22,26 +22,26 @@ mock.module("../api.js", () => ({
         decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", kind: "work_item", placement: "ref-chip", label: "label", color: "color" }],
       },
     },
-    // P10 (K1): oxplow-review's verdict, on the effort it was given on.
+    // P10 (K1): oxplow-bundled's verdict, on the effort it was given on.
     {
-      name: "oxplow-review",
+      name: "oxplow-bundled",
       enabled: true,
       ui: {
         slots: [],
         commands: [],
         decorators: [
-          { id: "oxplow-review/0", extension: "oxplow-review", view: "v_oxplow_review_verdict", kind: "effort", placement: "ref-chip", label: "label", color: "color" },
+          { id: "oxplow-bundled/0", extension: "oxplow-bundled", view: "v_oxplow_bundled_verdict", kind: "effort", placement: "ref-chip", label: "label", color: "color" },
         ],
       },
     },
   ],
   querySql: async (sql: string, ...rest: unknown[]) => {
-    if (sql.includes("FROM v_oxplow_review_verdict")) {
+    if (sql.includes("FROM v_oxplow_bundled_verdict")) {
       return {
         columns: ["ref", "label", "color"],
         rows: [["effort:eff7", "Changes requested", "red"]],
         truncated: false,
-        reads: { models: ["v_oxplow_review_verdict"], tables: [], measures: [] },
+        reads: { models: ["v_oxplow_bundled_verdict"], tables: [], measures: [] },
         freshness: {},
       };
     }

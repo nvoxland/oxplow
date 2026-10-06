@@ -1,7 +1,7 @@
 import { ipc, run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 
-// Bundled oxplow-review decorates an effort with its latest verdict: a chip
+// oxplow-bundled decorates an effort with its latest verdict: a chip
 // in the effort page's header.
 
 test("an accepted effort's page carries the review's verdict chip", async ({ page, daemon }) => {
@@ -16,7 +16,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
     })
   ).rows[0]?.[0] as string;
   expect(effort).toMatch(/^effort:eff\d+$/);
-  await run(daemon, "oxplow_review.accept", { ref: effort });
+  await run(daemon, "oxplow_bundled.accept", { ref: effort });
   await searchable(daemon, "Wombat fix", "task");
   await page.goto("/");
   await page.getByTestId("rail-search").click();

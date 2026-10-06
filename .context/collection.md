@@ -391,7 +391,7 @@ The `static-analysis` payload is `{ command?, analyzer?, findings:[…],
 errorCount, warningCount, infoCount, noteCount }`; its `metric_value` is the
 error+warning count (**lower is better**, unlike coverage where higher is
 better). The effort review shows the latest run's findings in the
-oxplow-analytics *Static Analysis* lens (part of its `effort-tests` grid,
+oxplow-bundled *Static Analysis* lens (part of its `effort-tests` grid,
 mounted in the `effort.review.details` slot), each row opening the file at the line.
 The analysis ride-along has **no nudge** — the report-less nudge is
 test-specific.
@@ -407,7 +407,7 @@ page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
   lens in the `work_item.detail.body` slot) — but
   **not** coverage, test runs or static analysis. Those live only on the
   effort **diff view** (`DiffViewPage`, the effort-review surface), as the
-  oxplow-analytics `effort-tests` lens grid in its `effort.review.details` slot:
+  oxplow-bundled `effort-tests` lens grid in its `effort.review.details` slot:
   diff coverage, most-untested files, test runs, tests that failed (with
   their latest status, so a red→green loop reads plainly) and analyzer
   findings, all SQL over `v_effort_observation`'s payloads.
@@ -464,7 +464,7 @@ general-purpose tool must not make (see also [[tsk251]]).
 ## Nudge persistence
 
 PostToolUse nudges (report-less-run, and post-tool-use advisories such as
-oxplow-analytics' `coverage-target`) are **persisted**
+oxplow-bundled's `coverage-target`) are **persisted**
 as well as returned to the agent, so a reviewer can see "what oxplow told the
 agent this effort" after the fact, and the persisted row is what delivers it
 (the next tool-hook response takes the thread's undelivered nudges). When `on_post_tool_use` decides to
@@ -476,7 +476,7 @@ bash command); a view of `v_agent_nudge` re-runs on `ModelsChanged`. Persistence
 durable dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
 stored. The store
 (`SqliteAgentNudgeStore`), IPC (`list_nudges_for_thread`), the
-`v_agent_nudge` view and the oxplow-analytics `effort-nudges` lens are
+`v_agent_nudge` view and the oxplow-bundled `effort-nudges` lens are
 covered in [data-model.md](./data-model.md),
 [ipc-and-stores.md](./ipc-and-stores.md), and
 [agent-model.md](./agent-model.md) (Nudge persistence).

@@ -104,7 +104,7 @@ pub fn classify_effort_attribution(spec: &MetricSpec) -> EffortAttributionFamily
 }
 
 /// Operational metric namespaces (tokens, cost, cycle-time, redo-rate, nudges) —
-/// thread+window facts, never per-file gauges. The oxplow-analytics
+/// thread+window facts, never per-file gauges. The oxplow-bundled
 /// `metric-deltas` advisory skips the same prefixes in its SQL.
 pub fn is_operational_metric_key(key: &str) -> bool {
     key.starts_with("agent.") || key.starts_with("effort.") || key.starts_with("task.")

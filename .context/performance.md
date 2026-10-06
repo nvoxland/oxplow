@@ -82,7 +82,7 @@ Already fixed — **do not re-optimize these**:
 - `representative_facts_by_slice` was **38% of backend CPU** in a live capture;
   most calls no longer run it at all (tsk239/tsk242, below).
 
-## oxplow-analytics' co-change pairs (P7.B5, 2026-10-02)
+## oxplow-bundled's co-change pairs (P7.B5, 2026-10-02)
 
 The plan moved co-change out of core only if its SQL could be
 materialized in under 2 s on this repo's commit index. Measured with
@@ -94,9 +94,9 @@ SELECT runs in **0.14 s** (18,392 pair rows, both ways round). It's
 change's surprises (`change_co_change`) are a live view over it, the
 last-touch lookup using `idx_git_commit_file_path`.
 
-## oxplow-review's deviation model (P7.C5, 2026-10-02)
+## oxplow-bundled's deviation model (P7.C5, 2026-10-02)
 
-`v_oxplow_review_deviation` (an extension model with a recursive CTE over
+`v_oxplow_bundled_deviation` (an extension model with a recursive CTE over
 every effort file's directory prefixes) computes all efforts at once:
 **0.21 s** over this repo's 658 efforts / 5,484 effort files (sqlite3 on
 the live database, the same SQL over the physical tables). It stays a

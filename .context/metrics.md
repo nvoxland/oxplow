@@ -23,7 +23,7 @@ substrate (`CollectionService::effort_observations_from_metrics`); the
 > **Direction (epic tsk275):** this fact substrate becomes the "facts"
 > half of the [semantic layer](./semantic-layer.md), which adds entities,
 > expression/join dimensions and a read-only `v_*` SQL contract. The
-> Metrics pages move into the `oxplow-analytics` extension
+> Metrics pages move into the `oxplow-bundled` extension
 > ([extensions.md](./extensions.md)); the substrate and engine stay core.
 
 ## The fact substrate (epic tsk12 — the inversion, in flight)
@@ -1527,7 +1527,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
   with the UI that used them (tsk309); agents slice with `metric_grid(…, dim)`
   and read offenders with `metric_findings()`, and per-effort deltas are
   `v_effort_metric_delta`. The agent
-  gets the same numbers as prompt text via oxplow-analytics' `metric-deltas`
+  gets the same numbers as prompt text via oxplow-bundled's `metric-deltas`
   advisory (over the stored `v_effort_metric_delta`).
 - **Event**: `OxplowEvent::MetricSamplesChanged { stream_id, measures }`, from
   the change loop (the renderer refetches).
@@ -1751,7 +1751,7 @@ The mechanics behind those controls (unchanged by tsk117):
   folder, or the embedded script for a built-in).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
-effort review (`DiffViewPage`'s `effort.review.details` slot) shows the oxplow-analytics
+effort review (`DiffViewPage`'s `effort.review.details` slot) shows the oxplow-bundled
 `effort-metric-deltas` lens — the metrics the effort moved, before→after with
 Δ, better/worse and any threshold crossing, over `v_effort_metric_delta`
 (tests, coverage, analysis, tokens and nudges have their own lenses and are
@@ -1764,7 +1764,7 @@ Configure block and the Metrics rows.
 **Scaffolding is not here** (tsk122): its UI button was retired, and it is
 now the `metric.scaffold` command (P4.8), which calls
 `MetricsService::metric_scaffold`.
-Token and page analytics are oxplow-analytics lenses (`usage`) over
+Token and page analytics are oxplow-bundled lenses (`usage`) over
 `v_token_usage` / `v_page_visit`; `page_visit`/`usage_event` are deliberately
 **not** projected into the metric substrate — see the producers note above.
 
@@ -1931,7 +1931,7 @@ the single source of red/green: the Metrics page colors from them
 See [theming.md](./theming.md).
 
 Feedback is **advisory — oxplow never blocks**. It lives in the bundled
-`oxplow-analytics` extension as **advisories** (see
+`oxplow-bundled` extension as **advisories** (see
 [extensions.md](./extensions.md) → "Advisories"), SQL over the stored
 per-effort views, not in core:
 
@@ -1953,7 +1953,7 @@ per-effort views, not in core:
 
 All three reach the agent through the same `additionalContext` paths the old
 core code used, and post-tool-use hits are still persisted as nudges.
-Disabling `oxplow-analytics` turns them off.
+Disabling `oxplow-bundled` turns them off.
 
 ## Performance: the `producers_for_measure` memo (tsk130)
 

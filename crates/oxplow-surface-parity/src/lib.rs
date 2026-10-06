@@ -117,7 +117,7 @@ pub const MANIFEST: &[Capability] = &[
     both("list_thread_notes"),
     agent("list_effort_observations"),
     // Per-effort metric roll-up for the task-page panel (tsk250): the
-    // agent gets the same numbers as prompt text via oxplow-analytics'
+    // agent gets the same numbers as prompt text via oxplow-bundled's
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
     model("list_efforts_in_window", &["v_effort"]),
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)

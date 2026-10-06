@@ -33,7 +33,7 @@ pub fn parse_tool_call(payload_json: &str, project_dir: &Path) -> Option<ToolCal
         .or_else(|| str_field("query"))
         .or_else(|| str_field("url"))
         // `await_user`: the question the agent is waiting on (read by the
-        // oxplow-review Waiting on Me lens).
+        // oxplow-bundled Waiting on Me lens).
         .or_else(|| str_field("question"))
         .map(|d| d.chars().take(MAX_DETAIL).collect());
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "oxplow_review.accepted",
+  "title": "oxplow_bundled.accepted",
   "description": "A person accepted an effort's work. The envelope carries what the verdict is about and is kept: its subject is the effort (first), its work item, and every claim left unverified and decision left inferred at the verdict (an acceptance that names any was forced).",
   "type": "object",
   "additionalProperties": false,

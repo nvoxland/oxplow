@@ -1,14 +1,16 @@
 manifest: 2
-name: oxplow-review
-description: The effort review packet. What to check before accepting an agent's work, shown on each effort's diff.
+name: oxplow-bundled
+description: What comes with oxplow, built as an ordinary extension. The effort review packet and its verdicts, metric and coverage guidance for the agent, and the usage, quality and change analysis lenses.
 sharing: shared
 engine: ">=0.7"
 intent:
   purpose: >-
-    Put what a reviewer must check before accepting an agent's work on the
-    effort's diff: the decisions it made, the claims it didn't verify, where it
-    deviated or struggled, the tests it weakened, and what is waiting on the
-    person.
+    Show what a reviewer must check before accepting an agent's work — the
+    decisions it made, the claims it didn't verify, where it deviated or
+    struggled, the tests it weakened — and how the effort moved the code:
+    coverage and tests, metric deltas and thresholds, churn, duplication and
+    co-change. Steer the agent toward tests and thresholds while the effort
+    is open, and show what is waiting on the person.
   origin: null
   examples:
     - name: an effort that claimed passing tests without a run
@@ -17,8 +19,23 @@ intent:
     - name: a stream with blocked tasks and open follow-ups
       input: { lens: waiting-on-me, params: { stream_id: 1 } }
       expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing
+    - name: an effort whose changed lines are under-covered
+      input: { lens: effort-tests, params: { effort_id: 1 } }
+      expect: the effort's test runs, its diff coverage and the uncovered changed lines
+    - name: a metric pushed past its warn threshold during an effort
+      input: { advisory: threshold-crossed, effort_id: 1 }
+      expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
 ui:
   slots:
+    - { slot: effort.review.details, lens: change-review }
+    - { slot: vcs.commit.details, lens: change-review }
+    - { slot: vcs.status.details, lens: change-review }
+    - { slot: effort.review.details, lens: effort-tests }
+    - { slot: effort.review.details, lens: effort-metric-deltas }
+    - { slot: effort.review.details, lens: effort-nudges }
+    - { slot: work_item.detail.body, lens: task-tokens }
+    - { slot: thread.plan.header, lens: thread-tokens }
+    - { slot: diff.file.header, lens: file-co-change }
     - { slot: effort.review.details, lens: decisions }
     - { slot: effort.review.details, lens: inferred-decisions }
     - { slot: effort.review.details, lens: unverified-claims }
@@ -30,15 +47,134 @@ ui:
     - { slot: effort.review.details, lens: context-read }
     - { slot: effort.review.details, lens: review-prompt }
   commands:
-    - { command: oxplow_review.accept, label: Accept Review, about: effort }
-    - { command: oxplow_review.request_changes, label: Request Changes, about: effort }
+    - { command: oxplow_bundled.accept, label: Accept Review, about: effort }
+    - { command: oxplow_bundled.request_changes, label: Request Changes, about: effort }
   # The verdict where the effort is shown: it shows; it never acts.
   decorators:
     - { model: verdict, kind: effort, placement: ref-chip, label: label, color: color }
     - { model: verdict, kind: effort, placement: row-badge, label: label, color: color }
 panels:
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
+advisories:
+  # Steer the agent to add tests when this effort's changed lines are poorly
+  # covered. Reads the stored observation, so it fires on the tool call after
+  # the coverage lands.
+  - id: coverage-target
+    on: post-tool-use
+    once_per: effort
+    query: |
+      SELECT printf(
+               'Diff coverage on this effort''s changed lines is %d%%, below the %d%% target. '
+               || 'Add tests for the uncovered changed lines before closing (advisory — oxplow '
+               || 'won''t block you). See the effort''s coverage panel for which lines are uncovered.',
+               CAST(round(metric_value) AS INTEGER), 80) AS message
+      FROM v_effort_observation
+      WHERE effort_id = :effort_id AND kind = 'diff-coverage' AND metric_value < 80
+      ORDER BY seq DESC
+      LIMIT 1
+  # How code metrics moved this effort, every prompt while any moved.
+  # Operational metrics (tokens, cycle time, …) grow every turn and aren't
+  # code-health signals, so they're left out.
+  - id: metric-deltas
+    on: prompt
+    once_per: turn
+    heading: "# Metric deltas (this effort)"
+    query: |
+      WITH d AS (
+        SELECT key,
+               '- ' || title || ': '
+               || (CASE WHEN coalesce(baseline, current) = CAST(coalesce(baseline, current) AS INTEGER)
+                        THEN printf('%d', CAST(coalesce(baseline, current) AS INTEGER))
+                        ELSE printf('%.1f', coalesce(baseline, current)) END)
+               || ' → '
+               || (CASE WHEN current = CAST(current AS INTEGER) THEN printf('%d', CAST(current AS INTEGER))
+                        ELSE printf('%.1f', current) END)
+               || (CASE WHEN unit IS NULL OR unit = '' THEN '' WHEN unit = '%' THEN '%' ELSE ' ' || unit END)
+               || (CASE WHEN delta IS NULL THEN ''
+                        ELSE ' (Δ ' || (CASE WHEN delta < 0 THEN '-' ELSE '+' END)
+                             || (CASE WHEN abs(delta) = CAST(abs(delta) AS INTEGER)
+                                      THEN printf('%d', CAST(abs(delta) AS INTEGER))
+                                      ELSE printf('%.1f', abs(delta)) END) || ')' END) AS line
+        FROM v_effort_metric_delta
+        WHERE effort_id = :effort_id AND changed = 1 AND kind <> 'event'
+          AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
+      )
+      SELECT message FROM (
+        SELECT 0 AS o, key, line AS message FROM d
+        UNION ALL
+        SELECT 1, '', '(Advisory — for awareness, not gating.)' WHERE EXISTS (SELECT 1 FROM d)
+      )
+      ORDER BY o, key
+  # A metric this effort pushed past its warn/fail threshold, once per metric.
+  - id: threshold-crossed
+    on: prompt
+    once_per: row
+    heading: "# Metric thresholds"
+    query: |
+      SELECT key,
+             '⚠ ' || title || ' crossed its ' || crossing || ' threshold'
+             || coalesce(' (' || (CASE WHEN t = CAST(t AS INTEGER) THEN printf('%d', CAST(t AS INTEGER))
+                                       ELSE printf('%.1f', t) END) || ')', '')
+             AS message
+      FROM (SELECT *, CASE WHEN crossing = 'fail' THEN fail_at ELSE warn_at END AS t
+            FROM v_effort_metric_delta)
+      WHERE effort_id = :effort_id AND crossing IS NOT NULL AND kind <> 'event'
+        AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
+      ORDER BY key
+measures:
+  - key: oxplow_bundled.effort_churn_lines
+    unit: lines
+    subjectKind: effort
+    temporalSemantics: additive
+metrics:
+  - key: oxplow_bundled.effort_churn_lines
+    title: Effort churn
+    sourceMeasure: oxplow_bundled.effort_churn_lines
+    aggregation: sum
+    unit: lines
+    direction: neutral
+    displayKind: gauge
+    description: Lines each finished effort's change added and deleted.
+collectors:
+  - id: oxplow_bundled.effort_churn
+    doc: An effort's churn, from its change, when it finishes.
+    runtime: starlark
+    entry: collectors/effort_churn.star
+    trigger:
+      on: [effort.finished]
+    after: [change.analyze]
+    input: |
+      SELECT f.path, f.additions, f.deletions
+      FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+      WHERE c.kind = 'effort' AND c.target = CAST(:effort_id AS TEXT)
+    facts: [oxplow_bundled.effort_churn_lines]
 models:
+  - name: change_interest
+    version: 1
+    description: "Each changed file's \"look here first\" review priority (size × complexity spikes × parameter growth × long new functions) and why, `; `-separated."
+    columns:
+      - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
+      - { name: path, type: TEXT, doc: "Repo-relative path." }
+      - { name: interest, type: "", doc: "Review priority (a real number); higher means look here first." }
+      - { name: reasons, type: "", doc: "Why it's high, `; `-separated ('' for a routine file)." }
+  - name: co_change_pair
+    version: 1
+    # "The last 180 days" moves with the clock, not with a write.
+    materialize: { every: 1h }
+    description: "Files usually committed together: each pair (both ways round) that shared at least 3 commits of 50 files or fewer in the last 180 days."
+    columns:
+      - { name: path, type: TEXT, doc: "A file." }
+      - { name: other, type: TEXT, doc: "A file committed with it." }
+      - { name: together, type: "", doc: "How many commits they shared." }
+  - name: change_co_change
+    version: 1
+    description: "Files in a change that history says are surprising: untouched for 90 days or more, or changed without any of their usual partners (top three co-changers)."
+    columns:
+      - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
+      - { name: path, type: TEXT, doc: "The surprising file." }
+      - { name: reason, type: "", doc: "`dormant` or `usual-co-changers-absent`." }
+      - { name: expected, type: "", doc: "Its usual partners, `, `-separated (for `usual-co-changers-absent`)." }
+      - { name: dormant_days, type: "", doc: "Days since a commit last touched it (for `dormant`; 90 when never)." }
   - name: deviation
     version: 1
     description: "Files each effort changed outside the area its work item names: a file is in the area when the item's title or body names it, or one of its directories at least two levels deep (`src/ui`). An item that names no area has none."
@@ -50,7 +186,7 @@ models:
     version: 1
     key: [seq]
     materialize: { incremental: seq }
-    description: "Every verdict a reviewer gave (`oxplow_review.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
+    description: "Every verdict a reviewer gave (`oxplow_bundled.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
     columns:
       - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
       - { name: ref, type: TEXT, doc: "The effort reviewed (`effort:eff<id>`)." }
@@ -66,18 +202,18 @@ models:
       - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
 event_types:
   types:
-    - type: oxplow_review.accepted
+    - type: oxplow_bundled.accepted
       v: 1
       schema: event_types/accepted.v1.json
       summary: A person accepted an effort's work. Subject — the effort, its work item and any claim or decision accepted unchecked.
-    - type: oxplow_review.changes_requested
+    - type: oxplow_bundled.changes_requested
       v: 1
       schema: event_types/changes_requested.v1.json
       summary: A person sent an effort's work back with changes requested. Subject — the effort and its work item.
 effects:
   - id: verify-unchecked
     summary: After an acceptance that left claims unverified or decisions inferred, file one item to verify them.
-    on: [oxplow_review.accepted]
+    on: [oxplow_bundled.accepted]
     entry: effects/verify_unchecked.star
     # The acceptance's subject: the effort, its item, and each claim and
     # decision accepted unchecked — still unverified or inferred now. None
@@ -98,9 +234,9 @@ effects:
         AND NOT EXISTS (
           SELECT 1 FROM v_event p
             JOIN v_effect_run r ON r.event_id = p.id
-           WHERE p.type = 'oxplow_review.accepted' AND p.seq < :event_seq
+           WHERE p.type = 'oxplow_bundled.accepted' AND p.seq < :event_seq
              AND json_extract(p.subject, '$[0]') = json_extract(e.subject, '$[0]')
-             AND r.effect = 'oxplow-review/verify-unchecked' AND r.latest = 1
+             AND r.effect = 'oxplow-bundled/verify-unchecked' AND r.latest = 1
              AND r.state IN ('ok', 'proposed'))
 commands:
   - name: accept
@@ -120,7 +256,7 @@ commands:
              (SELECT json_group_array(json_object('decision', 'decision:' || d.id, 'question', d.question, 'choice', d.choice))
                 FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
              (SELECT json_group_array(v.path)
-                FROM v_oxplow_review_deviation v WHERE v.effort_id = e.id) AS deviated
+                FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
       FROM v_effort e
       WHERE 'effort:eff' || e.id = :ref
     confirm: always
@@ -163,7 +299,7 @@ commands:
              (SELECT json_group_array(json_object('decision', 'decision:' || d.id, 'question', d.question, 'choice', d.choice))
                 FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
              (SELECT json_group_array(v.path)
-                FROM v_oxplow_review_deviation v WHERE v.effort_id = e.id) AS deviated
+                FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
       FROM v_effort e
       WHERE 'effort:eff' || e.id = :ref
     confirm: always

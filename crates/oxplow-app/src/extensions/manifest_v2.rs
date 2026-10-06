@@ -308,7 +308,7 @@ pub struct ManifestV2 {
     #[serde(default)]
     pub config: Option<Value>,
     /// Guidance queries for the agent; parsed one by one by the loader.
-    /// Stable: the bundled `oxplow-analytics` ships on it, which is the
+    /// Stable: bundled `oxplow-bundled` ships on it, which is the
     /// evidence a kind needs to be promoted.
     #[serde(default)]
     pub advisories: Vec<Value>,
@@ -661,7 +661,7 @@ mod tests {
     }
 
     /// P9.D6: `event_types` is a stable kind — a shared extension may
-    /// declare its own event types (oxplow-review's verdict is the one
+    /// declare its own event types (oxplow-bundled's verdict is the one
     /// that earned it) — while the kinds still experimental stay closed
     /// to it. Every kind is in exactly one of the two tables.
     #[test]
@@ -684,7 +684,7 @@ mod tests {
         assert!(EXPERIMENTAL_KINDS.contains(&"providers"));
     }
 
-    /// P11 (tsk956): `effects` is stable — oxplow-review's follow-up is its
+    /// P11 (tsk956): `effects` is stable — oxplow-bundled's follow-up is its
     /// bundled, shared use, approved like any effect — so a shared
     /// extension may declare effects; the tables still partition the kinds.
     #[test]
@@ -717,7 +717,7 @@ mod tests {
         );
     }
 
-    /// P10 (K1): `ui.decorators` is stable — oxplow-review's verdict
+    /// P10 (K1): `ui.decorators` is stable — oxplow-bundled's verdict
     /// chip is its bundled, shared use — so a shared extension may declare
     /// decorators; the tables still partition the kinds.
     #[test]

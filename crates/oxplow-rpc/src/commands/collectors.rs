@@ -209,11 +209,11 @@ mod tests {
         let out = crate::dispatch("list_project_programs", serde_json::json!({}), &svc)
             .await
             .unwrap();
-        // Only what comes with oxplow: oxplow-review's follow-up effect,
+        // Only what comes with oxplow: oxplow-bundled's follow-up effect,
         // waiting for a person's approval (tsk956).
         let programs = out.as_array().unwrap();
         assert_eq!(programs.len(), 1, "{out}");
-        assert_eq!(programs[0]["name"], "oxplow-review/verify-unchecked");
+        assert_eq!(programs[0]["name"], "oxplow-bundled/verify-unchecked");
         assert_eq!(programs[0]["approved"], false);
         let err = crate::dispatch(
             "approve_project_program",
@@ -237,7 +237,7 @@ mod tests {
         let version = listed[0]["version"].as_str().unwrap().to_string();
         crate::dispatch(
             "approve_project_program",
-            serde_json::json!({ "kind": "effect", "name": "oxplow-review/verify-unchecked", "version": version }),
+            serde_json::json!({ "kind": "effect", "name": "oxplow-bundled/verify-unchecked", "version": version }),
             &svc,
         )
         .await

@@ -4,7 +4,7 @@ params: [{ name: change_id }]
 query: |
   SELECT i.path, round(i.interest, 1) AS interest, i.reasons,
          c.base_revision, c.head_revision
-  FROM v_oxplow_analytics_change_interest i JOIN v_change c ON c.id = i.change_id
+  FROM v_oxplow_bundled_change_interest i JOIN v_change c ON c.id = i.change_id
   WHERE i.change_id = :change_id AND i.interest > 0
   ORDER BY i.interest DESC, i.path
   LIMIT 10

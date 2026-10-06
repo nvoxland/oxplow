@@ -17,5 +17,5 @@
   about: effort
   skill: README.md
   reaches:
-    sql: SELECT path, change_kind FROM v_oxplow_review_deviation WHERE effort_id = 1
+    sql: SELECT path, change_kind FROM v_oxplow_bundled_deviation WHERE effort_id = 1
   shape: { columns: [path, change_kind] }

@@ -242,8 +242,8 @@ function refFor(kind: string, id: string): TabRef | null {
     case "commit":
       return gitCommitRef(id);
     case "finding":
-      // Findings are listed by the oxplow-analytics Findings lens.
-      return lensRef("oxplow-analytics/findings");
+      // Findings are listed by the oxplow-bundled Findings lens.
+      return lensRef("oxplow-bundled/findings");
     default:
       return null;
   }

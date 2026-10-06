@@ -1,5 +1,5 @@
 //! How much a file's tests check, and how many they skip — counted from its
-//! text so both sides of a change can be compared (the oxplow-review Tests
+//! text so both sides of a change can be compared (the oxplow-bundled Tests
 //! Weakened lens, via `v_change_test_file`). A heuristic across languages,
 //! not a parser: it counts calls that look like assertions and markers that
 //! skip a test.

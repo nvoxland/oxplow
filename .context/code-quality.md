@@ -26,7 +26,7 @@ for the user to install.
 > `list_code_quality_findings`, `read_endpoint_files_content`) are gone.
 > `crates/oxplow-app/src/change_analysis.rs` computes and stores each change
 > behind `v_change*` ([semantic-layer.md](./semantic-layer.md) → "Change
-> analysis"), and the oxplow-analytics `change-review` lens grid shows it in
+> analysis"), and the oxplow-bundled `change-review` lens grid shows it in
 > the `vcs.commit.details`, `vcs.status.details` and `effort.review.details` slots.
 
 ## Per-function metrics (change analysis, not a persisted scan)
@@ -128,7 +128,7 @@ in the background. `DuplicationRecorder::record`
 - a `code_quality_scan` row (tool `duplication`, scope `change <id>`, the
   `revision` it read — `working`, `snap:<id>`, `git:<rev>` — and a
   path-list fingerprint) and its findings, read through
-  `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-analytics
+  `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-bundled
   `findings` and `duplicate-blocks` lenses);
 - **no facts**: a change scan anchors only its changed files, so a capture
   from it would restate the whole tree from a slice and zero out every
@@ -164,7 +164,7 @@ takes `{ path, base_content, head_content }` specs and calls
 `oxplow_code_metrics::analyze_file` per side (no tempdir, no subprocess).
 The change analyzer buckets the result into added / deleted /
 signature-changed / body-changed functions; a file's review priority is
-oxplow-analytics' model `change_interest` over those rows (P7.B5); see
+oxplow-bundled's model `change_interest` over those rows (P7.B5); see
 [semantic-layer.md](./semantic-layer.md) → "Change analysis".
 
 The result also carries a `churn: Vec<AnalyzedFileChurn>` rollup
@@ -277,9 +277,9 @@ No IPC of its own — `zones` rides on `get_config`, and the config
 watcher hot-reloads file edits, so a write repaints an open
 changed-files tree without a restart.
 
-### Co-change (oxplow-analytics, P7.B5)
+### Co-change (oxplow-bundled, P7.B5)
 
-No longer core. oxplow-analytics' `co_change_pair` model, materialized
+No longer core. oxplow-bundled's `co_change_pair` model, materialized
 over the commit index (`v_commit_file`, every stream's head; see
 git-integration.md "Commit indexer"), holds each pair of files that
 shared at least 3 commits of 50 files or fewer (mass renames and
@@ -310,7 +310,7 @@ quieter UI; a false-positive is a wrong "wrong layer" callout.
 
 ### Where it shows
 
-The oxplow-analytics `change-review` grid (commit, uncommitted and
+The oxplow-bundled `change-review` grid (commit, uncommitted and
 `effort.review.details` slots): summary, look-here-first, a churn treemap grouped
 by zone, function changes, test changes, co-change surprises,
 duplication (with compare links) and new cross-zone imports. Zone badges

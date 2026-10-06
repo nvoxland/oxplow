@@ -1415,7 +1415,7 @@ mod tests {
         let err = share("../../src").await.unwrap_err();
         assert!(err.to_string().contains("extension name"), "{err}");
         assert!(!root.join("oxplow/src").exists());
-        let err = share("oxplow-analytics").await.unwrap_err();
+        let err = share("oxplow-bundled").await.unwrap_err();
         assert!(err.to_string().contains("bundled"), "{err}");
 
         // A directory that isn't an extension yet, holding someone's files.

@@ -14,6 +14,6 @@ cov = "llvm-cov nextest --workspace --no-fail-fast --lcov --output-path target/c
 
 [env]
 # SQLite's built-in math functions (`log2`, `ln`, `pow`, …) in the bundled
-# build, so SQL models and lenses can use them (P7.B5: oxplow-analytics'
+# build, so SQL models and lenses can use them (P7.B5: oxplow-bundled's
 # `change_interest` scores with `log2`).
 LIBSQLITE3_FLAGS = "-DSQLITE_ENABLE_MATH_FUNCTIONS"

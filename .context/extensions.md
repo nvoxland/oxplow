@@ -2,7 +2,7 @@
 
 This doc covers how anything that **measures or visualizes** is added to
 oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
-the bundled `oxplow-analytics` example extension.
+`oxplow-bundled`, the one extension that ships with oxplow.
 
 > **Status: built (epic tsk275; host finished in tsk278).**
 > - **Current:**
@@ -16,8 +16,8 @@ the bundled `oxplow-analytics` example extension.
 >   - the core explorer: the Explore Data page (with Save as Lens) and
 >     lens tiles on dashboards;
 >   - **bundled extensions** (compiled in, read-only, reserved names) and
->     the `effort.review.details` **slot**; the bundled `oxplow-review` extension
->     is the effort review packet;
+>     the `effort.review.details` **slot**; the bundled `oxplow-bundled` extension
+>     holds the effort review packet;
 >   - `exec` **sources** that bring external records in as entities. The
 >     mechanics and decisions are in
 >     [semantic-layer.md](./semantic-layer.md) → "User and extension
@@ -25,8 +25,8 @@ the bundled `oxplow-analytics` example extension.
 >   - **slots** (now `effort.review.details`, `vcs.commit.details`,
 >     `vcs.status.details`, `work_item.detail.body`, `thread.plan.header`),
 >     **advisories**, per-project **disabling**, and the
->     **`oxplow-analytics` extraction** (tsk280): every analytics page and
->     widget is now a lens in that bundled extension, and core works with
+>     **analytics extraction** (tsk280): every analytics page and
+>     widget is now a lens in `oxplow-bundled`, and core works with
 >     it disabled (checked headless, 2026-09-27).
 >   - lens alerts (tsk316; the `rail` slot they mounted in became panels
 >     in P6.G1), and extension-declared
@@ -143,7 +143,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     panel's lenses from one owner (`useExtensionPanelRuns`), so a badge
     runs once per refresh. The body renders compact; the badge's
     alert count shows on the panel, and the core **Alerts** panel lists
-    every firing badge. oxplow-review's Waiting on You is a panel
+    every firing badge. oxplow-bundled's Waiting on You is a panel
     whose badge is its own lens.
   - **Actions are commands** (P6.B1, target §11.4): `actions:` declares
     `{ id, label, command, input?, row? }` — a button above the result, or,
@@ -370,7 +370,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   check` prints — for each enabled project extension, on open and on
   `extensionsChanged`, and lists its errors with the load errors, once
   each. Bundled extensions are checked where they're built.
-- **Bundled extensions.**
+- **Bundled extensions.** There is one, `oxplow-bundled` (tsk1084): the
+  review packet, the analytics lenses and the agent's advisories in one
+  extension, because the point is building oxplow on its own extension
+  platform, not letting people pick between its features. It can still be
+  disabled like any other.
   - Their sources live in the repo at `extensions/<name>/`. They're
     compiled into the binary by `crates/oxplow-app/src/bundled_extensions.rs`
     (`include_str!`). A test fails if a file in the folder isn't listed.
@@ -438,7 +442,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   only: the last test run, diff coverage, unverified claims, decisions to
   confirm), and the task page links to it as **Review**: on each effort's
   activity card, and in the details rail for the newest effort.
-- **`oxplow-review` (the review packet).** Its lenses, mounted in
+- **The review packet** (in `oxplow-bundled`). Its lenses, mounted in
   `effort.review.details`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
@@ -446,7 +450,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     **Mark Verified** (`effort.verify_claim`)
   - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
     (`effort.confirm_decision` / `effort.dismiss_decision`)
-  - What Deviated (its own model `v_oxplow_review_deviation`: each
+  - What Deviated (its own model `v_oxplow_bundled_deviation`: each
     effort's files against its work item's title and body — a file is in
     the area when the text names it or one of its directories at least
     two levels deep; none when the item names no area. Live, not
@@ -469,15 +473,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 
   **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
   effort's page under **Commands** (`ui.commands` about `effort`):
-  `oxplow_review.accept { ref, force? }` comments the review on the
+  `oxplow_bundled.accept { ref, force? }` comments the review on the
   effort's work item then transitions it to `done`, refusing (`{ refuse }`)
   while a claim is unverified or an inferred decision unreviewed unless
   `force` (then it lists them in the comment);
-  `oxplow_review.request_changes { ref, note? }` comments a checklist —
+  `oxplow_bundled.request_changes { ref, note? }` comments a checklist —
   each unverified claim, inferred decision, file outside the area, and
   the note — then transitions to `todo`. Both read one `input` query
   (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
-  `v_oxplow_review_deviation`), compose `work_item.comment` and
+  `v_oxplow_bundled_deviation`), compose `work_item.comment` and
   `work_item.transition` — one transaction (and one undo) on oxplow's own
   item, steps through the provider on another provider's (not undoable;
   [commands.md](./commands.md) → "Composition", tsk713) — refuse an
@@ -534,7 +538,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   extension over the [semantic layer](./semantic-layer.md). That includes
   what oxplow itself ships.
 - **One format for first- and third-party.** The bundled
-  `oxplow-analytics` extension uses exactly the format a user or their
+  `oxplow-bundled` extension uses exactly the format a user or their
   agent writes. If extracting it needs a capability the format lacks, that
   capability is added to core for everyone and logged under "Added for
   extraction" below. No private backdoors.
@@ -582,7 +586,7 @@ loader resolves cross-references with `file:line` messages.
 
 ```yaml
 manifest: 2
-name: oxplow-analytics   # must equal the folder name
+name: oxplow-bundled   # must equal the folder name
 description: …
 sharing: shared          # private (default) | shared — see below
 engine: ">=0.7"          # the oxplow it targets; required when shared
@@ -648,7 +652,7 @@ its line.
   `measures:`, which resolves when the catalog is assembled).
 
 **Decision (2026-09-28): `advisories` is a stable kind.** The plan sketch
-had it experimental, but the bundled `oxplow-analytics` — shared by
+had it experimental, but `oxplow-bundled` — bundled, so shared by
 definition — ships on it, and a first-party extension depending on a
 kind is exactly the evidence promotion requires (target §10.1, §12).
 
@@ -1298,7 +1302,7 @@ custom_components:
   - id: burndown                       # [a-z0-9-]+
     title: Burndown
     bundle: components/burndown        # default components/<id>; holds index.html
-    assets: [open-tasks, oxplow-analytics/visits]   # lens ids; a bare slug is this extension's
+    assets: [open-tasks, oxplow-bundled/visits]   # lens ids; a bare slug is this extension's
     commands: [work_item.transition]
 ```
 ```yaml
@@ -1494,7 +1498,7 @@ lens cell that links to a listed ref. A color is used only when it's a
 plain one (`#rgb…` or a CSS color name, `safeColor`). Decorations are
 additive: a decorator whose query fails shows nothing.
 
-**Promoted to stable (P10)** on its first-party use: bundled oxplow-review
+**Promoted to stable (P10)** on its first-party use: oxplow-bundled
 shows each effort's latest verdict on the effort — a `ref-chip` on its
 page and a `row-badge` where a lens row links to it. Its model `verdict`
 (`Accepted`, `Accepted (forced)` or `Changes requested`; green, orange,
@@ -1502,7 +1506,7 @@ red) reads `verdicts`, which keeps every verdict event
 (`materialize: { incremental: seq }`, appended as each lands; a rewrite of
 the log — retention's payload expiry, a restart's refill — refills it
 whole). It reads only the events' **envelopes** (tsk886): the type says
-the verdict (`oxplow_review.accepted` / `.changes_requested`) and the
+the verdict (`oxplow_bundled.accepted` / `.changes_requested`) and the
 subject what it was about — the effort first, then its work item, then
 each claim and decision an acceptance took unchecked (any makes it
 forced). Retention keeps envelopes and a plugin's payloads go after 30
@@ -1535,13 +1539,13 @@ event_types:
 ```
 
 **Promoted to stable (P9.D6)** on the evidence rule every kind is held to
-— a first-party, shared extension depending on it: oxplow-review's
-`oxplow_review.accepted@1 { unverified, inferred, deviated }` and
-`oxplow_review.changes_requested@1 { unverified, inferred, deviated,
+— a first-party, shared extension depending on it: oxplow-bundled's
+`oxplow_bundled.accepted@1 { unverified, inferred, deviated }` and
+`oxplow_bundled.changes_requested@1 { unverified, inferred, deviated,
 note? }`, which `accept.star` and `request_changes.star` return in
 `events:` (subjects: the effort, its work item and, for an acceptance, the
 claims and decisions it took unchecked; caused by the run's
-`command.executed`). They replaced `oxplow_review.verdict@1`, whose
+`command.executed`). They replaced a single `verdict@1` type, whose
 verdict lived in an expiring payload (tsk886).
 Before them, a verdict lived only in a comment's text; now the effort's
 timeline carries who decided what, and another extension can react to it
@@ -1557,8 +1561,8 @@ a removed type's rows stay readable. `STABLE_KINDS` lists it;
 table, so promoting a kind is moving it from one table to the other.
 
 **`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
-extension acts with one. oxplow-review's **`verify-unchecked`** reacts to
-`oxplow_review.accepted`: its `input` reads the acceptance's subject
+extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
+`oxplow_bundled.accepted`: its `input` reads the acceptance's subject
 (`:event_id`, tsk955) — the effort, its item, and each claim and decision
 accepted unchecked, still unverified or inferred now — and is empty when
 the effect already filed (or proposed) a follow-up for an earlier
@@ -2308,7 +2312,7 @@ advisories:
   context (with the session-context and decisions blocks).
 - `validate_extension` dry-runs each advisory with `:effort_id` NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxplow-analytics ships three: `coverage-target`, `metric-deltas`,
+- oxplow-bundled ships three: `coverage-target`, `metric-deltas`,
   `threshold-crossed` (see [metrics.md](./metrics.md)). Advisories read
   stored views (`v_effort_metric_delta`, `v_effort_observation`), never the
   engine directly.
@@ -2472,7 +2476,12 @@ Each loads clean (`documented_examples_load_without_errors`):
   page `pr` (the `pr` lens, given `?ref=`), `[[pr:12]]`. `crates/oxplow-
   sdk/tests/examples.rs` checks and tests it and opens a pull request.
 
-## The `oxplow-analytics` example extension
+## The `oxplow-bundled` extension
+
+Everything oxplow ships that measures, visualizes or reviews is this one
+extension (`extensions/oxplow-bundled/`): its namespace is
+`oxplow_bundled` (commands, event types, measures, collectors) and its
+models publish as `v_oxplow_bundled_*`.
 
 What moves out of core, and what it becomes:
 
@@ -2489,7 +2498,7 @@ What moves out of core, and what it becomes:
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is
-its model `change_interest` (`v_oxplow_analytics_change_interest`, over
+its model `change_interest` (`v_oxplow_bundled_change_interest`, over
 `ref('change_file')` and `ref('change_function')`), which the
 `change-look-here` lens reads; co-change surprises are its models
 `co_change_pair` (`materialize: { every: 1h }` over the commit index —
@@ -2498,9 +2507,9 @@ its model `change_interest` (`v_oxplow_analytics_change_interest`, over
 `file-co-change` lens ("Usually Changes With", mounted at
 `diff.file.header`, P9.A2) reads `co_change_pair` for the file a diff
 shows; an
-effort's churn is its fact collector `oxplow_analytics.effort_churn`
+effort's churn is its fact collector `oxplow_bundled.effort_churn`
 (`on: [effort.finished]`, `after: [change.analyze]`, reading the
-effort's change files) recording `oxplow_analytics.effort_churn_lines`.
+effort's change files) recording `oxplow_bundled.effort_churn_lines`.
 Full-tree duplicated lines (tsk388) read the tree, not tables, so they
 are a core built-in collector, `oxplow.duplicate_lines`, over the
 public `duplicate_blocks(min_lines)` builtin — what any extension could
@@ -2541,7 +2550,7 @@ lenses:
 - Copy review prompt (for reviewing with a second harness; the human
   pastes it)
 
-**Done when** core boots and is usable with `oxplow-analytics` disabled,
+**Done when** core boots and is usable with `oxplow-bundled` disabled,
 and enabling it restores the old pages' behavior as lenses.
 
 ## Added for extraction

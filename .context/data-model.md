@@ -1778,7 +1778,7 @@ already-recorded usage. No FK (the transcript outlives any single row).
 
 Store methods: `record`, `list_for_effort`, `totals_for_effort`,
 `totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
-reads `v_token_usage` through oxplow-analytics lenses (`task-tokens`,
+reads `v_token_usage` through oxplow-bundled lenses (`task-tokens`,
 `thread-tokens`, `usage`), which re-run on `ModelsChanged`.
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)

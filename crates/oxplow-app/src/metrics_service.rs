@@ -5426,7 +5426,7 @@ def transform(input):
         assert_eq!(
             (m, d),
             (2, 1),
-            "the project's measure and oxplow-analytics' (bundled, on), one project dimension"
+            "the project's measure and oxplow-bundled's (bundled, on), one project dimension"
         );
 
         // The custom measure lands beside the migration-seeded `oxplow.*` built-ins.

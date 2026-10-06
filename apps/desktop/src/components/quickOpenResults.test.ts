@@ -209,7 +209,7 @@ describe("buildQuickOpenResults", () => {
   test("a title match ranks first, and keywords match whole words", () => {
     const planning: PageDirectoryEntry = {
       ...page("lens:a/planning", "Planning"),
-      keywords: "lens oxplow-analytics planning what to do next, sorted by the oldest first",
+      keywords: "lens oxplow-bundled planning what to do next, sorted by the oldest first",
     };
     const todos: PageDirectoryEntry = { ...page("lens:t/todos", "TODO comments"), keywords: "lens todo-watch todos every comment" };
     const symbols: PageDirectoryEntry = { ...page("symbols", "Symbols"), keywords: "outline go to definition" };

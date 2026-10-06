@@ -1,6 +1,6 @@
 /// What a reviewer needs first about an effort (tsk1036): did it test, how
 /// much of the change the tests ran, and what's left to check — read from
-/// core models only (the review extension is optional), as one query.
+/// core models only (`oxplow-bundled` is optional), as one query.
 import type { SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /** One row for effort `?1` (its row id). */
