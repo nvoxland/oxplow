@@ -93,6 +93,17 @@ ancestor leaves it. The project picks the policy as
 both are rows in `v_capability_provider`. A task's status no longer opens
 or closes an effort anywhere else.
 
+Rule 2 reads **`thread.checkpoint@1 { thread, turn, reason, snapshot,
+changed, writing_tools }`**, logged by the `thread.checkpoint` consumer
+(`crate::thread_checkpoint`) once a turn's end take lands. `changed`
+compares the turn's start snapshot with the take's (content-addressed:
+the same id means the same tree); `writing_tools` counts the turn's calls
+to tools that can change the worktree — edits, shell commands, subagents,
+`run_command` — from a per-harness name list kept in that module, so no
+policy reads tool names. The policy opens an unlinked effort with
+`adopt_since` the turn's start when `changed` and `writing_tools > 0` and
+the thread has none open; a later item start links it (rule 1).
+
 ## No gates
 
 - The edit guard keeps only isolation: a non-writer thread, another
@@ -169,8 +180,7 @@ The three in progress:
   hook never refuses; the edit guard is isolation only; efforts need no
   work item, one is open per thread, and the seam (open with adoption,
   close as of a point, link, retitle — `commands/effort.rs`); the
-  effort-policy choice with "none", and rule 1.
-- Next, in order: rule 2 (open on change, after a turn's checkpoint);
-  observed files; rule 3 (a commit lands it); waiting derived; the
+  effort-policy choice with "none"; rules 1 and 2 (`thread.checkpoint`).
+- Next, in order: observed files; rule 3 (a commit lands it); waiting derived; the
   Work panel and a Thread activity page; hints; skills and repo rules.
   Then the capability framework and the three swappable pieces.

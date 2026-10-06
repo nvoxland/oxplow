@@ -127,6 +127,7 @@ pub mod terminal_sessions;
 pub(crate) mod test_fixtures;
 pub mod test_outcome;
 pub mod test_signals;
+pub mod thread_checkpoint;
 pub mod thread_runtime;
 pub mod token_usage;
 pub mod tool_call_reactors;
@@ -1100,6 +1101,11 @@ impl Services {
             }))
         };
         work_items.register(work_items::oxplow_provider());
+        // A turn's end take becomes a `thread.checkpoint` a policy reads.
+        event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
+            log: (*event_log_store).clone(),
+            sql: sql.clone(),
+        }));
         // The project's effort policy reacts to items starting and
         // finishing, through this bus (`.context/work-tracking.md`).
         event_pump.register_async(Arc::new(effort_policy::EffortPolicyConsumer {

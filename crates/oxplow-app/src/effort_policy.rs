@@ -14,6 +14,12 @@
 //! - work linked to a `todo` item moves the item to `in_progress`. Nothing
 //!   is ever marked done.
 //!
+//! Rule 2, open on change: a `thread.checkpoint` showing the worktree
+//! changed in a turn that ran a tool able to change it opens an unlinked
+//! effort on a thread with none open, adopting the turn (its tool calls,
+//! tokens and runs move into it). A turn that only read never opens one,
+//! so a person's own edits meanwhile don't either.
+//!
 //! The project chooses it like a work list: `activeProviders.effort_policy`
 //! is `oxplow` (the default) or `none`, which leaves efforts to people and
 //! agents.
@@ -24,8 +30,8 @@ use async_trait::async_trait;
 use oxplow_config::OxplowConfig;
 use oxplow_db::SqlCell;
 use oxplow_domain::events::schema::{
-    EffortLinked, EffortLinkedV1, EffortOpened, EffortOpenedV2, EventType as _,
-    WorkItemStateChanged, WorkItemStateChangedV1,
+    EffortLinked, EffortLinkedV1, EffortOpened, EffortOpenedV2, EventType as _, ThreadCheckpoint,
+    ThreadCheckpointV1, WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::work_items::CanonicalState;
 use oxplow_domain::{Actor, DomainError, EffortId, StoredEvent, ThreadId};
@@ -214,6 +220,28 @@ impl EffortPolicyConsumer {
         Ok(())
     }
 
+    /// A turn changed `thread`'s worktree: open an effort adopting the turn,
+    /// unless one is open.
+    async fn changed(&self, thread: ThreadId, turn: i64) -> Result<(), DomainError> {
+        if self.open_on(thread).await?.is_some() {
+            return Ok(());
+        }
+        let rows = self
+            .rows(
+                "SELECT started_at FROM v_agent_turn WHERE id = ?1",
+                vec![SqlCell::Int(turn)],
+            )
+            .await?;
+        let Some(started) = rows.first().and_then(|r| r.first()).and_then(text) else {
+            return Ok(());
+        };
+        self.run(
+            crate::commands::effort::OPEN,
+            json!({ "thread": thread.to_string(), "adopt_since": started }),
+        )
+        .await
+    }
+
     /// Work was linked to `item_ref`: a `todo` item moves to in progress.
     async fn linked(&self, item_ref: &str) -> Result<(), DomainError> {
         if let Some((Some(CanonicalState::Todo), _)) = self.item(item_ref).await? {
@@ -244,6 +272,7 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
         event_type == WorkItemStateChanged::TYPE
             || event_type == EffortLinked::TYPE
             || event_type == EffortOpened::TYPE
+            || event_type == ThreadCheckpoint::TYPE
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
@@ -269,6 +298,20 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
                 match linked.work_item {
                     Some(item) => self.linked(&item).await,
                     None => Ok(()),
+                }
+            }
+            t if t == ThreadCheckpoint::TYPE => {
+                let checkpoint: ThreadCheckpointV1 =
+                    serde_json::from_value(payload).map_err(storage)?;
+                if !checkpoint.changed || checkpoint.writing_tools == 0 {
+                    return Ok(());
+                }
+                match (
+                    event.envelope.anchors.thread_id,
+                    event.envelope.anchors.turn_id,
+                ) {
+                    (Some(thread), Some(turn)) => self.changed(thread, turn).await,
+                    _ => Ok(()),
                 }
             }
             _ => {
@@ -494,6 +537,66 @@ mod tests {
         let other = item(&fx, "other", None, false).await;
         transition(&fx, &agent(&fx), &other, "in_progress").await;
         transition(&fx, &agent(&fx), &work_item_ref(fx.task), "done").await;
+        assert_eq!(
+            efforts(&fx).await,
+            vec![(
+                fx.effort.value(),
+                Some(work_item_ref(fx.task)),
+                Some("open".into())
+            )]
+        );
+    }
+
+    /// Rule 2: a turn that changed the worktree and ran a tool that could
+    /// have, on a thread with no open effort, opens an unlinked one that
+    /// adopts the turn — its tool calls move into it.
+    #[tokio::test]
+    async fn a_turn_that_changed_the_worktree_opens_an_effort() {
+        let fx = crate::thread_checkpoint::tests::with_baseline().await;
+        close_fixture_effort(&fx).await;
+        crate::thread_checkpoint::tests::turn(&fx, Some(("made.txt", "x")), &["Edit"]).await;
+        settle(&fx).await;
+        let open: Vec<_> = efforts(&fx)
+            .await
+            .into_iter()
+            .filter(|e| e.2.as_deref() == Some("open"))
+            .collect();
+        assert_eq!(open.len(), 1, "{open:?}");
+        assert_eq!(open[0].1, None, "unlinked");
+        let adopted = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT count(*) FROM v_tool_call WHERE tool = 'Edit' AND effort_id = ?1",
+                vec![SqlCell::Int(open[0].0)],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        assert_eq!(
+            adopted[0][0],
+            SqlCell::Int(1),
+            "the turn's edit is the effort's"
+        );
+    }
+
+    /// A turn that only read never opens one, even when the person changed
+    /// the worktree meanwhile; nor does a turn that changed nothing; and an
+    /// open effort stays the one.
+    #[tokio::test]
+    async fn reading_turns_and_open_efforts_open_nothing() {
+        let fx = crate::thread_checkpoint::tests::with_baseline().await;
+        close_fixture_effort(&fx).await;
+        let before = efforts(&fx).await;
+        crate::thread_checkpoint::tests::turn(&fx, Some(("theirs.txt", "x")), &["Read"]).await;
+        crate::thread_checkpoint::tests::turn(&fx, None, &["Bash"]).await;
+        settle(&fx).await;
+        assert_eq!(efforts(&fx).await, before);
+
+        let fx = crate::thread_checkpoint::tests::with_baseline().await;
+        crate::thread_checkpoint::tests::turn(&fx, Some(("made.txt", "x")), &["Edit"]).await;
+        settle(&fx).await;
         assert_eq!(
             efforts(&fx).await,
             vec![(

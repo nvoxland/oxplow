@@ -1,0 +1,54 @@
+{
+  "$defs": {
+    "CheckpointReason": {
+      "description": "Why a thread reached a checkpoint.",
+      "oneOf": [
+        {
+          "const": "turn_end",
+          "description": "A turn ended and its snapshot was taken.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`thread.checkpoint@1`: a point in a thread's work oxplow observed, with\nwhat changed since the turn began — what an effort policy reacts to\nwithout reading snapshots or harness tool names\n(`.context/work-tracking.md`). Logged by the `thread.checkpoint`\nconsumer once a turn's end take lands.",
+  "properties": {
+    "changed": {
+      "description": "The worktree differs from where the turn began.",
+      "type": "boolean"
+    },
+    "reason": {
+      "$ref": "#/$defs/CheckpointReason"
+    },
+    "snapshot": {
+      "description": "`snapshot:N`, the worktree at the checkpoint.",
+      "type": "string"
+    },
+    "thread": {
+      "description": "`thread:thr3`.",
+      "type": "string"
+    },
+    "turn": {
+      "description": "`turn:trn12`.",
+      "type": "string"
+    },
+    "writing_tools": {
+      "description": "The turn's calls to tools that can change the worktree (edits,\nshell commands, subagents, oxplow commands); 0 for a turn that only\nread and answered.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "thread",
+    "turn",
+    "reason",
+    "snapshot",
+    "changed",
+    "writing_tools"
+  ],
+  "title": "ThreadCheckpointV1",
+  "type": "object"
+}

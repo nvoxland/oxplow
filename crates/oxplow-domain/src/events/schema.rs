@@ -32,6 +32,7 @@ use crate::DomainError;
 /// The namespaces core owns (§5.3). Plugin types may not use them.
 pub const CORE_NAMESPACES: &[&str] = &[
     "agent",
+    "thread",
     "snapshot",
     "vcs",
     "effort",
@@ -192,6 +193,8 @@ impl EventSchemaRegistry {
         r.register::<WorkItemRecorded>()
             .expect("core type registers");
         r.register::<WorkItemStateChanged>()
+            .expect("core type registers");
+        r.register::<ThreadCheckpoint>()
             .expect("core type registers");
         r.register::<KnowledgePageWritten>()
             .expect("core type registers");
@@ -1609,6 +1612,44 @@ impl EventType for CollectorSynced {
     type Payload = CollectorSyncedV1;
 }
 
+/// Why a thread reached a checkpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckpointReason {
+    /// A turn ended and its snapshot was taken.
+    TurnEnd,
+}
+
+/// `thread.checkpoint@1`: a point in a thread's work oxplow observed, with
+/// what changed since the turn began — what an effort policy reacts to
+/// without reading snapshots or harness tool names
+/// (`.context/work-tracking.md`). Logged by the `thread.checkpoint`
+/// consumer once a turn's end take lands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ThreadCheckpointV1 {
+    /// `thread:thr3`.
+    pub thread: String,
+    /// `turn:trn12`.
+    pub turn: String,
+    pub reason: CheckpointReason,
+    /// `snapshot:N`, the worktree at the checkpoint.
+    pub snapshot: String,
+    /// The worktree differs from where the turn began.
+    pub changed: bool,
+    /// The turn's calls to tools that can change the worktree (edits,
+    /// shell commands, subagents, oxplow commands); 0 for a turn that only
+    /// read and answered.
+    pub writing_tools: u32,
+}
+
+pub struct ThreadCheckpoint;
+impl EventType for ThreadCheckpoint {
+    const TYPE: &'static str = "thread.checkpoint";
+    const V: u32 = 1;
+    type Payload = ThreadCheckpointV1;
+}
+
 /// `work_item.state_changed@1`: a `work_item.*` command put an item in
 /// a canonical state — logged by core for every provider, anchored to the
 /// thread of whoever ran it (`.context/work-items.md`). A create always
@@ -2240,6 +2281,7 @@ mod tests {
                 ("snapshot.taken", 2),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 1),
+                ("thread.checkpoint", 1),
                 ("ui.op_failed", 1),
                 ("vcs.head.moved", 1),
                 ("work_item.commented", 1),
