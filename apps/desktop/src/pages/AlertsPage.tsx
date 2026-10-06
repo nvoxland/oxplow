@@ -1,4 +1,4 @@
-/// Everything that needs the person, in one place (tsk1097): opened from
+/// Everything that needs the person, in one place: opened from
 /// the status bar's bell or a toast's Review. Three groups:
 /// - Needs your decision — each waiting proposal as its card, with its
 ///   preview and Approve / Decline (the one place besides its thread

@@ -2694,7 +2694,7 @@ impl SqliteFactStore {
     /// don't skip).
     /// The newest snapshot of `stream_id` that `producer` finished a
     /// capture for, any scan kind — where a deferred (paced) run picks up
-    /// (tsk1092).
+    ///.
     pub async fn last_done_snapshot(
         &self,
         producer: &str,

@@ -92,7 +92,7 @@ pub fn payload_matches(
 /// whole-tree collector, which alone runs on a take that recorded none),
 /// an effort's end snapshot, or else the stream's latest snapshot.
 /// Only those that run at once: a collector whose pacing defers this
-/// event's type waits for `crate::pacing` (tsk1092).
+/// event's type waits for `crate::pacing`.
 async fn run_fact_collectors(svc: &Services, event: Arc<StoredEvent>) -> Result<(), DomainError> {
     let anchors = &event.envelope.anchors;
     let event_type = event.envelope.event_type.clone();
@@ -389,7 +389,7 @@ mod tests {
         );
     }
 
-    /// tsk1092: a paced collector doesn't run as its event arrives: it's
+    /// A paced collector doesn't run as its event arrives: it's
     /// recorded pending (the latest event wins) and runs once its pacing
     /// allows, for that event, then clears.
     #[tokio::test]
@@ -433,7 +433,7 @@ mod tests {
         );
     }
 
-    /// tsk1092: an `idle` collector waits while an agent turn runs, and
+    /// An `idle` collector waits while an agent turn runs, and
     /// runs once none does and nothing has changed for that long.
     #[tokio::test]
     async fn an_idle_collector_waits_out_a_running_turn() {

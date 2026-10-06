@@ -299,7 +299,7 @@ impl SqliteChangeStore {
             .await
     }
 
-    /// Stage one (tsk1095): replace the change's files — status and line
+    /// Stage one: replace the change's files — status and line
     /// counts — alone, stamped with what they saw, and for a working tree
     /// git's in-progress operation and conflict count. The deep analysis
     /// is left as it was. A list older than the stored one is dropped.

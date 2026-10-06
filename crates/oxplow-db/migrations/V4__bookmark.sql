@@ -1,4 +1,4 @@
--- The person's bookmarks (tsk1099): a page they starred, at one scope —
+-- The person's bookmarks: a page they starred, at one scope —
 -- a thread's, a stream's or the whole project's. From a thread a ref is
 -- bookmarked at most once across the scopes it sees (that thread, its
 -- stream, the project): bookmarking it again moves it. `ref` is the

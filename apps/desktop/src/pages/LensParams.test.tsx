@@ -6,7 +6,7 @@ import { ParamsForm } from "./LensPage.js";
 
 afterEach(cleanup);
 
-// tsk1100: a choice param is a select over the values its lens declares.
+// A choice param is a select over the values its lens declares.
 test("a choice param is a select of its options", () => {
   const lens = {
     params: [

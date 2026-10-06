@@ -10,7 +10,7 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
   await run(daemon, "work_item.create", { title: "Pear [delete]", thread: daemon.thread });
-  // The status bar's bell opens the Alerts page, where it waits (tsk1097).
+  // The status bar's bell opens the Alerts page, where it waits.
   await page.getByTestId("alerts-indicator").click();
   const card = page.locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   await expect(card).toBeVisible();

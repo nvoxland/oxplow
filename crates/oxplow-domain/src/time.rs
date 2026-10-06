@@ -99,7 +99,7 @@ impl<'de> Deserialize<'de> for Timestamp {
 /// duration; anything else (zero included) is `None`. One parser for
 /// `trigger: { every: … }` and `materialize: { every: … }`.
 /// A duration written `30s`, `5m` or `2h` (a positive whole number and a
-/// unit): a collector trigger's pacing (tsk1092).
+/// unit): a collector trigger's pacing.
 pub fn parse_duration(text: &str) -> Option<std::time::Duration> {
     let t = text.trim();
     let (n, unit) = if let Some(n) = t.strip_suffix('s') {

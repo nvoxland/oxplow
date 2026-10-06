@@ -77,7 +77,7 @@
     - { relationships: { column: ai_call_id, to: ai_call, field: id } }
 - name: bookmark
   version: 1
-  description: "Pages the person bookmarked, each at one scope (tsk1099): a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a ref is bookmarked at most once across those."
+  description: "Pages the person bookmarked, each at one scope: a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a ref is bookmarked at most once across those."
   columns:
     - { name: "id", type: "INTEGER", doc: "Bookmark id." }
     - { name: "ref", type: "TEXT", doc: "The page's canonical ref (its tab id): what the bookmark opens." }

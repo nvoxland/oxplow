@@ -28,7 +28,7 @@ export interface DisplayColumn {
 }
 
 /** The columns that style rows rather than show as cells: `group.by`,
- *  `emphasis` and `depth` (tsk1089). */
+ *  `emphasis` and `depth`. */
 function stylingColumns(lens: Lens): string[] {
   return [lens.group?.by, lens.emphasis, lens.depth].filter((c): c is string => !!c);
 }

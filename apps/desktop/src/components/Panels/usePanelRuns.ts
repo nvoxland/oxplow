@@ -1,6 +1,6 @@
 /// The extension panels' lens runs (P6.G1): each panel's body, its badge
 /// (the badge lens's alert count while it fires), its collapsed summary
-/// and its count lens (tsk1089) — each distinct lens once. One owner (the
+/// and its count lens — each distinct lens once. One owner (the
 /// rail) runs them all, once per refresh, and hands each panel its runs;
 /// the Alerts panel is derived from the same runs (`panelAlerts`), so a
 /// badge never runs twice and the header count and Alerts can't disagree.
@@ -61,7 +61,7 @@ export function panelParams(
   }
 }
 
-/** The viewer's picks for the panels' choice params (tsk1100): by panel
+/** The viewer's picks for the panels' choice params: by panel
  *  id, each param's chosen value. */
 export type PanelChoices = Record<string, Record<string, string>>;
 

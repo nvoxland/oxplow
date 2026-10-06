@@ -100,7 +100,7 @@ pub enum Trigger {
     On {
         events: Vec<String>,
         filter: BTreeMap<String, String>,
-        /// When the run happens after a triggering event (tsk1092): at
+        /// When the run happens after a triggering event: at
         /// once by default.
         #[serde(default)]
         pacing: Pacing,
@@ -111,7 +111,7 @@ pub enum Trigger {
     OnRun { run: RunKind },
 }
 
-/// When an `on:` collector runs after a triggering event (tsk1092). Empty,
+/// When an `on:` collector runs after a triggering event. Empty,
 /// at once — as before pacing existed. Otherwise the run is deferred
 /// (recorded `pending`, so views can say "updating…") until every set
 /// condition holds, then runs once for the latest triggering event:
@@ -1258,7 +1258,7 @@ mod tests {
                 pacing: Pacing::default(),
             }
         );
-        // tsk1092: pacing — settle, at most, idle, and the events that run
+        // Pacing — settle, at most, idle, and the events that run
         // at once past them.
         assert_eq!(
             with("trigger: { on: [snapshot.taken, effort.finished], settle: 30s, at_most: 5m, idle: 2m, force: [effort.finished] }")

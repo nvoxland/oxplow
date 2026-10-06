@@ -447,7 +447,7 @@ impl SqliteEventLogStore {
         self.db.call_mut(move |conn| get_tx(conn, &id)).await
     }
 
-    /// The event at `seq` (a paced collector's pending run, tsk1092).
+    /// The event at `seq` (a paced collector's pending run).
     pub async fn get_by_seq(&self, seq: i64) -> Result<Option<StoredEvent>, DomainError> {
         self.db
             .call_mut(move |conn| {

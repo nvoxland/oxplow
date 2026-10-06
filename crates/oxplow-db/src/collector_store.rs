@@ -154,7 +154,7 @@ impl SqliteCollectorStore {
     }
 
     /// Drop every table, view and state row an extension owns.
-    /// Defer `owner`/`id`'s run to event `seq` (tsk1092): the latest event
+    /// Defer `owner`/`id`'s run to event `seq`: the latest event
     /// wins, `since` stays the first deferral, `touched` is `now`.
     pub async fn mark_pending(
         &self,
@@ -772,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_pending_run_keeps_its_latest_event_and_clears_only_for_it() {
-        // tsk1092: a deferred collector run is recorded pending with the
+        // A deferred collector run is recorded pending with the
         // latest event it'll run for; clearing it for an older event (one
         // a newer arrived after) leaves it pending.
         let db = Database::in_memory();

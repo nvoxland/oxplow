@@ -1,4 +1,4 @@
-//! The person's bookmarks (`bookmark`, tsk1099): pages they starred, each
+//! The person's bookmarks (`bookmark`): pages they starred, each
 //! at one scope — a thread's, a stream's or the project's. A viewer (a
 //! thread, and its stream) sees its thread's bookmarks, its stream's and
 //! the project's; a ref is bookmarked at most once across what one viewer

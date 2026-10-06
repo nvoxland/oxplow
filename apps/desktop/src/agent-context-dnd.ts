@@ -51,7 +51,7 @@ export function readContextRef(e: AnyDragEvent): ContextRef | null {
 
 /**
  * Decode a `CONTEXT_REF_MIME` payload: a file, wiki page, task, or any
- * canonical ref (what a lens row drags, tsk1089). Null for anything
+ * canonical ref (what a lens row drags). Null for anything
  * malformed. Pure — exported for tests.
  */
 export function decodeContextRef(raw: string | null | undefined): ContextRef | null {

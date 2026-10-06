@@ -1,4 +1,4 @@
-/// The status bar's bell (tsk1097): how many things need the person, red
+/// The status bar's bell: how many things need the person, red
 /// while something failed, the accent while decisions or notices wait,
 /// quiet when nothing does. Opens the Alerts page.
 

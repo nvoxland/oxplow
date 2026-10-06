@@ -38,7 +38,7 @@ const HEAD_MOVED: &str = "vcs.head.moved";
 const EFFORT_FINISHED: &str = "effort.finished";
 const TURN_ENDED: &str = "agent.turn.ended";
 
-/// When a mutable change's deep analysis runs (tsk1093): its file list is
+/// When a mutable change's deep analysis runs: its file list is
 /// listed on every move (stage one); the deep analysis once a burst of
 /// takes settles (20 s), at most every 2 minutes, and at once when HEAD
 /// moves or an agent's turn ends. A finishing effort's runs at once.
@@ -174,7 +174,7 @@ impl AsyncEventConsumer for ChangeReactor {
             e => DomainError::Invalid(format!("analyzing stream {stream}: {e}")),
         };
         // Stage one first, for every mutable change: the file lists are
-        // current before any deep analysis begins (tsk1095).
+        // current before any deep analysis begins.
         let open: Vec<_> = svc
             .effort_store
             .list_open_for_stream(stream)
@@ -298,7 +298,7 @@ mod tests {
         std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    2\n}\n").unwrap();
     }
 
-    /// tsk1095: a move lists the working tree's files first, on their own:
+    /// A move lists the working tree's files first, on their own:
     /// even while a deep analysis of it is still running (the deep step
     /// defers, `Busy`), the file list is current.
     #[tokio::test]
@@ -332,7 +332,7 @@ mod tests {
         );
     }
 
-    /// tsk1093: a take that recorded files lists the working tree's files
+    /// A take that recorded files lists the working tree's files
     /// at once and paces the deep analysis (`pending_run`, core's job):
     /// it runs once settled, stamping what its inputs had seen.
     #[tokio::test]
@@ -376,7 +376,7 @@ mod tests {
         );
     }
 
-    /// tsk1093: an agent's turn ending analyzes at once — the moment a
+    /// An agent's turn ending analyzes at once — the moment a
     /// person looks at what it did — and clears the paced job.
     #[tokio::test]
     async fn a_turn_ending_analyzes_at_once() {

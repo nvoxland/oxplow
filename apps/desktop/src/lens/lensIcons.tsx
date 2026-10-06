@@ -1,5 +1,5 @@
 /**
- * The fixed vocabularies a lens draws from its rows (tsk1089): a column's
+ * The fixed vocabularies a lens draws from its rows: a column's
  * `icon` names one of `LENS_ICON_NAMES`, and its `tone` one of
  * `LENS_TONES`. Values come from the query, so the loader can't check them:
  * an unknown name draws no icon, an unknown tone leaves the cell plain.
@@ -71,7 +71,7 @@ export const LENS_ICON_NAMES: readonly string[] = [
 ];
 
 /** The icon `name` draws, or null when it isn't in the vocabulary. Past
- *  the names above, any page kind draws its page's icon (tsk1101), so a
+ *  the names above, any page kind draws its page's icon, so a
  *  row of pages — a bookmark, a visit — can pass its `page_kind`. */
 export function lensIcon(name: unknown): LensIconSpec | null {
   if (typeof name !== "string") return null;

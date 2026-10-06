@@ -1,4 +1,4 @@
-/// A failed operation's details (tsk1097: shown inline on the Alerts
+/// A failed operation's details (shown inline on the Alerts
 /// page, where the separate Op Error page used to be): the captured
 /// command, stderr, stdout, exit code and when — read-only; resolving it
 /// happens where it was started.

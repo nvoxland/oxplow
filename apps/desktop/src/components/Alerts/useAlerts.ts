@@ -1,4 +1,4 @@
-/// Everything that needs the person, live (tsk1097): proposals, failed
+/// Everything that needs the person, live: proposals, failed
 /// operations, undelivered events and failed reactions, and firing panel
 /// badges. The bell, the Alerts page and the toasts all read it.
 

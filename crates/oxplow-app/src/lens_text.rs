@@ -839,7 +839,7 @@ mod tests {
         r
     }
 
-    /// tsk1089: a grouped list reads as a section per group, in the order
+    /// A grouped list reads as a section per group, in the order
     /// each first appears, without the group, emphasis or depth columns.
     #[test]
     fn a_grouped_list_is_a_section_per_group() {

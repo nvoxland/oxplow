@@ -1,4 +1,4 @@
-//! Bookmark commands (tsk1099): a person stars a page at a scope — the
+//! Bookmark commands: a person stars a page at a scope — the
 //! thread they're in, its stream, or the project — or takes the star off.
 //! `Tx` over the bookmark store's `_tx` cores; read back through
 //! `v_bookmark`. The viewer is the thread (`thr1`) the person is in, its

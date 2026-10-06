@@ -2027,7 +2027,7 @@ impl SqliteSnapshotStore {
     /// The files recorded since `after` (exclusive) up to `to`, each at its
     /// latest row in that span — what an incremental scan would have seen
     /// had it run on every snapshot between (a paced collector's deferred
-    /// run, tsk1092). Deletions included, as a snapshot's own rows are.
+    /// run). Deletions included, as a snapshot's own rows are.
     pub async fn list_span_files(
         &self,
         after: i64,

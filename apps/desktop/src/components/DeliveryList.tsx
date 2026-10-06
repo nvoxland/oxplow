@@ -1,7 +1,7 @@
 /// The events oxplow couldn't deliver and the effect reactions that
 /// failed, each with what to do about it: Retry, or Discard (confirmed
 /// inline). Shown in Settings → Data → Delivery and on the Alerts page
-/// (tsk1097). Failures land in opErrorsStore.
+///. Failures land in opErrorsStore.
 
 import type { CSSProperties } from "react";
 import { useState } from "react";

@@ -2513,18 +2513,18 @@ export type ExtensionPanel = {
 	badge: string | null,
 	/**
 	 *  The page its header opens (`page:<kind>`, a canonical ref): a core
-	 *  page the panel summarizes, as Comments opens the inbox (tsk1086).
+	 *  page the panel summarizes, as Comments opens the inbox.
 	 *  Absent, the body lens's own page.
 	 */
 	open: string | null,
 	/**
 	 *  The lens shown, compact, while the panel is collapsed: its one-line
-	 *  summary (tsk1089). Absent, a collapsed panel shows only its header.
+	 *  summary. Absent, a collapsed panel shows only its header.
 	 */
 	collapsed: string | null,
 	/**
 	 *  The lens whose row count (a `number` lens: its value) is the
-	 *  header's count, without raising an alert (tsk1089). It wins over
+	 *  header's count, without raising an alert. It wins over
 	 *  the badge's count; the badge still feeds Alerts.
 	 */
 	count: string | null,
@@ -3243,7 +3243,7 @@ export type LensAction = {
 	row: boolean,
 	/**
 	 *  A group action: a button in the heading of the group whose `by`
-	 *  value (as text) this is, instead of above the result (tsk1089).
+	 *  value (as text) this is, instead of above the result.
 	 */
 	group: string | null,
 };
@@ -3346,7 +3346,7 @@ export type LensForm_Serialize = {
 /**
  *  `group` on a `list` or `table`: the rows under a heading per distinct
  *  value of `by`, in the order each first appears; `link` makes the
- *  heading a link, read from the group's first row (tsk1089).
+ *  heading a link, read from the group's first row.
  */
 export type LensGroup = {
 	// The column whose value groups the rows (not shown as a cell).
@@ -3419,7 +3419,7 @@ export type LensParam = {
 	// Used when the caller doesn't supply the param.
 	default?: SqlCell | null,
 	/**
-	 *  The values it takes, when it's a choice (tsk1100): a panel shows
+	 *  The values it takes, when it's a choice: a panel shows
 	 *  them as a toggle in its header, a lens page as a select. Its
 	 *  `default` must be one; a run supplying another is refused.
 	 */
@@ -3658,7 +3658,7 @@ export type Lens_Deserialize = {
 	form: LensForm_Deserialize | null,
 	// For `custom`: the component and its props.
 	custom: LensCustom_Deserialize | null,
-	// For `list` / `table`: rows under a heading per value (tsk1089).
+	// For `list` / `table`: rows under a heading per value.
 	group: LensGroup | null,
 	/**
 	 *  For `list` / `table` / `tree`: a column whose truthy value
@@ -3706,7 +3706,7 @@ export type Lens_Serialize = {
 	form: LensForm_Serialize | null,
 	// For `custom`: the component and its props.
 	custom: LensCustom_Serialize | null,
-	// For `list` / `table`: rows under a heading per value (tsk1089).
+	// For `list` / `table`: rows under a heading per value.
 	group: LensGroup | null,
 	/**
 	 *  For `list` / `table` / `tree`: a column whose truthy value
@@ -4374,7 +4374,7 @@ detail: string | null } |
 signIn: number | null; error: string | null };
 
 /**
- *  When an `on:` collector runs after a triggering event (tsk1092). Empty,
+ *  When an `on:` collector runs after a triggering event. Empty,
  *  at once — as before pacing existed. Otherwise the run is deferred
  *  (recorded `pending`, so views can say "updating…") until every set
  *  condition holds, then runs once for the latest triggering event:
@@ -5310,7 +5310,7 @@ export type Trigger =
  */
 { kind: "on"; events: string[]; filter: { [key in string]: string }; 
 /**
- *  When the run happens after a triggering event (tsk1092): at
+ *  When the run happens after a triggering event: at
  *  once by default.
  */
 pacing?: Pacing } | 

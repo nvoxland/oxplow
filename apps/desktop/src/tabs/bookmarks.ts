@@ -1,5 +1,5 @@
 /**
- * The person's bookmarks (tsk1099): pages starred at one scope — the
+ * The person's bookmarks: pages starred at one scope — the
  * thread, its stream or the project. Read from `v_bookmark`, written
  * through the `bookmark.set` / `bookmark.remove` commands. From one thread
  * a page is bookmarked once across what it sees, so setting another scope

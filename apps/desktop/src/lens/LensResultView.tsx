@@ -239,7 +239,7 @@ function RowsBody({
     const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null));
     // A timestamp keeps its full local time a hover away.
     const text = isTimestamp(raw) ? <span title={formatFullDateTime(raw)}>{formatted}</span> : formatted;
-    // Its icon and tone, named by other columns of the row (tsk1089).
+    // Its icon and tone, named by other columns of the row.
     const toneName = c.toneIndex === null ? null : (row[c.toneIndex] ?? null);
     const tone = toneColor(toneName);
     const icon = c.iconIndex === null ? null : lensIcon(row[c.iconIndex] ?? null);
@@ -343,7 +343,7 @@ interface RowLookOut {
 }
 type RowLook = (row: SqlCell[]) => RowLookOut;
 
-/** What a list, table or tree draws besides cells (tsk1089). */
+/** What a list, table or tree draws besides cells. */
 interface RowsView {
   groups: RowGroup[] | null;
   heading(g: RowGroup): ReactNode;

@@ -40,6 +40,14 @@ the matching `.context/` doc in the same commit**. Concrete triggers:
 
 Docs reference source by **path only** (no line numbers — they drift).
 
+**No task ids in the repo.** Don't cite oxplow task ids (`tsk42`,
+"epic tsk40") in docs, code or test comments, model descriptions,
+migrations or commit messages. They live only in one project's local
+database and mean nothing to anyone else. Say what the thing is or why
+it's that way instead. Older ids still in the tree predate this rule;
+drop one when you edit its line. Applied migrations are the exception:
+never edit them (refinery checksums them).
+
 Use plan mode for multi-subsystem work (3+ areas touched) or ambiguous
 requirements. Skip it for single-file changes, typos, renames, or narrow
 refactors — go straight to TDD or a subagent dispatch.

@@ -153,7 +153,7 @@ impl FactCollector {
     }
 
     /// Whether an `event_type` it runs on waits for its pacing rather than
-    /// running at once (tsk1092, `crate::pacing`).
+    /// running at once (`crate::pacing`).
     pub fn defers(&self, event_type: &str) -> bool {
         matches!(&self.trigger, Trigger::On { pacing, .. } if pacing.defers(event_type))
     }
@@ -1594,7 +1594,7 @@ impl MetricsService {
             // The snapshot's own rows — the incremental rescan corpus — or,
             // for a deferred run, every file recorded since the collector
             // last finished (`span_from`): what running on each snapshot
-            // between would have scanned (tsk1092).
+            // between would have scanned.
             let files = Arc::new(match span_from {
                 Some(after) => self.build_span_file_map(after, snapshot_id).await,
                 None => self.build_file_map(snapshot_id).await,
@@ -1806,7 +1806,7 @@ impl MetricsService {
     }
 
     /// Run fact collector `key` (of `owner`), deferred by its pacing, for
-    /// `event` (tsk1092). A snapshot collector runs over the stream's latest
+    /// `event`. A snapshot collector runs over the stream's latest
     /// snapshot with every file recorded since it last finished — what it
     /// would have scanned running on each snapshot between — so skipped
     /// snapshots lose nothing; an effort's or another event's runs as the
@@ -3421,7 +3421,7 @@ mod tests {
         assert_eq!(counts, (1, 1), "one capture and one run for one snapshot");
     }
 
-    /// tsk1092: a paced snapshot collector's one deferred run covers every
+    /// A paced snapshot collector's one deferred run covers every
     /// file the skipped snapshots recorded — what it would have scanned
     /// running on each — not just the latest snapshot's own files.
     #[tokio::test]

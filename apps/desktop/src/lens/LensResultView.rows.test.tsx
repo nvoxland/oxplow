@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Lens, LensLink, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { CONTEXT_REF_MIME } from "../dragMimes.js";
 
-// tsk1089: lens rows can be grouped under headings (with actions there),
+// Lens rows can be grouped under headings (with actions there),
 // styled from their own columns, and dragged into the agent's context.
 
 const realApi = await import("../api.js");

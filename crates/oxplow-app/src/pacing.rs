@@ -1,4 +1,4 @@
-//! Paced collector runs (tsk1092): an `on:` collector whose trigger sets
+//! Paced collector runs: an `on:` collector whose trigger sets
 //! `settle`, `at_most` or `idle` doesn't run as its event arrives. The
 //! `collector.triggers` consumer records it pending (`pending_run`,
 //! the latest event it'll run for) and this module runs it once every
@@ -75,7 +75,7 @@ enum Paced {
     Entity(String, oxplow_config::collectors::CollectorSpec),
     Fact(crate::metrics_service::FactCollector),
     /// Core's deep change analysis of a working tree or open effort
-    /// (`crate::change_reactor`, tsk1093).
+    /// (`crate::change_reactor`).
     Change(crate::change_analysis::ChangeTarget, Pacing),
 }
 

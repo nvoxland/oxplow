@@ -505,7 +505,7 @@ export function closedThreadsRef(): TabRef {
 
 /** Async-op error detail page. Scoped to the error id so each failure
  *  gets its own tab; closing it discards the view, not the store entry. */
-/** The Alerts page: everything that needs the person (tsk1097). */
+/** The Alerts page: everything that needs the person. */
 export function alertsRef(): TabRef {
   return indexRef("alerts");
 }

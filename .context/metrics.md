@@ -939,7 +939,7 @@ The UI shows the entity aggregation (`specAggregation`).
   in-memory value, or on a fresh process the latest stored fact. A level
   carries forward, so a restart doesn't pile up duplicates.
 
-### Pacing (tsk1092)
+### Pacing
 
 An `on:` trigger may pace its runs instead of running on every event:
 

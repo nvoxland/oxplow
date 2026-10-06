@@ -1,4 +1,4 @@
-/// A toast as each new thing needs the person (tsk1097): a proposal or a
+/// A toast as each new thing needs the person: a proposal or a
 /// failed operation as it arrives, delivery or a reaction as it starts
 /// failing, a badge as it starts firing. Once per item; its only action
 /// is Review (the Alerts page) — never Approve: a decision is made where

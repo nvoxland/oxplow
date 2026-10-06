@@ -1,4 +1,4 @@
-/// What needs the person, in one place (tsk1097): the status bar's bell,
+/// What needs the person, in one place: the status bar's bell,
 /// the Alerts page and the toasts all read these items. Pure.
 
 export interface AlertItems {

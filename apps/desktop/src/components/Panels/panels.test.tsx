@@ -73,7 +73,7 @@ test("the alerts are the badges that fire, from the same runs", () => {
   expect(alerts).toEqual([{ id: "x/q-badge", title: "Q", message: "2 rows" }]);
 });
 
-// tsk1086: a panel's header opens the page it names (Comments opens the
+// A panel's header opens the page it names (Comments opens the
 // inbox), else its body lens.
 test("a panel's header opens the page it names, else its body lens", async () => {
   const { panelOpenRef } = await import("./panelLayout.js");
@@ -82,7 +82,7 @@ test("a panel's header opens the page it names, else its body lens", async () =>
   expect(panelOpenRef(panel("stream"))).toEqual(lensRef("x/body"));
 });
 
-// tsk1089: a panel's `count` lens gives its header count — its row count,
+// A panel's `count` lens gives its header count — its row count,
 // or a `number` lens's value — without raising an alert; it wins over the
 // badge's count, and the badge still feeds Alerts.
 test("a count lens's rows (or number) are the header count, over the badge's", () => {
@@ -109,7 +109,7 @@ test("the rail runs a panel's collapsed and count lenses, each lens once", async
   expect(view.result.current["x/p"]?.count).toBe(0);
 });
 
-// tsk1100: a body lens's choice params are the panel's header toggle; the
+// A body lens's choice params are the panel's header toggle; the
 // viewer's pick binds the body lens only (the others don't declare it).
 test("a choice param binds the viewer's pick to the body lens only", async () => {
   runs.length = 0;

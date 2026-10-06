@@ -171,8 +171,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state.clone());
-    // Paced `on:` collectors: run each deferred one once its pacing allows
-    // (tsk1092).
+    // Paced `on:` collectors: run each deferred one once its pacing allows.
     crate::pacing::spawn(state.clone());
     // Core's capability providers, before the registry publishes the
     // external ones it starts.

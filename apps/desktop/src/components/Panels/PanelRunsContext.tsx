@@ -1,4 +1,4 @@
-/// The one owner of every extension panel's lens runs (tsk1097), shared by
+/// The one owner of every extension panel's lens runs, shared by
 /// the rail (each panel's body, count and summary), the status bar's bell
 /// and the Alerts page (the badges that fire): each lens runs once per
 /// refresh, and the three can't disagree. Provided by the app around
@@ -25,7 +25,7 @@ export interface PanelRunsValue {
   runs: Record<string, PanelRuns>;
   /** The badges that fire. */
   alerts: PanelAlert[];
-  /** The viewer's picks for the panels' choice params (tsk1100). */
+  /** The viewer's picks for the panels' choice params. */
   choices: PanelChoices;
   /** Pick `value` for a panel's choice param; its body re-runs. */
   choose(panelId: string, param: string, value: string): void;

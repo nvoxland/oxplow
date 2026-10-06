@@ -4,7 +4,7 @@ import { alertsSummary, alertKeys, newAlerts, type AlertItems } from "./alertsMo
 
 const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, badges: [] };
 
-// tsk1097: one bell for everything that needs the person.
+// One bell for everything that needs the person.
 test("the bell counts every item, red for a problem, accent for a decision", () => {
   expect(alertsSummary(none)).toEqual({ count: 0, tone: "none" });
   expect(alertsSummary({ ...none, proposals: [{ id: "proposal:1", title: "x" }] })).toEqual({ count: 1, tone: "accent" });

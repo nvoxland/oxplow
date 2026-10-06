@@ -1048,7 +1048,7 @@ oxplow-bundled change cards) only read them.
   turns and closed efforts are computed once (an effort that closes since
   is recomputed: its head moved). `ensure_change` reads a working tree's
   or an open effort's stored analysis, computing it the first time.
-- **Two stages (tsk1095).** Stage one is the file list alone:
+- **Two stages.** Stage one is the file list alone:
   `refresh_files(target)` diffs through `Trees` and stores `change_file`
   (status, +/−, zone, `is_test`) — no file is parsed — stamping
   `v_change.files_at` / `files_events_to`, and for a working tree git's
@@ -1065,7 +1065,7 @@ oxplow-bundled change cards) only read them.
   `vcs.head.moved`, it first runs stage one for the stream's `working`
   change and every open effort's (one without a start snapshot is
   skipped) — so the lists are always current. The deep analysis is
-  **paced** (tsk1093, `change_reactor::deep_pacing`, the same mechanism as
+  **paced** (`change_reactor::deep_pacing`, the same mechanism as
   collectors' — metrics.md "Pacing"): a take records core's job in
   `pending_run` (`owner` `core`, `id` `change/working/<stream>` or
   `change/effort/<effort>`) and `crate::pacing` runs `refresh_change`

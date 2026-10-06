@@ -49,7 +49,7 @@ describe("displayColumns", () => {
     ]);
   });
 
-  // tsk1089: a column's icon and tone come from other columns of the row;
+  // A column's icon and tone come from other columns of the row;
   // the row-styling columns (group, emphasis, depth) are never cells.
   test("columns carry their icon and tone columns; styling columns aren't cells", () => {
     const styled = lens({
@@ -66,7 +66,7 @@ describe("displayColumns", () => {
   });
 });
 
-describe("row groups and styling (tsk1089)", () => {
+describe("row groups and styling", () => {
   const cols = ["bucket", "title", "ref", "on", "d"];
   const rows = [
     ["Ready", "a", "page:tasks", 0, 0],

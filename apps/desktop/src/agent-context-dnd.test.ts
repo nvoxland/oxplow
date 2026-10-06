@@ -113,7 +113,7 @@ describe("decodeTaskDragRefs", () => {
   });
 });
 
-// tsk1089: a lens row drags the ref it links to (any canonical ref), so the
+// A lens row drags the ref it links to (any canonical ref), so the
 // terminal must read that payload back, not only files, wiki pages and
 // tasks.
 describe("decodeContextRef", () => {

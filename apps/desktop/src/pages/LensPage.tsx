@@ -193,7 +193,7 @@ function ParamInput({
   return <ParamText name={name} label={label} value={value} onApply={onApply} />;
 }
 
-/** A choice param (tsk1100): one of the values its lens declares. */
+/** A choice param: one of the values its lens declares. */
 function ParamChoice({
   name,
   label,

@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { LENS_ICON_NAMES, LENS_TONES, lensIcon, toneColor } from "./lensIcons.js";
 import { pageKindIconComponent } from "../pageKinds.js";
 
-// tsk1089: a column's `icon` names one from a fixed vocabulary — the work
+// A column's `icon` names one from a fixed vocabulary — the work
 // glyphs the rail draws today, the page kinds' icons and the ref-kind
 // icons; an unknown name draws nothing.
 test("the icon vocabulary has the work glyphs, kinds and ref-kind icons; unknown names draw nothing", () => {
@@ -29,7 +29,7 @@ test("tones map to theme variables; anything else is plain", () => {
   expect(toneColor(null)).toBeNull();
 });
 
-// tsk1101: any page kind names its page's icon, so a row of pages (a
+// Any page kind names its page's icon, so a row of pages (a
 // bookmark, a visit) shows each one's own.
 test("a page kind draws its page's icon", () => {
   for (const kind of ["git-dashboard", "alerts", "work_item", "dir", "settings"]) {

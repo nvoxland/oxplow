@@ -417,7 +417,7 @@ pub async fn refresh_change(
 
 /// What `target` compares: its stream, kind and key, and its two
 /// revisions.
-/// Stage one (tsk1095): list `target`'s changed files — status and line
+/// Stage one: list `target`'s changed files — status and line
 /// counts — and, for a working tree, git's operation in progress and how
 /// many files conflict, and store them alone, stamped with what they saw.
 /// Cheap: no file is parsed, so the `change.analyze` consumer runs it on
@@ -1328,7 +1328,7 @@ mod tests {
         );
     }
 
-    /// tsk1095: stage one — which files changed, with status and line
+    /// Stage one — which files changed, with status and line
     /// counts, and for the working tree git's in-progress operation and
     /// conflicts — is stored on its own, stamped with what it saw, and
     /// leaves the deep analysis alone.

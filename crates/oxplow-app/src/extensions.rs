@@ -448,7 +448,7 @@ pub struct LensColumn {
 
 /// `group` on a `list` or `table`: the rows under a heading per distinct
 /// value of `by`, in the order each first appears; `link` makes the
-/// heading a link, read from the group's first row (tsk1089).
+/// heading a link, read from the group's first row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LensGroup {
@@ -470,7 +470,7 @@ pub struct LensParam {
     /// Used when the caller doesn't supply the param.
     #[serde(default)]
     pub default: Option<SqlCell>,
-    /// The values it takes, when it's a choice (tsk1100): a panel shows
+    /// The values it takes, when it's a choice: a panel shows
     /// them as a toggle in its header, a lens page as a select. Its
     /// `default` must be one; a run supplying another is refused.
     #[serde(default)]
@@ -597,7 +597,7 @@ pub struct LensAction {
     /// bound to that row. Otherwise it's a button above the result.
     pub row: bool,
     /// A group action: a button in the heading of the group whose `by`
-    /// value (as text) this is, instead of above the result (tsk1089).
+    /// value (as text) this is, instead of above the result.
     pub group: Option<String>,
 }
 
@@ -874,14 +874,14 @@ pub struct ExtensionPanel {
     /// The badge lens, which declares an `alert`.
     pub badge: Option<String>,
     /// The page its header opens (`page:<kind>`, a canonical ref): a core
-    /// page the panel summarizes, as Comments opens the inbox (tsk1086).
+    /// page the panel summarizes, as Comments opens the inbox.
     /// Absent, the body lens's own page.
     pub open: Option<String>,
     /// The lens shown, compact, while the panel is collapsed: its one-line
-    /// summary (tsk1089). Absent, a collapsed panel shows only its header.
+    /// summary. Absent, a collapsed panel shows only its header.
     pub collapsed: Option<String>,
     /// The lens whose row count (a `number` lens: its value) is the
-    /// header's count, without raising an alert (tsk1089). It wins over
+    /// header's count, without raising an alert. It wins over
     /// the badge's count; the badge still feeds Alerts.
     pub count: Option<String>,
 }
@@ -970,7 +970,7 @@ pub struct Lens {
     pub form: Option<LensForm>,
     /// For `custom`: the component and its props.
     pub custom: Option<LensCustom>,
-    /// For `list` / `table`: rows under a heading per value (tsk1089).
+    /// For `list` / `table`: rows under a heading per value.
     pub group: Option<LensGroup>,
     /// For `list` / `table` / `tree`: a column whose truthy value
     /// highlights the row.
@@ -5644,7 +5644,7 @@ commands:
         );
     }
 
-    /// A param's `options` are the values it takes (tsk1100): its default
+    /// A param's `options` are the values it takes: its default
     /// must be one, and a run supplying another is refused.
     #[test]
     fn param_options_bound_their_values() {
@@ -6143,7 +6143,7 @@ commands:
                 count: None,
             }]
         );
-        // tsk1086: a panel may name the page its header opens (a core page,
+        // A panel may name the page its header opens (a core page,
         // as the Comments panel opens the inbox); without one, its body lens.
         let (_d, ext) = load_x(
             &lenses,
@@ -6191,7 +6191,7 @@ commands:
         }
     }
 
-    /// tsk1089: a panel may name a lens its collapsed header shows (one
+    /// A panel may name a lens its collapsed header shows (one
     /// line, compact) and a lens whose row count (or `number`) is its
     /// header count — checked like `body` and `badge`.
     #[test]
@@ -6237,7 +6237,7 @@ commands:
         }
     }
 
-    /// tsk1089: a list or table can group its rows under headings
+    /// A list or table can group its rows under headings
     /// (`group`), highlight one (`emphasis`), indent some (`depth`), and
     /// draw a cell's icon and tone from other columns; an action can sit in
     /// a group's heading. Shapes are checked at load; the columns they
