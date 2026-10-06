@@ -172,6 +172,8 @@ impl EventSchemaRegistry {
         r.register::<EffortClosedAtV1>()
             .expect("core type registers");
         r.register::<EffortClosed>().expect("core type registers");
+        r.register::<EffortLinked>().expect("core type registers");
+        r.register::<EffortRetitled>().expect("core type registers");
         r.register::<EffortClaimVerified>()
             .expect("core type registers");
         r.register::<EffortDecisionReviewed>()
@@ -1608,6 +1610,44 @@ impl EventType for CollectorSynced {
     type Payload = CollectorSyncedV1;
 }
 
+/// `effort.linked@1`: an effort's work item was set, changed or cleared
+/// (`effort.link`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortLinkedV1 {
+    /// `effort:eff12`.
+    pub effort: String,
+    /// The work item it's linked to now; absent when unlinked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_item: Option<String>,
+}
+
+pub struct EffortLinked;
+impl EventType for EffortLinked {
+    const TYPE: &'static str = "effort.linked";
+    const V: u32 = 1;
+    type Payload = EffortLinkedV1;
+}
+
+/// `effort.retitled@1`: an effort's own title was set or cleared
+/// (`effort.update`); cleared, it shows its default again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortRetitledV1 {
+    /// `effort:eff12`.
+    pub effort: String,
+    /// Its title now; absent when cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+pub struct EffortRetitled;
+impl EventType for EffortRetitled {
+    const TYPE: &'static str = "effort.retitled";
+    const V: u32 = 1;
+    type Payload = EffortRetitledV1;
+}
+
 /// The v1 shape of `effort.closed`, as a registry entry.
 pub struct EffortClosedAtV1;
 impl EventType for EffortClosedAtV1 {
@@ -2165,8 +2205,10 @@ mod tests {
                 ("effort.decision_reviewed", 1),
                 ("effort.finished", 1),
                 ("effort.finished", 2),
+                ("effort.linked", 1),
                 ("effort.opened", 1),
                 ("effort.opened", 2),
+                ("effort.retitled", 1),
                 ("knowledge.comment.deleted", 1),
                 ("knowledge.comment.written", 1),
                 ("knowledge.note.deleted", 1),

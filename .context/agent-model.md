@@ -1975,7 +1975,7 @@ auto-complete / adoption. Per-effort attribution and snapshots are
 anchored to `effort`, which opens and closes in the same transaction as
 a task's status change (`work_item.create` / `.update` / `.transition`,
 all audited to the actor); work tracked outside oxplow brackets itself
-with `effort.open` / `effort.close`. No edit waits on an open effort.
+with `effort.open` / `effort.close` (any thread; [commands.md](./commands.md)). No edit waits on an open effort.
 
 Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
 

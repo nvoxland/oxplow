@@ -1131,12 +1131,11 @@ impl Services {
             commands::work_item::reorder_command(work_items.clone()),
             commands::work_item::move_command(work_items.clone()),
             commands::work_item::delete_command(work_items.clone()),
-            commands::effort::open_command(work_items.clone()),
-            commands::effort::close_command(work_items.clone()),
         ]
         .into_iter()
         .chain(commands::review::commands())
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
+        .chain(commands::effort::commands())
         .chain(commands::bookmark::commands())
         .chain(commands::dashboard::commands(db.clone(), sql.clone()))
         .chain(commands::comment::commands())
@@ -1207,7 +1206,6 @@ impl Services {
             fact_store.clone(),
             nudge_store.clone(),
             effort_store.clone(),
-            task_store.clone(),
             thread_store.clone(),
             snapshot_store.clone(),
             snapshot_captures.clone(),

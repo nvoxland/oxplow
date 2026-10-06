@@ -143,7 +143,7 @@ pub async fn for_thread(
     use oxplow_domain::stores::ThreadStore as _;
     let effort = match cause.and_then(|c| c.anchors.effort_id) {
         Some(id) => svc.effort_store.get_effort(&id).await,
-        None => svc.effort_store.find_single_open_for_thread(thread).await,
+        None => svc.effort_store.find_open_for_thread(thread).await,
     };
     let Ok(Some(effort)) = effort else {
         return Vec::new();

@@ -257,11 +257,10 @@ fn effort_for_status_tx(
                     EffortTransition::Opened(crate::effort_store::start_tx(
                         conn,
                         ev,
-                        Some(&work_item),
-                        thread,
-                        None,
-                        Timestamp::now(),
-                        false,
+                        &crate::effort_store::EffortStart {
+                            work_item: Some(&work_item),
+                            ..crate::effort_store::EffortStart::at(thread, Timestamp::now())
+                        },
                     )?)
                 }
             }
@@ -607,7 +606,14 @@ pub fn place_task_tx(
             )?;
         }
         if let (Some(thread), TaskStatus::InProgress) = (dest, item.status) {
-            crate::effort_store::start_tx(conn, ev, Some(&work_item), thread, None, now, false)?;
+            crate::effort_store::start_tx(
+                conn,
+                ev,
+                &crate::effort_store::EffortStart {
+                    work_item: Some(&work_item),
+                    ..crate::effort_store::EffortStart::at(thread, now)
+                },
+            )?;
         }
     }
     Ok(Placed {

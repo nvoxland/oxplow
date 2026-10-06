@@ -54,13 +54,12 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
 }
 
 /// The anchors agent activity on `thread` carries (P3.3): the thread, its
-/// stream, the thread's open turn and its single open effort (none when
-/// two or more are open — attribution never guesses).
+/// stream, the thread's open turn and its open effort (at most one).
 pub fn activity_anchors_tx(conn: &Connection, thread: ThreadId) -> Result<Anchors, DomainError> {
     let mut anchors = anchors_for_thread_tx(conn, thread)?;
     anchors.turn_id = open_turn_ids_tx(conn, thread)?.first().map(|t| t.value());
-    anchors.effort_id =
-        crate::effort_store::find_single_open_for_thread_tx(conn, thread)?.map(|e| e.id);
+    anchors.effort_id = crate::effort_store::open_for_thread_tx(conn, thread)
+        .map_err(crate::database::map_sql_err)?;
     Ok(anchors)
 }
 

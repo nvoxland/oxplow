@@ -500,13 +500,11 @@ impl TokenUsageService {
         counted: Counted,
         cursor: Option<(String, u64)>,
     ) -> Result<RecordedTurns, DomainError> {
-        // The effort the turn ran in (its event's anchor); without one,
-        // attribute only when unambiguous — under parallel sub-agents (two
-        // open efforts) the turn isn't a single effort's, so it stays
-        // unattributed rather than guessing (tsk263).
+        // The effort the turn ran in (its event's anchor), else the
+        // thread's open one. An effort opened later adopts the row.
         let open_effort = match rec.effort {
             Some(id) => self.efforts.get_effort(&id).await?,
-            None => self.efforts.find_single_open_for_thread(thread).await?,
+            None => self.efforts.find_open_for_thread(thread).await?,
         };
         let effort_id = open_effort.as_ref().map(|e| e.id.to_string());
         // The i64 form stamps the fact-capture so `captures_for_effort` (the T-D

@@ -420,9 +420,6 @@ pub struct CollectionService {
     facts: Arc<SqliteFactStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
     efforts: Arc<SqliteEffortStore>,
-    /// Read-only, and only for run attribution: an effort's task text names the
-    /// files being worked on before snapshot capture has claimed any (tsk185).
-    tasks: Arc<oxplow_db::SqliteTaskStore>,
     threads: Arc<SqliteThreadStore>,
     snapshots: Arc<SqliteSnapshotStore>,
     /// Each stream's snapshot taker: a run's coverage is pinned to a take
@@ -442,7 +439,7 @@ pub struct CollectionService {
     run_log: Option<crate::collector_runner::RunLog>,
     /// Kind-agnostic attribution ledger (tsk262/263) — runs (test/coverage/
     /// analysis) record their claim state here. A run is auto-attributed to the
-    /// open effort at record time only when unambiguous (`find_single_open_for_thread`);
+    /// open effort at record time (`find_open_for_thread`);
     /// the concurrent case is resolved by the close reconcile + the agent's claim.
     attribution: Arc<SqliteAttributionStore>,
     /// The metric-ancestry resolver (tsk102) for this service's own
@@ -550,7 +547,6 @@ impl CollectionService {
         facts: Arc<SqliteFactStore>,
         nudges: Arc<SqliteAgentNudgeStore>,
         efforts: Arc<SqliteEffortStore>,
-        tasks: Arc<oxplow_db::SqliteTaskStore>,
         threads: Arc<SqliteThreadStore>,
         snapshots: Arc<SqliteSnapshotStore>,
         captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
@@ -569,7 +565,6 @@ impl CollectionService {
             facts,
             nudges,
             efforts,
-            tasks,
             threads,
             snapshots,
             captures,
@@ -1114,7 +1109,7 @@ impl CollectionService {
         // (so `captures_for_effort` attributes it, tsk37) and to claim the run in
         // the ledger at the tail. Same resolution the auto-claim uses.
         let owning = self
-            .resolve_owner(thread, task, anchored_effort(cause), Some(command))
+            .resolve_owner(thread, task, anchored_effort(cause))
             .await;
         let owning_val = owning.as_ref().map(|e| e.id.value());
 
@@ -1392,54 +1387,29 @@ impl CollectionService {
         match anchored_effort(cause) {
             Some(id) => self.efforts.get_effort(&id).await,
             None if cause.is_some() => Ok(None),
-            None => self.efforts.find_single_open_for_thread(thread).await,
+            None => self.efforts.find_open_for_thread(thread).await,
         }
     }
 
+    /// The effort a run belongs to: a named task's open effort (exact or
+    /// nothing), else the thread's open effort.
     async fn resolve_owning_effort(
         &self,
         thread: &ThreadId,
         task: Option<TaskId>,
     ) -> Option<Effort> {
-        self.resolve_owning_effort_for_command(thread, task, None)
-            .await
+        self.resolve_owner(thread, task, None).await
     }
 
-    /// [`resolve_owning_effort`], plus the run's command when there is one.
-    ///
-    /// Order of precedence:
-    /// 1. a named task — EXACT-or-nothing, unchanged;
-    /// 2. exactly one open effort — the existing AUTO rule;
-    /// 3. **several open, but the command names exactly one of them** — attribute
-    ///    by target overlap (tsk169).
-    ///
-    /// (3) is what turns the common concurrent-effort case from "unattributed,
-    /// reconcile later" into a correct answer at record time: `cargo test -p
-    /// oxplow-git symlink` belongs to whichever open effort is working in
-    /// `crates/oxplow-git/`. It never *guesses* — [`unique_best_by_targets`]
-    /// requires a strict maximum, so ties and misses fall through to the
-    /// unclaimed path exactly as before. The invariant is preserved: less
-    /// exact, never wrong-exact.
-    async fn resolve_owning_effort_for_command(
-        &self,
-        thread: &ThreadId,
-        task: Option<TaskId>,
-        command: Option<&str>,
-    ) -> Option<Effort> {
-        self.resolve_owner(thread, task, None, command).await
-    }
-
-    /// [`Self::resolve_owning_effort_for_command`] with the effort the
-    /// command ran in (`anchored`, the tool event's effort anchor — the
-    /// thread's single open effort then). It ranks after a named task and
-    /// before the thread's open efforts now, so a run the reactor records
-    /// after the effort closed still belongs to it.
+    /// [`Self::resolve_owning_effort`] with the effort the command ran in
+    /// (`anchored`, the tool event's effort anchor): it ranks after a named
+    /// task and before the thread's open effort now, so a run the reactor
+    /// records after the effort closed still belongs to it.
     async fn resolve_owner(
         &self,
         thread: &ThreadId,
         task: Option<TaskId>,
         anchored: Option<EffortId>,
-        command: Option<&str>,
     ) -> Option<Effort> {
         if task.is_none() {
             if let Some(id) = anchored {
@@ -1456,24 +1426,11 @@ impl CollectionService {
                 .ok()
                 .flatten();
         }
-        if let Some(single) = self
-            .efforts
-            .find_single_open_for_thread(thread)
+        self.efforts
+            .find_open_for_thread(thread)
             .await
             .ok()
             .flatten()
-        {
-            return Some(single);
-        }
-        let targets = crate::attribution::run_targets(command?);
-        if targets.is_empty() {
-            return None;
-        }
-        let open = self.efforts.list_open_for_thread(thread).await.ok()?;
-        // Same shared decision the per-file auto-claim makes (tsk186) — one
-        // implementation, so a run claim and a file claim can never disagree
-        // about which effort owns the work.
-        crate::attribution::resolve_by_targets(&self.efforts, &self.tasks, open, &targets).await
     }
 
     /// Claim `run:<id>` for an effort in the unified run ledger (best-effort — a
@@ -1811,7 +1768,7 @@ impl CollectionService {
         // The owning effort stamps the coverage capture AND receives the ledger
         // claim below — the capture IS the run now (T-E1, tsk48).
         let attribute_to = self
-            .resolve_owner(thread, None, anchored_effort(cause), None)
+            .resolve_owner(thread, None, anchored_effort(cause))
             .await;
         let owning_val = attribute_to.as_ref().map(|e| e.id.value());
         let turn = origin.turn();
@@ -2460,40 +2417,6 @@ impl CollectionService {
         // Nudges below are effort-RELATIVE (key/dedup per effort), so they only
         // run with a single open effort. The runs above are already recorded.
         let Some(effort) = effort_opt else {
-            // No single open effort — so this test run may have landed
-            // unattributed. Say so NOW, while a one-token fix is available on the
-            // next command, rather than leaving it for the closing EFFORT REVIEW
-            // to reconcile in bulk long after the context is gone (tsk170).
-            //
-            // Only when the run is genuinely unattributed: an `OXPLOW_TASK=`
-            // token or a target-overlap match (tsk169) resolves most of these
-            // silently, and nagging about a run that WAS attributed would train
-            // the agent to ignore the nudge.
-            if is_test && parse_task_token(&bash.command).is_none() {
-                let resolved = self
-                    .resolve_owner(thread, None, anchored_effort(cause), Some(&bash.command))
-                    .await;
-                if resolved.is_none() {
-                    let open = self
-                        .efforts
-                        .list_open_for_thread(thread)
-                        .await
-                        .unwrap_or_default();
-                    if open.len() > 1 {
-                        let msg = unattributed_run_message(&bash.command, &open);
-                        self.persist_nudge(
-                            thread,
-                            None,
-                            "unattributed-run",
-                            &msg,
-                            &bash.command,
-                            origin,
-                        )
-                        .await;
-                        return Ok(Some(msg));
-                    }
-                }
-            }
             return Ok(None);
         };
         // Nudge: the agent ran tests but this run regenerated no report
@@ -2684,7 +2607,7 @@ impl CollectionService {
         // receives the ledger claim and pins the take, as a test or
         // coverage run's does.
         let effort = self
-            .resolve_owner(thread, None, anchored_effort(cause), Some(command))
+            .resolve_owner(thread, None, anchored_effort(cause))
             .await;
         let mut payload = serde_json::Map::new();
         payload.insert("command".into(), json!(command));
@@ -3494,34 +3417,6 @@ impl CollectionService {
         }
         Some(diff_new_side_lines(&old, &new))
     }
-}
-
-/// The nudge shown when a test run lands with SEVERAL efforts open and nothing
-/// resolves which one owns it (tsk170).
-///
-/// Timing is the whole point. The closing EFFORT REVIEW already reports these,
-/// but by then they arrive in bulk, detached from what the agent was doing, and
-/// fixing them means hand-mapping run ids to efforts. Here it costs one token on
-/// the next command. It names the candidate tasks so the right id doesn't have
-/// to be looked up.
-fn unattributed_run_message(command: &str, open: &[Effort]) -> String {
-    let ids: Vec<String> = open
-        .iter()
-        .map(|e| match e.work_item.as_deref() {
-            Some(w) => oxplow_domain::refs::build::work_item_label(w),
-            None => e.id.to_string(),
-        })
-        .collect();
-    format!(
-        "`{cmd}` was recorded but NOT attributed to an effort — {n} efforts are open \
-         ({list}) and the command doesn't name which one it's for. Prefix the run with \
-         `OXPLOW_TASK=<task id>` (e.g. `OXPLOW_TASK={first} {cmd}`) to pin it. Otherwise \
-         it stays unattributed until you claim it at close.",
-        cmd = command.trim(),
-        n = open.len(),
-        list = ids.join(", "),
-        first = ids.first().map(String::as_str).unwrap_or("tskNN"),
-    )
 }
 
 /// The PostToolUse nudge shown when a detected test run produced no
@@ -4484,7 +4379,6 @@ mod tests {
                 facts,
                 nudges.clone(),
                 efforts.clone(),
-                Arc::new(SqliteTaskStore::new(db.clone())),
                 Arc::new(SqliteThreadStore::new(db.clone())),
                 snapshots,
                 captures,

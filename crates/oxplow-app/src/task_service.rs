@@ -1017,26 +1017,12 @@ impl TaskService {
             Some(id) => effort_store.get_effort(&id).await?,
             None => None,
         };
-        let single = match anchored {
-            Some(e) => Some(e),
-            None => effort_store.find_single_open_for_thread(thread).await?,
-        };
-        let effort = match single {
+        let effort = match anchored {
             Some(e) => e,
-            None => {
-                let open = effort_store.list_open_for_thread(thread).await?;
-                match crate::attribution::resolve_by_targets(
-                    effort_store,
-                    &self.store,
-                    open,
-                    &[path.to_string()],
-                )
-                .await
-                {
-                    Some(e) => e,
-                    None => return Ok(false),
-                }
-            }
+            None => match effort_store.find_open_for_thread(thread).await? {
+                Some(e) => e,
+                None => return Ok(false),
+            },
         };
         let version = self.resolve_effort_file_version(&effort).await;
         let change = classify_change(worktree_root, path);
@@ -2081,7 +2067,7 @@ mod tests {
             .await
             .unwrap();
         let effort = effort_store
-            .find_single_open_for_thread(&tid)
+            .find_open_for_thread(&tid)
             .await
             .unwrap()
             .expect("open effort");
@@ -2171,7 +2157,7 @@ mod tests {
             .await
             .unwrap();
         let effort = effort_store
-            .find_single_open_for_thread(&tid)
+            .find_open_for_thread(&tid)
             .await
             .unwrap()
             .expect("open effort");
@@ -2290,7 +2276,7 @@ mod tests {
             .await
             .unwrap();
         let effort = effort_store
-            .find_single_open_for_thread(&tid)
+            .find_open_for_thread(&tid)
             .await
             .unwrap()
             .expect("open effort");
@@ -2361,7 +2347,7 @@ mod tests {
             .await
             .unwrap();
         let effort = effort_store
-            .find_single_open_for_thread(&tid)
+            .find_open_for_thread(&tid)
             .await
             .unwrap()
             .expect("open effort");

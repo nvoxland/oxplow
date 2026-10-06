@@ -514,8 +514,22 @@ rebuilding the table, which would cascade away the child rows. In Rust
 `Effort.work_item` is `Option<String>`; `start_tx(conn, ev,
 work_item: Option<&str>, …)` and `finish_tx(conn, ev, id, &EffortEnd)`;
 the events are `effort.opened@2` / `effort.closed@2` (with `closed_by`) /
-`effort.finished@2`, each v1 upcast as is. A task going in progress on a
-thread that has another effort open closes that one first (`switch`).
+`effort.finished@2`, each v1 upcast as is, plus `effort.linked@1` and
+`effort.retitled@1`. Opening an effort on a thread that has one open
+closes that one first (`switch`).
+
+**Adoption and as-of closes.** `start_tx(conn, ev, &EffortStart)` may
+start an effort in the past (`adopt_since`, clamped to the thread's
+previous effort's end): it then stamps itself onto the thread's
+un-efforted rows since then in the derived tables that carry an effort
+(`EFFORT_STAMPED`: `agent_tool_call`, `agent_token_usage`,
+`metric_capture`, `agent_nudge`, `claim`, `decision`, `thread_answer`).
+`finish_tx` at a past point releases the rows after it. The event log is
+not restamped: an event keeps the anchors it was written with.
+`effort_at_tx(thread, at)` names the effort whose span covers a moment.
+Writers take the thread's open effort (`open_for_thread_tx`,
+`find_open_for_thread`); the old "single open effort", list-of-open and
+target-overlap scoring went with the one-open-per-thread rule.
 What follows describes the task-driven lifecycle still in place until
 the effort policy lands.
 

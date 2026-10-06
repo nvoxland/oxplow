@@ -25,7 +25,10 @@ use crate::page_ref_projections::{
     KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
-use oxplow_domain::events::schema::{EffortClosed, EffortClosedV2, EffortOpened, EffortOpenedV2};
+use oxplow_domain::events::schema::{
+    EffortClosed, EffortClosedV2, EffortLinked, EffortLinkedV1, EffortOpened, EffortOpenedV2,
+    EffortRetitled, EffortRetitledV1,
+};
 use oxplow_domain::refs::build::{
     effort_ref, snapshot_ref, task_of_work_item_ref, thread_ref, validate_work_item_ref,
     work_item_id_of_ref,
@@ -169,26 +172,113 @@ pub struct EffortAtSnapshot {
 // "Transactions".
 // ---------------------------------------------------------------------------
 
+/// The derived tables whose rows carry the effort they belong to, with
+/// their thread and time columns: what an effort adopts when it opens late,
+/// and releases when it closes as of a past point. The event log keeps the
+/// anchors its events were written with; it's history, not a projection.
+const EFFORT_STAMPED: [(&str, &str); 7] = [
+    ("agent_tool_call", "at"),
+    ("agent_token_usage", "recorded_at"),
+    ("metric_capture", "captured_at"),
+    ("agent_nudge", "created_at"),
+    ("claim", "created_at"),
+    ("decision", "created_at"),
+    ("thread_answer", "created_at"),
+];
+
+/// How an effort opens ([`start_tx`]).
+#[derive(Debug, Clone, Copy)]
+pub struct EffortStart<'a> {
+    pub thread: ThreadId,
+    /// The work item it's linked to, when it is.
+    pub work_item: Option<&'a str>,
+    /// When it's opened.
+    pub at: Timestamp,
+    /// Adopt the thread's un-efforted activity back to here — never past
+    /// the end of the thread's previous effort. `None` starts at `at`.
+    pub adopt_since: Option<Timestamp>,
+    /// Its start snapshot, when the opener already has one.
+    pub start_snapshot_id: Option<i64>,
+    /// Recorded after the fact: stored already closed, so it never takes
+    /// the thread's open slot or adopts anything.
+    pub retroactive: bool,
+}
+
+impl<'a> EffortStart<'a> {
+    /// An unlinked effort on `thread` opened at `at`.
+    pub fn at(thread: ThreadId, at: Timestamp) -> Self {
+        Self {
+            thread,
+            work_item: None,
+            at,
+            adopt_since: None,
+            start_snapshot_id: None,
+            retroactive: false,
+        }
+    }
+}
+
+/// The effort `thread` was in at `at`: the one whose span covers it.
+pub fn effort_at_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+    at: Timestamp,
+) -> rusqlite::Result<Option<EffortId>> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT id FROM effort
+          WHERE thread_id = ?1 AND started_at <= ?2 AND (ended_at IS NULL OR ended_at > ?2)
+          ORDER BY started_at DESC, id DESC LIMIT 1",
+        params![thread.value(), ts_to_string(at)],
+        |r| r.get(0).map(EffortId::new),
+    )
+    .optional()
+}
+
 /// Opens an effort on `thread`, linked to `work_item` when given (which
 /// the caller has validated with `validate_work_item_ref` or built with
 /// `work_item_ref`), and logs `effort.opened` in the same transaction —
 /// every open, whichever path made it. A thread holds one open effort, so
-/// the one it had open closes first (`switch`). A `retroactive` effort is
-/// recorded already closed ([`record_retroactive_tx`]) and never opens.
+/// the one it had open closes first (`switch`). An effort opened late
+/// adopts the thread's un-efforted activity since `adopt_since`, clamped
+/// to its previous effort's end.
 pub fn start_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
-    work_item: Option<&str>,
-    thread: ThreadId,
-    start_snapshot_id: Option<i64>,
-    now: Timestamp,
-    retroactive: bool,
+    start: &EffortStart<'_>,
 ) -> Result<EffortId, DomainError> {
+    let EffortStart {
+        thread,
+        work_item,
+        at: now,
+        adopt_since,
+        start_snapshot_id,
+        retroactive,
+    } = *start;
     if !retroactive {
         if let Some(open) = open_for_thread_tx(conn, thread).map_err(map_sql_err)? {
             finish_tx(conn, ev, open, &EffortEnd::at(now, ClosedBy::Switch))?;
         }
     }
+    // Where it starts: back to `adopt_since`, never before the thread's
+    // previous effort ended, never after now.
+    let started_at = match adopt_since.filter(|_| !retroactive) {
+        None => now,
+        Some(since) => {
+            let previous_end: Option<String> = conn
+                .query_row(
+                    "SELECT max(ended_at) FROM effort WHERE thread_id = ?1",
+                    params![thread.value()],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)?;
+            let floor = previous_end
+                .map(|e| string_to_ts(&e))
+                .transpose()?
+                .map_or(since, |end| since.max(end));
+            floor.min(now)
+        }
+    };
     conn.execute(
         "INSERT INTO effort
            (id, work_item, thread_id, started_at, ended_at,
@@ -198,7 +288,7 @@ pub fn start_tx(
             None::<i64>,
             work_item,
             thread.value(),
-            ts_to_string(now),
+            ts_to_string(started_at),
             start_snapshot_id,
             // Recorded after the fact: closed as it's made, so it never
             // takes the thread's one open slot.
@@ -207,6 +297,19 @@ pub fn start_tx(
     )
     .map_err(map_sql_err)?;
     let id = EffortId::new(conn.last_insert_rowid());
+    if !retroactive {
+        let since = ts_to_string(started_at);
+        for (table, time) in EFFORT_STAMPED {
+            conn.execute(
+                &format!(
+                    "UPDATE {table} SET effort_id = ?1
+                      WHERE thread_id = ?2 AND effort_id IS NULL AND {time} >= ?3"
+                ),
+                params![id.value(), thread.value(), since],
+            )
+            .map_err(map_sql_err)?;
+        }
+    }
     let env = ev
         .typed::<EffortOpened>(&EffortOpenedV2 {
             effort: effort_ref(id),
@@ -254,6 +357,81 @@ fn log_retroactive_close_tx(
         .with_subject([effort_ref(id), work_item.to_string()]);
     ev.append(conn, &env)?;
     Ok(())
+}
+
+/// Link `id` to `work_item` (or unlink it, with `None`) and log
+/// `effort.linked`; returns what it was linked to before. `Invalid` for an
+/// unknown effort.
+pub fn link_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    id: EffortId,
+    work_item: Option<&str>,
+) -> Result<Option<String>, DomainError> {
+    let (before, thread) = effort_field_tx(conn, id, "work_item")?;
+    conn.execute(
+        "UPDATE effort SET work_item = ?2 WHERE id = ?1",
+        params![id.value(), work_item],
+    )
+    .map_err(map_sql_err)?;
+    let env = ev
+        .typed::<EffortLinked>(&EffortLinkedV1 {
+            effort: effort_ref(id),
+            work_item: work_item.map(str::to_string),
+        })
+        .with_anchors(Anchors {
+            effort_id: Some(id),
+            ..anchors_for_thread_tx(conn, thread)?
+        })
+        .with_subject(std::iter::once(effort_ref(id)).chain(work_item.map(str::to_string)));
+    ev.append(conn, &env)?;
+    Ok(before)
+}
+
+/// Set `id`'s own title (or clear it, with `None`) and log
+/// `effort.retitled`; returns the title it had.
+pub fn retitle_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    id: EffortId,
+    title: Option<&str>,
+) -> Result<Option<String>, DomainError> {
+    let (before, thread) = effort_field_tx(conn, id, "title")?;
+    let title = title.map(str::trim).filter(|t| !t.is_empty());
+    conn.execute(
+        "UPDATE effort SET title = ?2 WHERE id = ?1",
+        params![id.value(), title],
+    )
+    .map_err(map_sql_err)?;
+    let env = ev
+        .typed::<EffortRetitled>(&EffortRetitledV1 {
+            effort: effort_ref(id),
+            title: title.map(str::to_string),
+        })
+        .with_anchors(Anchors {
+            effort_id: Some(id),
+            ..anchors_for_thread_tx(conn, thread)?
+        })
+        .with_subject([effort_ref(id)]);
+    ev.append(conn, &env)?;
+    Ok(before)
+}
+
+/// One of an effort's text columns and its thread.
+fn effort_field_tx(
+    conn: &rusqlite::Connection,
+    id: EffortId,
+    column: &str,
+) -> Result<(Option<String>, ThreadId), DomainError> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        &format!("SELECT {column}, thread_id FROM effort WHERE id = ?1"),
+        params![id.value()],
+        |r| Ok((r.get(0)?, ThreadId::new(r.get(1)?))),
+    )
+    .optional()
+    .map_err(map_sql_err)?
+    .ok_or_else(|| DomainError::Invalid(format!("no effort `{id}`")))
 }
 
 /// How an effort is closed ([`finish_tx`]).
@@ -342,6 +520,15 @@ pub fn finish_tx(
     let Some((work_item, thread)) = closed else {
         return Ok(false);
     };
+    // Closed as of a past point: what came after belongs to whatever the
+    // thread opens next.
+    for (table, time) in EFFORT_STAMPED {
+        conn.execute(
+            &format!("UPDATE {table} SET effort_id = NULL WHERE effort_id = ?1 AND {time} > ?2"),
+            params![id.value(), ts_to_string(now)],
+        )
+        .map_err(map_sql_err)?;
+    }
     let env = ev
         .typed::<EffortClosed>(&EffortClosedV2 {
             effort: effort_ref(id),
@@ -474,31 +661,6 @@ pub fn open_for_thread_tx(
     .optional()
 }
 
-/// The thread's open effort when exactly one is open (in the caller's
-/// transaction); `None` for zero or two-plus, so attribution never guesses.
-pub fn find_single_open_for_thread_tx(
-    conn: &rusqlite::Connection,
-    thread: ThreadId,
-) -> Result<Option<Effort>, DomainError> {
-    // LIMIT 2 distinguishes "exactly one" from "two-or-more" cheaply.
-    let mut stmt = conn
-        .prepare(
-            "SELECT * FROM effort
-             WHERE thread_id = ?1 AND ended_at IS NULL
-             ORDER BY started_at DESC LIMIT 2",
-        )
-        .map_err(map_sql_err)?;
-    let mut rows = stmt
-        .query_map(params![thread.value()], row_to_effort)
-        .map_err(map_sql_err)?;
-    let first = rows.next().transpose().map_err(map_sql_err)?;
-    let second = rows.next().transpose().map_err(map_sql_err)?;
-    Ok(match (first, second) {
-        (Some(e), None) => Some(e),
-        _ => None,
-    })
-}
-
 fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<Effort> {
     let id: i64 = row.get("id")?;
     let work_item: Option<String> = row.get("work_item")?;
@@ -564,26 +726,9 @@ pub trait EffortStore: Send + Sync {
     /// duplicate.
     async fn find_open_for_work_item(&self, work_item: &str)
         -> Result<Option<Effort>, DomainError>;
-    /// Open effort (`ended_at IS NULL`) for `thread`, if any. The
-    /// orchestrator keeps at most one item `in_progress` per thread, so
-    /// this is the effort that hook-driven collection (test runs,
-    /// coverage) attributes against. Newest open effort wins.
+    /// The thread's open effort, if any (at most one is open per thread):
+    /// what activity on the thread is attributed to now.
     async fn find_open_for_thread(&self, thread: &ThreadId) -> Result<Option<Effort>, DomainError>;
-    /// Open effort for `thread` ONLY when it's unambiguous — exactly one open
-    /// effort. Returns `None` when zero OR two-plus are open (parallel
-    /// sub-agents on one thread), so attribution never silently guesses the
-    /// wrong one; the ambiguous case defers to claim+reconcile (tsk263). The
-    /// concurrency-safe replacement for `find_open_for_thread` on the
-    /// attribution path.
-    async fn find_single_open_for_thread(
-        &self,
-        thread: &ThreadId,
-    ) -> Result<Option<Effort>, DomainError>;
-    /// EVERY open effort for `thread`, newest first. The disambiguation input
-    /// for target-overlap attribution (tsk169): when more than one is open
-    /// `find_single_open_for_thread` declines by design, and the caller scores
-    /// these candidates by what the run's command actually names.
-    async fn list_open_for_thread(&self, thread: &ThreadId) -> Result<Vec<Effort>, DomainError>;
     /// Most-recent effort for `work_item` regardless of state, or `None`
     /// when it has never had one. Used by `record_effort` to
     /// reattach files to a just-closed lifecycle effort.
@@ -852,11 +997,11 @@ impl SqliteEffortStore {
                         start_tx(
                             tx,
                             &ev,
-                            Some(&a.work_item),
-                            a.thread,
-                            None,
-                            Timestamp::now(),
-                            true,
+                            &EffortStart {
+                                work_item: Some(&a.work_item),
+                                retroactive: true,
+                                ..EffortStart::at(a.thread, Timestamp::now())
+                            },
                         )?,
                         true,
                     ),
@@ -1048,7 +1193,15 @@ impl EffortStore for SqliteEffortStore {
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
                 let ev = EventCtx::system(&vocabulary, "effort_store");
-                start_tx(tx, &ev, Some(&w), thread, start_snapshot_id, now, false)
+                start_tx(
+                    tx,
+                    &ev,
+                    &EffortStart {
+                        work_item: Some(&w),
+                        start_snapshot_id,
+                        ..EffortStart::at(thread, now)
+                    },
+                )
             })
             .await?;
         Ok(Effort {
@@ -1147,31 +1300,6 @@ impl EffortStore for SqliteEffortStore {
                 )?;
                 let mut rows = stmt.query_map(params![thread.value()], row_to_effort)?;
                 rows.next().transpose()
-            })
-            .await
-    }
-
-    async fn find_single_open_for_thread(
-        &self,
-        thread: &ThreadId,
-    ) -> Result<Option<Effort>, DomainError> {
-        let thread = *thread;
-        self.db
-            .read(move |tx| find_single_open_for_thread_tx(tx, thread))
-            .await
-    }
-
-    async fn list_open_for_thread(&self, thread: &ThreadId) -> Result<Vec<Effort>, DomainError> {
-        let thread = *thread;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM effort
-                     WHERE thread_id = ?1 AND ended_at IS NULL
-                     ORDER BY started_at DESC",
-                )?;
-                let rows = stmt.query_map(params![thread.value()], row_to_effort)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }
@@ -1620,6 +1748,118 @@ mod tests {
         (store, tid, thread)
     }
 
+    /// A tool call at `at` on `thread`, with no effort yet (as one made
+    /// before any effort opened).
+    fn tool_call(conn: &rusqlite::Connection, thread: ThreadId, at: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO agent_tool_call (thread_id, tool, path, at) VALUES (?1, 'Edit', 'a.rs', ?2)",
+            params![thread.value(), at],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    fn effort_of_call(conn: &rusqlite::Connection, id: i64) -> Option<i64> {
+        conn.query_row(
+            "SELECT effort_id FROM agent_tool_call WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    fn ts(s: &str) -> Timestamp {
+        Timestamp::parse(s).unwrap()
+    }
+
+    /// An effort opened late adopts the thread's un-efforted activity back
+    /// to `adopt_since` — never past the thread's previous effort's end,
+    /// never another thread's.
+    #[tokio::test]
+    async fn opening_adopts_the_threads_activity_since_its_last_effort() {
+        let (_store, db, _tid, thread) = fixture_with_db().await;
+        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
+        db.transaction(move |tx| {
+            let ev = EventCtx::system(&vocabulary, "test");
+            let before = tool_call(tx, thread, "2026-01-01T00:00:01.000000Z");
+            let prev = start_tx(
+                tx,
+                &ev,
+                &EffortStart::at(thread, ts("2026-01-01T00:00:02.000000Z")),
+            )?;
+            finish_tx(
+                tx,
+                &ev,
+                prev,
+                &EffortEnd::at(ts("2026-01-01T00:00:03.000000Z"), ClosedBy::Commit),
+            )?;
+            let after_prev = tool_call(tx, thread, "2026-01-01T00:00:04.000000Z");
+            let later = tool_call(tx, thread, "2026-01-01T00:00:05.000000Z");
+            let id = start_tx(
+                tx,
+                &ev,
+                &EffortStart {
+                    adopt_since: Some(ts("2026-01-01T00:00:00.000000Z")),
+                    ..EffortStart::at(thread, ts("2026-01-01T00:00:06.000000Z"))
+                },
+            )?;
+            // Clamped to the previous effort's end.
+            let started: String = tx
+                .query_row(
+                    "SELECT started_at FROM effort WHERE id = ?1",
+                    [id.value()],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)?;
+            assert_eq!(started, "2026-01-01T00:00:03.000000Z");
+            assert_eq!(effort_of_call(tx, before), None);
+            assert_eq!(effort_of_call(tx, after_prev), Some(id.value()));
+            assert_eq!(effort_of_call(tx, later), Some(id.value()));
+            assert_eq!(
+                effort_at_tx(tx, thread, ts("2026-01-01T00:00:04.500000Z")).map_err(map_sql_err)?,
+                Some(id)
+            );
+            assert_eq!(
+                effort_at_tx(tx, thread, ts("2026-01-01T00:00:02.500000Z")).map_err(map_sql_err)?,
+                Some(prev)
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    /// Closing as of a past point leaves what came after it to the next
+    /// effort.
+    #[tokio::test]
+    async fn closing_as_of_releases_what_came_after() {
+        let (_store, db, _tid, thread) = fixture_with_db().await;
+        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
+        db.transaction(move |tx| {
+            let ev = EventCtx::system(&vocabulary, "test");
+            let id = start_tx(
+                tx,
+                &ev,
+                &EffortStart::at(thread, ts("2026-01-01T00:00:01.000000Z")),
+            )?;
+            let inside = tool_call(tx, thread, "2026-01-01T00:00:02.000000Z");
+            let after = tool_call(tx, thread, "2026-01-01T00:00:04.000000Z");
+            tx.execute("UPDATE agent_tool_call SET effort_id = ?1", [id.value()])
+                .map_err(map_sql_err)?;
+            finish_tx(
+                tx,
+                &ev,
+                id,
+                &EffortEnd::at(ts("2026-01-01T00:00:03.000000Z"), ClosedBy::Commit),
+            )?;
+            assert_eq!(effort_of_call(tx, inside), Some(id.value()));
+            assert_eq!(effort_of_call(tx, after), None);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
     /// An effort needs no work item: unlinked, its title is the first
     /// line of the thread's first prompt in it; a thread holds one open.
     #[tokio::test]
@@ -1635,7 +1875,7 @@ mod tests {
                 )
                 .map_err(map_sql_err)?;
                 let ev = EventCtx::system(&vocabulary, "test");
-                let id = start_tx(tx, &ev, None, thread, None, Timestamp::now(), false)?;
+                let id = start_tx(tx, &ev, &EffortStart::at(thread, Timestamp::now()))?;
                 let title: String = tx
                     .query_row(
                         "SELECT title FROM v_effort WHERE id = ?1",
@@ -1643,7 +1883,7 @@ mod tests {
                         |r| r.get(0),
                     )
                     .map_err(map_sql_err)?;
-                start_tx(tx, &ev, None, thread, None, Timestamp::now(), false)?;
+                start_tx(tx, &ev, &EffortStart::at(thread, Timestamp::now()))?;
                 let open: i64 = tx
                     .query_row(
                         "SELECT count(*) FROM effort WHERE thread_id = ?1 AND ended_at IS NULL",
@@ -2222,7 +2462,12 @@ mod tests {
             .start("work_item:issues:ENG-1", &t, None)
             .await
             .unwrap();
-        let open = store.list_open_for_thread(&t).await.unwrap();
+        let open = store
+            .find_open_for_thread(&t)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>();
         assert_eq!(
             open.iter().map(|e| e.id).collect::<Vec<_>>(),
             vec![second.id]
@@ -2232,35 +2477,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn find_single_open_for_thread_only_when_unambiguous() {
+    async fn find_open_for_thread_finds_the_one_open_effort() {
         let (store, db, tid, thread) = fixture_with_db().await;
         // Zero open → None.
-        assert!(store
-            .find_single_open_for_thread(&thread)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(store.find_open_for_thread(&thread).await.unwrap().is_none());
         // Exactly one open → Some.
         store
             .start(&work_item_ref(tid), &thread, None)
             .await
             .unwrap();
-        assert!(store
-            .find_single_open_for_thread(&thread)
-            .await
-            .unwrap()
-            .is_some());
+        assert!(store.find_open_for_thread(&thread).await.unwrap().is_some());
         // Opening another moves the thread on: still exactly one open.
         let _ = db;
         store
             .start("work_item:issues:ENG-1", &thread, None)
             .await
             .unwrap();
-        assert!(store
-            .find_single_open_for_thread(&thread)
-            .await
-            .unwrap()
-            .is_some());
+        assert!(store.find_open_for_thread(&thread).await.unwrap().is_some());
     }
 
     #[tokio::test]

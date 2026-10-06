@@ -153,9 +153,11 @@ The three in progress:
 
 ## Status
 
-- Built: the hook payload dump and the observed hook events.
-- Next, in order: the Stop hook stops refusing; the edit guard drops the
-  tracked-work rung; the effort schema and seam; the default policy's
-  three rules; observed files; waiting derived; the Work panel and a
-  Thread activity page; hints; skills and repo rules. Then the capability
-  framework and the three swappable pieces.
+- Built: the hook payload dump and the observed hook events; the Stop
+  hook never refuses; the edit guard is isolation only; efforts need no
+  work item, one is open per thread, and the seam (open with adoption,
+  close as of a point, link, retitle — `commands/effort.rs`).
+- Next, in order: the default policy's three rules (with the
+  effort-policy choice and "none"); observed files; waiting derived; the
+  Work panel and a Thread activity page; hints; skills and repo rules.
+  Then the capability framework and the three swappable pieces.

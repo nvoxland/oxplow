@@ -63,7 +63,7 @@ impl TurnSnapshots for CaptureTurnSnapshots {
         };
         let effort = self
             .efforts
-            .find_single_open_for_thread(&thread)
+            .find_open_for_thread(&thread)
             .await
             .ok()
             .flatten()
