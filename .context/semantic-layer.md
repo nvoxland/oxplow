@@ -990,7 +990,9 @@ entities from data already in the semantic layer:
 ## Change analysis
 
 A **change** is one diff: a `commit` (vs its first parent), an `effort`
-(start snapshot → end snapshot, or → the working tree while open), an
+(start snapshot → end snapshot, or → the working tree while open — limited
+to the effort's own files, `v_effort_file`, since its bracket also holds
+what other threads and the person changed), an
 agent `turn` (its `start_snapshot_id` → its end `snapshot_id` — what the
 turn changed, even across a snapshot taken mid-turn; a turn still
 running is `NotFound`; target `{"kind":"turn","turnId":"trn12"}`, P2.10,
@@ -1062,8 +1064,10 @@ oxplow-bundled change cards) only read them.
   (`change_reactor.rs`) recomputes them as the stream moves: on a
   `snapshot.taken` that recorded files (not `unchanged`) or a
   `vcs.head.moved`, it first runs stage one for the stream's `working`
-  change and every open effort's (one without a start snapshot is
-  skipped) — so the lists are always current. The deep analysis is
+  change and the open efforts' (one without a start snapshot is
+  skipped): only the event's thread's effort when a thread's take made
+  it, every open effort on the stream otherwise — so the lists are always
+  current. The deep analysis is
   **paced** (`change_reactor::deep_pacing`, the same mechanism as
   collectors' — metrics.md "Pacing"): a take records core's job in
   `pending_run` (`owner` `core`, `id` `change/working/<stream>` or

@@ -174,12 +174,16 @@ impl AsyncEventConsumer for ChangeReactor {
             e => DomainError::Invalid(format!("analyzing stream {stream}: {e}")),
         };
         // Stage one first, for every mutable change: the file lists are
-        // current before any deep analysis begins.
+        // current before any deep analysis begins. A thread's take moves
+        // only its own effort's files; a take no thread made (the person's
+        // edits, a head move) may move any open effort's.
+        let thread = event.envelope.anchors.thread_id;
         let open: Vec<_> = svc
             .effort_store
             .list_open_for_stream(stream)
             .await?
             .into_iter()
+            .filter(|e| thread.is_none_or(|t| e.thread_id == t))
             // An effort with no start snapshot has nothing to diff.
             .filter(|e| e.start_snapshot_id.is_some())
             .collect();
@@ -296,6 +300,82 @@ mod tests {
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
         crate::test_fixtures::commit_all(root, "base");
         std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    2\n}\n").unwrap();
+    }
+
+    /// A take one thread's turn made refreshes that thread's effort, not
+    /// every open effort on the stream; a take no thread made (the
+    /// person's edits) refreshes them all.
+    #[tokio::test]
+    async fn a_threads_take_refreshes_only_its_effort() {
+        use oxplow_db::EffortStore as _;
+        let f = crate::thread_checkpoint::tests::with_baseline().await;
+        let stream = StreamId::new(1);
+        let start = f
+            .svc
+            .snapshot_store
+            .latest_snapshot_id_for_stream(stream)
+            .await
+            .unwrap()
+            .unwrap();
+        f.svc
+            .effort_store
+            .set_start_snapshot(&f.effort, start)
+            .await
+            .unwrap();
+        f.svc
+            .db
+            .transaction(|c| {
+                c.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                       VALUES (7, 1, 'other', 'queued',
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let other = f
+            .svc
+            .effort_store
+            .start(
+                "work_item:issues:B-1",
+                &oxplow_domain::ThreadId::new(7),
+                Some(start),
+            )
+            .await
+            .unwrap();
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        let efforts_analyzed = || async {
+            let out = f
+                .svc
+                .sql
+                .query_sql(
+                    "SELECT target FROM v_change WHERE kind = 'effort' ORDER BY target",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap();
+            serde_json::to_value(out.rows).unwrap()
+        };
+        let mut mine = log(&f.svc, taken(false, 1)).await;
+        mine.envelope.anchors.thread_id = Some(f.thread);
+        reactor.handle(&mine).await.unwrap();
+        assert_eq!(
+            efforts_analyzed().await,
+            serde_json::json!([[f.effort.value().to_string()]])
+        );
+        reactor
+            .handle(&log(&f.svc, taken(false, 1)).await)
+            .await
+            .unwrap();
+        assert_eq!(
+            efforts_analyzed().await,
+            serde_json::json!([
+                [f.effort.value().to_string()],
+                [other.id.value().to_string()]
+            ])
+        );
     }
 
     /// A move lists the working tree's files first, on their own:
@@ -495,6 +575,20 @@ mod tests {
             .await
             .unwrap();
         std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
+        // The effort's own file: its change is limited to those.
+        oxplow_db::EffortStore::record_file(
+            &*f.svc.effort_store,
+            &f.effort,
+            "src/new.rs",
+            oxplow_db::EffortFileChange::Created,
+            oxplow_db::effort_store::FileRefVersion {
+                local_snapshot_id: 0,
+                closest_vcs_rev: None,
+                vcs_rev_exact: false,
+            },
+        )
+        .await
+        .unwrap();
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         reactor
             .handle(&log(&f.svc, taken(false, 1)).await)
@@ -565,6 +659,19 @@ mod tests {
             .unwrap();
         // The edit lands and the effort closes: its end snapshot holds it.
         std::fs::write(root.join("src/late.rs"), "fn late() {}\n").unwrap();
+        oxplow_db::EffortStore::record_file(
+            &*f.svc.effort_store,
+            &f.effort,
+            "src/late.rs",
+            oxplow_db::EffortFileChange::Created,
+            oxplow_db::effort_store::FileRefVersion {
+                local_snapshot_id: 0,
+                closest_vcs_rev: None,
+                vcs_rev_exact: false,
+            },
+        )
+        .await
+        .unwrap();
         let end = take("src/late.rs").await.unwrap().unwrap();
         f.svc
             .effort_store
@@ -588,7 +695,7 @@ mod tests {
         let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
             "system",
             &oxplow_domain::events::schema::EffortFinishedV2 {
-                // The ref, as `effort.lifecycle` logs it (tsk1025).
+                // The ref, as `effort.lifecycle` logs it.
                 effort: oxplow_domain::refs::build::effort_ref(f.effort),
                 work_item: Some("work_item:oxplow:tsk1".into()),
                 end_snapshot: Some(format!("snapshot:{end}")),

@@ -436,9 +436,11 @@ pub async fn refresh_files(
         .await?;
     let root = svc.worktrees.resolve(Some(&stream.to_string())).await;
     let events_to = events_to(svc).await?;
+    let only = own_files(svc, kind, &key).await?;
     let entries = svc.trees.diff(&root, base.as_ref(), &head).await?;
     let files: Vec<ChangedFile> = entries
         .into_iter()
+        .filter(|e| only.as_ref().is_none_or(|own| own.contains(&e.path)))
         .map(|e| ChangedFile {
             path: e.path,
             status: e.status.as_str().to_string(),
@@ -663,7 +665,8 @@ async fn analyze(
     };
     let dup_head = head.clone();
     let started = std::time::Instant::now();
-    let result = compute(svc, &root, base, head).await;
+    let only = own_files(svc, kind, &key).await?;
+    let result = compute(svc, &root, base, head, only).await;
     let elapsed_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
     drop(running);
     match result {
@@ -768,23 +771,49 @@ fn spawn_duplicates(
     });
 }
 
-/// Diff `base` → `head` in `root`, read the changed files' contents, and
-/// analyze them.
+/// An effort's own files (`v_effort_file`: claimed or observed): what its
+/// change is limited to, since its bracket also holds what other threads
+/// and the person changed. `None` for any other kind of change.
+async fn own_files(
+    svc: &crate::Services,
+    kind: &str,
+    key: &str,
+) -> Result<Option<std::collections::HashSet<String>>, oxplow_domain::DomainError> {
+    use oxplow_db::EffortStore as _;
+    if kind != "effort" {
+        return Ok(None);
+    }
+    let Ok(id) = key.parse::<i64>() else {
+        return Ok(None);
+    };
+    let files = svc
+        .effort_store
+        .list_files(&oxplow_domain::EffortId::new(id))
+        .await?;
+    Ok(Some(files.into_iter().map(|f| f.path).collect()))
+}
+
+/// Diff `base` → `head` in `root` (limited to `only` when given), read the
+/// changed files' contents, and analyze them.
 async fn compute(
     svc: &crate::Services,
     root: &std::path::Path,
     base: Option<Revision>,
     head: Revision,
+    only: Option<std::collections::HashSet<String>>,
 ) -> Result<ChangeResults, String> {
     let zones = {
         let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
         ZoneRules::from_config(&cfg.zones)
     };
-    let entries = svc
+    let entries: Vec<_> = svc
         .trees
         .diff(root, base.as_ref(), &head)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|e| only.as_ref().is_none_or(|own| own.contains(&e.path)))
+        .collect();
     let analyzed: Vec<String> = entries
         .iter()
         .take(MAX_ANALYZED_FILES)
@@ -1396,6 +1425,66 @@ mod tests {
             )
             .await,
             serde_json::json!([[1, "merge"]])
+        );
+    }
+
+    /// An effort's change is its own files: another file that changed in
+    /// its bracket (someone else's, or between its turns) isn't on it.
+    #[tokio::test]
+    async fn an_efforts_change_is_limited_to_its_files() {
+        use oxplow_db::EffortStore as _;
+        let f = crate::thread_checkpoint::tests::with_baseline().await;
+        let stream = f.svc.streams.list_streams().await.unwrap()[0].id;
+        let start = f
+            .svc
+            .snapshot_store
+            .latest_snapshot_id_for_stream(stream)
+            .await
+            .unwrap();
+        f.svc
+            .effort_store
+            .finish(&f.effort, None, None)
+            .await
+            .unwrap();
+        let effort = f
+            .svc
+            .effort_store
+            .start("work_item:issues:A-1", &f.thread, start)
+            .await
+            .unwrap();
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::write(root.join("mine.txt"), "mine").unwrap();
+        std::fs::write(root.join("theirs.txt"), "theirs").unwrap();
+        f.svc
+            .effort_store
+            .record_file(
+                &effort.id,
+                "mine.txt",
+                oxplow_db::EffortFileChange::Created,
+                oxplow_db::effort_store::FileRefVersion {
+                    local_snapshot_id: 0,
+                    closest_vcs_rev: None,
+                    vcs_rev_exact: false,
+                },
+            )
+            .await
+            .unwrap();
+        let c = refresh_files(
+            &f.svc,
+            ChangeTarget::Effort {
+                effort_id: effort.id.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path FROM v_change_file WHERE change_id = ?1",
+                c.id
+            )
+            .await,
+            serde_json::json!([["mine.txt"]])
         );
     }
 
