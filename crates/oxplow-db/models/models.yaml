@@ -990,10 +990,10 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: capability_provider
-  version: 1
-  description: "Each capability's providers and the feature flags they declare: oxplow's own (`work_items/oxplow`, `vcs/git`, `knowledge/oxplow`) and every running external provider. The UI shows a provider's enhancements only when its flags allow them (a Comment… action only for a work-items provider with `comments`)."
+  version: 2
+  description: "Each capability's providers and the feature flags they declare: oxplow's own (`work_items/oxplow`, `vcs/git`, `knowledge/oxplow`, `effort_policy/oxplow` and `effort_policy/none`) and every running external provider. The UI shows a provider's enhancements only when its flags allow them (a Comment… action only for a work-items provider with `comments`)."
   columns:
-    - { name: "capability", type: "TEXT", doc: "`work_items`, `vcs`, `knowledge`." }
+    - { name: "capability", type: "TEXT", doc: "`work_items`, `vcs`, `knowledge`, `effort_policy`." }
     - { name: "provider", type: "TEXT", doc: "The provider's name: a work item ref's segment (`work_item:<provider>:…`), `git`." }
     - { name: "extension", type: "TEXT", doc: "The extension it comes from; NULL for oxplow's own." }
     - { name: "features", type: "TEXT", doc: "The capability's feature flags as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`)." }
