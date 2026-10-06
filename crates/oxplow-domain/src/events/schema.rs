@@ -451,10 +451,6 @@ pub struct WorkItemTransitionedV1 {
     pub work_item: String,
     pub from: TaskStatus,
     pub to: TaskStatus,
-    /// The effort this transition opened or closed, in events from before
-    /// a task's status stopped opening efforts; never written now.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
 }
 
 pub struct WorkItemTransitioned;
@@ -1723,10 +1719,6 @@ pub struct WorkItemCreatedV1 {
     /// `work_item:oxplow:tsk42`.
     pub work_item: String,
     pub status: TaskStatus,
-    /// The effort filing it opened, in events from before a task's status
-    /// stopped opening efforts; never written now.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
 }
 
 pub struct WorkItemCreated;
@@ -2361,7 +2353,6 @@ mod tests {
                 work_item: "work_item:oxplow:tsk4".into(),
                 from: TaskStatus::Ready,
                 to: TaskStatus::InProgress,
-                effort: Some("effort:eff9".into()),
             },
         );
         assert_eq!(ok.event_type, "work_item.transitioned");

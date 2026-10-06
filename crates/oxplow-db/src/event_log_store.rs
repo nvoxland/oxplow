@@ -574,7 +574,6 @@ mod tests {
                 work_item: "work_item:oxplow:tsk4".into(),
                 from: TaskStatus::Ready,
                 to: TaskStatus::InProgress,
-                effort: Some("effort:eff9".into()),
             },
         )
         .with_dedupe_key("k1")
@@ -583,7 +582,7 @@ mod tests {
             thread_id: Some(ThreadId::new(4)),
             ..Anchors::default()
         })
-        .with_subject(["work_item:oxplow:tsk4", "effort:eff9"]);
+        .with_subject(["work_item:oxplow:tsk4"]);
         let e2 = Envelope::typed::<CommandExecuted>(
             "agent:thr4",
             &CommandExecutedV2 {

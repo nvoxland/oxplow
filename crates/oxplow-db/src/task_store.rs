@@ -53,28 +53,8 @@ impl SqliteTaskStore {
         }
     }
 
-    /// Every live thread-attached task currently `in_progress`. Used
-    /// by boot recovery to heal the "in_progress without an open
-    /// effort" orphan.
-    pub async fn list_in_progress(&self) -> Result<Vec<Task>, DomainError> {
-        self.db
-            .call(|conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task
-                     WHERE status = 'in_progress'
-                       AND deleted_at IS NULL
-                       AND thread_id IS NOT NULL
-                     ORDER BY id",
-                )?;
-                let rows = stmt.query_map([], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    /// Insert a task and apply what its initial status implies, in one
-    /// transaction (see [`insert_logged_tx`]). Returns the id and the
-    /// effort it opened, if any.
+    /// Insert a task and log its filing, in one transaction (see
+    /// [`insert_logged_tx`]). Returns its id.
     pub async fn insert_logged(&self, item: &Task) -> Result<TaskId, DomainError> {
         let owned = Arc::new(item.clone());
         let vocabulary = self.vocabulary.clone();
@@ -107,10 +87,7 @@ impl SqliteTaskStore {
     }
 
     /// Move a task to another thread (or the backlog, `None`) at the end
-    /// of its list, taking its claim with it in the same transaction: an
-    /// open effort on the old thread closes, and an `in_progress` task
-    /// landing on a thread opens one there (another stream's included —
-    /// an effort's snapshots belong to one stream). Returns the moved row.
+    /// of its list. Returns the moved row.
     pub async fn move_task(&self, id: TaskId, dest: Option<ThreadId>) -> Result<Task, DomainError> {
         let vocabulary = self.vocabulary.clone();
         let moved = self
@@ -189,7 +166,6 @@ fn apply_status_tx(
                 work_item: work_item.clone(),
                 from,
                 to: item.status,
-                effort: None,
             })
             .with_anchors(anchors)
             .with_subject([work_item]);
@@ -311,7 +287,6 @@ pub fn insert_logged_tx(
         .typed::<WorkItemCreated>(&WorkItemCreatedV1 {
             work_item: work_item.clone(),
             status: placed.status,
-            effort: None,
         })
         .with_anchors(anchors)
         .with_subject([work_item]);
@@ -335,8 +310,8 @@ pub fn next_sort_index_tx(
 }
 
 /// Soft-delete task `id` at `now` in the caller's transaction — the core
-/// of `work_item.delete`: the row's `deleted_at`, its `work_item` row, an
-/// open effort closed, its body's `page_ref` edges dropped, and
+/// of `work_item.delete`: the row's `deleted_at`, its `work_item` row, its
+/// body's `page_ref` edges dropped, and
 /// `work_item.deleted@1` logged. `NotFound` when it's missing or already
 /// deleted.
 pub fn soft_delete_tx(
@@ -418,9 +393,7 @@ fn list_ids_tx(
 
 /// Put task `id` in `dest`'s list (`None` = the backlog) at `place`,
 /// renumbering that list's `sort_index` — the core of `work_item.reorder`
-/// (the same list) and `work_item.move` (another). A move takes the task's
-/// claim with it: an open effort closes, and an `in_progress` task landing
-/// on a thread opens one there. Logs `work_item.edited` (`thread` for a
+/// (the same list) and `work_item.move` (another). Logs `work_item.edited` (`thread` for a
 /// move, `position` within a list). `place` must name a task in that list.
 pub fn place_task_tx(
     conn: &rusqlite::Connection,
@@ -874,8 +847,7 @@ impl TaskStore for SqliteTaskStore {
         Ok(())
     }
 
-    /// Soft-delete the task and close its open effort in the same
-    /// transaction: no claim outlives its task.
+    /// Soft-delete the task (see [`soft_delete_tx`]).
     async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError> {
         let vocabulary = self.vocabulary.clone();
         self.db

@@ -4592,7 +4592,6 @@ async fn react(fx: &EffortFixture) -> oxplow_domain::StoredEvent {
             work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
             from: oxplow_domain::TaskStatus::InProgress,
             to: oxplow_domain::TaskStatus::Done,
-            effort: None,
         },
     );
     let id = env.id.clone();
@@ -4845,7 +4844,6 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
                 work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
                 from: oxplow_domain::TaskStatus::InProgress,
                 to: oxplow_domain::TaskStatus::Done,
-                effort: None,
             },
         );
         fx.svc.event_log_store.append(env).await.unwrap();
@@ -4888,7 +4886,6 @@ async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
                 work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
                 from: oxplow_domain::TaskStatus::InProgress,
                 to: oxplow_domain::TaskStatus::Done,
-                effort: None,
             },
         ))
         .await
@@ -4967,7 +4964,6 @@ where
             work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
             from: oxplow_domain::TaskStatus::InProgress,
             to: oxplow_domain::TaskStatus::Done,
-            effort: None,
         },
     );
     let id = env.id.clone();

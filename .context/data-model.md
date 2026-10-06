@@ -1459,8 +1459,8 @@ priority / parent / thread changed (`move_task` logs `thread` too, anchored
 to the destination), then moves the status — the core of
 `work_item.update` and `TaskService::update`. Filing a task
 (`insert_logged_tx`, the core of `work_item.create` and
-`TaskService::create`) logs **`work_item.created@1 { work_item, status }`**
-(an `effort` in older events only); filing into a status is a creation
+`TaskService::create`) logs **`work_item.created@1 { work_item, status }`**;
+filing into a status is a creation
 with that status, not a `ready →` transition. Every provider's state
 change also logs core's `work_item.state_changed@1 { work_item, to }`
 ([work-items.md](./work-items.md)). The `page_ref.work_item`
@@ -1474,11 +1474,10 @@ core, `task_store::apply_status_tx`, via `update_logged_tx` (an edited
 row), `insert_logged_tx` (filing straight into a status logs it as a
 change from `ready`) or `set_status_tx` (read-modify-write, the core of
 the `work_item.transition` command). It appends `work_item.transitioned@1`
-in the same transaction as the status flip and the effort open/finish —
-subject
-`work_item:oxplow:tskN` (+ `effort:effN`), anchors `stream` (looked up
-from the thread inside the transaction; none for a backlog task) /
-`thread` / `effort`, payload `{ work_item, from, to, effort? }`. Run as
+in the same transaction as the status flip — subject
+`work_item:oxplow:tskN`, anchors `stream` (looked up from the thread
+inside the transaction; none for a backlog task) / `thread`, payload
+`{ work_item, from, to }`. Run as
 `work_item.transition`, its source is the actor and its cause the run's
 `command.executed`; from `TaskService` directly it is
 `system:task_service`. A same-status re-issue logs

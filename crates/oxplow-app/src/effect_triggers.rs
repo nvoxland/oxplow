@@ -984,7 +984,6 @@ mod tests {
                 work_item: oxplow_domain::refs::build::work_item_ref(task),
                 from: TaskStatus::InProgress,
                 to,
-                effort: None,
             },
         )
     }

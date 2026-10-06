@@ -1285,15 +1285,6 @@ mod tests {
         assert!(conn.execute("DELETE FROM task", []).is_err());
     }
 
-    /// Regression: the first version of V18 rebuilt the `task` table
-    /// via `task_new` + `DROP TABLE task` + rename, which under
-    /// `PRAGMA foreign_keys = ON` cascaded and wiped every
-    /// `task_effort` row (`task_effort.task_id REFERENCES task(id)
-    /// ON DELETE CASCADE`). The fixed migration uses
-    /// `ALTER TABLE … DROP COLUMN` instead, which leaves child rows
-    /// untouched. This test asserts an `effort` row created
-    /// AFTER all migrations have run (including V18) coexists with
-    /// its parent and the `acceptance_criteria` column is gone.
     /// V5: an effort's work item becomes optional and at most one effort
     /// is open per thread. A V4 database with two open efforts on one
     /// thread (and an unlinked one stored as `''`) keeps every effort and
@@ -1355,6 +1346,54 @@ mod tests {
         assert!(err.is_err(), "one open effort per thread");
     }
 
+    /// V6: `work_item.created` and `work_item.transitioned` lose the
+    /// `effort` a task's status used to open; the logged payloads drop it
+    /// too, so they read under the narrowed v1 type.
+    #[test]
+    fn v6_strips_effort_from_logged_work_item_payloads() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(5))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload) VALUES
+                 ('a', 'work_item.created', 1, '2026-04-29T00:00:00Z', 'human', '[]',
+                  '{"work_item":"work_item:oxplow:tsk1","status":"in_progress","effort":"effort:eff1"}'),
+                 ('b', 'work_item.transitioned', 1, '2026-04-29T00:00:01Z', 'human', '[]',
+                  '{"work_item":"work_item:oxplow:tsk1","from":"in_progress","to":"done","effort":"effort:eff1"}'),
+                 ('c', 'effort.linked', 1, '2026-04-29T00:00:02Z', 'human', '[]',
+                  '{"effort":"effort:eff1","work_item":"work_item:oxplow:tsk1"}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let payloads: Vec<String> = conn
+            .prepare("SELECT payload FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            payloads,
+            vec![
+                r#"{"work_item":"work_item:oxplow:tsk1","status":"in_progress"}"#,
+                r#"{"work_item":"work_item:oxplow:tsk1","from":"in_progress","to":"done"}"#,
+                r#"{"effort":"effort:eff1","work_item":"work_item:oxplow:tsk1"}"#,
+            ]
+        );
+    }
+
+    /// Regression: the first version of V18 rebuilt the `task` table
+    /// via `task_new` + `DROP TABLE task` + rename, which under
+    /// `PRAGMA foreign_keys = ON` cascaded and wiped every
+    /// `task_effort` row (`task_effort.task_id REFERENCES task(id)
+    /// ON DELETE CASCADE`). The fixed migration uses
+    /// `ALTER TABLE … DROP COLUMN` instead, which leaves child rows
+    /// untouched. This test asserts an `effort` row created
+    /// AFTER all migrations have run (including V18) coexists with
+    /// its parent and the `acceptance_criteria` column is gone.
     #[test]
     fn v18_does_not_cascade_to_task_effort() {
         let db = Database::in_memory();

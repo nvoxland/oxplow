@@ -16,13 +16,6 @@
   "additionalProperties": false,
   "description": "`work_item.created@1`: a task was filed, in `status`.",
   "properties": {
-    "effort": {
-      "description": "The effort filing it opened, in events from before a task's status\nstopped opening efforts; never written now.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "status": {
       "$ref": "#/$defs/TaskStatus"
     },
