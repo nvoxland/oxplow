@@ -142,6 +142,9 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<SnapshotTaken>().expect("core type registers");
         r.register::<VcsHeadMoved>().expect("core type registers");
+        r.register::<VcsCommitIndexed>()
+            .expect("core type registers");
+        r.register::<EffortLanded>().expect("core type registers");
         r.register::<AgentTurnStarted>()
             .expect("core type registers");
         r.register::<AgentTurnEndedAtV1>()
@@ -1043,6 +1046,27 @@ impl EventType for VcsHeadMoved {
     type Payload = VcsHeadMovedV1;
 }
 
+/// `vcs.commit.indexed@1`: the commit indexer stored a commit it hadn't
+/// seen, reachable from a stream's head — every commit, however it was made
+/// (a `vcs.head.moved` needs a clean worktree, so it misses most).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VcsCommitIndexedV1 {
+    /// `commit:<sha>`.
+    pub commit: String,
+    /// `stream:strN`, the stream whose workspace it was found from.
+    pub stream: String,
+    /// When it was committed (RFC 3339).
+    pub committed_at: String,
+}
+
+pub struct VcsCommitIndexed;
+impl EventType for VcsCommitIndexed {
+    const TYPE: &'static str = "vcs.commit.indexed";
+    const V: u32 = 1;
+    type Payload = VcsCommitIndexedV1;
+}
+
 /// `agent.turn.started@1`: a person's prompt opened a turn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1690,6 +1714,26 @@ impl EventType for EffortLinked {
     type Payload = EffortLinkedV1;
 }
 
+/// `effort.landed@1`: a commit holds an open effort's work — every file
+/// the effort changed is in the commit as the effort left it (`complete`),
+/// or only some of them. What an effort policy closes an effort on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortLandedV1 {
+    /// `effort:eff12`.
+    pub effort: String,
+    /// `commit:<sha>`.
+    pub commit: String,
+    pub complete: bool,
+}
+
+pub struct EffortLanded;
+impl EventType for EffortLanded {
+    const TYPE: &'static str = "effort.landed";
+    const V: u32 = 1;
+    type Payload = EffortLandedV1;
+}
+
 /// `effort.retitled@1`: an effort's own title was set or cleared
 /// (`effort.update`); cleared, it shows its default again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2262,6 +2306,7 @@ mod tests {
                 ("effort.decision_reviewed", 1),
                 ("effort.finished", 1),
                 ("effort.finished", 2),
+                ("effort.landed", 1),
                 ("effort.linked", 1),
                 ("effort.opened", 1),
                 ("effort.opened", 2),
@@ -2283,6 +2328,7 @@ mod tests {
                 ("test.run.recorded", 1),
                 ("thread.checkpoint", 1),
                 ("ui.op_failed", 1),
+                ("vcs.commit.indexed", 1),
                 ("vcs.head.moved", 1),
                 ("work_item.commented", 1),
                 ("work_item.created", 1),

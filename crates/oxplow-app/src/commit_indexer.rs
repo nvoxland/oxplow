@@ -210,20 +210,24 @@ async fn index_one(
 pub async fn refresh(svc: &crate::Services) -> usize {
     use oxplow_domain::stores::StreamStore as _;
     let streams = svc.stream_store.list().await.unwrap_or_default();
+    // Each workspace once, with the first stream it's for.
     let mut workspaces: Vec<std::path::PathBuf> = Vec::new();
+    let mut stream_of: Vec<Option<oxplow_domain::StreamId>> = Vec::new();
     for s in &streams {
         let ws = svc.worktrees.resolve(Some(&s.id.to_string())).await;
         if !workspaces.contains(&ws) {
             workspaces.push(ws);
+            stream_of.push(Some(s.id));
         }
     }
     let primary = svc.worktrees.project_dir().to_path_buf();
     if !workspaces.contains(&primary) {
         workspaces.insert(0, primary.clone());
+        stream_of.insert(0, None);
     }
     let vocabulary = svc.vocabulary.current();
     let mut n = 0;
-    for ws in &workspaces {
+    for (ws, stream) in workspaces.iter().zip(&stream_of) {
         let indexed = index_recent(
             &vocabulary.kinds,
             &*svc.vcs,
@@ -239,6 +243,9 @@ pub async fn refresh(svc: &crate::Services) -> usize {
         for (sha, committed) in &indexed {
             if let Err(e) = crate::commit_links::link_commit(svc, ws, sha, *committed).await {
                 tracing::warn!(?e, %sha, "linking a commit to its effort failed");
+            }
+            if let Some(stream) = stream {
+                log_indexed(svc, *stream, sha, *committed).await;
             }
         }
     }
@@ -257,6 +264,35 @@ pub async fn refresh(svc: &crate::Services) -> usize {
     }
     refresh_refs(&*svc.vcs, &primary, &checkouts, &svc.git_store).await;
     n
+}
+
+/// `vcs.commit.indexed` for a commit found from `stream`'s workspace:
+/// once per commit, however many streams reach it.
+async fn log_indexed(
+    svc: &crate::Services,
+    stream: oxplow_domain::StreamId,
+    sha: &str,
+    committed: oxplow_domain::Timestamp,
+) {
+    use oxplow_domain::events::schema::{VcsCommitIndexed, VcsCommitIndexedV1};
+    let env = oxplow_domain::Envelope::typed::<VcsCommitIndexed>(
+        oxplow_domain::refs::build::system_source("commit_indexer"),
+        &VcsCommitIndexedV1 {
+            commit: format!("commit:{sha}"),
+            stream: oxplow_domain::refs::build::stream_ref(stream),
+            committed_at: committed.to_text(),
+        },
+    )
+    .with_anchors(oxplow_domain::Anchors {
+        stream_id: Some(stream),
+        ..Default::default()
+    })
+    .with_subject([format!("commit:{sha}")])
+    .with_dedupe_key(format!("vcs.commit.indexed:{sha}"));
+    match svc.event_log_store.append(env).await {
+        Ok(_) | Err(oxplow_domain::DomainError::Constraint(_)) => {}
+        Err(e) => tracing::warn!(?e, %sha, "logging an indexed commit failed"),
+    }
 }
 
 /// The stored form of a revision.

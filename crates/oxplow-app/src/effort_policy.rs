@@ -20,6 +20,12 @@
 //! tokens and runs move into it). A turn that only read never opens one,
 //! so a person's own edits meanwhile don't either.
 //!
+//! Rule 3, close on landing: an `effort.landed` with `complete` (a commit
+//! holds all the effort's files as it left them) closes the effort as a
+//! commit. A partial landing leaves it open; a reset or a branch switch
+//! lands nothing, so it closes nothing. Work after the commit is the next
+//! effort's (rule 2 opens it, adopting no further back than the close).
+//!
 //! The project chooses it like a work list: `activeProviders.effort_policy`
 //! is `oxplow` (the default) or `none`, which leaves efforts to people and
 //! agents.
@@ -30,8 +36,9 @@ use async_trait::async_trait;
 use oxplow_config::OxplowConfig;
 use oxplow_db::SqlCell;
 use oxplow_domain::events::schema::{
-    EffortLinked, EffortLinkedV1, EffortOpened, EffortOpenedV2, EventType as _, ThreadCheckpoint,
-    ThreadCheckpointV1, WorkItemStateChanged, WorkItemStateChangedV1,
+    EffortLanded, EffortLandedV1, EffortLinked, EffortLinkedV1, EffortOpened, EffortOpenedV2,
+    EventType as _, ThreadCheckpoint, ThreadCheckpointV1, WorkItemStateChanged,
+    WorkItemStateChangedV1,
 };
 use oxplow_domain::work_items::CanonicalState;
 use oxplow_domain::{Actor, DomainError, EffortId, StoredEvent, ThreadId};
@@ -114,6 +121,16 @@ impl EffortPolicyConsumer {
             }),
             _ => None,
         }))
+    }
+
+    async fn is_open(&self, effort: EffortId) -> Result<bool, DomainError> {
+        let rows = self
+            .rows(
+                "SELECT 1 FROM v_effort WHERE id = ?1 AND ended_at IS NULL",
+                vec![SqlCell::Int(effort.value())],
+            )
+            .await?;
+        Ok(!rows.is_empty())
     }
 
     /// The item's state and thread, if it is a live item.
@@ -273,6 +290,7 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
             || event_type == EffortLinked::TYPE
             || event_type == EffortOpened::TYPE
             || event_type == ThreadCheckpoint::TYPE
+            || event_type == EffortLanded::TYPE
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
@@ -298,6 +316,22 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
                 match linked.work_item {
                     Some(item) => self.linked(&item).await,
                     None => Ok(()),
+                }
+            }
+            t if t == EffortLanded::TYPE => {
+                let landed: EffortLandedV1 = serde_json::from_value(payload).map_err(storage)?;
+                if !landed.complete {
+                    return Ok(());
+                }
+                match event.envelope.anchors.effort_id {
+                    Some(effort) if self.is_open(effort).await? => {
+                        self.run(
+                            crate::commands::effort::CLOSE,
+                            json!({ "effort": effort.to_string(), "reason": "commit" }),
+                        )
+                        .await
+                    }
+                    _ => Ok(()),
                 }
             }
             t if t == ThreadCheckpoint::TYPE => {

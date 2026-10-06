@@ -391,6 +391,33 @@ impl TaskService {
             }
             return Ok(());
         }
+        // An effort that starts where its predecessor on the thread closed
+        // (an effort opened after a commit closed the last) begins at that
+        // close's end snapshot.
+        if let Some(end) = effort_store
+            .end_snapshot_closed_at(effort.thread_id, effort.started_at)
+            .await?
+        {
+            effort_store.set_start_snapshot(&effort_id, end).await?;
+            return Ok(());
+        }
+        // One that adopted work already taken (rule 2 opens after the
+        // turn's end take) begins at the stream's last snapshot from
+        // before it began: a capture now would include that work.
+        let store = snapshot.store();
+        let before = store
+            .latest_snapshot_at_or_before(*snapshot.stream_id(), effort.started_at)
+            .await?;
+        if let Some(prior) = before {
+            if before
+                != store
+                    .latest_snapshot_id_for_stream(*snapshot.stream_id())
+                    .await?
+            {
+                effort_store.set_start_snapshot(&effort_id, prior).await?;
+                return Ok(());
+            }
+        }
         // An effort's start baseline must reflect the full pre-edit tree:
         // wait for the startup sweep (a no-op once it's done).
         snapshot.await_initial_ready().await;

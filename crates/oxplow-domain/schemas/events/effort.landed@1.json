@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.landed@1`: a commit holds an open effort's work — every file\nthe effort changed is in the commit as the effort left it (`complete`),\nor only some of them. What an effort policy closes an effort on.",
+  "properties": {
+    "commit": {
+      "description": "`commit:<sha>`.",
+      "type": "string"
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "effort": {
+      "description": "`effort:eff12`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "effort",
+    "commit",
+    "complete"
+  ],
+  "title": "EffortLandedV1",
+  "type": "object"
+}

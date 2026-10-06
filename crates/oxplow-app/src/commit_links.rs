@@ -125,7 +125,11 @@ async fn holds_effort(
 
 /// The `work_item → commit` edge saying `sha` holds `effort`'s work; none
 /// while the effort is unlinked.
-async fn link(svc: &crate::Services, sha: &str, effort: &Effort) -> Result<(), DomainError> {
+pub(crate) async fn link(
+    svc: &crate::Services,
+    sha: &str,
+    effort: &Effort,
+) -> Result<(), DomainError> {
     let Some(work_item) = effort
         .work_item
         .as_deref()

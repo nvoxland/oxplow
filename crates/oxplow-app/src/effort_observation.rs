@@ -112,6 +112,20 @@ impl AsyncEventConsumer for EffortObservationConsumer {
         let Some(effort) = self.effort_at(thread.value(), &to).await? else {
             return Ok(());
         };
+        // From the later of the turn's start and the effort's: an effort
+        // that began mid-turn (after a commit closed the last) holds only
+        // what came after. Its start pin may not be taken yet (the policy
+        // just opened it): take it now (idempotent).
+        self.tasks.on_effort_opened(effort).await?;
+        let effort_start = self
+            .efforts
+            .get_effort(&effort)
+            .await?
+            .and_then(|e| e.start_snapshot_id);
+        let start = match (start, effort_start) {
+            (Some(t), Some(e)) => Some(t.max(e)),
+            (t, e) => t.or(e),
+        };
         let changes: Vec<(String, EffortFileChange)> = self
             .snapshots
             .diff_snapshots(start, end)

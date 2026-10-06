@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`vcs.commit.indexed@1`: the commit indexer stored a commit it hadn't\nseen, reachable from a stream's head — every commit, however it was made\n(a `vcs.head.moved` needs a clean worktree, so it misses most).",
+  "properties": {
+    "commit": {
+      "description": "`commit:<sha>`.",
+      "type": "string"
+    },
+    "committed_at": {
+      "description": "When it was committed (RFC 3339).",
+      "type": "string"
+    },
+    "stream": {
+      "description": "`stream:strN`, the stream whose workspace it was found from.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "commit",
+    "stream",
+    "committed_at"
+  ],
+  "title": "VcsCommitIndexedV1",
+  "type": "object"
+}

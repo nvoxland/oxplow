@@ -51,6 +51,7 @@ pub mod effect_triggers;
 pub mod effective_config;
 pub mod effects;
 pub mod effort_evidence;
+pub mod effort_landing;
 pub mod effort_lifecycle;
 pub mod effort_observation;
 pub mod effort_policy;

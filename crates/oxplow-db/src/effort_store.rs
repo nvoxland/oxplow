@@ -1041,6 +1041,30 @@ impl SqliteEffortStore {
     }
 
     /// The open efforts on `stream`'s threads, oldest first.
+    /// The end snapshot of `thread`'s effort that closed exactly at `at`:
+    /// where an effort that starts there (adopting no further back than
+    /// its predecessor's close) begins.
+    pub async fn end_snapshot_closed_at(
+        &self,
+        thread: ThreadId,
+        at: Timestamp,
+    ) -> Result<Option<i64>, DomainError> {
+        use rusqlite::OptionalExtension;
+        let at = ts_to_string(at);
+        self.db
+            .call(move |c| {
+                c.query_row(
+                    "SELECT end_snapshot_id FROM effort
+                      WHERE thread_id = ?1 AND ended_at = ?2 AND end_snapshot_id IS NOT NULL
+                      LIMIT 1",
+                    params![thread.value(), at],
+                    |r| r.get(0),
+                )
+                .optional()
+            })
+            .await
+    }
+
     pub async fn list_open_for_stream(&self, stream: StreamId) -> Result<Vec<Effort>, DomainError> {
         self.db
             .call(move |conn| {

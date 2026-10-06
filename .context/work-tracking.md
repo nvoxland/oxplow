@@ -72,8 +72,8 @@ events (a checkpoint after a turn's snapshot, a commit indexed, an effort
 landed by a commit, a work item changing state). The default:
 
 1. An item started on a thread links that thread's effort, opening one if
-   none is open. An ancestor or descendant refines the link (epic, then
-   child); an unrelated item closes the effort and opens the next; the
+   none is open. A descendant refines the link (epic, then child), an
+   ancestor leaves it; an unrelated item closes the effort and opens the next; the
    linked item going done or canceled closes it.
 2. A turn that changed the worktree, and ran at least one tool that isn't
    a read, opens an effort if none is open. A question-only turn never
@@ -186,8 +186,11 @@ The three in progress:
   hook never refuses; the edit guard is isolation only; efforts need no
   work item, one is open per thread, and the seam (open with adoption,
   close as of a point, link, retitle — `commands/effort.rs`); the
-  effort-policy choice with "none"; rules 1 and 2 (`thread.checkpoint`);
-  observed files and runs by their causing tool call.
-- Next, in order: rule 3 (a commit lands it); waiting derived; the
+  effort-policy choice with "none"; rules 1, 2 (`thread.checkpoint`) and
+  3 (`vcs.commit.indexed` → `effort.landed`); observed files and runs by
+  their causing tool call. An effort's start pin is where its span began:
+  the predecessor's end snapshot when it starts at that close, else the
+  stream's last snapshot before it when it adopted work already taken.
+- Next, in order: efforts close with their thread and stream; waiting derived; the
   Work panel and a Thread activity page; hints; skills and repo rules.
   Then the capability framework and the three swappable pieces.

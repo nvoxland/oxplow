@@ -566,7 +566,20 @@ commit into the unified `page_ref` graph (see
   over the commits since the effort started. An effort whose end-snapshot
   bytes have expired from Local History (or were never kept) can't be
   shown to hold anything, so it simply doesn't match; it must never error,
-  or one old effort stops the commit linking to every other (tsk1078).
+  or one old effort stops the commit linking to every other.
+- **Logged as `vcs.commit.indexed`** `{ commit, stream, committed_at }`,
+  once per commit (dedupe key), anchored to the stream whose workspace
+  found it — every commit, unlike `vcs.head.moved`, which needs a clean
+  worktree. The `effort.landing` consumer (`effort_landing.rs`) compares
+  it with each **open** effort on that stream by content: the effort's
+  files — recorded, plus what its thread's running turn has changed so far
+  (a mid-turn commit comes before those are observed) — as they are in the
+  worktree now, against the commit's version of each. It holds the effort
+  when it touches one of them and has every file it touches as the effort
+  left it, and holds it whole (`complete`) when that's true of all of
+  them. Either way it logs `effort.landed { effort, commit, complete }`
+  and links a linked effort's item to the commit; the effort policy closes
+  on a complete landing (`.context/work-tracking.md`, rule 3).
 
 Idempotent. Each commit is keyed by its full sha, and a one-row
 existence probe before re-diffing skips already-indexed commits, so

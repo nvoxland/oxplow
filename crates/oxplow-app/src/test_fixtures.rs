@@ -40,6 +40,18 @@ pub fn commit_all(dir: &Path, message: &str) -> String {
         .to_string()
 }
 
+/// Commit what's staged in `dir` on HEAD, as it is; the new sha.
+pub fn commit_index(dir: &Path, message: &str) -> String {
+    let repo = git2::Repository::open(dir).unwrap();
+    let mut idx = repo.index().unwrap();
+    let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+    let sig = repo.signature().unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+        .unwrap()
+        .to_string()
+}
+
 pub struct EffortFixture {
     pub svc: Arc<crate::Services>,
     /// Keep alive: the project directory.

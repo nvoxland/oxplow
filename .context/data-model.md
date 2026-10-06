@@ -1275,7 +1275,8 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `effort.claim` | async | `agent.tool.finished` | claims an edited file for the effort it was edited in | boot |
 | `thread.checkpoint` | async | `snapshot.taken` (`turn_end`) | logs `thread.checkpoint` (changed since the turn began, writing tool count) | `Services::new` |
 | `effort.policy` | async | `work_item.state_changed`, `effort.linked` / `opened`, `thread.checkpoint` | the default effort policy: opens, links, closes efforts through `effort.*` (`.context/work-tracking.md`) | `Services::new` |
-| `effort.observe` | async (after `effort.policy`) | `thread.checkpoint` | records the turn's changed files as the effort's `observed` files | `Services::new` |
+| `effort.observe` | async (after `effort.policy`) | `thread.checkpoint` | records the turn's changed files as the effort's `observed` files, from the later of the turn's start and the effort's | `Services::new` |
+| `effort.landing` | async | `vcs.commit.indexed` | logs `effort.landed` for each open effort on the stream the commit holds (git-integration.md "Commit indexer") | boot.rs |
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
