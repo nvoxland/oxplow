@@ -556,8 +556,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn closing_a_task_infers_its_efforts_decisions_in_the_background() {
+    async fn closing_an_effort_infers_its_decisions_in_the_background() {
         use crate::ai_service::{ProviderConfig, ProviderKind, RoleBinding};
+        use oxplow_db::EffortStore as _;
         let f = crate::test_fixtures::services_with_effort().await;
         let reply = serde_json::json!({"decisions": [{"question": "Q", "choice": "C"}]});
         let (base, _) = oxplow_ai_fake::mock(
@@ -602,14 +603,8 @@ mod tests {
             .unwrap();
         crate::effort_reactors::register(&f.svc);
         f.svc
-            .tasks
-            .update(
-                f.task,
-                crate::task_service::UpdateTaskChanges {
-                    status: Some(oxplow_domain::TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
+            .effort_store
+            .finish(&f.effort, None, None)
             .await
             .unwrap();
         // The close logged `effort.finished`; the pump hands it to the

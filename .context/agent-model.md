@@ -940,8 +940,7 @@ is `{ to: done|canceled, native_state: archived }`.
   thread? }` — always on the active tracker; filed on the agent's own
   thread unless `thread` names another; `native` is the tracker's own
   fields (oxplow: `{ priority? }`); `state` defaults to `todo` = oxplow
-  `ready`, and on oxplow's list `in_progress` opens the effort in the same
-  run; the result carries `ref` — `work_item.update`,
+  `ready`; the result carries `ref` — `work_item.update`,
   `work_item.transition`, `work_item.reorder { ref, before?, after? }`,
   `work_item.link` / `work_item.comment`. There is no agent delete —
   `work_item.delete` is destructive, and an agent never confirms one:
@@ -1840,12 +1839,11 @@ when takes happen.
   new row, so `end_snapshot_id` is set whenever the stream has any
   snapshot (null ⇔ effort in progress); the effort-lifecycle pump
   consumer falls back to the start snapshot on a capture failure. The
-  take is automatic after the status transition (the transition logs
-  `effort.opened` / `effort.closed`, and the call settles the pump) —
-  agents never flush explicitly.
+  take is automatic: an open or close logs `effort.opened` /
+  `effort.closed`, which the pump consumer pins — agents never flush
+  explicitly.
 - **Boot.** The primary stream's startup sweep (`enqueue_startup_diff`,
-  then a `startup` take) records what changed while oxplow was down;
-  recovery brackets orphaned efforts with an `effort_end` take.
+  then a `startup` take) records what changed while oxplow was down.
 - **HEAD moves.** The git-refs listener runs a `git_refs` take, then —
   on a clean tree — a `head_moved` re-stamp (`vcs.head.moved@1`).
 - **Effort-level diffs** are `diff_snapshots(start, end)` (content
@@ -1915,19 +1913,6 @@ authored work. Best-effort, never blocks the close; the existing
 `effort.report` file review (`compute_effort_file_review`) is unaffected
 because it reads claims, not the residue table. Claiming a path later
 (`record_file`) clears its residue, so the two sets never overlap.
-Restart-recovery orphan closes are reconciled the same way:
-`RecoveryService` (wired via `with_end_snapshots` in `Services::new`,
-after the capture registry is built) brackets each orphaned effort that
-has a start snapshot — it drains the worktree (`enqueue_startup_diff`)
-and requests an `EffortEnd` snapshot, since the boot worktree still
-reflects the dead effort's final state — and stamps it via
-`finish(Some(end_id), …)`. That close logs `effort.closed` like any, so
-the consumer reconciles it when the pump first runs; recovery records no
-residue itself. So a process that died mid-effort records its unclaimed
-residue as unattributed rather than silently attributing it. Best-effort
-and never blocks recovery: an effort with no start snapshot (or any
-capture failure) closes with `finish(None, None)`, and has no bracket to
-reconcile.
 
 **File-and-close shortcut.** An item that was never `in_progress` has
 no effort; `effort.report` on it (after a `work_item.transition` straight

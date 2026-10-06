@@ -450,7 +450,6 @@ fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::Initial
                 "comments": false,
                 "links": false,
                 "delete": false,
-                "in_progress_opens_effort": false,
             }),
         }],
         // The work-items contract's verbs (`.context/work-items.md`); declare

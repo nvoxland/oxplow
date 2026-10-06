@@ -12,7 +12,6 @@
         "delete": true,
         "hierarchy": true,
         "idempotent_writes": true,
-        "in_progress_opens_effort": false,
         "links": true
       }
     }

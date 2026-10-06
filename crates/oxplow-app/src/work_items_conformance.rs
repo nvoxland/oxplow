@@ -35,14 +35,13 @@ pub struct SuiteRun {
     pub left: Vec<String>,
 }
 
-/// What the suite reads back from the host: the item's `v_work_item` row,
-/// its open efforts and the events naming it.
+/// What the suite reads back from the host: the item's `v_work_item` row
+/// and the events naming it.
 #[async_trait]
 pub trait WorkItemsProbe: Send + Sync {
     /// Settle the host's projections (the event pump) before a read.
     async fn settle(&self);
     async fn record(&self, item_ref: &str) -> Option<WorkItemRecord>;
-    async fn open_efforts(&self, item_ref: &str) -> usize;
     /// The type of every logged event whose subject names `item_ref`.
     async fn event_types(&self, item_ref: &str) -> Vec<String>;
     /// Read `provider` back through its collectors (`provider.sync`), its
@@ -64,6 +63,16 @@ pub trait WorkItemsProbe: Send + Sync {
 /// suite checks it's `provider`). `native` is the provider's own fields
 /// for the items it files, `None` for none; an agent `actor` files them on
 /// its thread, so `in_progress` claims it on oxplow.
+/// How many `work_item.state_changed` events name `item`.
+async fn state_changes(probe: &dyn WorkItemsProbe, item: &str) -> usize {
+    probe
+        .event_types(item)
+        .await
+        .iter()
+        .filter(|t| *t == "work_item.state_changed")
+        .count()
+}
+
 pub async fn suite(
     items: &WorkItems,
     provider: &str,
@@ -116,6 +125,12 @@ pub async fn suite(
         fail("create", format!("`{item}` isn't a `{prefix}…` ref"));
     }
     probe.settle().await;
+    if state_changes(probe, &item).await == 0 {
+        fail(
+            "state_changed",
+            format!("creating `{item}` logged no work_item.state_changed"),
+        );
+    }
     match probe.record(&item).await {
         None => fail("create", format!("no v_work_item row for `{item}`")),
         Some(r) if r.title != "conformance item" || r.state != CanonicalState::Todo => fail(
@@ -152,15 +167,28 @@ pub async fn suite(
         }
     }
 
-    // 3. Every canonical state round-trips; entering in_progress opens
-    //    exactly one effort iff the provider says it does. Moving again
-    //    to the native state the row reports lands on the same state.
+    // 3. Every canonical state round-trips, and core logs each move as
+    //    `work_item.state_changed`, whoever the provider. Moving again to
+    //    the native state the row reports lands on the same state.
+    let mut was = CanonicalState::Todo;
     for state in CanonicalState::ALL {
+        let changes_before = state_changes(probe, &item).await;
         if let Err(e) = items.transition(actor, &item, state, None).await {
             fail("transition", format!("to {}: {e}", state.as_str()));
             continue;
         }
         probe.settle().await;
+        if state != was && state_changes(probe, &item).await <= changes_before {
+            fail(
+                "state_changed",
+                format!(
+                    "moving from {} to {} logged no work_item.state_changed",
+                    was.as_str(),
+                    state.as_str()
+                ),
+            );
+        }
+        was = state;
         let row = probe.record(&item).await;
         let got = row.as_ref().map(|r| r.state);
         if got != Some(state) {
@@ -168,16 +196,6 @@ pub async fn suite(
                 "transition",
                 format!("after moving to {}, the row says {got:?}", state.as_str()),
             );
-        }
-        if state == CanonicalState::InProgress {
-            let open = probe.open_efforts(&item).await;
-            let want = usize::from(features.in_progress_opens_effort);
-            if open != want {
-                fail(
-                    "in_progress_opens_effort",
-                    format!("{open} open efforts after in_progress, want {want}"),
-                );
-            }
         }
         if let Some(native) = row.map(|r| r.native_state) {
             match items.transition(actor, &item, state, Some(&native)).await {
@@ -501,23 +519,6 @@ impl WorkItemsProbe for ServicesProbe<'_> {
                     })
                 },
             )
-    }
-
-    async fn open_efforts(&self, item_ref: &str) -> usize {
-        let item_ref = item_ref.to_string();
-        self.0
-            .db
-            .read(move |c| {
-                c.query_row(
-                    "SELECT count(*) FROM effort WHERE work_item = ?1 AND ended_at IS NULL",
-                    [item_ref],
-                    |r| r.get::<_, i64>(0),
-                )
-                .map_err(sql)
-            })
-            .await
-            .map(|n| n as usize)
-            .unwrap_or(0)
     }
 
     async fn sync(&self, provider: &str) -> Result<bool, String> {

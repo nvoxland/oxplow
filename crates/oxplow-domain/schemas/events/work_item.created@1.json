@@ -14,10 +14,10 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`work_item.created@1`: a task was filed, in `status` (filing straight\ninto `in_progress` opens its effort in the same transaction).",
+  "description": "`work_item.created@1`: a task was filed, in `status`.",
   "properties": {
     "effort": {
-      "description": "The effort filing it opened, when it was filed `in_progress`.",
+      "description": "The effort filing it opened, in events from before a task's status\nstopped opening efforts; never written now.",
       "type": [
         "string",
         "null"

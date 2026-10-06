@@ -4229,8 +4229,8 @@ export type OxplowConfig = {
 	extensionInstances: { [key in string]: ExtensionInstanceConfig },
 	/**
 	 *  Each swappable capability's active provider
-	 *  (`activeProviders: { work_items: issues }`); a capability absent
-	 *  here keeps oxplow's own.
+	 *  (`activeProviders: { work_items: issues, effort_policy: none }`); a
+	 *  capability absent here keeps oxplow's own.
 	 */
 	activeProviders: { [key in string]: string },
 	/**
@@ -5462,11 +5462,6 @@ export type WorkItemsFeatures = {
 	links: boolean,
 	// Items can be deleted (`work_item.delete`).
 	delete?: boolean,
-	/**
-	 *  Moving an item to `in_progress` opens its effort itself (oxplow's
-	 *  tasks do), so `effort.open` must not open a second.
-	 */
-	in_progress_opens_effort: boolean,
 	/**
 	 *  A write sent twice with one idempotency key is done once, the
 	 *  second answered as the first (the protocol's

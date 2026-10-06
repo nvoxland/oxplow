@@ -3699,7 +3699,7 @@
         {
           "name": "features",
           "type": "TEXT",
-          "doc": "The capability's feature flags as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `in_progress_opens_effort`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`)."
+          "doc": "The capability's feature flags as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`)."
         },
         {
           "name": "active",

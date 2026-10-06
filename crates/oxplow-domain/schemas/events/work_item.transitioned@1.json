@@ -17,7 +17,7 @@
   "description": "`work_item.transitioned@1`: a task changed status.",
   "properties": {
     "effort": {
-      "description": "The effort this transition opened or closed, when it did either.",
+      "description": "The effort this transition opened or closed, in events from before\na task's status stopped opening efforts; never written now.",
       "type": [
         "string",
         "null"

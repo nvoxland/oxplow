@@ -52,6 +52,7 @@ pub mod effective_config;
 pub mod effects;
 pub mod effort_evidence;
 pub mod effort_lifecycle;
+pub mod effort_policy;
 pub mod effort_reactors;
 pub mod entity_metrics;
 pub mod event_bodies;
@@ -860,11 +861,7 @@ impl Services {
             event_bus.clone(),
         )
         .with_event_pump(event_pump.clone());
-        let recovery_svc = recovery::RecoveryService::new(
-            agent_turn_store.clone(),
-            task_store.clone(),
-            effort_store.clone(),
-        );
+        let recovery_svc = recovery::RecoveryService::new(agent_turn_store.clone());
 
         let pty = oxplow_pty::PtyManager::spawn();
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
@@ -998,11 +995,6 @@ impl Services {
             snapshot_captures.register(s);
         }
         snapshot_captures.set_primary(primary_stream.id);
-        // Now that the capture registry exists and its streams are
-        // registered, give recovery the wiring to bracket + reconcile
-        // orphaned efforts left open by a crash (death/restart case).
-        let recovery_svc =
-            recovery_svc.with_end_snapshots(thread_store.clone(), snapshot_captures.clone());
         let hook_ingest =
             hook_ingest.with_turn_snapshots(Arc::new(turn_snapshots::CaptureTurnSnapshots {
                 captures: snapshot_captures.clone(),
@@ -1108,6 +1100,13 @@ impl Services {
             }))
         };
         work_items.register(work_items::oxplow_provider());
+        // The project's effort policy reacts to items starting and
+        // finishing, through this bus (`.context/work-tracking.md`).
+        event_pump.register_async(Arc::new(effort_policy::EffortPolicyConsumer {
+            bus: Arc::downgrade(&commands),
+            sql: sql.clone(),
+            config: config_arc.clone(),
+        }));
         for command in commands::vcs::commands(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
             git: vcs::GitProvider,

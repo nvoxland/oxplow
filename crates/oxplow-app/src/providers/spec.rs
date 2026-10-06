@@ -672,11 +672,6 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
         if features.delete {
             needed.push("delete");
         }
-        if features.in_progress_opens_effort {
-            return Err(format!(
-                "provider `{id}`: only oxplow's own tasks open efforts on in_progress"
-            ));
-        }
         for name in needed {
             if !declared.commands.iter().any(|c| c.name == name) {
                 return Err(format!(

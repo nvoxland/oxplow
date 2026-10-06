@@ -113,7 +113,7 @@ pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;
 pub use symbol_store::{FileSymbols, SqliteSymbolStore, SymbolCapture, SymbolRow};
 pub use task_satellite::{SqliteTaskLinkStore, SqliteTaskNoteStore};
-pub use task_store::{EffortTransition, SqliteTaskStore};
+pub use task_store::SqliteTaskStore;
 pub use thread_answer_store::{AnswerShows, SqliteThreadAnswerStore, ThreadAnswer};
 pub use thread_store::SqliteThreadStore;
 pub use token_usage_store::{

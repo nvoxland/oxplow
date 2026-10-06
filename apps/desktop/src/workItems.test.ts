@@ -175,16 +175,16 @@ test("capability providers read with their features; an unknown provider has non
   const providers = capabilityProvidersFromResult({
     columns: ["capability", "provider", "extension", "features", "active"],
     rows: [
-      ["work_items", "oxplow", null, '{"hierarchy":true,"comments":true,"links":true,"delete":true,"in_progress_opens_effort":true}', 1],
+      ["work_items", "oxplow", null, '{"hierarchy":true,"comments":true,"links":true,"delete":true}', 1],
       ["work_items", "fake", "tracker", '{"comments":true}', 1],
     ],
     truncated: false,
     reads: { models: ["v_capability_provider"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult);
-  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true, in_progress_opens_effort: true });
-  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false, in_progress_opens_effort: false });
-  expect(featuresFor(providers, "issues")).toEqual({ hierarchy: false, comments: false, links: false, delete: false, in_progress_opens_effort: false });
+  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true });
+  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false });
+  expect(featuresFor(providers, "issues")).toEqual({ hierarchy: false, comments: false, links: false, delete: false });
   expect(providers.find((p) => p.provider === "fake")?.extension).toBe("tracker");
 });
 

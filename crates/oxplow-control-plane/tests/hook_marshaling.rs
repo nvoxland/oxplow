@@ -90,7 +90,6 @@ async fn seed_in_progress_task(services: &Services, thread_id: ThreadId) {
         note_count: 0,
         author: None,
     };
-    // Filed the way the app files it: the effort opens with it.
     services.task_store.insert_logged(&task).await.unwrap();
 }
 

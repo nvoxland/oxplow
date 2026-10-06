@@ -60,7 +60,8 @@ import { showToast } from "./toastStore.js";
 
 export function IntegrationsSection() {
   const [views, setViews] = useState<ProviderInstanceView[] | null>(null);
-  const [active, setActive] = useState<string>("oxplow");
+  // `activeProviders` as set: one choice per capability.
+  const [chosen, setChosen] = useState<Record<string, string>>({});
   const [replaced, setReplaced] = useState<UiReplacement[]>([]);
   const [off, setOff] = useState<string[]>([]);
 
@@ -75,8 +76,10 @@ export function IntegrationsSection() {
       setReplaced(extensions.filter((e) => e.enabled).flatMap((e) => e.ui.replacements));
       const turnedOff = settings.find((s) => s.key === "replacementsOff")?.value;
       setOff(Array.isArray(turnedOff) ? turnedOff.map(String) : []);
-      const chosen = settings.find((s) => s.key === "activeProviders")?.value as Record<string, unknown> | null;
-      setActive(typeof chosen?.work_items === "string" ? chosen.work_items : "oxplow");
+      const set = settings.find((s) => s.key === "activeProviders")?.value as Record<string, unknown> | null;
+      setChosen(
+        Object.fromEntries(Object.entries(set ?? {}).filter((e): e is [string, string] => typeof e[1] === "string")),
+      );
     } catch (e) {
       recordOpError({ label: "List integrations", message: String(e) });
       setViews([]);
@@ -109,7 +112,7 @@ export function IntegrationsSection() {
   }
   return (
     <div data-testid="integrations-section">
-      <ActiveWorkItems views={views} active={active} onChosen={setActive} />
+      <ActiveWorkItems views={views} chosen={chosen} onChosen={setChosen} />
       <Replacements replaced={replaced} off={off} onChanged={setOff} />
       {views.map((v) => (
         <IntegrationRow key={v.instance} view={v} onChanged={setViews} onCredentialChanged={() => void refresh()} />
@@ -121,27 +124,31 @@ export function IntegrationsSection() {
 
 /** Which provider new work items are filed on: a person's choice
  *  (`activeProviders` is a person-only key), so the click is the
- *  confirmation `config.set` asks for. */
+ *  confirmation `config.set` asks for. Only `work_items` changes; the
+ *  other capabilities' choices stay. */
 function ActiveWorkItems({
   views,
-  active,
+  chosen,
   onChosen,
 }: {
   views: ProviderInstanceView[];
-  active: string;
-  onChosen(provider: string): void;
+  chosen: Record<string, string>;
+  onChosen(chosen: Record<string, string>): void;
 }) {
   const choices = workItemsChoices(views);
   if (choices.length < 2) return null;
+  const active = chosen.work_items ?? "oxplow";
   const problem = activeProviderProblem(choices, active);
   async function choose(provider: string) {
+    const { work_items: _, ...others } = chosen;
+    const next = provider === "oxplow" ? others : { ...others, work_items: provider };
     try {
-      if (provider === "oxplow") {
+      if (Object.keys(next).length === 0) {
         await runCommand("config.unset", { key: "activeProviders" }, true);
       } else {
-        await runCommand("config.set", { key: "activeProviders", value: { work_items: provider } }, true);
+        await runCommand("config.set", { key: "activeProviders", value: next }, true);
       }
-      onChosen(provider);
+      onChosen(next);
       showToast({ message: `New work items are filed on ${provider}.` });
     } catch (e) {
       recordOpError({ label: "Choose where work items are filed", message: e instanceof Error ? e.message : String(e) });

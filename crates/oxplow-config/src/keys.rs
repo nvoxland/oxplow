@@ -16,8 +16,9 @@ use crate::{
 /// Keys only a person may set. Each either runs a program (`lsp`,
 /// `acpAgents`, `extensionInstances`, `agents`, `collectors`), chooses the model that
 /// reads the project (`ai`, `agentModels`), enables code (`extensions`),
-/// chooses where the project's work goes (`activeProviders`: an agent
-/// moving filing to another tracker), decides how long its agents'
+/// chooses where the project's work goes and how it is tracked
+/// (`activeProviders`: an agent moving filing to another tracker, or
+/// turning the effort policy off), decides how long its agents'
 /// activity is kept (`eventRetention`), or steers every agent (`agentPromptAppend`, `testing` — its agent hint —
 /// where an agent setting it could persist instructions into all threads): an agent asking to change one
 /// gets a proposal the person approves or declines. Everything else is the

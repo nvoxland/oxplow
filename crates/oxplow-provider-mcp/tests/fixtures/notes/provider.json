@@ -11,8 +11,7 @@
         "hierarchy": true,
         "comments": false,
         "links": false,
-        "delete": false,
-        "in_progress_opens_effort": false
+        "delete": false
       }
     }
   ],

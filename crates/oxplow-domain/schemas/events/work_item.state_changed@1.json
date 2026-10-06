@@ -1,0 +1,33 @@
+{
+  "$defs": {
+    "CanonicalState": {
+      "description": "The states every provider maps its own to.",
+      "enum": [
+        "todo",
+        "in_progress",
+        "blocked",
+        "done",
+        "canceled"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`work_item.state_changed@1`: a `work_item.*` command put an item in\na canonical state — logged by core for every provider, anchored to the\nthread of whoever ran it (`.context/work-items.md`). A create always\nlogs one; for a provider oxplow can't read the prior state of, a\ntransition or update that names a state logs one even when the item\nwas already there.",
+  "properties": {
+    "to": {
+      "$ref": "#/$defs/CanonicalState"
+    },
+    "work_item": {
+      "description": "`work_item:<provider>:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item",
+    "to"
+  ],
+  "title": "WorkItemStateChangedV1",
+  "type": "object"
+}

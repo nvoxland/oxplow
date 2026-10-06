@@ -20,6 +20,7 @@ use common::boot;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
+use oxplow_db::EffortStore as _;
 use oxplow_domain::stores::{StreamStore, ThreadStore};
 use oxplow_domain::{
     Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus, Thread,
@@ -86,11 +87,10 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
     thread.id
 }
 
-/// An `in_progress` task filed the way the app files one: its effort opens
-/// in the same transaction.
+/// An `in_progress` task on the thread, with its effort open.
 async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> TaskId {
     let now = Timestamp::from_unix_ms(1);
-    services
+    let task = services
         .task_store
         .insert_logged(&Task {
             id: TaskId::placeholder(),
@@ -110,8 +110,17 @@ async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> Tas
             author: None,
         })
         .await
-        .unwrap()
-        .0
+        .unwrap();
+    services
+        .effort_store
+        .start(
+            &oxplow_domain::refs::build::work_item_ref(task),
+            &thread_id,
+            None,
+        )
+        .await
+        .unwrap();
+    task
 }
 
 async fn post(

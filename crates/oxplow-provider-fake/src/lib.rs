@@ -253,8 +253,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
         capabilities: vec![CapabilityDecl {
             capability: "work_items".into(),
             features: json!({
-                "hierarchy": true, "comments": true, "links": true, "delete": true,
-                "in_progress_opens_effort": false, "idempotent_writes": idempotent_writes
+                "hierarchy": true, "comments": true, "links": true, "delete": true, "idempotent_writes": idempotent_writes
             }),
         }],
         commands: vec![

@@ -707,8 +707,8 @@ pub struct OxplowConfig {
     #[serde(rename = "extensionInstances")]
     pub extension_instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
     /// Each swappable capability's active provider
-    /// (`activeProviders: { work_items: issues }`); a capability absent
-    /// here keeps oxplow's own.
+    /// (`activeProviders: { work_items: issues, effort_policy: none }`); a
+    /// capability absent here keeps oxplow's own.
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
     /// Core components no extension's replacement may take over
@@ -1736,7 +1736,7 @@ fn validate_extension_instances(
 
 /// The capabilities whose active provider a project may choose
 /// (`activeProviders`).
-pub const SWAPPABLE_CAPABILITIES: &[&str] = &["work_items"];
+pub const SWAPPABLE_CAPABILITIES: &[&str] = &["work_items", "effort_policy"];
 
 /// Validate `replacementsOff:`: each a replaceable component's target
 /// ([`oxplow_domain::replaceable`]); a repeat is one.

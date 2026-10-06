@@ -113,21 +113,18 @@ the first time an op needs to join a transaction. Current users:
 (`start_tx` / `finish_tx`), `record_take`, and every `Tx` command
 handler (which runs in the bus's transaction).
 
-**Lifecycle invariant.** A thread-attached task is `in_progress` ⟺ it
-has exactly one open `effort` row. Enforced three ways: the
-status flip and effort open/finish commit in one transaction
-(`task_store::apply_status_tx`, via `set_status_tx` /
-`update_with_status_tx` / `insert_logged_tx` — the cores of
-`work_item.transition` / `work_item.update` / `work_item.create`, and
-`soft_delete`, which closes a deleted task's open effort in its own
-transaction, and `move_task`, which moves the claim with the task: the old
-thread's effort closes and an `in_progress` task landing on a thread opens
-one there, even in another stream (moved to the backlog, it just closes) — `get_task_tx` sees live rows only, so a deleted task takes
-no edits); a V31 partial
-unique index (V100: `effort(work_item) WHERE ended_at IS NULL`) makes a
-double-open a `Constraint` error; and boot recovery
-(`crates/oxplow-app/src/recovery.rs`) heals both orphan directions.
-Snapshot pins are taken after commit by the effort-lifecycle consumer
+**Lifecycle invariant.** At most one effort is open per thread (the
+V5 unique index `idx_effort_open_per_thread`), and a task's status never
+opens or closes one: `task_store::apply_status_tx` (the core of
+`set_status_tx` / `update_with_status_tx` / `insert_logged_tx`, behind
+`work_item.transition` / `update` / `create`), `soft_delete` and
+`move_task` touch the task alone — `get_task_tx` sees live rows only, so
+a deleted task takes no edits. Efforts open, close and link through the
+`effort.*` commands, which the effort policy runs as it reacts to
+`work_item.state_changed` (`.context/work-tracking.md`). Boot recovery
+(`crates/oxplow-app/src/recovery.rs`) only closes turns the previous run
+left open: an effort open across a restart is legal. Snapshot pins are
+taken after commit by the effort-lifecycle consumer
 on the event pump (`set_start_snapshot` / `set_end_snapshot`; see
 "event_log" → async consumers) — an effort row is never gated on
 snapshot success, and a crash between the two is resumed, not lost.
@@ -569,12 +566,11 @@ summary per effort, replaces the old per-item note-history append),
 to call out wiki pages it created, tasks it completed, commits it
 referenced, etc. Each row projects into `page_ref` under
 `ref_type=impact` with the action carried in `source_extra`).
-Auto-managed by the runtime on `task.changed` status transitions:
+Opened and closed by the `effort.*` commands (the effort policy runs
+them as items start and finish; `.context/work-tracking.md`):
 
-- `→ in_progress` opens a new effort; a `task-start` snapshot is flushed
-  and linked to `start_snapshot_id`.
-- `in_progress → {done, blocked, canceled}` closes the effort; a
-  `task-end` snapshot is flushed and linked to `end_snapshot_id`.
+- an open pins a start snapshot, linked to `start_snapshot_id`;
+- a close pins an end snapshot, linked to `end_snapshot_id`.
   Capture de-dupes by content hash — an unchanged tree reuses the
   latest existing snapshot id rather than writing a near-identical row
   — so `end_snapshot_id` is set whenever the stream holds any snapshot
@@ -587,7 +583,7 @@ completion via `effort.report` (the second half of the close's
 `command.sequence`). (A `summary_variants` column existed
 V27–V28 for the audience-variant feature; dropped in V29.)
 
-Re-opening a task (done → in_progress) produces a second effort. At most one effort is open per thread.
+Re-opening a task (done → in_progress) on a thread gives it a second effort. At most one effort is open per thread.
 
 `effort_file` (v22) records per-effort write paths so parallel
 subagents in one thread get distinct file lists instead of the union via
@@ -664,18 +660,7 @@ MCP-only effort). **Invariant: a path is CLAIMED (`effort_file`) or
 UNATTRIBUTED here, never both** — `record_file` deletes any matching
 residue row, so a later `effort.report` / `effort.amend` claim moves a path back into the
 claimed set. The existing agent nudge (`compute_effort_file_review`) reads
-`effort_file`, not this table, so it's unaffected. Restart-recovery
-orphan closes are reconciled by the same consumer (tsk942):
-`RecoveryService` (wired with the capture registry + thread store via
-`with_end_snapshots`) brackets each orphaned effort that has a start
-snapshot by draining the worktree (`enqueue_startup_diff`) and requesting
-an `EffortEnd` snapshot — the boot worktree still reflects the dead
-effort's final state — and stamps it via `finish(Some(end_id), …)`, whose
-`effort.closed` the consumer reconciles once the pump runs. So a process
-that died mid-effort still records its unclaimed residue as unattributed
-instead of leaving it silently attributed. Best-effort: an effort with no
-start snapshot (or any capture failure) closes with `finish(None, None)`
-and has no bracket to reconcile.
+`effort_file`, not this table, so it's unaffected.
 
 `effort_attribution` (V40) is the **kind-agnostic attribution ledger** —
 the generalization of the file tables above to any fact oxplow OBSERVES
@@ -1436,8 +1421,7 @@ start baseline on a huge repo waits for the startup sweep) so
 the close's `effort.report` file review sees the end pin and a batch's opens pin
 before its closes; the consumer holds
 `TaskService::without_event_pump()` so there's no reference cycle.
-Recovery's opens and closes now get pins, metrics and `effort.finished`
-too, since they log the same events. Letters are `pending | retried | discarded`; the
+Letters are `pending | retried | discarded`; the
 person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless
 the letter is `pending`) and `discard_dead_letter(id)` — **RPC only**
@@ -1475,10 +1459,11 @@ priority / parent / thread changed (`move_task` logs `thread` too, anchored
 to the destination), then moves the status — the core of
 `work_item.update` and `TaskService::update`. Filing a task
 (`insert_logged_tx`, the core of `work_item.create` and
-`TaskService::create`) logs **`work_item.created@1 { work_item, status,
-effort? }`** — filing straight into `in_progress` on a thread opens the
-effort in the same transaction; filing into a status is a creation with
-that status, not a `ready →` transition (tsk463). The `page_ref.work_item`
+`TaskService::create`) logs **`work_item.created@1 { work_item, status }`**
+(an `effort` in older events only); filing into a status is a creation
+with that status, not a `ready →` transition. Every provider's state
+change also logs core's `work_item.state_changed@1 { work_item, to }`
+([work-items.md](./work-items.md)). The `page_ref.work_item`
 pump consumer projects a task's body-mention edges on `work_item.created`
 and re-projects them on `work_item.edited` (it used to follow
 `work_item.transitioned`, whose status change moves no body edge).
@@ -1506,10 +1491,8 @@ post-commit `TasksChanged` broadcast as the UI wake-up.
 `finish_tx` — the only cores that open or close an effort — append
 `effort.opened@1 { effort, work_item, thread, start_snapshot? }` and
 `effort.closed@1 { effort, work_item, end_snapshot? }` themselves, so
-every path logs: the status transition, filing straight into
-`in_progress` (`insert_logged_tx`),
-`record_effort_atomic`'s synthesized efforts, recovery, and the async
-`start` / `finish`. Subject `[effort:effN, <work_item ref>]`; anchors
+every path logs: the `effort.*` commands, `record_effort_atomic`'s
+synthesized efforts, and the async `start` / `finish`. Subject `[effort:effN, <work_item ref>]`; anchors
 stream / thread / effort (+ `snapshot` when pinned at open or close). A
 `finish_tx` on an already-closed effort changes nothing and logs nothing
 (`UPDATE … RETURNING`). Cores take an `EventCtx { schemas, source, cause

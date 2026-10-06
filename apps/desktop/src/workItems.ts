@@ -213,7 +213,7 @@ export const STATE_LABEL: Record<CanonicalState, string> = {
 export type { WorkItemsFeatures };
 
 /** No feature declared. */
-export const NO_FEATURES: WorkItemsFeatures = { hierarchy: false, comments: false, links: false, delete: false, in_progress_opens_effort: false };
+export const NO_FEATURES: WorkItemsFeatures = { hierarchy: false, comments: false, links: false, delete: false };
 
 /** One capability's provider, with its flags as declared. */
 export interface CapabilityProvider {
@@ -274,7 +274,6 @@ export function featuresFor(providers: CapabilityProvider[], provider: string): 
     comments: f.comments === true,
     links: f.links === true,
     delete: f.delete === true,
-    in_progress_opens_effort: f.in_progress_opens_effort === true,
   };
 }
 

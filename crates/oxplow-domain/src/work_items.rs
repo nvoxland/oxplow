@@ -70,9 +70,6 @@ pub struct WorkItemsFeatures {
     /// Items can be deleted (`work_item.delete`).
     #[serde(default)]
     pub delete: bool,
-    /// Moving an item to `in_progress` opens its effort itself (oxplow's
-    /// tasks do), so `effort.open` must not open a second.
-    pub in_progress_opens_effort: bool,
     /// A write sent twice with one idempotency key is done once, the
     /// second answered as the first (the protocol's
     /// `InvokeParams.idempotency_key`): the host may send a write again
@@ -365,8 +362,7 @@ mod tests {
     #[test]
     fn features_default_delete_to_false() {
         let f: WorkItemsFeatures = serde_json::from_value(serde_json::json!({
-            "hierarchy": true, "comments": false, "links": false,
-            "in_progress_opens_effort": false
+            "hierarchy": true, "comments": false, "links": false
         }))
         .unwrap();
         assert!(!f.delete);

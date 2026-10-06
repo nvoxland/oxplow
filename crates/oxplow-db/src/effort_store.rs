@@ -720,10 +720,8 @@ pub trait EffortStore: Send + Sync {
     /// doesn't exist (e.g. cleared during snapshot prune).
     async fn get_effort(&self, id: &EffortId) -> Result<Option<Effort>, DomainError>;
     /// Open effort (`ended_at IS NULL`) for `work_item`, if any. Used by
-    /// the lifecycle path that opens an effort on in_progress entry
-    /// and finishes it on exit, and by `record_effort` to merge
-    /// touched-files into the lifecycle row instead of creating a
-    /// duplicate.
+    /// `record_effort` to merge touched-files into the open row instead of
+    /// creating a duplicate.
     async fn find_open_for_work_item(&self, work_item: &str)
         -> Result<Option<Effort>, DomainError>;
     /// The thread's open effort, if any (at most one is open per thread):
@@ -2254,98 +2252,45 @@ mod tests {
         assert_eq!(row.summary.as_deref(), Some("late summary"));
     }
 
+    /// A task's status is the task's: moving it in and out of progress
+    /// opens and closes no effort (efforts are a policy's business). Each
+    /// change logs one `work_item.transitioned`, naming the task.
     #[tokio::test]
-    async fn transition_opens_and_finishes_effort_with_status_flip() {
-        use crate::task_store::EffortTransition;
+    async fn a_status_change_leaves_efforts_alone() {
         let (store, db, tid, t) = fixture_with_db().await;
         let tasks = SqliteTaskStore::new(db.clone());
-
-        let entering = tasks
-            .set_status(tid, TaskStatus::InProgress)
-            .await
-            .unwrap()
-            .effort;
-        let EffortTransition::Opened(eff) = entering else {
-            panic!("expected Opened, got {entering:?}");
-        };
-        let open = store
-            .find_open_for_work_item(&work_item_ref(tid))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(open.id, eff);
-        assert!(open.start_snapshot_id.is_none(), "pin backfills later");
-
-        // Re-issuing the same status changes nothing: the open effort
-        // stays and nothing is logged.
-        let again = tasks
-            .set_status(tid, TaskStatus::InProgress)
-            .await
-            .unwrap()
-            .effort;
-        assert_eq!(again, EffortTransition::Untouched);
-
-        let leaving = tasks
-            .set_status(tid, TaskStatus::Done)
-            .await
-            .unwrap()
-            .effort;
-        assert_eq!(leaving, EffortTransition::Finished(eff));
+        tasks.set_status(tid, TaskStatus::InProgress).await.unwrap();
+        // Re-issuing the same status changes nothing and logs nothing.
+        tasks.set_status(tid, TaskStatus::InProgress).await.unwrap();
         assert!(store
             .find_open_for_work_item(&work_item_ref(tid))
             .await
             .unwrap()
             .is_none());
+        tasks.set_status(tid, TaskStatus::Done).await.unwrap();
 
-        // The outbox: one `work_item.transitioned@1` per status change,
-        // committed with it — the re-issued (same-status) call logged
-        // nothing. Subject and anchors name the task and its effort.
         let all = db
             .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
             .await
             .unwrap();
-        // The effort's own open/close ride the same transactions.
         let types: Vec<&str> = all.iter().map(|e| e.envelope.event_type.as_str()).collect();
         assert_eq!(
             types,
-            vec![
-                "effort.opened",
-                "work_item.transitioned",
-                "effort.closed",
-                "work_item.transitioned"
-            ]
+            vec!["work_item.transitioned", "work_item.transitioned"]
         );
-        let events: Vec<_> = all
-            .iter()
-            .filter(|e| e.envelope.event_type == "work_item.transitioned")
-            .collect();
-        assert_eq!(events.len(), 2, "{events:#?}");
-        let opened = &events[0].envelope;
-        assert_eq!(opened.event_type, "work_item.transitioned");
-        assert_eq!(opened.v, 1);
-        assert_eq!(
-            opened.subject,
-            vec![format!("work_item:oxplow:{tid}"), format!("effort:{eff}")]
-        );
-        assert_eq!(opened.anchors.thread_id, Some(t));
-        assert_eq!(opened.anchors.effort_id, Some(eff));
+        let started = &all[0].envelope;
+        assert_eq!(started.subject, vec![format!("work_item:oxplow:{tid}")]);
+        assert_eq!(started.anchors.thread_id, Some(t));
+        assert_eq!(started.anchors.effort_id, None);
         assert!(
-            opened.anchors.stream_id.is_some(),
+            started.anchors.stream_id.is_some(),
             "the thread's stream anchors it too"
         );
-        assert_eq!(opened.source, "system:task_service");
-        assert_eq!(opened.payload["from"], "ready");
-        assert_eq!(opened.payload["to"], "in_progress");
-        assert_eq!(
-            opened.payload["work_item"],
-            format!("work_item:oxplow:{tid}")
-        );
-        assert_eq!(opened.payload["effort"], format!("effort:{eff}"));
-        let finished = &events[1].envelope;
-        assert_eq!(finished.payload["from"], "in_progress");
-        assert_eq!(finished.payload["to"], "done");
-        assert_eq!(finished.anchors.effort_id, Some(eff));
-        assert!(events[1].seq > events[0].seq);
+        assert_eq!(started.source, "system:task_service");
+        assert_eq!(started.payload["from"], "ready");
+        assert_eq!(started.payload["to"], "in_progress");
+        assert_eq!(started.payload.get("effort"), None);
+        assert_eq!(all[1].envelope.payload["to"], "done");
     }
 
     /// P2.6.1 (tsk453): every effort open and close is logged in the

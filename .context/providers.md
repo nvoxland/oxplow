@@ -68,10 +68,9 @@ stub generation for provider authors.
 A scripted **work-items** provider, lib + bin (the `oxplow-acp-fake`
 pattern), that the host's tests and the conformance kit drive over real
 stdio. `declarations()` is its `InitializeResult`: the `work_items`
-capability (hierarchy, comments, links, delete and `idempotent_writes`;
-not `in_progress_opens_effort`), the work-items verbs `create` / `update` /
-`transition` (undoable: its inverse moves the item back) / `link` /
-`comment` / `delete` over the contract's inputs (`state` /
+capability (hierarchy, comments, links, delete and `idempotent_writes`),
+the work-items verbs `create` / `update` / `transition` (undoable: its
+inverse moves the item back) / `link` / `comment` / `delete` over the contract's inputs (`state` /
 `native_state`, its `native.points`; `additionalProperties: false`), one
 command of its own, `estimate { ref, points }`, the
 `work_item.recorded@1` event type with the core schema, a `work_items`
@@ -312,8 +311,7 @@ don't parse, speak another protocol version, lack the named capability,
 or — for `work_items` — lack `create` / `update` / `transition` (and
 `link` / `comment` / `delete` when its features say so), declare a verb
 that isn't `confirm: never` and `effect: record` (the `work_item.<verb>`
-command running it is what a person confirms and what is gated; tsk569,
-P7.A1), or claim `in_progress_opens_effort` (only oxplow's tasks do).
+command running it is what a person confirms and what is gated).
 
 **Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,
 key `provider:<ext>/<id>`): the approval hash covers every file in the

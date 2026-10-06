@@ -543,7 +543,10 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
         .map(|e| e.envelope.event_type.as_str())
         .collect();
-    assert_eq!(caused, vec!["work_item.recorded"]);
+    assert_eq!(
+        caused,
+        vec!["work_item.recorded", "work_item.state_changed"]
+    );
     let commands: Vec<String> = fx
         .svc
         .commands

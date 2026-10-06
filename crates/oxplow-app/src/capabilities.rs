@@ -13,9 +13,10 @@ use oxplow_db::{CapabilityProvider, SqliteCapabilityStore};
 use oxplow_domain::DomainError;
 use serde_json::{json, Value};
 
-/// Restate the table as core's providers: oxplow's work items, the VCS
-/// and the knowledge provider. A previous run's external rows go — their
-/// instances publish again when the provider registry starts them.
+/// Restate the table as core's providers: oxplow's work items, the VCS,
+/// the knowledge provider and the effort policies (oxplow's, or none). A
+/// previous run's external rows go — their instances publish again when
+/// the provider registry starts them.
 pub async fn publish_core(svc: &crate::Services) -> Result<(), DomainError> {
     let config = crate::config_service::read_config(&svc.config);
     let row = |capability: &str, provider: &str, features: Value| CapabilityProvider {
@@ -42,6 +43,13 @@ pub async fn publish_core(svc: &crate::Services) -> Result<(), DomainError> {
         serde_json::to_value(svc.vcs.features()).unwrap_or(Value::Null),
     ));
     rows.push(row("knowledge", svc.knowledge.provider(), json!({})));
+    // The effort policy: oxplow's default, or none.
+    for policy in [
+        oxplow_domain::work_items::OXPLOW,
+        crate::effort_policy::NONE,
+    ] {
+        rows.push(row(crate::effort_policy::CAPABILITY, policy, json!({})));
+    }
     SqliteCapabilityStore::new(svc.db.clone()).reset(rows).await
 }
 
@@ -106,6 +114,8 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                ("effort_policy", "none"),
+                ("effort_policy", "oxplow"),
                 ("knowledge", "oxplow"),
                 ("vcs", "git"),
                 ("work_items", "oxplow")
@@ -113,7 +123,7 @@ mod tests {
             "core's, and a previous run's external row is gone"
         );
         let work_items = rows.iter().find(|r| r.capability == "work_items").unwrap();
-        assert_eq!(work_items.features["in_progress_opens_effort"], true);
+        assert_eq!(work_items.features["delete"], true);
         assert_eq!(work_items.extension, None);
         // Readable as the model.
         let res = fx
@@ -157,6 +167,7 @@ mod tests {
         assert_eq!(
             active(store.list().await.unwrap()),
             vec![
+                pair("effort_policy", "oxplow"),
                 pair("knowledge", "oxplow"),
                 pair("vcs", "git"),
                 pair("work_items", "oxplow")
@@ -173,6 +184,7 @@ mod tests {
         assert_eq!(
             active(store.list().await.unwrap()),
             vec![
+                pair("effort_policy", "oxplow"),
                 pair("knowledge", "oxplow"),
                 pair("vcs", "git"),
                 pair("work_items", "issues")

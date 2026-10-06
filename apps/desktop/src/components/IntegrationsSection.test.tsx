@@ -479,3 +479,19 @@ test("a row re-reads when the instance's health is recorded", async () => {
     instance.health = ready;
   }
 });
+
+test("choosing where work items go keeps the other capabilities' choices", async () => {
+  active = { effort_policy: "none" };
+  const view = render(<IntegrationsSection />);
+  await waitFor(() => view.getByTestId("integrations-active-fake"));
+  fireEvent.click(view.getByTestId("integrations-active-fake"));
+  await waitFor(() =>
+    expect(ran).toEqual([
+      ["config.set", { key: "activeProviders", value: { effort_policy: "none", work_items: "fake" } }, true],
+    ]),
+  );
+  fireEvent.click(view.getByTestId("integrations-active-oxplow"));
+  await waitFor(() =>
+    expect(ran[1]).toEqual(["config.set", { key: "activeProviders", value: { effort_policy: "none" } }, true]),
+  );
+});

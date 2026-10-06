@@ -127,8 +127,8 @@ export function TaskPage({
       .catch((err) => logUi("warn", "task efforts fetch failed", { itemId: effortTaskId, error: String(err) }));
   }, [effortTaskId]);
   useEffect(() => loadEfforts(), [loadEfforts]);
-  // An effort opens or closes with a status move: the Activity timeline
-  // re-reads without a remount.
+  // An effort opens, closes or links as the effort policy reacts to a
+  // status move: the Activity timeline re-reads without a remount.
   useRerunOnChange(unionReads([taskReads, effortReads]), () => {
     refetchTask();
     loadEfforts();

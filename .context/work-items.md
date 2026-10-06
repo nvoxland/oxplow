@@ -136,8 +136,7 @@ item).
   the caller's when it has one (an effect's step), else the host mints
   one ([providers.md](./providers.md) "Idempotency").
 - **`WorkItemsFeatures`**: `hierarchy`, `comments`, `links`, `delete`,
-  `in_progress_opens_effort` (moving an item to `in_progress` opens its
-  effort itself), `idempotent_writes` (a write sent twice with one
+  `idempotent_writes` (a write sent twice with one
   idempotency key is done once — [providers.md](./providers.md)
   "Idempotency").
 - **`WorkItemsRegistry`** (`Services.work_items`): providers by name;
@@ -202,9 +201,16 @@ A comment's `task_note.author` names who made it (`note_author`, tsk1000):
 `user`, `agent` (a lens acting for one included), `effect:<extension>/<id>`
 or `oxplow` — as a task's `author` is left empty for an effect or oxplow
 (`task_author`), neither is shown as the person's.
-`effort.open` asks the ref's provider's features: refused when it
-declares `in_progress_opens_effort`, open to an unregistered provider's
-item.
+
+**`work_item.state_changed@1 { work_item, to }`** is core's, logged by
+`dispatching()` for every provider alike, subject the item, anchored to
+the actor's thread: a `create` always; a `transition` or an `update`
+whose state changed (oxplow's state is read before and after in the
+bus's transaction; for an external provider, whose prior state oxplow
+can't read, one that names a state counts, `to` taken from the
+`work_item.recorded` its answer carries). An item's state opens and
+closes no effort itself; the effort policy reacts to this event
+(`.context/work-tracking.md`).
 
 **Features reach the UI as a model** (P6b.C2): `v_capability_provider`
 (`capability`, `provider`, `extension`, `features` JSON, `active`) lists
@@ -251,8 +257,8 @@ through the `WorkItems` client (so it exercises the dispatching commands
 a person and an agent run) — is what every provider must do: create
 lands a `todo` row; an update changes only what it names; every
 canonical state round-trips, and moving again to the native state the
-row reports lands there (`in_progress` opens exactly one effort iff the
-provider says so); a parent resolves with `hierarchy` and is refused
+row reports lands there, and core logs `work_item.state_changed` for
+the create and every move to another state; a parent resolves with `hierarchy` and is refused
 without it; links and comments follow their features; every write that
 changed the item logged an event naming it (oxplow's
 `work_item.created` / `edited` / `transitioned` / `linked` /

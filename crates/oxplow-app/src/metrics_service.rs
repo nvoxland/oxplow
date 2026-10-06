@@ -4773,14 +4773,8 @@ def transform(input):
         );
         assert!(errors.is_empty(), "{errors:?}");
         svc.config.write().unwrap().collectors = specs;
-        svc.tasks
-            .update(
-                task,
-                crate::task_service::UpdateTaskChanges {
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
+        svc.effort_store
+            .finish(&effort.id, None, None)
             .await
             .unwrap();
         svc.event_pump.run_once().await.unwrap();

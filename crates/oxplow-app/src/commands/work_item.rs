@@ -19,16 +19,21 @@
 //! oxplow's own (`Tx`): they place an item in oxplow's lists.
 //!
 //! oxplow's cores: `work_item.transition` is `task_store::set_status_tx`
-//! — the row, the effort open/close it implies, `work_item.transitioned`
-//! and the effort's own events commit in the bus's transaction with the
-//! audit row, all caused by the run's `command.executed`. The effort's
-//! snapshot pin is the effort-lifecycle pump consumer's; callers that
-//! need it settle the pump (`TaskService::settle_lifecycle`).
+//! — the row and `work_item.transitioned` commit in the bus's transaction
+//! with the audit row, caused by the run's `command.executed`.
+//!
+//! Every provider's `create`, `update` and `transition` log
+//! `work_item.state_changed` when they put an item in a state: core logs
+//! it here, the same way for oxplow and for an external provider. An item's
+//! state never opens or closes an effort here; the effort policy reacts to
+//! the event (`crate::effort_policy`).
 
 use crate::link_check::LinkDeps;
 use oxplow_domain::events::schema::{
-    WorkItemCommented, WorkItemCommentedV1, WorkItemLinked, WorkItemLinkedV1,
+    EventType as _, WorkItemCommented, WorkItemCommentedV1, WorkItemLinked, WorkItemLinkedV1,
+    WorkItemRecorded, WorkItemStateChanged, WorkItemStateChangedV1,
 };
+use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{task_of_work_item_ref, work_item_ref};
 use oxplow_domain::work_items::{
     provider_of, CanonicalState, WorkItemsProvider, WorkItemsRegistry, OXPLOW, VERBS,
@@ -411,6 +416,11 @@ fn dispatching(
     target: Target,
     tx: Arc<TxHandler>,
 ) -> Command {
+    let tx = if STATE_VERBS.contains(&verb) {
+        logging_state(verb, tx)
+    } else {
+        tx
+    };
     let route_registry = registry.clone();
     let route = Arc::new(move |input: &Value| {
         target(&route_registry, input).map(|p| match p.external {
@@ -440,7 +450,12 @@ fn dispatching(
                 }
             }
             let out = verbs
-                .invoke(&invocation.actor, verb, input, invocation.idempotency_key)
+                .invoke(
+                    &invocation.actor,
+                    verb,
+                    input.clone(),
+                    invocation.idempotency_key,
+                )
                 .await?;
             let inverse = out
                 .inverse
@@ -460,10 +475,17 @@ fn dispatching(
                     })
                 })
                 .transpose()?;
+            let mut events = out.events;
+            if let Some(changed) = external_state_change(verb, &input, &out.result, &events) {
+                events.push(
+                    Envelope::typed::<WorkItemStateChanged>(invocation.actor.source(), &changed)
+                        .with_subject([changed.work_item.clone()]),
+                );
+            }
             Ok(HandlerOutput {
                 result: out.result,
                 inverse,
-                events: out.events,
+                events,
                 after_commit: None,
                 unchanged: false,
             })
@@ -478,6 +500,93 @@ fn dispatching(
         }),
     )
     .expect("a work_item command registers")
+}
+
+/// The verbs that can put an item in a state, each logging
+/// `work_item.state_changed` when it does — for every provider alike.
+const STATE_VERBS: [&str; 3] = ["create", "update", "transition"];
+
+/// The item a state verb wrote: a create's from its result, else the
+/// input's `ref`.
+fn written_ref(verb: &str, input: &Value, result: &Value) -> Option<String> {
+    let source = if verb == "create" { result } else { input };
+    source["ref"].as_str().map(str::to_string)
+}
+
+/// A provider's core in the bus's transaction: the item's state is read
+/// before and after it runs, and a change is logged.
+fn logging_state(verb: &'static str, tx: Arc<TxHandler>) -> Arc<TxHandler> {
+    Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
+        let state_of = |item_ref: &str| -> Result<Option<CanonicalState>, CommandError> {
+            use rusqlite::OptionalExtension;
+            let state: Option<String> = ctx
+                .conn
+                .query_row(
+                    "SELECT state FROM work_item WHERE ref = ?1 AND deleted_at IS NULL",
+                    [item_ref],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|e| CommandError::Failed {
+                    message: e.to_string(),
+                })?;
+            Ok(state.and_then(|s| serde_json::from_value(Value::String(s)).ok()))
+        };
+        let before = match input["ref"].as_str() {
+            Some(item_ref) if verb != "create" => state_of(item_ref)?,
+            _ => None,
+        };
+        let mut out = tx(ctx, input.clone())?;
+        if let Some(item_ref) = written_ref(verb, &input, &out.result) {
+            if let Some(to) = state_of(&item_ref)?.filter(|&to| Some(to) != before) {
+                out.events.push(
+                    ctx.events
+                        .typed::<WorkItemStateChanged>(&WorkItemStateChangedV1 {
+                            work_item: item_ref.clone(),
+                            to,
+                        })
+                        .with_subject([item_ref]),
+                );
+            }
+        }
+        Ok(out)
+    })
+}
+
+/// What another provider's state verb did, from the item its answer
+/// recorded. oxplow can't read that provider's prior state, so a create,
+/// a transition and an update naming a state each count as a change.
+fn external_state_change(
+    verb: &str,
+    input: &Value,
+    result: &Value,
+    events: &[Envelope],
+) -> Option<WorkItemStateChangedV1> {
+    let names_state = match verb {
+        "create" | "transition" => true,
+        "update" => input.get("state").is_some() || input.get("native_state").is_some(),
+        _ => false,
+    };
+    if !names_state {
+        return None;
+    }
+    let item_ref = written_ref(verb, input, result)?;
+    let to = events
+        .iter()
+        .filter(|e| e.event_type == WorkItemRecorded::TYPE)
+        .filter_map(|e| {
+            serde_json::from_value::<oxplow_domain::events::schema::WorkItemRecordedV1>(
+                e.payload.clone(),
+            )
+            .ok()
+        })
+        .find(|r| r.item.item_ref == item_ref)?
+        .item
+        .state;
+    Some(WorkItemStateChangedV1 {
+        work_item: item_ref,
+        to,
+    })
 }
 
 fn spec_name(verb: &str) -> String {
@@ -532,8 +641,7 @@ pub fn spec_transition() -> CommandSpec {
     spec(
         NAME,
         "Move a work item to a canonical state (todo, in_progress, blocked, done, canceled), \
-         optionally naming the provider's own state; for oxplow's tasks entering or leaving \
-         in_progress opens or closes the effort.",
+         optionally naming the provider's own state.",
         schema_of::<WorkItemTransitionInput>(),
         Confirm::Never,
         true,
@@ -635,8 +743,7 @@ pub struct WorkItemCreateInput {
     /// The parent's ref, on the same provider (needs `hierarchy`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_ref: Option<String>,
-    /// `todo` when absent; `in_progress` on oxplow opens the effort in
-    /// the same run.
+    /// `todo` when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<CanonicalState>,
     /// The provider's own state, which must map to `state` when both are
@@ -659,9 +766,8 @@ pub fn create_spec() -> CommandSpec {
         "File a work item on the active tracker (the one the person chose), optionally \
          straight into a state. `thread` is the thread it's filed on: absent, an agent's own \
          (a person's lands on the backlog). `native` is the tracker's own fields as its create \
-         declares them (oxplow: { priority }). On oxplow, in_progress opens its effort in the \
-         same transaction, and the result carries `link_warnings`: the `[[…]]` links in the \
-         body that don't resolve.",
+         declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: \
+         the `[[…]]` links in the body that don't resolve.",
         schema_of::<WorkItemCreateInput>(),
         Confirm::Never,
         // Undoing a filing would be deleting an item — not what undo is for.
@@ -670,10 +776,9 @@ pub fn create_spec() -> CommandSpec {
     )
 }
 
-/// oxplow's core: `insert_logged_tx` — the row (at the end of its list),
-/// `work_item.created`, and the effort when filed `in_progress`, caused
-/// by the run. An agent's task is authored `agent`. The result carries the
-/// body's `link_warnings` (tsk775).
+/// oxplow's core: `insert_logged_tx` — the row (at the end of its list)
+/// and `work_item.created`, caused by the run. An agent's task is authored
+/// `agent`. The result carries the body's `link_warnings`.
 /// Who authored a task an actor files: a person (`user`), an agent
 /// (`agent`, a lens acting for one included), or neither — an effect or
 /// oxplow itself (P11, tsk956): the creating actor is on the run's audit
@@ -734,7 +839,7 @@ fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             note_count: 0,
             author: task_author(ctx.actor),
         };
-        let (id, _) = oxplow_db::task_store::insert_logged_tx(ctx.conn, &ctx.events, &item)
+        let id = oxplow_db::task_store::insert_logged_tx(ctx.conn, &ctx.events, &item)
             .map_err(CommandError::from)?;
         let row = oxplow_db::task_store::get_task_tx(ctx.conn, id)
             .map_err(CommandError::from)?
@@ -843,7 +948,7 @@ fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             item.parent_id = p;
         }
         item.updated_at = now;
-        let (after, _) =
+        let after =
             oxplow_db::task_store::update_with_status_tx(ctx.conn, &ctx.events, &item, status, now)
                 .map_err(not_found)?;
         let inverse = WorkItemUpdateInput {
@@ -1057,8 +1162,8 @@ pub struct WorkItemDeleteInput {
     pub item_ref: String,
 }
 
-/// oxplow's core: `soft_delete_tx`. An open effort on it closes;
-/// `work_item.deleted@1` is logged caused by the run.
+/// oxplow's core: `soft_delete_tx`; `work_item.deleted@1` is logged
+/// caused by the run.
 fn tx_delete(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemDeleteInput = parse(input)?;
@@ -1086,7 +1191,7 @@ pub fn delete_command(registry: WorkItemsRegistry) -> Command {
     dispatching(
         spec(
             DELETE,
-            "Delete a work item (oxplow: its open effort closes).",
+            "Delete a work item.",
             schema_of::<WorkItemDeleteInput>(),
             Confirm::Destructive,
             false,
@@ -1185,8 +1290,7 @@ fn neighbour(place: oxplow_db::task_store::Placement) -> (Option<String>, Option
     }
 }
 
-/// Place the task in `dest`'s list, refusing a thread that doesn't exist
-/// and an effort the actor may not claim.
+/// Place the task in `dest`'s list, refusing a thread that doesn't exist.
 fn place(
     ctx: &TxCtx<'_>,
     id: TaskId,
@@ -1272,7 +1376,7 @@ pub fn move_command(registry: WorkItemsRegistry) -> Command {
     let spec = spec(
         MOVE,
         "Move a task to a thread's list or the backlog (at the end, or before/after an item \
-         there); an in-progress task's effort moves with it.",
+         there).",
         schema_of::<WorkItemMoveInput>(),
         Confirm::Never,
         true,
@@ -1857,10 +1961,10 @@ mod tests {
         assert!(err.to_string().contains("body"), "{err}");
     }
 
-    /// P2.6.3 (tsk455): a transition is one transaction with its audit —
-    /// the status, the effort close, `work_item.transitioned` and
-    /// `effort.closed` all carry the actor's source and are caused by the
-    /// run's `command.executed`.
+    /// A transition is one transaction with its audit: the status,
+    /// `work_item.transitioned` and core's `work_item.state_changed` carry
+    /// the actor's source and are caused by the run's `command.executed`.
+    /// The effort policy closes the item's effort after it, as a reaction.
     #[tokio::test]
     async fn a_transition_commits_with_its_audit_and_names_its_cause() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1893,13 +1997,20 @@ mod tests {
         assert_eq!(
             caused,
             vec![
-                ("effort.closed", source.as_str()),
                 ("work_item.transitioned", source.as_str()),
+                ("work_item.state_changed", source.as_str()),
             ]
         );
         assert!(events
             .iter()
             .any(|e| e.envelope.id == executed && e.envelope.event_type == "command.executed"));
+        fx.svc
+            .event_pump
+            .settle(
+                &[crate::effort_policy::NAME],
+                std::time::Duration::from_secs(5),
+            )
+            .await;
         let effort = fx
             .svc
             .effort_store
@@ -1946,8 +2057,8 @@ mod tests {
             caused,
             vec![
                 "work_item.edited",
-                "effort.closed",
-                "work_item.transitioned"
+                "work_item.transitioned",
+                "work_item.state_changed"
             ]
         );
 
@@ -2033,11 +2144,11 @@ mod tests {
         assert_eq!(out.result["status"], "in_progress");
     }
 
-    /// `work_item.create` (tsk463): filing a task is audited to the actor;
-    /// filed straight into `in_progress` it opens the effort in the same
-    /// run, and the body's mentions are projected by the pump.
+    /// `work_item.create`: filing a task is audited to the actor; filed
+    /// straight into `in_progress`, the effort policy then switches the
+    /// thread's effort to it; the body's mentions are projected by the pump.
     #[tokio::test]
-    async fn a_create_is_audited_and_opens_its_effort() {
+    async fn a_create_is_audited_and_its_start_switches_the_effort() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
@@ -2069,11 +2180,23 @@ mod tests {
             .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
             .map(|e| e.envelope.event_type.as_str())
             .collect();
+        assert_eq!(caused, vec!["work_item.created", "work_item.state_changed"]);
         // The fixture's effort closes as the thread switches to this one.
-        assert_eq!(
-            caused,
-            vec!["effort.closed", "effort.opened", "work_item.created"]
-        );
+        fx.svc
+            .event_pump
+            .settle(
+                &[crate::effort_policy::NAME],
+                std::time::Duration::from_secs(5),
+            )
+            .await;
+        let fixture_effort = fx
+            .svc
+            .effort_store
+            .get_effort(&fx.effort)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fixture_effort.closed_by.as_deref(), Some("switch"));
         assert!(fx
             .svc
             .effort_store
@@ -2294,8 +2417,7 @@ mod tests {
     }
 
     /// `work_item.move` takes an item to another list (its end, or next to
-    /// an item there), moving its effort's claim with it; undo brings it
-    /// back to its place.
+    /// an item there); undo brings it back to its place.
     #[tokio::test]
     async fn move_takes_an_item_to_another_list_and_undo_brings_it_back() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -2320,13 +2442,15 @@ mod tests {
             vec![x.clone(), t.clone(), y.clone()]
         );
         assert_eq!(list_order(&fx, Some(fx.thread)).await, vec![a.clone()]);
-        // Its in-progress claim closed with the move.
-        let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
-        let executed = out.event_id.clone().unwrap();
-        assert!(events
-            .iter()
-            .any(|e| e.envelope.cause.as_ref() == Some(&executed)
-                && e.envelope.event_type == "effort.closed"));
+        // The thread's effort is the thread's: a move leaves it open.
+        let effort = fx
+            .svc
+            .effort_store
+            .get_effort(&fx.effort)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(effort.ended_at.is_none());
 
         fx.svc
             .commands
@@ -2367,8 +2491,8 @@ mod tests {
         assert!(err.to_string().contains("thr999"), "{err}");
     }
 
-    /// `work_item.delete` asks first, then removes the task, closing its
-    /// open effort, logged as caused by the run.
+    /// `work_item.delete` asks first, then removes the task, logged as
+    /// caused by the run.
     #[tokio::test]
     async fn delete_asks_first_then_removes_the_task() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -2397,7 +2521,7 @@ mod tests {
             .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
             .map(|e| e.envelope.event_type.as_str())
             .collect();
-        assert_eq!(caused, vec!["effort.closed", "work_item.deleted"]);
+        assert_eq!(caused, vec!["work_item.deleted"]);
         let again = fx
             .svc
             .commands

@@ -81,6 +81,18 @@ oxplow moves a `todo` item to in progress when work is linked to it, and
 effort afterwards. A policy may be **none**: no efforts, and the record is
 per turn.
 
+Built so far: rule 1, in `crate::effort_policy` — a pump consumer on
+`work_item.state_changed` (core's, logged for every provider), `effort.linked`
+and `effort.opened`. It runs the `effort.*` and `work_item.transition`
+commands as the effect `oxplow:effort-policy` and ignores events its own
+runs caused. The thread is the event's (the agent that moved the item),
+else the item's (`v_work_item.thread_id`); a person moving a backlog item
+opens nothing. A descendant of the linked item refines the link; an
+ancestor leaves it. The project picks the policy as
+`activeProviders.effort_policy`: `oxplow` (the default, unset) or `none`;
+both are rows in `v_capability_provider`. A task's status no longer opens
+or closes an effort anywhere else.
+
 ## No gates
 
 - The edit guard keeps only isolation: a non-writer thread, another
@@ -156,8 +168,9 @@ The three in progress:
 - Built: the hook payload dump and the observed hook events; the Stop
   hook never refuses; the edit guard is isolation only; efforts need no
   work item, one is open per thread, and the seam (open with adoption,
-  close as of a point, link, retitle — `commands/effort.rs`).
-- Next, in order: the default policy's three rules (with the
-  effort-policy choice and "none"); observed files; waiting derived; the
+  close as of a point, link, retitle — `commands/effort.rs`); the
+  effort-policy choice with "none", and rule 1.
+- Next, in order: rule 2 (open on change, after a turn's checkpoint);
+  observed files; rule 3 (a commit lands it); waiting derived; the
   Work panel and a Thread activity page; hints; skills and repo rules.
   Then the capability framework and the three swappable pieces.

@@ -308,15 +308,12 @@ impl TaskService {
             note_count: 0,
             author: input.author.or(Some(TaskAuthor::User)),
         };
-        // Filing straight into a status is that change from `ready`: into
-        // `in_progress` (the path CLAUDE.md recommends to "start the work in
-        // the same call") it opens the effort in the insert's transaction,
-        // and any status but `ready` logs `work_item.transitioned`. The
-        // start snapshot comes from the effort-lifecycle consumer.
+        // Filing straight into a status is that change from `ready`: any
+        // status but `ready` logs `work_item.transitioned`.
         if item.status == TaskStatus::Done {
             item.completed_at = Some(now);
         }
-        let (id, _effort) = self.store.insert_logged(&item).await?;
+        let id = self.store.insert_logged(&item).await?;
         item.id = id;
         if item.status != TaskStatus::Ready {
             self.settle_lifecycle().await;
@@ -1644,7 +1641,29 @@ mod tests {
         svc.with_event_pump(pump)
     }
 
-    /// Review of P2.6 (tsk461): an open and its close both pending when the
+    /// Open `item`'s effort on `thread`, as the effort policy would, and let
+    /// the lifecycle consumer pin its start.
+    async fn open_effort(
+        svc: &TaskService,
+        efforts: &SqliteEffortStore,
+        item: TaskId,
+        thread: ThreadId,
+    ) -> oxplow_db::Effort {
+        let effort = efforts
+            .start(&work_item_ref(item), &thread, None)
+            .await
+            .unwrap();
+        svc.settle_lifecycle().await;
+        effort
+    }
+
+    /// Close an effort and let the lifecycle consumer pin and project it.
+    async fn close_effort(svc: &TaskService, efforts: &SqliteEffortStore, id: EffortId) {
+        efforts.finish(&id, None, None).await.unwrap();
+        svc.settle_lifecycle().await;
+    }
+
+    /// An open and its close both pending when the
     /// pump runs (nothing settled in between) still get a baseline — the
     /// stream's last snapshot from before the effort started, rather than
     /// no start pin at all.
@@ -1678,19 +1697,11 @@ mod tests {
             )
             .await
             .unwrap();
-        let quiet = svc.without_event_pump();
-        for status in [TaskStatus::InProgress, TaskStatus::Done] {
-            quiet
-                .update(
-                    item.id,
-                    UpdateTaskChanges {
-                        status: Some(status),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
-        }
+        let opened = effort_store
+            .start(&work_item_ref(item.id), &tid, None)
+            .await
+            .unwrap();
+        effort_store.finish(&opened.id, None, None).await.unwrap();
         svc.event_pump.clone().unwrap().run_once().await.unwrap();
         let effort = &effort_store
             .list_for_work_item(&work_item_ref(item.id))
@@ -1700,8 +1711,8 @@ mod tests {
         assert!(effort.end_snapshot_id.is_some());
     }
 
-    /// P2.6.2 (tsk454): the effort-start snapshot is the pump's, so a
-    /// process that dies after the transition commits — before the snapshot
+    /// The effort-start snapshot is the pump's, so a process that dies
+    /// after the open commits — before the snapshot
     /// — has it taken by the next pump run instead of losing the pin.
     #[tokio::test]
     async fn a_committed_open_is_pinned_by_the_next_pump_run_after_a_crash() {
@@ -1722,21 +1733,10 @@ mod tests {
             project.path().join("a.txt"),
             oxplow_fs_watch::WatchEventKind::Other,
         );
-        // The "crashed" process: it commits the transition, and no pump runs.
-        svc.without_event_pump()
-            .update(
-                item.id,
-                UpdateTaskChanges {
-                    status: Some(TaskStatus::InProgress),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
+        // The "crashed" process: it commits the open, and no pump runs.
         let open = effort_store
-            .find_open_for_work_item(&work_item_ref(item.id))
+            .start(&work_item_ref(item.id), &tid, None)
             .await
-            .unwrap()
             .unwrap();
         assert!(open.start_snapshot_id.is_none(), "nothing pinned yet");
 
@@ -1752,7 +1752,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_progress_transition_opens_effort_with_start_snapshot() {
+    async fn an_effort_is_pinned_at_its_open_and_its_close() {
         let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
@@ -1765,27 +1765,10 @@ mod tests {
             .await
             .unwrap();
 
-        // Ready → InProgress: opens an effort with start_snapshot_id.
-        let _ = svc
-            .update(
-                item.id,
-                UpdateTaskChanges {
-                    status: Some(TaskStatus::InProgress),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        let open = effort_store
-            .find_open_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap()
-            .expect("effort should be open");
-        // Dirty set is empty in tests (no actual fs writes), so the
-        // first snapshot returns None. The effort still opens but
-        // start_snapshot_id is None — that's the "nothing to pin"
-        // case and is fine. To verify the snapshot path actually
-        // ran, write a file first.
+        // Nothing is dirty yet, so the open pins no start snapshot: the
+        // "nothing to pin" case.
+        let opened = open_effort(&svc, &effort_store, item.id, tid).await;
+        let open = effort_store.get_effort(&opened.id).await.unwrap().unwrap();
         assert!(open.ended_at.is_none());
         assert!(open.start_snapshot_id.is_none());
 
@@ -1800,17 +1783,8 @@ mod tests {
             oxplow_fs_watch::WatchEventKind::Other,
         );
 
-        // InProgress → Done: closes the open effort with end_snapshot_id.
-        let _ = svc
-            .update(
-                item.id,
-                UpdateTaskChanges {
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
+        // The close pins its end snapshot.
+        close_effort(&svc, &effort_store, open.id).await;
         let efforts = effort_store
             .list_for_work_item(&work_item_ref(item.id))
             .await
@@ -1819,7 +1793,7 @@ mod tests {
         let closed = &efforts[0];
         assert!(closed.ended_at.is_some());
         assert!(closed.end_snapshot_id.is_some());
-        // And no new effort was opened.
+        // And nothing opened another.
         assert!(effort_store
             .find_open_for_work_item(&work_item_ref(item.id))
             .await
@@ -1896,7 +1870,7 @@ mod tests {
         );
     }
 
-    /// Review of P2.6 (tsk462): re-delivering a close (a crash before the
+    /// Re-delivering a close (a crash before the
     /// checkpoint, a dead-letter retry) projects the lifecycle facts once
     /// and keeps the first end pin.
     #[tokio::test]
@@ -1913,21 +1887,14 @@ mod tests {
             )
             .await
             .unwrap();
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
         let primary = captures.primary().unwrap();
         std::fs::write(project.path().join("work.txt"), "w").unwrap();
         primary.mark_dirty(
             project.path().join("work.txt"),
             oxplow_fs_watch::WatchEventKind::Other,
         );
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::Done),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        close_effort(&svc, &effort_store, effort.id).await;
         let effort = effort_store
             .list_for_work_item(&work_item_ref(item.id))
             .await
@@ -1958,10 +1925,9 @@ mod tests {
 
     #[tokio::test]
     async fn closing_an_effort_projects_lifecycle_metrics() {
-        // tsk216: leaving in_progress closes the effort and projects
-        // `effort.cycle_time_ms` + `task.efforts` into the metric substrate,
-        // reading `effort` as the source of truth.
-        let (svc, tid, _effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        // Closing an effort projects `effort.cycle_time_ms` + `task.efforts`
+        // into the metric substrate, reading `effort` as the source of truth.
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
@@ -1973,6 +1939,7 @@ mod tests {
             )
             .await
             .unwrap();
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
 
         // No facts while the effort is still open.
         let facts = svc.fact_store.as_ref().expect("fact store attached");
@@ -1987,19 +1954,10 @@ mod tests {
             .unwrap()
             .is_empty());
 
-        // InProgress → Done closes the effort and fires the projection: one
-        // `oxplow.cycle_time` fact, subject = the closed effort, on a capture
-        // that stamped the producing effort_id (unambiguous, decision #11).
-        // (The legacy definition/sample writes are gone, T-E2.)
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::Done),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        // The close fires the projection: one `oxplow.cycle_time` fact,
+        // subject = the closed effort, on a capture that stamped the
+        // producing effort_id (unambiguous).
+        close_effort(&svc, &effort_store, effort.id).await;
         let cycle_measure = facts
             .get_measure("oxplow.cycle_time")
             .await
@@ -2066,11 +2024,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let effort = effort_store
-            .find_open_for_thread(&tid)
-            .await
-            .unwrap()
-            .expect("open effort");
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
 
         // Simulate the OTLP ingest: an effort-stamped otel-tokens capture with
         // input/output on `oxplow.tokens` and a cache fact on
@@ -2097,15 +2051,7 @@ mod tests {
             .await
             .unwrap();
 
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::Done),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        close_effort(&svc, &effort_store, effort.id).await;
 
         let effort_tokens = facts
             .get_measure("oxplow.effort_tokens")
@@ -2156,11 +2102,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let effort = effort_store
-            .find_open_for_thread(&tid)
-            .await
-            .unwrap()
-            .expect("open effort");
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
 
         // Two prompts inside the window + one ancient one outside it.
         let turns = svc.agent_turn_store.as_ref().expect("turn store attached");
@@ -2225,15 +2167,7 @@ mod tests {
                 .unwrap();
         }
 
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::Done),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        close_effort(&svc, &effort_store, effort.id).await;
 
         let steering = facts
             .get_measure("oxplow.effort_steering")
@@ -2275,11 +2209,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let effort = effort_store
-            .find_open_for_thread(&tid)
-            .await
-            .unwrap()
-            .expect("open effort");
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
 
         let facts = svc.fact_store.as_ref().expect("fact store attached");
         let case = facts
@@ -2306,15 +2236,7 @@ mod tests {
                 .unwrap();
         }
 
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::Done),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        close_effort(&svc, &effort_store, effort.id).await;
 
         let ttg = facts
             .get_measure("oxplow.effort_time_to_green")
@@ -2346,11 +2268,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let effort = effort_store
-            .find_open_for_thread(&tid)
-            .await
-            .unwrap()
-            .expect("open effort");
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
         let facts = svc.fact_store.as_ref().expect("fact store attached");
         let case = facts
             .get_measure("oxplow.test_case")
@@ -2363,15 +2281,7 @@ mod tests {
         facts.record_facts(cap, Vec::new()).await.unwrap();
         let _ = case;
 
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::Done),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        close_effort(&svc, &effort_store, effort.id).await;
 
         let outcome = facts
             .get_measure("oxplow.effort_test_outcome")
@@ -2387,58 +2297,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_with_in_progress_opens_lifecycle_effort() {
-        // Filing a task directly in `in_progress` (the path CLAUDE.md
-        // recommends for "start the work in the same call") must run
-        // the lifecycle hook — otherwise the close's TaskEnd
-        // snapshot has no open effort to attach to and the snapshot
-        // is orphaned.
-        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "born running".into(),
-                    status: Some(TaskStatus::InProgress),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        let open = effort_store
-            .find_open_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap()
-            .expect("lifecycle effort should be open after in_progress create");
-        assert!(open.ended_at.is_none());
-    }
-
-    #[tokio::test]
-    async fn create_with_done_skips_effort_lifecycle() {
-        // Filing directly in a terminal status (e.g. retroactively
-        // logging completed work) must NOT open a lifecycle effort —
-        // record_effort handles that synthesis itself, with the
-        // touched_files payload.
-        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "retro".into(),
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        assert!(effort_store
-            .find_open_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap()
-            .is_none());
-    }
-
-    #[tokio::test]
     async fn record_effort_merges_into_lifecycle_effort() {
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
@@ -2451,28 +2309,8 @@ mod tests {
             )
             .await
             .unwrap();
-        // Open the lifecycle effort.
-        let _ = svc
-            .update(
-                item.id,
-                UpdateTaskChanges {
-                    status: Some(TaskStatus::InProgress),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        // Close it.
-        let _ = svc
-            .update(
-                item.id,
-                UpdateTaskChanges {
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
+        close_effort(&svc, &effort_store, effort.id).await;
         // Now record_effort comes in with touched files + summary.
         // It should attach to the already-closed lifecycle effort,
         // NOT create a second row.
@@ -2568,6 +2406,7 @@ mod tests {
             )
             .await
             .unwrap();
+        open_effort(&svc, &effort_store, item.id, tid).await;
         let claimed = svc
             .claim_open_effort_file(
                 &effort_store,
@@ -2644,11 +2483,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let open = effort_store
-            .find_open_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap()
-            .expect("effort open");
+        let open = open_effort(&svc, &effort_store, item.id, tid).await;
 
         let claimed = svc
             .claim_open_effort_file(&effort_store, &tid, "src/edited.rs", None)
@@ -2668,9 +2503,8 @@ mod tests {
 
     #[tokio::test]
     async fn out_of_band_close_marks_unclaimed_changes_unattributed() {
-        // An effort that changes a file nobody claimed, closed via a plain
-        // status transition (not the close (`effort.report`)), records that file as
-        // unattributed audit residue.
+        // An effort that changes a file nobody claimed, closed with no
+        // claims, records that file as unattributed audit residue.
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
         let dirty = captures.primary().expect("primary capture service");
         let item = svc
@@ -2689,32 +2523,15 @@ mod tests {
             project.path().join("a.rs"),
             oxplow_fs_watch::WatchEventKind::Other,
         );
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::InProgress),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
         // A parallel/unclaimed change during the effort.
         std::fs::write(project.path().join("parallel.rs"), "x").unwrap();
         dirty.mark_dirty(
             project.path().join("parallel.rs"),
             oxplow_fs_watch::WatchEventKind::Other,
         );
-        // Out-of-band close: a plain Done transition (no the close (`effort.report`),
-        // no touched_files claim).
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::Done),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        // Closed with no touched_files claim.
+        close_effort(&svc, &effort_store, effort.id).await;
         let efforts = effort_store
             .list_for_work_item(&work_item_ref(item.id))
             .await
@@ -2729,7 +2546,7 @@ mod tests {
 
     #[tokio::test]
     async fn claimed_change_is_not_marked_unattributed_on_close() {
-        // A file the agent claimed in real time (Child 1 auto-claim) is NOT
+        // A file the agent claimed in real time (the auto-claim) is NOT
         // marked unattributed when the effort closes.
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
         let dirty = captures.primary().expect("primary capture service");
@@ -2748,15 +2565,7 @@ mod tests {
             project.path().join("a.rs"),
             oxplow_fs_watch::WatchEventKind::Other,
         );
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::InProgress),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
         std::fs::write(project.path().join("mine.rs"), "x").unwrap();
         dirty.mark_dirty(
             project.path().join("mine.rs"),
@@ -2766,15 +2575,7 @@ mod tests {
         svc.claim_open_effort_file(&effort_store, &tid, "mine.rs", Some(project.path()))
             .await
             .unwrap();
-        svc.update(
-            item.id,
-            UpdateTaskChanges {
-                status: Some(TaskStatus::Done),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        close_effort(&svc, &effort_store, effort.id).await;
         let efforts = effort_store
             .list_for_work_item(&work_item_ref(item.id))
             .await
@@ -2799,30 +2600,34 @@ mod tests {
         assert!(!claimed, "no open effort → no claim");
     }
 
+    /// A task's status is the task's: filing it in progress, blocking it
+    /// and finishing it open and close no effort (that's the effort
+    /// policy's business, not the task store's).
     #[tokio::test]
-    async fn non_in_progress_transitions_skip_effort_lifecycle() {
+    async fn a_task_status_change_leaves_efforts_alone() {
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
                 CreateTaskInput {
-                    title: "skip".into(),
+                    title: "status only".into(),
+                    status: Some(TaskStatus::InProgress),
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
-        // Ready → Blocked: no effort row.
-        let _ = svc
-            .update(
+        for status in [TaskStatus::Blocked, TaskStatus::Done] {
+            svc.update(
                 item.id,
                 UpdateTaskChanges {
-                    status: Some(TaskStatus::Blocked),
+                    status: Some(status),
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
+        }
         assert!(effort_store
             .list_for_work_item(&work_item_ref(item.id))
             .await
@@ -3197,8 +3002,7 @@ mod tests {
             .await
             .unwrap();
 
-        // File the task in_progress — that opens an effort + captures
-        // start_snapshot_id.
+        // Its effort opens, capturing start_snapshot_id.
         let item = svc
             .create(
                 Some(thread.id),
@@ -3210,6 +3014,7 @@ mod tests {
             )
             .await
             .unwrap();
+        let effort = open_effort(&svc, &effort_store, item.id, thread.id).await;
 
         // Edit a file in the WORKTREE stream's directory and mark it
         // dirty against the worktree stream's service.
@@ -3229,19 +3034,9 @@ mod tests {
             .expect("primary service registered");
         primary_svc.mark_dirty(primary_edit.clone(), oxplow_fs_watch::WatchEventKind::Other);
 
-        // Done: closes the effort and captures the end snapshot —
-        // routes through the worktree stream's service because the
-        // task's thread.stream_id == worktree.id.
-        let _ = svc
-            .update(
-                item.id,
-                UpdateTaskChanges {
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
+        // The close captures the end snapshot — through the worktree
+        // stream's service, because the effort's thread is on it.
+        close_effort(&svc, &effort_store, effort.id).await;
 
         let closed = effort_store
             .list_for_work_item(&work_item_ref(item.id))
@@ -3305,20 +3100,15 @@ mod tests {
 
     #[tokio::test]
     async fn closing_an_effort_logs_effort_finished_once_its_bracket_is_pinned() {
-        // P2.6b (tsk451): the durable `effort.finished@1` — what the effort
+        // The durable `effort.finished@1` — what the effort
         // reactors consume — follows the lifecycle work, once per effort.
         let f = crate::test_fixtures::services_with_effort().await;
         f.svc
-            .tasks
-            .update(
-                f.task,
-                UpdateTaskChanges {
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
+            .effort_store
+            .finish(&f.effort, None, None)
             .await
             .unwrap();
+        f.svc.tasks.settle_lifecycle().await;
         let finished = |events: &[oxplow_domain::StoredEvent]| {
             events
                 .iter()

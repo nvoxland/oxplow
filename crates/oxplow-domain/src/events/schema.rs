@@ -191,6 +191,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<WorkItemRecorded>()
             .expect("core type registers");
+        r.register::<WorkItemStateChanged>()
+            .expect("core type registers");
         r.register::<KnowledgePageWritten>()
             .expect("core type registers");
         r.register::<KnowledgePageDeleted>()
@@ -449,7 +451,8 @@ pub struct WorkItemTransitionedV1 {
     pub work_item: String,
     pub from: TaskStatus,
     pub to: TaskStatus,
-    /// The effort this transition opened or closed, when it did either.
+    /// The effort this transition opened or closed, in events from before
+    /// a task's status stopped opening efforts; never written now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
 }
@@ -1610,6 +1613,27 @@ impl EventType for CollectorSynced {
     type Payload = CollectorSyncedV1;
 }
 
+/// `work_item.state_changed@1`: a `work_item.*` command put an item in
+/// a canonical state — logged by core for every provider, anchored to the
+/// thread of whoever ran it (`.context/work-items.md`). A create always
+/// logs one; for a provider oxplow can't read the prior state of, a
+/// transition or update that names a state logs one even when the item
+/// was already there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemStateChangedV1 {
+    /// `work_item:<provider>:<id>`.
+    pub work_item: String,
+    pub to: crate::work_items::CanonicalState,
+}
+
+pub struct WorkItemStateChanged;
+impl EventType for WorkItemStateChanged {
+    const TYPE: &'static str = "work_item.state_changed";
+    const V: u32 = 1;
+    type Payload = WorkItemStateChangedV1;
+}
+
 /// `effort.linked@1`: an effort's work item was set, changed or cleared
 /// (`effort.link`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1692,15 +1716,15 @@ impl EventType for EffortClosed {
     }
 }
 
-/// `work_item.created@1`: a task was filed, in `status` (filing straight
-/// into `in_progress` opens its effort in the same transaction).
+/// `work_item.created@1`: a task was filed, in `status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemCreatedV1 {
     /// `work_item:oxplow:tsk42`.
     pub work_item: String,
     pub status: TaskStatus,
-    /// The effort filing it opened, when it was filed `in_progress`.
+    /// The effort filing it opened, in events from before a task's status
+    /// stopped opening efforts; never written now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
 }
@@ -2232,6 +2256,7 @@ mod tests {
                 ("work_item.edited", 1),
                 ("work_item.linked", 1),
                 ("work_item.recorded", 1),
+                ("work_item.state_changed", 1),
                 ("work_item.transitioned", 1),
             ]
         );

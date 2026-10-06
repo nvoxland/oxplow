@@ -8,11 +8,11 @@ use oxplow_domain::events::schema::{
     WorkItemCreated, WorkItemCreatedV1, WorkItemDeleted, WorkItemDeletedV1, WorkItemEdited,
     WorkItemEditedV1, WorkItemTransitioned, WorkItemTransitionedV1,
 };
-use oxplow_domain::refs::build::{effort_ref, work_item_ref};
+use oxplow_domain::refs::build::work_item_ref;
 use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{
-    Anchors, DomainError, EffortId, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority,
-    TaskStatus, ThreadId, Timestamp,
+    Anchors, DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus,
+    ThreadId, Timestamp,
 };
 
 use crate::database::Database;
@@ -29,28 +29,13 @@ pub struct SqliteTaskStore {
     vocabulary: VocabularyHandle,
 }
 
-/// What a status change did to the task's effort (see [`update_logged_tx`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum EffortTransition {
-    /// Entered in_progress — this effort row was opened (or an
-    /// already-open one adopted) with no snapshot pin yet.
-    Opened(EffortId),
-    /// Left in_progress — this open effort row was finished with no
-    /// end-snapshot pin yet.
-    Finished(EffortId),
-    /// Left in_progress but no open effort existed to finish.
-    NoOpenEffort,
-    /// The change didn't cross the in_progress boundary on a thread.
-    Untouched,
-}
-
-/// A status change made by [`set_status_tx`]: the row before and after,
-/// and what happened to its effort.
+/// A status change made by [`set_status_tx`]: the row before and after.
+/// A task's status is a record; it never opens or closes an effort (the
+/// effort policy reacts to it, `.context/work-tracking.md`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusChange {
     pub before: Task,
     pub after: Task,
-    pub effort: EffortTransition,
 }
 
 impl SqliteTaskStore {
@@ -90,13 +75,10 @@ impl SqliteTaskStore {
     /// Insert a task and apply what its initial status implies, in one
     /// transaction (see [`insert_logged_tx`]). Returns the id and the
     /// effort it opened, if any.
-    pub async fn insert_logged(
-        &self,
-        item: &Task,
-    ) -> Result<(TaskId, Option<EffortId>), DomainError> {
+    pub async fn insert_logged(&self, item: &Task) -> Result<TaskId, DomainError> {
         let owned = Arc::new(item.clone());
         let vocabulary = self.vocabulary.clone();
-        let (id, effort) = self
+        let id = self
             .db
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
@@ -105,7 +87,7 @@ impl SqliteTaskStore {
             })
             .await?;
         self.project_body_refs(item, id).await?;
-        Ok((id, effort))
+        Ok(id)
     }
 
     /// Re-project a task's body mentions into `page_ref` (the task-body
@@ -178,7 +160,6 @@ impl SqliteTaskStore {
                 let vocabulary = vocabulary.current();
                 let ev = EventCtx::system(&vocabulary, "task_service");
                 update_with_status_tx(tx, &ev, &owned, status, Timestamp::now())
-                    .map(|(after, _)| after)
             })
             .await?;
         self.project_body_refs(&after, after.id).await?;
@@ -186,106 +167,35 @@ impl SqliteTaskStore {
     }
 }
 
-/// What a status change implies, inside the caller's transaction:
-/// open (or adopt) the effort when a thread-attached task enters
-/// `in_progress`, close it when one leaves, and log
-/// `work_item.transitioned@1` when the status changed — every change, not
-/// only in_progress crossings, and for thread-less tasks too (no stream
-/// anchor then). Snapshot pins are not part of this: the effort-lifecycle
-/// consumer takes them after commit. No dedupe key: a transactional
-/// producer's retry has already rolled back.
+/// Write a status inside the caller's transaction and log
+/// `work_item.transitioned@1` when it changed — every change, and for
+/// thread-less tasks too (no stream anchor then). No dedupe key: a
+/// transactional producer's retry has already rolled back.
 fn apply_status_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     item: &Task,
     from: TaskStatus,
-) -> Result<EffortTransition, DomainError> {
+) -> Result<(), DomainError> {
     write_status_tx(conn, item)?;
-    let transition = effort_for_status_tx(conn, ev, item, from)?;
-    let work_item = work_item_ref(item.id);
     if from != item.status {
-        let effort = match transition {
-            EffortTransition::Opened(e) | EffortTransition::Finished(e) => Some(e),
-            EffortTransition::NoOpenEffort | EffortTransition::Untouched => None,
-        };
-        let mut subject = vec![work_item.clone()];
-        subject.extend(effort.map(effort_ref));
+        let work_item = work_item_ref(item.id);
         let anchors = match item.thread_id {
             Some(thread) => anchors_for_thread_tx(conn, thread)?,
             None => Anchors::default(),
         };
         let env = ev
             .typed::<WorkItemTransitioned>(&WorkItemTransitionedV1 {
-                work_item,
+                work_item: work_item.clone(),
                 from,
                 to: item.status,
-                effort: effort.map(effort_ref),
+                effort: None,
             })
-            .with_anchors(Anchors {
-                effort_id: effort,
-                ..anchors
-            })
-            .with_subject(subject);
+            .with_anchors(anchors)
+            .with_subject([work_item]);
         ev.append(conn, &env)?;
     }
-    Ok(transition)
-}
-
-/// The effort a status change implies: open (or adopt) one when a
-/// thread-attached task enters `in_progress` from `from`, close the open
-/// one when it leaves. Logs the effort's own events, not the transition.
-fn effort_for_status_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    item: &Task,
-    from: TaskStatus,
-) -> Result<EffortTransition, DomainError> {
-    use crate::database::map_sql_err;
-    let work_item = work_item_ref(item.id);
-    let crossed_in = from != TaskStatus::InProgress && item.status == TaskStatus::InProgress;
-    let crossed_out = from == TaskStatus::InProgress && item.status != TaskStatus::InProgress;
-    Ok(match item.thread_id {
-        Some(thread) if crossed_in => {
-            match crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
-                .map_err(map_sql_err)?
-            {
-                // Adopted, not an error: the unique open index makes a true
-                // double-open impossible.
-                Some(open) => EffortTransition::Opened(open.id),
-                None => {
-                    // Opening moves the thread on from what it had open.
-                    EffortTransition::Opened(crate::effort_store::start_tx(
-                        conn,
-                        ev,
-                        &crate::effort_store::EffortStart {
-                            work_item: Some(&work_item),
-                            ..crate::effort_store::EffortStart::at(thread, Timestamp::now())
-                        },
-                    )?)
-                }
-            }
-        }
-        Some(_) if crossed_out => {
-            match crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
-                .map_err(map_sql_err)?
-            {
-                Some(open) => {
-                    crate::effort_store::finish_tx(
-                        conn,
-                        ev,
-                        open.id,
-                        &crate::effort_store::EffortEnd::at(
-                            Timestamp::now(),
-                            crate::effort_store::ClosedBy::Switch,
-                        ),
-                    )?;
-                    EffortTransition::Finished(open.id)
-                }
-                None => EffortTransition::NoOpenEffort,
-            }
-        }
-        _ => EffortTransition::Untouched,
-    })
+    Ok(())
 }
 
 /// The only writer of a task's `status` / `completed_at` (with
@@ -368,7 +278,7 @@ pub fn update_with_status_tx(
     item: &Task,
     status: Option<TaskStatus>,
     now: Timestamp,
-) -> Result<(Task, EffortTransition), DomainError> {
+) -> Result<Task, DomainError> {
     let before = get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)?;
     if update_task_tx(conn, item).map_err(crate::database::map_sql_err)? == 0 {
         return Err(DomainError::NotFound);
@@ -377,48 +287,36 @@ pub fn update_with_status_tx(
     if !fields.is_empty() {
         log_edited_tx(conn, ev, item, fields)?;
     }
-    let effort = match status {
-        Some(to) => set_status_tx(conn, ev, item.id, to, now)?.effort,
-        None => EffortTransition::Untouched,
-    };
-    let after = get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)?;
-    Ok((after, effort))
+    if let Some(to) = status {
+        set_status_tx(conn, ev, item.id, to, now)?;
+    }
+    get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)
 }
 
-/// Insert `item` and log `work_item.created@1` with its initial status;
-/// filed straight into `in_progress` on a thread, it opens the effort in
-/// the same transaction. Returns the id and any effort opened.
+/// Insert `item` and log `work_item.created@1` with its initial status.
+/// Returns its id.
 pub fn insert_logged_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     item: &Task,
-) -> Result<(TaskId, Option<EffortId>), DomainError> {
+) -> Result<TaskId, DomainError> {
     let id = insert_task_tx(conn, item).map_err(crate::database::map_sql_err)?;
     let placed = Task { id, ..item.clone() };
-    let effort = match effort_for_status_tx(conn, ev, &placed, TaskStatus::Ready)? {
-        EffortTransition::Opened(e) => Some(e),
-        _ => None,
-    };
     let work_item = work_item_ref(id);
-    let mut subject = vec![work_item.clone()];
-    subject.extend(effort.map(effort_ref));
     let anchors = match placed.thread_id {
         Some(thread) => anchors_for_thread_tx(conn, thread)?,
         None => Anchors::default(),
     };
     let env = ev
         .typed::<WorkItemCreated>(&WorkItemCreatedV1 {
-            work_item,
+            work_item: work_item.clone(),
             status: placed.status,
-            effort: effort.map(effort_ref),
+            effort: None,
         })
-        .with_anchors(Anchors {
-            effort_id: effort,
-            ..anchors
-        })
-        .with_subject(subject);
+        .with_anchors(anchors)
+        .with_subject([work_item]);
     ev.append(conn, &env)?;
-    Ok((id, effort))
+    Ok(id)
 }
 
 /// The next `sort_index` at the end of `thread`'s list (or the backlog's),
@@ -461,16 +359,6 @@ pub fn soft_delete_tx(
         .ok_or(DomainError::NotFound)?;
     project_work_item_tx(conn, id).map_err(crate::database::map_sql_err)?;
     let work_item = work_item_ref(id);
-    if let Some(open) = crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
-        .map_err(crate::database::map_sql_err)?
-    {
-        crate::effort_store::finish_tx(
-            conn,
-            ev,
-            open.id,
-            &crate::effort_store::EffortEnd::at(now, crate::effort_store::ClosedBy::Switch),
-        )?;
-    }
     crate::page_ref_store::replace_source_for_ref_types_tx(
         conn,
         KIND_WORK_ITEM,
@@ -593,29 +481,6 @@ pub fn place_task_tx(
     }
     let field = if moved { "thread" } else { "position" };
     log_edited_tx(conn, ev, &item, vec![field.to_string()])?;
-    if moved {
-        let work_item = work_item_ref(id);
-        if let Some(open) = crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
-            .map_err(crate::database::map_sql_err)?
-        {
-            crate::effort_store::finish_tx(
-                conn,
-                ev,
-                open.id,
-                &crate::effort_store::EffortEnd::at(now, crate::effort_store::ClosedBy::Switch),
-            )?;
-        }
-        if let (Some(thread), TaskStatus::InProgress) = (dest, item.status) {
-            crate::effort_store::start_tx(
-                conn,
-                ev,
-                &crate::effort_store::EffortStart {
-                    work_item: Some(&work_item),
-                    ..crate::effort_store::EffortStart::at(thread, now)
-                },
-            )?;
-        }
-    }
     Ok(Placed {
         task: item,
         from_thread,
@@ -635,12 +500,8 @@ pub fn set_status_tx(
     let before = get_task_tx(conn, id)?.ok_or(DomainError::NotFound)?;
     let mut after = before.clone();
     after.set_status(to, now);
-    let effort = apply_status_tx(conn, ev, &after, before.status)?;
-    Ok(StatusChange {
-        before,
-        after,
-        effort,
-    })
+    apply_status_tx(conn, ev, &after, before.status)?;
+    Ok(StatusChange { before, after })
 }
 
 /// Restate task `id`'s `work_item` row (P5.C1, the oxplow provider's):
@@ -1234,108 +1095,27 @@ mod tests {
         assert_eq!(left, (0, 0), "the backlog child went with its parent");
     }
 
-    /// Moving an in_progress task takes its claim with it: the effort on
-    /// the old thread closes and one opens on the new thread (another
-    /// stream included); moved to the backlog, it just closes (tsk465).
+    /// A deleted task can't be edited (nothing is logged or re-projected).
     #[tokio::test]
-    async fn moving_an_in_progress_task_moves_its_effort() {
-        let (store, tid) = fixture().await;
-        store
-            .db
-            .call(|c| {
-                c.execute_batch(
-                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-                       VALUES (2, 'worktree', 'b', 'b', 'refs/heads/b', 'main', '/b',
-                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
-                     INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                       VALUES (2, 2, 'other', 'active',
-                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
-                )
-            })
-            .await
-            .unwrap();
-        let mut filed = item(Some(tid));
-        filed.status = TaskStatus::InProgress;
-        let (id, first) = store.insert_logged(&filed).await.unwrap();
-        let first = first.unwrap();
-
-        let moved = store.move_task(id, Some(ThreadId::new(2))).await.unwrap();
-        assert_eq!(moved.thread_id, Some(ThreadId::new(2)));
-        let open_on = |thread: i64| {
-            let db = store.db.clone();
-            async move {
-                db.call(move |c| {
-                    c.query_row(
-                        "SELECT count(*) FROM effort WHERE thread_id = ?1 AND ended_at IS NULL",
-                        params![thread],
-                        |r| r.get::<_, i64>(0),
-                    )
-                })
-                .await
-                .unwrap()
-            }
-        };
-        assert_eq!(
-            open_on(tid.value()).await,
-            0,
-            "the old thread's claim closed"
-        );
-        assert_eq!(open_on(2).await, 1, "the new thread holds the claim");
-        let first_ended: Option<String> = store
-            .db
-            .call(move |c| {
-                c.query_row(
-                    "SELECT ended_at FROM effort WHERE id = ?1",
-                    params![first.value()],
-                    |r| r.get(0),
-                )
-            })
-            .await
-            .unwrap();
-        assert!(first_ended.is_some());
-
-        store.move_task(id, None).await.unwrap();
-        assert_eq!(open_on(2).await, 0, "the backlog holds no claim");
-    }
-
-    /// A deleted task can't be edited (nothing is logged or re-projected),
-    /// and deleting an in_progress task closes its effort — no claim
-    /// outlives its task (review of P2.6b–P2.11, tsk464).
-    #[tokio::test]
-    async fn a_deleted_task_takes_no_edits_and_leaves_no_open_effort() {
+    async fn a_deleted_task_takes_no_edits() {
         let (store, tid) = fixture().await;
         let mut filed = item(Some(tid));
         filed.status = TaskStatus::InProgress;
-        let (id, effort) = store.insert_logged(&filed).await.unwrap();
-        let effort = effort.unwrap();
+        let id = store.insert_logged(&filed).await.unwrap();
         store.soft_delete(id).await.unwrap();
 
-        let (ended, events): (Option<String>, Vec<String>) = store
+        let events: Vec<String> = store
             .db
             .call(move |c| {
-                let ended = c.query_row(
-                    "SELECT ended_at FROM effort WHERE id = ?1",
-                    params![effort.value()],
-                    |r| r.get(0),
-                )?;
                 let mut stmt = c.prepare("SELECT type FROM event_log ORDER BY seq")?;
                 let types = stmt
                     .query_map([], |r| r.get::<_, String>(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
-                Ok((ended, types))
+                Ok(types)
             })
             .await
             .unwrap();
-        assert!(ended.is_some(), "the effort closed with its task");
-        assert_eq!(
-            events,
-            vec![
-                "effort.opened",
-                "work_item.created",
-                "effort.closed",
-                "work_item.deleted"
-            ]
-        );
+        assert_eq!(events, vec!["work_item.created", "work_item.deleted"]);
 
         let mut edit = filed.clone();
         edit.id = id;
@@ -1349,7 +1129,7 @@ mod tests {
             .call(|c| c.query_row("SELECT count(*) FROM event_log", [], |r| r.get(0)))
             .await
             .unwrap();
-        assert_eq!(logged, 4, "a refused edit logs nothing");
+        assert_eq!(logged, 2, "a refused edit logs nothing");
         let live = store
             .db
             .transaction(move |c| get_task_tx(c, id))
@@ -1440,8 +1220,7 @@ mod tests {
 
         let mut filed = item(Some(tid));
         filed.status = TaskStatus::Blocked;
-        let (born, effort) = store.insert_logged(&filed).await.unwrap();
-        assert_eq!(effort, None, "only in_progress opens an effort");
+        let born = store.insert_logged(&filed).await.unwrap();
 
         let events = store
             .db
@@ -1509,7 +1288,6 @@ mod tests {
             .unwrap();
         assert_eq!(change.before.status, TaskStatus::Ready);
         assert_eq!(change.after.status, TaskStatus::InProgress);
-        assert!(matches!(change.effort, EffortTransition::Opened(_)));
         let vocabulary = store.vocabulary.clone();
         let done = store
             .db
@@ -1521,7 +1299,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(done.after.completed_at, Some(Timestamp::from_unix_ms(9)));
-        assert!(matches!(done.effort, EffortTransition::Finished(_)));
         let vocabulary = store.vocabulary.clone();
         let missing = store
             .db
@@ -1538,62 +1315,6 @@ mod tests {
             })
             .await;
         assert!(matches!(missing, Err(DomainError::NotFound)));
-    }
-
-    /// P2.5b (tsk428): filing a task straight into `in_progress` opens its
-    /// effort in the insert's own transaction — both or neither.
-    #[tokio::test]
-    async fn insert_in_progress_opens_its_effort_in_the_same_transaction() {
-        let (store, tid) = fixture().await;
-        let mut it = item(Some(tid));
-        it.status = TaskStatus::InProgress;
-        let (id, effort) = store.insert_logged(&it).await.unwrap();
-        let effort = effort.expect("in_progress on a thread opens an effort");
-        let (work_item, ended): (String, Option<String>) = store
-            .db
-            .call(move |c| {
-                c.query_row(
-                    "SELECT work_item, ended_at FROM effort WHERE id = ?1",
-                    params![effort.value()],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-            })
-            .await
-            .unwrap();
-        assert_eq!(work_item, work_item_ref(id));
-        assert_eq!(ended, None);
-
-        // The effort can't open, so the task row isn't written either.
-        store
-            .db
-            .call(|c| {
-                c.execute_batch(
-                    "CREATE TRIGGER no_efforts BEFORE INSERT ON effort
-                     BEGIN SELECT RAISE(ABORT, 'no efforts'); END;",
-                )
-            })
-            .await
-            .unwrap();
-        assert!(store.insert_logged(&it).await.is_err());
-        let rows: i64 = store
-            .db
-            .call(|c| c.query_row("SELECT count(*) FROM task", [], |r| r.get(0)))
-            .await
-            .unwrap();
-        assert_eq!(rows, 1, "the failed insert rolled back with its effort");
-        let logged: Vec<String> = store
-            .db
-            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|e| e.envelope.event_type)
-            .collect();
-        assert_eq!(
-            logged,
-            vec!["effort.opened", "work_item.created"],
-            "only the first insert's"
-        );
     }
 
     #[tokio::test]
