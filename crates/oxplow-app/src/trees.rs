@@ -258,7 +258,7 @@ impl Trees {
     /// `rev`'s filtered `path → Cell` tree and its identity space.
     async fn cells(&self, ws: &Path, rev: &Revision) -> Result<(Cells, Space), DomainError> {
         let filter = self.filter(ws);
-        let keep = |p: &str| !filter.ignore(Path::new(p), false);
+        let keep = |p: &str| !filter.ignore_in_trees(Path::new(p), false);
         match rev {
             Revision::Snapshot(id) => {
                 let tree = self.snapshots.tree_at(*id).await?;
@@ -315,7 +315,7 @@ impl Trees {
                 .filter_entry(|e| {
                     e.depth() == 0 || {
                         let rel = e.path().strip_prefix(&root).unwrap_or(e.path());
-                        !filter.ignore(rel, e.file_type().is_dir())
+                        !filter.ignore_in_trees(rel, e.file_type().is_dir())
                     }
                 })
                 .filter_map(Result::ok)
@@ -384,7 +384,7 @@ impl Trees {
 /// A snapshot's files, filtered, in snapshot space.
 fn snapshot_cells(tree: SnapshotTree, filter: &WorkspaceFilter) -> Cells {
     tree.into_iter()
-        .filter(|(p, _)| !filter.ignore(Path::new(p), false))
+        .filter(|(p, _)| !filter.ignore_in_trees(Path::new(p), false))
         .map(|(path, entry)| {
             let id = entry.identity();
             let source = snapshot_source(entry.storage, entry.address.as_deref());
@@ -705,6 +705,32 @@ mod tests {
             .filter(|e| e.status == FileStatus::Deleted)
             .collect();
         assert!(deleted.is_empty(), "{deleted:?}");
+    }
+
+    /// tsk1083: oxplow watches the wiki though git ignores it, but a tree
+    /// is git's view: the wiki is not uncommitted work.
+    #[tokio::test]
+    async fn the_working_tree_leaves_out_the_git_ignored_wiki() {
+        let f = services_with_effort().await;
+        let ws = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(ws.join(".oxplow/wiki")).unwrap();
+        std::fs::write(
+            ws.join(".oxplow/.gitignore"),
+            "*\n!.gitignore\n!project.yaml\n",
+        )
+        .unwrap();
+        let c1 = commit_all(&ws, "c1");
+        std::fs::write(ws.join(".oxplow/wiki/notes.md"), "# Notes\n").unwrap();
+        std::fs::write(ws.join(".oxplow/project.yaml"), "testing:\n  command: x\n").unwrap();
+        let d = f
+            .svc
+            .trees
+            .diff(&ws, Some(&Revision::git(c1)), &Revision::Working)
+            .await
+            .unwrap();
+        let d = by_path(&d);
+        assert!(!d.contains_key(".oxplow/wiki/notes.md"), "{d:?}");
+        assert!(d.contains_key(".oxplow/project.yaml"), "{d:?}");
     }
 
     /// tsk552: a diff between two commits honours the workspace filter

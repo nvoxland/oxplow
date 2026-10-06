@@ -431,11 +431,29 @@ impl WorkspaceFilter {
         I: IntoIterator<Item = T>,
         T: AsRef<str>,
     {
+        Self::build(
+            root,
+            exclude,
+            include,
+            ignore::gitignore::gitconfig_excludes_path(),
+        )
+    }
+
+    /// [`Self::for_project`] with git's global excludes file given
+    /// (`core.excludesFile`, found as git finds it), so a test needn't
+    /// touch the person's.
+    fn build<E, S, I, T>(root: &Path, exclude: E, include: I, global: Option<PathBuf>) -> Self
+    where
+        E: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        I: IntoIterator<Item = T>,
+        T: AsRef<str>,
+    {
         Self {
             exclude: parse_filter_entries(exclude),
             include: parse_filter_entries(include),
             root: root.to_path_buf(),
-            gitignores: std::sync::Arc::new(collect_gitignores(root)),
+            gitignores: std::sync::Arc::new(collect_gitignores(root, global.as_deref())),
         }
     }
 
@@ -444,6 +462,19 @@ impl WorkspaceFilter {
     /// whole subtree without descending into it — pass the real value
     /// at walk sites; `false` is a safe default for file events.
     pub fn ignore(&self, path: &Path, is_dir: bool) -> bool {
+        self.decide(path, is_dir, true)
+    }
+
+    /// True if `path` is out of a tree (`oxplow-app`'s `Trees`: a diff,
+    /// the working tree, a snapshot's files). The same rules as
+    /// [`Self::ignore`] but git's view of `.oxplow/wiki/`, which oxplow
+    /// watches though git ignores it: a tree answers "what would git
+    /// see?", so the wiki is no one's uncommitted work (tsk1083).
+    pub fn ignore_in_trees(&self, path: &Path, is_dir: bool) -> bool {
+        self.decide(path, is_dir, false)
+    }
+
+    fn decide(&self, path: &Path, is_dir: bool, watching: bool) -> bool {
         use std::path::Component;
 
         // 1. Absolute defaults: `.git` anywhere, and oxplow's own `.oxplow`
@@ -479,7 +510,7 @@ impl WorkspaceFilter {
                         // "should oxplow watch this?" — and for the wiki those
                         // differ, so the one distinction gitignore can't carry
                         // lives here.
-                        Some("wiki") => false,
+                        Some("wiki") if watching => false,
                         // Every other SUBDIRECTORY is pruned wholesale, so a
                         // walk never descends into `snapshots/` (thousands of
                         // blobs), `runtime/`, or the LSP caches. Negations
@@ -572,11 +603,16 @@ fn matches_filter_entries(entries: &[FilterEntry], path: &Path) -> bool {
 /// `.gitignore`) followed by every nested `.gitignore` reachable without
 /// descending into an already-ignored directory. Each matcher is rooted
 /// at its own directory so nested patterns anchor correctly.
-fn collect_gitignores(root: &Path) -> Vec<ignore::gitignore::Gitignore> {
+fn collect_gitignores(root: &Path, global: Option<&Path>) -> Vec<ignore::gitignore::Gitignore> {
     use ignore::gitignore::GitignoreBuilder;
     let mut out = Vec::new();
-    // `.git/info/exclude` first (lower precedence), then root `.gitignore`.
+    // Lowest precedence first, as git reads them: the global excludes
+    // file (`core.excludesFile`, tsk1083), `.git/info/exclude`, then the
+    // root `.gitignore`.
     let mut builder = GitignoreBuilder::new(root);
+    if let Some(global) = global {
+        let _ = builder.add(global);
+    }
     let _ = builder.add(root.join(".git").join("info").join("exclude"));
     let _ = builder.add(root.join(".gitignore"));
     if let Ok(gi) = builder.build() {
@@ -927,6 +963,37 @@ mod tests {
             }
         }
         assert!(top_seen, "expected top-level event for {top:?}");
+    }
+
+    /// tsk1083: git's global excludes file (`core.excludesFile`) counts
+    /// like any `.gitignore`; and the wiki, watched though git ignores it,
+    /// is out of a tree (`ignore_in_trees`): trees are git's view.
+    #[test]
+    fn global_excludes_count_and_trees_follow_git_for_the_wiki() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join(".oxplow/wiki")).unwrap();
+        std::fs::write(
+            root.join(".oxplow/.gitignore"),
+            "*\n!.gitignore\n!project.yaml\n",
+        )
+        .unwrap();
+        let global = dir.path().join("global-ignore");
+        std::fs::write(&global, "**/.claude/settings.local.json\n").unwrap();
+        let filter = WorkspaceFilter::build(
+            &root,
+            Vec::<String>::new(),
+            Vec::<String>::new(),
+            Some(global),
+        );
+        let local = Path::new(".claude/settings.local.json");
+        assert!(filter.ignore(local, false));
+        assert!(filter.ignore_in_trees(local, false));
+        let wiki = Path::new(".oxplow/wiki/notes.md");
+        assert!(!filter.ignore(wiki, false), "the wiki is watched");
+        assert!(filter.ignore_in_trees(wiki, false), "git ignores it");
+        let config = Path::new(".oxplow/project.yaml");
+        assert!(!filter.ignore(config, false) && !filter.ignore_in_trees(config, false));
     }
 
     #[test]

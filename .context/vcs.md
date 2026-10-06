@@ -122,7 +122,8 @@ for the code-quality scans) and `diff(from?, to)` with line counts.
 Snapshots read their blobs from the blob store and VCS-backed rows
 through the object store; the working tree reuses the head's object id
 for a file `status` calls clean and hashes the rest (`ObjectStore::id_of`). Every side honours the workspace filter
-(`generated:` plus `.gitignore`) — the working-tree corpus no longer has
+(`generated:` plus `.gitignore` and git's excludes, as `ignore_in_trees`:
+git's view, so the watched-but-ignored wiki is out, tsk1083) — the working-tree corpus no longer has
 its own skip list. Two VCS revisions diff like any other pair — their
 filtered `files_at` trees through `diff_trees` (a provider-side diff
 used to skip the filter, tsk552); two snapshots settle un-hashed rows

@@ -77,8 +77,16 @@ boot to seed its cache), registration is **scoped**:
 order: `.git` (the only hardcoded segment — `DEFAULT_IGNORED_SEGMENTS`)
 and `.oxplow` defaults → `generated.include` (forces a path back in) →
 `generated.exclude` → **`.gitignore`**, root + nested, with full
-hierarchical semantics. `target/` and `node_modules/` are skipped
+hierarchical semantics, under `.git/info/exclude` and git's global
+excludes file (`core.excludesFile`, found as git finds it — tsk1083).
+`target/` and `node_modules/` are skipped
 because a Rust/JS repo gitignores them, not because we name them.
+
+Two questions, one filter: `ignore` is "should oxplow watch this?" and
+`ignore_in_trees` is "would git see it?" (what `Trees` uses: diffs, the
+working tree, the Uncommitted panel). They differ only on
+`.oxplow/wiki/`, which is watched and snapshotted though git ignores it,
+so it is never reported as uncommitted.
 
 A per-event filter check still runs as defence-in-depth (and to drop
 swap/temp files) — it also catches *nested* ignores inside a watched
