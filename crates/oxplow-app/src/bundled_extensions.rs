@@ -974,14 +974,24 @@ mod tests {
             nodes,
             vec![
                 ("d:src".into(), None, "src/  AM".into()),
-                ("f:src/new.rs".into(), Some("d:src".into()), "new.rs  A".into()),
+                (
+                    "f:src/new.rs".into(),
+                    Some("d:src".into()),
+                    "new.rs  A".into()
+                ),
                 ("d:src/ui".into(), Some("d:src".into()), "ui/  M".into()),
-                ("f:src/ui/a.rs".into(), Some("d:src/ui".into()), "a.rs  M".into()),
+                (
+                    "f:src/ui/a.rs".into(),
+                    Some("d:src/ui".into()),
+                    "a.rs  M".into()
+                ),
             ]
         );
-        let line = run_bundled_lens(&f, "oxplow-bundled/uncommitted-line", &[("stream_id", 1)]).await;
+        let line =
+            run_bundled_lens(&f, "oxplow-bundled/uncommitted-line", &[("stream_id", 1)]).await;
         assert_eq!(line[0][0], "1A 1M  +2 −0");
-        let count = run_bundled_lens(&f, "oxplow-bundled/uncommitted-count", &[("stream_id", 1)]).await;
+        let count =
+            run_bundled_lens(&f, "oxplow-bundled/uncommitted-count", &[("stream_id", 1)]).await;
         assert_eq!(count, serde_json::json!([[2]]));
     }
 
@@ -1839,7 +1849,7 @@ mod tests {
         f.svc.metrics.seed_catalog().await;
         f.svc
             .metrics
-            .run_effort_collectors(&f.thread, &f.effort, None)
+            .run_effort_collectors(&f.thread, &f.effort, None, &|_| true)
             .await;
         let rows = f
             .svc

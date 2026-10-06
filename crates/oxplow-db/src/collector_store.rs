@@ -154,6 +154,80 @@ impl SqliteCollectorStore {
     }
 
     /// Drop every table, view and state row an extension owns.
+    /// Defer `owner`/`id`'s run to event `seq` (tsk1092): the latest event
+    /// wins, `since` stays the first deferral, `touched` is `now`.
+    pub async fn mark_pending(
+        &self,
+        owner: &str,
+        id: &str,
+        seq: i64,
+        now: &str,
+    ) -> Result<(), DomainError> {
+        let (owner, id, now) = (owner.to_string(), id.to_string(), now.to_string());
+        self.db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO collector_pending (owner, id, event_seq, since, touched)
+                     VALUES (?1, ?2, ?3, ?4, ?4)
+                     ON CONFLICT (owner, id) DO UPDATE SET
+                       event_seq = max(collector_pending.event_seq, excluded.event_seq),
+                       touched = excluded.touched",
+                    rusqlite::params![owner, id, seq, now],
+                )
+                .map_err(map_sql_err)
+                .map(|_| ())
+            })
+            .await
+    }
+
+    /// Every deferred run, oldest first.
+    pub async fn list_pending(&self) -> Result<Vec<PendingRun>, DomainError> {
+        self.db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT owner, id, event_seq, since, touched FROM collector_pending
+                         ORDER BY since, owner, id",
+                    )
+                    .map_err(map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| {
+                        Ok(PendingRun {
+                            owner: r.get(0)?,
+                            id: r.get(1)?,
+                            event_seq: r.get(2)?,
+                            since: r.get(3)?,
+                            touched: r.get(4)?,
+                        })
+                    })
+                    .map_err(map_sql_err)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(map_sql_err)
+            })
+            .await
+    }
+
+    /// Clear `owner`/`id`'s deferral once its run for event `seq` is done —
+    /// unless a newer event deferred it again meanwhile. Whether it cleared.
+    pub async fn clear_pending(
+        &self,
+        owner: &str,
+        id: &str,
+        seq: i64,
+    ) -> Result<bool, DomainError> {
+        let (owner, id) = (owner.to_string(), id.to_string());
+        self.db
+            .transaction(move |tx| {
+                tx.execute(
+                    "DELETE FROM collector_pending WHERE owner = ?1 AND id = ?2 AND event_seq <= ?3",
+                    rusqlite::params![owner, id, seq],
+                )
+                .map_err(map_sql_err)
+                .map(|n| n > 0)
+            })
+            .await
+    }
+
     pub async fn drop_extension(&self, extension: &str) -> Result<(), DomainError> {
         if !is_ext_name(extension) {
             return Err(DomainError::Invalid(format!(
@@ -268,6 +342,19 @@ pub fn record_run_in(conn: &rusqlite::Connection, run: &CollectorRun) -> rusqlit
         ],
     )
     .map(|_| ())
+}
+
+/// A collector run deferred by its trigger's pacing (`v_collector_pending`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRun {
+    pub owner: String,
+    pub id: String,
+    /// The latest triggering event it'll run for.
+    pub event_seq: i64,
+    /// When it was first deferred.
+    pub since: String,
+    /// When a triggering event last arrived.
+    pub touched: String,
 }
 
 /// `ext__<extension>__` with dashes as underscores.
@@ -681,6 +768,49 @@ mod tests {
             .is_ok());
         store.drop_extension("my-gh").await.unwrap();
         assert!(registered(&db).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_pending_run_keeps_its_latest_event_and_clears_only_for_it() {
+        // tsk1092: a deferred collector run is recorded pending with the
+        // latest event it'll run for; clearing it for an older event (one
+        // a newer arrived after) leaves it pending.
+        let db = Database::in_memory();
+        let store = SqliteCollectorStore::new(db.clone());
+        store
+            .mark_pending("project", "repo.a", 5, "2026-10-06T00:00:00.000000Z")
+            .await
+            .unwrap();
+        store
+            .mark_pending("project", "repo.a", 9, "2026-10-06T00:00:10.000000Z")
+            .await
+            .unwrap();
+        let pending = store.list_pending().await.unwrap();
+        assert_eq!(pending.len(), 1);
+        let p = &pending[0];
+        assert_eq!(
+            (p.owner.as_str(), p.id.as_str(), p.event_seq),
+            ("project", "repo.a", 9)
+        );
+        assert_eq!(
+            p.since, "2026-10-06T00:00:00.000000Z",
+            "since stays the first deferral"
+        );
+        assert_eq!(p.touched, "2026-10-06T00:00:10.000000Z");
+        assert!(!store.clear_pending("project", "repo.a", 5).await.unwrap());
+        assert_eq!(store.list_pending().await.unwrap().len(), 1);
+        assert!(store.clear_pending("project", "repo.a", 9).await.unwrap());
+        assert!(store.list_pending().await.unwrap().is_empty());
+        let rows = db
+            .read(|c| {
+                c.query_row("SELECT count(*) FROM v_collector_pending", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .map_err(crate::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 
     #[tokio::test]

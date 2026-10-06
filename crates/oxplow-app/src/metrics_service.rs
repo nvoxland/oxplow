@@ -131,6 +131,7 @@ impl FactCollector {
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect(),
+                pacing: Default::default(),
             },
             facts: Vec::new(),
             runtime: CollectorRuntime::Starlark,
@@ -149,6 +150,12 @@ impl FactCollector {
     /// Whether an event of `event_type` triggers it.
     pub fn runs_on(&self, event_type: &str) -> bool {
         matches!(&self.trigger, Trigger::On { events, .. } if events.iter().any(|e| e == event_type))
+    }
+
+    /// Whether an `event_type` it runs on waits for its pacing rather than
+    /// running at once (tsk1092, `crate::pacing`).
+    pub fn defers(&self, event_type: &str) -> bool {
+        matches!(&self.trigger, Trigger::On { pacing, .. } if pacing.defers(event_type))
     }
 
     /// The scope its captures record (the metric catalog's vocabulary).
@@ -1406,6 +1413,8 @@ impl MetricsService {
                 snapshot_id,
                 force,
                 None,
+                &|_| true,
+                None,
             )
             .await;
         Ok(BaselineReport {
@@ -1545,6 +1554,8 @@ impl MetricsService {
         snapshot_id: i64,
         force_full: bool,
         event: Option<Arc<oxplow_domain::StoredEvent>>,
+        select: &(dyn Fn(&FactCollector) -> bool + Sync),
+        span_from: Option<i64>,
     ) -> SweepReport {
         // A take that recorded no files (a ref move on a clean tree) has
         // no delta: only the whole-tree collectors have the moved revision
@@ -1554,6 +1565,7 @@ impl MetricsService {
             .fact_collectors()
             .into_iter()
             .filter(|g| g.runs_on(SNAPSHOT_TAKEN))
+            .filter(|g| select(g))
             .filter(|g| recorded || g.whole_tree)
             .filter(|g| {
                 event
@@ -1579,8 +1591,14 @@ impl MetricsService {
 
         let mut report = SweepReport::default();
         if !delta_gauges.is_empty() {
-            // The snapshot's own rows — the incremental rescan corpus.
-            let files = Arc::new(self.build_file_map(snapshot_id).await);
+            // The snapshot's own rows — the incremental rescan corpus — or,
+            // for a deferred run, every file recorded since the collector
+            // last finished (`span_from`): what running on each snapshot
+            // between would have scanned (tsk1092).
+            let files = Arc::new(match span_from {
+                Some(after) => self.build_span_file_map(after, snapshot_id).await,
+                None => self.build_file_map(snapshot_id).await,
+            });
             let mut ctx = self
                 .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
@@ -1740,11 +1758,13 @@ impl MetricsService {
         thread_id: &ThreadId,
         effort_id: &EffortId,
         event: Option<Arc<oxplow_domain::StoredEvent>>,
+        select: &(dyn Fn(&FactCollector) -> bool + Sync),
     ) {
         let gauges: Vec<FactCollector> = self
             .fact_collectors()
             .into_iter()
             .filter(|g| g.runs_on(EFFORT_FINISHED))
+            .filter(|g| select(g))
             .filter(|g| {
                 event
                     .as_ref()
@@ -1785,16 +1805,67 @@ impl MetricsService {
         }
     }
 
+    /// Run fact collector `key` (of `owner`), deferred by its pacing, for
+    /// `event` (tsk1092). A snapshot collector runs over the stream's latest
+    /// snapshot with every file recorded since it last finished — what it
+    /// would have scanned running on each snapshot between — so skipped
+    /// snapshots lose nothing; an effort's or another event's runs as the
+    /// event would have had it.
+    pub async fn run_paced(&self, owner: &str, key: &str, event: Arc<oxplow_domain::StoredEvent>) {
+        let only = |c: &FactCollector| c.owner == owner && c.key == key;
+        let anchors = event.envelope.anchors.clone();
+        match event.envelope.event_type.as_str() {
+            SNAPSHOT_TAKEN => {
+                let Some(stream) = anchors.stream_id else {
+                    return;
+                };
+                let Ok(Some(latest)) = self
+                    .snapshot_store
+                    .latest_snapshot_id_for_stream(stream)
+                    .await
+                else {
+                    return;
+                };
+                let since = match self.fact_store.as_ref() {
+                    Some(facts) => facts
+                        .last_done_snapshot(key, stream.value())
+                        .await
+                        .ok()
+                        .flatten(),
+                    None => None,
+                };
+                self.run_snapshot_collectors(stream, latest, false, Some(event), &only, since)
+                    .await;
+            }
+            EFFORT_FINISHED => {
+                let (Ok(effort), Some(thread)) = (
+                    crate::effort_lifecycle::effort_of(&event),
+                    anchors.thread_id,
+                ) else {
+                    return;
+                };
+                self.run_effort_collectors(&thread, &effort, Some(event), &only)
+                    .await;
+            }
+            _ => self.run_event_collectors(event, &only).await,
+        }
+    }
+
     /// Run the fact collectors an event of any other type triggers, over
     /// the latest snapshot of the event's stream (the primary when it has
     /// none).
-    pub async fn run_event_collectors(&self, event: Arc<oxplow_domain::StoredEvent>) {
+    pub async fn run_event_collectors(
+        &self,
+        event: Arc<oxplow_domain::StoredEvent>,
+        select: &(dyn Fn(&FactCollector) -> bool + Sync),
+    ) {
         let event_type = event.envelope.event_type.clone();
         let collectors: Vec<FactCollector> = self
             .fact_collectors()
             .into_iter()
             .filter(|c| {
-                c.runs_on(&event_type)
+                select(c)
+                    && c.runs_on(&event_type)
                     && crate::collector_triggers::matches_where(&c.trigger, &event)
             })
             .collect();
@@ -1905,6 +1976,15 @@ impl MetricsService {
     /// latest row per path ≤ the snapshot, tombstones excluded) — the baseline
     /// corpus (tsk71). Same content pipeline as [`Self::build_file_map`]; only
     /// the listing differs.
+    async fn build_span_file_map(&self, after: i64, to: i64) -> HashMap<String, String> {
+        let files = self
+            .snapshot_store
+            .list_span_files(after, to)
+            .await
+            .unwrap_or_default();
+        self.file_map_from_rows(files).await
+    }
+
     async fn build_full_file_map(&self, snapshot_id: i64) -> HashMap<String, String> {
         let files = self
             .snapshot_store
@@ -3341,6 +3421,83 @@ mod tests {
         assert_eq!(counts, (1, 1), "one capture and one run for one snapshot");
     }
 
+    /// tsk1092: a paced snapshot collector's one deferred run covers every
+    /// file the skipped snapshots recorded — what it would have scanned
+    /// running on each — not just the latest snapshot's own files.
+    #[tokio::test]
+    async fn a_deferred_snapshot_run_covers_every_skipped_snapshot() {
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            dir.path().join("seen.star"),
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"seen\", \"subject\": \"file:\" + f[\"path\"], \"path\": f[\"path\"]} for f in files(\"**\")]}\n",
+        )
+        .unwrap();
+        let configure = |trigger: &str| {
+            let (specs, errors) = oxplow_config::collectors::parse_collectors(
+                oxplow_config::collectors::PROJECT,
+                &serde_yaml::from_str(&format!(
+                    "- {{ id: repo.seen, runtime: starlark, entry: seen.star, trigger: {trigger}, facts: [oxplow.ast_hit] }}"
+                ))
+                .unwrap(),
+                &|_| true,
+            );
+            assert!(errors.is_empty(), "{errors:?}");
+            svc.config.write().unwrap().collectors = specs;
+        };
+        let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
+        use crate::event_pump::AsyncEventConsumer as _;
+        // A baseline, run at once.
+        configure("{ on: [snapshot.taken] }");
+        let base = snapshot_with_content(&svc, &[("src/z.rs", Some("z"))]).await;
+        consumer
+            .handle(&log_take(&svc, base, SnapshotTrigger::TurnEnd, false, 1).await)
+            .await
+            .unwrap();
+        // Now paced: two takes, each recording another file, both deferred.
+        configure("{ on: [snapshot.taken], settle: 30s }");
+        let one = snapshot_with_content(&svc, &[("src/a.rs", Some("a"))]).await;
+        consumer
+            .handle(&log_take(&svc, one, SnapshotTrigger::TurnEnd, false, 1).await)
+            .await
+            .unwrap();
+        let two = snapshot_with_content(&svc, &[("src/b.rs", Some("b"))]).await;
+        consumer
+            .handle(&log_take(&svc, two, SnapshotTrigger::TurnEnd, false, 1).await)
+            .await
+            .unwrap();
+        let subjects = |snap: i64| {
+            let svc = svc.clone();
+            async move {
+                svc.db
+                    .read(move |c| {
+                        let mut stmt = c
+                            .prepare(
+                                "SELECT f.path FROM fact f JOIN metric_capture m ON m.id = f.capture_id
+                                  WHERE m.producer = 'repo.seen' AND m.snapshot_id = ?1 ORDER BY f.path",
+                            )
+                            .map_err(oxplow_db::map_sql_err)?;
+                        let rows = stmt
+                            .query_map([snap], |r| r.get::<_, String>(0))
+                            .map_err(oxplow_db::map_sql_err)?;
+                        rows.collect::<rusqlite::Result<Vec<_>>>()
+                            .map_err(oxplow_db::map_sql_err)
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        assert!(subjects(two).await.is_empty(), "deferred, not run yet");
+        let later = oxplow_domain::Timestamp::from_unix_ms(
+            oxplow_domain::Timestamp::now().unix_ms() + 31_000,
+        );
+        assert_eq!(crate::pacing::run_due(&svc, later).await.unwrap(), 1);
+        assert_eq!(
+            subjects(two).await,
+            vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+            "one run over both skipped snapshots' files"
+        );
+    }
+
     use oxplow_domain::snapshot::SnapshotTrigger;
 
     /// Log `snapshot.taken` for snapshot `snap` on stream 1, as the take
@@ -3833,6 +3990,7 @@ mod tests {
             trigger: Trigger::On {
                 events: vec![SNAPSHOT_TAKEN.into()],
                 filter: Default::default(),
+                pacing: Default::default(),
             },
             facts,
             runtime: CollectorRuntime::Starlark,

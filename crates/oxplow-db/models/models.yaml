@@ -960,6 +960,16 @@
   tests:
     - { not_null: owner }
     - { not_null: id }
+- name: collector_pending
+  version: 1
+  key: [owner, id]
+  description: "Collector runs deferred by their trigger's pacing (`settle`, `at_most`, `idle`): each waiting collector, the latest event it'll run for, and since when. A view showing a collector's result can say it's updating while its row is here; the row goes once the run happens."
+  columns:
+    - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` or `built-in`." }
+    - { name: "id", type: "TEXT", doc: "The collector's id within its owner." }
+    - { name: "event_seq", type: "INTEGER", doc: "The latest triggering event it will run for (v_event.seq)." }
+    - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
+    - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: capability_provider
   version: 1
   description: "Each capability's providers and the feature flags they declare: oxplow's own (`work_items/oxplow`, `vcs/git`, `knowledge/oxplow`) and every running external provider. The UI shows a provider's enhancements only when its flags allow them (a Comment… action only for a work-items provider with `comments`)."

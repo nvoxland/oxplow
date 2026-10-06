@@ -2692,6 +2692,28 @@ impl SqliteFactStore {
     /// the event loop reacting to the same snapshot — must not re-scan the tree.
     /// `version = None` always returns `false` (can't confirm the logic matches, so
     /// don't skip).
+    /// The newest snapshot of `stream_id` that `producer` finished a
+    /// capture for, any scan kind — where a deferred (paced) run picks up
+    /// (tsk1092).
+    pub async fn last_done_snapshot(
+        &self,
+        producer: &str,
+        stream_id: i64,
+    ) -> Result<Option<i64>, DomainError> {
+        let producer = producer.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT max(c.snapshot_id) FROM metric_capture c
+                       JOIN snapshot s ON s.id = c.snapshot_id
+                      WHERE c.producer = ?1 AND c.status = 'done' AND s.stream_id = ?2",
+                    params![producer, stream_id],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+            })
+            .await
+    }
+
     pub async fn collector_done_for_snapshot(
         &self,
         producer: &str,

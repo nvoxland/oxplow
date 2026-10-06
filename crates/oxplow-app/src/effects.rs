@@ -151,7 +151,7 @@ fn decl_of(
     )
     .map_err(|e| named(e.replacen("trigger: ", "", 1)))?
     {
-        oxplow_config::collectors::Trigger::On { events, filter } => (events, filter),
+        oxplow_config::collectors::Trigger::On { events, filter, .. } => (events, filter),
         _ => return Err(named("`on` lists the event types it reacts to".into())),
     };
     let script = read(&f.entry)

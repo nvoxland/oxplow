@@ -4542,5 +4542,40 @@
       ],
       "key": []
     }
+  },
+  "collector_pending": {
+    "1": {
+      "columns": [
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it, `project` or `built-in`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The collector's id within its owner."
+        },
+        {
+          "name": "event_seq",
+          "type": "INTEGER",
+          "doc": "The latest triggering event it will run for (v_event.seq)."
+        },
+        {
+          "name": "since",
+          "type": "TEXT",
+          "doc": "When its run was first deferred (RFC 3339)."
+        },
+        {
+          "name": "touched",
+          "type": "TEXT",
+          "doc": "When a triggering event last arrived for it (RFC 3339): what `settle` counts from."
+        }
+      ],
+      "key": [
+        "owner",
+        "id"
+      ]
+    }
   }
 }

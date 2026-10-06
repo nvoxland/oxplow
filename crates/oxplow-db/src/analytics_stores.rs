@@ -2024,6 +2024,38 @@ impl SqliteSnapshotStore {
             .await
     }
 
+    /// The files recorded since `after` (exclusive) up to `to`, each at its
+    /// latest row in that span — what an incremental scan would have seen
+    /// had it run on every snapshot between (a paced collector's deferred
+    /// run, tsk1092). Deletions included, as a snapshot's own rows are.
+    pub async fn list_span_files(
+        &self,
+        after: i64,
+        to: i64,
+    ) -> Result<Vec<FileSnapshot>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage,
+                            snapshot_id
+                     FROM (
+                        SELECT f.id, f.stream_id, f.path, f.blob_hash, f.size_bytes, f.captured_at,
+                               f.storage, f.snapshot_id,
+                               ROW_NUMBER() OVER (
+                                 PARTITION BY f.path ORDER BY f.snapshot_id DESC, f.id DESC
+                               ) AS rn
+                        FROM file_snapshot f
+                        WHERE f.stream_id = (SELECT stream_id FROM snapshot WHERE id = ?2)
+                          AND f.snapshot_id > ?1 AND f.snapshot_id <= ?2
+                     ) WHERE rn = 1
+                     ORDER BY id ASC",
+                )?;
+                let rows = stmt.query_map(params![after, to], row_to_snapshot)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// The RECONSTRUCTED tree as-of `snapshot_id`: the latest `file_snapshot`
     /// row per path with `snapshot_id <= ?` (same window as [`Self::tree_at`]),
     /// excluding paths whose latest row is a deletion tombstone. This is the

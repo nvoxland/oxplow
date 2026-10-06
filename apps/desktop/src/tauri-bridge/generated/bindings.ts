@@ -4361,6 +4361,27 @@ detail: string | null } |
  */
 signIn: number | null; error: string | null };
 
+/**
+ *  When an `on:` collector runs after a triggering event (tsk1092). Empty,
+ *  at once — as before pacing existed. Otherwise the run is deferred
+ *  (recorded `pending`, so views can say "updating…") until every set
+ *  condition holds, then runs once for the latest triggering event:
+ *  - `settle` — no triggering event has arrived for that long;
+ *  - `at_most` — that long has passed since its last run (a deferred run
+ *    always follows, so the result is never left stale);
+ *  - `idle` — no agent turn is running and nothing changed (no snapshot or
+ *    agent event) for that long.
+ * 
+ *  An event type in `force` runs at once, past them all: a moment that
+ *  needs the result fresh (an effort finishing, a commit).
+ */
+export type Pacing = {
+	settleSecs: number | null,
+	atMostSecs: number | null,
+	idleSecs: number | null,
+	force: string[],
+};
+
 export type PageVisit = {
 	id: string,
 	page_kind: string,
@@ -5275,7 +5296,12 @@ export type Trigger =
  *  each `filter` field equal to its value — after the consumers in
  *  the collector's `after` have handled the event.
  */
-{ kind: "on"; events: string[]; filter: { [key in string]: string } } | 
+{ kind: "on"; events: string[]; filter: { [key in string]: string }; 
+/**
+ *  When the run happens after a triggering event (tsk1092): at
+ *  once by default.
+ */
+pacing?: Pacing } | 
 /**
  *  A report collector's: when the agent runs the project's tests or an
  *  analyzer (the `collection` reactor detects the run), if its report

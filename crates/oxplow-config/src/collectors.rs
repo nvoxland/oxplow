@@ -100,11 +100,48 @@ pub enum Trigger {
     On {
         events: Vec<String>,
         filter: BTreeMap<String, String>,
+        /// When the run happens after a triggering event (tsk1092): at
+        /// once by default.
+        #[serde(default)]
+        pacing: Pacing,
     },
     /// A report collector's: when the agent runs the project's tests or an
     /// analyzer (the `collection` reactor detects the run), if its report
     /// was written by that run.
     OnRun { run: RunKind },
+}
+
+/// When an `on:` collector runs after a triggering event (tsk1092). Empty,
+/// at once — as before pacing existed. Otherwise the run is deferred
+/// (recorded `pending`, so views can say "updating…") until every set
+/// condition holds, then runs once for the latest triggering event:
+/// - `settle` — no triggering event has arrived for that long;
+/// - `at_most` — that long has passed since its last run (a deferred run
+///   always follows, so the result is never left stale);
+/// - `idle` — no agent turn is running and nothing changed (no snapshot or
+///   agent event) for that long.
+///
+/// An event type in `force` runs at once, past them all: a moment that
+/// needs the result fresh (an effort finishing, a commit).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Pacing {
+    pub settle_secs: Option<u32>,
+    pub at_most_secs: Option<u32>,
+    pub idle_secs: Option<u32>,
+    pub force: Vec<String>,
+}
+
+impl Pacing {
+    /// No condition: every triggering event runs at once.
+    pub fn is_immediate(&self) -> bool {
+        self.settle_secs.is_none() && self.at_most_secs.is_none() && self.idle_secs.is_none()
+    }
+
+    /// Whether an event of `event_type` waits rather than running at once.
+    pub fn defers(&self, event_type: &str) -> bool {
+        !self.is_immediate() && !self.force.iter().any(|t| t == event_type)
+    }
 }
 
 /// The kind of run a report collector reads after.
@@ -483,7 +520,8 @@ pub fn parse_trigger(
     knows_event: &dyn Fn(&str) -> bool,
 ) -> Result<Trigger, String> {
     use serde_yaml::Value;
-    let shapes = "use `manual`, `{ every: 15m }`, `{ on: [<event type>], where?: {…} }` or \
+    let shapes = "use `manual`, `{ every: 15m }`, `{ on: [<event type>], where?: {…}, \
+                  settle?: 30s, at_most?: 5m, idle?: 2m, force?: [<event type>] }` or \
                   `{ on_run: test | analysis }`";
     let Some(value) = value else {
         return Ok(Trigger::Manual);
@@ -495,11 +533,12 @@ pub fn parse_trigger(
         return Err(format!("trigger: {shapes}"));
     };
     let get = |k: &str| map.get(Value::String(k.into()));
-    if let Some(stray) = map
-        .keys()
-        .filter_map(Value::as_str)
-        .find(|k| !matches!(*k, "every" | "on" | "where" | "on_run"))
-    {
+    if let Some(stray) = map.keys().filter_map(Value::as_str).find(|k| {
+        !matches!(
+            *k,
+            "every" | "on" | "where" | "on_run" | "settle" | "at_most" | "idle" | "force"
+        )
+    }) {
         return Err(format!("trigger: unknown key `{stray}`; {shapes}"));
     }
     if let Some(run) = get("on_run") {
@@ -518,6 +557,12 @@ pub fn parse_trigger(
         (Some(every), None) => {
             if get("where").is_some() {
                 return Err("trigger: `where` goes with `on`".into());
+            }
+            if ["settle", "at_most", "idle", "force"]
+                .iter()
+                .any(|k| get(k).is_some())
+            {
+                return Err("trigger: `settle`, `at_most`, `idle` and `force` go with `on`".into());
             }
             let minutes = every
                 .as_str()
@@ -565,7 +610,54 @@ pub fn parse_trigger(
                     filter.insert(k.to_string(), v);
                 }
             }
-            Ok(Trigger::On { events, filter })
+            let secs = |key: &str| -> Result<Option<u32>, String> {
+                get(key)
+                    .map(|v| {
+                        v.as_str()
+                            .and_then(oxplow_domain::time::parse_duration)
+                            .and_then(|d| u32::try_from(d.as_secs()).ok())
+                            .ok_or_else(|| {
+                                format!(
+                                    "trigger: `{key}` takes a duration like `30s`, `5m` or `2h`"
+                                )
+                            })
+                    })
+                    .transpose()
+            };
+            let mut pacing = Pacing {
+                settle_secs: secs("settle")?,
+                at_most_secs: secs("at_most")?,
+                idle_secs: secs("idle")?,
+                force: Vec::new(),
+            };
+            if let Some(force) = get("force") {
+                if pacing.is_immediate() {
+                    return Err(
+                        "trigger: `force` needs `settle`, `at_most` or `idle` (without them every \
+                         event runs at once)"
+                            .into(),
+                    );
+                }
+                pacing.force = match force {
+                    Value::String(s) => vec![s.clone()],
+                    Value::Sequence(items) => items
+                        .iter()
+                        .map(|i| i.as_str().map(str::to_string))
+                        .collect::<Option<_>>()
+                        .ok_or_else(|| "trigger: `force` lists event types".to_string())?,
+                    _ => return Err("trigger: `force` lists event types".into()),
+                };
+                if let Some(stray) = pacing.force.iter().find(|t| !events.contains(t)) {
+                    return Err(format!(
+                        "trigger: `force` names `{stray}`, which isn't in `on`"
+                    ));
+                }
+            }
+            Ok(Trigger::On {
+                events,
+                filter,
+                pacing,
+            })
         }
         _ => Err(format!("trigger: {shapes}")),
     }
@@ -1162,7 +1254,25 @@ mod tests {
             with("trigger: { on: [snapshot.taken], where: { trigger: git_refs } }").0[0].trigger,
             Trigger::On {
                 events: vec!["snapshot.taken".into()],
-                filter: [("trigger".to_string(), "git_refs".to_string())].into()
+                filter: [("trigger".to_string(), "git_refs".to_string())].into(),
+                pacing: Pacing::default(),
+            }
+        );
+        // tsk1092: pacing — settle, at most, idle, and the events that run
+        // at once past them.
+        assert_eq!(
+            with("trigger: { on: [snapshot.taken, effort.finished], settle: 30s, at_most: 5m, idle: 2m, force: [effort.finished] }")
+                .0[0]
+                .trigger,
+            Trigger::On {
+                events: vec!["snapshot.taken".into(), "effort.finished".into()],
+                filter: Default::default(),
+                pacing: Pacing {
+                    settle_secs: Some(30),
+                    at_most_secs: Some(300),
+                    idle_secs: Some(120),
+                    force: vec!["effort.finished".into()],
+                },
             }
         );
         assert_eq!(
@@ -1172,6 +1282,19 @@ mod tests {
         for (t, needle) in [
             ("trigger: hourly", "trigger"),
             ("trigger: { every: soon }", "duration"),
+            (
+                "trigger: { on: [snapshot.taken], settle: soon }",
+                "`settle` takes a duration",
+            ),
+            ("trigger: { every: 5m, settle: 30s }", "go with `on`"),
+            (
+                "trigger: { on: [snapshot.taken], force: [snapshot.taken] }",
+                "`force` needs",
+            ),
+            (
+                "trigger: { on: [snapshot.taken], settle: 30s, force: [effort.finished] }",
+                "`force` names `effort.finished`, which isn't in `on`",
+            ),
             (
                 "trigger: { on: [nope.happened] }",
                 "isn't a registered event type",

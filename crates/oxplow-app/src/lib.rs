@@ -94,6 +94,7 @@ pub mod net_sandbox;
 pub mod otlp_ingest;
 pub mod otlp_tokens;
 pub mod output_activity;
+pub mod pacing;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
 pub mod plugin_health;

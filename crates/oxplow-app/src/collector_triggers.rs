@@ -91,13 +91,24 @@ pub fn payload_matches(
 /// triggers over one corpus: a snapshot's files (its whole tree for a
 /// whole-tree collector, which alone runs on a take that recorded none),
 /// an effort's end snapshot, or else the stream's latest snapshot.
+/// Only those that run at once: a collector whose pacing defers this
+/// event's type waits for `crate::pacing` (tsk1092).
 async fn run_fact_collectors(svc: &Services, event: Arc<StoredEvent>) -> Result<(), DomainError> {
     let anchors = &event.envelope.anchors;
-    match event.envelope.event_type.as_str() {
+    let event_type = event.envelope.event_type.clone();
+    let now = |c: &crate::metrics_service::FactCollector| !c.defers(&event_type);
+    match event_type.as_str() {
         "snapshot.taken" => {
             if let (Some(stream), Some(snapshot)) = (anchors.stream_id, anchors.snapshot_id) {
                 svc.metrics
-                    .run_snapshot_collectors(stream, snapshot, false, Some(event.clone()))
+                    .run_snapshot_collectors(
+                        stream,
+                        snapshot,
+                        false,
+                        Some(event.clone()),
+                        &now,
+                        None,
+                    )
                     .await;
             }
         }
@@ -105,11 +116,11 @@ async fn run_fact_collectors(svc: &Services, event: Arc<StoredEvent>) -> Result<
             let effort = crate::effort_lifecycle::effort_of(&event)?;
             if let Some(thread) = anchors.thread_id {
                 svc.metrics
-                    .run_effort_collectors(&thread, &effort, Some(event.clone()))
+                    .run_effort_collectors(&thread, &effort, Some(event.clone()), &now)
                     .await;
             }
         }
-        _ => svc.metrics.run_event_collectors(event.clone()).await,
+        _ => svc.metrics.run_event_collectors(event.clone(), &now).await,
     }
     Ok(())
 }
@@ -211,18 +222,32 @@ impl AsyncEventConsumer for CollectorTriggers {
         };
         let event = Arc::new(event.clone());
         let event_type = event.envelope.event_type.as_str();
-        if svc
+        let now = oxplow_domain::Timestamp::now().to_text();
+        let facts: Vec<_> = svc
             .metrics
             .fact_collectors()
-            .iter()
-            .any(|c| c.runs_on(event_type) && matches_where(&c.trigger, &event))
-        {
+            .into_iter()
+            .filter(|c| c.runs_on(event_type) && matches_where(&c.trigger, &event))
+            .collect();
+        if facts.iter().any(|c| !c.defers(event_type)) {
             run_fact_collectors(&svc, event.clone()).await?;
+        }
+        // The paced ones wait, recorded pending (`crate::pacing`).
+        for c in facts.iter().filter(|c| c.defers(event_type)) {
+            svc.collector_store
+                .mark_pending(&c.owner, &c.key, event.seq, &now)
+                .await?;
         }
         let root = svc.layout.project_dir.clone();
         let ctx = Collectors::of(&svc, &root);
         for (owner, spec) in Self::entity_collectors(&svc) {
             if !triggered_by(&spec, &event) {
+                continue;
+            }
+            if matches!(&spec.trigger, Trigger::On { pacing, .. } if pacing.defers(event_type)) {
+                svc.collector_store
+                    .mark_pending(&owner, &spec.id, event.seq, &now)
+                    .await?;
                 continue;
             }
             match collector_runner::run_for_event(&ctx, &owner, &spec.id, event.clone()).await? {
@@ -362,6 +387,105 @@ mod tests {
             rows(&fx.svc, "SELECT last_event_id FROM v_collector_run").await,
             json!([[ev.seq]])
         );
+    }
+
+    /// tsk1092: a paced collector doesn't run as its event arrives: it's
+    /// recorded pending (the latest event wins) and runs once its pacing
+    /// allows, for that event, then clears.
+    #[tokio::test]
+    async fn a_settled_collector_waits_then_runs_once_for_the_latest_event() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        extension(
+            &fx.svc.layout.project_dir,
+            &on_claims(", settle: 30s"),
+            &[("seen.star", SEEN)],
+        );
+        let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
+        let first = log(&fx.svc, fx.effort, "reviewer").await;
+        consumer.handle(&first).await.unwrap();
+        let latest = log(&fx.svc, fx.effort, "reviewer").await;
+        consumer.handle(&latest).await.unwrap();
+        assert_eq!(
+            rows(&fx.svc, "SELECT count(*) FROM v_collector_run").await,
+            json!([[0]]),
+            "not run yet"
+        );
+        assert_eq!(
+            rows(
+                &fx.svc,
+                "SELECT owner, id, event_seq FROM v_collector_pending"
+            )
+            .await,
+            json!([["work", "seen", latest.seq]])
+        );
+        let now = oxplow_domain::Timestamp::now();
+        assert_eq!(
+            crate::pacing::run_due(&fx.svc, now).await.unwrap(),
+            0,
+            "not settled"
+        );
+        let later = oxplow_domain::Timestamp::from_unix_ms(now.unix_ms() + 31_000);
+        assert_eq!(crate::pacing::run_due(&fx.svc, later).await.unwrap(), 1);
+        assert_eq!(
+            rows(&fx.svc, "SELECT ev FROM v_work_seen").await,
+            json!([[latest.seq]]),
+            "once, for the latest event"
+        );
+        assert_eq!(
+            rows(&fx.svc, "SELECT count(*) FROM v_collector_pending").await,
+            json!([[0]])
+        );
+    }
+
+    /// tsk1092: an `idle` collector waits while an agent turn runs, and
+    /// runs once none does and nothing has changed for that long.
+    #[tokio::test]
+    async fn an_idle_collector_waits_out_a_running_turn() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        extension(
+            &fx.svc.layout.project_dir,
+            &on_claims(", idle: 2m"),
+            &[("seen.star", SEEN)],
+        );
+        let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
+        consumer
+            .handle(&log(&fx.svc, fx.effort, "reviewer").await)
+            .await
+            .unwrap();
+        let thread = fx.thread.value();
+        fx.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO agent_turn (thread_id, prompt, started_at) VALUES (?1, 'p', '2026-01-01T00:00:00.000000Z')",
+                    [thread],
+                )
+                .map_err(oxplow_db::map_sql_err)
+                .map(|_| ())
+            })
+            .await
+            .unwrap();
+        let later = oxplow_domain::Timestamp::from_unix_ms(
+            oxplow_domain::Timestamp::now().unix_ms() + 600_000,
+        );
+        assert_eq!(
+            crate::pacing::run_due(&fx.svc, later).await.unwrap(),
+            0,
+            "a turn runs"
+        );
+        fx.svc
+            .db
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE agent_turn SET ended_at = '2026-01-01T00:00:01.000000Z'",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)
+                .map(|_| ())
+            })
+            .await
+            .unwrap();
+        assert_eq!(crate::pacing::run_due(&fx.svc, later).await.unwrap(), 1);
     }
 
     /// A `where` filter skips an event whose payload doesn't match.

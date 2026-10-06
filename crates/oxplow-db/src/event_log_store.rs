@@ -447,6 +447,21 @@ impl SqliteEventLogStore {
         self.db.call_mut(move |conn| get_tx(conn, &id)).await
     }
 
+    /// The event at `seq` (a paced collector's pending run, tsk1092).
+    pub async fn get_by_seq(&self, seq: i64) -> Result<Option<StoredEvent>, DomainError> {
+        self.db
+            .call_mut(move |conn| {
+                conn.query_row(
+                    "SELECT * FROM event_log WHERE seq = ?1",
+                    params![seq],
+                    row_to_event,
+                )
+                .optional()
+                .map_err(map_sql_err)
+            })
+            .await
+    }
+
     pub async fn checkpoint(&self, consumer: String) -> Result<i64, DomainError> {
         self.db
             .call_mut(move |conn| checkpoint_tx(conn, &consumer))

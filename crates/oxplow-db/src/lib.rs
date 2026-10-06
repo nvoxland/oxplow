@@ -72,7 +72,8 @@ pub use change_store::{
     ChangeRow, ChangeTestFileRow, SqliteChangeStore,
 };
 pub use collector_store::{
-    CollectorRun, EntityColumn, EntityTable, EntityWrite, SqliteCollectorStore, StoredType,
+    CollectorRun, EntityColumn, EntityTable, EntityWrite, PendingRun, SqliteCollectorStore,
+    StoredType,
 };
 pub use command_audit_store::{CommandAudit, NewCommandAudit, SqliteCommandAuditStore};
 pub use comment_store::SqliteCommentStore;

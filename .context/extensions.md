@@ -2637,3 +2637,7 @@ available to every extension:
   `depth:` — row highlight and indent.
 - List, table and tree rows that link somewhere drag into the agent's
   context; tree labels honour their column's `link`.
+- Collector pacing: an `on:` trigger's `settle` / `at_most` / `idle` /
+  `force` (tsk1092, metrics.md "Pacing"), so an expensive collector runs
+  once a burst settles or the project is idle — never losing a skipped
+  snapshot's files — with `v_collector_pending` saying it's updating.

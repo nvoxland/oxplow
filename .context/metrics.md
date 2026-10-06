@@ -939,6 +939,43 @@ The UI shows the entity aggregation (`specAggregation`).
   in-memory value, or on a fresh process the latest stored fact. A level
   carries forward, so a restart doesn't pile up duplicates.
 
+### Pacing (tsk1092)
+
+An `on:` trigger may pace its runs instead of running on every event:
+
+```yaml
+trigger:
+  on: [snapshot.taken, effort.finished]
+  settle: 30s        # once no triggering event has arrived for 30s
+  at_most: 5m        # not more often than every 5m (a run always follows)
+  idle: 2m           # once no agent turn runs and nothing changed for 2m
+  force: [effort.finished]   # these run at once, past the rest
+```
+
+Any combination; without them every event runs at once, as before.
+`force` needs at least one of the others and names types in `on`.
+Durations are `30s` / `5m` / `2h` (`parse_duration`). Checked at load
+(`collectors::parse_trigger`); `Pacing` on `Trigger::On`.
+
+- **Deferring.** The `collector.triggers` consumer runs the collectors an
+  event triggers that don't defer it (`FactCollector::defers`, the passes'
+  `select`), and records the rest in `collector_pending` (V3; one row per
+  collector: the latest `event_seq`, `since`, `touched`), readable as
+  `v_collector_pending` — a view showing a collector's result can say
+  it's updating while its row is there.
+- **Running** (`crate::pacing`, spawned at boot, every 5 s): `run_due(now)`
+  runs each pending collector once `due()` holds — settled since
+  `touched`, `at_most` since its last `collector_run`, idle (`idle_for`:
+  no open `agent_turn`, and nothing since the last take that recorded
+  files or agent event) — for its latest event, then clears it unless a
+  newer event deferred it again meanwhile. A gone or no-longer-paced
+  collector, or an expired event, drops its row.
+- **Nothing skipped.** A snapshot collector's deferred run
+  (`MetricsService::run_paced`) runs over the stream's latest snapshot
+  with every file recorded since its last done capture
+  (`list_span_files`) — what running on each snapshot between would have
+  scanned — so pacing never loses a file.
+
 ### Exec fact collectors need consent (tsk331)
 
 Only the project's own fact collectors may be `runtime: exec` (an extension's
@@ -1803,7 +1840,7 @@ collectors:                           # the PRODUCER (runs a script, records fac
     doc: TODO comment scan
     runtime: starlark                 # starlark | jaq | exec (project only, approved)
     entry: oxplow/collectors/todo.star
-    trigger: { on: [snapshot.taken] } # manual | { every: 15m } | { on: [<types>], where?: {...} }
+    trigger: { on: [snapshot.taken] } # manual | { every: 15m } | { on: [<types>], where?: {...}, settle?, at_most?, idle?, force? }
     facts: [repo.todo_count]          # declare-to-collect allow-list
     # report: { path: target/x.json, format: json }   # text|json|xml|lcov|lines
     # input: "SELECT … :effort_id"    # starlark/jaq: rows as input.rows
