@@ -75,6 +75,22 @@
     - { not_null: input_hash }
     - { unique: id }
     - { relationships: { column: ai_call_id, to: ai_call, field: id } }
+- name: bookmark
+  version: 1
+  description: "Pages the person bookmarked, each at one scope (tsk1099): a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a ref is bookmarked at most once across those."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Bookmark id." }
+    - { name: "ref", type: "TEXT", doc: "The page's canonical ref (its tab id): what the bookmark opens." }
+    - { name: "page_kind", type: "TEXT", doc: "Its page kind (`page`, `file`, `wiki`, …), for the icon." }
+    - { name: "label", type: "TEXT", doc: "The page's title when it was bookmarked." }
+    - { name: "scope", type: "TEXT", doc: "`thread`, `stream` or `project`." }
+    - { name: "thread_id", type: "INTEGER", doc: "The owning thread, for a `thread` bookmark." }
+    - { name: "stream_id", type: "INTEGER", doc: "The owning stream, for a `stream` bookmark." }
+    - { name: "added_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+    - { not_null: ref }
 - name: branch
   version: 1
   description: "Local and remote-tracking branches, refreshed on boot and whenever refs move."

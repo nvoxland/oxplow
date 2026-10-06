@@ -1137,6 +1137,7 @@ impl Services {
         .into_iter()
         .chain(commands::review::commands())
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
+        .chain(commands::bookmark::commands())
         .chain(commands::dashboard::commands(db.clone(), sql.clone()))
         .chain(commands::comment::commands())
         .chain(commands::reasoning::commands())

@@ -10,6 +10,7 @@ pub mod ai_call_store;
 pub mod ai_result_store;
 pub mod analytics_stores;
 pub mod attribution_store;
+pub mod bookmark_store;
 pub mod capability_store;
 pub mod change_store;
 pub mod changes;

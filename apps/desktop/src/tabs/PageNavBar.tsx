@@ -37,11 +37,10 @@ export interface PageNavBarProps {
   title?: ReactNode;
   /** Optional bookmark affordance — when omitted, no star renders.
    *  The button always opens a popover that lets the user toggle this
-   *  page's bookmark in each scope (thread / stream / global). */
+   *  page's bookmark at one scope (thread / stream / project). */
   bookmark?: {
-    /** Scopes this page is currently bookmarked at. The star is filled
-     *  when this is non-empty. */
-    scopes: BookmarkScope[];
+    /** The scope this page is bookmarked at; the star is filled when set. */
+    scope: BookmarkScope | null;
     onToggleScope(scope: BookmarkScope): void;
   };
   /** Optional backlinks dropdown content — when omitted, no dropdown renders. */
@@ -364,10 +363,10 @@ export function PageNavBar({
             aria-expanded={scopeOpen}
             style={{
               ...navButtonStyle(true),
-              color: bookmark.scopes.length > 0 ? "var(--accent-fg)" : "var(--text-secondary)",
+              color: bookmark.scope != null ? "var(--accent-fg)" : "var(--text-secondary)",
             }}
           >
-            {bookmark.scopes.length > 0 ? "★" : "☆"}
+            {bookmark.scope != null ? "★" : "☆"}
           </button>
           {scopeOpen ? (
             <div
@@ -386,8 +385,8 @@ export function PageNavBar({
                 fontSize: "var(--text-xs)",
               }}
             >
-              {(["thread", "stream", "global"] as BookmarkScope[]).map((scope) => {
-                const active = bookmark.scopes.includes(scope);
+              {(["thread", "stream", "project"] as BookmarkScope[]).map((scope) => {
+                const active = bookmark.scope === scope;
                 return (
                   <button
                     key={scope}
@@ -409,7 +408,7 @@ export function PageNavBar({
                     <span style={{ display: "inline-block", width: 14 }}>
                       {active ? "★" : " "}
                     </span>
-                    {scope === "thread" ? "This thread" : scope === "stream" ? "This stream" : "Global"}
+                    {scope === "thread" ? "This thread" : scope === "stream" ? "This stream" : "This project"}
                   </button>
                 );
               })}

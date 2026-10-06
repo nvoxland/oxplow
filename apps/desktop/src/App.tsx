@@ -93,7 +93,7 @@ import type { PageKind, TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
 import { clearPageSnapshot } from "./tabs/usePageSnapshot.js";
 import { planCloseOrGoBack } from "./tabs/closeOrGoBack.js";
-import { useBookmarksStore } from "./tabs/useBookmarks.js";
+import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { LocalHistoryDashboardPage } from "./pages/LocalHistoryDashboardPage.js";
@@ -1707,7 +1707,7 @@ export function App() {
 
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
-  const bookmarksStore = useBookmarksStore();
+  const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
 
   const handleOpenPage = useCallback((ref: TabRef) => {
     // Page-visit recording lives in the central activation effect
@@ -3086,7 +3086,7 @@ export function App() {
       const entry = perThreadHistory[tabId] ?? { back: [], forward: [], siblings: null };
       const ref = pageRefsForThread.find((r) => r.id === tabId);
       const innerRender = tab.render;
-      const scopes = ref ? bookmarksStore.scopesFor(selectedThreadId, stream?.id ?? null, ref.id) : [];
+      const bookmarkScope = ref ? bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null : null;
       const registeredTitle = pageTitles[tabId];
       const navValue = {
         navigate: (newRef: TabRef, opts?: { newTab?: boolean; siblings?: import("./tabs/PageNavigationContext.js").NavSiblings }) => {
@@ -3112,14 +3112,14 @@ export function App() {
         pageKey: selectedThreadId ? `${selectedThreadId}::${tabId}` : undefined,
         ask: ref && parseRef(ref.id) ? { ref: ref.id, streamId: stream?.id ?? null } : undefined,
         bookmark: ref ? {
-          scopes,
+          scope: bookmarkScope,
           toggle: (scope: BookmarkScope) => {
-            const currentScopes = bookmarksStore.scopesFor(selectedThreadId, stream?.id ?? null, ref.id);
-            if (currentScopes.includes(scope)) {
-              bookmarksStore.remove(scope, selectedThreadId, stream?.id ?? null, ref.id);
-            } else {
-              bookmarksStore.add(scope, selectedThreadId, stream?.id ?? null, ref, registeredTitle ?? tab.label);
-            }
+            const viewer = { threadId: selectedThreadId, streamId: stream?.id ?? null };
+            const write = bookmarkScope === scope
+              ? removeBookmark(viewer, ref.id)
+              : setBookmark(viewer, ref, registeredTitle ?? tab.label, scope);
+            write.catch((e: unknown) =>
+              recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
           },
         } : undefined,
       };
@@ -3162,7 +3162,7 @@ export function App() {
     closePageTab,
     pageTitles,
     setPageTitle,
-    bookmarksStore,
+    bookmarks,
     workspaceContext.vcsEnabled,
     selectedFilePath,
     generated,
@@ -3249,10 +3249,7 @@ export function App() {
         <RailHud
           threadId={selectedThread?.id ?? null}
           streamId={stream?.id ?? null}
-          bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => ({
-            ref: b.ref,
-            label: b.label ?? b.ref.id,
-          }))}
+          bookmarks={bookmarks.map((b) => ({ ref: b.ref, label: b.label ?? b.ref.id }))}
           onOpenPage={handleOpenPage}
           onOpenSearch={() => setQuickOpenVisible(true)}
         />

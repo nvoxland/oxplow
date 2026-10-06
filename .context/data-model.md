@@ -1794,6 +1794,20 @@ expanded after the ones it does, and a named panel that no longer exists
 is dropped (`components/Panels/panelLayout.ts` `resolveLayout`). UI-only
 RPCs `get_panel_layout` / `set_panel_layout`.
 
+### `bookmark` — `bookmark_store` (`crates/oxplow-db/src/bookmark_store.rs`)
+
+V4 (tsk1099). The pages the person starred, each at one scope: `thread`
+(`thread_id`), `stream` (`stream_id`) or `project` (neither — the old
+localStorage "global" scope; every ref is this project's anyway). A
+viewer — a thread and its stream — sees its thread's, its stream's and
+the project's, and a ref is bookmarked at most once across those:
+`set_tx` takes it out of every scope the viewer sees before inserting, so
+bookmarking at another scope moves it. Read through `v_bookmark` (the UI's
+`tabs/bookmarks.ts`, a lens, the agent); every write is `bookmark.set` /
+`bookmark.remove` (commands.md). They lived in webview localStorage until
+tsk1099, where neither lenses nor the agent could see them; those weren't
+carried over.
+
 ### `capability_provider` — `SqliteCapabilityStore` (`crates/oxplow-db/src/capability_store.rs`)
 
 V128 (P6b.C2). Each capability's providers and the feature flags they

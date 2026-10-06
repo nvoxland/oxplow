@@ -4662,5 +4662,52 @@
         "id"
       ]
     }
+  },
+  "bookmark": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Bookmark id."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The page's canonical ref (its tab id): what the bookmark opens."
+        },
+        {
+          "name": "page_kind",
+          "type": "TEXT",
+          "doc": "Its page kind (`page`, `file`, `wiki`, …), for the icon."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "The page's title when it was bookmarked."
+        },
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`thread`, `stream` or `project`."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The owning thread, for a `thread` bookmark."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The owning stream, for a `stream` bookmark."
+        },
+        {
+          "name": "added_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
   }
 }

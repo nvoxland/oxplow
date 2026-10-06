@@ -40,9 +40,10 @@ export interface NavSiblings {
 }
 
 export interface BookmarkBinding {
-  /** All scopes this page is currently bookmarked at. */
-  scopes: BookmarkScope[];
-  /** Toggle bookmark in the given scope. */
+  /** The scope this page is bookmarked at, as this thread sees it. */
+  scope: BookmarkScope | null;
+  /** Bookmark it at `scope` (moving it there), or take it off when it's
+   *  already there. */
   toggle(scope: BookmarkScope): void;
 }
 

@@ -2,14 +2,14 @@ import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { PageVisitApi, Stream, TopVisitedRowApi } from "../api.js";
-import { listRecentPageVisits, subscribePageVisitEvents, topVisitedPages } from "../api.js";
+import { listRecentPageVisits, subscribePageVisitEvents, topVisitedPages, undoCommand } from "../api.js";
 import { readFailed } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
 import { PageKindIcon } from "../pageKinds.js";
-import { useBookmarksStore } from "../tabs/useBookmarks.js";
-import type { Bookmark, BookmarkScope } from "../tabs/bookmarks.js";
+import { removeBookmark, setBookmark, useBookmarks, type Bookmark, type BookmarkScope } from "../tabs/bookmarks.js";
+import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "../components/RailHud/history.js";
 
@@ -230,11 +230,11 @@ function LinkRow({ kind, label, onClick }: { kind: string; label: string; onClic
 const SCOPE_OPTIONS: { scope: BookmarkScope; letter: string; title: string }[] = [
   { scope: "thread", letter: "Thread", title: "Bookmark visible only in this thread" },
   { scope: "stream", letter: "Stream", title: "Bookmark visible across this stream" },
-  { scope: "global", letter: "Global", title: "Bookmark visible everywhere" },
+  { scope: "project", letter: "Project", title: "Bookmark visible in every thread of this project" },
 ];
 
 /** Bookmarks list with inline management: open, re-scope
- *  (thread / stream / global), and remove (fire-and-undo). */
+ *  (thread / stream / project), and remove (fire-and-undo). */
 function BookmarksManager({
   stream,
   threadId,
@@ -244,17 +244,19 @@ function BookmarksManager({
   threadId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  const store = useBookmarksStore();
-  const streamId = stream?.id ?? null;
-  const bookmarks = store.bookmarks(threadId, streamId);
+  const viewer = { threadId, streamId: stream?.id ?? null };
+  const bookmarks = useBookmarks(viewer.threadId, viewer.streamId);
+  const failed = (label: string) => (e: unknown) =>
+    recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
 
-  const removeBookmark = (b: Bookmark) => {
-    store.setScope(threadId, streamId, b.ref, b.label, b.scope); // collapse to a single scope first
-    store.remove(b.scope, threadId, streamId, b.ref.id);
-    showToast({
-      message: `Removed bookmark "${b.label ?? b.ref.id}"`,
-      onUndo: () => store.add(b.scope, threadId, streamId, b.ref, b.label),
-    });
+  const remove = (b: Bookmark) => {
+    removeBookmark(viewer, b.ref.id).then((out) => {
+      const auditId = out.audit_id;
+      showToast({
+        message: `Removed bookmark "${b.label ?? b.ref.id}"`,
+        onUndo: auditId == null ? undefined : () => void undoCommand(auditId).catch(failed("Undo remove bookmark")),
+      });
+    }, failed("Remove bookmark"));
   };
 
   return (
@@ -308,7 +310,7 @@ function BookmarksManager({
                   data-testid={`goto-bookmark-scope-${b.ref.id}-${opt.scope}`}
                   aria-pressed={active}
                   title={opt.title}
-                  onClick={() => { if (!active) store.setScope(threadId, streamId, b.ref, b.label, opt.scope); }}
+                  onClick={() => { if (!active) setBookmark(viewer, b.ref, b.label, opt.scope).catch(failed("Move bookmark")); }}
                   style={{
                     padding: "3px 8px",
                     fontSize: 11,
@@ -329,7 +331,7 @@ function BookmarksManager({
             data-testid={`goto-bookmark-remove-${b.ref.id}`}
             title="Remove bookmark"
             aria-label="Remove bookmark"
-            onClick={() => removeBookmark(b)}
+            onClick={() => remove(b)}
             style={{
               background: "transparent",
               border: "none",
