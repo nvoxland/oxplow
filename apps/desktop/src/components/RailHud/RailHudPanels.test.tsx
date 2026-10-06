@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { ExtensionPanel, Lens, LensRun, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 
@@ -7,8 +7,16 @@ import type { ExtensionPanel, Lens, LensRun, SqlCell } from "../../tauri-bridge/
 // (a summary, compact) and a lens whose row count is its header count.
 
 const realApi = await import("../../api.js");
+// The body lens has a choice param (tsk1100): the panel's header toggle.
+const MODE = {
+  name: "mode",
+  label: "Show",
+  default: "recent",
+  options: [{ value: "recent", label: "Recent" }, { value: "top", label: "Top" }],
+};
 const lens = (id: string, viz: Lens["viz"] = "list"): Lens =>
-  ({ id, extension: "x", slug: id, title: id, viz, params: [], columns: [], actions: [], empty: null, group: null, emphasis: null, depth: null }) as unknown as Lens;
+  ({ id, extension: "x", slug: id, title: id, viz, params: id === "x/body" ? [MODE] : [], columns: [], actions: [], empty: null, group: null, emphasis: null, depth: null }) as unknown as Lens;
+const bodyRuns: Record<string, SqlCell>[] = [];
 const results: Record<string, { viz: Lens["viz"]; columns: string[]; rows: SqlCell[][] }> = {
   "x/body": { viz: "list", columns: ["t"], rows: [["body row"]] },
   "x/line": { viz: "list", columns: ["t"], rows: [["summary row"]] },
@@ -33,6 +41,7 @@ mock.module("../../api.js", () => ({
   listExtensions: async () => [{ name: "x", enabled: true, panels: [panel], lenses: [], ui: { slots: [], commands: [], decorators: [], replacements: [] } }],
   runLens: async (id: string, params: Record<string, SqlCell>): Promise<LensRun> => {
     const r = results[id]!;
+    if (id === "x/body") bodyRuns.push(params);
     return {
       lens: lens(id, r.viz),
       params,
@@ -63,4 +72,23 @@ test("a collapsed panel shows its collapsed lens; its header counts the count le
   expect(view.queryByTestId("rail-panel-body")).toBeNull();
   expect(view.getByTestId("rail-section-toggle-ext:x/w").textContent).toContain("3");
   expect(section.textContent).not.toContain("body row");
+});
+
+test("a body lens's choice param is a header toggle; picking re-runs the body with it", async () => {
+  try {
+    localStorage.removeItem("oxplow.panelChoices.v1");
+  } catch {
+    // no storage in this environment
+  }
+  bodyRuns.length = 0;
+  const view = render(
+    <PanelRunsProvider streamId="str1" threadId={null}>
+      <RailHud threadId={null} streamId="str1" onOpenPage={() => {}} />
+    </PanelRunsProvider>,
+  );
+  const top = await waitFor(() => view.getByTestId("rail-panel-choice-mode-top"));
+  expect(view.getByTestId("rail-panel-choice-mode-recent").getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(top);
+  await waitFor(() => expect(bodyRuns.some((p) => p.mode === "top")).toBe(true));
+  await waitFor(() => expect(view.getByTestId("rail-panel-choice-mode-top").getAttribute("aria-pressed")).toBe("true"));
 });

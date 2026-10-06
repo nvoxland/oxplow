@@ -470,6 +470,53 @@ pub struct LensParam {
     /// Used when the caller doesn't supply the param.
     #[serde(default)]
     pub default: Option<SqlCell>,
+    /// The values it takes, when it's a choice (tsk1100): a panel shows
+    /// them as a toggle in its header, a lens page as a select. Its
+    /// `default` must be one; a run supplying another is refused.
+    #[serde(default)]
+    pub options: Vec<LensParamOption>,
+}
+
+/// One value a choice param takes, and what the viewer sees for it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LensParamOption {
+    pub value: String,
+    pub label: String,
+}
+
+impl LensParam {
+    /// Whether `value` is one this param takes: anything when it has no
+    /// options.
+    fn allows(&self, value: &SqlCell) -> bool {
+        self.options.is_empty()
+            || matches!(value, SqlCell::Text(v) if self.options.iter().any(|o| &o.value == v))
+    }
+}
+
+/// A choice param whose default isn't one of its options (or that has
+/// none: a choice starts somewhere).
+fn param_problem(lens: &Lens) -> Option<String> {
+    lens.params
+        .iter()
+        .filter(|p| !p.options.is_empty())
+        .find(|p| !p.default.as_ref().is_some_and(|d| p.allows(d)))
+        .map(|p| {
+            let default = match &p.default {
+                Some(SqlCell::Text(v)) => format!("`{v}`"),
+                Some(other) => format!("`{other:?}`"),
+                None => "no default".into(),
+            };
+            format!(
+                "param `{}` has {default}, not one of its options ({})",
+                p.name,
+                p.options
+                    .iter()
+                    .map(|o| o.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
 }
 
 /// A lens file as written on disk (`lenses/<slug>.yaml`).
@@ -2358,7 +2405,7 @@ fn shape_problem(
             )
         })
     };
-    if let Some(problem) = row_style_problem(lens) {
+    if let Some(problem) = row_style_problem(lens).or_else(|| param_problem(lens)) {
         return Some(problem);
     }
     let chart = lens.chart.clone().unwrap_or_default();
@@ -2727,6 +2774,22 @@ pub fn resolve_params(
             } else {
                 known.join(", ")
             }
+        )));
+    }
+    if let Some(p) = lens
+        .params
+        .iter()
+        .find(|p| supplied.get(&p.name).is_some_and(|v| !p.allows(v)))
+    {
+        return Err(DomainError::Invalid(format!(
+            "lens {}: param `{}` takes one of {}",
+            lens.id,
+            p.name,
+            p.options
+                .iter()
+                .map(|o| o.value.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         )));
     }
     let mut params = BTreeMap::new();
@@ -5579,6 +5642,32 @@ commands:
                 && errs.contains("`hunks: { path: <column>, from: <column>, to: <column> }`"),
             "{errs}"
         );
+    }
+
+    /// A param's `options` are the values it takes (tsk1100): its default
+    /// must be one, and a run supplying another is refused.
+    #[test]
+    fn param_options_bound_their_values() {
+        let (_d, ext) = load_x(
+            &[
+                ("ok", "title: OK\nquery: SELECT :mode AS m\nviz: list\nparams:\n  - { name: mode, default: recent, options: [{ value: recent, label: Recent }, { value: top, label: Most visited }] }\n"),
+                ("bad", "title: Bad\nquery: SELECT :mode AS m\nviz: list\nparams:\n  - { name: mode, default: all, options: [{ value: recent, label: Recent }] }\n"),
+            ],
+            "",
+        );
+        let ok = ext
+            .lenses
+            .iter()
+            .find(|l| l.slug == "ok")
+            .expect("ok loads");
+        assert_eq!(ok.params[0].options[1].label, "Most visited");
+        assert!(ext.lenses.iter().all(|l| l.slug != "bad"));
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("`mode`") && errs.contains("`all`"), "{errs}");
+        let supplied = BTreeMap::from([("mode".to_string(), SqlCell::Text("top".into()))]);
+        assert!(resolve_params(ok, &supplied, &LensContext::default()).is_ok());
+        let supplied = BTreeMap::from([("mode".to_string(), SqlCell::Text("all".into()))]);
+        assert!(resolve_params(ok, &supplied, &LensContext::default()).is_err());
     }
 
     /// Validation checks every block's columns, not only the chart's.

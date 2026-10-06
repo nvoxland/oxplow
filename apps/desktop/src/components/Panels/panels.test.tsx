@@ -14,7 +14,7 @@ mock.module("../../api.js", () => ({
     return { lens: { id } as LensRun["lens"], params, result: { columns: [], rows: [], truncated: false }, alert: null };
   },
 }));
-const { badgeCount, panelAlerts, panelCount, panelParams, useExtensionPanelRuns } = await import("./usePanelRuns.js");
+const { badgeCount, panelAlerts, panelChoices, panelCount, panelParams, useExtensionPanelRuns } = await import("./usePanelRuns.js");
 
 const panel = (scope: ExtensionPanel["scope"], over: Partial<ExtensionPanel> = {}): ExtensionPanel =>
   ({ id: "x/p", extension: "x", title: "P", icon: null, scope, body: "x/body", badge: null, ...over }) as ExtensionPanel;
@@ -107,4 +107,34 @@ test("the rail runs a panel's collapsed and count lenses, each lens once", async
   await waitFor(() => expect(view.result.current["x/p"]?.collapsed?.lens.id).toBe("x/line"));
   expect(runs.map((r) => r.id).sort()).toEqual(["x/body", "x/line"]);
   expect(view.result.current["x/p"]?.count).toBe(0);
+});
+
+// tsk1100: a body lens's choice params are the panel's header toggle; the
+// viewer's pick binds the body lens only (the others don't declare it).
+test("a choice param binds the viewer's pick to the body lens only", async () => {
+  runs.length = 0;
+  const panels = [panel("thread", { body: "x/body", collapsed: "x/line" })];
+  const view = renderHook(() => useExtensionPanelRuns(panels, "str2", "thr7", { "x/p": { mode: "top" } }));
+  await waitFor(() => expect(view.result.current["x/p"]?.collapsed?.lens.id).toBe("x/line"));
+  const of = (id: string) => runs.find((r) => r.id === id)?.params;
+  expect(of("x/body")).toEqual({ thread_id: 7, mode: "top" });
+  expect(of("x/line")).toEqual({ thread_id: 7 });
+});
+
+test("the toggle shows each choice param at the pick, else its default", () => {
+  const body = {
+    lens: {
+      params: [
+        { name: "thread_id", label: null, default: null, options: [] },
+        { name: "mode", label: "Show", default: "recent", options: [{ value: "recent", label: "Recent" }, { value: "top", label: "Most visited" }] },
+      ],
+    },
+  } as unknown as LensRun;
+  expect(panelChoices(body, {})).toEqual([
+    { name: "mode", label: "Show", value: "recent", options: [{ value: "recent", label: "Recent" }, { value: "top", label: "Most visited" }] },
+  ]);
+  expect(panelChoices(body, { mode: "top" })[0]!.value).toBe("top");
+  // A pick the lens no longer offers falls back to the default.
+  expect(panelChoices(body, { mode: "gone" })[0]!.value).toBe("recent");
+  expect(panelChoices(null, {})).toEqual([]);
 });

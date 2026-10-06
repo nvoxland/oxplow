@@ -3,6 +3,7 @@ import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
+import type { LensParamOption } from "../tauri-bridge/generated/bindings.js";
 import { querySql, runLens, type LensRun, type SqlCell } from "../api.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
@@ -154,7 +155,7 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
 
 /** The lens's params: oxplow's id params as pickers (`lensParams.ts`),
  *  anything else typed. */
-function ParamsForm({
+export function ParamsForm({
   lens,
   values,
   onApply,
@@ -166,7 +167,7 @@ function ParamsForm({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {lens.params.map((p) => (
-        <ParamInput key={p.name} name={p.name} label={p.label ?? p.name} value={values[p.name] ?? null} onApply={onApply} />
+        <ParamInput key={p.name} name={p.name} label={p.label ?? p.name} options={p.options} value={values[p.name] ?? null} onApply={onApply} />
       ))}
       <div style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Enter applies; Escape reverts.</div>
     </div>
@@ -176,17 +177,48 @@ function ParamsForm({
 function ParamInput({
   name,
   label,
+  options,
   value,
   onApply,
 }: {
   name: string;
   label: string;
+  options: LensParamOption[];
   value: SqlCell;
   onApply(name: string, value: SqlCell): void;
 }) {
+  if (options.length > 0) return <ParamChoice name={name} label={label} options={options} value={value} onApply={onApply} />;
   const kind = paramKind(name);
   if (kind) return <ParamPicker name={name} label={label} kind={kind} value={value} onApply={onApply} />;
   return <ParamText name={name} label={label} value={value} onApply={onApply} />;
+}
+
+/** A choice param (tsk1100): one of the values its lens declares. */
+function ParamChoice({
+  name,
+  label,
+  options,
+  value,
+  onApply,
+}: {
+  name: string;
+  label: string;
+  options: LensParamOption[];
+  value: SqlCell;
+  onApply(name: string, value: SqlCell): void;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-sm)" }}>
+      {label}
+      <select data-testid={`lens-param-${name}`} value={value == null ? "" : String(value)} onChange={(e) => onApply(name, e.target.value)}>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 /** One of oxplow's id params: pick what it names, by title (tsk1043). */

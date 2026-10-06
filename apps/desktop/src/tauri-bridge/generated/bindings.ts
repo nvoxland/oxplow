@@ -3418,6 +3418,18 @@ export type LensParam = {
 	label?: string | null,
 	// Used when the caller doesn't supply the param.
 	default?: SqlCell | null,
+	/**
+	 *  The values it takes, when it's a choice (tsk1100): a panel shows
+	 *  them as a toggle in its header, a lens page as a select. Its
+	 *  `default` must be one; a run supplying another is refused.
+	 */
+	options?: LensParamOption[],
+};
+
+// One value a choice param takes, and what the viewer sees for it.
+export type LensParamOption = {
+	value: string,
+	label: string,
 };
 
 // The result of running a lens.

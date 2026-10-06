@@ -24,7 +24,7 @@ import {
   type LayoutEdit,
   type LayoutSync,
 } from "../Panels/panelLayout.js";
-import type { PanelRuns } from "../Panels/usePanelRuns.js";
+import { panelChoices, type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../opErrorsStore.js";
@@ -634,6 +634,8 @@ function ExtensionPanelSection({
   streamId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
+  const { choices, choose } = usePanelRuns();
+  const toggles = panelChoices(runs.body, choices[panel.id] ?? {});
   const compact = (run: LensRun, testId: string) => (
     <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
       <LensResultView run={run} compact maxRows={8} streamId={streamId} onOpenPage={onOpenPage} />
@@ -647,6 +649,15 @@ function ExtensionPanelSection({
       collapsedContent={runs.collapsed ? compact(runs.collapsed, "rail-panel-collapsed") : undefined}
       onOpen={() => onOpenPage(panelOpenRef(panel))}
       openTitle={`Open ${panel.title}`}
+      headerAction={
+        toggles.length > 0 ? (
+          <>
+            {toggles.map((c) => (
+              <PanelChoiceToggle key={c.name} choice={c} onPick={(v) => choose(panel.id, c.name, v)} />
+            ))}
+          </>
+        ) : undefined
+      }
     >
       {runs.body ? (
         compact(runs.body, "rail-panel-body")
@@ -656,6 +667,41 @@ function ExtensionPanelSection({
         </div>
       )}
     </RailSection>
+  );
+}
+
+/** A panel's choice param in its header (tsk1100): one small button per
+ *  option, the one in force pressed. */
+function PanelChoiceToggle({ choice, onPick }: { choice: PanelChoice; onPick(value: string): void }) {
+  return (
+    <span role="group" aria-label={choice.label ?? choice.name} style={{ display: "inline-flex", gap: 2 }}>
+      {choice.options.map((o) => {
+        const active = o.value === choice.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            data-testid={`rail-panel-choice-${choice.name}-${o.value}`}
+            aria-pressed={active}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!active) onPick(o.value);
+            }}
+            style={{
+              background: active ? "var(--accent-soft-bg, var(--surface-app))" : "transparent",
+              border: "none",
+              borderRadius: 4,
+              color: active ? "var(--text-primary)" : "var(--text-secondary)",
+              cursor: active ? "default" : "pointer",
+              fontSize: 10,
+              padding: "0 4px",
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </span>
   );
 }
 

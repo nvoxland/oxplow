@@ -871,7 +871,18 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 `description`, `query`, `viz`, `params`, `columns`, `empty`, `chart`,
 `children`, `launcher`, `hidden`, `actions` and `alert`.
 
-- `params`: `name`, `label`, `default`. Untyped: a value is bound as-is.
+- `params`: `name`, `label`, `default`, `options`. Untyped: a value is
+  bound as-is.
+- **Choice params (tsk1100).** `options: [{ value, label }]` makes a
+  param a choice: a lens page shows a select, and an extension panel
+  whose body lens has one shows it as a toggle in the panel's header
+  (one small button per option). The default must be one of the options
+  (the loader refuses the lens otherwise, `param_problem`), and a run
+  supplying another value is refused (`resolve_params`). A panel's pick
+  binds its body lens only — the other lenses don't declare it — and is
+  the viewer's, remembered in the browser (`oxplow.panelChoices.v1`,
+  `PanelRunsProvider`); a pick the lens no longer offers falls back to
+  the default (`panelChoices`).
 - **Id params are pickers (tsk1043).** On a lens page, a param named
   `task_id`, `effort_id`, `thread_id` or `stream_id` — oxplow's own ids,
   the names it fills from context or a slot binds — is a picker over the
@@ -2630,6 +2641,9 @@ available to every extension:
   (tsk1089, for the Work panel).
 - Panel `count:` — a lens whose row count (or `number`) is the panel's
   header count without raising an alert.
+- Lens param `options:` — a choice, shown as a toggle in a panel's
+  header and a select on a lens page (tsk1100, for Go To's Recent / Most
+  visited).
 - Lens `group: { by, link? }` on `list` / `table` — rows under linked
   sub-headings, also in compact panels — and actions with `group:` in a
   group's heading.

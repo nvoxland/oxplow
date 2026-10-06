@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { runLens, type LensRun } from "../../api.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
 import { streamRowId, threadRowId } from "../../modelIds.js";
-import type { ExtensionPanel, PanelScope, Reads, SqlCell } from "../../tauri-bridge/generated/bindings.js";
+import type { ExtensionPanel, LensParamOption, PanelScope, Reads, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 
 export interface PanelRuns {
   body: LensRun | null;
@@ -61,6 +61,33 @@ export function panelParams(
   }
 }
 
+/** The viewer's picks for the panels' choice params (tsk1100): by panel
+ *  id, each param's chosen value. */
+export type PanelChoices = Record<string, Record<string, string>>;
+
+/** No picks — one value, so it doesn't re-run the panels each render. */
+export const NO_CHOICES: PanelChoices = {};
+
+/** One choice param of a panel's body lens, as its header toggle shows
+ *  it: the options, and the value in force — the viewer's pick while the
+ *  lens still offers it, else the default. */
+export interface PanelChoice {
+  name: string;
+  label: string | null;
+  options: LensParamOption[];
+  value: string;
+}
+
+export function panelChoices(body: LensRun | null, picked: Readonly<Record<string, string>>): PanelChoice[] {
+  return (body?.lens.params ?? [])
+    .filter((p) => p.options.length > 0)
+    .map((p) => {
+      const pick = picked[p.name];
+      const value = pick != null && p.options.some((o) => o.value === pick) ? pick : String(p.default ?? p.options[0]!.value);
+      return { name: p.name, label: p.label, options: p.options, value };
+    });
+}
+
 export interface PanelAlert {
   /** The badge lens (`<extension>/<slug>`); opening the alert opens it. */
   id: string;
@@ -82,6 +109,7 @@ export function useExtensionPanelRuns(
   panels: readonly ExtensionPanel[],
   streamId: string | null,
   threadId: string | null,
+  choices: PanelChoices = NO_CHOICES,
 ): Record<string, PanelRuns> {
   const [runs, setRuns] = useState<Record<string, PanelRuns>>({});
   const [reads, setReads] = useState<Reads>(NO_READS);
@@ -91,10 +119,14 @@ export function useExtensionPanelRuns(
     const entries = await Promise.all(
       panels.map(async (p) => {
         const params = panelParams(p.scope, streamId, threadId);
+        // The viewer's picks bind the body lens, which declares them.
+        const bodyParams = { ...params, ...(choices[p.id] ?? {}) };
         // Each distinct lens once, whatever roles it plays.
         const ids = [...new Set([p.body, p.badge, p.collapsed, p.count].filter((id): id is string => !!id))];
         const ran = new Map(
-          await Promise.all(ids.map(async (id) => [id, await runLens(id, params, streamId).catch(() => null)] as const)),
+          await Promise.all(
+            ids.map(async (id) => [id, await runLens(id, id === p.body ? bodyParams : params, streamId).catch(() => null)] as const),
+          ),
         );
         const of = (id: string | null) => (id ? (ran.get(id) ?? null) : null);
         const badge = of(p.badge);
@@ -104,7 +136,7 @@ export function useExtensionPanelRuns(
     );
     setRuns(Object.fromEntries(entries.map(([id, r]) => [id, r])));
     setReads(unionReads(entries.flatMap(([, , ran]) => ran.map((r) => r?.result.reads))));
-  }, [panels, streamId, threadId]);
+  }, [panels, streamId, threadId, choices]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
   return runs;
