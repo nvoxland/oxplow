@@ -27,7 +27,6 @@ mock.module("../../api.js", () => ({
     responses.push([t, r, o]);
   },
   acpCancel: async () => {},
-  acpDismissDirective: async () => {},
   subscribeAcpEvents: (l: (e: AcpEvent) => void) => {
     listener = l;
     return () => {
@@ -84,7 +83,6 @@ beforeEach(() => {
   snapshot = {
     agent: "fake",
     status: "idle",
-    directive: "Close the task before stopping.",
     usage: null,
     headSeq: 1,
     items: [{ id: 1, seq: 1, type: "agent", text: "done" }],
@@ -109,25 +107,20 @@ describe("AcpAgentView", () => {
     await waitFor(() => expect(empty.container.querySelector("[data-empty-state]")).not.toBeNull());
   });
 
-  test("Put in input fills the draft and sends nothing; Enter sends once", async () => {
+  test("Shift+Enter sends nothing; Enter sends once", async () => {
     const view = render(<AcpAgentView thread={thread} visible={true} />);
-    await waitFor(() => view.getByTestId("acp-directive"));
-
-    fireEvent.click(view.getByTestId("acp-directive-put"));
-    const input = view.getByTestId("acp-prompt-input") as HTMLTextAreaElement;
-    expect(input.value).toBe("Close the task before stopping.");
+    const input = (await waitFor(() => view.getByTestId("acp-prompt-input"))) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Close the task." } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     await new Promise((r) => setTimeout(r, 20));
     expect(prompts).toEqual([]);
-
-    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
-    expect(prompts).toEqual([]);
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(prompts).toEqual([["thr1", "Close the task before stopping."]]));
+    await waitFor(() => expect(prompts).toEqual([["thr1", "Close the task."]]));
     await waitFor(() => expect(input.value).toBe(""));
   });
 
   test("while a turn runs Enter sends nothing and Escape stops", async () => {
-    snapshot = { ...snapshot, status: "running", directive: null };
+    snapshot = { ...snapshot, status: "running" };
     const view = render(<AcpAgentView thread={thread} visible={true} />);
     await waitFor(() => view.getByTestId("acp-prompt-stop"));
     const input = view.getByTestId("acp-prompt-input") as HTMLTextAreaElement;
@@ -138,7 +131,6 @@ describe("AcpAgentView", () => {
   });
 
   test("live events render and a permission card answers through the API", async () => {
-    snapshot = { ...snapshot, directive: null };
     const view = render(<AcpAgentView thread={thread} visible={true} />);
     await waitFor(() => view.getByTestId("acp-item-1"));
     act(() => {
@@ -190,7 +182,6 @@ describe("AcpAgentView", () => {
     });
     snapshot = {
       ...snapshot,
-      directive: null,
       headSeq: 3,
       items: [
         proposing(1, "t1", [JSON.stringify({ kind: "proposed", proposal: "proposal:7", message: "waits" })]),
@@ -219,7 +210,6 @@ describe("AcpAgentView", () => {
     const out = JSON.stringify({ answer: "answer:7", title: "Churn", text: "| path |" });
     snapshot = {
       ...snapshot,
-      directive: null,
       headSeq: 2,
       items: [
         { id: 1, seq: 1, type: "agent", text: "Here:" },

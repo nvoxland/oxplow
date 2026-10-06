@@ -1,4 +1,0 @@
-{
-  "decision": "block",
-  "reason": "EFFORT REVIEW: one or more efforts you just closed have a discrepancy between what you declared and what oxplow observed — in the files you touched and/or the test/coverage/analysis runs that happened during your effort. For each:\n\n  • [tsk1] reviewed work (effort eff1)\n      These test/coverage/analysis runs happened during your effort but weren't attributed to you (a concurrent effort was open, so oxplow couldn't auto-assign them):\n        - run:77\n\nIf any are wrong, run `effort.amend { effort, add_files, remove_files, claim_runs, disclaim_runs }` (`mcp__oxplow__run_command`) to correct — `claim_runs` for runs that were yours, `disclaim_runs` for ones that weren't. If your original declaration was right (you reverted an edit, or another actor/effort produced those changes/runs), no amend is needed — silent agreement is fine and the prompt won't repeat."
-}

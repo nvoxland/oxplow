@@ -28,7 +28,6 @@ struct Host {
     deny_writes: Option<String>,
     context: Option<String>,
     nudge: Option<String>,
-    directive: Option<String>,
     log: Mutex<Vec<String>>,
 }
 
@@ -83,15 +82,16 @@ impl AcpHost for Host {
         &self,
         _t: &ThreadId,
         _s: &str,
+        answer: Option<&str>,
         tokens: Option<&TurnTokens>,
-    ) -> Option<String> {
+    ) {
         self.log.lock().push(format!(
-            "turn_ended {}",
+            "turn_ended {}{}",
             tokens
                 .map(|t| format!("{}/{}", t.input, t.output))
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            answer.map(|a| format!(" answer={a}")).unwrap_or_default()
         ));
-        self.directive.clone()
     }
     async fn awaiting_user(&self, _t: &ThreadId, q: Option<String>) {
         self.log.lock().push(format!("awaiting {}", q.is_some()));
@@ -261,7 +261,14 @@ async fn a_prompt_streams_the_reply_and_records_the_turn_once() {
         .any(|b| matches!(b, ItemBody::Tool { call } if call.id.ends_with("-t1"))));
     assert_eq!(rig.host.count("turn_started"), 1);
     assert_eq!(rig.host.count("turn_ended"), 1);
-    assert!(rig.host.log().contains(&"turn_ended 10/5".to_string()));
+    // The turn ends with its counts and the agent's last message as its answer.
+    assert!(
+        rig.host
+            .log()
+            .contains(&"turn_ended 10/5 answer=hello".to_string()),
+        "{:?}",
+        rig.host.log()
+    );
     assert!(rig.host.log().contains(&"tool Bash".to_string()));
     assert_eq!(rig.prompts().len(), 1);
 }
@@ -404,26 +411,6 @@ async fn a_second_prompt_during_a_turn_is_refused_not_queued() {
     rig.mgr.cancel(&thread()).unwrap();
     rig.wait_status(AcpStatus::Idle).await;
     assert_eq!(rig.prompts().len(), 1);
-}
-
-#[tokio::test]
-async fn the_directive_is_shown_and_never_sent() {
-    let mut rig = open(Host {
-        directive: Some("Close the task first.".into()),
-        ..Default::default()
-    })
-    .await;
-    rig.turn("fake:say done").await;
-    let snap = rig.mgr.transcript(&thread(), 0).unwrap();
-    assert_eq!(snap.directive.as_deref(), Some("Close the task first."));
-    assert!(rig
-        .items()
-        .iter()
-        .any(|b| matches!(b, ItemBody::Directive { .. })));
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(rig.prompts().len(), 1, "the directive must not be sent");
-    rig.mgr.dismiss_directive(&thread()).unwrap();
-    assert_eq!(rig.mgr.transcript(&thread(), 0).unwrap().directive, None);
 }
 
 #[tokio::test]

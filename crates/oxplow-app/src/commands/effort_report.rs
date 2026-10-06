@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use oxplow_db::{
     Database, EffortFileChange, EffortStore as _, SqliteAttributionStore, SqliteEffortStore,
-    SqliteSnapshotStore, STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED,
+    SqliteSnapshotStore, STATE_ACKNOWLEDGED, STATE_CLAIMED,
 };
 use oxplow_domain::refs::build::{thread_ref, validate_work_item_ref};
 use oxplow_domain::vcs::Vcs;
@@ -37,7 +37,6 @@ use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::file_ref_version::ResolvedFileVersion;
 use crate::sql_gateway::SqlGateway;
 use crate::task_service::{compute_effort_file_review, TaskService};
-use crate::thread_runtime::ThreadRuntimeRegistry;
 
 pub const REPORT: &str = "effort.report";
 pub const AMEND: &str = "effort.amend";
@@ -95,7 +94,6 @@ pub struct EffortDeps {
     pub efforts: Arc<SqliteEffortStore>,
     pub snapshots: Arc<SqliteSnapshotStore>,
     pub attribution: Arc<SqliteAttributionStore>,
-    pub runtime: Arc<ThreadRuntimeRegistry>,
     pub sql: SqlGateway,
     pub db: Database,
     /// The ref kinds a summary's links may name.
@@ -276,15 +274,6 @@ async fn report(
     if let Some(effort) = effort {
         // The run claims first, so a fully reconciled effort doesn't nag.
         settle_runs(deps, &effort, &input.claim_runs, &input.disclaim_runs).await?;
-        let residue = !deps
-            .attribution
-            .list_refs(&effort, "run", STATE_UNATTRIBUTED)
-            .await
-            .unwrap_or_default()
-            .is_empty();
-        if review.is_some() || residue {
-            deps.runtime.record_pending_effort_review(&thread, effort);
-        }
         decision_hint = crate::reasoning::missing_decisions_hint(&deps.sql, effort.value()).await;
     }
     let link_warnings = match &summary {

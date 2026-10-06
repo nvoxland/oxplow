@@ -40,15 +40,15 @@ pub trait AcpHost: Send + Sync + 'static {
         session_id: &str,
         event: &CanonicalToolEvent,
     ) -> Option<String>;
-    /// The turn ended: record it (with the counts the agent reported) and
-    /// return the Stop directive, if any. The directive is shown to the
-    /// person; it is never sent.
+    /// The turn ended: record it, with its final answer and the counts the
+    /// agent reported.
     async fn turn_ended(
         &self,
         thread: &ThreadId,
         session_id: &str,
+        answer: Option<&str>,
         tokens: Option<&TurnTokens>,
-    ) -> Option<String>;
+    );
     /// A permission card is (or no longer is) waiting on the person.
     async fn awaiting_user(&self, thread: &ThreadId, question: Option<String>);
     /// The agent went away mid-session.
@@ -197,12 +197,18 @@ impl AcpHost for ServicesAcpHost {
         &self,
         thread: &ThreadId,
         session_id: &str,
+        answer: Option<&str>,
         tokens: Option<&TurnTokens>,
-    ) -> Option<String> {
-        let svc = self.svc.upgrade()?;
+    ) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
         // The turn's own counts ride its `agent.turn.ended`; the
-        // `token_usage.turns` reactor records them (P3.7).
-        let mut body = serde_json::json!({ "session_id": session_id });
+        // `token_usage.turns` reactor records them.
+        let mut body = serde_json::json!({
+            "session_id": session_id,
+            crate::hook_ingest::LAST_ASSISTANT_MESSAGE: answer,
+        });
         if let Some(t) = tokens {
             body[crate::hook_ingest::TURN_USAGE_KEY] = serde_json::json!({
                 "input": t.input,
@@ -212,23 +218,9 @@ impl AcpHost for ServicesAcpHost {
             });
         }
         let env = self.envelope(HookKind::Stop, thread, session_id, body, None);
-        // What the turn this Stop closed did; none when no turn was open.
-        let signals = match svc.hook_ingest.ingest(env).await {
-            Ok(outcome) => match outcome.closed_turn {
-                Some(turn) => crate::agent_policy::TurnSignals::of_turn(&svc.db, turn)
-                    .await
-                    .ok(),
-                None => None,
-            },
-            Err(err) => {
-                warn!(?err, "acp: hook ingest failed");
-                None
-            }
-        };
-        svc.agent_policy
-            .on_turn_end(&svc, thread, signals.as_ref())
-            .await
-            .map(|d| d.reason)
+        if let Err(err) = svc.hook_ingest.ingest(env).await {
+            warn!(?err, "acp: hook ingest failed");
+        }
     }
 
     async fn awaiting_user(&self, thread: &ThreadId, question: Option<String>) {

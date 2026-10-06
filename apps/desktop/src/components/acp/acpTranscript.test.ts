@@ -21,7 +21,6 @@ const agent = (id: number, seq: number, text: string): TranscriptItem => ({
 const snap = (items: TranscriptItem[], over: Partial<AcpSnapshot> = {}): AcpSnapshot => ({
   agent: "fake",
   status: "idle",
-  directive: null,
   usage: null,
   headSeq: Math.max(0, ...items.map((i) => i.seq)),
   items,
@@ -68,15 +67,11 @@ describe("acp transcript reducer", () => {
     expect(s.headSeq).toBe(4);
   });
 
-  test("status, directive, usage and closed events set session state", () => {
+  test("status, usage and closed events set session state", () => {
     let s = initialState();
     expect(s.status).toBe("starting");
     s = applyEvent(s, { threadId: "thr1", type: "status", status: "running" });
     expect(isBusy(s.status)).toBe(true);
-    s = applyEvent(s, { threadId: "thr1", type: "directive", text: "Close the task." });
-    expect(s.directive).toBe("Close the task.");
-    s = applyEvent(s, { threadId: "thr1", type: "directive", text: null });
-    expect(s.directive).toBeNull();
     s = applyEvent(s, {
       threadId: "thr1",
       type: "usage",

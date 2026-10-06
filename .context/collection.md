@@ -180,8 +180,7 @@ hook + MCP wiring):
   whole-suite runs that name nothing decline on purpose: a mis-attributed run is
   worse than an unattributed one, because the agent can still claim the latter at
   close. An unattributed test run with 2+ efforts open fires the
-  `unattributed-run` nudge immediately (tsk170) rather than waiting for the
-  closing EFFORT REVIEW.
+  `unattributed-run` nudge immediately.
 
   **The same decision governs the per-file auto-claim** (tsk186).
   `claim_open_effort_file` used to return early whenever more than one effort was

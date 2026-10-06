@@ -68,6 +68,11 @@ use oxplow_domain::hook::TurnOutcome;
 /// (ACP's prompt response); they ride `agent.turn.ended@2 { usage }`.
 pub const TURN_USAGE_KEY: &str = "oxplow_turn_usage";
 
+/// The Stop-body key holding the agent's final message for the turn
+/// (Claude's own field; ACP sends its transcript's last agent message
+/// under it): kept as the turn's `answer`.
+pub const LAST_ASSISTANT_MESSAGE: &str = "last_assistant_message";
+
 /// What the agent policy decided about a tool call (PreToolUse), carried
 /// on the envelope so the log records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -444,7 +449,11 @@ fn record_tx(
         }
         HookKind::Stop | HookKind::Interrupt => {
             let (answer, outcome) = if env.kind == HookKind::Stop {
-                (None, TurnOutcome::Completed)
+                let said = body
+                    .get(LAST_ASSISTANT_MESSAGE)
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty());
+                (said, TurnOutcome::Completed)
             } else {
                 (Some("interrupted"), TurnOutcome::Interrupted)
             };

@@ -50,8 +50,7 @@ which is that oxplow steers and never drives a doing-agent.
   Protocol receives a prompt **only** when a human presses Enter in the
   thread's prompt box. oxplow's context (session context, advisories,
   decisions, post-tool nudges) rides **only** on that human prompt, as a
-  visible block. The Stop directive is shown as a banner; "Put in input"
-  fills the draft and never sends. Two source-scan tests pin this: the
+  visible block. Two source-scan tests pin this: the
   Rust `acp/guard_tests.rs` (the prompt type is built only on the human
   submit path) and the TS `no-agent-input-automation.test.ts` (only the
   prompt box calls `acpPrompt`). See [agent-model.md](./agent-model.md) →

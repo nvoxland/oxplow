@@ -492,25 +492,13 @@ async fn handle_hook_inner(
     };
 
     let envelope_for_resume = envelope.clone();
-    let ingested = match ctx.services.hook_ingest.ingest(envelope).await {
-        Ok(outcome) => outcome,
-        Err(err) => {
-            // The agent can't act on an error status — Claude Code just
-            // prints a "non-blocking status code" warning into the user's
-            // terminal. Log the cause server-side and ack anyway.
-            warn!(?event, ?err, "hook ingest failed");
-            return hook_ack();
-        }
-    };
-    // What the turn this Stop closed did (its own tool events); none when
-    // no turn was open.
-    let turn_signals = match ingested.closed_turn {
-        Some(turn) => oxplow_app::agent_policy::TurnSignals::of_turn(&ctx.services.db, turn)
-            .await
-            .ok(),
-        None => None,
-    };
-
+    if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
+        // The agent can't act on an error status — Claude Code just
+        // prints a "non-blocking status code" warning into the user's
+        // terminal. Log the cause server-side and ack anyway.
+        warn!(?event, ?err, "hook ingest failed");
+        return hook_ack();
+    }
     // Token usage (tsk104) is counted from the Stop's `agent.turn.ended`
     // by the `token_usage.turns` pump reactor (P3.7), not in the hook.
 
@@ -575,19 +563,8 @@ async fn handle_hook_inner(
         }
     }
 
-    // Stop — emit a directive after the turn closes when the
-    // in_progress audit branch (or filed-but-didn't-ship advisory)
-    // fires. The turn's signals (activity, writes, awaiting the person,
-    // a subagent still running) are read from the events anchored to the
-    // turn the Stop closed (`TurnSignals::of_turn`), after the ingest.
-    if kind == HookKind::Stop {
-        if let Some(directive) =
-            stop_directive(&ctx, thread_id.as_ref(), turn_signals.as_ref()).await
-        {
-            return (StatusCode::OK, Json(directive)).into_response();
-        }
-    }
-
+    // Stop is never refused: the ingest closed the turn; the ack ends it
+    // (.context/work-tracking.md "No gates").
     hook_ack()
 }
 
@@ -641,21 +618,6 @@ async fn pre_tool_check(
         PolicyDecision::Allow => None,
         PolicyDecision::Deny { reason, .. } => Some(reason),
     }
-}
-
-/// The shared policy's end-of-turn directive, rendered as Claude's Stop
-/// `{decision: "block", reason}`.
-async fn stop_directive(
-    ctx: &AppCtx,
-    thread_id: Option<&ThreadId>,
-    turn_signals: Option<&oxplow_app::agent_policy::TurnSignals>,
-) -> Option<serde_json::Value> {
-    let directive = ctx
-        .services
-        .agent_policy
-        .on_turn_end(&ctx.services, thread_id?, turn_signals)
-        .await?;
-    serde_json::to_value(directive).ok()
 }
 
 fn parse_hook_kind(event: &str) -> Option<HookKind> {

@@ -288,7 +288,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::acp_cancel,
             commands::generated::acp_respond_permission,
             commands::generated::acp_transcript,
-            commands::generated::acp_dismiss_directive,
             commands::generated::acp_close_session,
             commands::generated::forward_terminal_input,
             commands::generated::close_terminal_session,

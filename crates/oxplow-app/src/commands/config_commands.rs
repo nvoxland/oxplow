@@ -359,7 +359,7 @@ mod tests {
             oxplow_domain::vocabulary::VocabularyHandle::core(),
         );
         let pump = Arc::new(EventPump::new(db.clone(), log.clone(), vec![]));
-        let bus = CommandBus::new(db, log, Arc::new(AgentPolicy::default()), pump);
+        let bus = CommandBus::new(db, log, Arc::new(AgentPolicy), pump);
         for c in commands(target.clone()) {
             bus.register(c).unwrap();
         }

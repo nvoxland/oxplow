@@ -63,10 +63,6 @@ pub enum ItemBody {
         label: String,
         reason: String,
     },
-    /// The turn-end directive, shown to the human. Never sent.
-    Directive {
-        text: String,
-    },
     /// Something failed: the prompt, the agent process, the protocol.
     Error {
         message: String,
@@ -115,6 +111,20 @@ impl Transcript {
 
     pub fn usage(&self) -> Option<&ContextUsage> {
         self.usage.as_ref()
+    }
+
+    /// The agent's last message since the human last spoke: the turn's
+    /// final answer, recorded with the turn like Claude's Stop
+    /// `last_assistant_message`.
+    pub fn last_answer(&self) -> Option<String> {
+        self.items
+            .iter()
+            .rev()
+            .take_while(|i| !matches!(i.body, ItemBody::User { .. }))
+            .find_map(|i| match &i.body {
+                ItemBody::Agent { text } if !text.trim().is_empty() => Some(text.clone()),
+                _ => None,
+            })
     }
 
     /// Items created or changed after `seq`, oldest first.
@@ -369,11 +379,11 @@ mod tests {
     fn ring_drops_the_oldest() {
         let mut t = Transcript::new(2);
         for s in ["a", "b", "c"] {
-            t.push(ItemBody::Directive { text: s.into() });
+            t.push(ItemBody::Agent { text: s.into() });
         }
         let items = t.since(0);
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].body, ItemBody::Directive { text: "b".into() });
+        assert_eq!(items[0].body, ItemBody::Agent { text: "b".into() });
         assert!(t.update(1, |_| {}).is_none());
     }
 
@@ -407,10 +417,37 @@ mod tests {
     #[test]
     fn items_serialize_flat_with_a_type_tag() {
         let mut t = Transcript::default();
-        let item = t.push(ItemBody::Directive { text: "d".into() });
+        let item = t.push(ItemBody::Agent { text: "d".into() });
         assert_eq!(
             serde_json::to_value(item).unwrap(),
-            serde_json::json!({"id": 1, "seq": 1, "type": "directive", "text": "d"})
+            serde_json::json!({"id": 1, "seq": 1, "type": "agent", "text": "d"})
         );
+    }
+
+    /// The turn's answer is the agent's last message after the human's.
+    #[test]
+    fn the_last_answer_is_the_agents_last_message_this_turn() {
+        let mut t = Transcript::default();
+        t.push(ItemBody::User {
+            text: "q1".into(),
+            context: None,
+        });
+        t.push(ItemBody::Agent {
+            text: "first".into(),
+        });
+        assert_eq!(t.last_answer().as_deref(), Some("first"));
+        t.push(ItemBody::User {
+            text: "q2".into(),
+            context: None,
+        });
+        assert_eq!(t.last_answer(), None);
+        t.push(ItemBody::Agent {
+            text: "working".into(),
+        });
+        t.push(ItemBody::Thought { text: "hmm".into() });
+        t.push(ItemBody::Agent {
+            text: "done".into(),
+        });
+        assert_eq!(t.last_answer().as_deref(), Some("done"));
     }
 }

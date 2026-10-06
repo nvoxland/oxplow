@@ -978,18 +978,12 @@ export const commands = {
 	 */
 	generation: number,
 	status: AcpStatus,
-	directive: string | null,
 	usage: ContextUsage | null,
 	// The highest `seq` in the transcript; ask `since` this next time.
 	headSeq: number,
 	items: TranscriptItem[],
 	stderrTail: string[],
 } | null, IpcError>(__TAURI_INVOKE("acp_transcript", { threadId, sinceSeq })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	acpDismissDirective: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_dismiss_directive", { threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1118,7 +1112,7 @@ export type AcpEvent = {
 	generation: number,
 } & (AcpEventBody);
 
-export type AcpEventBody = { type: "item"; item: TranscriptItem } | { type: "status"; status: AcpStatus } | { type: "directive"; text: string | null } | { type: "usage"; usage: ContextUsage } | { type: "closed"; reason: string | null };
+export type AcpEventBody = { type: "item"; item: TranscriptItem } | { type: "status"; status: AcpStatus } | { type: "usage"; usage: ContextUsage } | { type: "closed"; reason: string | null };
 
 // A session as the UI reads it.
 export type AcpSnapshot = {
@@ -1129,7 +1123,6 @@ export type AcpSnapshot = {
 	 */
 	generation: number,
 	status: AcpStatus,
-	directive: string | null,
 	usage: ContextUsage | null,
 	// The highest `seq` in the transcript; ask `since` this next time.
 	headSeq: number,
@@ -3171,8 +3164,6 @@ export type ItemBody =
 { type: "policy_denied"; toolCallId: string; label: string; reason: string } | 
 // A write the policy would deny ran without asking first.
 { type: "bypass"; toolCallId: string; label: string; reason: string } | 
-// The turn-end directive, shown to the human. Never sent.
-{ type: "directive"; text: string } | 
 // Something failed: the prompt, the agent process, the protocol.
 { type: "error"; message: string };
 

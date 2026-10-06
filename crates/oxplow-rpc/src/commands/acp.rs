@@ -151,11 +151,6 @@ pub async fn acp_transcript(
     Ok(svc.acp.transcript(&thread_id, since_seq))
 }
 
-/// Dismiss the turn-end directive banner.
-pub async fn acp_dismiss_directive(svc: &Services, thread_id: ThreadId) -> Result<(), IpcError> {
-    svc.acp.dismiss_directive(&thread_id).map_err(acp_err)
-}
-
 /// Stop the session and its agent process.
 pub async fn acp_close_session(svc: &Services, thread_id: ThreadId) -> Result<(), IpcError> {
     svc.acp.close(&thread_id).map_err(acp_err)

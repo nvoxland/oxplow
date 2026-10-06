@@ -1,21 +1,15 @@
 //! Per-thread transient runtime state: the page the person has open on a
-//! thread and the effort reviews waiting for its next Stop. Nothing here
+//! thread. Nothing here
 //! outlives the process; agent status is on the event log
 //! (`oxplow_db::SqliteAgentStatusStore`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use oxplow_domain::{EffortId, ThreadId, Timestamp};
+use oxplow_domain::{ThreadId, Timestamp};
 
 #[derive(Default)]
 struct ThreadRuntime {
-    /// Effort ids whose touched_files claim disagreed with the auto-
-    /// diff at the close (`effort.report`) time. Drained by the Stop hook to fire
-    /// a one-shot directive prompting the agent to call
-    /// `effort.amend` (or silently agree). Cleared after the
-    /// directive fires so a single review never repeats.
-    pending_effort_reviews: HashSet<EffortId>,
     /// The page the human currently has open in this thread, as the UI
     /// last reported it. Ephemeral: what an agent reads via
     /// `get_open_page` to "look at what I'm looking at".
@@ -51,9 +45,6 @@ impl ThreadRuntimeRegistry {
         Arc::new(self)
     }
 
-    /// Stash an effort id whose touched_files claim disagreed with
-    /// the snapshot diff. The Stop hook drains the per-thread set
-    /// and surfaces a directive listing each. Idempotent.
     /// Record (or clear, with `None`) the page open in `thread`.
     pub fn set_open_page(&self, thread: &ThreadId, page: Option<OpenPage>) {
         let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -64,25 +55,6 @@ impl ThreadRuntimeRegistry {
     pub fn open_page(&self, thread: &ThreadId) -> Option<OpenPage> {
         let m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         m.get(thread).and_then(|rt| rt.open_page.clone())
-    }
-
-    pub fn record_pending_effort_review(&self, thread: &ThreadId, effort: EffortId) {
-        let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let runtime = m.entry(*thread).or_default();
-        runtime.pending_effort_reviews.insert(effort);
-    }
-
-    /// Take + clear all pending effort review ids for a thread. The
-    /// Stop hook calls this when building its directive — once
-    /// surfaced, the review doesn't re-fire. If the agent ignored
-    /// the prompt that's fine; this matches the "silent agreement"
-    /// path in the design.
-    pub fn take_pending_effort_reviews(&self, thread: &ThreadId) -> Vec<EffortId> {
-        let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(runtime) = m.get_mut(thread) else {
-            return Vec::new();
-        };
-        runtime.pending_effort_reviews.drain().collect()
     }
 }
 

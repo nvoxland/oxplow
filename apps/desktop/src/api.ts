@@ -975,10 +975,6 @@ export async function acpTranscript(threadId: string, sinceSeq: number): Promise
   return unwrap(await commands.acpTranscript(threadId, sinceSeq));
 }
 
-export async function acpDismissDirective(threadId: string): Promise<void> {
-  unwrap(await commands.acpDismissDirective(threadId));
-}
-
 export async function acpCloseSession(threadId: string): Promise<void> {
   unwrap(await commands.acpCloseSession(threadId));
 }

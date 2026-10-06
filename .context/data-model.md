@@ -358,7 +358,7 @@ Protocol.
 **Removed in v42:** the `auto_commit` column (added in v15) and the
 `commit_point` / `wait_point` tables (added in v6/v7). Commits are now
 user-driven only — the harness has no `git commit` path, no queueable
-commit/wait markers, and no auto-commit Stop directive. Consumers
+commit/wait markers, and nothing that steers the agent to commit. Consumers
 running an older DB get the columns/tables dropped on first launch with
 the new binary; existing rows are not migrated forward (no surface
 reads them).

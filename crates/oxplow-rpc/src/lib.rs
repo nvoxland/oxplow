@@ -204,7 +204,6 @@ macro_rules! oxplow_command_table {
                 acp_cancel => $crate::commands::acp::acp_cancel { thread_id: ::oxplow_domain::ThreadId } -> (),
                 acp_respond_permission => $crate::commands::acp::acp_respond_permission { thread_id: ::oxplow_domain::ThreadId, request_id: String, option_id: Option<String> } -> (),
                 acp_transcript => $crate::commands::acp::acp_transcript { thread_id: ::oxplow_domain::ThreadId, since_seq: u64 } -> Option<::oxplow_app::acp::manager::AcpSnapshot>,
-                acp_dismiss_directive => $crate::commands::acp::acp_dismiss_directive { thread_id: ::oxplow_domain::ThreadId } -> (),
                 acp_close_session => $crate::commands::acp::acp_close_session { thread_id: ::oxplow_domain::ThreadId } -> (),
                 list_closed_threads => $crate::commands::threads::list_closed_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,

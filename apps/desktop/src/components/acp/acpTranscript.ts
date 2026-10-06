@@ -20,7 +20,6 @@ export interface AcpViewState {
   /** Ordered by id (creation order). */
   items: TranscriptItem[];
   headSeq: number;
-  directive: string | null;
   usage: ContextUsage | null;
   stderrTail: string[];
   closedReason: string | null;
@@ -35,7 +34,6 @@ export function initialState(): AcpViewState {
     status: "starting",
     items: [],
     headSeq: 0,
-    directive: null,
     usage: null,
     stderrTail: [],
     closedReason: null,
@@ -67,7 +65,6 @@ export function mergeSnapshot(state: AcpViewState, s: AcpSnapshot): AcpViewState
     status: s.status,
     items: upsertItems(base.items, s.items),
     headSeq: Math.max(base.headSeq, s.headSeq),
-    directive: s.directive,
     usage: s.usage,
     stderrTail: s.stderrTail,
     stale: false,
@@ -99,8 +96,6 @@ export function applyEvent(prev: AcpViewState, e: AcpEvent): AcpViewState {
     }
     case "status":
       return { ...state, status: e.status };
-    case "directive":
-      return { ...state, directive: e.text };
     case "usage":
       return { ...state, usage: e.usage };
     case "closed":

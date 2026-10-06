@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   acpCancel,
-  acpDismissDirective,
   acpOpenSession,
   acpRespondPermission,
   acpTranscript,
@@ -51,9 +50,8 @@ interface Props {
  * tool calls with diffs, the plan, permission cards, policy notices) and
  * a prompt box. It replaces the terminal for `agent: acp` threads.
  *
- * oxplow never sends the agent anything on its own. The turn-end
- * directive shows as a banner; "Put in input" only fills the draft, and
- * only the person's Enter sends (see AcpPromptBox).
+ * oxplow never sends the agent anything on its own: only the person's
+ * Enter sends (see AcpPromptBox).
  */
 export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage }: Props) {
   const threadId = thread.id;
@@ -205,34 +203,6 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
               <pre style={preStyle}>{state.stderrTail.join("\n")}</pre>
             </details>
           )}
-        </div>
-      )}
-
-      {state.directive && (
-        <div data-testid="acp-directive" style={{ ...notice("var(--status-waiting)"), margin: "0 10px 6px" }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>oxplow reminder (not sent to the agent)</div>
-          <div style={{ whiteSpace: "pre-wrap" }}>{state.directive}</div>
-          <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              data-testid="acp-directive-put"
-              style={smallButton}
-              onClick={() => {
-                const text = state.directive ?? "";
-                setDraft((d) => (d.trim() ? `${d}\n\n${text}` : text));
-              }}
-            >
-              Put in input
-            </button>
-            <button
-              type="button"
-              data-testid="acp-directive-dismiss"
-              style={smallButton}
-              onClick={() => void acpDismissDirective(threadId).catch(report)}
-            >
-              Dismiss
-            </button>
-          </div>
         </div>
       )}
 
@@ -475,12 +445,6 @@ function Item({
       return (
         <div data-testid="acp-bypass" style={notice("var(--severity-high)")}>
           <strong>{item.label} ran without asking.</strong> oxplow would have blocked it: {item.reason}
-        </div>
-      );
-    case "directive":
-      return (
-        <div style={{ color: "var(--text-muted)", fontSize: 11 }}>
-          oxplow showed a turn-end reminder (not sent to the agent).
         </div>
       );
     case "error":

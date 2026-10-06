@@ -12,8 +12,7 @@
 ///   tool.execute.before -> PreToolUse   (deny response -> throw, which
 ///                          blocks the tool call in opencode)
 ///   tool.execute.after  -> PostToolUse
-///   event session.idle  -> Stop         (block response -> best-effort
-///                          re-prompt via client.session.prompt)
+///   event session.idle  -> Stop         (closes the turn; never refused)
 ///
 /// Everything is best-effort: a hook POST failure must never break the
 /// agent, matching oxplow's side-band hook policy.
@@ -128,19 +127,7 @@ export const OxplowHooks = async ({ client }) => {
       if (!event || event.type !== "session.idle") return;
       const sessionID = event.properties?.sessionID;
       if (await isChildSession(sessionID)) return;
-      const res = await post("Stop", { session_id: sessionID });
-      if (res && res.decision === "block" && res.reason && sessionID) {
-        // Stop-hook steering parity: relay the directive as a fresh
-        // prompt so the agent keeps going, like Claude's blocked Stop.
-        try {
-          await client.session.prompt({
-            path: { id: sessionID },
-            body: { parts: [{ type: "text", text: res.reason }] },
-          });
-        } catch {
-          /* best-effort */
-        }
-      }
+      await post("Stop", { session_id: sessionID });
     },
   };
 };

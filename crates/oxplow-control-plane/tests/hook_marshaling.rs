@@ -222,14 +222,13 @@ async fn pre_tool_use_with_in_progress_task_is_allowed() {
     assert_eq!(body, serde_json::json!({}));
 }
 
+/// A Stop is never refused, whatever is open (inferred work tracking): it
+/// acks `{}` and keeps the agent's final message as the turn's answer.
 #[tokio::test]
-async fn stop_with_in_progress_task_returns_block_directive() {
+async fn a_stop_is_never_refused_and_keeps_the_final_message() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     seed_in_progress_task(&svc, tid).await;
-
-    // Open a turn, then register write activity inside it so the Stop
-    // pipeline's Q&A-turn carve-out doesn't suppress the audit.
     post_hook(
         &cp,
         "UserPromptSubmit",
@@ -249,38 +248,24 @@ async fn stop_with_in_progress_task_returns_block_directive() {
     )
     .await;
 
-    let resp = post_hook(&cp, "Stop", Some(tid), serde_json::json!({})).await;
+    let resp = post_hook(
+        &cp,
+        "Stop",
+        Some(tid),
+        serde_json::json!({ "session_id": "s1", "last_assistant_message": "Did the thing." }),
+    )
+    .await;
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["decision"], "block");
-    let reason = body["reason"].as_str().unwrap();
-    assert!(reason.contains("AUDIT"), "unexpected reason: {reason}");
-    assert!(
-        reason.contains("ship the thing"),
-        "directive should name the open task: {reason}"
+    assert_eq!(body, serde_json::json!({}));
+    let out = oxplow_db::SemanticLayer::new(svc.db.clone())
+        .query_sql("SELECT answer FROM v_agent_turn", vec![], None)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&out.rows).unwrap(),
+        serde_json::json!([["Did the thing."]])
     );
-
-    // A second Stop with an unchanged in_progress set must NOT repeat
-    // the audit (signature dedup) — it falls through to the plain ack.
-    post_hook(
-        &cp,
-        "UserPromptSubmit",
-        Some(tid),
-        serde_json::json!({ "prompt": "again", "session_id": "s1" }),
-    )
-    .await;
-    post_hook(
-        &cp,
-        "PreToolUse",
-        Some(tid),
-        serde_json::json!({
-            "tool_name": "Edit",
-            "tool_input": { "file_path": target.to_string_lossy() },
-        }),
-    )
-    .await;
-    let resp2 = post_hook(&cp, "Stop", Some(tid), serde_json::json!({})).await;
-    assert_eq!(resp2.status(), 200);
 }
 
 async fn set_resume_session_id(services: &Services, thread_id: ThreadId, session: &str) {

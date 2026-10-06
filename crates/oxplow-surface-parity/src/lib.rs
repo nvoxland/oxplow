@@ -414,10 +414,6 @@ pub const MANIFEST: &[Capability] = &[
         "an ACP session's transcript, rendered for the person (tsk281)",
     ),
     ui(
-        "acp_dismiss_directive",
-        "the person dismisses the turn-end banner (tsk281)",
-    ),
-    ui(
         "acp_close_session",
         "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
     ),

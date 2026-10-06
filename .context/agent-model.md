@@ -14,9 +14,9 @@ queue itself, also read [data-model.md](./data-model.md).
 the agent are:
 
 1. The system prompt set at launch (`--append-system-prompt`).
-2. Hook responses returned to Claude over HTTP (especially the Stop hook's
-   `{ decision: "block", reason: "…" }` form, which Claude treats as a
-   fresh instruction to keep going). The default no-op response is
+2. Hook responses returned to Claude over HTTP: `additionalContext` on
+   the prompt and post-tool hooks. A Stop is never refused
+   ([work-tracking.md](./work-tracking.md) "No gates"). The default no-op response is
    `200 {}` (not `202` empty) — Claude Code prints a "non-blocking
    status code" warning into the user's terminal on every empty 202,
    which fills the xterm with noise on Edit/Write-heavy turns. This
@@ -55,7 +55,7 @@ Concretely:
 - The drag/drop + "add to context" path (`agent-input-bus.ts`) is also
   human-initiated: a user gesture publishes text the visible
   `TerminalPane` pastes. oxplow synthesizes nothing on its own.
-- Steering (nudges, `<session-context>`, the Stop-hook "keep going")
+- Steering (nudges, `<session-context>`)
   reaches the agent through **hook responses** that the agent's OWN
   harness injects (the invariant above), never by oxplow writing to the
   terminal.
@@ -92,10 +92,9 @@ Code ever ships a hook-surface knob for this, revisit.
 **Caveat — the first turn still needs a user prompt.** "Runtime never
 prompts" is about auto-progression, not cold-start. When the agent is
 sitting idle at its shell prompt (e.g. just after `oxplow` opens a
-fresh project, or after a `Stop` that didn't block), creating a work
+fresh project, or after a `Stop`), creating a work
 item does **not** kick it off. Someone — a human, or a harness typing
-into the xterm — has to send the first `UserPromptSubmit`. Stop-hook
-chaining only begins after the agent has done at least one turn.
+into the xterm — has to send the first `UserPromptSubmit`.
 
 ## Driving from automation
 
@@ -127,9 +126,8 @@ oxplow agent:
   Either run `git commit` yourself in the terminal, click commit in
   the Files panel, or tell the agent in chat "go run `git commit -m
   …`". The runtime never invokes `git commit` and there are no
-  queueable commit/wait point markers. The Stop-hook does not emit
-  any commit-related directives.
-- **task lifecycle.** Create → Stop-hook picks next ready item →
+  queueable commit/wait point markers.
+- **task lifecycle.** Create →
   agent marks `in_progress` → agent works → agent marks `done`
   when the work is complete. The user can reopen by flipping
   back to `in_progress`. Polling "is everything done?" treats `done`
@@ -271,10 +269,7 @@ details.
   write-guard + filing enforcement work; opencode's lowercase tool
   names and `filePath` arg are mapped to Claude's `Edit`/`Write`/… and
   `file_path`), `tool.execute.after` → `PostToolUse`, and the
-  `session.idle` event → `Stop`. A blocked Stop (`{decision:"block",
-  reason}`) is relayed best-effort as a fresh prompt via
-  `client.session.prompt` — Stop-hook steering parity, pending live
-  verification. Subagent sessions (`parentID` set) are filtered out of
+  `session.idle` event → `Stop`. Subagent sessions (`parentID` set) are filtered out of
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
   turn lifecycle.
   Skills + slash commands ship too: opencode only discovers SKILL.md
@@ -449,7 +444,9 @@ to `runtime.handleHookEnvelope`, which:
    `.context/extensions.md` → "Advisories"): with `oxplow-bundled`
    enabled, the metric deltas block and one-shot threshold crossings. The
    pieces are joined with a blank line; any may be absent.
-6. For `Stop`: runs `computeStopDirective` (below).
+6. For `Stop`: closes the turn, keeping the payload's
+   `last_assistant_message` as its `answer`, and acks `{}`. A stop is
+   never refused.
 
 **Side-band hook steps are best-effort by design.** The PostToolUse
 extras (collection observations, wiki-page attribution) are individually
@@ -463,7 +460,7 @@ response, so the control plane races the whole post-auth pipeline
 against a 5s timeout (`HOOK_HANDLING_TIMEOUT` /
 `bounded_hook_response` in `crates/oxplow-control-plane/src/lib.rs`).
 On expiry it logs a warning and returns the generic ack — tool call
-allowed, no directive — so a wedged DB (e.g. the writer lock held by
+allowed — so a wedged DB (e.g. the writer lock held by
 a snapshot flush) can never stall the agent. Availability over
 enforcement: the MCP tools re-check write-guard + filing at the call
 site, so a timed-out PreToolUse deny is still caught there.
@@ -534,7 +531,7 @@ the same JSON.
   - plan (replaced within a turn);
   - permission;
   - policy-denied, bypass;
-  - directive, error.
+  - error.
 - **Ids and seqs:** each item has a stable `id`, plus a `seq` that is bumped from one counter every time the item changes. `since(seq)` returns new and changed items, and clients upsert them by `id`.
 - **Chunks** of the same kind coalesce into the trailing item.
 - **`usage_update`** is transcript state (the context meter), not an item.
@@ -543,7 +540,7 @@ the same JSON.
 ## ACP agents: sessions (tsk337)
 
 **Shape.**
-- `Services.acp` (`acp/manager.rs`) holds each thread's command sender and a shared `SessionView` (status, transcript, directive, stderr tail).
+- `Services.acp` (`acp/manager.rs`) holds each thread's command sender and a shared `SessionView` (status, transcript, stderr tail).
 - One actor task per session (`acp/session.rs`) owns the connection.
 - `wire::run` feeds every agent message into ONE channel, and the prompt's result is an ordered barrier, so the actor sees updates, requests and turn end in wire order.
 - Events for every session go out on one broadcast channel (`AcpEvent`).
@@ -559,7 +556,7 @@ the same JSON.
 - `UserPromptSubmit` on the person's prompt;
 - `PreToolUse` on every policy check;
 - `PostToolUse` plus `AgentContext::post_tool_context` on each finished tool call (per canonical event);
-- `Stop` with the turn's reported counts on its body (counted by the `token_usage.turns` reactor), then the closed turn's signals read from the log and `AgentPolicy::on_turn_end` for the directive;
+- `Stop` with the turn's reported counts and its last agent message on its body (counted by the `token_usage.turns` reactor; the message is the turn's answer);
 - `Interrupt` when the agent goes away.
 
 **Starting.**
@@ -667,8 +664,8 @@ the same JSON.
 
 ## Agent policy (shared by every transport, tsk333)
 
-The write guard, filing enforcement and the Stop directive are one
-policy that every agent transport asks, not logic in the hook route.
+The write guard and filing enforcement are one policy that every agent
+transport asks, not logic in the hook route.
 
 - **Pure rules** live in `crates/oxplow-runtime/src/policy.rs`.
   `decide_tool(ToolIntent{label, kind, paths}, PolicyFacts)` returns
@@ -688,8 +685,6 @@ policy that every agent transport asks, not logic in the hook route.
   - `check_command(thread, spec)` is the command bus's agent gate
     ([commands.md](./commands.md)): an agent may run a command only when
     its spec admits agents. `DenyLayer::Command` names the refusal.
-  - `on_turn_end(svc, thread, signals)` is the Stop pipeline below. It
-    owns `StopState`, the reason builders and `describe_run`.
   - `claude_intent(body)` maps a Claude-shaped payload to an intent.
 - **Recording is the ingest's and the pump's; context is shared.** Every
   transport hands its envelopes to `HookIngestService::ingest`, which logs
@@ -703,255 +698,30 @@ policy that every agent transport asks, not logic in the hook route.
   - `prompt_context` builds the session-context block, advisories and
     decisions, deduped per session.
   - `reset_session` clears the per-session baselines. Session and resume
-    tracking live in the hook ingest (P3.3); turn signals are read from the
-    log (`TurnSignals::of_turn`, P3.4).
+    tracking live in the hook ingest (P3.3).
   - Transports that don't speak Claude's tool vocabulary build a
     `CanonicalToolEvent` (`crates/oxplow-app/src/acp/mapping.rs`) and ingest
     its `to_payload()`. That is the one place the canonical shape is built;
     the ingest and every reactor key on Claude's tool names.
 - **Transports only render the answer.**
-  - The hook route renders `hookSpecificOutput` for a deny and
-    `{decision:"block", reason}` for Stop.
-  - An ACP agent gets an automatic permission reject or an fs error,
-    and its directive is shown to the human.
+  - The hook route renders `hookSpecificOutput` for a deny.
+  - An ACP agent gets an automatic permission reject or an fs error.
 - **Byte-for-byte pins.** `crates/oxplow-control-plane/tests/hook_goldens.rs`
   pins the Claude responses byte for byte (`UPDATE_GOLDENS=1` rewrites
   them; a changed golden is a changed agent contract).
 
-## Stop-hook pipeline
+## Stop hook
 
-The decision logic lives in `decide_stop_directive` (a pure function in
-`crates/oxplow-runtime/src/stop_hook.rs`). `AgentPolicy::on_turn_end`
-(`crates/oxplow-app/src/agent_policy.rs`) builds a `ThreadSnapshot` from
-the live stores, calls the pure function, then applies any returned side
-effects (the audit signature, the filed-but-didn't-ship flag). Keeping the decision
-separate from the side effects lets every branch be unit-tested with a
-fixture.
-
-**Q&A short-circuit.** Before any branch runs, the pipeline checks the
-turn's `TurnSignals` (`crates/oxplow-app/src/agent_policy.rs`). They are
-read from the log after the Stop is ingested, for **the turn that Stop
-closed** (`IngestOutcome.closed_turn`): `had_activity` when any
-`agent.tool.requested` / `agent.tool.finished` is anchored to it,
-`had_writes` when one of them is Edit / Write / MultiEdit / NotebookEdit (a
-refused write still counts). Anchoring by turn id means neither an earlier
-turn nor a concurrent thread's can leak in (P3.4; it replaced a
-time-window scan of the in-memory hook ring). When the turn had no tool
-activity it was pure Q&A — the agent answered or asked the user something
-with no real work — and **every directive is suppressed** so the agent
-stays stopped waiting for the user. Audit and filing-enforcement are both
-skipped. A Stop that closed no turn has no signals, read as "unknown →
-don't suppress".
-
-**Awaiting-user gate.** A turn that *did* have qualifying tool
-activity (e.g. filed a task) but ended with the agent asking the
-user a question still needs to stop cleanly — the Q&A short-circuit
-won't fire because activity ≠ false. The agent signals this
-explicitly via `mcp__oxplow__await_user({ threadId, question })`, which
-logs `agent.status.changed{awaiting_user}` anchored to the open turn.
-`TurnSignals.awaiting_user` is true when such an event is anchored to
-the closed turn (the status a Stop sets is anchored to the turn it
-closed, so a Stop-payload sentinel counts too); then the Stop pipeline's
-top branch returns "allow stop" and **suppresses every directive**
-(in-progress audit, filing-enforcement) (tsk504). The next turn starts
-clean.
-
-**Subagent carve-out.** `TurnSignals.subagent_in_flight` is true when
-the turn's allowed subagent requests (`SUBAGENT_TOOLS`: `Task`, `Agent`)
-outnumber its finished ones; the in-progress audit then stays quiet
-while the subagent still works. The status derivation counts open
-subagents from the same list.
-
-The same `await_user` call also drives the **rail agent-status dot**
-(tsk30). The MCP handler flips `agent_status` to `AwaitingUser` with the
-*question text* on `detail` (not a bare `"await_user"` marker) **and
-emits `AgentStatusChanged` itself**, so the dot turns "awaiting you"
-immediately rather than lagging until the turn's `Stop`. Both the
-`Stop` branch AND the `PreToolUse`/`PostToolUse` derived-emit branch in
-`HookIngestService` then **preserve** an in-turn `AwaitingUser` instead
-of overwriting it — the real `Stop` payload carries no sentinel and the
-`derive_thread_status` reducer can't see the synthetic marker, so
-without these guards the dot would either vanish when the turn ends or
-flicker off on the `await_user` call's own `PostToolUse`
-(the logged-status checks in `crates/oxplow-app/src/hook_ingest.rs`). The
-flag is cleared by the next `UserPromptSubmit`; a resume that skips that
-hook is the one path where the dot can stay stale (rare). The question rides
-`AgentStatusChanged { detail }` to the renderer, which collapses
-`awaiting_user → "awaiting"` (`collapseAgentStatusState` in
-`apps/desktop/src/api.ts`) and shows a distinct blue pulsing dot whose
-tooltip is the question — so a *different* thread parked on your answer
-is visible from the rail without switching to it. It survives a
-restart: the status is the thread's newest logged `agent.status.changed`.
-
-**Filing enforcement (writer thread, PreToolUse).** Enforcement runs
-in the PreToolUse hook (`buildFilingEnforcementPreToolDeny` in
-`crates/oxplow-runtime/src/filing.rs`), not the Stop hook. When the agent invokes
-Edit / Write / MultiEdit / NotebookEdit on a writer thread and **no effort
-is open in its stream**, the hook returns `permissionDecision: "deny"`
-and the edit is rejected before it lands (P2.7, tsk431). The claim is an
-open **effort**, not a task status: an effort opens in the same
-transaction as a task filed or moved `in_progress`
-(`work_item.create` / `work_item.update` / `work_item.transition`), or
-through `run_command effort.open {work_item}` for another provider's work
-item; an `in_progress` row alone isn't a claim
-(recovery gives it an effort at boot). The deny text names both doors.
-It files a new concern the one way that works on any tracker: common
-fields only, no tracker named, on the agent's thread by default (every
-create files on the active tracker, tsk1058). When the active tracker
-isn't oxplow's own (`activeProviders`, P7.A2), it opens by saying so —
-moving its items to `in_progress` opens no effort, so `effort.open` on
-the ref: `PolicyFacts.active_work_items`, from
-`Services.work_items.active()`.
-**A `ready`-status filing call does NOT satisfy the guard** — `ready` is
-backlog ("noticed for later"), only an open effort is a commitment to
-ship now. The check (`stream_has_open_effort` in
-`crates/oxplow-app/src/agent_policy.rs` → `SqliteEffortStore::stream_has_open_effort`,
-one `EXISTS` over `effort JOIN threads`) runs live on each PreToolUse, so
-a filing that just landed is reflected immediately; a lookup failure
-denies. **The claim is scoped to the whole STREAM** (tsk133): a stream
-has exactly one active writer, so an effort on *any* thread in the
-writer's stream satisfies the guard — cross-thread dispatch needs no
-`move_task` first. This does **not** weaken the one-writer invariant:
-queued/closed threads still can't write at all (the write guard runs
-first). `PolicyFacts.has_open_effort` / `FilingContext.has_open_effort`
-carry it into the runtime.
-Bash is **excluded** — shell
-commands routinely mutate the worktree as a side effect (`git
-merge`, `git pull`, codegen, formatters) without representing
-authored change worth filing. The Stop-hook audit still fires for any
-open effort, so real edits made via Bash under an open item are
-unaffected.
-
-**The Stop audit walks the stream's open efforts** (P2.7):
-`open_efforts_in_stream` lists them (`list_open_for_stream`) as
-`[eff12] tsk42 — <title>`, or `[eff12] issues:ENG-12` for another
-provider's item, and the directive says to close an oxplow task with
-`run_command command.sequence [work_item.transition → done,
-effort.report]` (or `work_item.transition` it to todo/blocked/canceled)
-and to `effort.close` a foreign item. Its dedupe signature is over the
-effort ids plus each task's `updated_at` + note count, so touching a
-task re-arms it. An `in_progress` row with no effort doesn't hold the
-turn open.
-
-**Plan-mode plan file is exempt** (`isPlanModePlanFile` in
-`crates/oxplow-runtime/src/filing.rs`). Writes whose `tool_input.file_path` lands
-under `$HOME/.claude/plans/<slug>.md` skip the filing guard — that
-file is owned by the harness's plan workflow, not project work, and
-plan mode denies every other tool while it's on, so blocking the
-plan-file write would dead-lock the workflow. The carve-out is
-narrow: only paths under `.claude/plans/` ending in `.md`.
-
-**Mid-turn-prompt reminder (UserPromptSubmit).** When a new
-`UserPromptSubmit` arrives on the writer thread and the thread
-already has any `in_progress` item from a prior prompt, the runtime
-injects a `<prior-prompt-in-progress-reminder>` block into
-`additionalContext` via `buildPriorPromptInProgressReminder`. It
-names the open item and tells the agent to either file a new row
-(separate concern) or explicitly reopen the existing one (fix/redo)
-— so multi-prompt turns don't quietly pile new asks into whichever
-item was already open. Pairs with the recent-done reminder: that one
-fires when the prior item already closed, this one fires when it's
-still running. Builder lives in `crates/oxplow-runtime/src/lib.rs` next to
-`buildRecentDoneReminder`.
-
-**Ready-match nudge (UserPromptSubmit).** Sibling of the prior-prompt
-reminder, but for `ready` rows. `buildReadyMatchReminder(items,
-promptText)` tokenizes the prompt and each ready item's title +
-description into lowercase alphanumeric runs ≥ 4 chars (excluding a
-small stop-word list), scores intersection size, and emits a
-`<ready-item-match-reminder>` block iff exactly one ready item has
-≥ 2 shared tokens AND no other ready item is within 1 of its score.
-Catches the failure mode where the agent files a fresh task that
-duplicates a ready row already on the board, instead of flipping the
-existing row to in_progress. Conservative — silent on ambiguity, since
-the safer default is "file a new row" if the agent isn't confident
-the prompt is the same concern.
-
-**Wiki-capture is a UserPromptSubmit hint, not a Stop directive.**
-The wiki is for any non-trivial exploratory Q&A — codebase
-walkthroughs AND general synthesis (design rationale, comparisons,
-tradeoffs, recommendations, advice). Two regex families in
-`buildWikiCaptureHint(prompt)` cover both: a codebase pattern (matches
-"how does", "explain", "trace", "describe", "walk me through", "give
-me an overview", "high-level architecture", "summarize the codebase",
-etc.) and a general-synthesis pattern (matches "why does/did/should",
-"what's the difference", "compare X to Y", "tradeoffs", "pros and
-cons", "should I", "best way", "is it better", "advice on",
-"recommend", "rationale behind"). Either match injects a
-`<wiki-capture-hint>` block into `additionalContext`. The hint points
-the agent at the `oxplow-wiki-capture` skill (search existing notes →
-append-or-create → `run_command knowledge.write_page`) and notes that
-the command is open to read-only threads too. Fix/feature/yes-ack prompts pay no token cost — the
-builder returns `null`. The Stop hook no longer carries a
-wiki-capture branch; the old directive fired post-hoc, after the
-answer had already gone to chat with no durable home. The standing
-WIKI CAPTURE line in `buildThreadAgentPrompt` carries the same
-broadened framing — wiki ≠ codebase-only.
-
-The pipeline runs in priority order:
-
-1. **Writer thread with `in_progress` tasks.** Block with the audit
-   directive built by `buildInProgressAuditStopReason` — lists every
-   `in_progress` item on the thread (id + title) and instructs the agent
-   to reconcile each: still active → leave alone; work complete
-   → the `command.sequence` of `work_item.transition` (`to: done`) and
-   `effort.report`;
-   stuck → `blocked`; paused → `ready`; obsolete → `canceled`. Tasks
-   persist across turn boundaries; without this audit step stale
-   `in_progress` rows pile up because nothing forces a settle.
-   **No-change suppression.** The runtime keeps a per-thread fingerprint
-   (`lastAuditSignatureByThread`, signature = sorted
-   `id|updated_at` over the in_progress set) of the last set
-   it audited. On the next Stop, if the current signature matches the
-   recorded one — same items, no `work_item.update` /
-   `work_item.transition` (which bumps `updated_at`) — the directive is
-   suppressed. Any
-   change re-arms the audit. This stops the tight ack-loop where the
-   agent answers "still in progress" → Stop fires → identical audit
-   nudge → same answer, costing the user a wall of repeated lines and
-   model tokens. See the original ticket history.
-2. **Filed-but-didn't-ship advisory.** Fires when the turn filed at
-   least one new `ready` task, made zero project edits, and has
-   nothing `in_progress` — the "user said do X, agent logged it as
-   backlog and stopped" misread. Same dedup pattern as the audit
-   branch: a per-thread `filedButDidntShipFiredByThread` flag is set
-   by a `record-filed-but-didnt-ship-fired` side effect after the
-   first fire, suppressing re-emission on subsequent Stops within the
-   same prompt gap. Cleared on UserPromptSubmit alongside the other
-   per-turn filing flags. Without dedup the advisory loops forever
-   because its triggering condition (ready item filed, no edits) is a
-   property of accumulated turn state and never changes between Stop
-   acks.
-3. **Otherwise.** Allow stop.
-
-**No commit / wait-point branches.** The runtime never drives `git
-commit` and there are no queueable commit / wait-point markers. Commits
-are user-driven (CLI / Bash / Files-panel commit). The pipeline never
-emits commit-shaped directives.
-
-**Cross-turn queue progression is user-driven.** There is intentionally
-no Stop-hook directive that pushes the agent onto the next ready work
-item. When the agent finishes its current obligations and Stops, it
-stops — the user resumes queue work by typing a prompt or running the
-plugin-emitted `/work-next` slash command (which calls
-`read_task_options` and dispatches to a `general-purpose` subagent per
-the `oxplow-runtime` skill).
-
-**Subagent-in-flight carve-out.** The runtime tracks per-thread `Task`
-tool calls (PreToolUse → +1, PostToolUse → -1) in
-`pendingSubagentsByThread`. When the count is non-zero on a Stop, the
-audit branch is suppressed — re-emitting it while the parent is
-mid-`Task` produces a visual loop where the parent acks each Stop with
-"still actively being worked by background subagent" while still
-waiting on the subagent.
-
-### Forking a thread
-
-An agent forks its thread with `run_command thread.create { stream,
-title, from: "thread:<id>" }` (P8.A3): a new thread on the same stream,
-`queued` behind the writer, running the source's agent (and ACP agent).
-An agent creates threads only on its own stream; moving work across is
-`work_item.move`.
+A Stop is never refused. oxplow used to block stops (an audit of open
+efforts, an effort review, a filed-but-didn't-ship check) to make the
+agent declare and close its work; that is gone
+([work-tracking.md](./work-tracking.md)). The Stop ingest closes the
+turn, keeps `last_assistant_message` (Claude's Stop payload; ACP sends
+its transcript's last agent message under the same key,
+`hook_ingest::LAST_ASSISTANT_MESSAGE`) as the turn's `answer`, takes the
+turn-end snapshot, sets the status (keeping `awaiting_user` when the
+turn set it) and acks `{}`. ACP's `turn_ended` and opencode's
+`session.idle` do the same and nothing else.
 
 ## Orchestrator pattern
 
@@ -1256,7 +1026,7 @@ is `{ to: done|canceled, native_state: archived }`.
   reduction, never a reason to lose a claim.
 - **Files are one kind of a generic claim→reconcile mechanic.** The same
   CLAIM (agent asserts) / OBSERVE (oxplow detects independently) /
-  RECONCILE (residue at close) / SURFACE (Stop directive) loop attributes
+  RECONCILE (residue at close) / SURFACE (the report's file review) loop attributes
   **agent-work runs** (tests, analysis, coverage) too, keyed by
   `(effort, "run", "run:<id>")` rows in the `effort_attribution` ledger,
   where `<id>` is the run's `metric_capture` id — the capture IS the run
@@ -2108,7 +1878,7 @@ late) still goes to it, and `record_file` clears the path from the close's
 unattributed list. With no anchor (zero or two-plus efforts open) the
 thread's open efforts are scored by target overlap, strict unique winner
 only (tsk186); a tie declines and the file falls to close-time
-reconciliation, surfacing in the EFFORT REVIEW. The close waits for the
+reconciliation, surfacing in the effort's file review. The close waits for the
 claim reactor first: `EffortLifecycleConsumer` settles `effort.claim`
 (bounded, 10 s) before `on_effort_closed` reconciles, so the effort's
 last edits are counted. The claim is idempotent (`record_file` is
@@ -2229,26 +1999,6 @@ Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
 - **Persist across turns** — if a turn ends with work mid-flight
   (asked a question, Stop fired before finishing), the task stays
   `in_progress`. Only `done` when the work is actually shipped.
-
-### Stop-hook directives related to tasks
-
-The Stop-hook pipeline (see "Stop-hook pipeline" above) carries one
-task-shaped branch on the writer thread:
-
-- **Open-effort audit (priority 4).** If any effort is open in the
-  stream, the runtime emits `build_open_effort_audit_reason` listing
-  each (`[eff12] tsk42 — title`, or a foreign item's label) and
-  instructing the agent to reconcile: still active → leave alone;
-  criteria met → `command.sequence [work_item.transition → done,
-  effort.report]` (or `effort.close` for a foreign item); stuck →
-  `blocked`; paused → `todo`; obsolete → `canceled`
-  (P2.7).
-
-There is intentionally no ready-work branch — cross-turn queue
-progression is user-driven (a plain prompt, or `/work-next` shipped
-via the plugin). If a turn spawns real follow-up work, the agent
-files it with `mcp__oxplow__run_command` `work_item.create` (an epic:
-the parent, then each child with `parent_ref`).
 
 ## Related
 

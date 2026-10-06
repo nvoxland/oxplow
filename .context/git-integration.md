@@ -507,8 +507,7 @@ header toolbar whenever `vcsEnabled && uncommittedPaths.length > 0`.
 Clicking it opens a small `CommitDialog` with a commit-message
 textarea; submitting runs the `vcs.commit` command (`vcsCommit`). This
 is the UI entry point for
-user-driven commits. The agent doesn't drive commits — the Stop-hook
-emits no commit directives.
+user-driven commits. oxplow never steers the agent to commit.
 
 Button carries `data-testid="files-commit"`; the dialog's message
 textarea is `files-commit-message` and the submit button is
@@ -617,7 +616,6 @@ The cleanliness check and the head read go through the VCS capability
 - [vcs.md](./vcs.md) — the VCS capability core reads git through.
 - [data-model.md](./data-model.md) — schema overview, including the
   `page_ref` table the commit indexer writes into.
-- [agent-model.md](./agent-model.md) — Stop-hook pipeline (no commit
-  branches; commits are user-driven), plus the `list_backlinks` /
+- [agent-model.md](./agent-model.md) — commits are user-driven; the `list_backlinks` /
   `list_outbound` MCP tools that read the commit indexer's output.
 - [editor-and-monaco.md](./editor-and-monaco.md) — blame overlay UI.

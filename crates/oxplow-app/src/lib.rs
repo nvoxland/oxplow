@@ -1073,7 +1073,7 @@ impl Services {
             db.clone(),
             layout.project_dir.clone(),
         )));
-        let agent_policy = Arc::new(agent_policy::AgentPolicy::default());
+        let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(
                 db.clone(),
@@ -1148,7 +1148,6 @@ impl Services {
                 efforts: effort_store.clone(),
                 snapshots: snapshot_store.clone(),
                 attribution: attribution_store.clone(),
-                runtime: thread_runtime.clone(),
                 sql: sql.clone(),
                 db: db.clone(),
                 vocabulary: vocabulary.clone(),

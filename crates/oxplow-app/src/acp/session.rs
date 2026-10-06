@@ -52,7 +52,6 @@ pub enum AcpStatus {
 pub enum AcpEventBody {
     Item { item: Box<TranscriptItem> },
     Status { status: AcpStatus },
-    Directive { text: Option<String> },
     Usage { usage: ContextUsage },
     Closed { reason: Option<String> },
 }
@@ -112,7 +111,6 @@ pub struct SessionView {
     pub generation: u64,
     pub status: AcpStatus,
     pub transcript: Transcript,
-    pub directive: Option<String>,
     pub session_id: Option<String>,
     /// The agent's last stderr lines, for a failed start or a crash.
     pub stderr_tail: Vec<String>,
@@ -127,7 +125,6 @@ impl SessionView {
             generation,
             status: AcpStatus::Starting,
             transcript: Transcript::default(),
-            directive: None,
             session_id: None,
             stderr_tail: Vec::new(),
         }
@@ -789,15 +786,15 @@ impl Actor {
                 None
             }
         };
-        let directive = self
-            .host
-            .turn_ended(self.thread(), &self.session_id, tokens.as_ref())
+        let answer = self.view.lock().transcript.last_answer();
+        self.host
+            .turn_ended(
+                self.thread(),
+                &self.session_id,
+                answer.as_deref(),
+                tokens.as_ref(),
+            )
             .await;
-        if let Some(text) = directive {
-            self.view.lock().directive = Some(text.clone());
-            self.push(ItemBody::Directive { text: text.clone() });
-            self.emit(AcpEventBody::Directive { text: Some(text) });
-        }
         self.set_status(AcpStatus::Idle);
     }
 

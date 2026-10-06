@@ -16,9 +16,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::host::AcpHost;
 use super::model::ContextUsage;
-use super::session::{
-    AcpError, AcpEvent, AcpEventBody, AcpStatus, Actor, Command, SessionSpec, SessionView,
-};
+use super::session::{AcpError, AcpEvent, AcpStatus, Actor, Command, SessionSpec, SessionView};
 use super::transcript::TranscriptItem;
 use super::wire;
 
@@ -40,7 +38,6 @@ pub struct AcpSnapshot {
     /// client's transcript instead of merging into it.
     pub generation: u64,
     pub status: AcpStatus,
-    pub directive: Option<String>,
     pub usage: Option<ContextUsage>,
     /// The highest `seq` in the transcript; ask `since` this next time.
     pub head_seq: u64,
@@ -345,29 +342,11 @@ impl AcpManager {
             agent: v.agent.clone(),
             generation: v.generation,
             status: v.status,
-            directive: v.directive.clone(),
             usage: v.transcript.usage().cloned(),
             head_seq: v.transcript.head_seq(),
             items: v.transcript.since(since),
             stderr_tail: v.stderr_tail.clone(),
         })
-    }
-
-    /// The person dismissed the directive banner.
-    pub fn dismiss_directive(&self, thread: &ThreadId) -> Result<(), AcpError> {
-        let sessions = self.sessions.lock();
-        let h = sessions.get(thread).ok_or(AcpError::NotOpen)?;
-        let generation = {
-            let mut v = h.view.lock();
-            v.directive = None;
-            v.generation
-        };
-        let _ = self.events.send(AcpEvent {
-            thread_id: thread.to_string(),
-            generation,
-            body: AcpEventBody::Directive { text: None },
-        });
-        Ok(())
     }
 
     /// Stop the session and its agent process.

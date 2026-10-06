@@ -17,7 +17,6 @@
 mod common;
 
 use common::boot;
-use oxplow_domain::refs::build::work_item_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
@@ -186,8 +185,9 @@ async fn allowed_edit_and_post_tool_ack() {
     golden("post_tool_edit_ack", &ack, &root);
 }
 
+/// A Stop is acked, whatever is open: oxplow never refuses one.
 #[tokio::test]
-async fn stop_in_progress_audit() {
+async fn stop_ack() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     seed_task(&svc, tid, "ship the thing").await;
@@ -199,44 +199,14 @@ async fn stop_in_progress_audit() {
     )
     .await;
     post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
-    let stop = post(&cp, "Stop", tid, serde_json::json!({ "session_id": "s1" })).await;
-    golden("stop_in_progress_audit", &stop, &root);
-}
-
-#[tokio::test]
-async fn stop_effort_review_with_an_unattributed_run() {
-    use oxplow_app::EffortStore as _;
-    let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
-    let task = seed_task(&svc, tid, "reviewed work").await;
-    let effort = svc
-        .effort_store
-        .find_open_for_work_item(&work_item_ref(task))
-        .await
-        .unwrap()
-        .expect("filing in_progress opened its effort");
-    svc.attribution_store
-        .set_state(
-            &effort.id,
-            "run",
-            "run:77",
-            oxplow_db::attribution_store::STATE_UNATTRIBUTED,
-            None,
-        )
-        .await
-        .unwrap();
-    svc.thread_runtime
-        .record_pending_effort_review(&tid, effort.id);
-    post(
+    let stop = post(
         &cp,
-        "UserPromptSubmit",
+        "Stop",
         tid,
-        serde_json::json!({ "prompt": "finish", "session_id": "s1" }),
+        serde_json::json!({ "session_id": "s1", "last_assistant_message": "Shipped." }),
     )
     .await;
-    post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
-    let stop = post(&cp, "Stop", tid, serde_json::json!({ "session_id": "s1" })).await;
-    golden("stop_effort_review_unattributed_run", &stop, &root);
+    golden("stop_ack", &stop, &root);
 }
 
 #[tokio::test]

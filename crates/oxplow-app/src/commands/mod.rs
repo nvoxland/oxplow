@@ -2025,7 +2025,7 @@ mod tests {
             oxplow_domain::vocabulary::VocabularyHandle::core(),
         );
         let pump = Arc::new(EventPump::new(db.clone(), log.clone(), vec![]));
-        let bus = CommandBus::new(db.clone(), log, Arc::new(AgentPolicy::default()), pump);
+        let bus = CommandBus::new(db.clone(), log, Arc::new(AgentPolicy), pump);
         db.clone()
             .transaction(|tx| {
                 // The table the kv commands write, and the thread `agent()`
