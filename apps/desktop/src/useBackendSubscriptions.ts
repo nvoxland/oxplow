@@ -4,7 +4,6 @@ import {
   type AgentKind,
   type AgentStatus,
   type BacklogState,
-  formatAgentStallAlert,
   generatedPaths,
   getConfig,
   getThreadState,
@@ -12,7 +11,6 @@ import {
   listStreams,
   onRemoteReconnect,
   type Stream,
-  subscribeAgentStallAlerts,
   subscribeAgentStatus,
   subscribeOxplowEvents,
   subscribeWorkspaceContext,
@@ -73,7 +71,6 @@ export interface BackendSubscriptionApi {
   getThreadState: typeof getThreadState;
   listStreams: typeof listStreams;
   subscribeAgentStatus: typeof subscribeAgentStatus;
-  subscribeAgentStallAlerts: typeof subscribeAgentStallAlerts;
   listAgentStatuses: typeof listAgentStatuses;
   getConfig: typeof getConfig;
   onRemoteReconnect: typeof onRemoteReconnect;
@@ -87,7 +84,6 @@ const defaultApi: BackendSubscriptionApi = {
   getThreadState,
   listStreams,
   subscribeAgentStatus,
-  subscribeAgentStallAlerts,
   listAgentStatuses,
   getConfig,
   onRemoteReconnect,
@@ -119,7 +115,6 @@ export function useBackendSubscriptions(
     getThreadState,
     listStreams,
     subscribeAgentStatus,
-    subscribeAgentStallAlerts,
     listAgentStatuses,
     getConfig,
     onRemoteReconnect,
@@ -290,14 +285,4 @@ export function useBackendSubscriptions(
       unsubReconnect();
     };
   }, [setAgentStatuses, setAgentQuestions]);
-
-  useEffect(() => {
-    // Stall watchdog nudge: the backend fires this once per stall
-    // episode when in_progress work sits on a non-running agent past
-    // the alert threshold. Surface it as a toast (no onUndo — it is
-    // informational; the fix is to re-prompt the agent).
-    return subscribeAgentStallAlerts((alert) => {
-      showToast({ message: formatAgentStallAlert(alert), actionLabel: "Dismiss" });
-    });
-  }, []);
 }

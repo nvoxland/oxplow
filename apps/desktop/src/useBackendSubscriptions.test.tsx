@@ -27,7 +27,6 @@ function makeApi(): BackendSubscriptionApi {
   return {
     subscribeWorkspaceContext: noopSub,
     subscribeAgentStatus: noopSub,
-    subscribeAgentStallAlerts: noopSub,
     subscribeOxplowEvents: ((handler: Handler) => {
       oxplowHandlers.push(handler);
       return () => {
@@ -112,9 +111,9 @@ test("does not re-subscribe across re-renders (no churn)", () => {
 test("unsubscribes every subscription on unmount", () => {
   const { unmount } = render(<Harness workStates={{}} />);
   unmount();
-  // 5 oxplow + workspace-context + agent-status + stall-alerts = 8, plus
-  // 3 reconnect handlers (tasks, config, agent-status) = 11.
-  expect(unsubCount).toBe(11);
+  // 5 oxplow + workspace-context + agent-status = 7, plus 3 reconnect
+  // handlers (tasks, config, agent-status) = 10.
+  expect(unsubCount).toBe(10);
 });
 
 test("registers reconnect handlers for the core stores", () => {

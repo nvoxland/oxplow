@@ -4290,14 +4290,6 @@ export type OxplowEvent =
  */
 detail: string | null } | 
 /**
- *  The stall watchdog noticed `thread_id` has in_progress tasks
- *  but its agent has not been running for longer than the alert
- *  threshold — the queue is silently stalled. Emitted once per
- *  stall episode (re-armed when the agent runs again or the
- *  in_progress bucket empties). Renderer surfaces a toast.
- */
-{ kind: "agentStallAlert"; threadId: ThreadId; inProgressCount: number; waitingMs: number } | 
-/**
  *  A snapshot take recorded something new: a new snapshot (its
  *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
  *  current snapshot re-stamped with a new HEAD. Emitted after the

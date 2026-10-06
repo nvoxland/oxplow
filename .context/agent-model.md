@@ -1768,18 +1768,12 @@ a re-derive, `AgentStallWatch`
 (`crates/oxplow-app/src/agent_stall_watch.rs`, spawned from `boot.rs`)
 re-derives every thread once a minute and pushes
 `AgentStatusChanged { state: Stalled }` so the renderer's dot recovers
-on its own. The same watchdog emits `AgentStallAlert { thread_id,
-in_progress_count, waiting_ms }` — once per stall episode, re-armed
-when the agent runs again or the in_progress bucket empties — whenever
-a thread holds in_progress tasks but its agent is not working. A
-**Stalled** derivation alerts immediately (its silence threshold has
-already elapsed), so a genuine death surfaces stranded uncommitted work
-within ~5 min; an **Idle** thread (clean Stop, never resumed) waits the
-full `AGENT_STALL_ALERT_AFTER_MS` window first; **AwaitingUser** never
-alerts. The renderer collapses status as running → `working`, stalled →
+on its own. It raises nothing about in_progress tasks: a task left in
+progress while its agent is idle is normal (nothing marks work done, and
+the agent may be waiting on the person — `.context/work-tracking.md`).
+The renderer collapses status as running → `working`, stalled →
 `stalled` (red pulsing dot, labeled "agent exited or errored mid-turn —
-re-run"), everything else → `waiting`, and surfaces the alert as a
-toast (`useBackendSubscriptions.ts` → `formatAgentStallAlert`).
+re-run"), everything else → `waiting`.
 
 ## Snapshot tracking
 

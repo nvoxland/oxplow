@@ -2558,36 +2558,6 @@ export function subscribeAgentTurns(onChange: () => void): () => void {
   return onModelsChanged(["v_agent_turn"], onChange);
 }
 
-export interface AgentStallAlertEvent {
-  threadId: string;
-  inProgressCount: number;
-  waitingMs: number;
-}
-
-/// The backend stall watchdog fires this (once per stall episode) when
-/// a thread has in_progress tasks but its agent has not been running
-/// past the alert threshold — e.g. the agent process died on an API
-/// error without a Stop hook, or stopped cleanly and never resumed.
-export function subscribeAgentStallAlerts(onEvent: (alert: AgentStallAlertEvent) => void): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.kind !== "agentStallAlert") return;
-    const threadId = event.threadId as string | undefined;
-    if (!threadId) return;
-    onEvent({
-      threadId,
-      inProgressCount: (event.inProgressCount as number | undefined) ?? 0,
-      waitingMs: (event.waitingMs as number | undefined) ?? 0,
-    });
-  });
-}
-
-/// Toast copy for a stall alert. Pure so tests can pin the wording.
-export function formatAgentStallAlert(alert: AgentStallAlertEvent): string {
-  const minutes = Math.max(1, Math.round(alert.waitingMs / 60_000));
-  const tasks = alert.inProgressCount === 1 ? "1 in-progress task" : `${alert.inProgressCount} in-progress tasks`;
-  return `Agent appears stalled: ${tasks} but no agent activity for ${minutes} min`;
-}
-
 export async function probeDaemon(): Promise<boolean> {
   try {
     unwrap(await commands.ping());
