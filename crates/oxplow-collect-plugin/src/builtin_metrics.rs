@@ -31,10 +31,27 @@ pub struct BuiltinMetric {
     /// It reads the whole tree as of the snapshot, never only the files
     /// the snapshot recorded: its capture restates every file.
     pub whole_tree: bool,
+    /// How its runs are paced; [`IMMEDIATE`] runs on every event.
+    pub pacing: BuiltinPacing,
     pub runtime: &'static str,
     pub input: &'static str,
     pub script: &'static str,
 }
+
+/// A built-in's pacing (`.context/metrics.md` "Pacing"): run once the
+/// triggering events have stopped for `settle_secs`, at most every
+/// `at_most_secs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltinPacing {
+    pub settle_secs: Option<u32>,
+    pub at_most_secs: Option<u32>,
+}
+
+/// Every triggering event runs it at once.
+pub const IMMEDIATE: BuiltinPacing = BuiltinPacing {
+    settle_secs: None,
+    at_most_secs: None,
+};
 
 const RUST: &[BuiltinMetric] = &[
     BuiltinMetric {
@@ -51,6 +68,7 @@ const RUST: &[BuiltinMetric] = &[
         on: &["snapshot.taken"],
         filter: &[],
         whole_tree: false,
+        pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
         script: include_str!("plugins/metrics/rust/unsafe_blocks.star"),
@@ -69,6 +87,7 @@ const RUST: &[BuiltinMetric] = &[
         on: &["snapshot.taken"],
         filter: &[],
         whole_tree: false,
+        pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
         script: include_str!("plugins/metrics/rust/unwrap_expect_calls.star"),
@@ -87,6 +106,7 @@ const RUST: &[BuiltinMetric] = &[
         on: &["snapshot.taken"],
         filter: &[],
         whole_tree: false,
+        pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
         script: include_str!("plugins/metrics/rust/panic_macros.star"),
@@ -154,6 +174,7 @@ const CODE: &[BuiltinMetric] = &[
         on: &["snapshot.taken"],
         filter: &[],
         whole_tree: false,
+        pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
         script: include_str!("plugins/metrics/code/doc_coverage.star"),
@@ -179,6 +200,13 @@ const TREE: &[BuiltinMetric] = &[BuiltinMetric {
     on: &["snapshot.taken"],
     filter: &[("trigger", "git_refs")],
     whole_tree: true,
+    // A whole-tree scan is minutes of CPU on a large tree, and a commit or
+    // rebase moves several refs at once (a restart replays the ones it
+    // missed): one scan of the latest tree once they settle.
+    pacing: BuiltinPacing {
+        settle_secs: Some(60),
+        at_most_secs: Some(15 * 60),
+    },
     runtime: "starlark",
     input: "text",
     script: include_str!("plugins/metrics/code/duplicate_lines.star"),
@@ -205,6 +233,7 @@ const fn code_metric(
         on: &["snapshot.taken"],
         filter: &[],
         whole_tree: false,
+        pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
         script,
@@ -236,6 +265,7 @@ const fn ast_metric(
         on: &["snapshot.taken"],
         filter: &[],
         whole_tree: false,
+        pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
         script,

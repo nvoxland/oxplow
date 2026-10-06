@@ -134,8 +134,10 @@ in the background. `DuplicationRecorder::record`
   from it would restate the whole tree from a slice and zero out every
   untouched file's duplicates (tsk365). `oxplow.duplicate_lines` is the
   built-in whole-tree collector's (P7.B5, closes tsk388): the
-  `duplicate_blocks(min_lines)` Starlark builtin over the whole tree on
-  every ref move (`snapshot.taken`, `trigger: git_refs`), an empty capture
+  `duplicate_blocks(min_lines)` Starlark builtin over the whole tree after
+  ref moves (`snapshot.taken`, `trigger: git_refs`) — paced, so a burst
+  of them (a commit, a rebase, a restart's catch-up) is one scan of the
+  latest tree once they settle for 60 s, at most every 15 min — an empty capture
   clearing the metric after a refactor (tsk44); those restates are history,
   never baselines the dominated-capture prune acts on (tsk709) —
   [metrics.md](./metrics.md) → "built-in";

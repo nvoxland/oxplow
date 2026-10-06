@@ -131,7 +131,11 @@ impl FactCollector {
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect(),
-                pacing: Default::default(),
+                pacing: oxplow_config::collectors::Pacing {
+                    settle_secs: m.pacing.settle_secs,
+                    at_most_secs: m.pacing.at_most_secs,
+                    ..Default::default()
+                },
             },
             facts: Vec::new(),
             runtime: CollectorRuntime::Starlark,
@@ -3563,9 +3567,57 @@ mod tests {
         snap
     }
 
-    /// P7.B5 (tsk388): `oxplow.duplicate_lines` is restated over the whole
-    /// tree on every ref move — a take that recorded nothing included —
-    /// and a clean tree clears it.
+    /// A burst of ref moves (a commit, a rebase, a restart's catch-up of
+    /// missed ones) scans the tree once, over the latest snapshot, after
+    /// the moves settle: never once per move.
+    #[tokio::test]
+    async fn a_burst_of_ref_moves_scans_duplicates_once_over_the_latest() {
+        let (svc, _dir) = fixture().await;
+        svc.config.write().unwrap().metrics.push(MetricEntry {
+            use_key: Some("oxplow.duplicate_lines".into()),
+            ..Default::default()
+        });
+        let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
+        use crate::event_pump::AsyncEventConsumer as _;
+        let mut snaps = Vec::new();
+        for (i, path) in ["src/a.rs", "src/b.rs", "src/c.rs"].iter().enumerate() {
+            let snap =
+                snapshot_with_content(&svc, &[(path, Some(&*format!("fn f{i}() {{}}\n")))]).await;
+            consumer
+                .handle(&log_take(&svc, snap, SnapshotTrigger::GitRefs, false, 1).await)
+                .await
+                .unwrap();
+            snaps.push(snap);
+        }
+        let scanned = || async {
+            svc.db
+                .read(|c| {
+                    let mut stmt = c
+                        .prepare(
+                            "SELECT snapshot_id FROM metric_capture
+                              WHERE producer = 'oxplow.duplicate_lines' ORDER BY id",
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| r.get::<_, i64>(0))
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        assert!(scanned().await.is_empty(), "the moves wait to settle");
+        let later = oxplow_domain::Timestamp::from_unix_ms(
+            oxplow_domain::Timestamp::now().unix_ms() + 20 * 60_000,
+        );
+        assert_eq!(crate::pacing::run_due(&svc, later).await.unwrap(), 1);
+        assert_eq!(scanned().await, vec![snaps[2]], "one scan, of the latest");
+    }
+
+    /// `oxplow.duplicate_lines` is restated over the whole tree after a ref
+    /// move — a take that recorded nothing included — and a clean tree
+    /// clears it.
     #[tokio::test]
     async fn a_ref_move_restates_duplicate_lines_over_the_whole_tree() {
         const BODY: &str = "pub fn compute(input: &[i64]) -> i64 {\n\
@@ -3586,6 +3638,15 @@ mod tests {
         });
         let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
         use crate::event_pump::AsyncEventConsumer as _;
+        // A ref move's scan is paced: run what's due well past its pacing.
+        let runs = std::sync::atomic::AtomicI64::new(0);
+        let settle = || async {
+            let n = runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let later = oxplow_domain::Timestamp::from_unix_ms(
+                oxplow_domain::Timestamp::now().unix_ms() + n * 20 * 60_000,
+            );
+            crate::pacing::run_due(&svc, later).await.unwrap();
+        };
         let measure = svc
             .fact_store
             .get_measure("oxplow.duplicate_lines")
@@ -3644,6 +3705,7 @@ mod tests {
         // second take's one file.
         let moved = log_take(&svc, second, SnapshotTrigger::GitRefs, true, 0).await;
         consumer.handle(&moved).await.unwrap();
+        settle().await;
         let both = current().await;
         assert_eq!(both.len(), 2, "both sides of the copy: {both:?}");
         assert!(both[0].starts_with("src/a.rs:") && both[1].starts_with("src/b.rs:"));
@@ -3659,10 +3721,11 @@ mod tests {
             .handle(&log_take(&svc, third, SnapshotTrigger::GitRefs, true, 0).await)
             .await
             .unwrap();
+        settle().await;
         assert!(current().await.is_empty(), "an empty capture clears it");
         assert_eq!(captures().await, 2);
 
-        // P7 review (tsk709): a second clean restate is another empty
+        // A second clean restate is another empty
         // capture. It is history, not a baseline: the earlier captures and
         // the stream's cube stay.
         let measure_id = measure.id;
@@ -3684,6 +3747,7 @@ mod tests {
             .handle(&log_take(&svc, fourth, SnapshotTrigger::GitRefs, true, 0).await)
             .await
             .unwrap();
+        settle().await;
         assert_eq!(captures().await, 3, "a clean restate prunes nothing");
         let cube_states: i64 = svc
             .db
