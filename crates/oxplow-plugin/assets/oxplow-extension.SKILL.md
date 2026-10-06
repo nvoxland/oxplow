@@ -232,11 +232,27 @@ empty: Nothing is waiting on you.
   lists it in the launcher under `category` (Work, Code, Git, Activity,
   Knowledge, Data, Lenses, System).
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,
-  scope, body, badge? }]`): `body` renders compact; `badge` (a lens with
-  an `alert`) gives the panel's count and lists in the Alerts panel while
-  it fires. `scope` is `project`, `stream` or `thread` — a `stream` /
+  scope, body, badge?, open?, collapsed?, count? }]`): `body` renders
+  compact; `badge` (a lens with an `alert`) gives the panel's count and
+  lists in the Alerts panel while it fires; `collapsed` is a lens shown
+  compact while the panel is collapsed (its summary); `count` is a lens
+  whose row count (a `number` lens: its value) is the header count
+  without an alert — it wins over the badge's. `scope` is `project`, `stream` or `thread` — a `stream` /
   `thread` panel's lenses must declare `stream_id` / `thread_id`, which the
   nav binds. The person arranges, hides and collapses panels.
+- **Row styling** on `list` / `table` (each names a result column):
+  `group: { by: bucket, link?: { kind, from } }` puts the rows under a
+  heading per `by` value, in the order each first appears (the heading
+  links from the group's first row); `emphasis: is_current` highlights a
+  row whose value is truthy (also on `tree`); `depth: level` indents a
+  row by its whole-number value. On a column, `icon: status` draws an
+  icon named by that column's value — `ready`, `todo`, `in_progress`,
+  `blocked`, `done`, `canceled`, `archived`, `epic`, `task`, `wiki`,
+  `file`, `folder`, `commit`, `diff`, `lens`, `metric`, `dashboard`,
+  `comment` or a ref-kind icon name (`bug`, `git-pull-request`, …) — and
+  `tone: hue` colours the cell: `accent`, `success`, `warning`, `danger`,
+  `muted`. Unknown values draw nothing. Rows that link somewhere drag
+  onto the agent terminal to add the page to its context.
 - **`alert:`** says when a lens needs attention: `{ min_rows: 1 }` (the
   run returned at least that many rows) or `{ column: pct, below: 80 }` /
   `above:` (the first row's value), with an optional `label`. `run_lens`
@@ -250,8 +266,10 @@ empty: Nothing is waiting on you.
   e.g. `{ id: finish, label: Finish, command: work_item.transition,
   row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: collector.sync, input:
-  { owner: github, id: prs } }`. Copy and Add to Agent Context are
-  on every lens already — don't declare them.
+  { owner: github, id: prs } }`. With `group: <value>` (on a lens with
+  `group`), the action is a button in that group's heading instead — it
+  shows in a compact panel too; it can't be a row action. Copy and Add
+  to Agent Context are on every lens already — don't declare them.
 
   An action runs as the lens acting for whoever pressed it, so it can't do
   anything they couldn't: you can press one with `run_lens_action`, but a

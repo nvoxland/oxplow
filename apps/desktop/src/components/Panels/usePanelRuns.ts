@@ -1,5 +1,6 @@
-/// The extension panels' lens runs (P6.G1): each panel's body, and its
-/// badge — the badge lens's alert count while it fires. One owner (the
+/// The extension panels' lens runs (P6.G1): each panel's body, its badge
+/// (the badge lens's alert count while it fires), its collapsed summary
+/// and its count lens (tsk1089) — each distinct lens once. One owner (the
 /// rail) runs them all, once per refresh, and hands each panel its runs;
 /// the Alerts panel is derived from the same runs (`panelAlerts`), so a
 /// badge never runs twice and the header count and Alerts can't disagree.
@@ -17,12 +18,28 @@ export interface PanelRuns {
   body: LensRun | null;
   /** The badge lens's run, when the panel has one. */
   badge: LensRun | null;
-  /** The badge's count while its alert fires; null otherwise. */
+  /** The collapsed lens's run — the one-line summary a collapsed panel
+   *  shows — when the panel has one. */
+  collapsed: LensRun | null;
+  /** The header's count (`panelCount`); null shows none. */
   count: number | null;
 }
 
 export function badgeCount(badge: LensRun | null): number | null {
   return badge?.alert?.firing ? badge.alert.count : null;
+}
+
+/** The header's count: the count lens's row count (a `number` lens: its
+ *  value), which raises no alert; else the badge's count while it fires.
+ *  A panel with both shows the count lens's; its badge still feeds Alerts. */
+export function panelCount(count: LensRun | null, badge: LensRun | null): number | null {
+  if (!count) return badgeCount(badge);
+  if (count.lens.viz === "number") {
+    const v = count.result.rows[0]?.[0] ?? null;
+    const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+    return Number.isFinite(n) ? n : null;
+  }
+  return count.result.rows.length;
 }
 
 /** What a panel's lenses are bound to, by its scope: the stream's row id
@@ -74,15 +91,19 @@ export function useExtensionPanelRuns(
     const entries = await Promise.all(
       panels.map(async (p) => {
         const params = panelParams(p.scope, streamId, threadId);
-        const [body, badge] = await Promise.all([
-          runLens(p.body, params, streamId).catch(() => null),
-          p.badge ? runLens(p.badge, params, streamId).catch(() => null) : Promise.resolve(null),
-        ]);
-        return [p.id, { body, badge, count: badgeCount(badge) }] as const;
+        // Each distinct lens once, whatever roles it plays.
+        const ids = [...new Set([p.body, p.badge, p.collapsed, p.count].filter((id): id is string => !!id))];
+        const ran = new Map(
+          await Promise.all(ids.map(async (id) => [id, await runLens(id, params, streamId).catch(() => null)] as const)),
+        );
+        const of = (id: string | null) => (id ? (ran.get(id) ?? null) : null);
+        const badge = of(p.badge);
+        const runs: PanelRuns = { body: of(p.body), badge, collapsed: of(p.collapsed), count: panelCount(of(p.count), badge) };
+        return [p.id, runs, [...ran.values()]] as const;
       }),
     );
-    setRuns(Object.fromEntries(entries));
-    setReads(unionReads(entries.flatMap(([, r]) => [r.body?.result.reads, r.badge?.result.reads])));
+    setRuns(Object.fromEntries(entries.map(([id, r]) => [id, r])));
+    setReads(unionReads(entries.flatMap(([, , ran]) => ran.map((r) => r?.result.reads))));
   }, [panels, streamId, threadId]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());

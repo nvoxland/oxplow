@@ -435,6 +435,28 @@ pub struct LensColumn {
     /// `lines`): a number shows as a metric value in it (tsk1038).
     #[serde(default)]
     pub unit: Option<String>,
+    /// A column of the same row naming an icon drawn before the cell
+    /// (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
+    /// vocabulary, `lens/lensIcons.tsx` — an unknown name draws none).
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// A column of the same row naming the cell's tone: `accent`,
+    /// `success`, `warning`, `danger` or `muted` (anything else is plain).
+    #[serde(default)]
+    pub tone: Option<String>,
+}
+
+/// `group` on a `list` or `table`: the rows under a heading per distinct
+/// value of `by`, in the order each first appears; `link` makes the
+/// heading a link, read from the group's first row (tsk1089).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LensGroup {
+    /// The column whose value groups the rows (not shown as a cell).
+    pub by: String,
+    /// The heading's link; `from` defaults to `by`.
+    #[serde(default)]
+    pub link: Option<LensLink>,
 }
 
 /// A value the viewer (or an agent) can set when running the lens,
@@ -483,6 +505,12 @@ struct LensFile {
     form: Option<LensForm>,
     #[serde(default)]
     custom: Option<LensCustom>,
+    #[serde(default)]
+    group: Option<LensGroup>,
+    #[serde(default)]
+    emphasis: Option<String>,
+    #[serde(default)]
+    depth: Option<String>,
     /// For `grid`: lens slugs in this extension, or `<ext>/<slug>` ids.
     #[serde(default)]
     children: Vec<String>,
@@ -521,6 +549,9 @@ pub struct LensAction {
     /// A row action: offered on each row (right-click), with `{{row.*}}`
     /// bound to that row. Otherwise it's a button above the result.
     pub row: bool,
+    /// A group action: a button in the heading of the group whose `by`
+    /// value (as text) this is, instead of above the result (tsk1089).
+    pub group: Option<String>,
 }
 
 /// One `{{scope.name}}` placeholder in a string: its scope and name
@@ -595,6 +626,7 @@ pub fn action_templates(input: &serde_json::Value) -> Vec<(String, String)> {
 fn parse_actions(
     raw: Vec<serde_yaml::Value>,
     params: &[LensParam],
+    grouped: bool,
 ) -> Result<Vec<LensAction>, String> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -606,6 +638,8 @@ fn parse_actions(
         input: Option<serde_json::Value>,
         #[serde(default)]
         row: bool,
+        #[serde(default)]
+        group: Option<String>,
     }
     let mut out: Vec<LensAction> = Vec::new();
     for v in raw {
@@ -618,6 +652,20 @@ fn parse_actions(
         }
         oxplow_domain::CommandSpec::validate_name(&f.command)
             .map_err(|e| format!("actions: `{}`: {e}", f.id))?;
+        if let Some(g) = &f.group {
+            if !grouped {
+                return Err(format!(
+                    "actions: `{}`: `group: {g}` needs the lens to have a `group`",
+                    f.id
+                ));
+            }
+            if f.row {
+                return Err(format!(
+                    "actions: `{}`: a group action isn't a row action (drop `row` or `group`)",
+                    f.id
+                ));
+            }
+        }
         let input = f.input.unwrap_or_else(|| serde_json::json!({}));
         if !input.is_object() {
             return Err(format!(
@@ -656,6 +704,7 @@ fn parse_actions(
             command: f.command,
             input,
             row: f.row,
+            group: f.group,
         });
     }
     Ok(out)
@@ -781,6 +830,13 @@ pub struct ExtensionPanel {
     /// page the panel summarizes, as Comments opens the inbox (tsk1086).
     /// Absent, the body lens's own page.
     pub open: Option<String>,
+    /// The lens shown, compact, while the panel is collapsed: its one-line
+    /// summary (tsk1089). Absent, a collapsed panel shows only its header.
+    pub collapsed: Option<String>,
+    /// The lens whose row count (a `number` lens: its value) is the
+    /// header's count, without raising an alert (tsk1089). It wins over
+    /// the badge's count; the badge still feeds Alerts.
+    pub count: Option<String>,
 }
 
 /// A page an extension contributes (P6.G2, target §11.3): a lens shown
@@ -826,6 +882,10 @@ struct PanelFile {
     badge: Option<String>,
     #[serde(default)]
     open: Option<String>,
+    #[serde(default)]
+    collapsed: Option<String>,
+    #[serde(default)]
+    count: Option<String>,
 }
 
 /// A lens an extension mounts into a core page.
@@ -863,6 +923,13 @@ pub struct Lens {
     pub form: Option<LensForm>,
     /// For `custom`: the component and its props.
     pub custom: Option<LensCustom>,
+    /// For `list` / `table`: rows under a heading per value (tsk1089).
+    pub group: Option<LensGroup>,
+    /// For `list` / `table` / `tree`: a column whose truthy value
+    /// highlights the row.
+    pub emphasis: Option<String>,
+    /// For `list` / `table`: a column whose integer value indents the row.
+    pub depth: Option<String>,
     /// For `grid`: child lens ids.
     pub children: Vec<String>,
     /// Launcher section; `None` = "Lenses".
@@ -1887,7 +1954,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()))
             .and_then(|mut l| {
                 let alert = l.alert.take().map(AlertFile::into_alert).transpose()?;
-                let actions = parse_actions(std::mem::take(&mut l.actions), &l.params)?;
+                let actions =
+                    parse_actions(std::mem::take(&mut l.actions), &l.params, l.group.is_some())?;
                 Ok((l, alert, actions))
             });
         match parsed {
@@ -1909,6 +1977,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 hunks: l.hunks,
                 form: l.form,
                 custom: l.custom,
+                group: l.group,
+                emphasis: l.emphasis,
+                depth: l.depth,
                 children: l
                     .children
                     .into_iter()
@@ -2165,7 +2236,7 @@ fn parse_panels(
                     .and_then(|i| i.as_str())
                     .unwrap_or_default()
                     .to_string();
-                errors.push((needle, format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge?, open? }}`)")));
+                errors.push((needle, format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge?, open?, collapsed?, count? }}`)")));
                 continue;
             }
         };
@@ -2197,7 +2268,12 @@ fn parse_panels(
                 ok = false;
             }
         }
-        for (role, slug) in [("body", Some(&p.body)), ("badge", p.badge.as_ref())] {
+        for (role, slug) in [
+            ("body", Some(&p.body)),
+            ("badge", p.badge.as_ref()),
+            ("collapsed", p.collapsed.as_ref()),
+            ("count", p.count.as_ref()),
+        ] {
             let Some(slug) = slug else { continue };
             let Some(lens) = lenses.iter().find(|l| &l.slug == slug) else {
                 errors.push(err(format!("its {role} lens `{slug}` isn't in lenses/")));
@@ -2234,6 +2310,8 @@ fn parse_panels(
                 body: format!("{extension}/{}", p.body),
                 badge: p.badge.map(|b| format!("{extension}/{b}")),
                 open: p.open,
+                collapsed: p.collapsed.map(|c| format!("{extension}/{c}")),
+                count: p.count.map(|c| format!("{extension}/{c}")),
             });
         }
     }
@@ -2280,6 +2358,9 @@ fn shape_problem(
             )
         })
     };
+    if let Some(problem) = row_style_problem(lens) {
+        return Some(problem);
+    }
     let chart = lens.chart.clone().unwrap_or_default();
     match lens.viz {
         LensViz::Bar | LensViz::Line => need("chart", &[("x", &chart.x), ("y", &chart.y)]),
@@ -2338,10 +2419,34 @@ fn shape_problem(
     }
 }
 
+/// Row styling on a viz that doesn't draw rows that way: `group` and
+/// `depth` are for `list` / `table`, `emphasis` also for `tree`.
+fn row_style_problem(lens: &Lens) -> Option<String> {
+    let rows = matches!(lens.viz, LensViz::List | LensViz::Table);
+    let viz = format!("{:?}", lens.viz).to_lowercase();
+    if lens.group.is_some() && !rows {
+        return Some(format!(
+            "`group` is only for `list` and `table`, not `{viz}`"
+        ));
+    }
+    if lens.depth.is_some() && !rows {
+        return Some(format!(
+            "`depth` is only for `list` and `table`, not `{viz}`"
+        ));
+    }
+    if lens.emphasis.is_some() && !rows && lens.viz != LensViz::Tree {
+        return Some(format!(
+            "`emphasis` is only for `list`, `table` and `tree`, not `{viz}`"
+        ));
+    }
+    None
+}
+
 impl Lens {
     /// Every result column the lens's component blocks name (`chart`,
-    /// `tree`, `timeline`, `steps`, `hunks`) — what `validate` checks the
-    /// query returns.
+    /// `tree`, `timeline`, `steps`, `hunks`) and its row styling
+    /// (`group`, `emphasis`, `depth`) — what `validate` checks the query
+    /// returns.
     pub fn role_columns(&self) -> Vec<(&'static str, &String)> {
         let mut out: Vec<(&'static str, &String)> = Vec::new();
         if let Some(c) = &self.chart {
@@ -2379,6 +2484,19 @@ impl Lens {
                     .map(|k| ("hunks", k)),
             );
         }
+        if let Some(g) = &self.group {
+            out.push(("group", &g.by));
+            if let Some(l) = &g.link {
+                out.extend(
+                    [&l.from, &l.line, &l.base, &l.head]
+                        .into_iter()
+                        .flatten()
+                        .map(|k| ("group", k)),
+                );
+            }
+        }
+        out.extend(self.emphasis.iter().map(|k| ("emphasis", k)));
+        out.extend(self.depth.iter().map(|k| ("depth", k)));
         out
     }
 }
@@ -3042,6 +3160,8 @@ async fn prepare(
                 for c in &run.lens.columns {
                     let mut keys = vec![&c.key];
                     keys.extend(c.unit.iter());
+                    keys.extend(c.icon.iter());
+                    keys.extend(c.tone.iter());
                     if let Some(link) = c.link.as_ref() {
                         keys.extend(link.from.iter());
                         keys.extend(link.line.iter());
@@ -3475,6 +3595,12 @@ pub struct LensSpec {
     pub hunks: Option<LensHunks>,
     #[serde(default)]
     pub form: Option<LensForm>,
+    #[serde(default)]
+    pub group: Option<LensGroup>,
+    #[serde(default)]
+    pub emphasis: Option<String>,
+    #[serde(default)]
+    pub depth: Option<String>,
 }
 
 impl Lens {
@@ -3500,6 +3626,9 @@ impl Lens {
             hunks: spec.hunks.clone(),
             form: spec.form.clone(),
             custom: None,
+            group: spec.group.clone(),
+            emphasis: spec.emphasis.clone(),
+            depth: spec.depth.clone(),
             children: Vec::new(),
             launcher_category: None,
             hidden: false,
@@ -3525,6 +3654,9 @@ impl Lens {
             steps: self.steps.clone(),
             hunks: self.hunks.clone(),
             form: self.form.clone(),
+            group: self.group.clone(),
+            emphasis: self.emphasis.clone(),
+            depth: self.depth.clone(),
         }
     }
 }
@@ -4554,6 +4686,9 @@ empty: No tasks.
             steps: None,
             hunks: None,
             form: None,
+            group: None,
+            emphasis: None,
+            depth: None,
         }
     }
 
@@ -5909,6 +6044,8 @@ commands:
                 body: "x/open".into(),
                 badge: Some("x/count".into()),
                 open: None,
+                collapsed: None,
+                count: None,
             }]
         );
         // tsk1086: a panel may name the page its header opens (a core page,
@@ -5956,6 +6093,144 @@ commands:
                 "{panel}: {errs}"
             );
             assert!(ext.panels.is_empty(), "{panel}");
+        }
+    }
+
+    /// tsk1089: a panel may name a lens its collapsed header shows (one
+    /// line, compact) and a lens whose row count (or `number`) is its
+    /// header count — checked like `body` and `badge`.
+    #[test]
+    fn panels_summarize_with_collapsed_and_count_lenses() {
+        let lenses = [
+            ("open", "title: Open\nquery: SELECT 1\nparams: [{ name: stream_id, default: '' }]\n"),
+            ("line", "title: Line\nquery: SELECT 1\nparams: [{ name: stream_id, default: '' }]\n"),
+            ("n", "title: N\nquery: SELECT 1\nviz: number\nparams: [{ name: stream_id, default: '' }]\n"),
+            ("quiet", "title: Quiet\nquery: SELECT 1\n"),
+        ];
+        let (_d, ext) = load_x(
+            &lenses,
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: w, title: W, scope: stream, body: open, collapsed: line, count: n }\n",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.panels[0].collapsed.as_deref(), Some("x/line"));
+        assert_eq!(ext.panels[0].count.as_deref(), Some("x/n"));
+        for (panel, says) in [
+            (
+                "{ id: a, title: A, scope: project, body: quiet, collapsed: nope }",
+                "its collapsed lens `nope` isn't in lenses/",
+            ),
+            (
+                "{ id: a, title: A, scope: project, body: quiet, count: nope }",
+                "its count lens `nope` isn't in lenses/",
+            ),
+            (
+                "{ id: a, title: A, scope: stream, body: open, collapsed: quiet }",
+                "lens `quiet` must declare `stream_id`",
+            ),
+            (
+                "{ id: a, title: A, scope: stream, body: open, count: quiet }",
+                "lens `quiet` must declare `stream_id`",
+            ),
+        ] {
+            let (_d, ext) = load_x(
+                &lenses,
+                &format!("manifest: 2\nintent:\n  purpose: p\npanels:\n  - {panel}\n"),
+            );
+            let errs = ext.errors.join("\n");
+            assert!(errs.contains(says), "{panel}: {errs}");
+            assert!(ext.panels.is_empty(), "{panel}");
+        }
+    }
+
+    /// tsk1089: a list or table can group its rows under headings
+    /// (`group`), highlight one (`emphasis`), indent some (`depth`), and
+    /// draw a cell's icon and tone from other columns; an action can sit in
+    /// a group's heading. Shapes are checked at load; the columns they
+    /// name, against the result by `validate_extension`.
+    #[test]
+    fn lenses_group_and_style_their_rows() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "a",
+                    "title: A\nviz: list\nquery: SELECT 1 AS id, 'Ready' AS bucket, 'page:tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue\nparams: [{ name: stream_id, default: '' }]\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
+                ),
+                ("t", "title: T\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n"),
+                ("b", "title: B\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l\ntree: { id: id, parent: p, label: l }\ngroup: { by: l }\n"),
+                ("c", "title: C\nviz: list\nquery: SELECT 1\ngroup: { link: { kind: task } }\n"),
+                ("d", "title: D\nviz: number\nquery: SELECT 1\ndepth: n\n"),
+                ("e", "title: E\nviz: list\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b, group: Ready }]\n"),
+                ("f", "title: F\nviz: list\nquery: SELECT 1\ngroup: { by: g }\nactions: [{ id: x, label: X, command: a.b, group: Ready, row: true }]\n"),
+                ("g", "title: G\nviz: bar\nquery: SELECT 1 AS x, 2 AS y\nchart: { x: x, y: y }\nemphasis: x\n"),
+            ],
+            "",
+        );
+        let a = ext
+            .lenses
+            .iter()
+            .find(|l| l.slug == "a")
+            .expect("a grouped, styled list loads");
+        assert_eq!(
+            a.group,
+            Some(LensGroup {
+                by: "bucket".into(),
+                link: Some(LensLink {
+                    kind: LensLinkKind::Page,
+                    from: Some("bucket_ref".into()),
+                    line: None,
+                    base: None,
+                    head: None,
+                }),
+            })
+        );
+        assert_eq!(a.emphasis.as_deref(), Some("current"));
+        assert_eq!(a.depth.as_deref(), Some("indent"));
+        assert_eq!(a.columns[0].icon.as_deref(), Some("glyph"));
+        assert_eq!(a.columns[0].tone.as_deref(), Some("hue"));
+        assert_eq!(a.actions[0].group.as_deref(), Some("Ready"));
+        assert!(
+            ext.lenses.iter().any(|l| l.slug == "t"),
+            "a tree may emphasize"
+        );
+        for (slug, needle) in [
+            ("b", "`group` is only for `list` and `table`"),
+            ("c", "missing field `by`"),
+            ("d", "`depth` is only for `list` and `table`"),
+            ("e", "`group: Ready` needs the lens to have a `group`"),
+            ("f", "a group action isn't a row action"),
+            ("g", "`emphasis` is only for `list`, `table` and `tree`"),
+        ] {
+            assert!(
+                ext.lenses.iter().all(|l| l.slug != slug),
+                "{slug} should fail"
+            );
+            assert!(
+                ext.errors
+                    .iter()
+                    .any(|e| e.contains(&format!("{slug}.yaml")) && e.contains(needle)),
+                "{slug}: {:?}",
+                ext.errors
+            );
+        }
+    }
+
+    /// The columns `group`, `emphasis`, `depth` and a column's `icon` /
+    /// `tone` name must be in the result (`validate_extension`).
+    #[tokio::test]
+    async fn validate_checks_row_style_columns() {
+        let (d, _) = load_x(
+            &[(
+                "a",
+                "title: A\nviz: table\nquery: SELECT 1 AS id\ngroup: { by: g1, link: { kind: task, from: g2 } }\nemphasis: e1\ndepth: d1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
+            )],
+            "",
+        );
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        for k in ["g1", "g2", "e1", "d1", "i1", "t1"] {
+            assert!(errs.contains(&format!("`{k}`")), "{k}: {errs}");
         }
     }
 

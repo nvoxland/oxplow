@@ -14,7 +14,7 @@ mock.module("../../api.js", () => ({
     return { lens: { id } as LensRun["lens"], params, result: { columns: [], rows: [], truncated: false }, alert: null };
   },
 }));
-const { badgeCount, panelAlerts, panelParams, useExtensionPanelRuns } = await import("./usePanelRuns.js");
+const { badgeCount, panelAlerts, panelCount, panelParams, useExtensionPanelRuns } = await import("./usePanelRuns.js");
 
 const panel = (scope: ExtensionPanel["scope"], over: Partial<ExtensionPanel> = {}): ExtensionPanel =>
   ({ id: "x/p", extension: "x", title: "P", icon: null, scope, body: "x/body", badge: null, ...over }) as ExtensionPanel;
@@ -66,9 +66,9 @@ test("the alerts are the badges that fire, from the same runs", () => {
     panel("project", { id: "x/p" }),
   ];
   const alerts = panelAlerts(panels, {
-    "x/q": { body: null, badge: firing, count: 2 },
-    "x/r": { body: null, badge: quiet, count: null },
-    "x/p": { body: null, badge: null, count: null },
+    "x/q": { body: null, badge: firing, collapsed: null, count: 2 },
+    "x/r": { body: null, badge: quiet, collapsed: null, count: null },
+    "x/p": { body: null, badge: null, collapsed: null, count: null },
   });
   expect(alerts).toEqual([{ id: "x/q-badge", title: "Q", message: "2 rows" }]);
 });
@@ -80,4 +80,31 @@ test("a panel's header opens the page it names, else its body lens", async () =>
   const { lensRef } = await import("../../tabs/pageRefs.js");
   expect(panelOpenRef(panel("stream", { open: "page:comments" })).id).toBe("page:comments");
   expect(panelOpenRef(panel("stream"))).toEqual(lensRef("x/body"));
+});
+
+// tsk1089: a panel's `count` lens gives its header count — its row count,
+// or a `number` lens's value — without raising an alert; it wins over the
+// badge's count, and the badge still feeds Alerts.
+test("a count lens's rows (or number) are the header count, over the badge's", () => {
+  const rows = (n: number) =>
+    ({ lens: { viz: "list" }, result: { columns: ["a"], rows: Array.from({ length: n }, () => ["x"]) } }) as unknown as LensRun;
+  const number = (v: SqlCell) => ({ lens: { viz: "number" }, result: { columns: ["n"], rows: [[v]] } }) as unknown as LensRun;
+  const firing = { alert: { firing: true, count: 9, value: null, message: "" } } as unknown as LensRun;
+  expect(panelCount(rows(3), null)).toBe(3);
+  expect(panelCount(rows(0), firing)).toBe(0);
+  expect(panelCount(number(7), firing)).toBe(7);
+  expect(panelCount(number("x"), null)).toBeNull();
+  expect(panelCount(null, firing)).toBe(9);
+  expect(panelCount(null, null)).toBeNull();
+});
+
+// The one owner runs a panel's collapsed and count lenses with its body and
+// badge — each distinct lens once, however many roles it plays.
+test("the rail runs a panel's collapsed and count lenses, each lens once", async () => {
+  runs.length = 0;
+  const panels = [panel("stream", { body: "x/body", collapsed: "x/line", count: "x/body" })];
+  const view = renderHook(() => useExtensionPanelRuns(panels, "str2", null));
+  await waitFor(() => expect(view.result.current["x/p"]?.collapsed?.lens.id).toBe("x/line"));
+  expect(runs.map((r) => r.id).sort()).toEqual(["x/body", "x/line"]);
+  expect(view.result.current["x/p"]?.count).toBe(0);
 });

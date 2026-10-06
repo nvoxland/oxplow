@@ -299,28 +299,54 @@ fn markdown_table(header: &[String], rows: &[Vec<String>]) -> String {
 }
 
 /// What a table or list shows: the declared columns in their order (with
-/// their labels), or every result column when none are declared.
+/// their labels), or every result column when none are declared; a
+/// grouped one, a section per group in the order each first appears.
 fn table(run: &LensRun) -> String {
     let shown = shown(run);
     let header: Vec<String> = shown.iter().map(|(_, l)| l.clone()).collect();
-    let rows: Vec<Vec<String>> = run
-        .result
-        .rows
+    let line = |r: &Vec<SqlCell>| -> Vec<String> {
+        shown
+            .iter()
+            .map(|(i, _)| r.get(*i).map(cell).unwrap_or_default())
+            .collect()
+    };
+    let by = run
+        .lens
+        .group
+        .as_ref()
+        .and_then(|g| column(run, Some(&g.by)));
+    let Some(by) = by else {
+        let rows: Vec<Vec<String>> = run.result.rows.iter().map(line).collect();
+        return markdown_table(&header, &rows);
+    };
+    let mut groups: Vec<(String, Vec<Vec<String>>)> = Vec::new();
+    for r in &run.result.rows {
+        let name = r.get(by).map(cell).unwrap_or_default();
+        match groups.iter_mut().find(|(g, _)| *g == name) {
+            Some((_, rows)) => rows.push(line(r)),
+            None => groups.push((name, vec![line(r)])),
+        }
+    }
+    groups
         .iter()
-        .map(|r| {
-            shown
-                .iter()
-                .map(|(i, _)| r.get(*i).map(cell).unwrap_or_default())
-                .collect()
-        })
-        .collect();
-    markdown_table(&header, &rows)
+        .map(|(name, rows)| format!("### {name}\n\n{}", markdown_table(&header, rows)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The displayed columns (the UI's `displayColumns`): the declared ones in
-/// their order with their labels, else every result column.
+/// their order with their labels, else every result column — never the
+/// row-styling ones (`group.by`, `emphasis`, `depth`).
 fn shown(run: &LensRun) -> Vec<(usize, String)> {
-    if run.lens.columns.is_empty() {
+    let styling: Vec<&String> = run
+        .lens
+        .group
+        .iter()
+        .map(|g| &g.by)
+        .chain(run.lens.emphasis.iter())
+        .chain(run.lens.depth.iter())
+        .collect();
+    let all: Vec<(usize, String)> = if run.lens.columns.is_empty() {
         run.result.columns.iter().cloned().enumerate().collect()
     } else {
         run.lens
@@ -331,7 +357,10 @@ fn shown(run: &LensRun) -> Vec<(usize, String)> {
                 Some((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
             })
             .collect()
-    }
+    };
+    all.into_iter()
+        .filter(|(i, _)| !styling.contains(&&run.result.columns[*i]))
+        .collect()
 }
 
 /// A tree: each row under the row its parent names, indented; rows whose
@@ -672,6 +701,9 @@ mod tests {
                 hunks: None,
                 form: None,
                 custom: None,
+                group: None,
+                emphasis: None,
+                depth: None,
                 children: Vec::new(),
                 launcher_category: None,
                 hidden: false,
@@ -805,6 +837,31 @@ mod tests {
     fn with<F: FnOnce(&mut Lens)>(mut r: LensRun, f: F) -> LensRun {
         f(&mut r.lens);
         r
+    }
+
+    /// tsk1089: a grouped list reads as a section per group, in the order
+    /// each first appears, without the group, emphasis or depth columns.
+    #[test]
+    fn a_grouped_list_is_a_section_per_group() {
+        let rows = vec![
+            vec![t("Ready"), t("a"), SqlCell::Int(0)],
+            vec![t("Done"), t("b"), SqlCell::Int(1)],
+            vec![t("Ready"), t("c"), SqlCell::Int(0)],
+        ];
+        let r = with(
+            run(LensViz::List, None, &["bucket", "title", "d"], rows),
+            |l| {
+                l.group = Some(crate::extensions::LensGroup {
+                    by: "bucket".into(),
+                    link: None,
+                });
+                l.depth = Some("d".into());
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "### Ready\n\n| title |\n| --- |\n| a |\n| c |\n\n### Done\n\n| title |\n| --- |\n| b |\n"
+        );
     }
 
     /// A tree nests each row under the row its parent names.

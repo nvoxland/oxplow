@@ -103,6 +103,34 @@ declare them.
 A lens action never approves a source. The first run of a source that
 executes a program is still approved in Settings → Data.
 
+### Grouping and styling rows
+
+A list or table can put its rows under headings, one per value of a
+column, in the order each value first appears:
+
+```yaml
+viz: list
+group: { by: bucket, link: { kind: page, from: bucket_page } }   # link is optional
+emphasis: is_current     # a true / non-zero value highlights the row
+depth: level             # a whole number indents the row
+columns:
+  - { key: title, link: { kind: task, from: id }, icon: status, tone: hue }
+actions:
+  - { id: add, label: "+", command: work_item.create, group: Ready, input: { title: New task } }
+```
+
+The `group`, `emphasis` and `depth` columns aren't shown as cells. An
+action with `group:` is a button in that group's heading. `icon` names a
+column whose value picks an icon: `ready`, `todo`, `in_progress`,
+`blocked`, `done`, `canceled`, `archived`, `epic`, `task`, `wiki`,
+`file`, `folder`, `commit`, `diff`, `lens`, `metric`, `dashboard`,
+`comment`, or a ref-kind icon such as `bug`. `tone` names a column whose
+value colours the cell: `accent`, `success`, `warning`, `danger` or
+`muted`. Values outside those lists are ignored.
+
+Drag a row that links somewhere onto the agent terminal to add that page
+to the agent's context.
+
 ### Alerts
 
 A lens can say when it needs your attention:
@@ -122,6 +150,10 @@ they run the lens.
 panels:
   - { id: waiting, title: Waiting on You, scope: project, body: waiting-on-me, badge: waiting-on-me }
 ```
+
+A panel can also name a `collapsed:` lens, shown as its summary while the
+panel is collapsed, and a `count:` lens, whose number of rows is the
+panel's count without raising an alert.
 
 ### Showing a lens on a core page
 

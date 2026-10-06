@@ -13,6 +13,7 @@
 import type { DragEvent as ReactDragEvent } from "react";
 import { formatContextMention, type ContextRef } from "./agent-context-ref.js";
 import { CONTEXT_REF_MIME, TASK_DRAG_MIME } from "./dragMimes.js";
+import { parseRef } from "./refs/ref.js";
 
 type AnyDragEvent = ReactDragEvent | DragEvent;
 
@@ -45,12 +46,22 @@ export function readContextRef(e: AnyDragEvent): ContextRef | null {
     // preventDefault to keep the drop active.
     return { kind: "file", path: "" }; // sentinel: caller only checks non-null
   }
+  return decodeContextRef(raw);
+}
+
+/**
+ * Decode a `CONTEXT_REF_MIME` payload: a file, wiki page, task, or any
+ * canonical ref (what a lens row drags, tsk1089). Null for anything
+ * malformed. Pure — exported for tests.
+ */
+export function decodeContextRef(raw: string | null | undefined): ContextRef | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
     if (parsed.kind === "file" && typeof parsed.path === "string") return { kind: "file", path: parsed.path };
     if (parsed.kind === "wiki" && typeof parsed.slug === "string") return { kind: "wiki", slug: parsed.slug };
+    if (parsed.kind === "ref" && typeof parsed.ref === "string" && parseRef(parsed.ref)) return { kind: "ref", ref: parsed.ref };
     if (parsed.kind === "task"
       && typeof parsed.itemId === "string"
       && typeof parsed.title === "string"

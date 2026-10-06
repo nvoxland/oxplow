@@ -132,18 +132,25 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     category, a lens that exists), listed in the launcher under its
     category (`components/extensionLauncher.ts`).
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
-    scope: project | stream | thread, body, badge?, open? }]` put a lens in the
+    scope: project | stream | thread, body, badge?, open?, collapsed?,
+    count? }]` put a lens in the
     left nav (`open`, a `page:<kind>` ref, is the page its header opens —
     a core page it summarizes, as Comments opens the inbox; absent, the
-    body lens, tsk1086) (`Extension.panels`, `ExtensionPanel`; checked at load in
-    `parse_panels`: a kebab-case id, lenses that exist, a badge with an
+    body lens, tsk1086). `collapsed` is a lens shown compact while the
+    panel is collapsed, as its summary (absent, a collapsed panel is just
+    its header). `count` is a lens whose row count — a `number` lens's
+    value — is the header's count, raising no alert; with a `badge` too,
+    the count lens's number shows and the badge still feeds Alerts
+    (`panelCount`, tsk1089). (`Extension.panels`, `ExtensionPanel`; checked at load in
+    `parse_panels`: a kebab-case id, lenses that exist — body, badge,
+    collapsed, count — a badge with an
     `alert`, and a `stream` / `thread` scope's lenses declaring
     `stream_id` / `thread_id`). The nav binds those itself
     (`panelParams`: the stream's and thread's row ids for the stream and
     thread it's shown for, re-run when they change) rather than leaving
     the backend to infer the thread from the selection, and runs every
-    panel's lenses from one owner (`useExtensionPanelRuns`), so a badge
-    runs once per refresh. The body renders compact; the badge's
+    panel's lenses from one owner (`useExtensionPanelRuns`), each distinct
+    lens once per refresh whatever roles it plays. The body renders compact; the badge's
     alert count shows on the panel, and the core **Alerts** panel lists
     every firing badge. oxplow-bundled's Waiting on You is a panel
     whose badge is its own lens.
@@ -899,9 +906,56 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `compare`), and `unit` — another column of the row holding this one's
   unit, so a number shows as a metric value (`16.4 s`, `42.5%`; tsk1038).
   A timestamp cell shows in local time, its full time on hover.
+- `columns` also take `icon` and `tone` (tsk1089): each names another
+  column of the row. `icon`'s value names an icon drawn before the cell
+  from a fixed vocabulary (`lens/lensIcons.tsx`): the work glyphs
+  `ready` / `todo` ☐, `in_progress` ◐, `blocked` ⚠, `done` ✓,
+  `canceled` ✗, `archived` ▣ (each with its own tone); the kinds `epic`,
+  `task`, `wiki`, `file`, `folder`, `commit`, `diff`, `lens`, `metric`,
+  `dashboard`, `comment` (their pages' icons); and the ref-kind icon
+  names (`bug`, `git-pull-request`, … — `REF_KIND_ICONS`). `tone`'s value
+  is `accent`, `success`, `warning`, `danger` or `muted`, drawn with theme
+  variables (`--accent`, `--status-done`, `--status-waiting`,
+  `--severity-critical`, `--text-muted`); it colours the cell and wins
+  over an icon's own tone. Values come from the query, so the loader
+  can't check them: an unknown name draws nothing, an unknown tone is
+  plain.
+- **Row styling** (tsk1089), each naming a result column:
+  - `group: { by, link? }` (`list` / `table`): the rows under a heading
+    per distinct `by` value, in the order each first appears — a group
+    with no rows doesn't appear. The heading looks like the rail's
+    sub-headings (also compact, in a panel) and links through `link`
+    (any column link kind; `from` defaults to `by`), read from the
+    group's first row. A table puts the heading in a full-width row.
+  - `emphasis` (`list` / `table` / `tree`): a truthy value (true, a
+    non-zero number, text other than empty / `0` / `false`) highlights
+    the row (`--accent-soft-bg`, medium weight).
+  - `depth` (`list` / `table`): a whole number (0–8) indents the row, for
+    children under a parent in a flat list.
+  - `group.by`, `emphasis` and `depth` are never shown as cells. The
+    loader refuses them on other vizes; `validate_extension` checks the
+    columns they name (and `icon` / `tone`) are in the result
+    (`Lens::role_columns`); at render a missing one is ignored.
+  - Copy (`lens_text`) renders a grouped lens as a section per group.
+  - Pure shaping: `rowGroups`, `rowEmphasized`, `rowDepth` in
+    `lensModel.ts`.
+- **Rows drag into the agent's context** (tsk1089): a `list`, `table` or
+  `tree` row whose first linked column resolves (`rowRef`) is draggable
+  with the agent-context drag (`CONTEXT_REF_MIME`, `setContextRefDrag`) —
+  a working-tree file or wiki page as its `@` mention, any other ref as
+  `[oxplow ref …]` (`rowContextRef`). The agent terminal highlights and
+  accepts it as for the core rows; the keyboard path is the row menu's
+  Ask About This. A `tree`'s labels draw through their declared column
+  (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
+  apply.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
-  row? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
-  for whoever pressed, so they grant no power.
+  row?, group? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
+  for whoever pressed, so they grant no power. `group: <value>` puts the
+  action in that group's heading (matched against the group's value as
+  text) instead of the toolbar — also in a compact panel, where the
+  toolbar is hidden. It needs the lens to have `group`, isn't a row
+  action, and binds only `{{param.x}}`; a group with no rows shows no
+  heading, so neither its action.
 - `alert`: a row-count or threshold condition that shows a panel badge
   (nudging the agent is what advisories are for).
 
@@ -2571,3 +2625,14 @@ available to every extension:
 - Lens tabs carry params: `lens:<ext>/<slug>?k=v` (`lensRef(id, params)`),
   so a slot lens's heading opens its page with the slot's values, and
   history and bookmarks keep them.
+- Panel `collapsed:` — a lens shown as a collapsed panel's summary
+  (tsk1089, for the Work panel).
+- Panel `count:` — a lens whose row count (or `number`) is the panel's
+  header count without raising an alert.
+- Lens `group: { by, link? }` on `list` / `table` — rows under linked
+  sub-headings, also in compact panels — and actions with `group:` in a
+  group's heading.
+- Column `icon:` / `tone:` from fixed vocabularies, and lens `emphasis:` /
+  `depth:` — row highlight and indent.
+- List, table and tree rows that link somewhere drag into the agent's
+  context; tree labels honour their column's `link`.

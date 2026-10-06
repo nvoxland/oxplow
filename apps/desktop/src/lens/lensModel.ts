@@ -10,7 +10,7 @@ import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/Rail
 import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { formatContextMention } from "../agent-context-ref.js";
+import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
 import { parseRef } from "../refs/ref.js";
 
 export interface DisplayColumn {
@@ -21,23 +21,120 @@ export interface DisplayColumn {
   link: LensLink | null;
   /** Position of the column holding this one's unit, if it names one. */
   unitIndex: number | null;
+  /** Position of the column naming the cell's icon (`lensIcons.tsx`). */
+  iconIndex: number | null;
+  /** Position of the column naming the cell's tone. */
+  toneIndex: number | null;
+}
+
+/** The columns that style rows rather than show as cells: `group.by`,
+ *  `emphasis` and `depth` (tsk1089). */
+function stylingColumns(lens: Lens): string[] {
+  return [lens.group?.by, lens.emphasis, lens.depth].filter((c): c is string => !!c);
 }
 
 /** Columns to render, in order. Declared `columns` win (skipping keys the
  *  result doesn't have — `validate_extension` reports those); otherwise
- *  every result column, labelled by name. */
+ *  every result column, labelled by name. The row-styling columns are
+ *  never cells. */
 export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColumn[] {
+  const styling = stylingColumns(lens);
+  const at = (key: string | null | undefined) => {
+    const i = key ? resultColumns.indexOf(key) : -1;
+    return i === -1 ? null : i;
+  };
   if (lens.columns.length === 0) {
-    return resultColumns.map((key, index) => ({ key, label: key, index, link: null, unitIndex: null }));
+    return resultColumns.flatMap((key, index) =>
+      styling.includes(key) ? [] : [{ key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null }],
+    );
   }
   const out: DisplayColumn[] = [];
   for (const c of lens.columns) {
     const index = resultColumns.indexOf(c.key);
-    if (index === -1) continue;
-    const unitIndex = c.unit ? resultColumns.indexOf(c.unit) : -1;
-    out.push({ key: c.key, label: c.label ?? c.key, index, link: c.link ?? null, unitIndex: unitIndex === -1 ? null : unitIndex });
+    if (index === -1 || styling.includes(c.key)) continue;
+    out.push({
+      key: c.key,
+      label: c.label ?? c.key,
+      index,
+      link: c.link ?? null,
+      unitIndex: at(c.unit),
+      iconIndex: at(c.icon),
+      toneIndex: at(c.tone),
+    });
   }
   return out;
+}
+
+/** One `group` of a list or table: its value (as text, what a group
+ *  action names), its heading, its rows, and where the heading links. */
+export interface RowGroup {
+  key: string;
+  label: string;
+  rows: SqlCell[][];
+  ref: TabRef | null;
+}
+
+/** A grouped lens's rows under a heading per distinct `group.by` value,
+ *  in the order each first appears; the heading links through
+ *  `group.link`, read from the group's first row. Null when the lens isn't
+ *  grouped or the result lacks the column. */
+export function rowGroups(lens: Lens, result: SqlQueryResult): RowGroup[] | null {
+  const by = lens.group?.by;
+  const i = by ? result.columns.indexOf(by) : -1;
+  if (!by || i === -1) return null;
+  const groups = new Map<string, RowGroup>();
+  for (const row of result.rows) {
+    const v = row[i] ?? null;
+    const key = v === null ? "" : String(v);
+    const g = groups.get(key);
+    if (g) {
+      g.rows.push(row);
+      continue;
+    }
+    const link = lens.group?.link ?? null;
+    groups.set(key, {
+      key,
+      label: formatCell(v),
+      rows: [row],
+      ref: link ? cellLinkRef(link, by, row, result.columns) : null,
+    });
+  }
+  return [...groups.values()];
+}
+
+function cellOf(columns: string[], row: SqlCell[], key: string | null | undefined): SqlCell {
+  const i = key ? columns.indexOf(key) : -1;
+  return i === -1 ? null : (row[i] ?? null);
+}
+
+/** Whether the row is highlighted: its `emphasis` cell is truthy (true,
+ *  a non-zero number, text other than empty / `0` / `false`). */
+export function rowEmphasized(lens: Lens, columns: string[], row: SqlCell[]): boolean {
+  const v = cellOf(columns, row, lens.emphasis);
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") return v !== "" && v !== "0" && v.toLowerCase() !== "false";
+  return v === true;
+}
+
+/** How far the row is indented: its `depth` cell as a whole number
+ *  (0–8), else 0. */
+export function rowDepth(lens: Lens, columns: string[], row: SqlCell[]): number {
+  const v = cellOf(columns, row, lens.depth);
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : 0;
+  return Number.isInteger(n) ? Math.max(0, Math.min(8, n)) : 0;
+}
+
+/** What dragging the row onto the agent adds to its context: the page
+ *  its first link opens (a working-tree file and a wiki page as their
+ *  `@` mentions, anything else as its ref), or null when it links
+ *  nowhere. */
+export function rowContextRef(lens: Lens, columns: string[], row: SqlCell[]): ContextRef | null {
+  const ref = rowRef(lens, columns, row);
+  if (!ref) return null;
+  const parsed = parseRef(ref);
+  if (parsed?.kind === "wiki" && parsed.rev === null) return { kind: "wiki", slug: parsed.id };
+  if (parsed?.kind === "file" && parsed.rev === null && parsed.frag === null) return { kind: "file", path: parsed.id };
+  return { kind: "ref", ref };
 }
 
 /** The page a linked cell opens, or null when the target value is
@@ -249,6 +346,9 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     hunks: null,
     form: null,
     custom: null,
+    group: null,
+    emphasis: null,
+    depth: null,
     children: [],
     launcherCategory: null,
     hidden: false,

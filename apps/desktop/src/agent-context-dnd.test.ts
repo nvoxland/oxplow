@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeContextRef,
   decodeTaskDragPayload,
   decodeTaskDragRefs,
   resolveTaskContextRefs,
@@ -109,5 +110,31 @@ describe("decodeTaskDragRefs", () => {
   test("returns [] for malformed JSON", () => {
     expect(decodeTaskDragRefs("not json")).toEqual([]);
     expect(decodeTaskDragRefs(null)).toEqual([]);
+  });
+});
+
+// tsk1089: a lens row drags the ref it links to (any canonical ref), so the
+// terminal must read that payload back, not only files, wiki pages and
+// tasks.
+describe("decodeContextRef", () => {
+  test("reads every kind a drag source sets", () => {
+    expect(decodeContextRef(JSON.stringify({ kind: "file", path: "a.ts" }))).toEqual({ kind: "file", path: "a.ts" });
+    expect(decodeContextRef(JSON.stringify({ kind: "wiki", slug: "s" }))).toEqual({ kind: "wiki", slug: "s" });
+    expect(decodeContextRef(JSON.stringify({ kind: "task", itemId: "tsk1", title: "T", status: "ready" }))).toEqual({
+      kind: "task",
+      itemId: "tsk1",
+      title: "T",
+      status: "ready",
+    });
+    expect(decodeContextRef(JSON.stringify({ kind: "ref", ref: "work_item:oxplow:tsk12" }))).toEqual({
+      kind: "ref",
+      ref: "work_item:oxplow:tsk12",
+    });
+  });
+
+  test("refuses a ref that isn't canonical, and junk", () => {
+    expect(decodeContextRef(JSON.stringify({ kind: "ref", ref: "not a ref" }))).toBeNull();
+    expect(decodeContextRef("nope")).toBeNull();
+    expect(decodeContextRef("")).toBeNull();
   });
 });

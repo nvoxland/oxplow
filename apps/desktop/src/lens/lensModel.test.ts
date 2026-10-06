@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp } from "./lensModel.js";
+import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
@@ -30,8 +30,8 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
 describe("displayColumns", () => {
   test("without declared columns shows every result column by name", () => {
     expect(displayColumns(lens(), ["id", "title"])).toEqual([
-      { key: "id", label: "id", index: 0, link: null, unitIndex: null },
-      { key: "title", label: "title", index: 1, link: null, unitIndex: null },
+      { key: "id", label: "id", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null },
+      { key: "title", label: "title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null },
     ]);
   });
 
@@ -44,9 +44,71 @@ describe("displayColumns", () => {
       ],
     });
     expect(displayColumns(l, ["id", "title", "u"])).toEqual([
-      { key: "title", label: "Task", index: 1, link: { kind: "task", from: "id", line: null, base: null, head: null }, unitIndex: null },
-      { key: "id", label: "id", index: 0, link: null, unitIndex: 2 },
+      { key: "title", label: "Task", index: 1, link: { kind: "task", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null },
+      { key: "id", label: "id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null },
     ]);
+  });
+
+  // tsk1089: a column's icon and tone come from other columns of the row;
+  // the row-styling columns (group, emphasis, depth) are never cells.
+  test("columns carry their icon and tone columns; styling columns aren't cells", () => {
+    const styled = lens({
+      group: { by: "bucket", link: null },
+      emphasis: "on",
+      depth: "d",
+      columns: [{ key: "title", label: null, link: null, unit: null, icon: "glyph", tone: "hue" }, { key: "bucket", label: null, link: null, unit: null }],
+    });
+    expect(displayColumns(styled, ["title", "bucket", "glyph", "hue"])).toEqual([
+      { key: "title", label: "title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3 },
+    ]);
+    const auto = lens({ group: { by: "bucket", link: null }, emphasis: "on", depth: "d" });
+    expect(displayColumns(auto, ["title", "bucket", "on", "d"]).map((c) => c.key)).toEqual(["title"]);
+  });
+});
+
+describe("row groups and styling (tsk1089)", () => {
+  const cols = ["bucket", "title", "ref", "on", "d"];
+  const rows = [
+    ["Ready", "a", "page:tasks", 0, 0],
+    ["Done", "b", null, 1, 1],
+    ["Ready", "c", "page:other", 0, "2"],
+  ];
+  const res = { columns: cols, rows, truncated: false } as never;
+
+  test("rows group by a column, in the order each value first appears; the heading links from the group's first row", () => {
+    const l = lens({ viz: "list", group: { by: "bucket", link: { kind: "page", from: "ref", line: null, base: null, head: null } } });
+    const groups = rowGroups(l, res)!;
+    expect(groups.map((g) => [g.key, g.label, g.rows.map((r) => r[1])])).toEqual([
+      ["Ready", "Ready", ["a", "c"]],
+      ["Done", "Done", ["b"]],
+    ]);
+    expect(groups[0]!.ref?.id).toBe("page:tasks");
+    expect(groups[1]!.ref).toBeNull();
+  });
+
+  test("an ungrouped lens, or one whose group column isn't in the result, has no groups", () => {
+    expect(rowGroups(lens({ viz: "list" }), res)).toBeNull();
+    expect(rowGroups(lens({ viz: "list", group: { by: "gone", link: null } }), res)).toBeNull();
+  });
+
+  test("emphasis is a truthy cell; depth an integer cell, else 0", () => {
+    const l = lens({ emphasis: "on", depth: "d" });
+    expect(rows.map((r) => rowEmphasized(l, cols, r))).toEqual([false, true, false]);
+    expect(rows.map((r) => rowDepth(l, cols, r))).toEqual([0, 1, 2]);
+    expect(rowEmphasized(lens(), cols, rows[1]!)).toBe(false);
+    expect(rowDepth(lens({ depth: "title" }), cols, rows[0]!)).toBe(0);
+    expect(rowEmphasized(lens({ emphasis: "title" }), cols, ["x", "false"])).toBe(false);
+  });
+
+  test("a row that links somewhere drags into the agent's context", () => {
+    const link = (kind: "task" | "wiki" | "file" | "page", from: string) => ({ kind, from, line: null, base: null, head: null });
+    const at = (kind: "task" | "wiki" | "file" | "page", value: string | number) =>
+      rowContextRef(lens({ columns: [{ key: "title", label: null, link: link(kind, "v"), unit: null }] }), ["title", "v"], ["T", value]);
+    expect(at("task", 12)).toEqual({ kind: "ref", ref: "work_item:oxplow:tsk12" });
+    expect(at("page", "page:comments")).toEqual({ kind: "ref", ref: "page:comments" });
+    expect(at("wiki", "auth-flow")).toEqual({ kind: "wiki", slug: "auth-flow" });
+    expect(at("file", "src/a.ts")).toEqual({ kind: "file", path: "src/a.ts" });
+    expect(rowContextRef(lens(), ["title"], ["T"])).toBeNull();
   });
 });
 

@@ -797,7 +797,10 @@ mod tests {
         let rows = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 1)]).await;
         assert_eq!(
             rows,
-            serde_json::json!([["For me", 2, "page:comments"], ["For the agent", 1, "page:comments"]])
+            serde_json::json!([
+                ["For me", 2, "page:comments"],
+                ["For the agent", 1, "page:comments"]
+            ])
         );
         let none = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 2)]).await;
         assert_eq!(none, serde_json::json!([]));

@@ -13,7 +13,7 @@ import { getPanelLayout, setPanelLayout } from "../../api.js";
 import { useExtensions } from "../../extensionsStore.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { LensResultView } from "../../lens/LensResultView.js";
-import type { ExtensionPanel, PanelPlacement, Reads } from "../../tauri-bridge/generated/bindings.js";
+import type { ExtensionPanel, LensRun, PanelPlacement, Reads } from "../../tauri-bridge/generated/bindings.js";
 import {
   CORE_PANELS,
   extensionPanelId,
@@ -480,7 +480,7 @@ export function RailHud({
           <ExtensionPanelSection
             key={id}
             panel={panel}
-            runs={panelRuns[panel.id] ?? { body: null, badge: null, count: null }}
+            runs={panelRuns[panel.id] ?? { body: null, badge: null, collapsed: null, count: null }}
             streamId={streamId ?? null}
             onOpenPage={onOpenPage}
           />
@@ -1307,8 +1307,9 @@ function ApprovalsSection({ proposals, reveal }: { proposals: Proposal[]; reveal
   );
 }
 
-/** An extension's panel (P6.G1): its body lens, compact, and its badge's
- *  count in the header while the badge fires. */
+/** An extension's panel (P6.G1): its body lens, compact; its count in the
+ *  header (`panelCount`: the count lens's, else the badge's while it
+ *  fires); and, collapsed, its collapsed lens compact as the summary. */
 function ExtensionPanelSection({
   panel,
   runs,
@@ -1321,21 +1322,27 @@ function ExtensionPanelSection({
   streamId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
+  const compact = (run: LensRun, testId: string) => (
+    <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
+      <LensResultView run={run} compact maxRows={8} streamId={streamId} onOpenPage={onOpenPage} />
+    </div>
+  );
   return (
     <RailSection
       id={extensionPanelId(panel)}
       title={panel.title}
       count={runs.count ?? undefined}
+      collapsedContent={runs.collapsed ? compact(runs.collapsed, "rail-panel-collapsed") : undefined}
       onOpen={() => onOpenPage(panelOpenRef(panel))}
       openTitle={`Open ${panel.title}`}
     >
-      <div style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
-        {runs.body ? (
-          <LensResultView run={runs.body} compact maxRows={8} streamId={streamId} onOpenPage={onOpenPage} />
-        ) : (
+      {runs.body ? (
+        compact(runs.body, "rail-panel-body")
+      ) : (
+        <div style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
           <RailEmpty label="Loading…" />
-        )}
-      </div>
+        </div>
+      )}
     </RailSection>
   );
 }

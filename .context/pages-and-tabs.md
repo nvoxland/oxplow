@@ -168,18 +168,26 @@ core's (`core:alerts`, `core:approvals`, `core:uncommitted`,
 `core:work`, `core:bookmarks`) and every enabled
 extension's `panels:`
 (`ext:<extension>/<id>`, rendered by `ExtensionPanelSection`: the body
-lens compact, the badge lens's alert count in the header, the header's ↗
+lens compact; the header's count — the `count` lens's row count (or
+`number`), else the badge lens's alert count while it fires
+(`panelCount`); collapsed, the `collapsed` lens compact as its summary,
+else nothing; the header's ↗
 opening the panel's `open` page or else its body lens, `panelOpenRef`).
+A compact lens keeps its `group` headings and group actions (the
+toolbar is hidden), and its linked rows drag into the agent's context
+(tsk1089).
 The rail's panels are moving out of core into `oxplow-bundled` (epic
 tsk1085): only their UI moves, as lenses over the existing views and
 commands; Comments is done (`ext:oxplow-bundled/comments`). The rail is
 the one owner of every panel's runs (`components/Panels/usePanelRuns.ts`
 → `useExtensionPanelRuns`): it binds each panel's scope — `stream_id` /
 `thread_id` as row ids, from `panelParams` — for the stream and thread it
-shows, re-runs when either changes or when a read changes, and hands each
+shows, re-runs when either changes or when a read changes, runs each
+distinct lens of a panel once whatever roles it plays, and hands each
 section its runs. **Alerts** is derived from the same runs
 (`panelAlerts`): every firing badge, once, so a badge never runs twice
-and a panel's header count and its Alerts row can't disagree. Alerts
+and a badge-only panel's header count and its Alerts row can't disagree
+(a `count` lens deliberately shows its own number). Alerts
 leads with "N proposals await your approval" while any agent proposal is
 pending; the row reveals **Approvals** (`revealPanel`: shown if hidden,
 expanded — Approvals then scrolls itself into view). Alerts' own count

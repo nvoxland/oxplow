@@ -2517,6 +2517,17 @@ export type ExtensionPanel = {
 	 *  Absent, the body lens's own page.
 	 */
 	open: string | null,
+	/**
+	 *  The lens shown, compact, while the panel is collapsed: its one-line
+	 *  summary (tsk1089). Absent, a collapsed panel shows only its header.
+	 */
+	collapsed: string | null,
+	/**
+	 *  The lens whose row count (a `number` lens: its value) is the
+	 *  header's count, without raising an alert (tsk1089). It wins over
+	 *  the badge's count; the badge still feeds Alerts.
+	 */
+	count: string | null,
 };
 
 /**
@@ -3230,6 +3241,11 @@ export type LensAction = {
 	 *  bound to that row. Otherwise it's a button above the result.
 	 */
 	row: boolean,
+	/**
+	 *  A group action: a button in the heading of the group whose `by`
+	 *  value (as text) this is, instead of above the result (tsk1089).
+	 */
+	group: string | null,
 };
 
 /**
@@ -3268,6 +3284,17 @@ export type LensColumn = {
 	 *  `lines`): a number shows as a metric value in it (tsk1038).
 	 */
 	unit?: string | null,
+	/**
+	 *  A column of the same row naming an icon drawn before the cell
+	 *  (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
+	 *  vocabulary, `lens/lensIcons.tsx` — an unknown name draws none).
+	 */
+	icon?: string | null,
+	/**
+	 *  A column of the same row naming the cell's tone: `accent`,
+	 *  `success`, `warning`, `danger` or `muted` (anything else is plain).
+	 */
+	tone?: string | null,
 };
 
 // A `custom` lens's component and the props it starts with.
@@ -3314,6 +3341,18 @@ export type LensForm_Serialize = {
 	command: string | null,
 	// Input values the form starts with (`{{param.x}}` placeholders bound).
 	defaults: unknown | null,
+};
+
+/**
+ *  `group` on a `list` or `table`: the rows under a heading per distinct
+ *  value of `by`, in the order each first appears; `link` makes the
+ *  heading a link, read from the group's first row (tsk1089).
+ */
+export type LensGroup = {
+	// The column whose value groups the rows (not shown as a cell).
+	by: string,
+	// The heading's link; `from` defaults to `by`.
+	link?: LensLink | null,
 };
 
 // `hunks` viz: the file and the two revisions each row diffs.
@@ -3458,6 +3497,9 @@ export type LensSpec_Deserialize = {
 	steps?: LensSteps | null,
 	hunks?: LensHunks | null,
 	form?: LensForm_Deserialize | null,
+	group?: LensGroup | null,
+	emphasis?: string | null,
+	depth?: string | null,
 };
 
 /**
@@ -3485,6 +3527,9 @@ export type LensSpec_Serialize = {
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
 	form: LensForm_Serialize | null,
+	group: LensGroup | null,
+	emphasis: string | null,
+	depth: string | null,
 };
 
 // `steps` viz: each step's text and status.
@@ -3601,6 +3646,15 @@ export type Lens_Deserialize = {
 	form: LensForm_Deserialize | null,
 	// For `custom`: the component and its props.
 	custom: LensCustom_Deserialize | null,
+	// For `list` / `table`: rows under a heading per value (tsk1089).
+	group: LensGroup | null,
+	/**
+	 *  For `list` / `table` / `tree`: a column whose truthy value
+	 *  highlights the row.
+	 */
+	emphasis: string | null,
+	// For `list` / `table`: a column whose integer value indents the row.
+	depth: string | null,
 	// For `grid`: child lens ids.
 	children: string[],
 	// Launcher section; `None` = "Lenses".
@@ -3640,6 +3694,15 @@ export type Lens_Serialize = {
 	form: LensForm_Serialize | null,
 	// For `custom`: the component and its props.
 	custom: LensCustom_Serialize | null,
+	// For `list` / `table`: rows under a heading per value (tsk1089).
+	group: LensGroup | null,
+	/**
+	 *  For `list` / `table` / `tree`: a column whose truthy value
+	 *  highlights the row.
+	 */
+	emphasis: string | null,
+	// For `list` / `table`: a column whose integer value indents the row.
+	depth: string | null,
 	// For `grid`: child lens ids.
 	children: string[],
 	// Launcher section; `None` = "Lenses".

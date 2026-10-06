@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { getLens, lensForm, lensText, runLens, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
@@ -26,12 +26,17 @@ import {
   limitRows,
   lineSeries,
   rowAsk,
+  rowContextRef,
+  rowDepth,
+  rowEmphasized,
+  rowGroups,
   rowRef,
   stepItems,
   timelineEntries,
   treeNodes,
   treemapItems,
   type DisplayColumn,
+  type RowGroup,
   type StepStatus,
   type TreeNode,
 } from "./lensModel.js";
@@ -47,6 +52,8 @@ import { personCommands } from "../personCommands.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
 import { addLensToContext, copyLens, performLensAction, rowRecord } from "./lensActions.js";
+import { LensIcon, lensIcon, toneColor } from "./lensIcons.js";
+import { setContextRefDrag } from "../agent-context-dnd.js";
 
 type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
 
@@ -76,7 +83,7 @@ export function LensResultView(props: LensResultViewProps) {
     return (
       <>
         {confirm}
-        <LensBody {...props} runRowAction={actions.run} />
+        <LensBody {...props} actions={actions} />
       </>
     );
   }
@@ -84,7 +91,7 @@ export function LensResultView(props: LensResultViewProps) {
     <div>
       {confirm}
       <LensToolbar run={run} streamId={streamId} actions={actions} />
-      <LensBody {...props} runRowAction={actions.run} />
+      <LensBody {...props} actions={actions} />
     </div>
   );
 }
@@ -140,10 +147,11 @@ function useLensActions(run: LensRun, streamId: string | null) {
 
 type LensActionsState = ReturnType<typeof useLensActions>;
 
-/** Copy, Add to Agent Context, and the lens's whole-lens actions. */
+/** Copy, Add to Agent Context, and the lens's whole-lens actions (a row's
+ *  are in its menu, a group's in its heading). */
 function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: string | null; actions: LensActionsState }) {
   const [copied, setCopied] = useState(false);
-  const buttons = run.lens.actions.filter((a) => !a.row);
+  const buttons = run.lens.actions.filter((a) => !a.row && !a.group);
   return (
     <>
     <div data-testid="lens-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginBottom: 6 }}>
@@ -185,9 +193,7 @@ function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: strin
   );
 }
 
-type RowActionRunner = (action: LensAction, row: Record<string, SqlCell>) => void;
-
-function LensBody(props: LensResultViewProps & { runRowAction?: RowActionRunner }) {
+function LensBody(props: LensResultViewProps & { actions?: LensActionsState }) {
   const { run, onOpenPage, streamId = null } = props;
   // A grid composes child lenses and has no rows of its own; it's its own
   // component so the row views' hooks always run in the same order.
@@ -204,10 +210,10 @@ function RowsBody({
   maxRows,
   streamId = null,
   compact = false,
-  runRowAction,
+  actions,
   onCustomFailure,
   onCustomReady,
-}: LensResultViewProps & { runRowAction?: RowActionRunner }) {
+}: LensResultViewProps & { actions?: LensActionsState }) {
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
@@ -233,18 +239,27 @@ function RowsBody({
     const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null));
     // A timestamp keeps its full local time a hover away.
     const text = isTimestamp(raw) ? <span title={formatFullDateTime(raw)}>{formatted}</span> : formatted;
+    // Its icon and tone, named by other columns of the row (tsk1089).
+    const toneName = c.toneIndex === null ? null : (row[c.toneIndex] ?? null);
+    const tone = toneColor(toneName);
+    const icon = c.iconIndex === null ? null : lensIcon(row[c.iconIndex] ?? null);
     const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
-    if (!ref) return text;
-    const link = (
-      <RouteLink to={ref} onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined} style={linkStyle}>
+    const mine = ref ? badges.filter((b) => b.ref === ref.id) : [];
+    const body = ref ? (
+      <RouteLink to={ref} onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined} style={tone ? { ...linkStyle, color: tone } : linkStyle}>
         {text}
       </RouteLink>
+    ) : (
+      text
     );
-    const mine = badges.filter((b) => b.ref === ref.id);
-    if (mine.length === 0) return link;
+    if (!tone && !icon && mine.length === 0) return body;
     return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-        {link}
+      <span
+        data-tone={tone ? String(toneName) : undefined}
+        style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap", color: tone ?? undefined }}
+      >
+        {icon ? <LensIcon spec={icon} tone={tone} /> : null}
+        {body}
         {mine.map((b, i) => (
           <RefBadge key={i} label={b.label} tone="label" color={safeColor(b.color) ?? undefined} title={`from ${b.extension}`} />
         ))}
@@ -263,8 +278,8 @@ function RowsBody({
     ...rowActions.map((a) => ({
       id: `lens-action-${a.id}`,
       label: a.label,
-      enabled: runRowAction !== undefined,
-      run: () => runRowAction?.(a, rowRecord(result.columns, row)),
+      enabled: actions !== undefined,
+      run: () => actions?.run(a, rowRecord(result.columns, row)),
     })),
     // Extensions' commands for what the row links to (P6b.C4).
     ...(() => {
@@ -283,11 +298,107 @@ function RowsBody({
     onContextMenu: (e) => ctxMenu.open(e, rowItems(row)),
     onKeyDown: (e) => ctxMenu.openForKey(e, rowItems(row)),
   });
+  // A list, table or tree row: dragged into the agent's context when it
+  // links somewhere, highlighted by `emphasis`, indented by `depth`.
+  const rowLook: RowLook = (row) => {
+    const ref = rowContextRef(lens, result.columns, row);
+    const emphasized = rowEmphasized(lens, result.columns, row);
+    return {
+      props: {
+        ...(ref ? { draggable: true, onDragStart: (e: React.DragEvent) => setContextRefDrag(e, ref) } : {}),
+        ...(emphasized ? { "data-emphasis": "true" } : {}),
+      },
+      emphasized,
+      indent: rowDepth(lens, result.columns, row) * DEPTH_INDENT,
+    };
+  };
+  // A grouped list or table: its headings, each with its group's actions.
+  const groups = rowGroups(lens, result);
+  const heading = (g: RowGroup) => (
+    <GroupHeading
+      group={g}
+      actions={lens.actions.filter((a) => a.group === g.key)}
+      busy={actions?.busy ?? null}
+      onAction={(a) => actions?.run(a, null)}
+      onOpenPage={onOpenPage}
+    />
+  );
+  const rowsView: RowsView = { groups, heading, rowLook };
   return (
     <>
-      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, onCustomFailure, onCustomReady }} />
+      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady }} />
       {ctxMenu.menu}
     </>
+  );
+}
+
+/** How far each `depth` level indents a row, px. */
+const DEPTH_INDENT = 14;
+
+interface RowLookOut {
+  props: Record<string, unknown>;
+  emphasized: boolean;
+  /** Extra left padding, px. */
+  indent: number;
+}
+type RowLook = (row: SqlCell[]) => RowLookOut;
+
+/** What a list, table or tree draws besides cells (tsk1089). */
+interface RowsView {
+  groups: RowGroup[] | null;
+  heading(g: RowGroup): ReactNode;
+  rowLook: RowLook;
+}
+
+/** A group's heading, styled as the rail's sub-headings: its value
+ *  (linked when the group's `link` resolves) and its group actions. */
+function GroupHeading({
+  group,
+  actions,
+  busy,
+  onAction,
+  onOpenPage,
+}: {
+  group: RowGroup;
+  actions: LensAction[];
+  busy: string | null;
+  onAction(a: LensAction): void;
+  onOpenPage?(ref: TabRef): void;
+}) {
+  const ref = group.ref;
+  return (
+    <div data-testid="lens-group-heading" data-group={group.key} style={groupHeadingStyle}>
+      {ref ? (
+        <RouteLink
+          to={ref}
+          testId="lens-group-link"
+          onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined}
+          style={{ ...linkStyle, color: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}
+        >
+          {group.label}
+        </RouteLink>
+      ) : (
+        <span>{group.label}</span>
+      )}
+      {actions.length > 0 ? (
+        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
+          {actions.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              data-testid={`lens-group-action-${a.id}`}
+              disabled={busy !== null}
+              title={a.label}
+              aria-label={a.label}
+              onClick={() => onAction(a)}
+              style={groupActionStyle}
+            >
+              {busy === a.id ? `${a.label}…` : a.label}
+            </button>
+          ))}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -308,6 +419,7 @@ function LensViz({
   streamId,
   onOpenPage,
   rowMenu,
+  rowsView,
   onCustomFailure,
   onCustomReady,
 }: {
@@ -321,6 +433,7 @@ function LensViz({
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
   rowMenu: RowMenu;
+  rowsView: RowsView;
   onCustomFailure?(reason: string): void;
   onCustomReady?(): void;
 }) {
@@ -340,7 +453,15 @@ function LensViz({
     case "markdown":
       return <MarkdownViz body={first === null ? "" : String(first)} />;
     case "tree":
-      return <TreeViz nodes={treeNodes(lens, result)} rowMenu={rowMenu} />;
+      return (
+        <TreeViz
+          nodes={treeNodes(lens, result)}
+          label={treeLabelColumn(lens, cols, result.columns)}
+          cell={cell}
+          rowMenu={rowMenu}
+          rowLook={rowsView.rowLook}
+        />
+      );
     case "timeline":
       return <TimelineViz entries={timelineEntries(lens, result)} onOpenPage={onOpenPage} rowMenu={rowMenu} />;
     case "detail":
@@ -350,7 +471,7 @@ function LensViz({
     case "hunks":
       return <HunksViz rows={hunkRows(lens, result)} streamId={streamId} rowMenu={rowMenu} />;
     case "list":
-      return <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />;
+      return <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} view={rowsView} />;
     case "custom":
       return (
         <CustomComponentViz
@@ -364,7 +485,7 @@ function LensViz({
       );
     case "table":
     default:
-      return <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />;
+      return <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} view={rowsView} />;
   }
 }
 
@@ -433,23 +554,48 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   );
 }
 
+/** The column a tree's labels are drawn as: its declared column (so its
+ *  link, icon and tone apply), else the plain `tree.label` column. */
+function treeLabelColumn(lens: LensRun["lens"], cols: DisplayColumn[], resultColumns: string[]): DisplayColumn | null {
+  const key = lens.tree?.label;
+  if (!key) return null;
+  const declared = cols.find((c) => c.key === key);
+  if (declared) return declared;
+  const index = resultColumns.indexOf(key);
+  return index === -1 ? null : { key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null };
+}
+
+interface TreeVizProps {
+  label: DisplayColumn | null;
+  cell: CellRenderer;
+  rowMenu: RowMenu;
+  rowLook: RowLook;
+}
+
 /** `tree`: nested rows, each branch collapsible (expanded by default). */
-function TreeViz({ nodes, rowMenu }: { nodes: TreeNode[]; rowMenu: RowMenu }) {
+function TreeViz({ nodes, ...rest }: TreeVizProps & { nodes: TreeNode[] }) {
   return (
     <ul data-testid="lens-tree" style={treeListStyle}>
       {nodes.map((n, i) => (
-        <TreeItem key={i} node={n} rowMenu={rowMenu} />
+        <TreeItem key={i} node={n} {...rest} />
       ))}
     </ul>
   );
 }
 
-function TreeItem({ node, rowMenu }: { node: TreeNode; rowMenu: RowMenu }) {
+function TreeItem({ node, ...rest }: TreeVizProps & { node: TreeNode }) {
+  const { label, cell, rowMenu, rowLook } = rest;
   const [open, setOpen] = useState(true);
   const branch = node.children.length > 0;
+  const look = rowLook(node.row);
   return (
     <li data-testid="lens-tree-node">
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0" }} {...rowMenu(node.row)}>
+      <div
+        data-testid="lens-tree-row"
+        style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0", ...(look.emphasized ? emphasisStyle : {}) }}
+        {...rowMenu(node.row)}
+        {...look.props}
+      >
         {branch ? (
           <button
             type="button"
@@ -463,12 +609,12 @@ function TreeItem({ node, rowMenu }: { node: TreeNode; rowMenu: RowMenu }) {
         ) : (
           <span style={{ display: "inline-block", width: 16 }} />
         )}
-        <span>{node.label}</span>
+        <span>{label ? cell(node.row, label) : node.label}</span>
       </div>
       {branch && open ? (
         <ul style={{ ...treeListStyle, paddingLeft: 16 }}>
           {node.children.map((c, i) => (
-            <TreeItem key={i} node={c} rowMenu={rowMenu} />
+            <TreeItem key={i} node={c} {...rest} />
           ))}
         </ul>
       ) : null}
@@ -768,7 +914,20 @@ interface RowsVizProps {
   truncated: boolean;
   /** Right-click on a row (per-row actions are right-click only). */
   rowMenu: RowMenu;
+  /** Groups, emphasis, depth and dragging; absent, plain rows. */
+  view?: RowsView;
 }
+
+/** The rows in drawing order, each with its index in the result (its
+ *  test id), under their group's heading when the lens is grouped. */
+function sections(rows: SqlCell[][], view: RowsView | undefined): { group: RowGroup | null; rows: [SqlCell[], number][] }[] {
+  const index = new Map(rows.map((r, i) => [r, i] as const));
+  const groups = view?.groups;
+  if (!groups) return [{ group: null, rows: rows.map((r, i) => [r, i]) }];
+  return groups.map((g) => ({ group: g, rows: g.rows.map((r) => [r, index.get(r) ?? 0]) }));
+}
+
+const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0 };
 
 function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }) {
   if (!truncated) return null;
@@ -777,25 +936,43 @@ function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }
   );
 }
 
-function ListViz({ rows, cols, cell, truncated, rowMenu }: RowsVizProps) {
+function ListViz({ rows, cols, cell, truncated, rowMenu, view }: RowsVizProps) {
   const [head, ...rest] = cols;
   return (
     <>
       <ul data-testid="lens-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-        {rows.map((row, i) => (
-          <li key={i} data-testid={`lens-row-${i}`} style={listRowStyle} {...rowMenu(row)}>
-            <div>{head ? cell(row, head) : null}</div>
-            {rest.length > 0 ? (
-              <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                {rest.map((c, j) => (
-                  <span key={c.key}>
-                    {j > 0 ? " · " : null}
-                    {cell(row, c)}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </li>
+        {sections(rows, view).map(({ group, rows: inGroup }) => (
+          <Fragment key={group?.key ?? ""}>
+            {group && view ? <li style={{ listStyle: "none" }}>{view.heading(group)}</li> : null}
+            {inGroup.map(([row, i]) => {
+              const look = view?.rowLook(row) ?? noLook;
+              return (
+                <li
+                  key={i}
+                  data-testid={`lens-row-${i}`}
+                  style={{
+                    ...listRowStyle,
+                    ...(look.emphasized ? emphasisStyle : {}),
+                    ...(look.indent ? { paddingLeft: look.indent } : {}),
+                  }}
+                  {...rowMenu(row)}
+                  {...look.props}
+                >
+                  <div>{head ? cell(row, head) : null}</div>
+                  {rest.length > 0 ? (
+                    <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
+                      {rest.map((c, j) => (
+                        <span key={c.key}>
+                          {j > 0 ? " · " : null}
+                          {cell(row, c)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </Fragment>
         ))}
       </ul>
       <TruncatedNote rows={rows.length} truncated={truncated} />
@@ -803,7 +980,7 @@ function ListViz({ rows, cols, cell, truncated, rowMenu }: RowsVizProps) {
   );
 }
 
-function TableViz({ rows, cols, cell, truncated, rowMenu }: RowsVizProps) {
+function TableViz({ rows, cols, cell, truncated, rowMenu, view }: RowsVizProps) {
   return (
     <>
       <table data-testid="lens-table" style={tableStyle}>
@@ -817,14 +994,28 @@ function TableViz({ rows, cols, cell, truncated, rowMenu }: RowsVizProps) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} data-testid={`lens-row-${i}`} {...rowMenu(row)}>
-              {cols.map((c) => (
-                <td key={c.key} style={tdStyle}>
-                  {cell(row, c)}
-                </td>
-              ))}
-            </tr>
+          {sections(rows, view).map(({ group, rows: inGroup }) => (
+            <Fragment key={group?.key ?? ""}>
+              {group && view ? (
+                <tr>
+                  <td colSpan={Math.max(cols.length, 1)} style={{ padding: 0 }}>
+                    {view.heading(group)}
+                  </td>
+                </tr>
+              ) : null}
+              {inGroup.map(([row, i]) => {
+                const look = view?.rowLook(row) ?? noLook;
+                return (
+                  <tr key={i} data-testid={`lens-row-${i}`} style={look.emphasized ? emphasisStyle : undefined} {...rowMenu(row)} {...look.props}>
+                    {cols.map((c, j) => (
+                      <td key={c.key} style={j === 0 && look.indent ? { ...tdStyle, paddingLeft: 8 + look.indent } : tdStyle}>
+                        {cell(row, c)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -853,6 +1044,30 @@ const thStyle: CSSProperties = {
 };
 const tdStyle: CSSProperties = { padding: "6px 8px", borderBottom: "1px solid var(--border-subtle)", verticalAlign: "top" };
 const listRowStyle: CSSProperties = { padding: "8px 0", borderBottom: "1px solid var(--border-subtle)" };
+/** An `emphasis` row: the soft accent wash an active row gets. */
+const emphasisStyle: CSSProperties = { background: "var(--accent-soft-bg)", fontWeight: 500 };
+/** A group's heading: the rail's sub-heading look. */
+const groupHeadingStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "10px 0 4px",
+  fontSize: 11,
+  fontWeight: 600,
+  color: "var(--text-secondary)",
+  textTransform: "uppercase",
+  letterSpacing: 0.4,
+};
+const groupActionStyle: CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: "0 4px",
+  color: "var(--text-muted)",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  textTransform: "none",
+};
 const linkStyle: CSSProperties = {
   background: "none",
   border: "none",
