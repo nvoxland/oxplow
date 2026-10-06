@@ -18,7 +18,24 @@ mock.module("../../api.js", () => ({
   setPanelLayout: async (layout: Placement[]) => {
     saved.push(layout);
   },
-  listExtensions: async () => [],
+  // An extension panel beside Go To, so one can be toggled and the other
+  // hidden by the stored layout.
+  listExtensions: async () => [
+    {
+      name: "x",
+      enabled: true,
+      panels: [{ id: "x/w", extension: "x", title: "W", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null }],
+      lenses: [],
+      ui: { slots: [], commands: [], decorators: [], replacements: [] },
+    },
+  ],
+  runLens: async (id: string) => ({
+    lens: { id, viz: "list", params: [], columns: [], actions: [] },
+    params: {},
+    result: { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: [] },
+    alert: null,
+    warnings: [],
+  }),
   listCommentsForStream: async () => [],
   listRecentPageVisits: async () => [],
   topVisitedPages: async () => [],
@@ -28,25 +45,30 @@ mock.module("../../api.js", () => ({
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { RailHud } = await import("./RailHud.js");
+const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
 
 afterEach(cleanup);
 
 test("a toggle made before the stored layout loads survives it, and keeps what was stored", async () => {
-  const view = render(<RailHud threadId={null} streamId={null} onOpenPage={() => {}} />);
-  const toggle = view.getByTestId("rail-section-toggle-core:alerts");
+  const view = render(
+    <PanelRunsProvider streamId={null} threadId={null}>
+      <RailHud threadId={null} streamId={null} onOpenPage={() => {}} />
+    </PanelRunsProvider>,
+  );
+  const toggle = view.getByTestId("rail-section-toggle-core:bookmarks");
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(saved, "nothing is written over a layout not loaded yet").toEqual([]);
   await act(async () => {
     deliverLayout([
-      { panel: "core:alerts", hidden: false, collapsed: false },
-      { panel: "core:bookmarks", hidden: true, collapsed: false },
+      { panel: "core:bookmarks", hidden: false, collapsed: false },
+      { panel: "ext:x/w", hidden: true, collapsed: false },
     ]);
   });
-  expect(view.getByTestId("rail-section-toggle-core:alerts").getAttribute("aria-expanded")).toBe("false");
-  expect(view.queryByTestId("rail-section-core:bookmarks"), "the stored hide stands").toBeNull();
+  expect(view.getByTestId("rail-section-toggle-core:bookmarks").getAttribute("aria-expanded")).toBe("false");
+  expect(view.queryByTestId("rail-section-ext:x/w"), "the stored hide stands").toBeNull();
   const last = saved.at(-1)!;
-  expect(last.find((p) => p.panel === "core:alerts")).toMatchObject({ collapsed: true });
-  expect(last.find((p) => p.panel === "core:bookmarks")).toMatchObject({ hidden: true });
+  expect(last.find((p) => p.panel === "core:bookmarks")).toMatchObject({ collapsed: true });
+  expect(last.find((p) => p.panel === "ext:x/w")).toMatchObject({ hidden: true });
 });

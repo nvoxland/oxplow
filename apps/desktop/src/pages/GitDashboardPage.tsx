@@ -27,7 +27,7 @@ import { gitRevision, vcsRevOf } from "../revision.js";
 import { readBranches, readHistory, type History } from "../vcsHistory.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, indexRef, opErrorRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { alertsRef, gitCommitRef, indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { awaitGitOp, opErrorOf } from "../git-op.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -335,7 +335,10 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       // A failure is recorded globally (toast + status-bar indicator) and,
       // since the person is on this page, its details open (usability.md
       // "Errors"). Refresh either way so any partial progress shows.
-      if (!result.success) onOpenPage(opErrorRef(recordOpError(opErrorOf(label, command, result))));
+      if (!result.success) {
+        recordOpError(opErrorOf(label, command, result));
+        onOpenPage(alertsRef());
+      }
       void refresh();
     },
     [refresh, onOpenPage, addPending, removePending],

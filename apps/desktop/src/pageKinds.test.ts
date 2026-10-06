@@ -39,7 +39,7 @@ describe("pageKindIconComponent", () => {
       "diff",
       "duplicate-block",
       "dashboard",
-      "op-error",
+      "alerts",
       "stream-settings",
       "thread-settings",
       "settings",

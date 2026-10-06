@@ -48,11 +48,16 @@ mock.module("../../api.js", () => ({
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { RailHud } = await import("./RailHud.js");
+const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
 
 afterEach(cleanup);
 
 test("a collapsed panel shows its collapsed lens; its header counts the count lens's rows", async () => {
-  const view = render(<RailHud threadId={null} streamId="str1" onOpenPage={() => {}} />);
+  const view = render(
+    <PanelRunsProvider streamId="str1" threadId={null}>
+      <RailHud threadId={null} streamId="str1" onOpenPage={() => {}} />
+    </PanelRunsProvider>,
+  );
   const section = await waitFor(() => view.getByTestId("rail-section-ext:x/w"));
   await waitFor(() => expect(view.getByTestId("rail-panel-collapsed").textContent).toContain("summary row"));
   expect(view.queryByTestId("rail-panel-body")).toBeNull();

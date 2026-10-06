@@ -140,9 +140,12 @@ import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
-import { OpErrorPage } from "./pages/OpErrorPage.js";
+import { AlertsPage } from "./pages/AlertsPage.js";
+import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
+import { useAlerts } from "./components/Alerts/useAlerts.js";
+import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, customDashboardRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, customDashboardRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -328,7 +331,6 @@ export function App() {
     include: [],
   });
   const opErrorsStore = getOpErrorsStore();
-  const opErrorsAll = useSyncExternalStore(opErrorsStore.subscribe, opErrorsStore.getSnapshot);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   // macOS uses the native top-of-screen menu bar (driven by the
@@ -948,27 +950,6 @@ export function App() {
   useEffect(() => {
     opErrorsStore.setActiveStream(stream?.id ?? null);
   }, [stream?.id, opErrorsStore]);
-  // Toast each newly-recorded error (errors now surface via the status-bar
-  // OpErrorIndicator; the toast gives the moment-of-failure heads-up). Seed
-  // the known set on first run so pre-existing errors don't toast on boot.
-  const knownErrorIds = useRef<Set<string> | null>(null);
-  useEffect(() => {
-    if (knownErrorIds.current === null) {
-      knownErrorIds.current = new Set(opErrorsAll.map((e) => e.id));
-      return;
-    }
-    const known = knownErrorIds.current;
-    for (const e of opErrorsAll) {
-      if (known.has(e.id)) continue;
-      known.add(e.id);
-      const errorId = e.id;
-      showToast({
-        message: e.label,
-        actionLabel: "View",
-        onUndo: () => handleOpenPageRef.current?.(opErrorRef(errorId)),
-      });
-    }
-  }, [opErrorsAll]);
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};
@@ -2620,13 +2601,12 @@ export function App() {
           ),
         };
       },
-      "op-error": (ref, nav) => {
-        const errorId = (ref.payload as { errorId?: string } | null)?.errorId ?? "";
+      alerts: (ref, nav) => {
         return {
           id: ref.id,
-          label: "Op Error",
+          label: "Alerts",
           closable: true,
-          render: () => <OpErrorPage errorId={errorId} />,
+          render: () => <AlertsPage onOpenPage={nav.navOpen} />,
         };
       },
       files: (ref, nav) => {
@@ -3195,6 +3175,10 @@ export function App() {
   ]);
 
   return (
+    // One owner of every extension panel's runs, read by the rail, the
+    // status bar's bell and the Alerts page (tsk1097).
+    <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
+    <AlertToasts onReview={() => handleOpenPage(alertsRef())} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* macOS uses an Overlay titlebar (transparent, hidden title), so the
           webview reaches the top edge. This chrome-colored drag strip hosts
@@ -3367,15 +3351,6 @@ export function App() {
           stream={stream}
           vcsEnabled={workspaceContext.vcsEnabled}
           onOpenPage={handleOpenPage}
-          onDismissOpError={(id) => {
-            opErrorsStore.dismiss(id);
-            void forgetPage("op-error", `op-error:${id}`);
-          }}
-          onClearOpErrors={() => {
-            const ids = opErrorsAll.map((e) => e.id);
-            opErrorsStore.clear();
-            for (const id of ids) void forgetPage("op-error", `op-error:${id}`);
-          }}
         />
       </div>
         </div>
@@ -3420,7 +3395,15 @@ export function App() {
       <PersonCommandConfirm />
       <RemoteConnectionBanner />
     </div>
+    </PanelRunsProvider>
   );
+}
+
+/** A toast as each new thing needs the person; Review opens Alerts. */
+function AlertToasts({ onReview }: { onReview(): void }) {
+  const { items } = useAlerts();
+  useAlertToasts(items, onReview);
+  return null;
 }
 
 /**

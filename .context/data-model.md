@@ -1786,7 +1786,7 @@ reads `v_token_usage` through oxplow-bundled lenses (`task-tokens`,
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
 V126 (P6.G1). The person's left-nav layout in this project: one row per
-panel they've placed (`panel` — a core id like `core:alerts` or
+panel they've placed (`panel` — a core id like `core:bookmarks` or
 `ext:<extension>/<id>` — `position`, `hidden`, `collapsed`). Local state,
 never the repo. `get` returns the placements in order; `set` replaces
 them all in one transaction. A panel the table doesn't name shows

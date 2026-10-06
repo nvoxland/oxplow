@@ -2,16 +2,14 @@ import { vcsCheckoutBranch } from "../api.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import { BackgroundTaskIndicator } from "./BackgroundTaskIndicator.js";
 import { BranchPicker, type PickedRef } from "./BranchPicker.js";
-import { OpErrorIndicator } from "./OpErrorIndicator.js";
+import { AlertsIndicator } from "./Alerts/AlertsIndicator.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 interface Props {
   stream: Stream | null;
   vcsEnabled: boolean;
-  /** Async-op error surfacing — the indicator only renders when there are errors. */
+  /** Opens the Alerts page from the bell. */
   onOpenPage(ref: TabRef): void;
-  onDismissOpError(id: string): void;
-  onClearOpErrors(): void;
 }
 
 /**
@@ -20,7 +18,7 @@ interface Props {
  * picker chip. Clicking the branch chip opens the picker; clicking the
  * task indicator opens its own popover with the live task list.
  */
-export function StatusBar({ stream, vcsEnabled, onOpenPage, onDismissOpError, onClearOpErrors }: Props) {
+export function StatusBar({ stream, vcsEnabled, onOpenPage }: Props) {
   const canInteract = !!stream && vcsEnabled;
   const label = stream ? stream.branch : "—";
   const title = !vcsEnabled
@@ -39,7 +37,7 @@ export function StatusBar({ stream, vcsEnabled, onOpenPage, onDismissOpError, on
 
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      <OpErrorIndicator onOpenPage={onOpenPage} onDismiss={onDismissOpError} onClear={onClearOpErrors} />
+      <AlertsIndicator onOpenPage={onOpenPage} />
       <BackgroundTaskIndicator />
       <BranchPicker
       label={

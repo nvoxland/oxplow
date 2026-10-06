@@ -14,7 +14,7 @@
  */
 import {
   Activity,
-  AlertCircle,
+  Bell,
   Archive,
   BarChart3,
   BookOpen,
@@ -92,8 +92,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "custom-dashboard":
     case "dashboards":
       return LayoutDashboard;
-    case "op-error":
-      return AlertCircle;
+    case "alerts":
+      return Bell;
     case "stream-settings":
     case "thread-settings":
     case "settings":
@@ -244,8 +244,8 @@ export function pageKindLabel(kind: string): string {
       return "stream settings";
     case "thread-settings":
       return "thread settings";
-    case "op-error":
-      return "error";
+    case "alerts":
+      return "alerts";
     case "metrics-recorded":
       return "metrics";
     case "custom-dashboard":

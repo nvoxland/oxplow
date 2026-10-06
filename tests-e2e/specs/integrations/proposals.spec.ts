@@ -1,6 +1,5 @@
 import { approveProgram, ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { expandRailSection } from "../../support/ui.js";
 
 // The test extension's effect deletes a task titled "[delete]": a
 // destructive step oxplow never runs for an effect, so it waits as a
@@ -11,7 +10,8 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
   await run(daemon, "work_item.create", { title: "Pear [delete]", thread: daemon.thread });
-  await expandRailSection(page, "core:alerts");
+  // The status bar's bell opens the Alerts page, where it waits (tsk1097).
+  await page.getByTestId("alerts-indicator").click();
   const card = page.locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   await expect(card).toBeVisible();
   const id = (await card.getAttribute("data-testid"))!.replace("proposal-", "");

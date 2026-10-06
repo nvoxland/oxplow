@@ -487,10 +487,10 @@ live row has been evicted. The snapshot is captured on
 LRU-capped) so the renderer's `awaitBackgroundTask` can still read the
 final `result_json` / `error` even if the 4s grace window expired between
 the "ended" event and the IPC re-fetch. Without this, fast git ops
-that succeed silently could surface a blank op-error page (no stderr,
+that succeed silently could surface a blank op error on the Alerts page (no stderr,
 no stdout, no exitCode) — `opErrorOf` (`git-op.ts`) flags a failure
 whose `OpOutcome` carries neither a log nor conflicts as
-`blankFailure`, which flows into `OpError` and the OpErrorPage.
+`blankFailure`, which flows into `OpError` and its detail on the Alerts page.
 
 Adding a new producer: don't widen the union — extend
 `BackgroundTaskKind` and pick the most relevant existing kind, or add

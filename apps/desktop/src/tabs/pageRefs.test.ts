@@ -19,7 +19,7 @@ import {
   lensRef,
   metricRef,
   newTaskRef,
-  opErrorRef,
+  alertsRef,
   refFromTabId,
   pageKindOf,
   snapshotRef,
@@ -90,7 +90,7 @@ describe("pageRefs", () => {
     expect(customDashboardRef("dsh3").id).toBe("page:custom-dashboard?id=dsh3");
     expect(streamSettingsRef("str1").id).toBe("page:stream-settings?stream=str1");
     expect(threadSettingsRef("thr1").id).toBe("page:thread-settings?thread=thr1");
-    expect(opErrorRef("oe-1").id).toBe("page:op-error?id=oe-1");
+    expect(alertsRef().id).toBe("page:alerts");
   });
 
   test("route params stay readable: only the ref-reserved and query-syntax characters are escaped", () => {
@@ -262,7 +262,7 @@ describe("refFromTabId", () => {
       lensRef("acme/x", { path: "src/a@b.ts", q: "a=b&c" }),
       fileRef("src/a@b.ts"),
       diffRef({ path: "src/a.ts", leftVersion: "working", rightVersion: "git:HEAD", baseLabel: "HEAD" }),
-      opErrorRef("oe-1"),
+      alertsRef(),
       streamSettingsRef("str1"),
       threadSettingsRef("thr1"),
       wikiFreshnessRef("data-model"),

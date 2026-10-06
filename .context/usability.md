@@ -84,18 +84,26 @@ Things I keep forgetting. Read this before adding any UI.
   `CommandConfirm` (`PersonCommandConfirm`, mounted once in `App`). The
   task page's and wiki page's rail Delete use `InlineConfirm`; the wiki
   pane's right-click Delete uses `personCommands`.
+- **What needs the person isn't in the rail (tsk1097).** One status-bar
+  bell (`components/Alerts/AlertsIndicator.tsx`) counts everything that
+  needs them — red while something failed, the accent while decisions or
+  notices wait, quiet otherwise — and opens the **Alerts page**
+  (`page:alerts`): Needs your decision (each proposal's card, Approve /
+  Decline), Problems (failed operations; undelivered events and failed
+  reactions with Retry / Discard, the same `DeliveryList` as Settings →
+  Data), From extensions (firing panel badges). A toast announces each
+  new item once (`useAlertToasts`; what's there in the first seconds
+  after the app opens counts as seen) and offers only **Review** — never
+  Approve: consent is given where the preview is.
 - **Async-op failures don't `alert`.** Push a record into
   `opErrorsStore` (`recordOpError({ label, command?, stderr?, stdout?,
-  exitCode?, message? })`). Errors surface in two places, both global
-  (not scoped to a thread): a transient toast at the moment of failure
-  ("<label> — View"), and the **status-bar `OpErrorIndicator`** (a red
-  `⚠ N` chip in the bottom bar that only appears when there are errors;
-  click for the popover list). Clicking a row — or the toast's "View" —
-  opens an `op-error` page tab with the full output. There is **no rail
-  "Errors" section** any more. For ops that already have a page focus
-  when they fail (e.g. `runOp` in GitDashboardPage), call
-  `onOpenPage(opErrorRef(id))` after recording so the user lands on
-  the detail view directly. The store stays in memory (gone on reload),
+  exitCode?, message? })`). A failure is one of the things that need the
+  person (tsk1097, below): a toast as it happens ("<label> — Review"),
+  the status bar's bell counts it (red), and the **Alerts page** lists
+  it under Problems, each row opening to its full output. For ops that
+  already have a page focus when they fail (e.g. `runOp` in
+  GitDashboardPage), call `onOpenPage(alertsRef())` after recording so
+  the person lands where it's shown. The store stays in memory (gone on reload),
   but each record is also reported to the daemon, fire-and-forget, as
   the person-only `ui.report_error` (tsk1072), so the agent reads what
   the person saw in `v_op_error`. A report that fails is logged with
@@ -173,8 +181,7 @@ Things I keep forgetting. Read this before adding any UI.
   approved before it runs and goes back to waiting if the run fails
   (tsk858). Only the thread's own
   proposals show: a ref the transcript merely quotes shows nothing. The
-  rail's Alerts panel stays the cross-thread list (its proposal cards,
-  tsk1096: there's no separate Approvals panel).
+  Alerts page stays the cross-thread list (its proposal cards, tsk1097).
 
 ## Menus a page or row gets from extensions
 

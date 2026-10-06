@@ -3,7 +3,7 @@ import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { refFromTabId, dashboardRef, lensRef, indexRef } from "../../tabs/pageRefs.js";
+import { refFromTabId, dashboardRef } from "../../tabs/pageRefs.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import { getPanelLayout, setPanelLayout } from "../../api.js";
 import { useExtensions } from "../../extensionsStore.js";
@@ -24,10 +24,8 @@ import {
   type LayoutEdit,
   type LayoutSync,
 } from "../Panels/panelLayout.js";
-import { decide, useProposals, type Proposal } from "../../proposals.js";
-import { deliveryAlert, useUndelivered } from "../../delivery.js";
-import { ProposalCard } from "../Proposals/ProposalCard.js";
-import { panelAlerts, useExtensionPanelRuns, type PanelAlert, type PanelRuns } from "../Panels/usePanelRuns.js";
+import type { PanelRuns } from "../Panels/usePanelRuns.js";
+import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../opErrorsStore.js";
 import { readFailed } from "../../logger.js";
@@ -40,7 +38,6 @@ import {
 } from "../../api.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 import { readWikiPages } from "../../knowledge.js";
-import { goToSettingsSection } from "../../pages/settingsSections.js";
 
 export interface BookmarkRailEntry {
   ref: TabRef;
@@ -386,13 +383,9 @@ export function RailHud({
   onOpenSearch,
 }: RailHudProps) {
   const width = useRailWidth();
-  const extPanels = useExtensionPanels(streamId ?? null);
-  // One owner for every panel's lens runs: each section reads its own,
-  // and Alerts is derived from the same runs.
-  const panelRuns = useExtensionPanelRuns(extPanels, streamId ?? null, threadId);
-  const alerts = useMemo(() => panelAlerts(extPanels, panelRuns), [extPanels, panelRuns]);
-  const proposals = useProposals();
-  const undelivered = useUndelivered();
+  // One owner for every panel's lens runs, shared with the bell and the
+  // Alerts page (`PanelRunsProvider`, tsk1097).
+  const { panels: extPanels, runs: panelRuns } = usePanelRuns();
   const available = useMemo(
     () => [...CORE_PANELS.map((p) => p.id), ...extPanels.map(extensionPanelId)],
     [extPanels],
@@ -406,16 +399,6 @@ export function RailHud({
   // empty state when it has no content.
   function renderSection(id: RailSectionId): ReactNode {
     switch (id) {
-      case "core:alerts":
-        return (
-          <AlertsSection
-            key={id}
-            alerts={alerts}
-            proposals={proposals}
-            undelivered={undelivered.length}
-            onOpenPage={onOpenPage}
-          />
-        );
       case "core:bookmarks":
         return <GoToSection key={id} entries={bookmarks ?? []} threadId={threadId} onOpenPage={onOpenPage} />;
       default: {
@@ -636,69 +619,6 @@ function RailEmpty({ label }: { label: string }) {
   );
 }
 
-/** Alerts (a core panel, P6.G1): everything that needs the person. The
- *  proposals waiting for them, newest first, each its card with Approve
- *  and Decline (tsk1096: there's no separate Approvals panel); one row
- *  while events couldn't be delivered, opening Settings (Data →
- *  Delivery); then every panel badge that fires, one row each with its
- *  message, opening the badge's lens. Live. */
-function AlertsSection({
-  alerts,
-  proposals,
-  undelivered,
-  onOpenPage,
-}: {
-  alerts: PanelAlert[];
-  /** The proposals waiting for the person. */
-  proposals: Proposal[];
-  /** How many events wait in the dead-letter queue. */
-  undelivered: number;
-  onOpenPage(ref: TabRef): void;
-}) {
-  const delivery = deliveryAlert(undelivered);
-  const count = alerts.length + proposals.length + (delivery ? 1 : 0);
-  return (
-    <RailSection id="core:alerts" title="Alerts" count={count || undefined}>
-      {count === 0 ? <RailEmpty label="Nothing needs you" /> : null}
-      {proposals.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 8px 8px" }}>
-          {proposals.map((p) => (
-            <ProposalCard key={p.id} proposal={p} onDecide={decide} />
-          ))}
-        </div>
-      ) : null}
-      {delivery ? (
-        <button
-          type="button"
-          data-testid="rail-alert-delivery"
-          onClick={() => {
-            goToSettingsSection("settings-data-delivery");
-            onOpenPage(indexRef("settings"));
-          }}
-          title="Open Settings → Data → Delivery"
-          style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
-        >
-          <span style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}>{delivery}</span>
-        </button>
-      ) : null}
-      {alerts.map((a) => (
-        <button
-          key={a.id}
-          type="button"
-          data-testid={`rail-alert-${a.id}`}
-          onClick={() => onOpenPage(lensRef(a.id))}
-          title={`Open ${a.title}`}
-          style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
-        >
-          <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>{a.title}</span>
-          <span style={{ flex: 1 }} />
-          <span style={{ color: "var(--accent)", fontSize: 11 }}>{a.message}</span>
-        </button>
-      ))}
-    </RailSection>
-  );
-}
-
 /** An extension's panel (P6.G1): its body lens, compact; its count in the
  *  header (`panelCount`: the count lens's, else the badge's while it
  *  fires); and, collapsed, its collapsed lens compact as the summary. */
@@ -737,13 +657,6 @@ function ExtensionPanelSection({
       )}
     </RailSection>
   );
-}
-
-/** The enabled extensions' panels for this stream (the shared extensions
- *  store, so it follows their changes). */
-function useExtensionPanels(streamId: string | null): ExtensionPanel[] {
-  const exts = useExtensions(streamId);
-  return useMemo(() => (exts ?? []).filter((e) => e.enabled).flatMap((e) => e.panels), [exts]);
 }
 
 /** The "Go To" pane — the rail's combined bookmarks + history surface.

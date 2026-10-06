@@ -59,7 +59,7 @@ export type RoutePageKind =
   | "stream-settings"
   | "thread-settings"
   | "closed-threads"
-  | "op-error"
+  | "alerts"
   | "external-url"
   | "metrics-recorded"
   | "custom-dashboard"

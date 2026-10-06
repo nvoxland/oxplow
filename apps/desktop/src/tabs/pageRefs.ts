@@ -194,6 +194,7 @@ export type IndexKind =
   | "wiki-index"
   | "files"
   | "comments"
+  | "alerts"
   | "local-history"
   | "local-history-full"
   | "local-history-by-commit-full"
@@ -504,8 +505,9 @@ export function closedThreadsRef(): TabRef {
 
 /** Async-op error detail page. Scoped to the error id so each failure
  *  gets its own tab; closing it discards the view, not the store entry. */
-export function opErrorRef(errorId: string): TabRef {
-  return route("op-error", { errorId }, { id: errorId });
+/** The Alerts page: everything that needs the person (tsk1097). */
+export function alertsRef(): TabRef {
+  return indexRef("alerts");
 }
 
 export interface ExternalUrlPayload {
@@ -591,7 +593,7 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   dashboard: (p) => (p.get("variant") === "visits" ? dashboardRef("visits") : null),
   "stream-settings": (p) => (p.get("stream") ? streamSettingsRef(p.get("stream")!) : null),
   "thread-settings": (p) => (p.get("thread") ? threadSettingsRef(p.get("thread")!) : null),
-  "op-error": (p) => (p.get("id") ? opErrorRef(p.get("id")!) : null),
+  alerts: () => alertsRef(),
   "external-url": (p) => (p.get("url") ? externalUrlRef(p.get("url")!) : null),
 };
 
