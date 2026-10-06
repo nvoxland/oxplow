@@ -14,7 +14,6 @@
 //! (`oxplow-coverage`), never from the agent — so `diff-coverage` is
 //! always `observed`.
 
-use oxplow_domain::refs::build::work_item_ref;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -28,13 +27,10 @@ use oxplow_collect_plugin::{
 use oxplow_config::collectors::{CollectorSpec, Records, RunKind, Trigger};
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
-use oxplow_db::{
-    Effort, EffortStore, SqliteAttributionStore, SqliteEffortStore, SqliteSnapshotStore,
-    SqliteThreadStore, STATE_CLAIMED,
-};
+use oxplow_db::{Effort, EffortStore, SqliteEffortStore, SqliteSnapshotStore, SqliteThreadStore};
 use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId};
+use oxplow_domain::{DomainError, EffortId, ThreadId};
 
 use crate::file_ref_version;
 use crate::metric_engine::threshold_state;
@@ -194,8 +190,8 @@ const READ_ONLY_EXECUTABLES: &[&str] = &[
 ];
 
 /// The leading executable of one (operator-split) sub-command: lowercased,
-/// basename only, skipping leading `VAR=val` env assignments (so the
-/// `OXPLOW_TASK=tsk42` attribution token doesn't mask the real command).
+/// basename only, skipping leading `VAR=val` env assignments (so a
+/// `RUST_LOG=debug` prefix doesn't mask the real command).
 /// `None` for an empty sub-command.
 fn subcommand_exec(sub: &str) -> Option<String> {
     for tok in sub.split_whitespace() {
@@ -222,7 +218,7 @@ fn subcommand_is_read_only(sub: &str) -> bool {
 /// (`&&` / `||` / `;` / `|` / newline); a sub-command whose leading executable
 /// only reads (grep/echo/cat/…) is ignored. So a command that merely *mentions*
 /// a pattern (e.g. `grep test:collect .oxplow/project.yaml`) no longer counts as a run,
-/// while a real `cd app && OXPLOW_TASK=tsk1 bun run test:collect` still does.
+/// while a real `cd app && RUST_LOG=debug bun run test:collect` still does.
 fn matches_any(command: &str, builtins: &[&str], extras: &[String]) -> bool {
     matched_segment(command, builtins, extras).is_some()
 }
@@ -252,20 +248,9 @@ fn matched_segment(command: &str, builtins: &[&str], extras: &[String]) -> Optio
         .map(|sub| sub.trim().to_string())
 }
 
-/// The optional `OXPLOW_TASK=<id>` attribution token an agent prefixes onto a
-/// test command so the passive PostToolUse ride-along can pin the run to EXACTLY
-/// that task's open effort (`find_open_for_task`), even with several efforts
-/// open. Accepts the human id (`tsk42`) or a bare number (`42`). Returns `None`
-/// when absent/unparseable (the run then uses the single-open auto rule).
-fn parse_task_token(command: &str) -> Option<TaskId> {
-    const KEY: &str = "OXPLOW_TASK=";
-    let idx = command.find(KEY)?;
-    let val = command[idx + KEY.len()..]
-        .split_whitespace()
-        .next()?
-        .trim_matches(['"', '\'']);
-    TaskId::try_from_str(val).or_else(|| val.parse::<i64>().ok().map(TaskId::new))
-}
+/// The `metric_capture.trigger` every agent-work run (tests, coverage,
+/// analysis) is recorded with: what an effort's runs are read by.
+const RUN_TRIGGER: &str = "on-report";
 
 /// The Bash command + best-effort exit code pulled out of a PostToolUse
 /// envelope. `None` when the tool wasn't Bash or no command was present.
@@ -318,7 +303,7 @@ pub enum CoverageIngest {
     /// off).
     NoChangedCoverage,
     Stored {
-        /// The run's capture (`run:<id>`, what `claim_runs` takes).
+        /// The run's capture.
         run: i64,
         summary_pct: f64,
         changed_lines: usize,
@@ -403,7 +388,7 @@ pub enum AnalysisIngest {
     /// nothing was recorded.
     Off,
     Stored {
-        /// The run's capture (`run:<id>`, what `claim_runs` takes).
+        /// The run's capture.
         run: i64,
         error_count: u64,
         warning_count: u64,
@@ -437,11 +422,6 @@ pub struct CollectionService {
     /// `collector.synced`) and its health kept (tsk863). Without one (unit
     /// harnesses) a report is still read, its run unrecorded.
     run_log: Option<crate::collector_runner::RunLog>,
-    /// Kind-agnostic attribution ledger (tsk262/263) — runs (test/coverage/
-    /// analysis) record their claim state here. A run is auto-attributed to the
-    /// open effort at record time (`find_open_for_thread`);
-    /// the concurrent case is resolved by the close reconcile + the agent's claim.
-    attribution: Arc<SqliteAttributionStore>,
     /// The metric-ancestry resolver (tsk102) for this service's own
     /// `tree_state_series` call — built in `new` from the stores it already
     /// holds, so the wiring can't be forgotten at a call site. Same rule,
@@ -555,7 +535,6 @@ impl CollectionService {
         vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
         project_dir: PathBuf,
-        attribution: Arc<SqliteAttributionStore>,
     ) -> Self {
         let metric_visibility = Arc::new(crate::metric_visibility::VisibilityResolver::new(
             (*snapshots).clone(),
@@ -574,7 +553,6 @@ impl CollectionService {
             config,
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             run_log: None,
-            attribution,
             metric_visibility,
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         }
@@ -1015,7 +993,6 @@ impl CollectionService {
         provenance: &str,
         source: &str,
         report: Option<&oxplow_coverage::TestReport>,
-        task: Option<TaskId>,
         turn: Option<i64>,
     ) -> Result<Option<i64>, DomainError> {
         self.record_test_run_caused(
@@ -1026,7 +1003,6 @@ impl CollectionService {
             provenance,
             source,
             report,
-            task,
             RunOrigin::Command { turn },
         )
         .await
@@ -1046,7 +1022,6 @@ impl CollectionService {
         provenance: &str,
         source: &str,
         report: Option<&oxplow_coverage::TestReport>,
-        task: Option<TaskId>,
         origin: RunOrigin<'_>,
     ) -> Result<Option<i64>, DomainError> {
         let cause = origin.cause();
@@ -1105,12 +1080,9 @@ impl CollectionService {
         if let Some(s) = skipped {
             payload.insert("skipped".into(), json!(s));
         }
-        // Resolve the owning effort ONCE — used to stamp the fact-capture below
-        // (so `captures_for_effort` attributes it, tsk37) and to claim the run in
-        // the ledger at the tail. Same resolution the auto-claim uses.
-        let owning = self
-            .resolve_owner(thread, task, anchored_effort(cause))
-            .await;
+        // The owning effort stamps the capture (`metric_capture.effort_id`):
+        // the effort the command ran in, else the thread's open one.
+        let owning = self.resolve_owner(thread, anchored_effort(cause)).await;
         let owning_val = owning.as_ref().map(|e| e.id.value());
 
         // Write the run CAPTURE into the durable fact layer (epic tsk12): one
@@ -1249,7 +1221,7 @@ impl CollectionService {
                 let mut capture = NewMetricCapture::done(stream_val, producer, source.to_string());
                 capture.provenance = provenance.to_string();
                 capture.thread_id = Some(thread.value());
-                capture.trigger = Some("on-report".into());
+                capture.trigger = Some(RUN_TRIGGER.into());
                 capture.branch = branch;
                 capture.snapshot_id = snapshot_id;
                 capture.closest_vcs_rev = version.as_ref().and_then(|v| v.closest_vcs_rev.clone());
@@ -1302,13 +1274,7 @@ impl CollectionService {
             }
         }
         let _ = (stream_id, payload);
-        // ATTRIBUTE via the unified run ledger (the effort resolved above), then
-        // refresh the panel for the effort it landed on (if any). Observe-always:
-        // the run is already recorded above regardless of effort. The claimed ref
-        // is the CAPTURE id (T-E1).
-        if let (Some(cid), Some(effort)) = (capture_id, owning.as_ref()) {
-            self.claim_run(effort, cid).await;
-        }
+        let _ = owning;
         Ok(capture_id)
     }
 
@@ -1391,61 +1357,20 @@ impl CollectionService {
         }
     }
 
-    /// The effort a run belongs to: a named task's open effort (exact or
-    /// nothing), else the thread's open effort.
-    async fn resolve_owning_effort(
-        &self,
-        thread: &ThreadId,
-        task: Option<TaskId>,
-    ) -> Option<Effort> {
-        self.resolve_owner(thread, task, None).await
-    }
-
-    /// [`Self::resolve_owning_effort`] with the effort the command ran in
-    /// (`anchored`, the tool event's effort anchor): it ranks after a named
-    /// task and before the thread's open effort now, so a run the reactor
-    /// records after the effort closed still belongs to it.
-    async fn resolve_owner(
-        &self,
-        thread: &ThreadId,
-        task: Option<TaskId>,
-        anchored: Option<EffortId>,
-    ) -> Option<Effort> {
-        if task.is_none() {
-            if let Some(id) = anchored {
-                if let Ok(Some(e)) = self.efforts.get_effort(&id).await {
-                    return Some(e);
-                }
+    /// The effort a run belongs to: the one the command ran in (`anchored`,
+    /// the tool event's effort anchor), so a run recorded after the effort
+    /// closed still belongs to it; else the thread's open effort.
+    async fn resolve_owner(&self, thread: &ThreadId, anchored: Option<EffortId>) -> Option<Effort> {
+        if let Some(id) = anchored {
+            if let Ok(Some(e)) = self.efforts.get_effort(&id).await {
+                return Some(e);
             }
-        }
-        if let Some(tid) = task {
-            return self
-                .efforts
-                .find_open_for_work_item(&work_item_ref(tid))
-                .await
-                .ok()
-                .flatten();
         }
         self.efforts
             .find_open_for_thread(thread)
             .await
             .ok()
             .flatten()
-    }
-
-    /// Claim `run:<id>` for an effort in the unified run ledger (best-effort — a
-    /// ledger write error never fails the host path).
-    async fn claim_run(&self, effort: &Effort, run_id: i64) {
-        let _ = self
-            .attribution
-            .set_state(
-                &effort.id,
-                "run",
-                &format!("run:{run_id}"),
-                STATE_CLAIMED,
-                None,
-            )
-            .await;
     }
 
     /// Run report collector `id` by hand (`collector.sync`, tsk863): read
@@ -1508,7 +1433,6 @@ impl CollectionService {
                         "observed",
                         &source,
                         Some(report),
-                        None,
                         None,
                     )
                     .await
@@ -1690,7 +1614,7 @@ impl CollectionService {
             let mut capture =
                 NewMetricCapture::done(stream_val, analyzer.clone(), source.to_string());
             capture.thread_id = Some(thread.value());
-            capture.trigger = Some("on-report".into());
+            capture.trigger = Some(RUN_TRIGGER.into());
             capture.snapshot_id = snapshot_id;
             capture.closest_vcs_rev = vcs_rev.clone();
             capture.vcs_rev_exact = vcs_rev_exact;
@@ -1767,9 +1691,7 @@ impl CollectionService {
 
         // The owning effort stamps the coverage capture AND receives the ledger
         // claim below — the capture IS the run now (T-E1, tsk48).
-        let attribute_to = self
-            .resolve_owner(thread, None, anchored_effort(cause))
-            .await;
+        let attribute_to = self.resolve_owner(thread, anchored_effort(cause)).await;
         let owning_val = attribute_to.as_ref().map(|e| e.id.value());
         let turn = origin.turn();
         // Pin to a take of the code the report measured (tsk883),
@@ -1856,7 +1778,7 @@ impl CollectionService {
                     (version.local_snapshot_id != 0).then_some(version.local_snapshot_id);
                 let mut capture = NewMetricCapture::done(stream_val, "coverage", source);
                 capture.thread_id = Some(thread.value());
-                capture.trigger = Some("on-report".into());
+                capture.trigger = Some(RUN_TRIGGER.into());
                 capture.snapshot_id = snapshot_id;
                 capture.closest_vcs_rev = version.closest_vcs_rev.clone();
                 capture.vcs_rev_exact = version.vcs_rev_exact;
@@ -1893,11 +1815,6 @@ impl CollectionService {
         let Some(run) = capture_id else {
             return Ok(CoverageIngest::NoChangedCoverage);
         };
-        // ATTRIBUTE via the unified run ledger (the capture id is the ref), then
-        // refresh the panel for the effort it landed on (if any).
-        if let Some(effort) = attribute_to.as_ref() {
-            self.claim_run(effort, run).await;
-        }
 
         Ok(CoverageIngest::Stored {
             run,
@@ -2154,7 +2071,7 @@ impl CollectionService {
         capture.status = "failed".into();
         capture.error = Some(error.to_string());
         capture.thread_id = Some(thread.value());
-        capture.trigger = Some("on-report".into());
+        capture.trigger = Some(RUN_TRIGGER.into());
         capture.turn_id = origin.turn();
         capture.idempotency_key = cause.map(|c| format!("coverage-failure:{}", c.event_id));
         if let Err(e) = self.facts.record_facts(capture, Vec::new()).await {
@@ -2379,11 +2296,6 @@ impl CollectionService {
                 "observed",
                 &source,
                 report.as_ref(),
-                // Exact attribution when the agent prefixed `OXPLOW_TASK=<id>`
-                // (find_open_for_task — survives concurrent efforts); then the
-                // effort the command ran in; otherwise the single-open auto
-                // rule attributes it (tsk265/tsk271).
-                parse_task_token(&bash.command),
                 origin,
             )
             .await
@@ -2528,7 +2440,7 @@ impl CollectionService {
                 let owning = match effort.or_else(|| anchored_effort(cause)) {
                     Some(id) => Some(id),
                     None if cause.is_some() => None,
-                    None => self.resolve_owning_effort(thread, None).await.map(|e| e.id),
+                    None => self.resolve_owner(thread, None).await.map(|e| e.id),
                 };
                 let owning_val = owning.map(|e| e.value());
                 let mut capture = NewMetricCapture::done(stream_val, "nudges", "nudges");
@@ -2606,9 +2518,7 @@ impl CollectionService {
         // Resolve the owning effort ONCE (tsk926) — it stamps the capture,
         // receives the ledger claim and pins the take, as a test or
         // coverage run's does.
-        let effort = self
-            .resolve_owner(thread, None, anchored_effort(cause))
-            .await;
+        let effort = self.resolve_owner(thread, anchored_effort(cause)).await;
         let mut payload = serde_json::Map::new();
         payload.insert("command".into(), json!(command));
         if !analyzers.is_empty() {
@@ -2692,10 +2602,6 @@ impl CollectionService {
             closest_vcs_rev,
             vcs_rev_exact,
         );
-        // Attribute the run via the unified ledger.
-        if let (Some(rid), Some(effort)) = (run_id, effort.as_ref()) {
-            self.claim_run(effort, rid).await;
-        }
         Ok(run_id)
     }
 
@@ -2719,24 +2625,16 @@ impl CollectionService {
         // Coverage derives its effort-relative diff against the effort's start
         // snapshot, so load the effort once (tsk270).
         let effort = self.efforts.get_effort(&eid).await.ok().flatten();
-        // Every run kind is observe-always → attribute by the unified ledger
-        // CLAIM (exact under concurrency), never a time window (which would mix
-        // concurrent efforts' runs). The capture IS the run (T-E1, tsk48): the
-        // claimed refs are capture ids, and the verbatim payload rides in the
-        // capture's `detail_json` envelope.
-        let mut caps: Vec<oxplow_db::MetricCapture> = Vec::new();
-        for id in self
-            .attribution
-            .list_refs(&eid, "run", STATE_CLAIMED)
+        // Every run kind is the effort's own capture: stamped with the
+        // effort of the tool call that caused it.
+        let mut caps: Vec<oxplow_db::MetricCapture> = self
+            .facts
+            .captures_for_effort(eid.value())
             .await
             .unwrap_or_default()
-            .iter()
-            .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse::<i64>().ok()))
-        {
-            if let Ok(Some(c)) = self.facts.get_capture(id).await {
-                caps.push(c);
-            }
-        }
+            .into_iter()
+            .filter(|c| c.trigger.as_deref() == Some(RUN_TRIGGER))
+            .collect();
         // Oldest first: the order they ran in.
         caps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
         let mut out = Vec::new();
@@ -3319,19 +3217,14 @@ impl CollectionService {
         spec: &oxplow_db::MetricSpec,
         effort: &Effort,
     ) -> Option<oxplow_db::EffortMetricDelta> {
-        let mut caps: Vec<oxplow_db::MetricCapture> = Vec::new();
-        for id in self
-            .attribution
-            .list_refs(&effort.id, "run", STATE_CLAIMED)
+        let mut caps: Vec<oxplow_db::MetricCapture> = self
+            .facts
+            .captures_for_effort(effort.id.value())
             .await
             .unwrap_or_default()
-            .iter()
-            .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse::<i64>().ok()))
-        {
-            if let Ok(Some(c)) = self.facts.get_capture(id).await {
-                caps.push(c);
-            }
-        }
+            .into_iter()
+            .filter(|c| c.trigger.as_deref() == Some(RUN_TRIGGER))
+            .collect();
         caps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
         let mut derived: Vec<f64> = Vec::new();
         let mut latest_cap = None;
@@ -3978,11 +3871,11 @@ mod tests {
         );
         assert_eq!(
             test_run_segment(
-                "cd app && OXPLOW_TASK=tsk1 bun run test:collect",
+                "cd app && RUST_LOG=debug bun run test:collect",
                 &["test:collect".into()]
             )
             .as_deref(),
-            Some("OXPLOW_TASK=tsk1 bun run test:collect")
+            Some("RUST_LOG=debug bun run test:collect")
         );
         assert_eq!(test_run_segment("ls -la", &[]), None);
     }
@@ -4000,24 +3893,9 @@ mod tests {
         // The real command still detects — compound, env-prefixed, and piped.
         assert!(detect_test_run("cd app && bun run test:collect", &extra));
         assert!(detect_test_run(
-            "OXPLOW_TASK=tsk42 bun run test:collect 2>&1 | tail -5",
+            "RUST_LOG=debug bun run test:collect 2>&1 | tail -5",
             &extra,
         ));
-    }
-
-    #[test]
-    fn parse_task_token_reads_oxplow_task_prefix() {
-        assert_eq!(
-            parse_task_token("OXPLOW_TASK=tsk42 bun run test:collect"),
-            Some(TaskId::new(42)),
-        );
-        // Bare number is accepted too.
-        assert_eq!(
-            parse_task_token("OXPLOW_TASK=42 cargo test"),
-            Some(TaskId::new(42))
-        );
-        // Absent → None (falls back to the single-open auto rule).
-        assert_eq!(parse_task_token("bun run test:collect"), None);
     }
 
     #[test]
@@ -4338,7 +4216,11 @@ mod tests {
 
             let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
             let effort = efforts
-                .start(&work_item_ref(task_id), &thread.id, Some(snap_id))
+                .start(
+                    &oxplow_domain::refs::build::work_item_ref(task_id),
+                    &thread.id,
+                    Some(snap_id),
+                )
                 .await
                 .unwrap();
 
@@ -4393,7 +4275,6 @@ mod tests {
                 Arc::new(crate::vcs::GitProvider),
                 Arc::new(RwLock::new(cfg)),
                 project_dir,
-                Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone())),
             )
             .with_run_log(crate::collector_runner::RunLog {
                 db: db.clone(),
@@ -4746,81 +4627,6 @@ mod tests {
                 .gc(&keep)
                 .unwrap();
             assert_eq!(diff_pct(&h).await, None);
-        }
-
-        #[tokio::test]
-        async fn coverage_diff_is_unattributed_under_concurrency_then_claimable() {
-            // tsk270: with two open efforts, a coverage run is observed but NOT
-            // auto-attributed (no pollution) — neither effort's panel shows it
-            // until the agent claims it. After a claim, the diff is DERIVED at
-            // read for the claiming effort (late-claim works even post-close).
-            use oxplow_db::SqliteAttributionStore;
-            let h = build(Some(COBERTURA_50PCT)).await;
-            let now = Timestamp::now();
-            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            // Open a second effort so the thread is ambiguous.
-            let task2 = SqliteTaskStore::new(h.db.clone())
-                .insert(&Task {
-                    id: TaskId::placeholder(),
-                    thread_id: Some(h.thread),
-                    parent_id: None,
-                    title: "t2".into(),
-                    description: String::new(),
-                    status: TaskStatus::InProgress,
-                    priority: TaskPriority::Medium,
-                    sort_index: 0,
-                    created_by: TaskActorKind::User,
-                    created_at: now,
-                    updated_at: now,
-                    completed_at: None,
-                    deleted_at: None,
-                    note_count: 0,
-                    author: Some(TaskAuthor::User),
-                })
-                .await
-                .unwrap();
-            let _eff2 = h
-                .efforts
-                .start(&work_item_ref(task2), &h.thread, None)
-                .await
-                .unwrap();
-
-            // Observe coverage — two efforts open ⇒ unclaimed.
-            assert!(matches!(
-                sync_coverage(&h).await,
-                CoverageIngest::Stored { .. }
-            ));
-            // No pollution: neither effort shows a diff-coverage observation yet.
-            assert!(h
-                .service
-                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
-                .await
-                .is_empty());
-
-            // The agent claims the run for eff1 (late-claim is the same path).
-            let ledger = SqliteAttributionStore::new(h.db.clone());
-            let runs = oxplow_db::SqliteFactStore::new(h.db.clone())
-                .captures_in_window_by_trigger(
-                    h.thread.value(),
-                    "on-report",
-                    Timestamp::from_unix_ms(0),
-                    None,
-                )
-                .await
-                .unwrap();
-            let run_ref = format!("run:{}", runs[0].id);
-            ledger
-                .set_state(&eid1, "run", &run_ref, STATE_CLAIMED, None)
-                .await
-                .unwrap();
-
-            // Now eff1's diff-coverage is derived at read (50%, line 4 uncovered).
-            let rows = h
-                .service
-                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
-                .await;
-            assert_eq!(rows.len(), 1, "claimed run now surfaces a derived diff");
-            assert!((rows[0].metric_value.unwrap() - 50.0).abs() < 1e-6);
         }
 
         #[tokio::test]
@@ -5196,7 +5002,6 @@ mod tests {
                     "post-tool-bash",
                     None,
                     None,
-                    None,
                 )
                 .await
                 .unwrap();
@@ -5260,7 +5065,6 @@ mod tests {
                     "mcp",
                     None,
                     None,
-                    None,
                 )
                 .await
                 .unwrap();
@@ -5306,7 +5110,6 @@ mod tests {
                     Some(6),
                     "observed",
                     "post-tool-bash",
-                    None,
                     None,
                     None,
                 )
@@ -5372,7 +5175,6 @@ mod tests {
                     "post-tool-bash",
                     Some(&report),
                     None,
-                    None,
                 )
                 .await
                 .unwrap();
@@ -5387,7 +5189,6 @@ mod tests {
                     None,
                     "observed",
                     "post-tool-bash",
-                    None,
                     None,
                     None,
                 )
@@ -5441,7 +5242,6 @@ mod tests {
                     Some(4),
                     "asserted",
                     "agent",
-                    None,
                     None,
                     None,
                 )
@@ -5500,7 +5300,6 @@ mod tests {
                     "post-tool-bash",
                     None,
                     None,
-                    None,
                 )
                 .await
                 .unwrap();
@@ -5541,7 +5340,6 @@ mod tests {
                     Some(3),
                     "observed",
                     "post-tool-bash",
-                    None,
                     None,
                     None,
                 )
@@ -5597,7 +5395,6 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
-                    None,
                     None,
                 )
                 .await
@@ -5710,7 +5507,6 @@ mod tests {
                         "post-tool-bash",
                         Some(&r),
                         None,
-                        None,
                     )
                     .await
                     .unwrap();
@@ -5766,7 +5562,6 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
-                    None,
                     None,
                 )
                 .await
@@ -5827,7 +5622,6 @@ mod tests {
                     "post-tool-bash",
                     Some(&report),
                     None,
-                    None,
                 )
                 .await
                 .unwrap();
@@ -5885,7 +5679,6 @@ mod tests {
                         "observed",
                         "post-tool-bash",
                         Some(&report(status)),
-                        None,
                         None,
                     )
                     .await
@@ -6222,7 +6015,11 @@ mod tests {
                 .unwrap();
             let eff2 = h
                 .efforts
-                .start(&work_item_ref(task2), &h.thread, None)
+                .start(
+                    &oxplow_domain::refs::build::work_item_ref(task2),
+                    &h.thread,
+                    None,
+                )
                 .await
                 .unwrap();
             let eff2_id = eff2.id.to_string();
@@ -6543,10 +6340,8 @@ mod tests {
 
         #[tokio::test]
         async fn record_test_run_observes_with_no_open_effort() {
-            // tsk269 observe-always: a run is recorded into the substrate even
-            // with NO open effort — just left unattributed (no ledger claim). The
-            // bug this fixes: collection used to drop it entirely.
-            use oxplow_db::SqliteAttributionStore;
+            // Observe-always: a run is recorded into the substrate even with
+            // NO open effort, belonging to none.
             let h = build(None).await;
             let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             h.efforts.finish(&eid1, None, None).await.unwrap(); // close the only effort
@@ -6564,7 +6359,6 @@ mod tests {
                     "post-tool-bash",
                     None,
                     None,
-                    None,
                 )
                 .await
                 .unwrap();
@@ -6580,24 +6374,14 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(runs.len(), 1, "run recorded despite no open effort");
-            // …but nothing is claimed (no effort to attribute to).
-            let ledger = SqliteAttributionStore::new(h.db.clone());
-            assert!(
-                ledger
-                    .list_refs(&eid1, "run", STATE_CLAIMED)
-                    .await
-                    .unwrap()
-                    .is_empty(),
-                "no effort open ⇒ no claim, just an observed run"
-            );
+            // …but it belongs to no effort.
+            assert_eq!(runs[0].effort_id, None);
         }
 
         #[tokio::test]
         async fn record_test_run_auto_attributes_when_single_open_effort() {
-            // tsk263: a recorded test run is auto-attributed to the open effort
-            // when it's unambiguous (the Harness has exactly one). The agent is
-            // only asked in the concurrent case.
-            use oxplow_db::{SqliteAttributionStore, STATE_CLAIMED};
+            // A recorded test run is the thread's open effort's: its capture
+            // is stamped with it.
             let h = build(None).await;
             h.service
                 .record_test_run(
@@ -6612,171 +6396,24 @@ mod tests {
                     "post-tool-bash",
                     None,
                     None,
-                    None,
                 )
                 .await
                 .unwrap();
-            let ledger = SqliteAttributionStore::new(h.db.clone());
             let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            let claimed = ledger.list_refs(&eid, "run", STATE_CLAIMED).await.unwrap();
-            assert_eq!(claimed.len(), 1, "single open effort → run auto-attributed");
-            assert!(claimed[0].starts_with("run:"), "ref is run:<id>");
-            // The capture IS the run (T-E1, tsk48): the claimed id resolves to a
-            // metric_capture carrying the verbatim payload in its detail envelope.
-            let cid: i64 = claimed[0].strip_prefix("run:").unwrap().parse().unwrap();
-            let cap = oxplow_db::SqliteFactStore::new(h.db.clone())
-                .get_capture(cid)
+            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_for_effort(eid.value())
                 .await
-                .unwrap()
-                .expect("the claimed ref is a capture id");
+                .unwrap();
+            assert_eq!(caps.len(), 1, "the open effort's run");
+            // The capture IS the run, carrying the verbatim payload in its
+            // detail envelope.
+            let cap = &caps[0];
             assert_eq!(cap.producer, "tests");
             assert_eq!(cap.trigger.as_deref(), Some("on-report"));
             let envelope: serde_json::Value =
                 serde_json::from_str(cap.detail_json.as_deref().unwrap()).unwrap();
             assert_eq!(envelope["kind"], "test-detail");
             assert_eq!(envelope["payload"]["total"], 5);
-        }
-
-        #[tokio::test]
-        async fn record_test_run_attributes_to_named_task_under_concurrent_efforts() {
-            // tsk265: the agent-agnostic EXACT path. When the caller NAMES its
-            // task (a dispatched sub-agent knows its own task id), the run is
-            // claimed for THAT task's open effort even though two efforts are
-            // open on the thread — `find_single` would punt (ambiguous), but the
-            // named task resolves it exactly via the MCP contract, with no
-            // visibility into which sub-agent ran it.
-            use oxplow_db::{SqliteAttributionStore, STATE_CLAIMED};
-            let h = build(None).await;
-            let now = Timestamp::now();
-            let task2 = SqliteTaskStore::new(h.db.clone())
-                .insert(&Task {
-                    id: TaskId::placeholder(),
-                    thread_id: Some(h.thread),
-                    parent_id: None,
-                    title: "t2".into(),
-                    description: String::new(),
-                    status: TaskStatus::InProgress,
-                    priority: TaskPriority::Medium,
-                    sort_index: 0,
-                    created_by: TaskActorKind::User,
-                    created_at: now,
-                    updated_at: now,
-                    completed_at: None,
-                    deleted_at: None,
-                    note_count: 0,
-                    author: Some(TaskAuthor::User),
-                })
-                .await
-                .unwrap();
-            let eff2 = h
-                .efforts
-                .start(&work_item_ref(task2), &h.thread, None)
-                .await
-                .unwrap();
-
-            // Two efforts open ⇒ ambiguous for find_single. Name task2.
-            h.service
-                .record_test_run(
-                    &h.thread,
-                    "cargo test",
-                    Some(0),
-                    None,
-                    Some(5),
-                    Some(0),
-                    Some(5),
-                    "asserted",
-                    "agent",
-                    None,
-                    Some(task2),
-                    None,
-                )
-                .await
-                .unwrap();
-
-            let ledger = SqliteAttributionStore::new(h.db.clone());
-            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            // Claimed for the NAMED effort, never the other open one.
-            assert_eq!(
-                ledger
-                    .list_refs(&eff2.id, "run", STATE_CLAIMED)
-                    .await
-                    .unwrap()
-                    .len(),
-                1,
-                "named task → run claimed for its effort"
-            );
-            assert!(
-                ledger
-                    .list_refs(&eid1, "run", STATE_CLAIMED)
-                    .await
-                    .unwrap()
-                    .is_empty(),
-                "the other open effort is not credited"
-            );
-        }
-
-        #[tokio::test]
-        async fn record_test_run_named_task_without_open_effort_stays_unclaimed() {
-            // tsk271: naming a task is EXACT-or-nothing. When the named task has
-            // NO open effort, the run must NOT fall back to the thread's single
-            // open effort (a DIFFERENT task) — that would be a wrong-exact claim
-            // the design otherwise avoids. The run is still recorded
-            // (observe-always); it's just left unclaimed for the agent to claim.
-            use oxplow_db::{SqliteAttributionStore, STATE_CLAIMED};
-            let h = build(None).await;
-            let now = Timestamp::now();
-            // task2 exists but never started an effort ⇒ find_open_for_task is
-            // None. The harness's task1 effort is the ONLY open effort.
-            let task2 = SqliteTaskStore::new(h.db.clone())
-                .insert(&Task {
-                    id: TaskId::placeholder(),
-                    thread_id: Some(h.thread),
-                    parent_id: None,
-                    title: "t2".into(),
-                    description: String::new(),
-                    status: TaskStatus::InProgress,
-                    priority: TaskPriority::Medium,
-                    sort_index: 0,
-                    created_by: TaskActorKind::User,
-                    created_at: now,
-                    updated_at: now,
-                    completed_at: None,
-                    deleted_at: None,
-                    note_count: 0,
-                    author: Some(TaskAuthor::User),
-                })
-                .await
-                .unwrap();
-
-            h.service
-                .record_test_run(
-                    &h.thread,
-                    "cargo test",
-                    Some(0),
-                    None,
-                    Some(5),
-                    Some(0),
-                    Some(5),
-                    "asserted",
-                    "agent",
-                    None,
-                    Some(task2),
-                    None,
-                )
-                .await
-                .unwrap();
-
-            let ledger = SqliteAttributionStore::new(h.db.clone());
-            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            assert!(
-                ledger
-                    .list_refs(&eid1, "run", STATE_CLAIMED)
-                    .await
-                    .unwrap()
-                    .is_empty(),
-                "named task with no open effort must not fall back to the single \
-                 open effort of a different task"
-            );
         }
 
         #[tokio::test]
@@ -6845,7 +6482,6 @@ mod tests {
                     "post-tool-bash",
                     Some(&junit),
                     None,
-                    None,
                 )
                 .await
                 .unwrap();
@@ -6867,8 +6503,8 @@ mod tests {
 
         #[tokio::test]
         async fn a_coverage_report_is_observed_with_no_open_effort() {
-            // tsk270 observe-always: coverage is recorded even with no open effort
-            // (absolute), just left unattributed — no longer dropped.
+            // Observe-always: coverage is recorded even with no open effort
+            // (absolute), belonging to none.
             let h = build(Some(COBERTURA_50PCT)).await;
             h.efforts
                 .finish(&EffortId::try_from_str(&h.effort_id).unwrap(), None, None)

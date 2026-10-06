@@ -141,9 +141,9 @@ pub struct TaskNote {
 /// "this effort created/updated/deleted/referenced/resolved <kind>:<id>".
 /// Stored as a JSON list on `effort.impacts_json` and projected
 /// into the unified `page_ref` graph as outbound edges from the
-/// owning task. Distinct from `touched_files` (which only covers
-/// the file kind) — impacts cover wiki pages, tasks, commits,
-/// findings, directories, and files alike.
+/// owning task. Distinct from an effort's files (observed, never
+/// declared) — impacts cover wiki pages, tasks, commits, findings,
+/// directories, and files alike.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct TaskImpact {
     /// Page kind being impacted — `wiki | task | file | directory

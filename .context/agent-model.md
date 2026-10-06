@@ -819,12 +819,12 @@ Streamable-HTTP session (initialize → tools/list → tools/call) against
 
 ### Param casing is lenient (camelCase aliases tolerated)
 
-Param structs are snake_case (`thread_id`, `touched_files`) and that
+Param structs are snake_case (`thread_id`, `work_item`) and that
 stays the **canonical/advertised** form — the JSON schema is derived
 unchanged from each struct. But tool *outputs* are camelCase
 (`itemId`, …) and weak models (opencode / GPT-5-mini) carry camelCase
-priors from training, so they'd send `touchedFiles` / `threadId` and
-hit an opaque `-32602 missing field "touched_files"` they can't act on.
+priors from training, so they'd send `workItem` / `threadId` and
+hit an opaque `-32602 missing field "work_item"` they can't act on.
 
 `lenient_params::Parameters` (in `crates/oxplow-mcp/src/lib.rs`) is a
 drop-in replacement for rmcp's `Parameters<T>` — same name, so the
@@ -895,7 +895,7 @@ BM25 over tasks/comments/notes/wiki/file-contents via the unified FTS index,
 fed by the `search:<kind>` assets for tasks, comments, notes and wiki and the
 `search.index` consumer for files; optional `stream_id` scopes file hits).
 A file's captured history is the model `v_snapshot_file`, and an
-effort's unclaimed residue `v_effort_unattributed_file`; git mutations
+effort's files (claimed or observed) `v_effort_file`; git mutations
 stay on the agent's own git.
 
 The `kind` discriminator (`epic`/`task`/`subtask`/`bug`/`note`) was
@@ -946,150 +946,49 @@ is `{ to: done|canceled, native_state: archived }`.
   `work_item.delete` is destructive, and an agent never confirms one:
   cancel or archive instead. `dispatch_task` is read-only (it composes
   the brief). Closing is `command.sequence [work_item.transition → done,
-  effort.report]` — one audited run (P8.A7/A10); correcting an effort
-  afterwards is `run_command effort.amend`
-- `effort.report` returns `{ effort, file_review, link_warnings,
-  decision_hint }`. The "changed"
-  set is a **content diff between the effort's start and end
-  snapshots** — `SqliteSnapshotStore::diff_snapshots(start, end)`,
-  which reconstructs each path's content as-of each boundary
-  (latest `file_snapshot` row ≤ that snapshot) and reports a path
-  only when its `blob_hash` differs. This is the shared
-  `oxplow_domain::diff_trees` comparison (the same one
-  `oxplow_git::diff_commits` uses), **not** raw membership of rows
-  in `(start, end]` — so a no-op rewrite / edit-then-revert (equal
-  hash) doesn't count as changed, and the comparison is the source
-  of truth, not snapshot row timing. (`list_changed_paths_for_effort`
-  still exists for an IPC view but no longer drives the review.)
-  Two pieces make the underlying capture work end-to-end:
+  effort.report]` — one audited run.
+- `effort.report { work_item, thread?, summary?, impacts? }` returns
+  `{ effort, link_warnings, decision_hint }`. It records a summary and
+  the impacts beyond the edits; it takes no files or runs — those are
+  observed (`.context/work-tracking.md`).
+- **An effort's files are claimed or observed, never declared.**
+  `effort_file.source` is `claimed` when an edit tool named the path
+  (the `effort.claim` reactor, "Per-effort write log" below) and
+  `observed` when it changed during one of the thread's turns: the
+  `effort.observe` consumer (`crates/oxplow-app/src/effort_observation.rs`,
+  after `effort.policy`, on `thread.checkpoint`) diffs the turn's start →
+  end snapshots and records each changed path on the effort holding the
+  turn, unless another thread's overlapping effort claimed it
+  (`effort_store::observe_files_tx`). A file two threads changed at once
+  and neither claimed is observed by both. Changes between turns (the
+  person's own) belong to no effort. The diff is a **content diff** —
+  `SqliteSnapshotStore::diff_snapshots(start, end)` reconstructs each
+  path's content as-of each boundary and reports a path only when its
+  `blob_hash` differs (the shared `oxplow_domain::diff_trees`), so an
+  edit-then-revert doesn't count. Two pieces make the capture work:
   1. `SnapshotCaptureService::request_snapshot` sleeps for
-     `DEFAULT_PREDRAIN_DELAY` (300 ms) before draining the dirty
-     set so the fs-watch debouncer (250 ms in `workspace_watch`)
-     has time to deliver in-flight events; without that wait, an
-     edit followed immediately by the close (`effort.report`) collapses the
-     bracket to zero-width.
+     `DEFAULT_PREDRAIN_DELAY` (300 ms) before draining the dirty set so
+     the fs-watch debouncer (250 ms in `workspace_watch`) has time to
+     deliver in-flight events.
   2. There is **one `SnapshotCaptureService` per stream**
-     (`SnapshotCaptureRegistry`), each watching its own worktree.
-     `TaskService` resolves the right service via the task's
-     thread → stream, so an effort on a worktree stream captures
-     against THAT worktree's fs-watch — not the primary's.
-     Without per-stream capture, edits in any non-primary
-     worktree are invisible to `file_snapshot` and the bracket
-     diff is always empty there. When `file_review` is non-null the bracket diff
-  disagreed with the agent's declared `touched_files`:
-  `claimed_but_not_changed` lists files the agent said it edited
-  but the worktree didn't change;
-  `changed_but_not_claimed` lists files that did change but the
-  agent didn't declare — minus any path another effort already
-  claimed whose snapshot window *overlaps* this effort's window
-  (`paths_claimed_by_intervening_efforts`: `other.start < self.end
-  AND (other.end IS NULL OR other.end > self.start)`), since that
-  concurrent/sibling effort already owns it. Overlap (not "ends
-  inside") is deliberate: when sibling efforts are filed in one turn
-  and completed in sequence, the earliest-completed one would
-  otherwise be nagged for files a later-completed sibling claims
-  (whose end lands *after* this window). The latter is capped at 10
-  entries (`unclaimed_overflow` carries the original count when
-  truncated) so the agent isn't asked to triage a wall of paths
-  from parallel efforts or formatters. The review names each row by its
-  **canonical ids** — `[tsk42] title (effort eff313)` — because those are
-  what `work_item.*` / `effort.amend` parse; a bare `313` is rejected
-  (tsk341; pinned by the `stop_effort_review_*` goldens). `effort.amend
-  { effort, add_files, remove_files, claim_runs, disclaim_runs }` (External,
-  `commands/effort_report.rs`; an agent amends only its own thread's
-  efforts) is the corrective command —
-  adds/removes `effort_file` rows AND, for every path in
-  `remove_files`, records an acknowledgement row in
-  `effort_acknowledged_path` so the Stop hook's recompute treats the
-  discrepancy as resolved. Re-adding a previously-disclaimed path via
-  `add_files` clears its acknowledgement. Persisted authorship is always
-  the agent's declared list (after any amend), never the raw diff.
-- **Paths the project never snapshots are dropped from a claim, not
-  flagged** (tsk249). `TaskService::claimable_paths(thread, paths)` runs
-  every claim through the stream's `WorkspaceFilter` (the project's
-  `generated.exclude` list + `.gitignore`, via
-  `SnapshotCaptureService::excluded_from_capture`) and silently drops
-  what capture excludes. An excluded path is never in the bracket diff,
-  so claiming one guaranteed a `claimed_but_not_changed` nudge the agent
-  could only answer with "yes, that was right" — this repo's
-  `generated/bindings.ts` hit it on every close that regenerated it. All
-  three claim boundaries filter: `record_effort` (the boundary
-  `touched_files`), `claim_open_effort_file` (the PostToolUse auto-claim,
-  which returns `Ok(false)`), and `effort.amend`'s `add_files`;
-  `effort.report` filters once up front so the review sees the same list
-  it recorded. The reverse direction needs nothing — an excluded path
-  can't appear in the diff, so it is never `changed_but_not_claimed`.
-  With no capture service reachable for the thread (bare `TaskService`,
-  unregistered stream) paths pass through unfiltered: this is noise
-  reduction, never a reason to lose a claim.
-- **Files are one kind of a generic claim→reconcile mechanic.** The same
-  CLAIM (agent asserts) / OBSERVE (oxplow detects independently) /
-  RECONCILE (residue at close) / SURFACE (the report's file review) loop attributes
-  **agent-work runs** (tests, analysis, coverage) too, keyed by
-  `(effort, "run", "run:<id>")` rows in the `effort_attribution` ledger,
-  where `<id>` is the run's `metric_capture` id — the capture IS the run
-  (T-E1, tsk48) (see `crates/oxplow-app/src/attribution.rs`,
-  `AttributionKind` trait with `FileKind` + `RunKind`; ledger table in
-  `.context/data-model.md`; metric reads in `.context/metrics.md`). This
-  matters because **`find_open_for_thread` is no longer the attribution
-  authority** — "newest open effort on the thread wins" mis-assigns work
-  when parallel sub-agents (Claude/Codex internals we don't see into) run
-  separate efforts in one thread. Producers OBSERVE at thread/time grain
-  with no effort guess (**observe-always**, tsk269: tests + analysis are
-  recorded regardless of open-effort count — coverage stores absolute
-  and derives its effort diff at read, tsk270);
-  runs auto-attribute via `find_single_open_for_thread` only when
-  **exactly one** effort is open, or when the recorder names a `task_id`
-  (exact even under concurrency); the concurrent case is left unattributed
-  for the agent to claim. **`find_single_open_for_thread` is a Class-A
-  auto-attribute optimization, never a drop-gate** — a producer never bails
-  for lack of a single effort; it records and defers attribution. `effort.amend`'s `claim_runs`/`disclaim_runs` are the run-kind
-  counterpart of `add_files`/`remove_files`: `claim_runs` writes a
-  `claimed` ledger row, `disclaim_runs` an `acknowledged` one. A
-  `(effort, kind, ref)` is in exactly one of {claimed, unattributed,
-  acknowledged}; claiming/disclaiming clears the unattributed residue. A
-  claim is **globally exclusive per `(kind, ref)`** (a run has one owning
-  effort — claiming displaces any other effort's claim, so rollups can't
-  double-count), and at reconcile **window-dominance** drops a run from an
-  effort's residue when a strictly-nested sibling effort's window owns it
-  (tsk267).
-- **Run attribution rides the MCP contract, never agent internals (tsk265).**
-  oxplow has exactly two cross-agent-stable signals: the **filesystem
-  snapshot** (agent-agnostic — but a test run leaves no worktree artifact, so
-  this signal doesn't exist for runs) and the **MCP tool contract** (universal
-  because oxplow defines it). So run attribution depends ONLY on MCP +
-  effort state — never on `SubagentStop`, per-agent transcripts, `agent_id`,
-  `session_id`, or `parentID` (all of which vary by agent and drift across
-  versions). Concretely: Claude/Codex **sub-agent tool calls don't fire the
-  parent's PostToolUse hook**, so a sub-agent's `cargo test` is invisible to
-  passive collection. The fix isn't to spy on sub-agents — it's that a
-  dispatched sub-agent **names its task**: `run_command test.record_run` takes
-  an optional `work_item` (P8.A8), and `effort.report`/`effort.amend` take
-  `claim_runs`/`disclaim_runs`. A run is attributed (1) EXACTLY when a `task_id`
-  is named — resolved via `find_open_for_work_item`, correct even under concurrency,
-  with no "which sub-agent" visibility; naming a task is **exact-or-nothing**
-  (tsk271): when the named task has no open effort the run is left *unclaimed*,
-  never auto-attributed to whatever single effort happens to be open (that
-  effort is a different task's — claiming it would be wrong-exact); (2) AUTO
-  when **no task is named** and exactly one effort is open
-  (`find_single_open_for_thread`); (3) else COARSELY to the thread's
-  open-effort *set* (the time-window OBSERVE puts it in every overlapping
-  effort's residue) — less exact, never wrong-exact. The `dispatch_task` brief
-  instructs sub-agents to run `test.record_run` with their `work_item` for
-  exactly this reason.
-- The Stop hook also surfaces unresolved reviews as a one-shot **EFFORT
-  REVIEW** directive (priority: between stale-epic-children and
-  in-progress audit), covering BOTH file and run discrepancies.
-  `effort.report` stashes the effort id in
-  `ThreadRuntimeRegistry::pending_effort_reviews` on either a file
-  discrepancy OR ledger run residue; the Stop hook drains it via
-  `take_pending_effort_reviews`, recomputes the file diff fresh against
-  the current `effort_file` rows (minus `effort_acknowledged_path`)
-  AND re-reads the ledger's `unattributed` runs, and fires the
-  directive only if something still remains. So a successful `effort.amend`
-  (files or runs) reconciles in a single round-trip — the Stop hook won't
-  re-flag the same disclaimed path/run on the next recompute. Drained =
-  one-shot regardless.
+     (`SnapshotCaptureRegistry`), each watching its own worktree, so an
+     effort on a worktree stream captures against THAT worktree.
+- **Paths the project never snapshots belong to no effort.**
+  `TaskService::claimable_paths(thread, paths)` runs every claim and
+  observation through the stream's `WorkspaceFilter` (the project's
+  `generated.exclude` list + `.gitignore`) and drops what capture
+  excludes. With no capture service reachable for the thread (bare
+  `TaskService`, unregistered stream) paths pass through unfiltered.
+- **A run is the effort its causing tool call was in.** Producers
+  observe-always: tests, analysis and coverage are recorded whether or
+  not an effort is open (coverage stores absolute line-sets and derives
+  its effort diff at read). The capture is stamped with
+  `CollectionService::resolve_owner(thread, anchored)` — the tool event's
+  effort anchor, else the thread's open effort — as
+  `metric_capture.effort_id`, and an effort that adopts a turn restamps
+  its captures. Subagent tool calls reach the hooks like any other, so a
+  subagent's runs need nothing from it; `test.record_run` is only for
+  counts oxplow couldn't parse from a run's output.
 - `dispatch_task({ thread_id?, item_id?, extra_context? })` composes
   a subagent brief server-side (item fields + description + optional extra
   context + the protocol preamble) so the orchestrator doesn't have to Read
@@ -1309,9 +1208,9 @@ one run by hand, `test.record_run`, and the `list_effort_observations` /
 `get_open_effort` MCP reads) is documented in `.context/collection.md`.
 `get_open_effort({ thread_id })` answers "what is this thread's
 currently-open effort?" — returns `{ open, effortId, taskId, startedAt,
-hasStartSnapshot }` (`open:false` with null ids when none): the `effortId`
-for `effort.amend`, whether an effort is open before a run is recorded, and
-whether its diff coverage has a baseline (`hasStartSnapshot`).
+hasStartSnapshot }` (`open:false` with null ids when none): whether an
+effort is open before a run is recorded, and whether its diff coverage has
+a baseline (`hasStartSnapshot`).
 Report parsing is **pluggable**: a report collector names a bundled parser
 (`entry: oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>`, jq programs in
 `crates/oxplow-collect-plugin`) or its own jaq / Starlark / exec script, no
@@ -1391,9 +1290,8 @@ The transcript path:
    wired later). (`parse_usage_delta` still exists as the whole-chunk sum,
    but `on_stop` records per-turn.)
 4. Attribute each turn to the effort the oxplow turn ran in (the event's
-   effort anchor; without one, `find_single_open_for_thread` — nullable: a
-   Stop can land with no open effort, or with two-plus open, in which case
-   the turn is left unattributed rather than mis-assigned) and persist one
+   effort anchor; without one, the thread's open effort — nullable: a Stop
+   can land with no open effort) and persist one
    `agent_token_usage` row per turn (provenance `observed`, with the actual
    per-turn `model` and `prompt`). A chunk spanning several prompts (a brief
    plus follow-up nudges, or an interrupt-and-re-prompt) yields one row per
@@ -1846,75 +1744,39 @@ when takes happen.
 
 ## Per-effort write log
 
-Snapshot pair-diffs over-report when two subagents edit the same worktree
-in parallel: both efforts share the same window, so each shows the
-union. To attribute writes correctly the agent declares its touched
-files on the status transition that closes the effort; the runtime
-stores them in `effort_file` (see data-model.md).
+An effort's files (`effort_file`, see data-model.md) are recorded as the
+work happens, never declared by the agent.
 
-**Claim-first auto-attribution (a pump reactor, P3.5).** Every structured
-write tool — `Edit` / `Write` / `MultiEdit` / `NotebookEdit` — claims the
-file it wrote for the effort it was written in. The `effort.claim` async
+**Claimed: structured writes (a pump reactor).** Every structured write
+tool — `Edit` / `Write` / `MultiEdit` / `NotebookEdit` — claims the file
+it wrote for the effort it was written in. The `effort.claim` async
 consumer (`crates/oxplow-app/src/tool_call_reactors.rs`) reacts to
 `agent.tool.finished`; the ingest already made `path` relative to the
-thread's own tree (its stream's worktree, a sibling directory for a
-worktree stream — tsk386/tsk350), and an absolute path (outside it) is
-never claimed. It calls `TaskService::claim_effort_file` with the event's
-**effort anchor** — the thread's single open effort when the edit
-happened — so a claim that lands after that effort closed (the reactor ran
-late) still goes to it, and `record_file` clears the path from the close's
-unattributed list. With no anchor (zero or two-plus efforts open) the
-thread's open efforts are scored by target overlap, strict unique winner
-only (tsk186); a tie declines and the file falls to close-time
-reconciliation, surfacing in the effort's file review. The close waits for the
-claim reactor first: `EffortLifecycleConsumer` settles `effort.claim`
-(bounded, 10 s) before `on_effort_closed` reconciles, so the effort's
-last edits are counted. The claim is idempotent (`record_file` is
-`INSERT OR REPLACE` keyed on `(effort_id, path)`). `Bash` / codegen /
-formatter writes are intentionally NOT auto-claimed — they stay for
-snapshot reconciliation. The same event feeds two sync consumers:
+thread's own tree (its stream's worktree), and an absolute path (outside
+it) is never claimed. It calls `TaskService::claim_effort_file` with the
+event's **effort anchor**, so a claim that lands after that effort closed
+(the reactor ran late) still goes to it; with no anchor the thread's open
+effort takes it. The claim is idempotent (`record_file` is `INSERT OR
+REPLACE` keyed on `(effort_id, path)`, `source = 'claimed'`), and replaces
+an observation of the same path. The same event feeds two sync consumers:
 `tool_call.project` (the `agent_tool_call` row, one per event by
 `event_id`) and `wiki.attribution` (an edit of an indexed
 `.oxplow/wiki/<slug>.md` marks the page touched by the thread; a page the
-watcher hasn't indexed yet is skipped rather than dead-lettered, as the
-inline write used to warn and skip).
+watcher hasn't indexed yet is skipped rather than dead-lettered).
 
-**Agent-declared payload (now confirm/amend).** When closing an
-effort, the agent's `effort.report` (the second call of the close's
-`command.sequence`) passes `touched_files: string[]` — the repo-relative
-paths it wrote or edited during this effort. Because structured edits
-already auto-claimed in real time, this payload merely confirms/amends
-rather than enumerating from scratch. The report runs after the
-transition has closed the effort: `TaskService::record_effort` drops
-paths the project never snapshots (`claimable_paths`), then records the
-files, impacts and summary onto the item's most recent effort in one
-transaction (`record_effort_atomic`).
-
-**Close-time reconciliation (unattributed residue).** On every
-snapshot-bracketed effort close — whatever moved the task out of
-`in_progress` (a desktop edit, `work_item.transition` / `work_item.update`,
-the close half of the agent's close sequence), the effort-lifecycle
-consumer of `effort.closed` (`TaskService::on_effort_closed`,
-`crates/oxplow-app/src/task_service.rs`) runs `attribution::reconcile_close`
-over the file kind: it diffs the effort's snapshot bracket against its
-claims and records the `changed_but_not_claimed` delta into
-`effort_unattributed_file` (see data-model.md). That consumer is the
-**one place** a close is reconciled (tsk942; guard
-`effort_close_reconciles_in_one_place`). This is the
-AUDIT layer of claim-first attribution: an out-of-band close (UI, weaker
-agent) can't leave a parallel/external write looking like the agent's
-authored work. Best-effort, never blocks the close; the existing
-`effort.report` file review (`compute_effort_file_review`) is unaffected
-because it reads claims, not the residue table. Claiming a path later
-(`record_file`) clears its residue, so the two sets never overlap.
+**Observed: everything else a turn changed.** `Bash`, codegen and
+formatter writes name no file. The `effort.observe` consumer records
+each path the turn's snapshot bracket changed as `observed` on the
+effort holding the turn (see "MCP tools" above for the rules: another
+thread's claim wins, a shared unclaimed change goes to both, changes
+between turns go to none). Nothing is reconciled at close.
 
 **File-and-close shortcut.** An item that was never `in_progress` has
 no effort; `effort.report` on it (after a `work_item.transition` straight
 to `done`, or a `work_item.create` with `state: done`) makes
 `record_effort` SYNTHESIZE one — opened and closed `retroactive`, with no
-snapshot pin — so the attribution still lands (tsk172). A report with no
-`summary`, `touched_files` or `impacts` records nothing (a pure
-record row, or the agent explicitly declining attribution).
+snapshot pin — so its summary has an effort to land on. A report with no
+`summary` or `impacts` records nothing.
 
 **Redo nudges are gone.** The UserPromptSubmit `<recent-done-reminder>`
 and the MCP `create_task` `redoHint` (a soft warning when a new row was
@@ -1935,10 +1797,9 @@ snapshot `S`:
   the raw pair-diff.
 - ≥2 efforts end at S → one row per effort, each labelled with its
   task title; detail panes call `getEffortFiles(effortId)`. If
-  the effort has ≥1 `effort_file` row the pair-diff is
-  filtered to those paths; if it has 0 rows (the agent's
-  `effort.report` named no `touched_files` and nothing auto-claimed) we fall back to
-  the raw pair-diff — better to over-report than silently show empty.
+  the effort has ≥1 `effort_file` row (claimed or observed) the pair-diff
+  is filtered to those paths; if it has 0 rows we fall back to the raw
+  pair-diff — better to over-report than silently show empty.
 
 `get_effort_files` is implemented in
 `crates/oxplow-tauri-ipc/src/commands/effort.rs` over the

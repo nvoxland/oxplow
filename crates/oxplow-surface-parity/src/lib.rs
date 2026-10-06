@@ -508,13 +508,6 @@ pub const MANIFEST: &[Capability] = &[
     model("get_effort", &["v_effort"]),
     model("list_efforts_at_snapshots", &["v_effort"]),
     model("list_efforts_overlapping_range", &["v_effort"]),
-    // The files of the effort's snapshot bracket (`v_snapshot_file`
-    // between `v_effort`'s start and end snapshots), split by whether the
-    // effort claimed them (`v_effort_file`).
-    model(
-        "list_changed_paths_for_effort",
-        &["v_effort", "v_snapshot_file", "v_effort_file"],
-    ),
     // ---- workspace file I/O (agent uses Read/Write tools) ----
     ui(
         "list_workspace_entries",

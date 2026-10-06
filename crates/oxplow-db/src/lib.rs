@@ -9,7 +9,6 @@ pub mod agent_stores;
 pub mod ai_call_store;
 pub mod ai_result_store;
 pub mod analytics_stores;
-pub mod attribution_store;
 pub mod bookmark_store;
 pub mod capability_store;
 pub mod change_store;
@@ -64,9 +63,6 @@ pub use analytics_stores::{
     SnapshotStorage, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,
     SqliteUsageStore, StampedSnapshot, TakeOutcome, TakeRecord, UsageEvent, UsageRollup,
 };
-pub use attribution_store::{
-    SqliteAttributionStore, STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED,
-};
 pub use capability_store::{CapabilityProvider, SqliteCapabilityStore};
 pub use change_store::{
     ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeImportRow, ChangeResults,
@@ -86,8 +82,8 @@ pub use diagnostic_store::{DiagnosticRow, SqliteDiagnosticStore};
 pub use effort_evidence_store::EffortObservation;
 pub use effort_evidence_store::SqliteEffortEvidenceStore;
 pub use effort_store::{
-    Effort, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, EffortStore,
-    FileRefVersion, OwnedFileRefVersion, RecordEffortAtomic, SqliteEffortStore,
+    Effort, EffortAtSnapshot, EffortFile, EffortFileChange, EffortStore, FileRefVersion,
+    FileSource, OwnedFileRefVersion, RecordEffortAtomic, SqliteEffortStore,
 };
 pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};
 pub use fact_store::{

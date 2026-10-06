@@ -333,18 +333,8 @@ mod tests {
         // Effort 2: failed, then fixed → verified.
         test_run(&db, Some(2), 2, 5, "2026-01-02T00:00:00Z").await;
         test_run(&db, Some(2), 0, 5, "2026-01-02T01:00:00Z").await;
-        // Effort 3: a clean run it claimed through attribution → verified.
-        let run = test_run(&db, None, 0, 5, "2026-01-03T00:00:00Z").await;
-        db.call(move |c| {
-            c.execute(
-                "INSERT INTO effort_attribution (effort_id, kind, ref, state, recorded_at)
-                 VALUES (3, 'run', ?1, 'claimed', '2026-01-03')",
-                [format!("run:{run}")],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
+        // Effort 3: a clean run → verified.
+        test_run(&db, Some(3), 0, 5, "2026-01-03T00:00:00Z").await;
         // Effort 4: a run with no tests → not verified.
         test_run(&db, Some(4), 0, 0, "2026-01-04T00:00:00Z").await;
         for effort in 1..=4 {

@@ -89,19 +89,27 @@ pub struct EffortFile {
     /// set later when the snapshot is stamped with a revision — a take on
     /// a clean head, or a head move; `stamp_revision_tx`).
     pub vcs_rev_exact: bool,
+    pub source: FileSource,
 }
 
-/// The snapshot-bracket changed paths for an effort, split by whether the
-/// effort CLAIMED each one (via `effort_file`). Mirrors the
-/// claimed/unclaimed attribution of the history view
-/// (`apps/desktop/src/snapshot-effort-grouping.ts`): `claimed` =
-/// changed-during-the-bracket AND claimed by this effort; `unclaimed` =
-/// changed but never claimed (parallel/external writes, formatters, capture
-/// gaps). Claim-first attribution, Child 3.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
-pub struct EffortChangedPaths {
-    pub claimed: Vec<String>,
-    pub unclaimed: Vec<String>,
+/// How an effort came to own a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FileSource {
+    /// An edit tool named it.
+    Claimed,
+    /// It changed during one of the thread's turns and no other thread
+    /// claimed it — a shell edit, a formatter, a generator.
+    Observed,
+}
+
+impl FileSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claimed => "claimed",
+            Self::Observed => "observed",
+        }
+    }
 }
 
 /// Snapshot-pinned version data for a file reference. The
@@ -142,13 +150,6 @@ pub struct RecordEffortAtomic {
     /// A `work_item` ref (validated before the transaction).
     pub work_item: String,
     pub thread: ThreadId,
-    /// `(path, change)` pairs; callers pre-filter empty paths.
-    pub files: Vec<(String, EffortFileChange)>,
-    /// Version triple stamped on every file row. Resolved by the
-    /// caller BEFORE the transaction (it reads the snapshot store) —
-    /// advisory metadata, so a racing effort change between resolve
-    /// and commit only yields a slightly stale pin, never bad rows.
-    pub version: OwnedFileRefVersion,
     pub impacts: Vec<TaskImpact>,
     pub summary: Option<String>,
 }
@@ -581,8 +582,8 @@ fn record_file_tx(
     conn.execute(
         "INSERT OR REPLACE INTO effort_file
            (effort_id, path, change_kind,
-            local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            local_snapshot_id, closest_vcs_rev, vcs_rev_exact, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'claimed')",
         params![
             id.value(),
             path,
@@ -592,13 +593,52 @@ fn record_file_tx(
             if version.vcs_rev_exact { 1 } else { 0 },
         ],
     )?;
-    // Claim-first invariant: a path is CLAIMED or UNATTRIBUTED, never both.
-    // Claiming clears any audit residue recorded for it on close.
-    conn.execute(
-        "DELETE FROM effort_unattributed_file WHERE effort_id = ?1 AND path = ?2",
-        params![id.value(), path],
-    )?;
     Ok(())
+}
+
+/// Record the files a turn of `thread` changed (`changes`, in the window
+/// `from`..=`to`) as `effort`'s `observed` files, at `version`: each one
+/// it hasn't already, unless another thread's effort that overlaps the
+/// window claimed it (an edit tool there named it).
+pub fn observe_files_tx(
+    conn: &rusqlite::Connection,
+    effort: EffortId,
+    thread: ThreadId,
+    from: &str,
+    to: &str,
+    changes: &[(String, EffortFileChange)],
+    version: FileRefVersion<'_>,
+) -> rusqlite::Result<usize> {
+    let mut observed = 0;
+    for (path, change) in changes {
+        let claimed_elsewhere: bool = conn.query_row(
+            "SELECT EXISTS (
+               SELECT 1 FROM effort_file f JOIN effort o ON o.id = f.effort_id
+                WHERE f.path = ?1 AND f.source = 'claimed' AND o.thread_id != ?2
+                  AND o.started_at <= ?4 AND (o.ended_at IS NULL OR o.ended_at >= ?3))",
+            params![path, thread.value(), from, to],
+            |r| r.get(0),
+        )?;
+        if claimed_elsewhere {
+            continue;
+        }
+        observed += conn.execute(
+            "INSERT INTO effort_file
+               (effort_id, path, change_kind,
+                local_snapshot_id, closest_vcs_rev, vcs_rev_exact, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'observed')
+             ON CONFLICT (effort_id, path) DO NOTHING",
+            params![
+                effort.value(),
+                path,
+                change_to_str(*change),
+                version.local_snapshot_id,
+                version.closest_vcs_rev,
+                if version.vcs_rev_exact { 1 } else { 0 },
+            ],
+        )?;
+    }
+    Ok(observed)
 }
 
 pub fn find_open_for_work_item_tx(
@@ -740,6 +780,16 @@ pub trait EffortStore: Send + Sync {
     async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
     async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError>;
+    /// Record a turn's changed files as `effort`'s observed ones (see
+    /// [`observe_files_tx`]); how many it added.
+    async fn observe_files(
+        &self,
+        effort: &EffortId,
+        thread: ThreadId,
+        window: (String, String),
+        changes: Vec<(String, EffortFileChange)>,
+        version: OwnedFileRefVersion,
+    ) -> Result<usize, DomainError>;
     async fn record_file(
         &self,
         id: &EffortId,
@@ -776,59 +826,6 @@ pub trait EffortStore: Send + Sync {
         range_start: i64,
         range_end: i64,
     ) -> Result<Vec<Effort>, DomainError>;
-    /// All distinct file paths whose `file_snapshot` rows fall inside
-    /// this effort's snapshot bracket — i.e. the auto-diff for the
-    /// effort. Returns empty when either `start_snapshot_id` or
-    /// `end_snapshot_id` is NULL. Used by the effort-end
-    /// reconciliation to compare against the LLM's claimed
-    /// `touched_files`.
-    async fn list_changed_paths_for_effort(
-        &self,
-        id: &EffortId,
-    ) -> Result<EffortChangedPaths, DomainError>;
-    /// Remove specific `effort_file` rows. Companion to
-    /// `record_file`. Used by the `effort.amend` command when the
-    /// agent disclaims a path that the auto-diff thought was theirs.
-    async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError>;
-    /// Record that the agent explicitly disclaimed `path` for this
-    /// effort. Survives Stop-hook recomputes so the same
-    /// `changed_but_not_claimed` discrepancy doesn't re-fire the
-    /// directive after a successful `effort.amend`. Idempotent.
-    async fn acknowledge_unclaimed_path(
-        &self,
-        id: &EffortId,
-        path: &str,
-    ) -> Result<(), DomainError>;
-    /// Drop a prior acknowledgement. Called when the agent re-claims
-    /// a path via `effort.amend { add_files }` after having previously
-    /// disclaimed it.
-    async fn forget_acknowledged_path(&self, id: &EffortId, path: &str) -> Result<(), DomainError>;
-    /// All paths the agent has explicitly acknowledged as
-    /// not-mine-but-in-the-diff for this effort.
-    async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError>;
-    /// Paths claimed (via `effort_file`) by OTHER efforts whose
-    /// snapshot window OVERLAPS this effort's window (not merely ends
-    /// inside it): `other.start < self.end AND (other.end IS NULL OR
-    /// other.end > self.start)`. Such a path changed during this
-    /// effort's bracket but another (possibly later-completed) effort
-    /// already owns it, so we shouldn't ask this one to claim it too —
-    /// regardless of the order the sibling efforts were completed in.
-    async fn paths_claimed_by_intervening_efforts(
-        &self,
-        id: &EffortId,
-    ) -> Result<Vec<String>, DomainError>;
-    /// Replace the effort's UNATTRIBUTED audit residue with `paths`
-    /// (delete-all-for-effort, then insert) — the claim-first
-    /// reconciliation's record of `changed_but_not_claimed` paths an
-    /// out-of-band close couldn't attribute. Idempotent. See migration
-    /// `V34__effort_unattributed_file.sql`.
-    async fn replace_unattributed_files(
-        &self,
-        id: &EffortId,
-        paths: &[String],
-    ) -> Result<(), DomainError>;
-    /// The effort's recorded unattributed/unreviewed paths.
-    async fn list_unattributed_files(&self, id: &EffortId) -> Result<Vec<String>, DomainError>;
 }
 
 #[derive(Clone)]
@@ -1004,10 +1001,6 @@ impl SqliteEffortStore {
                         true,
                     ),
                 };
-                let version = a.version.as_ref();
-                for (path, change) in &a.files {
-                    record_file_tx(tx, effort_id, path, *change, version).map_err(map_sql_err)?;
-                }
                 if !a.impacts.is_empty() {
                     let json = serde_json::to_string(&a.impacts).map_err(|e| {
                         DomainError::Invalid(format!("impacts serialize failed: {e}"))
@@ -1356,7 +1349,7 @@ impl EffortStore for SqliteEffortStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT effort_id, path, change_kind,
-                            local_snapshot_id, closest_vcs_rev, vcs_rev_exact
+                            local_snapshot_id, closest_vcs_rev, vcs_rev_exact, source
                      FROM effort_file
                      WHERE effort_id = ?1 ORDER BY path ASC",
                 )?;
@@ -1367,6 +1360,7 @@ impl EffortStore for SqliteEffortStore {
                     let local_snapshot_id: i64 = r.get(3)?;
                     let closest_vcs_rev: Option<String> = r.get(4)?;
                     let vcs_rev_exact: i64 = r.get(5)?;
+                    let source: String = r.get(6)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -1381,6 +1375,11 @@ impl EffortStore for SqliteEffortStore {
                         local_snapshot_id,
                         closest_vcs_rev,
                         vcs_rev_exact: vcs_rev_exact != 0,
+                        source: if source == "observed" {
+                            FileSource::Observed
+                        } else {
+                            FileSource::Claimed
+                        },
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1427,6 +1426,38 @@ impl EffortStore for SqliteEffortStore {
         }
     }
 
+    async fn observe_files(
+        &self,
+        effort: &EffortId,
+        thread: ThreadId,
+        window: (String, String),
+        changes: Vec<(String, EffortFileChange)>,
+        version: OwnedFileRefVersion,
+    ) -> Result<usize, DomainError> {
+        let effort = *effort;
+        let added = self
+            .db
+            .transaction(move |tx| {
+                observe_files_tx(
+                    tx,
+                    effort,
+                    thread,
+                    &window.0,
+                    &window.1,
+                    &changes,
+                    version.as_ref(),
+                )
+                .map_err(map_sql_err)
+            })
+            .await?;
+        if added > 0 {
+            if let Some(w) = self.work_item_for_effort(&effort).await? {
+                self.project_effort_slice(&w).await?;
+            }
+        }
+        Ok(added)
+    }
+
     async fn record_file(
         &self,
         id: &EffortId,
@@ -1450,196 +1481,6 @@ impl EffortStore for SqliteEffortStore {
             }
         }
         Ok(())
-    }
-
-    async fn list_changed_paths_for_effort(
-        &self,
-        id: &EffortId,
-    ) -> Result<EffortChangedPaths, DomainError> {
-        let id_clone = *id;
-        // Raw snapshot-bracket changed paths …
-        let changed: Vec<String> = self
-            .db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT DISTINCT fs.path
-                     FROM effort e
-                     JOIN snapshot s_start ON s_start.id = e.start_snapshot_id
-                     JOIN file_snapshot fs ON fs.stream_id = s_start.stream_id
-                     WHERE e.id = ?1
-                       AND e.start_snapshot_id IS NOT NULL
-                       AND e.end_snapshot_id IS NOT NULL
-                       AND fs.snapshot_id > e.start_snapshot_id
-                       AND fs.snapshot_id <= e.end_snapshot_id
-                     ORDER BY fs.path",
-                )?;
-                let rows =
-                    stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await?;
-        // … partitioned by whether this effort CLAIMED each one.
-        let claimed_set: std::collections::HashSet<String> = self
-            .list_files(id)
-            .await?
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        let (claimed, unclaimed): (Vec<String>, Vec<String>) =
-            changed.into_iter().partition(|p| claimed_set.contains(p));
-        Ok(EffortChangedPaths { claimed, unclaimed })
-    }
-
-    async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
-        let id_clone = *id;
-        let path_clone = path.to_string();
-        self.db
-            .call(move |conn| {
-                conn.execute(
-                    "DELETE FROM effort_file WHERE effort_id = ?1 AND path = ?2",
-                    params![id_clone.value(), path_clone],
-                )?;
-                Ok(())
-            })
-            .await?;
-        {
-            if let Some(w) = self.work_item_for_effort(id).await? {
-                self.project_effort_slice(&w).await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn acknowledge_unclaimed_path(
-        &self,
-        id: &EffortId,
-        path: &str,
-    ) -> Result<(), DomainError> {
-        let id_clone = *id;
-        let path_clone = path.to_string();
-        self.db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT OR IGNORE INTO effort_acknowledged_path (effort_id, path) \
-                     VALUES (?1, ?2)",
-                    params![id_clone.value(), path_clone],
-                )?;
-                Ok(())
-            })
-            .await
-    }
-
-    async fn forget_acknowledged_path(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
-        let id_clone = *id;
-        let path_clone = path.to_string();
-        self.db
-            .call(move |conn| {
-                conn.execute(
-                    "DELETE FROM effort_acknowledged_path \
-                     WHERE effort_id = ?1 AND path = ?2",
-                    params![id_clone.value(), path_clone],
-                )?;
-                Ok(())
-            })
-            .await
-    }
-
-    async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError> {
-        let id_clone = *id;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT path FROM effort_acknowledged_path \
-                     WHERE effort_id = ?1 ORDER BY path",
-                )?;
-                let rows =
-                    stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    async fn paths_claimed_by_intervening_efforts(
-        &self,
-        id: &EffortId,
-    ) -> Result<Vec<String>, DomainError> {
-        let id_clone = *id;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    // Any OTHER effort whose snapshot window OVERLAPS
-                    // self's window (10,30] — not just one that ends
-                    // inside it. Overlap of half-open intervals
-                    // (a.start, a.end] and (b.start, b.end] is
-                    // `a.start < b.end AND a.end > b.start`. An ongoing
-                    // effort (NULL end) overlaps if it started before
-                    // self's window closed. This way a sibling effort
-                    // that's claimed later (ends after self's window)
-                    // still suppresses the nag, regardless of the order
-                    // the efforts were completed in.
-                    "SELECT DISTINCT tef.path
-                     FROM effort self
-                     JOIN effort other
-                       ON other.id != self.id
-                      AND other.start_snapshot_id < self.end_snapshot_id
-                      AND (other.end_snapshot_id IS NULL
-                           OR other.end_snapshot_id > self.start_snapshot_id)
-                     JOIN effort_file tef ON tef.effort_id = other.id
-                     WHERE self.id = ?1
-                       AND self.start_snapshot_id IS NOT NULL
-                       AND self.end_snapshot_id IS NOT NULL
-                     ORDER BY tef.path",
-                )?;
-                let rows =
-                    stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    async fn replace_unattributed_files(
-        &self,
-        id: &EffortId,
-        paths: &[String],
-    ) -> Result<(), DomainError> {
-        let id_clone = *id;
-        let paths = paths.to_vec();
-        self.db
-            .transaction(move |tx| {
-                let sql_err = crate::database::map_sql_err;
-                tx.execute(
-                    "DELETE FROM effort_unattributed_file WHERE effort_id = ?1",
-                    params![id_clone.value()],
-                )
-                .map_err(sql_err)?;
-                let now = ts_to_string(Timestamp::now());
-                for path in &paths {
-                    tx.execute(
-                        "INSERT OR REPLACE INTO effort_unattributed_file
-                           (effort_id, path, recorded_at)
-                         VALUES (?1, ?2, ?3)",
-                        params![id_clone.value(), path, now],
-                    )
-                    .map_err(sql_err)?;
-                }
-                Ok(())
-            })
-            .await
-    }
-
-    async fn list_unattributed_files(&self, id: &EffortId) -> Result<Vec<String>, DomainError> {
-        let id_clone = *id;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT path FROM effort_unattributed_file \
-                     WHERE effort_id = ?1 ORDER BY path",
-                )?;
-                let rows =
-                    stmt.query_map(params![id_clone.value()], |row| row.get::<_, String>(0))?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
     }
 
     async fn list_efforts_at_snapshots(
@@ -1898,67 +1739,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn intervening_efforts_claims_overlapping_window() {
-        // self effort spans snapshots (10, 30]. We report a path when
-        // the claiming effort's window *overlaps* self's window,
-        // regardless of completion order:
-        //   ef-inside  (15, 20]  fully inside        → reported
-        //   ef-after   (25, 40]  starts in, ends out → reported (the
-        //                        sibling-completed-later case)
-        //   ef-before  ( 1,  5]  entirely before     → not reported
-        //   ef-later   (35, 50]  entirely after      → not reported
-        let db = Database::in_memory();
-        let store = SqliteEffortStore::new(db.clone());
-        let db2 = db.clone();
-        tokio::task::spawn_blocking(move || {
-            db2.with_conn(|conn| {
-                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-                for (id, start, end) in [
-                    (1, 10, 30), // ef-self
-                    (2, 15, 20), // ef-inside
-                    (3, 25, 40), // ef-after
-                    (4, 1, 5),   // ef-before
-                    (5, 35, 50), // ef-later
-                ] {
-                    conn.execute(
-                        "INSERT INTO effort
-                           (id, work_item, thread_id, started_at, ended_at,
-                            start_snapshot_id, end_snapshot_id)
-                         VALUES (?1, 'work_item:oxplow:tsk1', 1, '2026-01-01T00:00:00Z',
-                                 '2026-01-01T00:01:00Z', ?2, ?3)",
-                        params![id, start, end],
-                    )?;
-                }
-                for (eid, path) in [
-                    (2, "inside.rs"), // ef-inside
-                    (3, "after.rs"),  // ef-after
-                    (4, "before.rs"), // ef-before
-                    (5, "later.rs"),  // ef-later
-                ] {
-                    conn.execute(
-                        "INSERT INTO effort_file
-                           (effort_id, path, change_kind, local_snapshot_id,
-                            closest_vcs_rev, vcs_rev_exact)
-                         VALUES (?1, ?2, 'updated', 1, NULL, 0)",
-                        params![eid, path],
-                    )?;
-                }
-                Ok(())
-            })
-        })
-        .await
-        .unwrap()
-        .unwrap();
-
-        let got = store
-            .paths_claimed_by_intervening_efforts(&EffortId::new(1))
-            .await
-            .unwrap();
-        // Ordered by path; overlapping efforts only.
-        assert_eq!(got, vec!["after.rs".to_string(), "inside.rs".to_string()]);
-    }
-
-    #[tokio::test]
     async fn nested_efforts_returns_only_strictly_contained_siblings() {
         // tsk267 window-dominance: self = effort 1 [10:00, 11:00]. A sibling is
         // "nested" only when its window is strictly inside self's.
@@ -2172,45 +1952,99 @@ mod tests {
         assert_eq!(list[0].summary.as_deref(), Some("done"));
     }
 
-    fn atomic_args(
-        tid: TaskId,
-        thread: ThreadId,
-        files: Vec<(String, EffortFileChange)>,
-        summary: Option<&str>,
-    ) -> RecordEffortAtomic {
+    fn atomic_args(tid: TaskId, thread: ThreadId, summary: Option<&str>) -> RecordEffortAtomic {
         RecordEffortAtomic {
             work_item: work_item_ref(tid),
             thread,
-            files,
-            version: OwnedFileRefVersion {
-                local_snapshot_id: 0,
-                closest_vcs_rev: None,
-                vcs_rev_exact: false,
-            },
             impacts: Vec::new(),
             summary: summary.map(|s| s.to_string()),
         }
     }
 
+    /// A turn's observed files: a file another thread's overlapping effort
+    /// claimed stays that thread's; one this effort already claimed stays
+    /// claimed; a second observation adds nothing.
     #[tokio::test]
-    async fn record_effort_atomic_opens_records_and_closes_in_one_action() {
+    async fn observing_files_skips_other_threads_claims_and_keeps_its_own() {
+        let (store, db, _tid, t) = fixture_with_db().await;
+        db.call(|c| {
+            c.execute_batch(
+                "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                   VALUES (2, 1, 'other', 'queued', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
+            )
+        })
+        .await
+        .unwrap();
+        let mine = store.start("work_item:issues:A-1", &t, None).await.unwrap();
+        let theirs = store
+            .start("work_item:issues:B-1", &ThreadId::new(2), None)
+            .await
+            .unwrap();
+        let v = FileRefVersion {
+            local_snapshot_id: 0,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
+        };
+        store
+            .record_file(&theirs.id, "theirs.rs", EffortFileChange::Updated, v)
+            .await
+            .unwrap();
+        store
+            .record_file(&mine.id, "claimed.rs", EffortFileChange::Updated, v)
+            .await
+            .unwrap();
+        let window = (
+            "2000-01-01T00:00:00Z".to_string(),
+            "2999-01-01T00:00:00Z".to_string(),
+        );
+        let changes = vec![
+            ("theirs.rs".to_string(), EffortFileChange::Updated),
+            ("claimed.rs".to_string(), EffortFileChange::Updated),
+            ("shell.rs".to_string(), EffortFileChange::Created),
+        ];
+        let owned = || OwnedFileRefVersion {
+            local_snapshot_id: 0,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
+        };
+        let added = store
+            .observe_files(&mine.id, t, window.clone(), changes.clone(), owned())
+            .await
+            .unwrap();
+        assert_eq!(added, 1);
+        let files: Vec<(String, FileSource)> = store
+            .list_files(&mine.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.path, f.source))
+            .collect();
+        assert_eq!(
+            files,
+            vec![
+                ("claimed.rs".to_string(), FileSource::Claimed),
+                ("shell.rs".to_string(), FileSource::Observed),
+            ]
+        );
+        assert_eq!(
+            store
+                .observe_files(&mine.id, t, window, changes, owned())
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn record_effort_atomic_opens_and_closes_in_one_action() {
         let (store, tid, t) = fixture().await;
         let eff = store
-            .record_effort_atomic(atomic_args(
-                tid,
-                t,
-                vec![
-                    ("src/a.rs".into(), EffortFileChange::Updated),
-                    ("src/b.rs".into(), EffortFileChange::Created),
-                ],
-                Some("shipped"),
-            ))
+            .record_effort_atomic(atomic_args(tid, t, Some("shipped")))
             .await
             .unwrap();
         let row = store.get_effort(&eff).await.unwrap().unwrap();
         assert!(row.ended_at.is_some(), "fresh effort is closed");
         assert_eq!(row.summary.as_deref(), Some("shipped"));
-        assert_eq!(store.list_files(&eff).await.unwrap().len(), 2);
         assert!(store
             .find_open_for_work_item(&work_item_ref(tid))
             .await
@@ -2223,12 +2057,7 @@ mod tests {
         let (store, tid, t) = fixture().await;
         let lifecycle = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         let eff = store
-            .record_effort_atomic(atomic_args(
-                tid,
-                t,
-                vec![("src/a.rs".into(), EffortFileChange::Updated)],
-                Some("done"),
-            ))
+            .record_effort_atomic(atomic_args(tid, t, Some("done")))
             .await
             .unwrap();
         // Merged into the lifecycle row, not a duplicate.
@@ -2244,7 +2073,7 @@ mod tests {
         let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         store.finish(&eff.id, None, None).await.unwrap();
         let landed = store
-            .record_effort_atomic(atomic_args(tid, t, Vec::new(), Some("late summary")))
+            .record_effort_atomic(atomic_args(tid, t, Some("late summary")))
             .await
             .unwrap();
         assert_eq!(landed, eff.id);
@@ -2314,12 +2143,6 @@ mod tests {
             .record_effort_atomic(RecordEffortAtomic {
                 work_item: work_item_ref(tid),
                 thread: t,
-                files: vec![],
-                version: OwnedFileRefVersion {
-                    local_snapshot_id: 0,
-                    closest_vcs_rev: None,
-                    vcs_rev_exact: false,
-                },
                 impacts: vec![],
                 summary: Some("s".into()),
             })
@@ -2628,83 +2451,6 @@ mod tests {
                 .iter()
                 .any(|e| e.source_id == format!("oxplow:{tid}")),
             "summary slice was clobbered by record_file: {wiki_back:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn unattributed_files_replace_list_and_cascade() {
-        // replace_unattributed_files records the audit residue; list reads
-        // it back; deleting the effort cascades it away.
-        let (_, db, tid, t) = fixture_with_db().await;
-        let store = SqliteEffortStore::new(db.clone());
-        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
-        store
-            .replace_unattributed_files(&eff.id, &["a.rs".into(), "b.rs".into()])
-            .await
-            .unwrap();
-        let mut got = store.list_unattributed_files(&eff.id).await.unwrap();
-        got.sort();
-        assert_eq!(got, vec!["a.rs".to_string(), "b.rs".to_string()]);
-        // Published as `v_effort_unattributed_file`, with the effort's task
-        // (tsk944).
-        let published = db
-            .read(|tx| {
-                let rows = || -> rusqlite::Result<Vec<(i64, i64, String)>> {
-                    let mut st = tx.prepare(
-                        "SELECT effort_id, task_id, path FROM v_effort_unattributed_file ORDER BY path",
-                    )?;
-                    let rows = st
-                        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    Ok(rows)
-                };
-                rows().map_err(|e| DomainError::Storage(e.to_string()))
-            })
-            .await
-            .unwrap();
-        let (effort, task) = (eff.id.value(), tid.value());
-        assert_eq!(
-            published,
-            vec![
-                (effort, task, "a.rs".to_string()),
-                (effort, task, "b.rs".to_string())
-            ]
-        );
-        // Replace is idempotent / overwrites the whole set.
-        store
-            .replace_unattributed_files(&eff.id, &["c.rs".into()])
-            .await
-            .unwrap();
-        assert_eq!(
-            store.list_unattributed_files(&eff.id).await.unwrap(),
-            vec!["c.rs".to_string()]
-        );
-    }
-
-    #[tokio::test]
-    async fn record_file_clears_unattributed_mark() {
-        // Invariant: a path is CLAIMED or UNATTRIBUTED, never both.
-        // Claiming a previously-unattributed path drops its residue row.
-        let (_, db, tid, t) = fixture_with_db().await;
-        let store = SqliteEffortStore::new(db);
-        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
-        store
-            .replace_unattributed_files(&eff.id, &["shared.rs".into(), "other.rs".into()])
-            .await
-            .unwrap();
-        let v = FileRefVersion {
-            local_snapshot_id: 0,
-            closest_vcs_rev: None,
-            vcs_rev_exact: false,
-        };
-        store
-            .record_file(&eff.id, "shared.rs", EffortFileChange::Updated, v)
-            .await
-            .unwrap();
-        // shared.rs is now claimed → no longer unattributed; other.rs stays.
-        assert_eq!(
-            store.list_unattributed_files(&eff.id).await.unwrap(),
-            vec!["other.rs".to_string()]
         );
     }
 

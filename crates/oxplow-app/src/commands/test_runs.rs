@@ -1,14 +1,12 @@
-//! Test evidence an agent hands oxplow (P8.A8): `test.record_run`, a run
-//! the Bash hook couldn't see (a sub-agent's). `External` over the
+//! Test evidence an agent hands oxplow: `test.record_run`, a run whose
+//! counts oxplow couldn't read from its output. `External` over the
 //! `CollectionService`: the capture with its `test.run.recorded` commits in
 //! the collector's own transaction. Audited to the actor; an agent's goes
 //! on its own thread whatever it names, a person names one. A report file
-//! oxplow parses itself is a report collector's, run by `collector.sync`
-//! (tsk863).
+//! oxplow parses itself is a report collector's, run by `collector.sync`.
 
 use std::sync::Arc;
 
-use oxplow_domain::refs::build::{task_of_work_item_ref, validate_work_item_ref};
 use oxplow_domain::{
     Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
 };
@@ -29,10 +27,6 @@ pub struct RecordRunInput {
     /// The thread (`thread:thr3`); an agent's is always its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The work item the run was for (`work_item:oxplow:tsk42`), so it's
-    /// attributed to that effort even with sibling efforts open.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
     /// The command that ran the tests.
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,16 +64,15 @@ fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
     }
 }
 
-/// `test.record_run { thread?, work_item?, command, duration_ms?, passed?, failed?, total? }`.
+/// `test.record_run { thread?, command, duration_ms?, passed?, failed?, total? }`.
 pub fn record_run_command(collection: CollectionService) -> Command {
     Command::new(
         spec(
             RECORD_RUN,
-            "Record a test run with pass/fail counts the Bash hook can't see, marked `asserted`. \
-             oxplow records the main agent's runs from the Bash hook already, but a dispatched \
-             sub-agent's are invisible to it, so a sub-agent should run this for its test runs. \
-             Pass `work_item` (from your brief) so the run lands on your item's effort even with \
-             sibling efforts open. Returns `{ recorded, observationId }`.",
+            "Record a test run with pass/fail counts oxplow couldn't read from its output, \
+             marked `asserted`. oxplow records runs it sees in shell commands itself; this is \
+             for runs it couldn't parse. The run is the thread's open effort's. Returns \
+             `{ recorded, observationId }`.",
             schema::<RecordRunInput>(),
         ),
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
@@ -87,16 +80,6 @@ pub fn record_run_command(collection: CollectionService) -> Command {
             Box::pin(async move {
                 let input: RecordRunInput = parse(input)?;
                 let thread = acting_thread_of(&actor, input.thread.as_deref())?;
-                let task = match input.work_item.as_deref() {
-                    Some(item) => {
-                        validate_work_item_ref(item).map_err(|e| CommandError::Invalid {
-                            field: Some("/work_item".into()),
-                            message: e.to_string(),
-                        })?;
-                        task_of_work_item_ref(item)
-                    }
-                    None => None,
-                };
                 let turn = collection.command_turn(&actor, thread).await;
                 let id = collection
                     .record_test_run(
@@ -110,7 +93,6 @@ pub fn record_run_command(collection: CollectionService) -> Command {
                         "asserted",
                         author_of(&actor),
                         None,
-                        task,
                         turn,
                     )
                     .await?;

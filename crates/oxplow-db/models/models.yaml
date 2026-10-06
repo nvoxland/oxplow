@@ -396,8 +396,8 @@
     - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of its first prompt. (v2)" }
     - { name: "closed_by", type: "TEXT", doc: "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)" }
 - name: effort_file
-  version: 1
-  description: "Files each effort touched (as claimed or detected at close), with how they changed."
+  version: 2
+  description: "Files each effort changed, with how they changed: claimed by an edit tool, or observed changing during one of its thread's turns."
   columns:
     - { name: "effort_id", type: "INTEGER", doc: "The effort (v_effort.id)." }
     - { name: "work_item", type: "TEXT", doc: "That effort's work item ref." }
@@ -405,6 +405,7 @@
     - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
     - { name: "change_kind", type: "TEXT", doc: "`created`, `updated` or `deleted`." }
     - { name: "closest_vcs_rev", type: "TEXT", doc: "The VCS revision (a git sha) nearest the file when recorded." }
+    - { name: "source", type: "TEXT", doc: "`claimed` (an edit tool named it) or `observed` (it changed during one of the thread's turns and no other thread claimed it)." }
 - name: effort_metric_delta
   version: 1
   description: "How each metric moved during an effort (before → after), computed by oxplow's metric engine and refreshed when the effort closes and as data arrives while it's open."
@@ -443,18 +444,6 @@
     - { name: "payload_json", type: "TEXT", doc: "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines)." }
     - { name: "local_snapshot_id", type: "INTEGER", doc: "Snapshot it was captured against." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-- name: effort_unattributed_file
-  version: 1
-  description: "Files that changed during an effort that nothing claimed: the residue its close reconciled out of its snapshot bracket. A path is claimed (v_effort_file) or here, never both."
-  columns:
-    - { name: "effort_id", type: "INTEGER", doc: "The effort (v_effort.id)." }
-    - { name: "work_item", type: "TEXT", doc: "That effort's work item ref." }
-    - { name: "task_id", type: "", doc: "That effort's oxplow task (v_task.id); NULL for another provider's work item." }
-    - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
-    - { name: "recorded_at", type: "TEXT", doc: "When the close recorded it (RFC 3339)." }
-  tests:
-    - { not_null: effort_id }
-    - { not_null: path }
 - name: event
   version: 1
   description: "The event log: every activity and state change, oldest first by `seq`, written in the same transaction as the change it records (.context/data-model.md \"event_log\")."
@@ -886,13 +875,13 @@
     - { name: "status", type: "", doc: "`passed`, `failed` or `skipped`." }
     - { name: "time_ms", type: "", doc: "Its duration, when the report gave one." }
 - name: test_run
-  version: 1
+  version: 2
   description: "Every test run oxplow saw (hook-observed or reported by an agent), with its counts."
   columns:
     - { name: "id", type: "INTEGER", doc: "Run id; `run:<id>` is how claims and decisions cite it." }
     - { name: "stream_id", type: "INTEGER", doc: "Stream it ran in (v_stream.id)." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread whose agent ran it, if known." }
-    - { name: "effort_id", type: "", doc: "Effort it belongs to: the one that claimed it, else the one open when it ran." }
+    - { name: "effort_id", type: "INTEGER", doc: "Effort it belongs to: the one the tool call that ran it was in (or the thread's open one)." }
     - { name: "command", type: "", doc: "The command that was run." }
     - { name: "exit_code", type: "", doc: "Its exit code, if known." }
     - { name: "passed", type: "", doc: "Tests passed (NULL when not reported)." }

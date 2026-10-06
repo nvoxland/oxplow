@@ -21,8 +21,8 @@ use thiserror::Error;
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::SqliteThreadStore;
 use oxplow_db::{
-    Effort, EffortFileChange, EffortStore, NewFact, NewMetricCapture, SqliteAttributionStore,
-    SqliteEffortStore, SqliteFactStore, SqliteSnapshotStore,
+    Effort, EffortFileChange, EffortStore, NewFact, NewMetricCapture, SqliteEffortStore,
+    SqliteFactStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
@@ -122,10 +122,6 @@ pub struct TaskService {
     /// the renderer refetches on a new capture.
     fact_store: Option<Arc<SqliteFactStore>>,
     events: Option<EventBus>,
-    /// Kind-agnostic attribution ledger (tsk263). When set (with
-    /// `effort_store`), closing an effort reconciles the run kinds too — the
-    /// concurrent-effort runs left unattributed become the close residue.
-    attribution: Option<Arc<SqliteAttributionStore>>,
     /// Steering-signal sources (tsk76): agent turns (user prompt submissions)
     /// and comment threads, counted into `oxplow.effort_steering` at close.
     /// Optional so bare TaskService tests skip that fact.
@@ -166,7 +162,6 @@ impl TaskService {
             thread_store: None,
             fact_store: None,
             events: None,
-            attribution: None,
             agent_turn_store: None,
             comment_store: None,
             event_pump: None,
@@ -187,13 +182,6 @@ impl TaskService {
             event_pump: None,
             ..self.clone()
         }
-    }
-
-    /// Attach the attribution ledger so closing an effort reconciles the run
-    /// kinds (test/coverage/analysis) alongside files (tsk263).
-    pub fn with_attribution(mut self, store: Arc<SqliteAttributionStore>) -> Self {
-        self.attribution = Some(store);
-        self
     }
 
     /// Attach the durable fact layer + event bus. When present (together with
@@ -468,18 +456,6 @@ impl TaskService {
                         effort_store.set_end_snapshot(&effort_id, id).await?;
                     }
                 }
-                // Claim-first reconciliation: changed-but-not-claimed paths
-                // become unattributed residue, and so do the concurrent
-                // case's runs (tsk263/tsk269).
-                let files = crate::attribution::FileKind::new(effort_store, snapshot.store());
-                let marked = crate::attribution::reconcile_close(&files, &effort_id).await;
-                if !marked.is_empty() {
-                    tracing::debug!(effort = %effort_id, count = marked.len(), "effort close: recorded unattributed changes");
-                }
-            }
-            if let (Some(attribution), Some(facts)) = (&self.attribution, &self.fact_store) {
-                let kind = crate::attribution::RunKind::runs(effort_store, facts, attribution);
-                let _ = crate::attribution::reconcile_close(&kind, &effort_id).await;
             }
         }
         self.project_effort_lifecycle_metrics(&effort, retroactive)
@@ -872,74 +848,25 @@ impl TaskService {
         Ok(self.store.list_for_thread(thread).await?)
     }
 
-    /// Open + record + close an effort for `work_item` (a canonical
-    /// `work_item:…` ref) against `thread`.
-    /// Declared `impacts` are persisted before finish so the
-    /// page_ref projection runs once with the full payload.
-    ///
-    /// `worktree_root`, when supplied, lets the store classify each
-    /// touched file as `Deleted` (file no longer on disk) vs.
-    /// `Updated` (file still present). Without a baseline snapshot
-    /// "Created" can't be distinguished from "Updated" by stat
-    /// alone, so callers needing that signal should declare it via
-    /// `impacts` (`{kind:"file", action:"created"}`). Pass `None`
-    /// from tests / callers that don't have a worktree handle — the
-    /// store falls back to `Updated` for every path, matching the
-    /// pre-change behavior.
-    // Each parameter is doing distinct semantic work — bundling
-    // into a struct would hide that without buying anything.
-    #[allow(clippy::too_many_arguments)]
+    /// Record an effort's `summary` and `impacts` for `work_item` (a
+    /// canonical `work_item:…` ref) on `thread`, closing it if it's open.
+    /// Impacts are persisted before the close so the page_ref projection
+    /// runs once with the full payload.
     pub async fn record_effort(
         &self,
         effort_store: &SqliteEffortStore,
         work_item: &str,
         thread: &ThreadId,
-        touched_files: &[String],
         summary: Option<String>,
         impacts: &[TaskImpact],
-        worktree_root: Option<&Path>,
     ) -> Result<(), TaskServiceError> {
-        // Resolve the version triple from the most-recent effort
-        // BEFORE the transaction — it reads the snapshot store. The
-        // attribution itself (attach-or-start + files + impacts +
-        // finish/summary) commits as one transaction, so a crash can
-        // no longer leave files recorded without their summary/finish.
-        // No prior effort means the atomic op below will SYNTHESIZE one: the
-        // task was closed without ever being `in_progress` (tsk172). Its
+        // No prior effort means the atomic op SYNTHESIZES one: its
         // `effort.opened` / `closed` are logged `retroactive`, and the
-        // effort-lifecycle consumer projects its metrics — otherwise the work
-        // is invisible to exactly the metrics that measure the pairing.
-        let prior = effort_store.most_recent_for_work_item(work_item).await?;
-        let version = match prior {
-            Some(e) => self.resolve_effort_file_version(&e).await,
-            // No effort yet — the atomic op will open one with no
-            // snapshot pin, so the version triple is the unpinned
-            // default.
-            None => crate::file_ref_version::ResolvedFileVersion {
-                local_snapshot_id: 0,
-                closest_vcs_rev: None,
-                vcs_rev_exact: false,
-            },
-        };
-        let files: Vec<(String, oxplow_db::EffortFileChange)> = self
-            .claimable_paths(thread, touched_files)
-            .await
-            .into_iter()
-            .map(|p| {
-                let change = classify_change(worktree_root, &p);
-                (p, change)
-            })
-            .collect();
+        // effort-lifecycle consumer projects its metrics.
         effort_store
             .record_effort_atomic(oxplow_db::RecordEffortAtomic {
                 work_item: work_item.to_string(),
                 thread: *thread,
-                files,
-                version: oxplow_db::OwnedFileRefVersion {
-                    local_snapshot_id: version.local_snapshot_id,
-                    closest_vcs_rev: version.closest_vcs_rev,
-                    vcs_rev_exact: version.vcs_rev_exact,
-                },
                 impacts: impacts.to_vec(),
                 summary,
             })
@@ -950,12 +877,10 @@ impl TaskService {
         Ok(())
     }
 
-    /// Auto-claim a single file the agent just edited onto the thread's
-    /// OPEN effort, in real time from the PostToolUse hook (Child 1 of the
-    /// claim-first attribution epic). Idempotent — `record_file` is
-    /// `INSERT OR REPLACE` keyed on `(effort_id, path)`, so the agent's
-    /// `touched_files` at completion merely confirms/amends rather than
-    /// enumerating from scratch. Returns `Ok(true)` when a claim was
+    /// Claim a single file an edit tool just named onto the thread's OPEN
+    /// effort. Idempotent — `record_file` is `INSERT OR REPLACE` keyed on
+    /// `(effort_id, path)`, and a claim replaces an observation. Returns
+    /// `Ok(true)` when a claim was
     /// recorded, `Ok(false)` when no effort is open (no-op). Best-effort:
     /// the PostToolUse caller swallows errors so the hook never fails.
     pub async fn claim_open_effort_file(
@@ -972,9 +897,8 @@ impl TaskService {
     /// [`Self::claim_open_effort_file`] for an edit recorded with the effort
     /// it happened in (`anchored`, the event's effort anchor — P3.5): that
     /// effort takes the claim even when it has closed since (the reactor
-    /// can run after the close; `record_file` also clears the path from
-    /// the close's unattributed list). With no anchor, the thread's open
-    /// efforts decide as below.
+    /// can run after the close). With no anchor, the thread's open effort
+    /// takes it.
     pub async fn claim_effort_file(
         &self,
         effort_store: &SqliteEffortStore,
@@ -995,21 +919,7 @@ impl TaskService {
         {
             return Ok(false);
         }
-        // One open effort ⇒ unambiguous, claim it.
-        //
-        // Several open ⇒ ASK WHICH ONE rather than giving up (tsk186). This used
-        // to return early on the grounds that "we can't know which one edited
-        // the file" — but that switched claiming off in exactly the situation
-        // where attribution is hardest, and the cost compounds: run attribution
-        // scores against claimed files, so an unclaimed file also means
-        // unattributed test runs, which means a close-time reconcile the user
-        // has to do by hand.
-        //
-        // The same scoring the run auto-claim uses decides it: the edited path
-        // against each open effort's claimed files ∪ its task's named paths,
-        // strict unique winner only. A tie still declines — a WRONG claim
-        // misreports what an effort did, which is worse than a missing one the
-        // agent can add at close.
+        // The effort the edit happened in, else the thread's open one.
         let anchored = match anchored {
             Some(id) => effort_store.get_effort(&id).await?,
             None => None,
@@ -1034,14 +944,8 @@ impl TaskService {
     /// by the stream's workspace filter (the project's
     /// `generated.exclude` list or `.gitignore`).
     ///
-    /// tsk249: an excluded path is deliberately never snapshotted, so
-    /// the close-time diff can never confirm it. Recording a claim on
-    /// one guarantees it lands in `claimed_but_not_changed` on every
-    /// close — a nudge the agent can only ever answer with "yes, that
-    /// was right". Silently dropping it is the honest outcome: oxplow
-    /// doesn't track the file, so it doesn't ask about it either.
-    /// (The reverse direction needs no filtering — an excluded path is
-    /// absent from the diff, so it can't be `changed_but_not_claimed`.)
+    /// An excluded path is deliberately never snapshotted: oxplow doesn't
+    /// track the file, so no effort owns it.
     ///
     /// Paths pass through unfiltered when no capture service is
     /// reachable for the thread (bare TaskService in tests, a stream
@@ -1091,7 +995,17 @@ impl TaskService {
             .end_snapshot_id
             .or(effort.start_snapshot_id)
             .unwrap_or(0);
-        let svc = self.service_for_thread(&effort.thread_id).await;
+        self.file_version_at(&effort.thread_id, snapshot_id).await
+    }
+
+    /// The version a file of `thread`'s stream was at in `snapshot_id`:
+    /// that snapshot and its nearest VCS revision.
+    pub async fn file_version_at(
+        &self,
+        thread: &ThreadId,
+        snapshot_id: i64,
+    ) -> crate::file_ref_version::ResolvedFileVersion {
+        let svc = self.service_for_thread(thread).await;
         match svc {
             Some(svc) if snapshot_id != 0 => svc.resolve_file_version(snapshot_id).await.unwrap_or(
                 crate::file_ref_version::ResolvedFileVersion {
@@ -1107,142 +1021,6 @@ impl TaskService {
             },
         }
     }
-}
-
-/// Set-wise diff between what the agent claimed in `touched_files`
-/// and what the snapshot bracket actually shows changed during the
-/// effort. Returned alongside the task on the close (`effort.report`) and
-/// surfaced via the Stop hook so the agent can choose to amend.
-/// Skipped (None) entirely when the auto-diff matches the claim, or
-/// when no snapshot bracket is available (effort has no start/end
-/// snapshot pin yet).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct EffortFileReview {
-    pub effort_id: String,
-    /// The effort's work item (`work_item:oxplow:tsk42`), when linked.
-    pub work_item: Option<String>,
-    /// Paths the agent claimed but the auto-diff doesn't see as
-    /// changed. Disclaim via `effort.amend { remove_files }` if not
-    /// actually touched.
-    pub claimed_but_not_changed: Vec<String>,
-    /// Paths the auto-diff sees as changed but the agent didn't
-    /// claim. Capped at `MAX_UNCLAIMED_FOR_REVIEW`; when larger,
-    /// the field is empty and `unclaimed_overflow` is set.
-    pub changed_but_not_claimed: Vec<String>,
-    /// Number of changed-but-not-claimed paths the diff actually
-    /// contained, before any cap was applied. `None` means the
-    /// list is the full set.
-    pub unclaimed_overflow: Option<usize>,
-}
-
-/// Cap on the "files in the diff that the agent didn't claim" list
-/// surfaced to the agent. Above this volume something else is
-/// happening (overlapping efforts, formatter, codegen, user edits)
-/// and the agent can't be expected to triage a wall of paths.
-pub const MAX_UNCLAIMED_FOR_REVIEW: usize = crate::attribution::MAX_UNCLAIMED_FOR_REVIEW;
-
-/// Compare the agent's declared `touched_files` for a work item's
-/// most-recent effort against the auto-diff between
-/// start_snapshot_id and end_snapshot_id. Returns `None` when
-/// nothing's worth showing the agent — claim and diff agree, or no
-/// snapshot bracket exists yet.
-pub async fn compute_effort_file_review(
-    effort_store: &SqliteEffortStore,
-    snapshot_store: &SqliteSnapshotStore,
-    work_item: &str,
-    claimed: &[String],
-) -> Option<EffortFileReview> {
-    let effort = effort_store
-        .most_recent_for_work_item(work_item)
-        .await
-        .ok()
-        .flatten()?;
-    let changed = effort_changed_paths(snapshot_store, &effort).await?;
-    let acknowledged = effort_store
-        .list_acknowledged_paths(&effort.id)
-        .await
-        .ok()?;
-    let other_claimed = effort_store
-        .paths_claimed_by_intervening_efforts(&effort.id)
-        .await
-        .ok()?;
-    review_from_lists(
-        &effort.id,
-        effort.work_item.as_deref(),
-        claimed,
-        &changed,
-        &acknowledged,
-        &other_claimed,
-    )
-}
-
-/// The set of paths whose content changed between the effort's start
-/// and end snapshots, via the shared snapshot diff (content/hash-based,
-/// not snapshot-row membership). `None` if the effort has no snapshot
-/// bracket yet.
-async fn effort_changed_paths(
-    snapshot_store: &SqliteSnapshotStore,
-    effort: &oxplow_db::Effort,
-) -> Option<Vec<String>> {
-    let (start, end) = (effort.start_snapshot_id?, effort.end_snapshot_id?);
-    let changes = snapshot_store.diff_snapshots(Some(start), end).await.ok()?;
-    Some(changes.into_iter().map(|c| c.path).collect())
-}
-
-/// Recompute a review for a specific effort id. The Stop hook
-/// uses this to refresh a stale review after the agent may have
-/// run `effort.amend`. Returns `None` when the effort no longer
-/// has a discrepancy (or doesn't exist / has no snapshot bracket).
-pub async fn recompute_effort_file_review(
-    effort_store: &SqliteEffortStore,
-    snapshot_store: &SqliteSnapshotStore,
-    effort_id: &EffortId,
-) -> Option<EffortFileReview> {
-    let effort = effort_store.get_effort(effort_id).await.ok().flatten()?;
-    let files = effort_store.list_files(effort_id).await.ok()?;
-    let claimed: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
-    let changed = effort_changed_paths(snapshot_store, &effort).await?;
-    let acknowledged = effort_store.list_acknowledged_paths(effort_id).await.ok()?;
-    let other_claimed = effort_store
-        .paths_claimed_by_intervening_efforts(effort_id)
-        .await
-        .ok()?;
-    review_from_lists(
-        effort_id,
-        effort.work_item.as_deref(),
-        &claimed,
-        &changed,
-        &acknowledged,
-        &other_claimed,
-    )
-}
-
-/// Build a file review from the claimed/changed/acknowledged/other-claimed sets
-/// via the kind-agnostic differ ([`crate::attribution::diff`]) — the file view
-/// onto the shared reconciliation core.
-pub(crate) fn review_from_lists(
-    effort_id: &EffortId,
-    work_item: Option<&str>,
-    claimed: &[String],
-    changed: &[String],
-    acknowledged: &[String],
-    other_claimed: &[String],
-) -> Option<EffortFileReview> {
-    let sets = crate::attribution::AttrSets {
-        claimed: claimed.to_vec(),
-        observed: changed.to_vec(),
-        acknowledged: acknowledged.to_vec(),
-        other_claimed: other_claimed.to_vec(),
-    };
-    let (claimed_but_not_changed, changed_but_not_claimed, unclaimed_overflow) =
-        crate::attribution::diff(&sets, MAX_UNCLAIMED_FOR_REVIEW)?;
-    Some(EffortFileReview {
-        effort_id: effort_id.to_string(),
-        work_item: work_item.map(str::to_string),
-        claimed_but_not_changed,
-        changed_but_not_claimed,
-        unclaimed_overflow,
-    })
 }
 
 impl TaskService {
@@ -1399,46 +1177,6 @@ mod tests {
         assert_eq!(
             classify_change(Some(tmp.path()), "real.rs"),
             EffortFileChange::Updated
-        );
-    }
-
-    #[test]
-    fn review_subtracts_acknowledged_paths_from_unclaimed() {
-        // Diff sees `extra.rs` plus `claimed.rs`; agent only claimed
-        // `claimed.rs`. Without ack: `extra.rs` shows in
-        // `changed_but_not_claimed`. With ack: it's filtered out
-        // and the review collapses to `None`.
-        let effort = EffortId::new(1);
-        let task = "work_item:oxplow:tsk1";
-        let claimed = vec!["claimed.rs".to_string()];
-        let changed = vec!["claimed.rs".to_string(), "extra.rs".to_string()];
-        let no_ack = review_from_lists(&effort, Some(task), &claimed, &changed, &[], &[]);
-        let r = no_ack.expect("unclaimed extra.rs should produce a review");
-        assert_eq!(r.changed_but_not_claimed, vec!["extra.rs".to_string()]);
-        let with_ack = review_from_lists(
-            &effort,
-            Some(task),
-            &claimed,
-            &changed,
-            &["extra.rs".to_string()],
-            &[],
-        );
-        assert!(
-            with_ack.is_none(),
-            "acknowledged path should clear the discrepancy: {with_ack:?}",
-        );
-        // Same effect when another effort already claimed the path.
-        let with_other = review_from_lists(
-            &effort,
-            Some(task),
-            &claimed,
-            &changed,
-            &[],
-            &["extra.rs".to_string()],
-        );
-        assert!(
-            with_other.is_none(),
-            "path claimed by an intervening effort should clear the discrepancy: {with_other:?}",
         );
     }
 
@@ -1803,8 +1541,8 @@ mod tests {
 
     #[tokio::test]
     async fn closing_a_never_started_task_still_counts_toward_efforts_per_task() {
-        // tsk172: the close (`effort.report`) on a task that was never `in_progress`
-        // synthesizes the effort so `touched_files` attributes — but the status
+        // The close (`effort.report`) on a task that was never `in_progress`
+        // synthesizes the effort its summary lands on — but the status
         // transition never crosses OUT of the in-progress band, so
         // `project_effort_lifecycle_metrics` never ran and the work was invisible
         // to the pairing metrics. Verified in a real DB: two such efforts had
@@ -1830,10 +1568,8 @@ mod tests {
             &effort_store,
             &work_item_ref(item.id),
             &tid,
-            &["src/a.rs".to_string()],
             Some("done".into()),
             &[],
-            None,
         )
         .await
         .unwrap();
@@ -2311,17 +2047,14 @@ mod tests {
             .unwrap();
         let effort = open_effort(&svc, &effort_store, item.id, tid).await;
         close_effort(&svc, &effort_store, effort.id).await;
-        // Now record_effort comes in with touched files + summary.
-        // It should attach to the already-closed lifecycle effort,
-        // NOT create a second row.
+        // A summary recorded after the close attaches to that effort,
+        // NOT a second row.
         svc.record_effort(
             &effort_store,
             &work_item_ref(item.id),
             &tid,
-            &["src/x.rs".to_string()],
             Some("did the thing".into()),
             &[],
-            None,
         )
         .await
         .unwrap();
@@ -2332,58 +2065,6 @@ mod tests {
         assert_eq!(efforts.len(), 1, "should still be a single effort row");
         let row = &efforts[0];
         assert_eq!(row.summary.as_deref(), Some("did the thing"));
-        let files = effort_store.list_files(&row.id).await.unwrap();
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].path, "src/x.rs");
-    }
-
-    /// tsk249: a path the workspace filter ignores (project
-    /// `generated.exclude`, `.gitignore`) is never snapshotted, so it can
-    /// never show up in the effort's diff — claiming one would be flagged
-    /// as "claimed but not changed" on every single close. Drop it from
-    /// the claim silently; the authored paths beside it still land.
-    #[tokio::test]
-    async fn record_effort_drops_paths_that_are_never_snapshotted() {
-        let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
-        captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
-            "generated",
-        ]));
-        let item = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "codegen".into(),
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        svc.record_effort(
-            &effort_store,
-            &work_item_ref(item.id),
-            &tid,
-            &[
-                "src/authored.rs".to_string(),
-                "apps/desktop/src/generated/bindings.ts".to_string(),
-            ],
-            Some("regenerated the bindings".into()),
-            &[],
-            None,
-        )
-        .await
-        .unwrap();
-        let efforts = effort_store
-            .list_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap();
-        let files = effort_store.list_files(&efforts[0].id).await.unwrap();
-        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(
-            paths,
-            vec!["src/authored.rs"],
-            "generated path should be silently dropped, authored path kept"
-        );
     }
 
     /// The PostToolUse auto-claim gets the same treatment — writing a
@@ -2450,10 +2131,8 @@ mod tests {
             &effort_store,
             &work_item_ref(item.id),
             &tid,
-            &["a.rs".to_string()],
             Some("retro".into()),
             &[],
-            None,
         )
         .await
         .unwrap();
@@ -2499,93 +2178,6 @@ mod tests {
         let files = effort_store.list_files(&open.id).await.unwrap();
         assert_eq!(files.len(), 1, "idempotent — one row");
         assert_eq!(files[0].path, "src/edited.rs");
-    }
-
-    #[tokio::test]
-    async fn out_of_band_close_marks_unclaimed_changes_unattributed() {
-        // An effort that changes a file nobody claimed, closed with no
-        // claims, records that file as unattributed audit residue.
-        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
-        let dirty = captures.primary().expect("primary capture service");
-        let item = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "oob".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        // Seed start-snapshot content.
-        std::fs::write(project.path().join("a.rs"), "v1").unwrap();
-        dirty.mark_dirty(
-            project.path().join("a.rs"),
-            oxplow_fs_watch::WatchEventKind::Other,
-        );
-        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
-        // A parallel/unclaimed change during the effort.
-        std::fs::write(project.path().join("parallel.rs"), "x").unwrap();
-        dirty.mark_dirty(
-            project.path().join("parallel.rs"),
-            oxplow_fs_watch::WatchEventKind::Other,
-        );
-        // Closed with no touched_files claim.
-        close_effort(&svc, &effort_store, effort.id).await;
-        let efforts = effort_store
-            .list_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap();
-        let eff = &efforts[0];
-        let unattributed = effort_store.list_unattributed_files(&eff.id).await.unwrap();
-        assert!(
-            unattributed.contains(&"parallel.rs".to_string()),
-            "unclaimed change should be marked unattributed: {unattributed:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn claimed_change_is_not_marked_unattributed_on_close() {
-        // A file the agent claimed in real time (the auto-claim) is NOT
-        // marked unattributed when the effort closes.
-        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
-        let dirty = captures.primary().expect("primary capture service");
-        let item = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "claimed".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        std::fs::write(project.path().join("a.rs"), "v1").unwrap();
-        dirty.mark_dirty(
-            project.path().join("a.rs"),
-            oxplow_fs_watch::WatchEventKind::Other,
-        );
-        let effort = open_effort(&svc, &effort_store, item.id, tid).await;
-        std::fs::write(project.path().join("mine.rs"), "x").unwrap();
-        dirty.mark_dirty(
-            project.path().join("mine.rs"),
-            oxplow_fs_watch::WatchEventKind::Other,
-        );
-        // Claim it (as the PostToolUse auto-claim would).
-        svc.claim_open_effort_file(&effort_store, &tid, "mine.rs", Some(project.path()))
-            .await
-            .unwrap();
-        close_effort(&svc, &effort_store, effort.id).await;
-        let efforts = effort_store
-            .list_for_work_item(&work_item_ref(item.id))
-            .await
-            .unwrap();
-        let eff = &efforts[0];
-        let unattributed = effort_store.list_unattributed_files(&eff.id).await.unwrap();
-        assert!(
-            !unattributed.contains(&"mine.rs".to_string()),
-            "a claimed change must not be unattributed: {unattributed:?}"
-        );
     }
 
     #[tokio::test]
@@ -3049,52 +2641,22 @@ mod tests {
         assert!(closed.start_snapshot_id.is_some());
         assert!(closed.end_snapshot_id.is_some());
 
-        // Nothing claimed → the worktree edit lands in the `unclaimed`
-        // half of the split; the primary-stream edit appears in neither.
-        let changed =
-            oxplow_db::EffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
-                .await
-                .unwrap();
+        // The effort's bracket diff holds the worktree edit and nothing
+        // from the primary stream.
+        let changed: Vec<String> = snapshot_store
+            .diff_snapshots(closed.start_snapshot_id, closed.end_snapshot_id.unwrap())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.path)
+            .collect();
         assert!(
-            changed.unclaimed.iter().any(|p| p == "changed.txt"),
+            changed.iter().any(|p| p == "changed.txt"),
             "worktree edit must be visible in the bracket diff; got {changed:?}",
         );
         assert!(
-            !changed.claimed.iter().any(|p| p == "changed.txt"),
-            "nothing was claimed, so it must not be in the claimed half; got {changed:?}",
-        );
-        assert!(
-            !changed.unclaimed.iter().any(|p| p == "other.txt")
-                && !changed.claimed.iter().any(|p| p == "other.txt"),
+            !changed.iter().any(|p| p == "other.txt"),
             "primary-stream edit must NOT bleed into the worktree's effort; got {changed:?}",
-        );
-
-        // Claiming the path moves it from `unclaimed` to `claimed`.
-        let v = crate::file_ref_version::ResolvedFileVersion {
-            local_snapshot_id: 0,
-            closest_vcs_rev: None,
-            vcs_rev_exact: false,
-        };
-        oxplow_db::EffortStore::record_file(
-            &*effort_store,
-            &closed.id,
-            "changed.txt",
-            oxplow_db::EffortFileChange::Updated,
-            v.as_ref(),
-        )
-        .await
-        .unwrap();
-        let split =
-            oxplow_db::EffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
-                .await
-                .unwrap();
-        assert!(
-            split.claimed.iter().any(|p| p == "changed.txt"),
-            "a claimed change must appear in the claimed half; got {split:?}",
-        );
-        assert!(
-            !split.unclaimed.iter().any(|p| p == "changed.txt"),
-            "a claimed change must not also be unclaimed; got {split:?}",
         );
     }
 

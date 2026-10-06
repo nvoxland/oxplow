@@ -52,6 +52,7 @@ pub mod effective_config;
 pub mod effects;
 pub mod effort_evidence;
 pub mod effort_lifecycle;
+pub mod effort_observation;
 pub mod effort_policy;
 pub mod effort_reactors;
 pub mod entity_metrics;
@@ -537,9 +538,6 @@ pub struct Services {
     /// engine's fact fold and the cube builder's seed, so the two can never
     /// disagree on what a branch sees.
     pub metric_visibility: Arc<metric_visibility::VisibilityResolver>,
-    /// Kind-agnostic attribution ledger (tsk262/263) — run claim/acknowledge
-    /// state; the agent claims/disclaims runs via `effort.amend`.
-    pub attribution_store: Arc<oxplow_db::SqliteAttributionStore>,
     /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
     /// seeds definitions, runs on-snapshot/on-effort-complete/manual triggers.
     pub metrics: metrics_service::MetricsService,
@@ -823,7 +821,6 @@ impl Services {
         let sql = sql
             .with_engine(metric_engine.clone())
             .with_watermarks(model_watermarks.clone());
-        let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));
         let collector_store = Arc::new(oxplow_db::SqliteCollectorStore::new(db.clone()));
@@ -1049,16 +1046,12 @@ impl Services {
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store.clone())
             .with_metrics(fact_store.clone(), event_bus.clone())
-            .with_attribution(attribution_store.clone())
             .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         // The post-commit half of effort open/close runs on the pump.
-        event_pump.register_async(Arc::new(
-            effort_lifecycle::EffortLifecycleConsumer::new(
-                tasks.without_event_pump(),
-                (*event_log_store).clone(),
-            )
-            .with_pump(Arc::downgrade(&event_pump)),
-        ));
+        event_pump.register_async(Arc::new(effort_lifecycle::EffortLifecycleConsumer::new(
+            tasks.without_event_pump(),
+            (*event_log_store).clone(),
+        )));
         // A structured edit claims its file for the effort it happened in.
         event_pump.register_async(Arc::new(tool_call_reactors::EffortClaimConsumer::new(
             tasks.without_event_pump(),
@@ -1106,6 +1099,13 @@ impl Services {
             log: (*event_log_store).clone(),
             sql: sql.clone(),
         }));
+        // Its turn's changed files become the effort's observed ones.
+        event_pump.register_async(Arc::new(effort_observation::EffortObservationConsumer {
+            efforts: effort_store.clone(),
+            snapshots: snapshot_store.clone(),
+            sql: sql.clone(),
+            tasks: tasks.without_event_pump(),
+        }));
         // The project's effort policy reacts to items starting and
         // finishing, through this bus (`.context/work-tracking.md`).
         event_pump.register_async(Arc::new(effort_policy::EffortPolicyConsumer {
@@ -1150,8 +1150,6 @@ impl Services {
             commands::effort_report::EffortDeps {
                 tasks: tasks.clone(),
                 efforts: effort_store.clone(),
-                snapshots: snapshot_store.clone(),
-                attribution: attribution_store.clone(),
                 sql: sql.clone(),
                 db: db.clone(),
                 vocabulary: vocabulary.clone(),
@@ -1219,7 +1217,6 @@ impl Services {
             vcs.clone(),
             config_arc.clone(),
             layout.project_dir.clone(),
-            attribution_store.clone(),
         )
         .with_approvals(approvals.clone())
         .with_vocabulary(vocabulary.clone())
@@ -1400,7 +1397,6 @@ impl Services {
             fact_store,
             metric_engine,
             metric_visibility,
-            attribution_store,
             metrics,
             nudge_store,
             dashboard_store,
@@ -1734,7 +1730,6 @@ mod tests {
                 "dashboard.update_item",
                 // The worktree and the snapshot diff a report is checked
                 // against (P8.A7).
-                "effort.amend",
                 "effort.report",
                 // A clone into a stream's worktree, a person's call (P8.A9).
                 "extension.install",

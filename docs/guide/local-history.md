@@ -49,11 +49,9 @@ transitions to `done` / `blocked` (with a snapshot id pinned at
 each end). The Local History dashboard surfaces which efforts
 were in-flight or just completed in each snapshot's window.
 
-When the agent closes an effort it passes its declared
-`touched_files`. The runtime cross-checks that list against
-the snapshot bracket diff and asks the agent to `effort.amend`
-if the two disagree — see
-[Agent control](agent-control.md#stop-hook).
+An effort's files are observed, not declared: a file an edit tool
+named is claimed, and any other file that changed during one of the
+thread's turns (a shell edit, a formatter) is observed.
 
 ## The Local History dashboard
 

@@ -699,11 +699,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listChangedPathsForEffort: (effortId: EffortId) => typedError<EffortChangedPaths, IpcError>(__TAURI_INVOKE("list_changed_paths_for_effort", { effortId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listEffortsInWindow: (windowStart: Timestamp, windowEnd: Timestamp) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_efforts_in_window", { windowStart, windowEnd })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2260,20 +2255,6 @@ export type EffortAtSnapshot = {
 	effort: Effort,
 };
 
-/**
- *  The snapshot-bracket changed paths for an effort, split by whether the
- *  effort CLAIMED each one (via `effort_file`). Mirrors the
- *  claimed/unclaimed attribution of the history view
- *  (`apps/desktop/src/snapshot-effort-grouping.ts`): `claimed` =
- *  changed-during-the-bracket AND claimed by this effort; `unclaimed` =
- *  changed but never claimed (parallel/external writes, formatters, capture
- *  gaps). Claim-first attribution, Child 3.
- */
-export type EffortChangedPaths = {
-	claimed: string[],
-	unclaimed: string[],
-};
-
 export type EffortFile = {
 	effort_id: EffortId,
 	path: string,
@@ -2297,6 +2278,7 @@ export type EffortFile = {
 	 *  a clean head, or a head move; `stamp_revision_tx`).
 	 */
 	vcs_rev_exact: boolean,
+	source: FileSource,
 };
 
 export type EffortFileChange = "created" | "updated" | "deleted";
@@ -2892,6 +2874,16 @@ export type FileSnapshot = {
 	 */
 	content_hash: string | null,
 };
+
+// How an effort came to own a file.
+export type FileSource = 
+// An edit tool named it.
+"claimed" | 
+/**
+ *  It changed during one of the thread's turns and no other thread
+ *  claimed it — a shell edit, a formatter, a generator.
+ */
+"observed";
 
 // How a path differs from the head, or how a revision changed it.
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";

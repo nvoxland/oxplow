@@ -56,10 +56,16 @@ so a policy may react late: opening adopts the thread's activity back to
 its previous effort's end, and closing can cut the span at a past point.
 
 **Attribution is core's, from observation:** files are *claimed* (an edit
-tool named them) or *observed* (they changed in the span and no other
-thread claimed them), which covers shell edits — the large majority. Runs
-go to the effort of the tool call that caused them. A commit is linked to
-the efforts whose changes it holds, by content.
+tool named them) or *observed* (they changed during one of the thread's
+turns and no other thread's overlapping effort claimed them), which covers
+shell edits — the large majority. The `effort.observe` consumer records
+them per turn from the turn's snapshot bracket, after the policy has
+reacted to the turn's `thread.checkpoint`; a file two threads changed at
+once and neither claimed is observed by both, and changes between turns
+(the person's own) belong to no effort. Runs go to the effort of the tool
+call that caused them (`metric_capture.effort_id`). Nothing is declared or
+reconciled at close. A commit is linked to the efforts whose changes it
+holds, by content.
 
 **A policy decides** when to open, close and link, reacting to core's
 events (a checkpoint after a turn's snapshot, a commit indexed, an effort
@@ -180,7 +186,8 @@ The three in progress:
   hook never refuses; the edit guard is isolation only; efforts need no
   work item, one is open per thread, and the seam (open with adoption,
   close as of a point, link, retitle — `commands/effort.rs`); the
-  effort-policy choice with "none"; rules 1 and 2 (`thread.checkpoint`).
-- Next, in order: observed files; rule 3 (a commit lands it); waiting derived; the
+  effort-policy choice with "none"; rules 1 and 2 (`thread.checkpoint`);
+  observed files and runs by their causing tool call.
+- Next, in order: rule 3 (a commit lands it); waiting derived; the
   Work panel and a Thread activity page; hints; skills and repo rules.
   Then the capability framework and the three swappable pieces.

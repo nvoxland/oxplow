@@ -10,7 +10,8 @@ is `work_item:oxplow:<id>`.
 
 - On entry: `work_item.transition { ref, to: "in_progress" }`.
 - On exit: one `command.sequence` of `work_item.transition { ref, to:
-  "done" }` and `effort.report { work_item: ref, summary, touched_files }`.
+  "done" }` and `effort.report { work_item: ref, summary }`. Your files
+  and test runs are observed.
 - Return ONE line: `oxplow-result: {"ok":true,"itemId":"id","…":…}`.
 - Keep notes terse (`knowledge.add_note { body }`): what you did, not how.
 - On blocker, `work_item.transition` it to `blocked` and leave a note —

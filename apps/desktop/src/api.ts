@@ -2012,9 +2012,8 @@ export async function getEffort(effortId: string): Promise<OverlappingEffort | n
   return row ? toOverlappingEffort(row) : null;
 }
 
-/** Per-effort touched_files list — the canonical authorship list
- *  (LLM-declared via `complete_task` + any subsequent `effort.amend`
- *  corrections).  */
+/** An effort's files: claimed by an edit tool, or observed changing
+ *  during one of its thread's turns. */
 export async function listEffortFiles(
   effortId: string,
 ): Promise<Array<{ path: string; change: "created" | "updated" | "deleted" }>> {
@@ -2053,21 +2052,6 @@ export async function listWikiSlugsForSnapshots(
     await commands.listWikiSlugsForSnapshots(snapshotIds),
   ) as unknown as Array<[number, string]>;
   return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
-}
-
-export type { EffortChangedPaths } from "./tauri-bridge/index.js";
-
-/** Snapshot-bracket changed paths for an effort, split into the paths the
- *  effort CLAIMED (effort_file) vs the `unclaimed` rest (parallel/
- *  external writes, formatters, capture gaps) — the claim-aware view that
- *  matches the history grouping. Both empty when the effort has no
- *  start/end snapshot pin yet. */
-export async function listChangedPathsForEffort(
-  effortId: string,
-): Promise<import("./tauri-bridge/index.js").EffortChangedPaths> {
-  return unwrap(
-    await commands.listChangedPathsForEffort(effortId),
-  ) as unknown as import("./tauri-bridge/index.js").EffortChangedPaths;
 }
 
 export async function listEffortsAtSnapshots(

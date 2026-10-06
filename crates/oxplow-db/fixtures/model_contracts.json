@@ -1629,6 +1629,46 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort (v_effort.id)."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "That effort's work item ref."
+        },
+        {
+          "name": "task_id",
+          "type": "",
+          "doc": "That effort's oxplow task (v_task.id); NULL for another provider's work item."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative file path."
+        },
+        {
+          "name": "change_kind",
+          "type": "TEXT",
+          "doc": "`created`, `updated` or `deleted`."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) nearest the file when recorded."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "`claimed` (an edit tool named it) or `observed` (it changed during one of the thread's turns and no other thread claimed it)."
+        }
+      ],
+      "key": []
     }
   },
   "effort_metric_delta": {
@@ -3355,6 +3395,96 @@
           "name": "effort_id",
           "type": "",
           "doc": "Effort it belongs to: the one that claimed it, else the one open when it ran."
+        },
+        {
+          "name": "command",
+          "type": "",
+          "doc": "The command that was run."
+        },
+        {
+          "name": "exit_code",
+          "type": "",
+          "doc": "Its exit code, if known."
+        },
+        {
+          "name": "passed",
+          "type": "",
+          "doc": "Tests passed (NULL when not reported)."
+        },
+        {
+          "name": "failed",
+          "type": "",
+          "doc": "Tests failed (NULL when not reported)."
+        },
+        {
+          "name": "skipped",
+          "type": "",
+          "doc": "Tests skipped (NULL when not reported)."
+        },
+        {
+          "name": "total",
+          "type": "",
+          "doc": "Tests run in total (NULL when not reported)."
+        },
+        {
+          "name": "duration_ms",
+          "type": "",
+          "doc": "Wall-clock duration, if known."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What recorded it (`hook`, `mcp`, …)."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) the tested tree was at or nearest to."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When it was recorded (RFC 3339)."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran in (v_agent_turn.id), if it ran in one."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Run id; `run:<id>` is how claims and decisions cite it."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread whose agent ran it, if known."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort it belongs to: the one the tool call that ran it was in (or the thread's open one)."
         },
         {
           "name": "command",

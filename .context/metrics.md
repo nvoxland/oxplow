@@ -127,7 +127,7 @@ welded to collection.
 > capture a snapshot listing the whole tree) is **gone**: that snapshot polluted
 > effort file-attribution — an edit from effort A that hadn't been snapshotted yet
 > first landed in a snapshot inside whatever effort window was open when a rebuild
-> ran, producing false "changed but not claimed" EFFORT REVIEW flags.
+> ran, misattributing files.
 >
 > `collectors_needing_baseline` is the **pending-baseline queue**: the on-snapshot sweep
 > (`run_snapshot_collectors`) partitions fact collectors every time a snapshot lands — already-
@@ -366,7 +366,7 @@ welded to collection.
   `captured_at`/`ended_at`; where `snapshot_id`/`closest_vcs_rev`/
   `vcs_rev_exact`/`branch`/`basis_ref`; who `stream_id` (NOT NULL, the CASCADE
   scope) / `thread_id` / **`effort_id`** (nullable, `ON DELETE SET NULL` — the
-  *producing* effort, stamped only when unambiguous; ledger-backfilled otherwise);
+  *producing* effort: the tool call's effort, else the thread's open one);
   trust `provenance`/`source`. **Captures are durable by default** (they carry
   the facts' context — no independent sweep). The one opt-in exception is
   `metricRetentionDays` (tsk93, **default 0 = keep everything**): when set, a
@@ -1140,22 +1140,20 @@ summed every assistant line) and was Claude-only + format-fragile.
   > (`otlp_tokens::summarize_metrics_request`). Off by default.
   See `.context/agent-model.md`.
 
-**Fact-attribution spine — `metric_capture.effort_id` (T-D prep, tsk37).** The
-read-side effort attribution (T-D) resolves an effort's facts from *its captures*
-(`captures_for_effort`). So the effort-scoped producers stamp `capture.effort_id`
-at write time using the **same** resolution the run-ledger auto-claim uses —
-`CollectionService::resolve_owning_effort(thread, task)`: a named task is
-exact-or-nothing (`find_open_for_work_item`); an unnamed one claims only the single
-open effort (`find_single_open_for_thread`), else stays null (deferred to
-reconcile). Stamped by: **tokens/turns** (`token_usage.rs`, the effort resolved
-once in `on_stop` and threaded to the capture), **tests / lint-hits / coverage /
-nudges** (`collection.rs`), and **effort-lifecycle** (`task_service.rs`, which
-knows its exact effort). The **snapshot fact-collector** captures are deliberately
-NOT stamped — they're whole-tree scans whose baseline predates the effort, so
-T-D's File family attributes them by *claimed files × time window*, not by
-`effort_id`. `auto_attribute_run` now composes `resolve_owning_effort` +
-`claim_run` (the `run:<id>` ledger write is unchanged) so the run claim and the
-capture stamp always agree.
+**Fact-attribution spine — `metric_capture.effort_id`.** The read-side
+effort attribution resolves an effort's facts from *its captures*
+(`captures_for_effort`). The effort-scoped producers stamp
+`capture.effort_id` at write time with
+`CollectionService::resolve_owner(thread, anchored)`: the causing tool
+event's effort anchor, else the thread's open effort, else null. Stamped
+by: **tokens/turns** (`token_usage.rs`, the effort resolved once in
+`on_stop`), **tests / lint-hits / coverage / nudges** (`collection.rs`),
+and **effort-lifecycle** (`task_service.rs`, which knows its exact
+effort). An effort that adopts a turn restamps its captures. The
+**snapshot fact-collector** captures are deliberately NOT stamped —
+they're whole-tree scans whose baseline predates the effort, so the File
+family attributes them by *the effort's files × time window*, not by
+`effort_id`.
 
 **Code-metric unbake (tsk23) — the keystone, and the one non-mechanical producer.**
 A code scan's output used to be baked `samples` (headline) + `findings`
@@ -1399,42 +1397,33 @@ age sweep only.
 + `EffortMetrics.tsx` are untouched). Two capture-resolution spines back the four
 families:
 
-- **claimed files × time** — code-metric collectors are snapshot scans, so their captures are
-  **not** effort-stamped; the File family reads them by claimed path + capture time,
+- **the effort's files × time** — code-metric collectors are snapshot scans, so their captures are
+  **not** effort-stamped; the File family reads them by the effort's paths (claimed or observed) + capture time,
   scoped to the effort's stream. Exception: an `{ on: [effort.finished] }` collector run KNOWS
   its producing effort and stamps the capture (tsk43 — `CollectorRunContext.effort_id`),
   so its just-after-close capture still counts as the effort's "current".
 - **`metric_capture.effort_id`** — the run/operational producers stamp the owning
-  effort at ingest (tsk37, `resolve_owning_effort`), so an effort's run + token +
+  effort at ingest (`resolve_owner`), so an effort's run + token +
   nudge facts are exactly `captures_for_effort(effort_id)` → `facts_for_captures`.
 
 | family | how the delta is computed |
 |---|---|
-| **File** — snapshot-scan metric (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code metrics, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`effort_file`) of `(current − baseline)`, each fact contributing per the spec's **aggregation** (`count` ⇒ 1 per offender — matching the Metrics page — else the fact value); facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an `effort.finished` collector run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` picks the two captures from capture metadata (the producers of the spec's slice, `producers_of_slice`) and loads only those captures' facts (`facts_for_captures`); a per-path measure's repo total at a capture is the metric engine's cube-backed series point, never a replay of the history. It used to load the measure's whole stream history per call (millions of facts) and dedupe captures quadratically |
+| **File** — snapshot-scan metric (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code metrics, whose captures are never effort-stamped; tsk43) | Σ over the effort's **files** (`effort_file`, claimed or observed) of `(current − baseline)`, each fact contributing per the spec's **aggregation** (`count` ⇒ 1 per offender — matching the Metrics page — else the fact value); facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an `effort.finished` collector run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). An effort file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No files, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` picks the two captures from capture metadata (the producers of the spec's slice, `producers_of_slice`) and loads only those captures' facts (`facts_for_captures`); a per-path measure's repo total at a capture is the metric engine's cube-backed series point, never a replay of the history. |
 | **Run** — tests (category `testing`) + the `oxplow.analysis.*` producer pair | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is classified Run via the producer-key check (its facts arrive on effort-stamped run-ingest captures), so it never reaches the File branch (the tsk272 guard) |
-| **Window** — operational (`agent.*`/`effort.*`/`task.*`) + formula/event specs | identical read to Run now that captures carry `effort_id`; kept a distinct family only to document it has no run-claim write side. `effort_stamped_delta` serves both |
-| **Coverage** (category `coverage`) | effort-relative: for each coverage run CAPTURE this effort **claimed** (ledger — the capture is the run, T-E1), `coverage_delta_for_spec` derives the **diff-coverage** (`diff_coverage_for_effort`, start snapshot vs the capture's own snapshot — collection.md) from the capture's ABSOLUTE per-file **line-sets** (`metric_capture.detail_json`, the `coverage-detail` envelope), then before→after over the derived sequence. The coverage FACTS carry num/den counts; the line-sets live only in the detail envelope |
+| **Window** — operational (`agent.*`/`effort.*`/`task.*`) + formula/event specs | identical read to Run; a distinct family to document what it holds. `effort_stamped_delta` serves both |
+| **Coverage** (category `coverage`) | effort-relative: for each of the effort's coverage run CAPTURES (`captures_for_effort`, trigger `on-report` — the capture is the run), `coverage_delta_for_spec` derives the **diff-coverage** (`diff_coverage_for_effort`, start snapshot vs the capture's own snapshot — collection.md) from the capture's ABSOLUTE per-file **line-sets** (`metric_capture.detail_json`, the `coverage-detail` envelope), then before→after over the derived sequence. The coverage FACTS carry num/den counts; the line-sets live only in the detail envelope |
 
 The family is chosen by **one classifier** — `classify_effort_attribution(spec)
-→ EffortAttributionFamily` (`crates/oxplow-app/src/attribution.rs`, beside the
-write-side `AttributionKind` each maps to: File↔`FileKind`, Coverage/Run↔`RunKind`,
-Window↔no-claim). `effort_metric_deltas` `match`es on it; adding a fact-kind is one
-variant + one match arm, not a scattered if/else chain (tsk274). A formula spec (no
-source measure) falls through to Window and no-ops.
+→ EffortAttributionFamily` (`crates/oxplow-app/src/attribution.rs`).
+`effort_metric_deltas` `match`es on it; adding a fact-kind is one variant + one
+match arm. A formula spec (no source measure) falls through to Window and no-ops.
 
-The ledger-run-claim ∪ (the `capture.effort_id` spine) is the intended end state;
-T-D lands on the stamped spine alone (the common auto-attributed case). A run
-CLAIMED post-hoc (`claim_runs` at close) whose capture wasn't stamped at ingest is
-the deferred backfill (tsk38). The now-orphaned legacy reads
-(`file_samples_for_paths`, `samples_for_effort`, `samples_for_runs`,
-`list_findings`, `runs_in_window_by_trigger`) are swept in T-E3 (tsk20).
-
-### Run attribution grain — the ledger, not the clock (tsk260/tsk269)
+### Run attribution grain — the causing tool call, not the clock
 
 > **P3 (tsk476):** a run the `collection` reactor records carries the tool
 > event that ran it: the capture is keyed `test-run:<event id>` (a
 > redelivery records nothing new), the effort the command ran in owns it
-> (the event's effort anchor, after an `OXPLOW_TASK=` token), and its
+> (the event's effort anchor), and its
 > `test.run.recorded` is anchored to the turn.
 >
 > **P10 (tsk483):** the capture carries that turn too —
@@ -1455,30 +1444,21 @@ the deferred backfill (tsk38). The now-orphaned legacy reads
 > counted them. A capture no turn produced (a scheduled collector, a
 > baseline scan) has none.
 
-**The capture IS the run (T-E1, tsk48).** Agent-work runs — tests, coverage,
-analysis — are **observe-always**: every run writes its `metric_capture` + facts
-regardless of how many efforts are open, attributed through the `capture.effort_id` stamp
-(T-D read) + the `effort_attribution` ledger (the write/reconcile side), never by
-time window — because parallel sub-agents in one thread run different runs
-concurrently and the clock can't tell them apart. All stamp `trigger='on-report'`,
-and each carries its verbatim payload in `metric_capture.detail_json` as the
-envelope `{"kind": "test-detail"|"coverage-detail"|"analysis-detail", "payload":
-{…}}`. At record time the producer resolves the owning effort — when the caller
-named a `task_id` (exact) or exactly one effort is open — stamps
-`capture.effort_id`, and writes a `claimed` ledger row for **`run:<capture_id>`**;
-the concurrent-unnamed case is left for the agent to claim at close (`claim_runs`
-on `effort.report`/`effort.amend` — the ids in those refs are
-capture ids now). `RunKind` OBSERVES via `captures_in_window_by_trigger`; the
-EFFORT REVIEW's `describe_run` reads the claimed capture + its envelope. The
-`effort_observations_from_metrics` read joins the ledger (claimed capture ids →
-`get_capture` → the detail envelope); the metric-delta read (above) joins
-`capture.effort_id`. **Coverage** is effort-relative (diff vs the effort's start
-snapshot), so it observes the ABSOLUTE report always and DERIVES the effort diff
-with the effort's evidence (`diff_coverage_for_effort` over the capture's
-`coverage-detail` envelope, against the snapshot the capture measured) — a run
-claimed after close still yields a diff (tsk270, tsk862). The mechanic
-+ trait (`AttributionKind`/`RunKind`) live in `.context/agent-model.md` +
-`.context/data-model.md`.
+**The capture IS the run.** Agent-work runs — tests, coverage, analysis —
+are **observe-always**: every run writes its `metric_capture` + facts whether
+or not an effort is open, attributed by the `capture.effort_id` stamp (the
+causing tool call's effort), never by time window — the clock can't tell two
+threads' runs apart. All stamp `trigger='on-report'` (`RUN_TRIGGER`), and each
+carries its verbatim payload in `metric_capture.detail_json` as the envelope
+`{"kind": "test-detail"|"coverage-detail"|"analysis-detail", "payload": {…}}`.
+`effort_observations_from_metrics` reads the effort's own run captures
+(`captures_for_effort`, filtered to that trigger) and their envelopes; the
+metric-delta read (above) joins `capture.effort_id` the same way.
+**Coverage** is effort-relative (diff vs the effort's start snapshot), so it
+observes the ABSOLUTE report always and DERIVES the effort diff with the
+effort's evidence (`diff_coverage_for_effort` over the capture's
+`coverage-detail` envelope, against the snapshot the capture measured) — a
+run attributed after the close still yields a diff.
 
 ### Additivity
 

@@ -736,7 +736,7 @@ function ResolvedEndpointDiff({
         ) : filesForList.length === 0 ? (
           <div style={muted}>
             {effortPassed
-              ? "This effort claimed no changed files."
+              ? "This effort has no changed files."
               : "No file changes between these endpoints."}
           </div>
         ) : onOpenFile ? (

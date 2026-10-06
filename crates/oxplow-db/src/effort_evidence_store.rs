@@ -36,9 +36,14 @@ fn now() -> String {
         .unwrap_or_default()
 }
 
-/// An effort's claims, as a signature: how many, and the newest's time.
-const SIG: &str = "SELECT count(*) || '|' || coalesce(max(a.recorded_at), '') \
-                   FROM effort_attribution a WHERE a.effort_id = e.id";
+/// What an effort's evidence is computed from, as a signature: its runs
+/// (the agent-work captures stamped with it — how many, and the newest)
+/// and its files (how many). Migration V7 restamps stored signatures with
+/// this same expression; change both together.
+const SIG: &str = "SELECT (SELECT count(*) || '|' || coalesce(max(c.id), '') \
+                           FROM metric_capture c \
+                          WHERE c.effort_id = e.id AND c.trigger = 'on-report') \
+                   || '|' || (SELECT count(*) FROM effort_file f WHERE f.effort_id = e.id)";
 
 fn attribution_sig_tx(tx: &rusqlite::Connection, effort_id: i64) -> Result<String, DomainError> {
     tx.query_row(
@@ -60,16 +65,17 @@ impl SqliteEffortEvidenceStore {
     }
 
     /// What `effort_id`'s evidence is computed from, as a signature of its
-    /// claims: how many, and the newest's time (tsk889). A claim added,
-    /// moved away or changed moves it. Read it before computing the
-    /// evidence, and store it with [`Self::replace`].
+    /// runs and files: one added, or moved to another effort, moves it.
+    /// Read it before computing the evidence, and store it with
+    /// [`Self::replace`].
     pub async fn attribution_sig(&self, effort_id: i64) -> Result<String, DomainError> {
         self.db
             .read(move |tx| attribution_sig_tx(tx, effort_id))
             .await
     }
 
-    /// Closed efforts whose claims moved since their evidence was stored.
+    /// Closed efforts whose runs or files moved since their evidence was
+    /// stored.
     pub async fn stale_closed(&self) -> Result<Vec<i64>, DomainError> {
         self.db
             .read(|tx| {
@@ -91,7 +97,7 @@ impl SqliteEffortEvidenceStore {
     }
 
     /// Replace `effort_id`'s evidence — its metric deltas and observations —
-    /// and record `sig`, the claims it was computed from, in one
+    /// and record `sig`, what it was computed from, in one
     /// transaction.
     pub async fn replace(
         &self,

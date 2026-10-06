@@ -164,14 +164,12 @@ Drive these like a user would, not just the agent terminal:
   question ("trace subsystem X end to end") and have it write a wiki
   page; verify it saved (`.oxplow/wiki/<slug>.md`) and that **⌘K BM25
   search** surfaces it across tasks/comments/wiki/files.
-- **The claim-first effort model.** Agents claim the files they touch
-  (`effort.report touched_files`, run with the close's
-  `work_item.transition`; structured edits also auto-claim via
-  the hook); the snapshot is the audit that reconciles claims
-  (`changed_but_not_claimed` / `claimed_but_not_changed`). NOTE: a file
-  YOU (navigator) or another writer touch in the worktree during an
-  open effort gets attributed to that effort — expect attribution noise
-  under concurrent/external writes.
+- **The observed effort model.** An effort's files are claimed (an
+  edit tool named them) or observed (they changed during one of its
+  thread's turns); test runs are the effort's whose tool call ran them.
+  NOTE: a file YOU (navigator) or another writer change in the worktree
+  during the agent's turn is observed by its effort too — expect
+  attribution noise under concurrent/external writes.
 - **Cross-stream / worktree parallelism + merges.** Run agents in
   parallel across streams (a primary stream + worktree streams) to get
   more done, then integrate to the primary. Merge via the **branch

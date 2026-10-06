@@ -1029,14 +1029,10 @@ mod tests {
             c.execute(
                 "INSERT INTO metric_capture (id, stream_id, thread_id, effort_id, producer, provenance, source, captured_at, detail_json)
                  VALUES (41, 1, 1, 7, 'tests', 'observed', 'hook', '2026-01-02T00:00:00Z', ?1),
-                        (42, 1, 1, NULL, 'test-run', 'asserted', 'mcp', '2026-01-03T00:00:00Z', ?2)",
+                        (42, 1, 1, 8, 'test-run', 'asserted', 'mcp', '2026-01-03T00:00:00Z', ?2)",
                 [&payload, &counts_only],
             )?;
-            // Run 42 was claimed by effort 8 at close.
-            c.execute_batch(
-                "INSERT INTO effort_attribution (effort_id, kind, ref, state, recorded_at)
-                   VALUES (8, 'run', 'run:42', 'claimed', '2026-01-03');",
-            )
+            Ok(())
         })
         .await
         .unwrap();

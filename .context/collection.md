@@ -152,60 +152,19 @@ hook + MCP wiring):
   counters sum, tsk160) — the effort's diff coverage is derived from it;
   analysis reports into one `static-analysis` observation (findings +
   per-severity counts). All `observed`, no agent step.
-  **Attribution (tsk347):** the run is pinned to its effort via the `"run"`
-  ledger. An agent forces EXACT attribution by prefixing the command with
-  `OXPLOW_TASK=<task id>` — `parse_task_token` reads it and
-  `CollectionService::record_test_run` claims the run for that task's open effort (`find_open_for_work_item`), correct even
-  under concurrent efforts. Without the token, resolution is, in order:
-  **single open effort** → **target overlap** (tsk169: score each open effort by
-  what the command names — `-p <crate>`, path args — against the files it has
-  claimed **union the paths its task's own text names**, and take a STRICT
-  unique winner) → **unattributed**.
-
-  The task-text half is not a nicety (tsk185). Claimed files can legitimately be
-  EMPTY, for two reasons that have nothing to do with timing — file claiming is
-  SYNCHRONOUS on the PostToolUse hook, not a race (a first diagnosis said
-  otherwise and was wrong):
-  1. a brand-new effort has claimed nothing yet, and
-  2. a file written through **Bash** (codegen, a formatter, an agent using a
-     heredoc) is deliberately never auto-claimed — only Edit / Write /
-     MultiEdit / NotebookEdit are, so those writes stay for snapshot
-     reconciliation and will always surface at close.
-
-  Files alone therefore cannot resolve the run you most want recorded.
-  `task_target_paths` reads only `[[wikilinks]]` and backticked spans that look
-  like paths (trimming a `:42` line suffix); scraping free prose would invent
-  matches. Union rather than fallback: widening the pool can only create ties,
-  which the strict-winner rule declines on. Ties and
-  whole-suite runs that name nothing decline on purpose: a mis-attributed run is
-  worse than an unattributed one, because the agent can still claim the latter at
-  close. An unattributed test run with 2+ efforts open fires the
-  `unattributed-run` nudge immediately.
-
-  **The same decision governs the per-file auto-claim** (tsk186).
-  `claim_open_effort_file` used to return early whenever more than one effort was
-  open — "we can't know which one edited the file" — which switched claiming off
-  precisely when attribution is hardest, and compounded: run scoring reads
-  claimed files, so an unclaimed file also meant unattributed runs and a
-  close-time reconcile by hand. It now calls the same
-  `attribution::resolve_by_targets`, scoring the EDITED PATH instead of a
-  command's targets. One implementation for both call sites on purpose — a file
-  claim and a run claim must never disagree about which effort owns the work.
-
-  **The filing discipline and attribution pull in opposite directions, and
-  nothing else warns you.** "One user-visible concern per row" encourages many
-  small tasks; batching several in one session means several efforts open at
-  once, which is exactly when auto-attribution has to decline. Either
-  **serialize** (close each task before starting the next) or **prefix every run
-  with `OXPLOW_TASK=`**. Doing neither is what produces a closing audit full of
-  unattributed runs to hand-reconcile — the failure mode tsk169/tsk170 exist to
-  shrink, not to eliminate.
+  **Attribution:** a run is the effort its causing tool call was in — the
+  `agent.tool.finished` event's effort anchor, else the thread's open
+  effort (`CollectionService::resolve_owner`) — stamped as
+  `metric_capture.effort_id`. With no effort open the run is still
+  recorded, belonging to none; an effort that later adopts the turn
+  restamps it. Nothing is declared or claimed
+  ([work-tracking.md](./work-tracking.md)).
   **Detection is run-aware (tsk347):** `detect_test_run`/`detect_analysis_run`
   split the command on shell operators (`&&`/`||`/`;`/`|`) and ignore
   sub-commands whose leading executable only *reads* (grep/echo/cat/sed/…), so a
   command that merely MENTIONS a pattern (`grep test:collect .oxplow/project.yaml`) is no
   longer a phantom run (and fires no report-less nudge); leading `VAR=val` env
-  assignments are skipped so the `OXPLOW_TASK=` prefix doesn't mask the real
+  assignments are skipped so a `RUST_LOG=debug` prefix doesn't mask the real
   exec. The sub-command that matched is what the run records as its
   `command` (`test_run_segment`, tsk1037) — the whole Bash call, when it was
   more (a heredoc that edited a file, a `cd`), rides beside it as
@@ -225,12 +184,10 @@ hook + MCP wiring):
   were already keyed by their report's content, a coverage failure by
   `coverage-failure:<event id>`), and nudges are unique by `(cause, kind)`.
   **The effort the command ran in owns the run** — the event's effort
-  anchor ranks after an `OXPLOW_TASK=` token and before the thread's open
-  efforts (`resolve_owner`) — so a run the reactor records after `Stop` +
-  the close (`work_item.transition` → done) closed the effort still lands on it.
-  A test, coverage or analysis run resolves its owner **once**: the same
-  effort stamps its capture, receives its ledger claim and pins its take
-  (tsk926). Each run capture logs
+  anchor ranks before the thread's open effort (`resolve_owner`) — so a run
+  the reactor records after the effort closed still lands on it. A test,
+  coverage or analysis run resolves its owner **once**: the same effort
+  stamps its capture and pins its take. Each run capture logs
   `test.run.recorded` (subject `run:<capture>`, anchored to the tool's turn,
   caused by the tool event) and each coverage capture `test.coverage.recorded`
   in the capture's transaction (`SqliteFactStore::record_facts_logged`); the
@@ -282,8 +239,8 @@ hook + MCP wiring):
   the thread (an agent's own; a person names one) like a detected run's —
   a test run, a coverage capture or a static-analysis capture, with
   `collector.sync project/<id>` as the run's command — and answers
-  `{ recorded: { status, records, run } }` (`run:<capture>`, what
-  `claim_runs` takes — the real capture for every kind, tsk891).
+  `{ recorded: { status, records, run } }` (`run:<capture>`, the real
+  capture for every kind).
   `status` is `stored`, or why nothing landed: `no_stream`, `no_cases`
   (tests), `no_coverage` (nothing instrumented, or no coverage measure),
   `metric_off` (no enabled metric reads analysis). A failed write is an
@@ -294,8 +251,7 @@ hook + MCP wiring):
   `test.record_run` is the one `asserted` writer, for richer
   pass/fail counts the exit code alone can't give; its counts also become
   status-sliced `oxplow.test_case` facts (no case identity) so the
-  `oxplow.tests.*` specs read them, and it returns the capture id (the run
-  identity `claim_runs` refs use). A report-less, count-less run records its
+  `oxplow.tests.*` specs read them, and it returns the capture id. A report-less, count-less run records its
   capture under the `test-run` producer so it never reads as "found 0 tests"
   (see [metrics.md](./metrics.md)). The run capture also stamps
   **`closest_vcs_rev`/`vcs_rev_exact`** (tsk95) — the commit it tested,
@@ -320,8 +276,8 @@ hook + MCP wiring):
   recorded would split one run across two rows (`v_test_run`'s grain).
 
 **Observe-always (tsk269/tsk270).** Tests, analysis, **and coverage** are recorded
-**regardless of how many efforts are open** — attribution is deferred to the
-unified `"run"` ledger, never a precondition for recording. `on_post_tool_use`
+**whether or not an effort is open** — attribution is the capture's
+`effort_id`, never a precondition for recording. `on_post_tool_use`
 resolves a single open effort only for the effort-RELATIVE *advisories*
 (the report-less / coverage-target nudges), which legitimately
 no-op under 0/N efforts; every OBSERVE call runs unconditionally. Report freshness
@@ -362,22 +318,10 @@ not "every line changed"; an oversize file (no bytes kept) contributes nothing. 
 the producers are gone — the helper stays only as the Class-A auto-attribute
 optimization.
 
-**Sub-agent runs + cross-agent attribution (tsk265).** The passive PostToolUse
-path only sees the **parent agent's** tool calls — Claude/Codex sub-agent (Task
-tool) tool calls don't fire the parent's hook, so a dispatched sub-agent's
-`cargo test` is **invisible to passive collection**. oxplow deliberately does
-NOT try to recover it by reading sub-agent transcripts / `SubagentStop` /
-`agent_id` (all agent-specific and version-fragile). Instead, attribution rides
-the two cross-agent-stable surfaces oxplow owns: the filesystem snapshot (which
-runs don't touch) and the **MCP contract**. So a sub-agent records its runs
-through `test.record_run`, passing `work_item` so the run attributes EXACTLY to
-its effort even under concurrency (resolved via `find_open_for_work_item`); the
-`dispatch_task` brief instructs this. Without a named task, a run attributes
-automatically when one effort is open, else is left unclaimed for the close
-reconcile + window-dominance + the agent's claim — never guessed onto one.
-`claim_runs`/`disclaim_runs` on `effort.report` (the close's second call) let
-the agent fix attribution at the close boundary; `effort.amend` does it after the fact. See
-[agent-model.md](./agent-model.md) for the full claim→reconcile loop.
+**Sub-agent runs.** A subagent's tool calls reach the hooks like the
+parent's, anchored to the same thread, so its runs are recorded and
+attributed like any other. `test.record_run` is only for pass/fail counts
+oxplow couldn't parse from a run's output.
 
 Both paths classify by the collector's `records:` (its parser's kind), not a
 format-name heuristic. Trust tier rides in `source`: in-process tiers

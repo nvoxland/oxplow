@@ -8,7 +8,6 @@
 //! convention); request shapes are defined as `serde + JsonSchema`
 //! structs alongside the tool methods.
 
-use oxplow_domain::refs::build::work_item_ref;
 use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
@@ -1960,9 +1959,9 @@ impl OxplowMcp {
     #[tool(
         description = "Discover the thread's currently-open effort. Returns `{ open, effortId, \
             taskId, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
-            is open. Use this to find the `effortId` for `effort.amend`, to confirm an effort is \
-            open before `collector.sync` on a report collector or `test.record_run`, and to see \
-            whether its diff coverage has a baseline (`hasStartSnapshot:false` ⇒ none)."
+            is open. Use this to confirm an effort is open before `collector.sync` on a report \
+            collector or `test.record_run`, and to see whether its diff coverage has a baseline \
+            (`hasStartSnapshot:false` ⇒ none)."
     )]
     async fn get_open_effort(
         &self,
@@ -3195,16 +3194,13 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
         out.push(String::new());
     }
     out.push("## Protocol".into());
-    out.push(format!(
+    out.push(
         "Follow the `oxplow-subagent-work-protocol` skill: `work_item.transition` it to \
          in_progress on entry; on exit run the `command.sequence` of `work_item.transition` \
-         (done) and `effort.report` with your `touched_files` so Local History attributes the \
-         writes. Return ONE line: `oxplow-result: {{\"ok\":true,\"itemId\":\"<id>\",…}}`. \
-         If you run tests, run `test.record_run` with `work_item: \"{}\"` — your runs are \
-         invisible to oxplow's passive Bash-hook collection, and naming your item attributes \
-         them exactly even while sibling efforts are open.",
-        work_item_ref(item.id)
-    ));
+         (done) and `effort.report` with your summary; the files and test runs you made are \
+         observed. Return ONE line: `oxplow-result: {\"ok\":true,\"itemId\":\"<id>\",…}`."
+            .into(),
+    );
     out.join("\n")
 }
 
@@ -4630,7 +4626,11 @@ mod tests {
             .unwrap();
         let effort = services
             .effort_store
-            .start(&work_item_ref(task_id), &thread.id, None)
+            .start(
+                &oxplow_domain::refs::build::work_item_ref(task_id),
+                &thread.id,
+                None,
+            )
             .await
             .unwrap();
         let row = |kind: &str, value: f64| oxplow_db::EffortObservation {
@@ -4692,7 +4692,11 @@ mod tests {
             .unwrap();
         let effort = services
             .effort_store
-            .start(&work_item_ref(task_id), &thread.id, None)
+            .start(
+                &oxplow_domain::refs::build::work_item_ref(task_id),
+                &thread.id,
+                None,
+            )
             .await
             .unwrap();
 

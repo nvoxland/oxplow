@@ -24,37 +24,11 @@ pub const NAME: &str = "effort.lifecycle";
 pub struct EffortLifecycleConsumer {
     tasks: TaskService,
     log: SqliteEventLogStore,
-    /// To let the claim reactor catch up before a close reconciles.
-    pump: Option<std::sync::Weak<crate::event_pump::EventPump>>,
 }
-
-/// How long a close waits for pending edit claims before it reconciles.
-const CLAIM_SETTLE: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl EffortLifecycleConsumer {
     pub fn new(tasks: TaskService, log: SqliteEventLogStore) -> Self {
-        Self {
-            tasks,
-            log,
-            pump: None,
-        }
-    }
-
-    pub fn with_pump(mut self, pump: std::sync::Weak<crate::event_pump::EventPump>) -> Self {
-        self.pump = Some(pump);
-        self
-    }
-
-    /// A close compares what the effort claimed with what changed; the
-    /// claims of its last edits may still be on the `effort.claim`
-    /// reactor's queue. Let it catch up first (bounded: a timeout
-    /// reconciles with what's there, the claim still lands and clears the
-    /// path from the unattributed list).
-    async fn settle_claims(&self) {
-        if let Some(pump) = self.pump.as_ref().and_then(|p| p.upgrade()) {
-            pump.settle(&[crate::tool_call_reactors::EFFORT_CLAIM], CLAIM_SETTLE)
-                .await;
-        }
+        Self { tasks, log }
     }
 
     /// Log `effort.finished@1` for a close this consumer finished handling.
@@ -124,13 +98,10 @@ impl AsyncEventConsumer for EffortLifecycleConsumer {
             // A retroactive open is closed in the same transaction; only its
             // close has work (the metrics).
             "effort.opened" if !retroactive => self.tasks.on_effort_opened(effort).await,
-            "effort.closed" => {
-                self.settle_claims().await;
-                match self.tasks.on_effort_closed(effort, retroactive).await? {
-                    Some(finished) => self.log_finished(event, &finished, retroactive).await,
-                    None => Ok(()),
-                }
-            }
+            "effort.closed" => match self.tasks.on_effort_closed(effort, retroactive).await? {
+                Some(finished) => self.log_finished(event, &finished, retroactive).await,
+                None => Ok(()),
+            },
             _ => Ok(()),
         }
     }

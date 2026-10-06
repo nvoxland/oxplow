@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use oxplow_app::Services;
-use oxplow_db::{Effort, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortStore as _};
+use oxplow_db::{Effort, EffortAtSnapshot, EffortFile, EffortStore as _};
 use oxplow_domain::{EffortId, Timestamp};
 use oxplow_fs_watch::WorkspaceFilter;
 
@@ -80,33 +80,6 @@ pub async fn list_efforts_overlapping_range(
         .effort_store
         .list_efforts_overlapping_range(range_start, range_end)
         .await?)
-}
-
-/// All distinct file paths whose `file_snapshot` rows fall inside
-/// this effort's snapshot bracket — the "all changes during this
-/// effort" reference list. Returns empty when the effort has no
-/// start/end snapshot pin yet. Drives the reference view shown
-/// alongside the canonical `effort_file` list on
-/// `SnapshotDetailPage`.
-pub async fn list_changed_paths_for_effort(
-    svc: &Services,
-    effort_id: EffortId,
-) -> Result<EffortChangedPaths, IpcError> {
-    let filter = current_filter(svc);
-    let split = svc
-        .effort_store
-        .list_changed_paths_for_effort(&effort_id)
-        .await?;
-    let keep = |paths: Vec<String>| -> Vec<String> {
-        paths
-            .into_iter()
-            .filter(|p| !filter.ignore(Path::new(p), false))
-            .collect()
-    };
-    Ok(EffortChangedPaths {
-        claimed: keep(split.claimed),
-        unclaimed: keep(split.unclaimed),
-    })
 }
 
 #[cfg(test)]

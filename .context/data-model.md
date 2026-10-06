@@ -585,20 +585,19 @@ V27–V28 for the audience-variant feature; dropped in V29.)
 
 Re-opening a task (done → in_progress) on a thread gives it a second effort. At most one effort is open per thread.
 
-`effort_file` (v22) records per-effort write paths so parallel
-subagents in one thread get distinct file lists instead of the union via
-the snapshot pair-diff. Columns: `effort_id`, `path`, `change_kind`,
-`local_snapshot_id`, `closest_vcs_rev`, `vcs_rev_exact`,
-primary key `(effort_id, path)`. Rows come from two claim-first
-sources: the PostToolUse hook auto-claims each structured edit
-(Edit/Write/MultiEdit/NotebookEdit) onto the thread's open effort in
-real time (`record_file`, idempotent `INSERT OR REPLACE`), and the
-`touched_files` of the `effort.report` that follows the transition to
-`done` confirms/amends. (Bash/codegen/formatter writes are NOT
-auto-claimed — they stay for snapshot reconciliation; the old
-unconditional active-effort heuristic was removed because it
-over-reported when ≥2 efforts were in_progress, but the per-thread
-open-effort auto-claim is reliable under V31's single-open-effort rule.)
+`effort_file` records an effort's files. Columns: `effort_id`, `path`,
+`change_kind`, `local_snapshot_id`, `closest_vcs_rev`, `vcs_rev_exact`,
+`source` (V7: `claimed` | `observed`), primary key `(effort_id, path)`;
+read as `v_effort_file`. Two writers, both as the work happens: the
+`effort.claim` reactor claims each structured edit
+(Edit/Write/MultiEdit/NotebookEdit) for the effort it happened in
+(`record_file`, `INSERT OR REPLACE`, `source = 'claimed'` — a claim
+replaces an observation); the `effort.observe` consumer records every
+other path a thread's turn changed as `observed` on the effort holding
+the turn (`observe_files_tx`: skipped when another thread's overlapping
+effort claimed it, never overwriting a row). A file two threads changed
+at once and neither claimed is observed by both. Nothing is declared by
+the agent and nothing is reconciled at close.
 See agent-model.md's "Per-effort write log" for the flow. Consumed by `get_effort_files`
 (`crates/oxplow-tauri-ipc/src/commands/effort.rs`) over the
 `EffortStore` and `SnapshotStore`: when ≥2 efforts share an end
@@ -617,13 +616,6 @@ read over the models — `v_effort` left-joined to `v_effort_file`
 (`workItems.readTaskEfforts` → `effortDetailsFromResult`), not an RPC
 per effort.
 
-`list_changed_paths_for_effort` returns a **claimed/unclaimed split**
-(`EffortChangedPaths { claimed, unclaimed }`) rather than a flat list:
-the snapshot-bracket changed paths partitioned by whether this effort
-claimed each one (`effort_file`), matching the history view's
-attribution (`apps/desktop/src/snapshot-effort-grouping.ts`). Claim-first
-attribution, Child 3.
-
 **Commit↔item attribution is intentionally NOT tracked.** A
 `task_commit` junction (migration v27) was never written or read and
 was dropped in V100, with the equally dead `task_effort_turn`. Users commit outside oxplow all the time (IDE buttons,
@@ -633,74 +625,13 @@ than it'd be useful. If a future feature wants "show me commits for
 this item," the answer is to scope `git log` by the files
 in `effort_file`.
 
-`effort_acknowledged_path` (V21) records the agent's explicit
-disclaim of a path that the auto-diff thought belonged to the
-effort. Columns: `effort_id`, `path`, `acknowledged_at`. Written by
-`effort.amend { remove_files }` (one row per path, idempotent via
-`INSERT OR IGNORE`); cleared by `effort.amend { add_files }` when
-the agent re-claims a previously-disclaimed path. Consumed by
-`recompute_effort_file_review` in `oxplow_app::task_service`: paths
-present here are subtracted from `changed_but_not_claimed` before
-the Stop hook decides whether to fire the file-review directive,
-so a successful amend reconciles in one round-trip instead of
-relying on the hook's one-fire silent-agreement grace.
-
-`effort_unattributed_file` (V34; model `v_effort_unattributed_file`)
-records the **unattributed/unreviewed** audit residue of an effort close: the `changed_but_not_claimed` paths the
-snapshot diff saw change during the effort that nothing claimed. Columns:
-`effort_id`, `path`, `recorded_at`, primary key `(effort_id, path)`,
-CASCADE on the effort. Written by `attribution::reconcile_close` (called
-only from `TaskService::on_effort_closed`) at every snapshot-bracketed effort close
-(the effort-lifecycle consumer of `effort.closed`, whatever moved the task
-out of `in_progress` — a desktop edit, `work_item.transition` /
-`work_item.update`, the close half of the agent's close sequence), so an out-of-band
-close can't leave a parallel/external write looking like the agent's
-authored work (the bug that mis-attributed a navigator screenshot to an
-MCP-only effort). **Invariant: a path is CLAIMED (`effort_file`) or
-UNATTRIBUTED here, never both** — `record_file` deletes any matching
-residue row, so a later `effort.report` / `effort.amend` claim moves a path back into the
-claimed set. The existing agent nudge (`compute_effort_file_review`) reads
-`effort_file`, not this table, so it's unaffected.
-
-`effort_attribution` (V40) is the **kind-agnostic attribution ledger** —
-the generalization of the file tables above to any fact oxplow OBSERVES
-but can't auto-attribute under concurrency — the unified `"run"` kind covers
-**tests, analysis, and coverage** (tsk269/tsk270), observed by
-`trigger='on-report'`. Columns:
-`effort_id` (CASCADE), `kind` TEXT (`"run"` for tests/analysis/coverage; `"file"`
-is re-expressed over the legacy file tables), `ref` TEXT (the
-item's identity, e.g. `run:<id>`), `state` TEXT CHECK
-(`claimed | unattributed | acknowledged`), `detail_json`, `recorded_at`;
-primary key `(effort_id, kind, ref)`; index on `(kind, state)`. Store:
-`SqliteAttributionStore` (`crates/oxplow-db/src/attribution_store.rs`),
-driven by the `AttributionKind` engine (`crates/oxplow-app/src/attribution.rs`,
-with `FileKind` re-expressing the file tables and `RunKind` over this
-ledger). **Invariant (mirrors the file one): a `(effort, kind, ref)` is in
-exactly one of {claimed, unattributed, acknowledged}** — `set_state` is
-`INSERT OR REPLACE` on the PK, so claiming/disclaiming a run moves it
-between states rather than duplicating. **A `claimed` row is additionally
-globally exclusive per `(kind, ref)`** (tsk267): `set_state` for a claim
-first deletes any *other* effort's row for that ref, so a run has at most
-one owning effort and can't double-count across two efforts' rollups
-(`unattributed`/`acknowledged` stay per-effort). Runs auto-attribute to a
-`claimed` row at `test.record_run` time only when
-`find_single_open_for_thread` resolves exactly one open effort (or the
-caller named a `task_id` — exact even under concurrency); the unclaimed
-concurrent case stays observed-only until the close reconciliation writes
-an `unattributed` row, which the agent resolves via
-`effort.report` / `effort.amend` `claim_runs`/`disclaim_runs`.
-**Window-dominance** keeps that residue from over-surfacing: at reconcile a
-run that falls inside a strictly-nested sibling effort's time window
-(`SqliteEffortStore::nested_efforts`) is the *narrower* effort's to
-own, so the wider effort drops it; truly-overlapping (non-nested) siblings
-have no dominant effort, so the run stays in both and the agent
-disambiguates by claiming. The ledger's `run:<id>` refs are `metric_capture`
-ids — the capture IS the run (T-E1, tsk48). The ledger row CASCADEs on
-`effort` while `metric_capture.effort_id` is SET NULL on effort GC, so
-attribution is exact while the effort is alive and degrades gracefully after —
-the capture rows outlive it. See `.context/metrics.md` for how reads join
-through this ledger and `.context/agent-model.md` for the
-claim→reconcile→surface loop.
+A **run** (a test, coverage or analysis capture) is the effort its
+causing tool call was in: `metric_capture.effort_id`, stamped at ingest
+from the tool event's effort anchor (else the thread's open effort) and
+restamped when an effort adopts the turn. `v_test_run.effort_id` (v2)
+reads it directly. `metric_capture.effort_id` is SET NULL on effort GC, so
+the capture rows outlive their effort. See `.context/metrics.md` for how
+effort reads use it.
 
 ### `snapshot` + `file_snapshot` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
@@ -1340,8 +1271,11 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `ui.push` | sync | `snapshot.taken` (that recorded files), `vcs.head.moved` | the renderer's `SnapshotTaken` on the UI bus (P7.B6) | boot |
 | `metrics.entity_states` | async | `work_item.*`, `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |
 | `config.workspace_filter` | async | `config.changed` (`generated`) | the snapshot captures' filter | boot |
-| `effort.lifecycle` | async | `effort.opened` / `closed` | snapshot pins, reconcile (after settling `effort.claim`), metrics; logs `effort.finished` | boot |
+| `effort.lifecycle` | async | `effort.opened` / `closed` | snapshot pins, metrics; logs `effort.finished` | boot |
 | `effort.claim` | async | `agent.tool.finished` | claims an edited file for the effort it was edited in | boot |
+| `thread.checkpoint` | async | `snapshot.taken` (`turn_end`) | logs `thread.checkpoint` (changed since the turn began, writing tool count) | `Services::new` |
+| `effort.policy` | async | `work_item.state_changed`, `effort.linked` / `opened`, `thread.checkpoint` | the default effort policy: opens, links, closes efforts through `effort.*` (`.context/work-tracking.md`) | `Services::new` |
+| `effort.observe` | async (after `effort.policy`) | `thread.checkpoint` | records the turn's changed files as the effort's `observed` files | `Services::new` |
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
@@ -1391,8 +1325,8 @@ pinned). An open delivered after its close — nothing settled in between —
 pins the stream's last snapshot at or before `started_at` instead
 (`latest_snapshot_at_or_before`): a capture then would include the
 effort's own work. `on_effort_closed` takes and pins the
-`effort_end` snapshot (falling back to the start pin), reconciles
-unclaimed files and runs, projects the lifecycle metrics, then logs
+`effort_end` snapshot (falling back to the start pin), projects the
+lifecycle metrics, then logs
 **`effort.finished@1 { effort, work_item, end_snapshot?, retroactive? }`**
 (caused by the `effort.closed`, dedupe key `effort.finished:<effort>` so a
 re-delivery's second append is a no-op). `effort` is the ref
@@ -1402,7 +1336,7 @@ consumer parses it its own way (tsk1025). A `retroactive` effort (recorded
 by `record_effort_atomic` for an item never opened) gets only the metrics. Re-delivery is safe (review of P2.6, tsk462): pins are stamped only
 while NULL (`set_start_snapshot` / `set_end_snapshot`), the lifecycle
 metrics stop when the effort already has its `effort-lifecycle` capture,
-reconciliation replaces, `effort.finished` is deduped, and
+`effort.finished` is deduped, and
 `retry_dead_letter` runs under the consumer's lock.
 
 **Effort reactors** (`crates/oxplow-app/src/effort_reactors.rs`, P2.6b)
@@ -1615,13 +1549,15 @@ Coverage / test / static-analysis facts live in the **fact substrate**
 detail that used to live in `payload_json` (test suite/case tree, coverage
 per-file line-sets, analysis payload) rides verbatim in
 `metric_capture.detail_json` (the `{"kind": …, "payload": …}` envelope, T-E1).
-The `effort_evidence` asset rebuilds each effort's rows from its ledger-claimed
-captures (`CollectionService::effort_observations_from_metrics`) and stores them
+The `effort_evidence` asset rebuilds each effort's rows from its own run
+captures (`metric_capture.effort_id`, trigger `on-report`;
+`CollectionService::effort_observations_from_metrics`) and stores them
 in `effort_observation_row` (V80, read as `v_effort_observation`); the panel and
 MCP `list_effort_observations` read those. `effort_evidence_state` records the
-claim signature each effort's rows were computed from — the count and newest
-`recorded_at` of its `effort_attribution` rows — so a closed effort whose claims
-move is recomputed (V163, tsk889). `EffortObservation`
+signature each effort's rows were computed from — the count and newest id of
+its run captures and its file count (`effort_evidence_store.rs` `SIG`; V7
+restamped stored ones) — so a closed effort whose runs or files move is
+recomputed. `EffortObservation`
 (`effort_evidence_store.rs`) is that row (tsk862). The `provenance`/`source` trust spine and the `observed`/`asserted`
 distinction carry on every capture (see `.context/metrics.md`).
 

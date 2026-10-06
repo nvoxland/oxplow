@@ -230,7 +230,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_effort,
             commands::generated::list_efforts_at_snapshots,
             commands::generated::list_efforts_overlapping_range,
-            commands::generated::list_changed_paths_for_effort,
             commands::generated::list_efforts_in_window,
             commands::generated::enable_metrics,
             commands::generated::run_command,

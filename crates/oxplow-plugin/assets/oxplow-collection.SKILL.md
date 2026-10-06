@@ -37,23 +37,6 @@ Run it three specific ways:
     If that turns out to be too slow to run every cycle, say so and offer to add
     one — do NOT quietly fall back to a bare `cargo test`, which records
     nothing. An unrecorded run is the failure mode this rule exists to prevent.
-- **Prefix `OXPLOW_TASK=<your task id>`** (e.g. `OXPLOW_TASK=tsk42 <command>`).
-  The collection hook reads the token and pins the run to **exactly** your
-  task's effort — correct even when several efforts are open.
-
-    Without the token oxplow falls back to: the single open effort, else
-    whichever open effort the command's target names (`-p <crate>`, a path arg),
-    else **unattributed**. That covers a lot, but a whole-suite run
-    (`<command>` with no filter) names nothing and cannot be resolved that
-    way.
-
-    **Whenever you have more than one task in progress, prefix every run.**
-    This is easy to miss because the filing discipline pushes the other way —
-    one concern per row means batching work opens several efforts at once, which
-    is precisely when attribution has to give up. Either close each task before
-    starting the next, or use the token. If a run does land unattributed you'll
-    get an `unattributed-run` nudge naming the candidate tasks; fix it on the
-    next command rather than leaving it for the close-time audit.
 - **Run it in the FOREGROUND, never backgrounded.** The PostToolUse hook fires
   when the Bash call *returns*; a backgrounded run returns at launch (before
   the reports regenerate), so its reports are never ingested and the effort
@@ -64,8 +47,7 @@ Run it three specific ways:
 - **Test runs are observed automatically (foreground only).** When you run the
   tests via Bash, oxplow's PostToolUse hook records a `test-run` observation
   against the effort (command + exit code, + the parsed suite tree). You don't
-  report it. Attribution uses the `OXPLOW_TASK=` token when present, else the
-  single-open-effort rule.
+  report it: the run is the effort whose tool call ran it.
 - **Individual tests + coverage are parsed by oxplow, not you.** Each
   report collector (`collectors:` with `records:` — JUnit → per-test
   tree; lcov / cobertura / jacoco → diff coverage over the effort's

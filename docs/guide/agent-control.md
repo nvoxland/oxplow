@@ -47,13 +47,7 @@ priority order:
 4. **Filed-but-didn't-ship advisory.** Catches the misread
    where the agent logged a `ready` row instead of doing the
    work the user asked for.
-5. **Effort file-review.** After the agent's `effort.report`, the runtime
-   diffs the agent's declared `touched_files` against the
-   snapshot bracket the effort actually ran against. If the
-   sets disagree, a one-shot directive fires asking the agent
-   to either `effort.amend` to reconcile or silently agree (the
-   prompt won't repeat after agreement).
-6. **Otherwise.** Allow stop.
+5. **Otherwise.** Allow stop.
 
 Cross-turn queue progression is **user-driven**. When the agent
 finishes its obligations and Stops, it stops — you resume queue

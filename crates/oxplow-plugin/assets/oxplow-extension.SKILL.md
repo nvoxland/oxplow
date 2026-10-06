@@ -389,9 +389,8 @@ names the file and line and says what to change.
 
 Tell the user the lens title and how to open it (Cmd+P, type the title).
 Offer to commit it if they want their team to have it. Lens files are
-ordinary project files, so they go through the normal task/effort flow:
-file or pick up a task before editing, and list the files in
-`touched_files` when you close it.
+ordinary project files, so they go through the normal task/effort flow
+(the files you write are observed).
 
 ## Working with the user's lenses
 

@@ -59,18 +59,12 @@ oxplow no longer refuses an edit or a stop over tracked work
 before working is still this repo's convention until its rules are
 reworked; nothing checks it.
 
-**`touched_files` declares AUTHORED work, and the same exemption
-applies.** A path listed in `generated.exclude` (`.oxplow/project.yaml`)
-is build output oxplow deliberately does not snapshot, so it can't be
-attributed to an effort. Since tsk249 oxplow **silently drops** such a
-path from any claim (`TaskService::claimable_paths` — see
-`.context/agent-model.md`) rather than flagging it, so listing one is
-harmless — but it also isn't recorded, so don't count on it appearing in
-the effort's files. The live example is
-`apps/desktop/src/tauri-bridge/generated/bindings.ts`: Tauri Specta
-rewrites it on nearly every build, which is exactly why it was excluded.
-Change an IPC signature or an `OxplowEvent`, regenerate it, commit it —
-the claim is just noise either way.
+**An effort's files are observed, never declared** (`effort.report`
+takes no files, and the `OXPLOW_TASK=` prefix on a test command is no
+longer read). A path in `generated.exclude` (`.oxplow/project.yaml`) is
+build output oxplow deliberately doesn't snapshot, so no effort owns it —
+e.g. `apps/desktop/src/tauri-bridge/generated/bindings.ts`, which Tauri
+Specta rewrites on nearly every build.
 
 **Asking the user a question.** When your reply ends with a real
 clarifying question, A/B/C choice, or any ask where the user owns the
@@ -381,8 +375,8 @@ a placeholder. Every task write is `mcp__oxplow__run_command`: file
 with `work_item.create { title, body, state: "in_progress", native: {
 thread } }` (without `native.thread` it lands on the backlog). When it's
 settled, close it with one `command.sequence` of `work_item.transition`
-(`to: "done"`) and `effort.report` (`summary`, `touched_files`) to ship an
-explicit summary.
+(`to: "done"`) and `effort.report` (`summary`) to ship an explicit
+summary.
 
 **File one task for one coherent change**, even if it spans a few
 files. Make an epic (file the parent, then each child with

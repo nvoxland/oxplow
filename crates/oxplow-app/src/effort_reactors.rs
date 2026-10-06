@@ -101,10 +101,8 @@ mod tests {
                 &f.svc.effort_store,
                 &oxplow_domain::refs::build::work_item_ref(never_opened),
                 &f.thread,
-                &[],
                 Some("did it without opening".into()),
                 &[],
-                None,
             )
             .await
             .unwrap();

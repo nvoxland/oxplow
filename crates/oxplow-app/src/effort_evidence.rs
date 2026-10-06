@@ -18,11 +18,11 @@ use crate::assets::{Materializer, Recomputed};
 pub const ASSET: &str = "effort_evidence";
 
 /// What the evidence reads: metric captures and facts (deltas and
-/// observations) and run claims (`effort_attribution`). Token usage reaches
-/// it as facts; the `agent_token_usage` rows themselves aren't read, so
-/// they aren't an input — listing them recomputed every open effort's
-/// evidence a second time on every agent turn.
-const INPUTS: [&str; 3] = ["metric_capture", "fact", "effort_attribution"];
+/// observations; a run is a capture stamped with its effort) and the
+/// effort's files (the File family's deltas). Token usage reaches it as
+/// facts; the `agent_token_usage` rows themselves aren't read, so they
+/// aren't an input.
+const INPUTS: [&str; 3] = ["metric_capture", "fact", "effort_file"];
 
 /// Recompute one effort's evidence; failures are logged.
 pub(crate) async fn refresh(state: &crate::Services, effort_id: i64) {
@@ -58,9 +58,8 @@ impl Materializer for OpenEffortEvidence {
         for e in svc.effort_store.list_all_open().await? {
             refresh(&svc, e.id.value()).await;
         }
-        // A closed effort whose claims moved since its evidence was stored —
-        // a run claimed after the close, `effort.amend`, a claim moved to
-        // another effort (tsk889).
+        // A closed effort whose runs or files moved since its evidence was
+        // stored — a run collected late, an adoption's restamp.
         for id in svc.effort_evidence_store.stale_closed().await? {
             refresh(&svc, id).await;
         }
@@ -119,11 +118,11 @@ mod tests {
         assert!(computed.is_some());
     }
 
-    /// tsk889: a run claimed for an effort after it closed (a late
-    /// collection, `effort.amend { claim_runs }`) lands in its evidence:
-    /// the asset recomputes every closed effort whose claims moved.
+    /// A run that becomes an effort's after it closed (a late collection of
+    /// a tool call it held, an adoption's restamp) lands in its evidence:
+    /// the asset recomputes every closed effort whose runs moved.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_run_claimed_after_the_close_lands_in_the_closed_efforts_evidence() {
+    async fn a_run_attributed_after_the_close_lands_in_the_closed_efforts_evidence() {
         let f = crate::test_fixtures::services_with_effort().await;
         let effort = f.effort.value();
         f.svc
@@ -162,14 +161,19 @@ mod tests {
                 "test.record_run",
                 None,
                 None,
-                None,
             )
             .await
             .unwrap()
             .expect("a run");
         f.svc
-            .attribution_store
-            .set_state(&f.effort, "run", &format!("run:{run}"), "claimed", None)
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE metric_capture SET effort_id = ?2 WHERE id = ?1",
+                    rusqlite::params![run, effort],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
             .await
             .unwrap();
         OpenEffortEvidence {

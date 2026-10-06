@@ -1,10 +1,7 @@
 SELECT c.id,
        c.stream_id,
        c.thread_id,
-       COALESCE(
-         (SELECT min(a.effort_id) FROM source('effort_attribution') a
-          WHERE a.kind = 'run' AND a.ref = 'run:' || c.id AND a.state = 'claimed'),
-         c.effort_id) AS effort_id,
+       c.effort_id,
        json_extract(c.detail_json, '$.payload.command') AS command,
        json_extract(c.detail_json, '$.payload.exitCode') AS exit_code,
        json_extract(c.detail_json, '$.payload.passed') AS passed,
