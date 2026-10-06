@@ -60,6 +60,20 @@ panels:
   - { id: uncommitted, title: Uncommitted, icon: git-branch, scope: stream, body: uncommitted, collapsed: uncommitted-line, count: uncommitted-count, open: 'page:uncommitted-changes' }
   - { id: work, title: Work, icon: list-checks, scope: thread, body: work, collapsed: work-line, count: work-count, open: 'page:tasks' }
 advisories:
+  # Work grown large with nothing committed: an open effort holding many
+  # files (a commit landing its work would have closed it). Once per effort,
+  # raised at a turn's end and heard at the next prompt.
+  - id: large-uncommitted
+    on: turn-end
+    once_per: effort
+    query: |
+      SELECT printf(
+               'This effort has changed %d files and none of it is committed. If part of it '
+               || 'is done, committing that part makes it reviewable; oxplow closes the effort '
+               || 'when a commit lands its work.', count(DISTINCT f.path)) AS message
+      FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id
+      WHERE e.id = :effort_id AND e.ended_at IS NULL
+      HAVING count(DISTINCT f.path) >= 15
   # Steer the agent to add tests when this effort's changed lines are poorly
   # covered. Reads the stored observation, so it fires on the tool call after
   # the coverage lands.

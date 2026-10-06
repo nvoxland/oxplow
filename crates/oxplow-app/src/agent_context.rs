@@ -92,26 +92,13 @@ impl AgentContext {
                 POST_TOOL_SETTLE,
             )
             .await;
-        let mut nudges = match svc
-            .nudge_store
-            .take_undelivered(&thread_id.to_string())
-            .await
-        {
-            Ok(n) => n,
-            Err(err) => {
-                warn!(?err, "reading undelivered nudges failed");
-                return None;
-            }
-        };
-        // Advisory kinds are `<extension>/<id>`; oxplow's own come first.
-        nudges.sort_by_key(|n| (n.kind.contains('/'), n.id));
-        let text: Vec<String> = nudges.into_iter().map(|n| n.message).collect();
-        (!text.is_empty()).then(|| text.join("\n\n"))
+        undelivered(svc, thread_id).await
     }
 
     /// Context for a human's prompt: the `<session-context>` block (only
-    /// when it changed for this session), prompt advisories, and the open
-    /// effort's decisions (once per session, and when they change).
+    /// when it changed for this session), the thread's undelivered nudges
+    /// (prompt advisories, and the hints its last turn's end left), and the
+    /// open effort's decisions (once per session, and when they change).
     pub async fn prompt_context(
         &self,
         svc: &Services,
@@ -121,20 +108,16 @@ impl AgentContext {
         let ctx_block = self
             .refreshed_session_context(svc, thread_id, session_id)
             .await;
-        let advisory_hits = crate::advisories::for_thread(
+        // Prompt advisories land as nudges beside any a turn's end or a
+        // late tool call left; the prompt carries them all.
+        crate::advisories::for_thread(
             &svc.advisory_deps(),
             thread_id,
             crate::extensions::AdvisoryOn::Prompt,
             None,
         )
         .await;
-        let advisory_block = (!advisory_hits.is_empty()).then(|| {
-            advisory_hits
-                .into_iter()
-                .map(|h| h.text)
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        });
+        let advisory_block = undelivered(svc, thread_id).await;
         let decisions_block = self
             .refreshed_decisions_context(svc, thread_id, session_id)
             .await;
@@ -250,6 +233,26 @@ impl AgentContext {
             .copied()?;
         (initial != current).then(|| role_change_banner(initial, current))
     }
+}
+
+/// The thread's undelivered nudges as one block, marked delivered: each
+/// reaches the agent once, on whichever hook comes first. oxplow's own
+/// come before advisories (`<extension>/<id>` kinds).
+async fn undelivered(svc: &Services, thread_id: &ThreadId) -> Option<String> {
+    let mut nudges = match svc
+        .nudge_store
+        .take_undelivered(&thread_id.to_string())
+        .await
+    {
+        Ok(n) => n,
+        Err(err) => {
+            warn!(?err, "reading undelivered nudges failed");
+            return None;
+        }
+    };
+    nudges.sort_by_key(|n| (n.kind.contains('/'), n.id));
+    let text: Vec<String> = nudges.into_iter().map(|n| n.message).collect();
+    (!text.is_empty()).then(|| text.join("\n\n"))
 }
 
 #[cfg(test)]

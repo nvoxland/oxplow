@@ -2345,26 +2345,44 @@ Every contribution that runs — a provider instance, a collector, an effect
 
 ## Advisories
 
-An extension gives the coding agent guidance with **advisories** in
-`extension.yaml` (current). Core owns only the mechanism; what to say, and
-when, is SQL in the extension.
+An extension gives the coding agent guidance — **hints** — with
+**advisories** in `extension.yaml` (current). Core owns only the
+mechanism; what to say, and when, is SQL in the extension.
 
 ```yaml
 advisories:
   - id: coverage-target
-    on: post-tool-use        # or prompt
-    once_per: effort         # effort (default) | row (needs a `key` column) | turn
+    on: post-tool-use        # or prompt, or turn-end
+    once_per: effort         # effort (default) | thread | row (needs a `key` column) | turn
     heading: "# Optional heading line"
-    query: |                 # :effort_id = the thread's open effort
+    query: |                 # :thread_id, :stream_id, :turn_id, :effort_id
       SELECT '...' AS message FROM v_effort_observation WHERE effort_id = :effort_id ...
 ```
 
+- **Triggers.** `post-tool-use` runs on each `agent.tool.finished`
+  (`advisories.post_tool`), `prompt` on each prompt the person sends, and
+  `turn-end` on each `thread.checkpoint` (`advisories.turn_end`, after
+  `effort.observe`): evaluated when the turn ends, heard when the agent
+  next hears from oxplow. A turn's end is the one point every harness
+  reaches, blocked or not.
+- **Params.** Every query may use `:thread_id`, `:stream_id`, `:turn_id`
+  (NULL at a prompt) and `:effort_id` (NULL when the thread has no effort
+  — for an event, the effort it was anchored to; at a turn's end, the one
+  holding the turn's end; at a prompt, the open one).
+- **Repeat rules.** `once_per: effort` fires once per effort and doesn't
+  run without one; `thread` once per thread; `row` once per `key` within
+  the effort, or the thread when there's none; `turn` whenever it has
+  rows. Marks live in `once_mark`, per effort or thread.
+- **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
+  `<extension>/<id>`), undelivered. The thread's next prompt
+  (`AgentContext::prompt_context`) or tool call (`post_tool_context`)
+  takes its undelivered nudges and stamps `delivered_at`: the ledger says
+  what was raised and what the agent actually received.
 - `crates/oxplow-app/src/advisories.rs`: `AdvisoryRunner` runs the enabled
-  extensions' advisories for one hook point and applies `once_per` with an
-  in-memory, bounded fired-set (like the nudges it replaced, a restart may
-  repeat one). Marks are recorded only after every query ran. A failing
+  extensions' advisories for one trigger and scope and applies
+  `once_per`. Marks are recorded only after every query ran. A failing
   query is logged and skipped.
-- **Consent (tsk352).** A shared extension's advisories (committed by a
+- **Consent.** A shared extension's advisories (committed by a
   teammate, or installed from git) speak into the agent's context, so they
   run only once a person approved them. `exec_consent::advisory_program`
   turns an extension's advisories into a program (kind `advisories`), with
@@ -2372,17 +2390,14 @@ advisories:
   Settings → Data → Programs lists them, and any change needs approving
   again. `advisories::consented` filters before running; bundled
   extensions aren't gated.
-- `for_thread(svc, thread, on)` runs them for the thread's **single** open
-  effort (none under parallel efforts), reading extensions from the
-  thread's stream worktree. Post-tool-use hits are persisted as nudges
-  (kind `<extension>/<id>`, `v_agent_nudge`).
-- The control plane appends post-tool-use hits to the collection nudge in
-  PostToolUse `additionalContext`, and prompt hits to the UserPromptSubmit
-  context (with the session-context and decisions blocks).
-- `validate_extension` dry-runs each advisory with `:effort_id` NULL and
+- `for_thread(svc, thread, on, cause)` runs them for a thread, reading
+  extensions from its stream worktree.
+- `validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxplow-bundled ships three: `coverage-target`, `metric-deltas`,
-  `threshold-crossed` (see [metrics.md](./metrics.md)). Advisories read
+- oxplow-bundled ships `large-uncommitted` (turn-end, once per effort:
+  an open effort holding 15 or more files — a commit landing its work
+  would have closed it) and three metric ones, `coverage-target`,
+  `metric-deltas`, `threshold-crossed` (see [metrics.md](./metrics.md)). Advisories read
   stored views (`v_effort_metric_delta`, `v_effort_observation`), never the
   engine directly.
 - The report-less-run nudge stays in core: it's about collection hygiene,

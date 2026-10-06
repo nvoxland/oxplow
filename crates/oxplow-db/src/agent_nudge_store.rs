@@ -79,6 +79,29 @@ fn row_to_nudge(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentNudge> {
 const SELECT_COLS: &str =
     "id, thread_id, effort_id, kind, message, trigger, created_at, turn_id, delivered_at";
 
+/// Where a one-shot mark is kept: a thread, or one of its efforts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OnceScope {
+    pub thread: i64,
+    pub effort: Option<i64>,
+}
+
+impl OnceScope {
+    pub fn thread(thread: i64) -> Self {
+        Self {
+            thread,
+            effort: None,
+        }
+    }
+
+    pub fn effort(thread: i64, effort: i64) -> Self {
+        Self {
+            thread,
+            effort: Some(effort),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SqliteAgentNudgeStore {
     db: Database,
@@ -124,24 +147,26 @@ impl SqliteAgentNudgeStore {
             .await
     }
 
-    /// Claim the one-shot `mark` for `effort_id` (`report-less-run`,
+    /// Claim the one-shot `mark` in `scope` (`report-less-run`,
     /// `<extension>/<advisory>`, …). `true` the first time, `false` once
     /// it has fired — durably, across restarts.
-    pub async fn claim_once(&self, effort_id: i64, mark: &str) -> Result<bool, DomainError> {
+    pub async fn claim_once(&self, scope: OnceScope, mark: &str) -> Result<bool, DomainError> {
         let mark = mark.to_string();
         self.db
-            .transaction(move |tx| claim_once_tx(tx, effort_id, &mark))
+            .transaction(move |tx| claim_once_tx(tx, scope, &mark))
             .await
     }
 
-    /// Whether `mark` has fired for `effort_id`.
-    pub async fn has_fired(&self, effort_id: i64, mark: &str) -> Result<bool, DomainError> {
+    /// Whether `mark` has fired in `scope`.
+    pub async fn has_fired(&self, scope: OnceScope, mark: &str) -> Result<bool, DomainError> {
         let mark = mark.to_string();
         self.db
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT EXISTS (SELECT 1 FROM effort_once_mark WHERE effort_id = ?1 AND mark = ?2)",
-                    params![effort_id, mark],
+                    "SELECT EXISTS (SELECT 1 FROM once_mark
+                      WHERE thread_id = ?1 AND coalesce(effort_id, 0) = coalesce(?2, 0)
+                        AND mark = ?3)",
+                    params![scope.thread, scope.effort, mark],
                     |r| r.get(0),
                 )
             })
@@ -224,18 +249,23 @@ pub fn record_tx(
     .map_err(sql_err)
 }
 
-/// Claim `mark` for `effort_id` in the caller's transaction: `true` the
-/// first time, `false` when it has already fired.
+/// Claim `mark` in `scope` in the caller's transaction: `true` the first
+/// time, `false` when it has already fired.
 pub fn claim_once_tx(
     conn: &rusqlite::Connection,
-    effort_id: i64,
+    scope: OnceScope,
     mark: &str,
 ) -> Result<bool, DomainError> {
     let n = conn
         .execute(
-            "INSERT INTO effort_once_mark (effort_id, mark, fired_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT (effort_id, mark) DO NOTHING",
-            params![effort_id, mark, ts_to_string(Timestamp::now())],
+            "INSERT INTO once_mark (thread_id, effort_id, mark, fired_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (thread_id, coalesce(effort_id, 0), mark) DO NOTHING",
+            params![
+                scope.thread,
+                scope.effort,
+                mark,
+                ts_to_string(Timestamp::now())
+            ],
         )
         .map_err(crate::database::map_sql_err)?;
     Ok(n == 1)
@@ -343,15 +373,27 @@ mod tests {
     }
 
     /// A one-shot mark is durable: a new store over the same database (a
-    /// restart) sees it, and claiming it again says so.
+    /// restart) sees it, and claiming it again says so. A thread's mark and
+    /// its effort's are separate.
     #[tokio::test]
     async fn once_marks_survive_a_restart() {
         let (store, _thread, _effort) = fixture().await;
-        assert!(store.claim_once(1, "report-less-run").await.unwrap());
-        assert!(!store.claim_once(1, "report-less-run").await.unwrap());
+        let effort = OnceScope::effort(1, 1);
+        let thread = OnceScope::thread(1);
+        assert!(store.claim_once(effort, "report-less-run").await.unwrap());
+        assert!(!store.claim_once(effort, "report-less-run").await.unwrap());
+        assert!(!store.has_fired(thread, "report-less-run").await.unwrap());
+        assert!(store.claim_once(thread, "report-less-run").await.unwrap());
         let restarted = SqliteAgentNudgeStore::new(store.db.clone());
-        assert!(restarted.has_fired(1, "report-less-run").await.unwrap());
-        assert!(!restarted.has_fired(1, "acme/other").await.unwrap());
+        assert!(restarted
+            .has_fired(effort, "report-less-run")
+            .await
+            .unwrap());
+        assert!(restarted
+            .has_fired(thread, "report-less-run")
+            .await
+            .unwrap());
+        assert!(!restarted.has_fired(effort, "acme/other").await.unwrap());
     }
 
     #[tokio::test]

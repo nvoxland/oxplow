@@ -1956,8 +1956,8 @@ per-effort views, not in core:
   (`threshold_state`). This used to be a marker on the delta line; it's now
   its own block.
 
-All three reach the agent through the same `additionalContext` paths the old
-core code used, and post-tool-use hits are still persisted as nudges.
+All three reach the agent as nudges (`v_agent_nudge`), taken by the next
+prompt or tool call (`.context/extensions.md` "Advisories").
 Disabling `oxplow-bundled` turns them off.
 
 ## Performance: the `producers_for_measure` memo (tsk130)

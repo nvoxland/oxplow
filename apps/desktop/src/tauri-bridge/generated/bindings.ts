@@ -1152,8 +1152,10 @@ export type AdapterSpec = {
 
 /**
  *  Guidance an extension gives the coding agent: a query over the semantic
- *  layer, run by core at `on`, with `:effort_id` bound to the thread's
- *  open effort. Each result row's `message` column is a line of guidance.
+ *  layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`
+ *  and `:effort_id` bound (`:effort_id` NULL when the thread has no
+ *  effort, `:turn_id` NULL at a prompt). Each result row's `message`
+ *  column is a line of guidance.
  */
 export type Advisory = {
 	id: string,
@@ -1172,7 +1174,13 @@ export type AdvisoryOn =
  */
 "post-tool-use" | 
 // On each prompt the human sends; results join the prompt's context.
-"prompt";
+"prompt" | 
+/**
+ *  When a turn ends (its `thread.checkpoint`): what the turn left
+ *  behind, delivered when the agent next hears from oxplow (the next
+ *  prompt, else the next tool call).
+ */
+"turn-end";
 
 // How often the same advisory may reach the agent.
 export type AdvisoryOncePer = 
@@ -1181,7 +1189,9 @@ export type AdvisoryOncePer =
 // Once per effort per `key` value: each row's `key` column fires once.
 "row" | 
 // Every time, whenever the query returns rows.
-"turn";
+"turn" | 
+// Once per thread, the first time the query returns rows.
+"thread";
 
 export type AgentKind = "claude" | "codex" | "opencode" | 
 /**

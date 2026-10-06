@@ -1426,6 +1426,50 @@ mod tests {
         );
     }
 
+    /// V9: once-marks are kept per thread, and per effort within it; the
+    /// effort marks already fired move over under their effort's thread.
+    #[test]
+    fn v9_keeps_effort_marks_under_their_thread() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(8))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'p', 'main', 'r', 'r', '/r', '2026-01-01', '2026-01-01');
+             INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+               VALUES (7, 1, 't', 'active', '2026-01-01', '2026-01-01');
+             INSERT INTO effort (id, thread_id, started_at) VALUES (3, 7, '2026-01-01');
+             INSERT INTO effort_once_mark (effort_id, mark, fired_at)
+               VALUES (3, 'report-less-run', '2026-01-02');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(i64, Option<i64>, String)> = conn
+            .prepare("SELECT thread_id, effort_id, mark FROM once_mark")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![(7, Some(3), "report-less-run".to_string())]);
+        conn.execute(
+            "INSERT INTO once_mark (thread_id, effort_id, mark, fired_at) VALUES (7, NULL, 'x', 'n')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            conn.execute(
+                "INSERT INTO once_mark (thread_id, effort_id, mark, fired_at) VALUES (7, NULL, 'x', 'n')",
+                [],
+            )
+            .is_err(),
+            "a thread mark fires once"
+        );
+    }
+
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every

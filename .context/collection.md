@@ -382,7 +382,7 @@ names comes entirely from the project's config, so it works for any
 test tool, current or future.
 
 **Anti-nag:** the nudge fires at most once per effort — a durable one-shot
-mark (`effort_once_mark`, `claim_once`), so a daemon restart doesn't re-arm
+mark (`once_mark`, `claim_once`), so a daemon restart doesn't re-arm
 it. The *fired* nudge itself is persisted for review and delivery — see
 Nudge persistence below.
 

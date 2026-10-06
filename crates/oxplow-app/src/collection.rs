@@ -2339,7 +2339,7 @@ impl CollectionService {
         // report", never on which tool ran; the command it names comes
         // from the project's own config.
         let produced_report = report.is_some() || coverage.is_some();
-        if !produced_report && self.mark_nudged(&effort.id).await {
+        if !produced_report && self.mark_nudged(&effort).await {
             let msg = if reads.unread.is_empty() {
                 report_nudge_message(&cfg, !self.report_collectors().is_empty(), &bash.command)
             } else {
@@ -2461,11 +2461,14 @@ impl CollectionService {
 
     /// Record that `effort` has been nudged about a report-less run.
     /// `true` the first time (caller should nudge), `false` afterwards —
-    /// durably (`effort_once_mark`), so a restart doesn't repeat it. A
-    /// failed write reads as "already nudged": don't nag on an error.
-    async fn mark_nudged(&self, effort: &EffortId) -> bool {
+    /// durably (`once_mark`), so a restart doesn't repeat it. A failed
+    /// write reads as "already nudged": don't nag on an error.
+    async fn mark_nudged(&self, effort: &Effort) -> bool {
         self.nudges
-            .claim_once(effort.value(), "report-less-run")
+            .claim_once(
+                oxplow_db::OnceScope::effort(effort.thread_id.value(), effort.id.value()),
+                "report-less-run",
+            )
             .await
             .unwrap_or(false)
     }
@@ -7009,7 +7012,7 @@ mod tests {
             let nudged = h
                 .service
                 .nudges
-                .has_fired(901, "report-less-run")
+                .has_fired(oxplow_db::OnceScope::effort(1, 901), "report-less-run")
                 .await
                 .unwrap();
             assert!(
@@ -7050,7 +7053,10 @@ mod tests {
             assert!(!h
                 .service
                 .nudges
-                .has_fired(eid.value(), "report-less-run")
+                .has_fired(
+                    oxplow_db::OnceScope::effort(h.thread.value(), eid.value()),
+                    "report-less-run"
+                )
                 .await
                 .unwrap());
         }

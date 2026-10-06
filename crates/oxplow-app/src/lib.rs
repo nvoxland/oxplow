@@ -1344,18 +1344,23 @@ impl Services {
         event_pump.register_async(Arc::new(post_tool_reactors::RunReportsConsumer {
             collection: collection.clone(),
         }));
+        let advisory_deps = advisories::AdvisoryDeps {
+            advisories: advisories.clone(),
+            effort_store: effort_store.clone(),
+            thread_store: thread_store.clone(),
+            worktrees: worktrees.clone(),
+            approvals: approvals.clone(),
+            extension_catalog: extension_catalog.clone(),
+            db: db.clone(),
+            sql: sql.clone(),
+            collection: collection.clone(),
+        };
         event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
-            deps: advisories::AdvisoryDeps {
-                advisories: advisories.clone(),
-                effort_store: effort_store.clone(),
-                thread_store: thread_store.clone(),
-                worktrees: worktrees.clone(),
-                approvals: approvals.clone(),
-                extension_catalog: extension_catalog.clone(),
-                db: db.clone(),
-                sql: sql.clone(),
-                collection: collection.clone(),
-            },
+            deps: advisory_deps.clone(),
+        }));
+        // Hints a turn's end raises, for the agent's next prompt.
+        event_pump.register_async(Arc::new(advisories::TurnEndAdvisories {
+            deps: advisory_deps,
         }));
         Ok(Self {
             config: config_arc,

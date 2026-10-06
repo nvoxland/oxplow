@@ -1240,10 +1240,13 @@ s) and returns the thread's nudges with no `delivered_at`
 advisories — so one that finishes after its hook answered reaches the agent
 on the thread's next tool call. The ExitPlanMode ROLE CHANGE banner still
 wins its call; nudges wait for the next. **One-shot marks are durable**
-(`effort_once_mark`): the report-less-run nudge fires once per effort and a
-`once_per: effort` / `row` advisory once per effort (and row key) across
-restarts — the in-memory sets (`nudged_efforts`, `AdvisoryRunner.fired`)
-are gone. Prompt advisories use the same marks.
+(`once_mark`, per effort or per thread): the report-less-run nudge fires
+once per effort, and an advisory once per its `once_per` scope, across
+restarts. **Every advisory hit is a nudge**, whatever its trigger: prompt
+and turn-end hits are persisted too, and `AgentContext::prompt_context`
+takes the thread's undelivered nudges like a tool call does — so a hint a
+turn's end raised reaches the agent at the next prompt (or tool call),
+stamped `delivered_at` when it does.
 
 These are surfaced UI-side only (the agent never reads them back): an
 "Agent Nudges" H2 section on the task page (after each effort's Metrics)

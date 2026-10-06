@@ -53,7 +53,7 @@ pub mod tool_call_store;
 pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
 
-pub use agent_nudge_store::{AgentNudge, NewAgentNudge, SqliteAgentNudgeStore};
+pub use agent_nudge_store::{AgentNudge, NewAgentNudge, OnceScope, SqliteAgentNudgeStore};
 pub use agent_stores::{SqliteAgentStatusStore, SqliteAgentTurnStore};
 pub use ai_call_store::{NewAiCall, SqliteAiCallStore};
 pub use ai_result_store::{AiResult, NewAiResult, SqliteAiResultStore};

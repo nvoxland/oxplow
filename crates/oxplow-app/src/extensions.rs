@@ -770,6 +770,10 @@ pub enum AdvisoryOn {
     PostToolUse,
     /// On each prompt the human sends; results join the prompt's context.
     Prompt,
+    /// When a turn ends (its `thread.checkpoint`): what the turn left
+    /// behind, delivered when the agent next hears from oxplow (the next
+    /// prompt, else the next tool call).
+    TurnEnd,
 }
 
 /// How often the same advisory may reach the agent.
@@ -782,6 +786,8 @@ pub enum AdvisoryOncePer {
     Row,
     /// Every time, whenever the query returns rows.
     Turn,
+    /// Once per thread, the first time the query returns rows.
+    Thread,
 }
 
 fn default_once_per() -> AdvisoryOncePer {
@@ -789,8 +795,10 @@ fn default_once_per() -> AdvisoryOncePer {
 }
 
 /// Guidance an extension gives the coding agent: a query over the semantic
-/// layer, run by core at `on`, with `:effort_id` bound to the thread's
-/// open effort. Each result row's `message` column is a line of guidance.
+/// layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`
+/// and `:effort_id` bound (`:effort_id` NULL when the thread has no
+/// effort, `:turn_id` NULL at a prompt). Each result row's `message`
+/// column is a line of guidance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Advisory {
@@ -3166,7 +3174,12 @@ async fn prepare(
         let run = layer
             .run(
                 oxplow_db::SqlQuery::new(&a.query)
-                    .named(vec![("effort_id".into(), SqlCell::Null(()))])
+                    .named(
+                        crate::advisories::PARAMS
+                            .iter()
+                            .map(|p| (p.to_string(), SqlCell::Null(())))
+                            .collect(),
+                    )
                     .limit(None),
             )
             .await;
@@ -5347,7 +5360,12 @@ commands:
         let advisories: Vec<&str> = b.advisories.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
             advisories,
-            ["coverage-target", "metric-deltas", "threshold-crossed"]
+            [
+                "large-uncommitted",
+                "coverage-target",
+                "metric-deltas",
+                "threshold-crossed"
+            ]
         );
         let mut models: Vec<&str> = b.models.iter().map(|m| m.decl.name.as_str()).collect();
         models.sort();

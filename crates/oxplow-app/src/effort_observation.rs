@@ -56,25 +56,47 @@ impl EffortObservationConsumer {
             _ => None,
         }))
     }
+}
 
-    /// The effort holding `thread`'s work at `at`.
-    async fn effort_at(&self, thread: i64, at: &str) -> Result<Option<EffortId>, DomainError> {
-        let rows = self
-            .sql
-            .query_sql(
-                "SELECT id FROM v_effort
-                  WHERE thread_id = ?1 AND started_at <= ?2
-                    AND (ended_at IS NULL OR ended_at >= ?2)
-                  ORDER BY started_at DESC LIMIT 1",
-                vec![SqlCell::Int(thread), SqlCell::Text(at.into())],
-                None,
-            )
-            .await?
-            .rows;
-        Ok(match rows.first().and_then(|r| r.first()) {
-            Some(SqlCell::Int(id)) => Some(EffortId::new(*id)),
-            _ => None,
-        })
+/// The effort holding `thread`'s work at `at`.
+async fn effort_at(
+    sql: &SqlGateway,
+    thread: i64,
+    at: &str,
+) -> Result<Option<EffortId>, DomainError> {
+    let rows = sql
+        .query_sql(
+            "SELECT id FROM v_effort
+              WHERE thread_id = ?1 AND started_at <= ?2
+                AND (ended_at IS NULL OR ended_at >= ?2)
+              ORDER BY started_at DESC LIMIT 1",
+            vec![SqlCell::Int(thread), SqlCell::Text(at.into())],
+            None,
+        )
+        .await?
+        .rows;
+    Ok(match rows.first().and_then(|r| r.first()) {
+        Some(SqlCell::Int(id)) => Some(EffortId::new(*id)),
+        _ => None,
+    })
+}
+
+/// The effort holding `turn`'s end: the one its files and hints belong to.
+pub(crate) async fn effort_at_turn_end(
+    sql: &SqlGateway,
+    turn: i64,
+) -> Result<Option<EffortId>, DomainError> {
+    let rows = sql
+        .query_sql(
+            "SELECT thread_id, ended_at FROM v_agent_turn WHERE id = ?1",
+            vec![SqlCell::Int(turn)],
+            None,
+        )
+        .await?
+        .rows;
+    match rows.first().map(|r| &r[..]) {
+        Some([SqlCell::Int(thread), SqlCell::Text(to)]) => effort_at(sql, *thread, to).await,
+        _ => Ok(None),
     }
 }
 
@@ -109,7 +131,7 @@ impl AsyncEventConsumer for EffortObservationConsumer {
         let Some((start, from, to)) = self.turn(turn).await? else {
             return Ok(());
         };
-        let Some(effort) = self.effort_at(thread.value(), &to).await? else {
+        let Some(effort) = effort_at(&self.sql, thread.value(), &to).await? else {
             return Ok(());
         };
         // From the later of the turn's start and the effort's: an effort

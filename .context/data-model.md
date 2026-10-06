@@ -1280,6 +1280,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `effort.landing` | async | `vcs.commit.indexed` | logs `effort.landed` for each open effort on the stream the commit holds (git-integration.md "Commit indexer") | boot.rs |
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
+| `advisories.turn_end` | async (after `effort.observe`) | `thread.checkpoint` | turn-end advisories (hints) for the effort holding the turn's end, persisted as undelivered nudges for the next prompt | `Services::new` |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
 | `effort.evidence` / `effort.decisions` / `effort.commits` | async | `effort.finished` | evidence rows, inferred decisions, the commits that hold its work linked to its task (`commit_links`, tsk1035) | boot.rs |
 | `search.index` | async | `snapshot.taken` | the search index's file contents (the other kinds are assets, `kind_search.rs`) | boot.rs |
@@ -1671,8 +1672,11 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   so a nudge whose reactor finishes after its hook's response went out
   reaches the agent on the thread's next hook instead of being lost. Rows
   from before V102 were stamped delivered.
-- **One-shot marks are durable** (V102): `effort_once_mark(effort_id FK
-  effort CASCADE, mark, fired_at, PK(effort_id, mark))` holds
+- **One-shot marks are durable** (V102; per thread since V9):
+  `once_mark(thread_id FK threads CASCADE, effort_id FK effort CASCADE
+  NULL, mark, fired_at)`, unique on `(thread_id, coalesce(effort_id, 0),
+  mark)` — a mark is kept in an effort, or in the thread when
+  `effort_id` is NULL (`OnceScope`). It holds
   `report-less-run`, `<extension>/<advisory>` and
   `<extension>/<advisory>#<row key>`. `claim_once_tx` is the insert (`true`
   the first time); `has_fired` reads it. It replaces the in-memory sets

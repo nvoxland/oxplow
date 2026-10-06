@@ -203,5 +203,10 @@ The three in progress:
   the Thread activity lens lists the thread's turns under the effort each
   fell in, with question-only turns "Between efforts"; an effort's page
   header renames, links, unlinks and closes it.
-- Next, in order: hints; skills and repo rules.
+  Hints, first cut: advisories gain a `turn-end` trigger, every param
+  (`:thread_id`, `:stream_id`, `:turn_id`, nullable `:effort_id`),
+  `once_per: thread`, and one delivery path — every hit is a nudge the
+  next prompt or tool call takes and stamps; bundled `large-uncommitted`.
+- Next, in order: hints' second cut (audience, pacing, effectiveness);
+  skills and repo rules.
   Then the capability framework and the three swappable pieces.
