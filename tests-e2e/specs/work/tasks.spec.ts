@@ -10,17 +10,17 @@ test("a task made in the UI is on the thread's list", async ({ fresh }) => {
   await openNewTask(page);
   await page.getByTestId("tasks-title").fill("Made in the UI");
   await page.getByTestId("tasks-save").click();
-  await expandRailSection(page, "core:work");
-  await expect(page.getByTestId("rail-section-core:work")).toContainText("Made in the UI");
+  await expandRailSection(page, "ext:oxplow-bundled/work");
+  await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toContainText("Made in the UI");
 });
 
 test("a task made elsewhere appears without a reload", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await page.goto("/");
-  await expandRailSection(page, "core:work");
-  await expect(page.getByTestId("rail-section-core:work")).toBeVisible();
+  await expandRailSection(page, "ext:oxplow-bundled/work");
+  await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toBeVisible();
   await waitForModels(daemon, ["v_task"], () =>
     run(daemon, "work_item.create", { title: "Made elsewhere", thread: daemon.thread }),
   );
-  await expect(page.getByTestId("rail-section-core:work")).toContainText("Made elsewhere");
+  await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toContainText("Made elsewhere");
 });

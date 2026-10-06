@@ -32,7 +32,7 @@ const { RailHud } = await import("./RailHud.js");
 afterEach(cleanup);
 
 test("a toggle made before the stored layout loads survives it, and keeps what was stored", async () => {
-  const view = render(<RailHud threadId={null} streamId={null} threadWork={null} onOpenPage={() => {}} />);
+  const view = render(<RailHud threadId={null} streamId={null} onOpenPage={() => {}} />);
   const toggle = view.getByTestId("rail-section-toggle-core:approvals");
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   fireEvent.click(toggle);

@@ -17,7 +17,6 @@ export const CORE_PANELS: readonly CorePanel[] = [
   { id: "core:alerts", title: "Alerts" },
   { id: "core:approvals", title: "Approvals" },
   { id: "core:uncommitted", title: "Uncommitted" },
-  { id: "core:work", title: "Work" },
   { id: "core:bookmarks", title: "Bookmarks" },
 ];
 

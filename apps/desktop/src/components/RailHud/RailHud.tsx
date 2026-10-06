@@ -1,13 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { DiffEntry, FinishedEntry, FileStatus, InProgressOp, ThreadWorkState, Task } from "../../api.js";
+import type { DiffEntry, FileStatus, InProgressOp } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, taskRef, refFromTabId, dashboardRef, lensRef, indexRef, workItemTabRef } from "../../tabs/pageRefs.js";
-import { readWorkItems, type WorkItem } from "../../workItems.js";
-import { setContextRefDrag } from "../../agent-context-dnd.js";
-import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
+import { fileRef, uncommittedChangesRef, refFromTabId, dashboardRef, lensRef, indexRef } from "../../tabs/pageRefs.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import { getPanelLayout, setPanelLayout } from "../../api.js";
 import { useExtensions } from "../../extensionsStore.js";
@@ -67,15 +64,9 @@ export interface RailHudProps {
   threadId: string | null;
   /** Current stream — scopes the open-comments section. */
   streamId?: string | null;
-  threadWork: ThreadWorkState | null;
   bookmarks?: BookmarkRailEntry[];
-  /** Most recently finished work — closed tasks efforts merged
-   *  with updated wiki notes, sorted by timestamp DESC. */
-  recentlyFinished?: FinishedEntry[];
   /** Working-tree uncommitted summary; section hidden when null or empty. */
   uncommitted?: UncommittedSummary | null;
-  /** Mark all currently-finished entries as seen (clears the section). */
-  onClearFinished?(): void;
   /** Open a page (or focus if already open) in the active thread's tab area. */
   onOpenPage(ref: TabRef): void;
   /** Optional: invoked when the user clicks the search affordance. */
@@ -91,7 +82,7 @@ export interface RailHudProps {
 // (`get/set_panel_layout`). The Search box is
 // pinned at the top and is not part of this set.
 
-// A panel id: core's (`core:work`, …) or an extension's (`ext:<ext>/<id>`).
+// A panel id: core's (`core:alerts`, …) or an extension's (`ext:<ext>/<id>`).
 // "core:bookmarks" is the combined Bookmarks + History pane: collapsed it
 // shows bookmarks only; expanded it adds the page-visit History list.
 type RailSectionId = string;
@@ -405,19 +396,11 @@ function RailSection({
 export function RailHud({
   threadId,
   streamId,
-  threadWork,
   bookmarks,
-  recentlyFinished,
   uncommitted,
-  onClearFinished,
   onOpenPage,
   onOpenSearch,
 }: RailHudProps) {
-  const activeItem = useMemo(() => computeActiveItem(threadWork), [threadWork]);
-  const activeEpic = useMemo(() => computeActiveEpicContext(threadWork, activeItem), [threadWork, activeItem]);
-  // The full ready pool (capped) so the Work block can show an accurate
-  // count even though it only renders the first handful when expanded.
-  const readyItems = useMemo(() => computeUpNext(threadWork, 50), [threadWork]);
   const width = useRailWidth();
   const extPanels = useExtensionPanels(streamId ?? null);
   // One owner for every panel's lens runs: each section reads its own,
@@ -459,19 +442,6 @@ export function RailHud({
         return <ApprovalsSection key={id} proposals={proposals} reveal={revealApprovals} />;
       case "core:uncommitted":
         return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
-      case "core:work":
-        return (
-          <WorkSection
-            key={id}
-            threadId={threadId}
-            activeItem={activeItem}
-            activeEpic={activeEpic}
-            readyItems={readyItems}
-            recentlyFinished={recentlyFinished}
-            onOpenPage={onOpenPage}
-            onClearFinished={onClearFinished}
-          />
-        );
       case "core:bookmarks":
         return <GoToSection key={id} entries={bookmarks ?? []} threadId={threadId} onOpenPage={onOpenPage} />;
       default: {
@@ -531,120 +501,6 @@ export function RailHud({
       </div>
       <RailResizeHandle onChange={width.setFromDelta} />
     </aside>
-  );
-}
-
-/** The Work section. Uniform collapsible header (id "work", default
- *  collapsed). When collapsed it keeps a compact one-liner — the active
- *  item when working, else the most recent finished item; expanding
- *  reveals the full In progress / Ready / Finished lists. */
-function WorkSection({
-  threadId,
-  activeItem,
-  activeEpic,
-  readyItems,
-  recentlyFinished,
-  onOpenPage,
-  onClearFinished,
-}: {
-  threadId: string | null;
-  activeItem: Task | null;
-  activeEpic: { epic: Task; children: Task[] } | null;
-  readyItems: Task[];
-  recentlyFinished?: FinishedEntry[];
-  onOpenPage(ref: TabRef): void;
-  onClearFinished?(): void;
-}) {
-  const finished = recentlyFinished ?? [];
-  const readyCount = readyItems.length;
-  const outside = useOutsideItems(threadId);
-  const working = !!activeItem;
-  const lastFinished = finished[0] ?? null;
-  const hasContent = working || finished.length > 0 || readyCount > 0 || outside.length > 0;
-  const isEmpty = !threadId || !hasContent;
-
-  const collapsedContent = isEmpty ? (
-    <RailEmpty label="No active work" />
-  ) : working ? (
-    <ActiveItemSection item={activeItem} epicContext={activeEpic} onOpenPage={onOpenPage} showHeading={false} />
-  ) : lastFinished ? (
-    <SingleFinishedRow entry={lastFinished} onOpenPage={onOpenPage} />
-  ) : null;
-
-  return (
-    <RailSection
-      id="core:work"
-      title="Work"
-      // What's open on this thread: in progress, ready, and on the tracker.
-      count={(working ? 1 : 0) + readyCount + outside.length || undefined}
-      collapsedContent={collapsedContent}
-      onOpen={() => onOpenPage(tasksRef())}
-      openTitle="Open Tasks"
-    >
-      {isEmpty ? (
-        <RailEmpty label="No active work" />
-      ) : (
-        <>
-          {activeItem ? (
-            <>
-              <SectionHeading>In progress</SectionHeading>
-              <ActiveItemSection item={activeItem} epicContext={activeEpic} onOpenPage={onOpenPage} showHeading={false} />
-            </>
-          ) : null}
-          {readyCount > 0 ? (
-            <UpNextSection items={readyItems.slice(0, 10)} onOpenPage={onOpenPage} />
-          ) : null}
-          {outside.length > 0 ? <OutsideSection items={outside.slice(0, 10)} onOpenPage={onOpenPage} /> : null}
-          {finished.length > 0 ? (
-            <FinishedSection entries={finished} onOpenPage={onOpenPage} onClear={onClearFinished} />
-          ) : null}
-        </>
-      )}
-    </RailSection>
-  );
-}
-
-/** Single most-recent finished row — the collapsed "Last done" content
- *  when nothing is actively in progress. */
-function SingleFinishedRow({
-  entry,
-  onOpenPage,
-}: {
-  entry: FinishedEntry;
-  onOpenPage(ref: TabRef): void;
-}) {
-  const ref = entry.kind === "task" ? taskRef(entry.itemId) : wikiPageRef(entry.slug);
-  return (
-    <div data-testid="rail-last-done" style={{ paddingBottom: 8 }}>
-      <button
-        type="button"
-        data-testid={`rail-finished-${entry.kind === "task" ? entry.itemId : entry.slug}`}
-        title={entry.kind === "task" ? `#${entry.itemId} ${entry.title}` : entry.title}
-        onClick={() => onOpenPage(ref)}
-        style={rowHoverStyle()}
-      >
-        {entry.kind === "task" ? (
-          <span
-            aria-hidden
-            style={{
-              width: 14,
-              display: "inline-flex",
-              justifyContent: "center",
-              color: statusIconColor("done"),
-              fontSize: "var(--text-xs)",
-              flexShrink: 0,
-            }}
-          >
-            {statusIcon("done")}
-          </span>
-        ) : (
-          <PageKindIcon kind="wiki" size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-        )}
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {entry.title}
-        </span>
-      </button>
-    </div>
   );
 }
 
@@ -793,215 +649,6 @@ function SearchTrigger({ onOpenSearch }: { onOpenSearch?: () => void }) {
         </kbd>
       </button>
     </div>
-  );
-}
-
-function statusIcon(status: Task["status"]): string {
-  switch (status) {
-    case "done": return "✓";
-    case "in_progress": return "◐";
-    case "blocked": return "⚠";
-    case "canceled": return "✗";
-    case "archived": return "▣";
-    case "ready":
-    default: return "☐";
-  }
-}
-
-function statusIconColor(status: Task["status"]): string {
-  switch (status) {
-    case "done": return "var(--diff-add-fg, #2ea043)";
-    case "in_progress": return "var(--accent-fg, #58a6ff)";
-    case "blocked": return "var(--diff-del-fg, #f85149)";
-    case "canceled": return "var(--text-muted)";
-    default: return "var(--text-secondary)";
-  }
-}
-
-function ActiveItemSection({
-  item,
-  epicContext,
-  onOpenPage,
-  showHeading = true,
-}: {
-  item: Task | null;
-  epicContext: { epic: Task; children: Task[] } | null;
-  onOpenPage(ref: TabRef): void;
-  /** Drop the "Current Work" heading when rendered inside the Work
-   *  zone (the zone divider already labels it). */
-  showHeading?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  if (!item) {
-    return null;
-  }
-
-  if (epicContext) {
-    const { epic, children } = epicContext;
-    return (
-      <>
-        {showHeading ? <SectionHeading>Current Work</SectionHeading> : null}
-        <div
-          data-testid="rail-active-epic"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "4px 8px 4px 14px",
-          }}
-        >
-          <button
-            type="button"
-            data-testid="rail-active-epic-toggle"
-            onClick={() => setExpanded((v) => !v)}
-            title={expanded ? "Collapse" : "Expand"}
-            aria-expanded={expanded}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              padding: "0 2px",
-              fontSize: 14,
-              width: 16,
-            }}
-          >
-            {expanded ? "▾" : "▸"}
-          </button>
-          <button
-            type="button"
-            data-testid="rail-active-epic-row"
-            title={`#${epic.id} ${epic.title}`}
-            onClick={() => onOpenPage(taskRef(epic.id))}
-            draggable
-            onDragStart={(ev) => setContextRefDrag(ev, {
-              kind: "task",
-              itemId: epic.id,
-              title: epic.title,
-              status: epic.status,
-            })}
-            style={{
-              ...rowStyle,
-              padding: "2px 6px",
-              flex: 1,
-            }}
-          >
-            <span aria-hidden style={{ fontSize: 11, color: "var(--text-secondary)" }}>📚</span>
-            <span
-              style={{
-                flex: 1,
-                color: "var(--text-primary)",
-                fontWeight: "var(--weight-medium)",
-                fontSize: "var(--text-sm)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {epic.title}
-            </span>
-          </button>
-        </div>
-        {expanded ? (
-          <div
-            data-testid="rail-active-epic-children"
-            style={{ paddingBottom: 8 }}
-          >
-            {children.map((child) => {
-              const isActive = child.id === item.id;
-              return (
-                <button
-                  key={child.id}
-                  type="button"
-                  data-testid={`rail-active-epic-child-${child.id}`}
-                  onClick={() => onOpenPage(taskRef(child.id))}
-                  draggable
-                  onDragStart={(ev) => setContextRefDrag(ev, {
-                    kind: "task",
-                    itemId: child.id,
-                    title: child.title,
-                    status: child.status,
-                  })}
-                  style={{
-                    ...rowStyle,
-                    padding: "4px 14px 4px 32px",
-                    background: isActive ? "var(--surface-card)" : "transparent",
-                    fontWeight: isActive ? 500 : 400,
-                  }}
-                  title={`#${child.id} ${child.title}`}
-                >
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 14,
-                      display: "inline-flex",
-                      justifyContent: "center",
-                      color: statusIconColor(child.status),
-                      fontSize: "var(--text-xs)",
-                    }}
-                  >
-                    {statusIcon(child.status)}
-                  </span>
-                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {child.title}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </>
-    );
-  }
-
-  return (
-    <>
-      {showHeading ? <SectionHeading>Current Work</SectionHeading> : null}
-      <button
-        type="button"
-        data-testid="rail-active-item"
-        title={`#${item.id} ${item.title}`}
-        onClick={() => onOpenPage(taskRef(item.id))}
-        draggable
-        onDragStart={(ev) => setContextRefDrag(ev, {
-          kind: "task",
-          itemId: item.id,
-          title: item.title,
-          status: item.status,
-        })}
-        style={{
-          ...rowStyle,
-          padding: "4px 14px 12px",
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 14,
-            display: "inline-flex",
-            justifyContent: "center",
-            color: statusIconColor(item.status),
-            fontSize: "var(--text-xs)",
-            flexShrink: 0,
-          }}
-        >
-          {statusIcon(item.status)}
-        </span>
-        <span
-          style={{
-            flex: 1,
-            color: "var(--text-primary)",
-            fontWeight: "var(--weight-medium)",
-            fontSize: "var(--text-sm)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {item.title}
-        </span>
-      </button>
-    </>
   );
 }
 
@@ -1354,92 +1001,6 @@ function useExtensionPanels(streamId: string | null): ExtensionPanel[] {
   return useMemo(() => (exts ?? []).filter((e) => e.enabled).flatMap((e) => e.panels), [exts]);
 }
 
-/** The thread's open items on another provider — an outside tracker the
- *  agent filed them on (tsk1041); oxplow's own tasks are `threadWork`. */
-function useOutsideItems(threadId: string | null): WorkItem[] {
-  const [items, setItems] = useState<WorkItem[]>([]);
-  const [reads, setReads] = useState(NO_READS);
-  const load = useCallback(async () => {
-    if (!threadId) {
-      setItems([]);
-      return;
-    }
-    try {
-      const read = await readWorkItems({ scope: { thread: threadId }, states: ["todo", "in_progress", "blocked"] });
-      setItems(read.items.filter((i) => i.provider !== "oxplow"));
-      setReads(read.reads);
-    } catch {
-      setItems([]);
-    }
-  }, [threadId]);
-  useEffect(() => {
-    void load();
-  }, [load]);
-  useRerunOnChange(reads, () => void load());
-  return items;
-}
-
-/** The thread's open items on an outside tracker, each opening its page. */
-function OutsideSection({ items, onOpenPage }: { items: WorkItem[]; onOpenPage(ref: TabRef): void }) {
-  return (
-    <>
-      <SectionHeading>On your tracker</SectionHeading>
-      <div data-testid="rail-outside-items" style={{ paddingBottom: 8 }}>
-        {items.map((item) => (
-          <button
-            key={item.ref}
-            type="button"
-            data-testid={`rail-outside-item-${item.ref}`}
-            title={`${item.title} (${item.provider}, ${item.state.replace("_", " ")})`}
-            onClick={() => onOpenPage(workItemTabRef(item.ref))}
-            style={rowHoverStyle()}
-          >
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</span>
-            <span style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>{item.provider}</span>
-          </button>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function UpNextSection({
-  items,
-  onOpenPage,
-}: {
-  items: Task[];
-  onOpenPage(ref: TabRef): void;
-}) {
-  return (
-    <>
-      <SectionHeading>Ready</SectionHeading>
-      <div data-testid="rail-up-next" style={{ paddingBottom: 8 }}>
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            data-testid={`rail-up-next-item-${item.id}`}
-            title={`#${item.id} ${item.title}`}
-            onClick={() => onOpenPage(taskRef(item.id))}
-            draggable
-            onDragStart={(ev) => setContextRefDrag(ev, {
-              kind: "task",
-              itemId: item.id,
-              title: item.title,
-              status: item.status,
-            })}
-            style={rowHoverStyle()}
-          >
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {item.title}
-            </span>
-          </button>
-        ))}
-      </div>
-    </>
-  );
-}
-
 /** The "Go To" pane — the rail's combined bookmarks + history surface.
  *  Collapsed it shows the bookmark rows only; expanded it labels them
  *  under a "Bookmarks" subheading and adds the page-visit History list
@@ -1491,89 +1052,6 @@ function GoToSection({
       {bookmarkRows}
       <HistoryRows {...history} onOpenPage={onOpenPage} />
     </RailSection>
-  );
-}
-
-function FinishedSection({
-  entries,
-  onOpenPage,
-  onClear,
-}: {
-  entries: FinishedEntry[];
-  onOpenPage(ref: TabRef): void;
-  onClear?(): void;
-}) {
-  return (
-    <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "12px 14px 4px",
-        }}
-      >
-        <button
-          type="button"
-          data-testid="rail-finished-heading"
-          onClick={() => onOpenPage(tasksRef())}
-          title="Open Tasks"
-          style={{
-            flex: 1,
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            margin: 0,
-            textAlign: "left",
-            cursor: "pointer",
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--text-secondary)",
-            textTransform: "uppercase",
-            letterSpacing: 0.4,
-          }}
-        >
-          Finished
-        </button>
-        {onClear ? (
-          <button
-            type="button"
-            data-testid="rail-finished-clear"
-            onClick={(e) => { e.stopPropagation(); onClear(); }}
-            title="Mark all as seen"
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              fontSize: 10,
-              padding: "0 4px",
-            }}
-          >
-            clear
-          </button>
-        ) : null}
-      </div>
-      <div data-testid="rail-finished" style={{ paddingBottom: 8 }}>
-        {entries.map((e) => {
-          const ref = e.kind === "task" ? taskRef(e.itemId) : wikiPageRef(e.slug);
-          return (
-            <button
-              key={`${e.kind}:${e.kind === "task" ? e.itemId : e.slug}`}
-              type="button"
-              data-testid={`rail-finished-${e.kind === "task" ? e.itemId : e.slug}`}
-              title={e.kind === "task" ? `#${e.itemId} ${e.title}` : e.title}
-              onClick={() => onOpenPage(ref)}
-              style={rowHoverStyle()}
-            >
-              <PageKindIcon kind={e.kind === "task" ? "work_item" : "wiki"} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {e.title}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </>
   );
 }
 

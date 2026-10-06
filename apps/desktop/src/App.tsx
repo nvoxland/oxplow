@@ -25,7 +25,6 @@ import {
   renameStream,
   subscribeWorkspaceEvents,
   openExternalUrl,
-  type FinishedEntry,
   diffRevisions,
   vcsHead,
   vcsStatus,
@@ -49,12 +48,10 @@ import {
   type WorkspaceContext,
 } from "./api.js";
 import {
-  clearRecentlyFinished,
   createTask,
   deleteTask,
   moveTask,
   orderedTaskIds,
-  readRecentlyFinished,
   readThreadWork,
   reorderTasks,
   updateTask,
@@ -62,8 +59,6 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "./workItems.js";
-import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
-import type { Reads } from "./tauri-bridge/generated/bindings.js";
 import {
   closeOpenFile,
   createEmptyFileSession,
@@ -1789,21 +1784,6 @@ export function App() {
     return () => { cancelled = true; coalesced.cancel(); offGit(); offWs(); };
   }, [stream?.id]);
 
-  // The rail's Finished section: done tasks and the knowledge pages this
-  // thread wrote, from the models, re-read when they change.
-  const [recentlyFinished, setRecentlyFinished] = useState<FinishedEntry[]>([]);
-  const [finishedReads, setFinishedReads] = useState<Reads>(NO_READS);
-  const refreshFinished = useCallback(() => {
-    void readRecentlyFinished(selectedThreadId, 5)
-      .then(({ entries, reads }) => {
-        setRecentlyFinished(entries);
-        setFinishedReads(reads);
-      })
-      .catch(() => { /* ignore — empty list keeps the section hidden */ });
-  }, [selectedThreadId]);
-  useEffect(() => refreshFinished(), [refreshFinished]);
-  useRerunOnChange(finishedReads, refreshFinished);
-
   const handleOpenPage = useCallback((ref: TabRef) => {
     // Page-visit recording lives in the central activation effect
     // below — it fires whenever `effectiveCenterActive` resolves to a
@@ -3341,13 +3321,7 @@ export function App() {
         <RailHud
           threadId={selectedThread?.id ?? null}
           streamId={stream?.id ?? null}
-          threadWork={selectedThreadWork}
-          recentlyFinished={recentlyFinished}
           uncommitted={uncommittedSummary}
-          onClearFinished={() => {
-            clearRecentlyFinished(selectedThreadId);
-            refreshFinished();
-          }}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => ({
             ref: b.ref,
             label: b.label ?? b.ref.id,

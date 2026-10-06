@@ -5275,7 +5275,11 @@ commands:
         let commands: Vec<&str> = b.commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(
             commands,
-            ["oxplow_bundled.accept", "oxplow_bundled.request_changes"]
+            [
+                "oxplow_bundled.accept",
+                "oxplow_bundled.request_changes",
+                "oxplow_bundled.clear_finished"
+            ]
         );
         let advisories: Vec<&str> = b.advisories.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
@@ -5291,6 +5295,8 @@ commands:
                 "change_interest",
                 "co_change_pair",
                 "deviation",
+                "finished_cleared",
+                "thread_work",
                 "verdict",
                 "verdicts"
             ]

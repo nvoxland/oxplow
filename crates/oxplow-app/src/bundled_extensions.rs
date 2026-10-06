@@ -23,12 +23,14 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
     name: "oxplow-bundled",
     files: &[
         ext_file!("oxplow-bundled", "README.md"),
-        ext_file!("oxplow-bundled", "extension.yaml"),
         ext_file!("oxplow-bundled", "collectors/effort_churn.star"),
         ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
         ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
         ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
+        ext_file!("oxplow-bundled", "event_types/finished_cleared.v1.json"),
+        ext_file!("oxplow-bundled", "extension.yaml"),
         ext_file!("oxplow-bundled", "handlers/accept.star"),
+        ext_file!("oxplow-bundled", "handlers/clear_finished.star"),
         ext_file!("oxplow-bundled", "handlers/request_changes.star"),
         ext_file!("oxplow-bundled", "lenses/backlog-tasks.yaml"),
         ext_file!("oxplow-bundled", "lenses/change-co-change.yaml"),
@@ -80,10 +82,15 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
         ext_file!("oxplow-bundled", "lenses/verify-claim-with-evidence.yaml"),
         ext_file!("oxplow-bundled", "lenses/waiting-on-me.yaml"),
         ext_file!("oxplow-bundled", "lenses/what-deviated.yaml"),
+        ext_file!("oxplow-bundled", "lenses/work-count.yaml"),
+        ext_file!("oxplow-bundled", "lenses/work-line.yaml"),
+        ext_file!("oxplow-bundled", "lenses/work.yaml"),
         ext_file!("oxplow-bundled", "models/change_co_change.sql"),
         ext_file!("oxplow-bundled", "models/change_interest.sql"),
         ext_file!("oxplow-bundled", "models/co_change_pair.sql"),
         ext_file!("oxplow-bundled", "models/deviation.sql"),
+        ext_file!("oxplow-bundled", "models/finished_cleared.sql"),
+        ext_file!("oxplow-bundled", "models/thread_work.sql"),
         ext_file!("oxplow-bundled", "models/verdict.sql"),
         ext_file!("oxplow-bundled", "models/verdicts.sql"),
         ext_file!("oxplow-bundled", "questions.yaml"),
@@ -804,6 +811,101 @@ mod tests {
         );
         let none = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 2)]).await;
         assert_eq!(none, serde_json::json!([]));
+    }
+
+    /// tsk1087: the rail's Work panel is a lens: per thread, what's in
+    /// progress, what's ready and what finished since the person last
+    /// cleared it (an extension command recording an event), grouped
+    /// under headings; collapsed, just the active item; counted without
+    /// an alert.
+    #[tokio::test]
+    async fn work_is_a_panel_grouping_a_threads_work() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let bundled = crate::extensions::load_extensions(f._dir.path())
+            .into_iter()
+            .find(|e| e.name == "oxplow-bundled")
+            .unwrap();
+        assert!(bundled.errors.is_empty(), "{:?}", bundled.errors);
+        let panel = bundled
+            .panels
+            .iter()
+            .find(|p| p.id == "oxplow-bundled/work")
+            .expect("a work panel");
+        assert_eq!(
+            (
+                panel.body.as_str(),
+                panel.collapsed.as_deref(),
+                panel.count.as_deref(),
+                panel.open.as_deref()
+            ),
+            (
+                "oxplow-bundled/work",
+                Some("oxplow-bundled/work-line"),
+                Some("oxplow-bundled/work-count"),
+                Some("page:tasks")
+            )
+        );
+        let run = |name: &'static str, input: serde_json::Value| {
+            let svc = f.svc.clone();
+            async move {
+                svc.commands
+                    .run(&oxplow_domain::Actor::Human, name, input, false)
+                    .await
+                    .unwrap_or_else(|e| panic!("{name}: {e:?}"))
+            }
+        };
+        let thread = format!("thr{}", f.thread.value());
+        for (title, state) in [("Next up", "todo"), ("Shipped", "done")] {
+            run(
+                "work_item.create",
+                serde_json::json!({ "title": title, "state": state, "thread": thread }),
+            )
+            .await;
+        }
+        // As boot does: its models, its event types, its commands.
+        f.svc.extension_models.sync().await.unwrap();
+        f.svc.vocabulary_service.sync().await.unwrap();
+        f.svc.extension_commands.reconcile().await;
+        let tid = f.thread.value();
+        // (group, title) per row, in display order.
+        let lines = |rows: serde_json::Value| -> Vec<(String, String)> {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    (
+                        r[0].as_str().unwrap().to_string(),
+                        r[1].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await),
+            vec![
+                ("In progress".into(), "t".into()),
+                ("Ready".into(), "Next up".into()),
+                ("Finished".into(), "Shipped".into()),
+            ]
+        );
+        assert_eq!(
+            run_bundled_lens(&f, "oxplow-bundled/work-count", &[("thread_id", tid)]).await,
+            serde_json::json!([[2]]),
+            "the active item and the ready one; finished isn't counted"
+        );
+        // Clearing hides what finished before it.
+        run(
+            "oxplow_bundled.clear_finished",
+            serde_json::json!({ "thread_id": f.thread.value() }),
+        )
+        .await;
+        assert_eq!(
+            lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await)
+                .into_iter()
+                .map(|(g, _)| g)
+                .collect::<Vec<_>>(),
+            vec!["In progress".to_string(), "Ready".to_string()]
+        );
     }
 
     /// Waiting on Me sits in the rail and raises an alert while anything
@@ -1706,7 +1808,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ("oxplow_bundled.accepted", 1),
-                ("oxplow_bundled.changes_requested", 1)
+                ("oxplow_bundled.changes_requested", 1),
+                ("oxplow_bundled.finished_cleared", 1)
             ],
             "a shared extension's event types load"
         );

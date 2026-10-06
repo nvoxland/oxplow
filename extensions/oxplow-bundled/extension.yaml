@@ -56,6 +56,7 @@ ui:
 panels:
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
   - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments, open: 'page:comments' }
+  - { id: work, title: Work, icon: list-checks, scope: thread, body: work, collapsed: work-line, count: work-count, open: 'page:tasks' }
 advisories:
   # Steer the agent to add tests when this effort's changed lines are poorly
   # covered. Reads the stored observation, so it fires on the tool call after
@@ -201,6 +202,26 @@ models:
       - { name: ref, type: TEXT, doc: "The effort (`effort:eff<id>`)." }
       - { name: label, type: TEXT, doc: "`Accepted`, `Accepted (forced)` or `Changes requested`." }
       - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
+  - name: finished_cleared
+    version: 1
+    key: [thread_id]
+    description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow_bundled.clear_finished`), read from the events' envelopes."
+    columns:
+      - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
+      - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
+  - name: thread_work
+    version: 1
+    description: "Each thread's Work panel, one row per line in display order: the task in progress (under its epic, with the epic's other children), up to 10 ready tasks, up to 10 open items on an outside tracker, and the last 5 finished tasks and wiki pages since the list was cleared."
+    columns:
+      - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
+      - { name: grp, type: TEXT, doc: "`In progress`, `Ready`, `On your tracker` or `Finished`." }
+      - { name: g, type: INT, doc: "The group's place (0–3)." }
+      - { name: ord, type: INT, doc: "The line's place in its group." }
+      - { name: title, type: TEXT, doc: "What to show." }
+      - { name: icon, type: TEXT, doc: "A lens icon name: a status (`in_progress`, `ready`, `done`, …), `epic` or `wiki`." }
+      - { name: ref, type: TEXT, doc: "What the line opens (`work_item:…`, `wiki:<slug>`)." }
+      - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
+      - { name: active, type: INT, doc: "1 for the task in progress." }
 event_types:
   types:
     - type: oxplow_bundled.accepted
@@ -211,6 +232,10 @@ event_types:
       v: 1
       schema: event_types/changes_requested.v1.json
       summary: A person sent an effort's work back with changes requested. Subject — the effort and its work item.
+    - type: oxplow_bundled.finished_cleared
+      v: 1
+      schema: event_types/finished_cleared.v1.json
+      summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
 effects:
   - id: verify-unchecked
     summary: After an acceptance that left claims unverified or decisions inferred, file one item to verify them.
@@ -322,3 +347,16 @@ commands:
         input: { ref: "effort:eff3", note: "x" }
         rows: [{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]
         refuses: has no work item
+  - name: clear_finished
+    summary: Clear a thread's Finished list in the Work panel — what finished before now stops showing there.
+    input_schema:
+      type: object
+      required: [thread_id]
+      properties:
+        thread_id: { type: [integer, string], description: "The thread's row id (v_thread.id)." }
+      additionalProperties: false
+    entry: handlers/clear_finished.star
+    effect: record
+    invokers: { human: true, agent: false, lens: true }
+    examples:
+      - { name: clears, input: { thread_id: 3 }, expect_commands: [] }

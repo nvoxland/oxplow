@@ -1,0 +1,19 @@
+title: Work
+description: The thread's work — in progress (with its epic), ready next, on an outside tracker, and recently finished.
+params:
+  - { name: thread_id, label: Thread }
+query: |
+  SELECT grp, title, icon, ref, depth, active,
+         CASE grp WHEN 'Finished' THEN 'page:tasks' END AS grp_ref
+  FROM v_oxplow_bundled_thread_work
+  WHERE thread_id = :thread_id
+  ORDER BY g, ord
+viz: list
+group: { by: grp, link: { kind: page, from: grp_ref } }
+emphasis: active
+depth: depth
+columns:
+  - { key: title, label: Item, icon: icon, link: { kind: page, from: ref } }
+actions:
+  - { id: clear, label: clear, command: oxplow_bundled.clear_finished, group: Finished, input: { thread_id: '{{param.thread_id}}' } }
+empty: No active work

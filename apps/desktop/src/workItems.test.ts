@@ -92,7 +92,7 @@ test("the Board groups by canonical state, in workflow order, each column in lis
   ]);
 });
 
-import { bucketThreadWork, placementFromOrder, recentlyFinished, tasksFromResult } from "./workItems.js";
+import { bucketThreadWork, placementFromOrder, tasksFromResult } from "./workItems.js";
 
 const taskResult = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
@@ -146,19 +146,6 @@ test("a reordered list is one item placed next to a neighbour", () => {
   expect(placementFromOrder(["a", "b", "c"], ["c", "a", "b"])).toEqual({ id: "c", place: { before: "a" } });
   expect(placementFromOrder(["a", "b", "c"], ["b", "c", "a"])).toEqual({ id: "a", place: { after: "c" } });
   expect(placementFromOrder(["a", "b"], ["a", "b"])).toBeNull();
-});
-
-test("recently finished: done tasks and touched pages, newest first, after the cleared cursor", () => {
-  const out = recentlyFinished(
-    [
-      { kind: "task", itemId: "tsk1", title: "Old", t: "2026-01-01T00:00:00Z" },
-      { kind: "task", itemId: "tsk2", title: "New", t: "2026-01-03T00:00:00Z" },
-      { kind: "wiki", slug: "notes", title: "Notes", t: "2026-01-02T00:00:00Z" },
-    ],
-    "2026-01-01T12:00:00Z",
-    5,
-  );
-  expect(out.map((e) => e.title)).toEqual(["New", "Notes"]);
 });
 
 // A drag's "before" order is the server's list order — sort_index, then

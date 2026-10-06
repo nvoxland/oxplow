@@ -1,0 +1,14 @@
+title: Work count
+description: How much work the thread has open — the task in progress, the ready ones and those on an outside tracker.
+hidden: true
+params:
+  - { name: thread_id, label: Thread }
+query: |
+  SELECT (SELECT count(*) > 0 FROM v_oxplow_bundled_thread_work WHERE thread_id = :thread_id AND grp = 'In progress')
+       + (SELECT min(count(*), 50) FROM v_task t
+          WHERE t.thread_id = :thread_id AND t.status = 'ready'
+            AND NOT EXISTS (SELECT 1 FROM v_task c WHERE c.parent_id = t.id))
+       + (SELECT count(*) FROM v_work_item w
+          WHERE w.thread_id = :thread_id AND w.provider <> 'oxplow' AND w.state IN ('todo', 'in_progress', 'blocked'))
+       AS open
+viz: number

@@ -1,4 +1,3 @@
-import type { ThreadWorkState, Task } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import {
   archivedRef,
@@ -87,57 +86,4 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "closed-threads", label: "Closed Threads", ref: closedThreadsRef(), category: "System" },
     { id: "settings", label: "Settings", ref: indexRef("settings"), category: "System" },
   ];
-}
-
-/**
- * Pick the lowest-sort_index `in_progress` non-epic item from a thread's
- * work state. The "Active item" rail section anchors on this.
- *
- * The store's `inProgress` bucket holds `in_progress` items. The rail's
- * "Active item" means *what the agent is doing right now*.
- */
-export function computeActiveItem(state: ThreadWorkState | null): Task | null {
-  if (!state) return null;
-  const epicIds = new Set(state.epics.map((e) => e.id));
-  const candidates = state.inProgress.filter(
-    (item) => item.status === "in_progress" && !epicIds.has(item.id),
-  );
-  if (candidates.length === 0) return null;
-  return candidates.reduce((best, current) =>
-    current.sort_index < best.sort_index ? current : best,
-  );
-}
-
-/**
- * If the active in-progress item is a child of an epic, return the epic
- * and its non-archived children (sorted by sort_index ascending). When
- * the active item is standalone, returns null.
- */
-export function computeActiveEpicContext(
-  state: ThreadWorkState | null,
-  active: Task | null,
-): { epic: Task; children: Task[] } | null {
-  if (!state || !active || !active.parent_id) return null;
-  // Only treat the parent as an "epic" if it is in state.epics — i.e. it
-  // has children (the runtime classifies any task with children as an
-  // epic). A plain task whose id happens to match active.parent_id is
-  // not an epic anchor.
-  const epic = state.epics.find((i) => i.id === active.parent_id);
-  if (!epic) return null;
-  const pool = state.items.length > 0 ? state.items : [...state.epics, ...state.inProgress, ...state.waiting, ...state.done];
-  const children = pool
-    .filter((i) => i.parent_id === epic.id && i.status !== "archived")
-    .sort((a, b) => a.sort_index - b.sort_index);
-  return { epic, children };
-}
-
-/**
- * Return the next-up `ready` items, sorted by sort_index ascending,
- * truncated to `limit`. The "Ready" rail section uses this.
- */
-export function computeUpNext(state: ThreadWorkState | null, limit = 5): Task[] {
-  if (!state) return [];
-  const ready = state.items.filter((item) => item.status === "ready");
-  ready.sort((a, b) => a.sort_index - b.sort_index);
-  return ready.slice(0, limit);
 }

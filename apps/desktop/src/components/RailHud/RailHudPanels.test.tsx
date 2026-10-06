@@ -52,7 +52,7 @@ const { RailHud } = await import("./RailHud.js");
 afterEach(cleanup);
 
 test("a collapsed panel shows its collapsed lens; its header counts the count lens's rows", async () => {
-  const view = render(<RailHud threadId={null} streamId="str1" threadWork={null} onOpenPage={() => {}} />);
+  const view = render(<RailHud threadId={null} streamId="str1" onOpenPage={() => {}} />);
   const section = await waitFor(() => view.getByTestId("rail-section-ext:x/w"));
   await waitFor(() => expect(view.getByTestId("rail-panel-collapsed").textContent).toContain("summary row"));
   expect(view.queryByTestId("rail-panel-body")).toBeNull();

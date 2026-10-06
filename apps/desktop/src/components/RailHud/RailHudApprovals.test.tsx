@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 test("the Alerts row for waiting proposals reveals a hidden Approvals panel", async () => {
-  const view = render(<RailHud threadId={null} streamId={null} threadWork={null} onOpenPage={() => {}} />);
+  const view = render(<RailHud threadId={null} streamId={null} onOpenPage={() => {}} />);
   const row = await waitFor(() => view.getByTestId("rail-alert-proposals"));
   expect(row.textContent).toContain("1 proposal awaits your approval");
   expect(view.queryByTestId("rail-section-core:approvals")).toBeNull();
@@ -72,7 +72,7 @@ test("the Alerts row for waiting proposals reveals a hidden Approvals panel", as
 // Settings, where Data → Delivery lists them.
 test("the Alerts row for undelivered events opens Settings", async () => {
   const opened: unknown[] = [];
-  const view = render(<RailHud threadId={null} streamId={null} threadWork={null} onOpenPage={(r) => opened.push(r)} />);
+  const view = render(<RailHud threadId={null} streamId={null} onOpenPage={(r) => opened.push(r)} />);
   const row = await waitFor(() => view.getByTestId("rail-alert-delivery"));
   expect(row.textContent).toBe("2 events couldn't be delivered");
   fireEvent.click(row);

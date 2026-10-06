@@ -288,7 +288,7 @@ export interface ThreadState {
 
 // Tasks are read from the models by the work-item data layer
 // (`workItems.ts`, P6.E1b), which owns their shape.
-export type { Task, TaskStatus, TaskPriority, ThreadWorkState, BacklogState, FinishedEntry } from "./workItems.js";
+export type { Task, TaskStatus, TaskPriority, ThreadWorkState, BacklogState } from "./workItems.js";
 
 export interface TaskNote {
   id: string;

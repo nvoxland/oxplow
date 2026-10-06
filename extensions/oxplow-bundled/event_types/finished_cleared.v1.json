@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oxplow_bundled.finished_cleared",
+  "description": "A person cleared a thread's Finished list in the Work panel. The envelope's subject is the thread; the payload is empty.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}
