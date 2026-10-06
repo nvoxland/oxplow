@@ -40,7 +40,10 @@ const PLUGIN_VERSION: &str = "0.0.0";
 /// Hook event names mirrored from main. SessionStart is registered
 /// even though Claude Code drops HTTP hooks for it ("HTTP hooks are
 /// not supported for SessionStart" in its debug log) — we learn the
-/// session id from whichever hook fires next instead.
+/// session id from whichever hook fires next instead. The last group is
+/// only observed: subagents, Claude's own task list and compaction are
+/// acked unread today, and their payloads can be dumped
+/// (`OXPLOW_HOOK_DEBUG`) to learn their shapes.
 pub const HOOK_EVENTS: &[&str] = &[
     "PreToolUse",
     "PostToolUse",
@@ -49,6 +52,11 @@ pub const HOOK_EVENTS: &[&str] = &[
     "SessionEnd",
     "Stop",
     "Notification",
+    "SubagentStart",
+    "SubagentStop",
+    "TaskCreated",
+    "TaskCompleted",
+    "PreCompact",
 ];
 
 /// Env vars the plugin's hooks header-interpolates from. Claude Code
@@ -802,6 +810,28 @@ mod tests {
             entry["headers"]["Authorization"],
             "Bearer $OXPLOW_HOOK_TOKEN"
         );
+    }
+
+    /// The events oxplow only observes (subagents, Claude's own task list,
+    /// compaction) are registered too, so their payloads reach the hook
+    /// endpoint (acked unread, dumped under `OXPLOW_HOOK_DEBUG`).
+    #[test]
+    fn hooks_json_registers_the_observed_events() {
+        let v = build_hooks_json("http://h/hook");
+        for event in [
+            "SubagentStart",
+            "SubagentStop",
+            "TaskCreated",
+            "TaskCompleted",
+            "PreCompact",
+            "Notification",
+        ] {
+            assert_eq!(
+                v["hooks"][event][0]["hooks"][0]["url"],
+                format!("http://h/hook/{event}"),
+                "{event}"
+            );
+        }
     }
 
     #[test]

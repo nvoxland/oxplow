@@ -68,6 +68,7 @@ or exact mechanics.
 | Language support — the `Language` enum, `LanguagePlugin` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-plugins.md` |
 | Tables, stores, work queue, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
+| How oxplow infers the agent's work (efforts, policies, no gates, hints) and the swappable-pieces direction (capabilities, work list, snapshots) | `.context/work-tracking.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |

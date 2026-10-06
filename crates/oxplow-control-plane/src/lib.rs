@@ -275,6 +275,42 @@ fn otlp_debug_dump(headers: &HeaderMap, body: &[u8]) {
     }
 }
 
+/// Append every hook payload, as the agent sent it, to the file named by
+/// `OXPLOW_HOOK_DEBUG`: how to learn a harness's real payload shapes (the
+/// Stop's final message, subagent ids, its own task list) from a live run
+/// before depending on them. No-op when unset; best-effort, like
+/// [`otlp_debug_dump`].
+fn hook_debug_dump(event: &str, thread: Option<&str>, body: &[u8]) {
+    let Ok(path) = std::env::var("OXPLOW_HOOK_DEBUG") else {
+        return;
+    };
+    if path.is_empty() {
+        return;
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = f.write_all(hook_debug_entry(event, thread, body).as_bytes());
+    }
+}
+
+/// One JSON line: the event, the thread its headers named, when, and the
+/// payload (parsed when it's JSON, else the text as sent).
+fn hook_debug_entry(event: &str, thread: Option<&str>, body: &[u8]) -> String {
+    let payload = serde_json::from_slice::<serde_json::Value>(body)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(body).into_owned()));
+    let entry = serde_json::json!({
+        "event": event,
+        "thread": thread,
+        "at": oxplow_domain::Timestamp::now().to_string(),
+        "payload": payload,
+    });
+    format!("{entry}\n")
+}
+
 /// Empty OTLP success ack: a 200 with a protobuf content type and an empty
 /// body, which deserializes to an empty `ExportMetricsServiceResponse` — what
 /// OTLP exporters expect for a successful export.
@@ -350,6 +386,8 @@ async fn handle_hook_inner(
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
         .and_then(ThreadId::try_from_str);
+
+    hook_debug_dump(&event, thread_id.map(|t| t.to_string()).as_deref(), &body);
 
     let body_str = match std::str::from_utf8(&body) {
         Ok(s) => s.to_string(),
@@ -689,6 +727,31 @@ mod tests {
             http::HeaderValue::from_static("Bearer xyz"),
         );
         assert!(!check_bearer(&h, "abc"));
+    }
+
+    /// `OXPLOW_HOOK_DEBUG`'s entry is one JSON line per hook: the event,
+    /// its headers' thread, and the payload as sent (kept verbatim when it
+    /// isn't JSON).
+    #[test]
+    fn a_hook_debug_entry_is_one_json_line_with_the_payload() {
+        let line = hook_debug_entry(
+            "Stop",
+            Some("thr3"),
+            br#"{"session_id":"s","last_assistant_message":"done"}"#,
+        );
+        assert!(
+            line.ends_with('\n') && line.matches('\n').count() == 1,
+            "{line:?}"
+        );
+        let v: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
+        assert_eq!(v["event"], "Stop");
+        assert_eq!(v["thread"], "thr3");
+        assert_eq!(v["payload"]["last_assistant_message"], "done");
+        assert!(v["at"].as_str().is_some());
+        let raw = hook_debug_entry("Notification", None, b"not json");
+        let v: serde_json::Value = serde_json::from_str(raw.trim_end()).unwrap();
+        assert_eq!(v["payload"], "not json");
+        assert!(v["thread"].is_null());
     }
 
     #[test]

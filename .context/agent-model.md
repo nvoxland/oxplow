@@ -250,7 +250,11 @@ details.
 - Claude writes `.oxplow/runtime/claude-plugin/`, passes it with
   `--plugin-dir`, and registers HTTP hooks for `PreToolUse`,
   `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`,
-  `Stop`, and `Notification`.
+  `Stop`, and `Notification`, plus events it only observes
+  (`SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`,
+  `PreCompact`), acked unread. `OXPLOW_HOOK_DEBUG=<file>` appends every
+  hook payload as sent, one JSON line each, to learn real payload shapes
+  ([work-tracking.md](./work-tracking.md) "The record").
 - Codex writes `.oxplow/runtime/codex-plugin/`, packages the same
   oxplow skills in Codex plugin layout, and registers command hooks
   that POST Codex hook stdin to the same oxplow hook endpoint. Codex MCP
