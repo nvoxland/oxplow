@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow work items and efforts, all optional — how oxplow tracks your work on its own, when filing a task or reporting is worth it, the work_item.* and effort.* commands, decisions and claims, and the command bus. Loads on mcp__oxplow__run_command with work_item.*, effort.* or knowledge.add_note, and on read_task_options or v_work_item.
+description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions and claims, and the command bus. Loads on mcp__oxplow__run_command with effort.* or knowledge.add_note, and on v_effort.
 ---
 
 # Your work in oxplow
@@ -20,44 +20,11 @@ finish.
   result (coverage below target, work grown large with nothing
   committed). Each is advisory.
 
-## When a task is worth filing
-
-File one when it helps the person follow the work:
-
-- a plan of several separately reviewable steps (an epic and children,
-  each child filed with `"parent_ref": "<the epic's ref>"`);
-- work the person wants done in a later turn;
-- a follow-up you noticed but can't do now.
-
-```json
-{ "name": "work_item.create",
-  "input": { "title": "Fix login redirect loop", "body": "…", "state": "todo" } }
-```
-
-It goes on the project's active tracker. `state` is `todo` (the
-default) or `in_progress`; a tracker's own fields go under `native`
-(oxplow's: `{ "priority": "high" }`). Title: imperative, ≤60 chars. One
-reviewable concern per item.
-
-Starting an item (`work_item.transition { ref, to: "in_progress" }`)
-links your effort to it; starting an unrelated one begins a new effort.
-oxplow never marks an item done. If you're tracking one, move it to
-`done` when it ships.
-
-**Statuses:** `todo` (ready), `in_progress`, `blocked` (needs an
-answer), `done`, `canceled` (decided against: keep the row, with the
-reasoning), and oxplow's `archived` (`{ to: "done" or "canceled",
-native_state: "archived" }`). Put state in the status, never in the
-title.
-
-When the person rejects your last attempt at an item, reopen that item
-rather than filing a new one.
-
 ## Correcting an effort
 
 - `effort.update { effort, title }`: rename it.
-- `effort.link { effort | thread, work_item }`: link it to an item, or
-  unlink it (`null`).
+- `effort.link { effort | thread, work_item }`: link it to a work item,
+  or unlink it (`null`).
 - `effort.close { effort | thread }` / `effort.open { title?, work_item? }`:
   split work oxplow grouped together.
 - `effort.report { summary?, impacts? }`: other words than your last
@@ -77,18 +44,9 @@ that file is the project's shared config.
 
 ## Reading work
 
-`query_sql` over `v_work_item` (`ref`, `provider`, `title`, `state`,
-`native_state`, `parent_ref`) covers every tracker's items. Efforts are
-`v_effort` (`id`, `work_item`, `thread_id`, `title`, `started_at`,
-`ended_at`, `closed_by`, `summary`), their files `v_effort_file`.
-`read_task_options` suggests what's ready next on a thread.
-
-The same commands change any tracker's items, by canonical ref
-(`work_item:<provider>:<id>`): `work_item.transition { ref, to,
-native_state? }`, `work_item.update { ref, title?, body?, parent_ref?,
-state?, native? }`, `work_item.link { ref, target, link_type }`,
-`work_item.comment { ref, body }`, `work_item.reorder { ref, before?,
-after? }`.
+Efforts are `v_effort` (`id`, `work_item`, `thread_id`, `title`,
+`started_at`, `ended_at`, `closed_by`, `summary`), their files
+`v_effort_file`. A work list, when the project has one, has its own skill.
 
 ## Decisions and claims
 
@@ -105,8 +63,8 @@ data:
 
 ## Writing about work
 
-Refer to a task by its quoted title, never by id or "#N": the person
-can't map ids to what they see. In task bodies, summaries and wiki pages,
+Refer to a work item by its quoted title, never by id or "#N": the
+person can't map ids to what they see. In task bodies, summaries and wiki pages,
 write entities as `[[…]]` wikilinks: `[[src/foo.ts]]`,
 `[[dir:src/components]]`, `[[some-slug]]` (wiki), `[[abc1234]]`
 (commit), `[[tsk42]]` (never `#42`). Inline code is for identifiers and
@@ -129,7 +87,7 @@ run is validated, policy-checked and audited; undoable runs return an
   program or pick the model (`agents`, `lsp`, `testing`, `collectors`,
   `ai`, `acpAgents`, `agentModels`, `extensions`, `agentPromptAppend`, …)
   need the person's confirmation.
-- Work items `work_item.*`; efforts `effort.*`; test evidence
+- Efforts `effort.*`; work items `work_item.*` (when a list is active); test evidence
   `test.record_run`, `collector.sync`; notes and comments
   `knowledge.add_note`, `knowledge.reply_comment`, ….
 

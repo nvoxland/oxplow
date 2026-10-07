@@ -528,10 +528,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
   `stream_id`. `launcher_lenses_need_no_slot_params` enforces the rule
   for every bundled lens (tsk374).
-- **One skill list.** Every agent runtime writes its skills from the single
-  `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
-  skill takes one row. ACP agents get the same list as an index in their
-  system prompt plus the MCP `get_skill` tool (see agent-model.md → ACP).
+- **One skill set.** Every agent runtime writes its skills and commands
+  from one `oxplow_plugin::AgentText`: core's (`OXPLOW_SKILLS` and
+  `CORE_COMMANDS` in `crates/oxplow-plugin/src/lib.rs`) plus what
+  extensions offer now ("Skills"). ACP agents get the same set as an
+  index in their system prompt plus the MCP `get_skill` tool (see
+  agent-model.md → ACP).
 
 - **P6b (epic tsk592, 2026-10-01).** An extension can also *act* and
   *extend the shell*: `commands:` (Starlark composing core commands, see
@@ -2410,6 +2412,45 @@ needs aren't met doesn't run. A context built without `Services` (param
 checks) checks nothing. In `oxplow-bundled`, the ready and backlog task
 lenses and the `landed-in-progress` hint need `work_items`; the Work
 panel doesn't — its efforts exist without a work list.
+
+**What a built-in owns.** A built-in may own commands and MCP tools that
+only it offers (`BuiltIn.commands` / `tools`: `oxplow:tasks` owns
+`work_item.reorder` / `move` and `list_tasks`, `get_task`,
+`read_task_options`); a provider instance owns its command namespace.
+They're offered and run only while their implementation is active
+(`capabilities::Active::refusal`, `.context/commands.md` step 0).
+
+## Skills
+
+An extension gives the coding agent skills and slash commands (stable,
+`skills:`; `extensions/skills.rs`):
+
+```yaml
+skills:
+  - { name: work-items, file: skills/work-items/SKILL.md, needs: [work_items] }
+  - { name: work-next, kind: command, file: commands/work-next.md }
+implementations:
+  - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next] }
+```
+
+- `name` is lowercase letters, digits and `-`, not one of core's own
+  (`oxplow_plugin::AgentText::core`), declared once; a skill's
+  frontmatter `name:` is its `name` and it has a `description:`, a
+  command's frontmatter has a `description:`. `kind` is `skill` (the
+  default: `<name>/SKILL.md`) or `command` (`/oxplow:<name>`).
+- **Offered** (`capabilities::agent_text`): from consented, enabled
+  extensions, when its `needs:` are met and, if an implementation lists
+  it in its `skills:`, while that implementation is the active one. A name
+  another extension already took is left out (logged).
+- **Installed.** Each spawn writes what's offered into the runtime
+  (`oxplow_plugin::write_agent_runtime(…, &AgentText)`); boot, an
+  extension change and a `capability.switched` rewrite the runtimes
+  already on disk (`refresh_agent_text`). A skill folder oxplow wrote
+  carries a `.oxplow` marker, so one no longer offered is removed and a
+  person's own stay; the Claude `commands/` folder is oxplow's whole.
+  ACP agents get the offered set's index and `get_skill`.
+- `oxplow-bundled` gives the `work-items` skill (any work list) and the
+  `work-next` command (oxplow's tasks' ready queue).
 
 ## Advisories
 

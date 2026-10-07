@@ -252,7 +252,9 @@ The three in progress:
   The agent's surface follows the active implementation: commands
   declare `needs:`, built-ins declare the commands and tools only they
   offer, an instance owns its namespace, and the bus and MCP offer and run
-  only what's active.
+  only what's active. Skills and slash commands come from extensions
+  too (`skills:`), offered the same way; the work-item guidance and
+  `/work-next` moved from core into `oxplow-bundled`.
 - Next: the three
   swappable pieces. Loose
   refs (`tsk12` for a work item) wait for it: recognising an id is the

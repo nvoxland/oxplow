@@ -420,7 +420,9 @@ mod tests {
             .await
             .unwrap();
         let svc = oxplow_app::Services::in_memory(tmp.path()).unwrap();
-        let skill = |name: &str| oxplow_plugin::skill_body(name).map(str::to_string);
+        // Core's skills and what the bundled extension offers by default.
+        let text = oxplow_app::capabilities::agent_text(&svc);
+        let skill = |name: &str| text.skill_body(name).map(str::to_string);
         let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
         let checker = Checker {
             skill_text: &skill,

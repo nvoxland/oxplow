@@ -30,9 +30,14 @@ intent:
 # effort policy fall to none; snapshots, which can't be none, fall back to
 # core's default.
 implementations:
-  - { capability: work_items, id: oxplow, entry: "oxplow:tasks" }
+  - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next] }
   - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch" }
   - { capability: snapshots, id: oxplow, entry: "oxplow:snapshots" }
+# What the coding agent reads about the work list: any list's commands
+# while one is active, and oxplow's tasks' ready queue while they are it.
+skills:
+  - { name: work-items, file: skills/work-items/SKILL.md, needs: [work_items] }
+  - { name: work-next, kind: command, file: commands/work-next.md }
 ui:
   slots:
     - { slot: effort.review.details, lens: change-review }

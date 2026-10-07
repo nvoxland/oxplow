@@ -682,13 +682,14 @@ impl OxplowMcp {
         params: Parameters<GetSkillParams>,
     ) -> Result<CallToolResult, McpError> {
         let name = params.0.name;
-        match oxplow_plugin::skill_body(&name) {
-            Some(body) => Ok(CallToolResult::success(vec![ContentBlock::text(body)])),
+        // What's offered now: core's and the active implementations'.
+        let text = oxplow_app::capabilities::agent_text(&self.services);
+        match text.skill_body(&name) {
+            Some(body) => Ok(CallToolResult::success(vec![ContentBlock::text(
+                body.to_string(),
+            )])),
             None => {
-                let names: Vec<&str> = oxplow_plugin::skill_index()
-                    .into_iter()
-                    .map(|(n, _)| n)
-                    .collect();
+                let names: Vec<&str> = text.skill_index().into_iter().map(|(n, _)| n).collect();
                 Err(McpError::invalid_params(
                     format!("no skill `{name}` (skills: {})", names.join(", ")),
                     None,

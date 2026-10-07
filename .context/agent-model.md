@@ -274,12 +274,12 @@ details.
   turn lifecycle.
   Skills + slash commands ship too: opencode only discovers SKILL.md
   from fixed locations (no config key), so `write_opencode_runtime`
-  materializes the five oxplow skills into `<project>/.opencode/skills/
-  <name>/` — each dir carries a `*` .gitignore so the generated files
-  never land in commits. The work-next / review-comments / configure
+  materializes the offered skills (`capabilities::agent_text`) into
+  `<project>/.opencode/skills/<name>/` — each dir carries a `*`
+  .gitignore so the generated files never land in commits. The offered
   commands ride `OPENCODE_CONFIG_CONTENT`'s inline `command` key
-  (`oxplow_plugin::opencode_command_definitions()`, frontmatter
-  description + body template) as `/oxplow-work-next` etc. — opencode
+  (`oxplow_plugin::opencode_command_definitions(&text)`, frontmatter
+  description + body template) as `/oxplow-review-comments` etc. — opencode
   has no plugin namespacing, hence the `oxplow-` prefix instead of
   Claude's `/oxplow:` form. The launch model comes from
   `agentModels.opencode` in .oxplow/project.yaml (falling back to the
@@ -563,7 +563,7 @@ the same JSON.
 - **MCP:** oxplow's MCP rides `session/new|load` as an HTTP MCP entry. An agent without HTTP MCP support is refused with a clear error.
 - **Resume:** `thread.resume_session_id` is `session/load`ed when the agent supports it. The replay rebuilds the transcript and records nothing: no hooks, no tool rows, no bypass checks, and fs writes are refused.
 - **System prompt:** it goes in `_meta.systemPrompt.append` when `system_prompt_via_meta` (the Claude adapter). Otherwise it is a block ahead of the first prompt of a new session.
-- **Skills (tsk376):** an ACP agent discovers no skill files, so its system prompt ends with an `# oxplow skills` index (`oxplow_plugin::skill_index`: name + frontmatter description) and it reads a body with the read-only, agent-only MCP tool `get_skill(name)`. Terminal runtimes still ship the files; `Services::boot` calls `oxplow_plugin::refresh_skills` to rewrite the skills of runtimes already on disk (never creating one), so an agent outliving an upgrade reads the current ones.
+- **Skills (tsk376):** an ACP agent discovers no skill files, so its system prompt ends with an `# oxplow skills` index (`AgentText::skill_index` of what's offered now, `capabilities::agent_text`: name + frontmatter description) and it reads a body with the read-only, agent-only MCP tool `get_skill(name)`. Terminal runtimes still ship the files; boot (`boot.rs`, once services are up), an extension change and a `capability.switched` call `capabilities::refresh_agent_text` to rewrite the skills and commands of runtimes already on disk (never creating one), so an agent outliving an upgrade or a switch reads the current ones.
 
 **Prompts (the no-automation rule).**
 - `acp/human_prompt.rs` `compose` is the only way to make a `HumanPrompt`, and `wire::AgentConn::prompt` accepts nothing else.
@@ -742,7 +742,7 @@ in one of three shapes:
   pick one or a link-related cluster. Epics are excluded from this list.
 - `{ mode: "empty" }` — nothing ready.
 
-`/work-next` calls it and works the item it picks, moving it to
+`/work-next` (the bundled extension's command, offered while oxplow's tasks are the work list) calls it and works the item it picks, moving it to
 `in_progress` so the effort links to it. Claude Code's built-in
 `TaskCreate` is a within-turn micro-planner and never mirrors oxplow
 items.

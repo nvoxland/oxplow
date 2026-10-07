@@ -30,6 +30,9 @@ pub struct ImplementationDecl {
     /// The built-in it is (`oxplow:tasks`); its features are core's to
     /// say.
     pub entry: String,
+    /// The extension's skills (`skills:`) it owns: offered only while it's
+    /// the active implementation.
+    pub skills: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -40,6 +43,8 @@ struct ImplementationFile {
     #[serde(default)]
     title: Option<String>,
     entry: String,
+    #[serde(default)]
+    skills: Vec<String>,
 }
 
 /// Parse `implementations:`: the valid declarations, and what's wrong
@@ -135,6 +140,7 @@ fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
         id: f.id,
         title: f.title,
         entry: f.entry,
+        skills: f.skills,
     })
 }
 
@@ -160,6 +166,7 @@ mod tests {
                 id: "oxplow".into(),
                 title: None,
                 entry: "oxplow:tasks".into(),
+                skills: vec![],
             }]
         );
     }

@@ -21,6 +21,7 @@ pub mod decorators;
 pub mod implementations;
 pub mod manifest_v2;
 pub mod replacements;
+pub mod skills;
 pub mod ui_commands;
 use manifest_v2::{at, entry_line, key_line, line_under, ManifestV2};
 pub use manifest_v2::{
@@ -1074,6 +1075,9 @@ pub struct Extension {
     /// The capability implementations it declares (stable:
     /// `implementations:`, each a built-in of core's).
     pub implementations: Vec<implementations::ImplementationDecl>,
+    /// Skills and slash commands it gives the coding agent (`skills:`;
+    /// valid ones — invalid ones are in `errors`).
+    pub skills: Vec<skills::SkillDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1697,6 +1701,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         ref_kinds: Vec::new(),
         effects: Vec::new(),
         implementations: Vec::new(),
+        skills: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -1822,8 +1827,28 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.effects = effects;
             ext.errors.extend(errors);
         }
+        if let Some(v) = m.skills.as_ref() {
+            let (declared, errors) = skills::parse_skills(v, &file, &manifest, files);
+            ext.skills = declared;
+            ext.errors.extend(errors);
+        }
         if let Some(v) = m.implementations.as_ref() {
             let (declared, errors) = implementations::parse_implementations(v, &file, &manifest);
+            // An implementation owns the skills it lists: they must be its
+            // extension's.
+            for d in &declared {
+                for skill in d
+                    .skills
+                    .iter()
+                    .filter(|s| !ext.skills.iter().any(|k| &k.name == *s))
+                {
+                    ext.errors.push(at(
+                        &file,
+                        entry_line(&manifest, "implementations", "id", &d.id),
+                        format!("implementation `{}` lists skill `{skill}`, which `skills:` doesn't declare", d.id),
+                    ));
+                }
+            }
             ext.implementations = declared;
             ext.errors.extend(errors);
         }

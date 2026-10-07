@@ -24,6 +24,7 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
     files: &[
         ext_file!("oxplow-bundled", "README.md"),
         ext_file!("oxplow-bundled", "collectors/effort_churn.star"),
+        ext_file!("oxplow-bundled", "commands/work-next.md"),
         ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
         ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
         ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
@@ -100,6 +101,7 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
         ext_file!("oxplow-bundled", "models/verdict.sql"),
         ext_file!("oxplow-bundled", "models/verdicts.sql"),
         ext_file!("oxplow-bundled", "questions.yaml"),
+        ext_file!("oxplow-bundled", "skills/work-items/SKILL.md"),
     ],
 }];
 

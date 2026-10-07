@@ -94,6 +94,7 @@ pub async fn acp_open_session(
         &config,
         &stream,
         Some(&thread),
+        &oxplow_app::capabilities::agent_text(ctx),
     );
     let spec = SessionSpec {
         thread_id,

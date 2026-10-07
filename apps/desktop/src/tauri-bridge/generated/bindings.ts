@@ -2712,6 +2712,11 @@ export type Extension_Deserialize = {
 	 */
 	implementations: ImplementationDecl[],
 	/**
+	 *  Skills and slash commands it gives the coding agent (`skills:`;
+	 *  valid ones — invalid ones are in `errors`).
+	 */
+	skills: SkillDecl[],
+	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
 	 *  type (`vocabulary_reactor`).
@@ -2828,6 +2833,11 @@ export type Extension_Serialize = {
 	 *  `implementations:`, each a built-in of core's).
 	 */
 	implementations: ImplementationDecl[],
+	/**
+	 *  Skills and slash commands it gives the coding agent (`skills:`;
+	 *  valid ones — invalid ones are in `errors`).
+	 */
+	skills: SkillDecl[],
 	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
@@ -3097,6 +3107,11 @@ export type ImplementationDecl = {
 	 *  say.
 	 */
 	entry: string,
+	/**
+	 *  The extension's skills (`skills:`) it owns: offered only while it's
+	 *  the active implementation.
+	 */
+	skills: string[],
 };
 
 // An operation paused mid-way, waiting on its conflicts.
@@ -5005,6 +5020,23 @@ export type SignInState = { state: "not_signed_in" } |
 { state: "signed_in"; until: string | null } | 
 // Its token lapsed or was revoked, and it can't renew itself.
 { state: "sign_in_again" };
+
+// One skill or command as the extension declares it.
+export type SkillDecl = {
+	name: string,
+	kind: SkillKind,
+	// Its markdown, inside the extension.
+	file: string,
+	// What it needs active (`work_items`, `work_items.comments`).
+	needs: string[],
+};
+
+// What the agent's runtime makes of it.
+export type SkillKind = 
+// A skill the agent loads when it's relevant: `<name>/SKILL.md`.
+"skill" | 
+// A slash command the person runs: `/oxplow:<name>`.
+"command";
 
 /**
  *  `snapshot` row — one per `request_snapshot()` call that had

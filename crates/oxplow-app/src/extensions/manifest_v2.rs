@@ -323,6 +323,9 @@ pub struct ManifestV2 {
     /// (stable; `oxplow-bundled` declares the defaults).
     #[serde(default)]
     pub implementations: Option<Value>,
+    /// Skills and slash commands for the coding agent (stable).
+    #[serde(default)]
+    pub skills: Option<Value>,
 
     // ---- experimental kinds (private extensions only) ----
     #[serde(default)]
@@ -353,6 +356,7 @@ pub const STABLE_KINDS: &[&str] = &[
     "ui.decorators",
     "ref_kinds",
     "implementations",
+    "skills",
     "config",
     "advisories",
     "event_types",

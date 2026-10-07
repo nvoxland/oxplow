@@ -587,6 +587,105 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
         .collect()
 }
 
+/// Every skill and slash command the agent gets now: core's, and each
+/// consented extension's that's offered — what it needs is active, and,
+/// when an implementation lists it, that implementation is the active one.
+/// A name another extension already took is left out (logged).
+pub fn agent_text(svc: &crate::Services) -> oxplow_plugin::AgentText {
+    let project_dir = svc.worktrees.project_dir();
+    let extensions =
+        crate::advisories::consented(&svc.approvals, &svc.extension_catalog.get(project_dir));
+    let config = crate::config_service::read_config(&svc.config);
+    offered_text(&svc.capabilities, &config, &extensions, |ext, file| {
+        crate::extensions::read_extension_file(project_dir, ext, file)
+    })
+}
+
+/// Rewrite the skills and commands of the agent runtimes already on disk
+/// to what's offered now: at boot (an agent that outlived an upgrade,
+/// tsk376), when the extensions change, and on a switch.
+pub fn refresh_agent_text(svc: &crate::Services) {
+    if let Err(error) = oxplow_plugin::refresh_skills(&svc.layout.project_dir, &agent_text(svc)) {
+        tracing::warn!(%error, "refreshing the agent's skills failed");
+    }
+}
+
+/// [`refresh_agent_text`] on each `capability.switched`.
+pub struct AgentTextRefresh {
+    services: std::sync::Weak<crate::Services>,
+}
+
+/// Register [`AgentTextRefresh`] on `svc`'s pump (boot, before it spawns).
+pub fn register(svc: &std::sync::Arc<crate::Services>) {
+    svc.event_pump
+        .register_async(std::sync::Arc::new(AgentTextRefresh {
+            services: std::sync::Arc::downgrade(svc),
+        }));
+}
+
+#[async_trait::async_trait]
+impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
+    fn name(&self) -> &'static str {
+        "capabilities.agent_text"
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == CapabilitySwitched::TYPE
+    }
+
+    async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
+        if let Some(svc) = self.services.upgrade() {
+            refresh_agent_text(&svc);
+        }
+        Ok(())
+    }
+}
+
+/// [`agent_text`] over `extensions`, reading each file with `read`.
+pub fn offered_text(
+    registry: &CapabilityRegistry,
+    config: &OxplowConfig,
+    extensions: &[crate::extensions::Extension],
+    read: impl Fn(&str, &str) -> Option<String>,
+) -> oxplow_plugin::AgentText {
+    use crate::extensions::skills::SkillKind;
+    let active = registry.snapshot(config);
+    let mut text = oxplow_plugin::AgentText::core();
+    for ext in extensions.iter().filter(|e| e.enabled) {
+        for skill in &ext.skills {
+            let owner = ext
+                .implementations
+                .iter()
+                .find(|d| d.skills.contains(&skill.name));
+            let owner_active = owner.is_none_or(|d| {
+                registry.active(config, &d.capability) == d.id
+                    && registry
+                        .get(&d.capability, &d.id)
+                        .is_some_and(|i| i.extension.as_deref() == Some(ext.name.as_str()))
+            });
+            if !owner_active || !active.unmet(&skill.needs).is_empty() {
+                continue;
+            }
+            if text.names(&skill.name) {
+                tracing::warn!(extension = %ext.name, skill = %skill.name, "another extension's skill has this name; leaving it out");
+                continue;
+            }
+            let Some(body) = read(&ext.name, &skill.file) else {
+                continue;
+            };
+            let item = oxplow_plugin::Text {
+                name: skill.name.clone(),
+                body,
+            };
+            match skill.kind {
+                SkillKind::Skill => text.skills.push(item),
+                SkillKind::Command => text.commands.push(item),
+            }
+        }
+    }
+    text
+}
+
 /// Restate the registry's declared implementations from the project's
 /// extensions and publish the rows.
 pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
@@ -976,5 +1075,37 @@ mod tests {
         let fake = r.snapshot(&config(&[("work_items", "fake")], &[]));
         assert_eq!(fake.command_refusal("fake.sync_now", &[]), None);
         assert!(fake.command_refusal("work_item.reorder", &[]).is_some());
+    }
+
+    /// A runtime already on disk gets what's offered (boot refreshes it
+    /// for an agent that outlived an upgrade, tsk376): core's skills, and
+    /// the work list's while one is active — none takes them away.
+    #[tokio::test]
+    async fn the_runtimes_skills_follow_what_is_offered() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let plugin = svc.layout.project_dir.join(".oxplow/runtime/claude-plugin");
+        let (skills, commands) = (plugin.join("skills"), plugin.join("commands"));
+        std::fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
+        std::fs::create_dir_all(&commands).unwrap();
+        std::fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
+        refresh_agent_text(svc);
+        assert_eq!(
+            std::fs::read_to_string(skills.join("oxplow-extension/SKILL.md")).unwrap(),
+            oxplow_plugin::AgentText::core()
+                .skill_body("oxplow-extension")
+                .unwrap()
+        );
+        assert!(skills.join("work-items/SKILL.md").is_file());
+        assert!(commands.join("work-next.md").is_file());
+        svc.config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), NONE.into());
+        refresh_agent_text(svc);
+        assert!(!skills.join("work-items").exists());
+        assert!(!commands.join("work-next.md").exists());
+        assert!(commands.join("configure.md").is_file());
     }
 }

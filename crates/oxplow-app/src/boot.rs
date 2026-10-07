@@ -152,6 +152,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::effort_landing::register(state);
     // A disabled plugin contribution's repair work item (P7.C2).
     crate::plugin_repair::register(state);
+    crate::capabilities::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
     // Extensions' effects (P8.D10), approved ones only — and a person's
@@ -180,6 +181,8 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     if let Err(e) = crate::capabilities::refresh(state).await {
         tracing::warn!(error = %e, "publishing the capability implementations failed");
     }
+    // The agent runtimes' skills: what's offered now.
+    crate::capabilities::refresh_agent_text(state);
     {
         let state = state.clone();
         let mut changes = state.extension_catalog.changes();
@@ -190,6 +193,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                 if let Err(e) = crate::capabilities::refresh(&state).await {
                     tracing::warn!(error = %e, "restating the capability implementations failed");
                 }
+                crate::capabilities::refresh_agent_text(&state);
             }
         });
     }
