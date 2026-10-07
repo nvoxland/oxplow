@@ -419,6 +419,20 @@ never while it's pending; `assets.rs`), and `CollectionService` uses the
 app's one engine. A spec with `min_value`/`max_value` still can't be
 cube-served; it folds once per capture token, shared.
 
+## Effort deltas recompute only what moved (2026-10-06)
+
+Token counts land as captures every ~18 s, and each one, through the cube,
+recomputed every open effort's delta for every spec. `CollectionService`
+now memoizes each (effort, spec) delta on what it's computed from: the
+spec, the effort's span, start/end snapshots, stream and claimed files,
+its own captures, and the capture token of its source measure's
+producers. A token capture moves only the token specs' inputs; the rest
+reuse their row. A formula spec (no source measure) always recomputes.
+Together with the per-measure memo (producers, slice keys,
+representatives; `.context/metrics.md`) and the cube skipping measures
+with nothing new, a burst of token writes costs a few indexed lookups per
+spec rather than history scans.
+
 ## Assets skip their boot rebuild (2026-10-06)
 
 Every asset rebuilt at boot because which tables changed was known only

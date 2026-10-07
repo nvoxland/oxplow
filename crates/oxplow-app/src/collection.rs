@@ -398,6 +398,10 @@ pub enum AnalysisIngest {
     },
 }
 
+/// `(effort, spec key)` → (what the delta was computed from, the delta).
+type DeltaMemo =
+    std::collections::HashMap<(i64, String), (String, Option<oxplow_db::EffortMetricDelta>)>;
+
 #[derive(Clone)]
 pub struct CollectionService {
     /// Durable fact layer (epic tsk12): coverage/test/analysis producers
@@ -430,6 +434,14 @@ pub struct CollectionService {
     /// resolver (with the ancestry cache) are shared with every other
     /// metric read, never rebuilt per call.
     metric_engine: crate::metric_engine::MetricEngine,
+    /// Per (effort, spec): what its delta was computed from, and the delta.
+    /// A recompute whose inputs haven't moved — the usual case, since a
+    /// token count lands every few seconds and moves only its own specs —
+    /// reuses it.
+    delta_memo: Arc<std::sync::Mutex<DeltaMemo>>,
+    /// The specs whose deltas were computed, in order (tests).
+    #[cfg(test)]
+    computed: Arc<std::sync::Mutex<Vec<String>>>,
     /// Validates the `test.*` events a capture logs with it.
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
@@ -574,6 +586,9 @@ impl CollectionService {
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             run_log: None,
             metric_engine,
+            delta_memo: Default::default(),
+            #[cfg(test)]
+            computed: Default::default(),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         }
     }
@@ -2815,6 +2830,24 @@ impl CollectionService {
             // One classifier (in `attribution.rs`, beside the write-side
             // `AttributionKind` each family maps to) decides the family; this match
             // is the only place each family's read computation is named (tsk274).
+            let inputs = self
+                .delta_inputs(spec, &effort, &claimed, stream, &effort_caps)
+                .await;
+            let memo_key = (effort.id.value(), spec.key.clone());
+            if let Some(inputs) = &inputs {
+                let memo = self.delta_memo.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some((from, row)) = memo.get(&memo_key) {
+                    if from == inputs {
+                        out.extend(row.clone());
+                        continue;
+                    }
+                }
+            }
+            #[cfg(test)]
+            self.computed
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(spec.key.clone());
             let row = match classify_effort_attribution(spec) {
                 EffortAttributionFamily::File => {
                     self.file_delta_from_facts(spec, &effort, &claimed, stream, &mut fact_cache)
@@ -2832,6 +2865,12 @@ impl CollectionService {
                     self.effort_stamped_delta(spec, &effort_caps).await
                 }
             };
+            if let Some(inputs) = inputs {
+                self.delta_memo
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(memo_key, (inputs, row.clone()));
+            }
             if let Some(row) = row {
                 out.push(row);
             }
@@ -2842,6 +2881,46 @@ impl CollectionService {
                 .then_with(|| a.title.cmp(&b.title))
         });
         out
+    }
+
+    /// What `spec`'s delta for `effort` is computed from: the spec itself,
+    /// the effort's span and start/end snapshots, its stream and claimed
+    /// files, its own captures, and the capture token of the producers of
+    /// the spec's source measure. `None` when that can't be named (a formula
+    /// spec with no source measure): then it's always computed.
+    async fn delta_inputs(
+        &self,
+        spec: &oxplow_db::MetricSpec,
+        effort: &Effort,
+        claimed: &[String],
+        stream: Option<i64>,
+        effort_caps: &[oxplow_db::MetricCapture],
+    ) -> Option<String> {
+        let measure = self
+            .facts
+            .get_measure(spec.source_measure.as_deref()?)
+            .await
+            .ok()??;
+        let producers = self.facts.producers_for_measure(measure.id).await.ok()?;
+        let token = self
+            .facts
+            .capture_token_for_producers(producers)
+            .await
+            .ok()?;
+        let caps: Vec<i64> = effort_caps.iter().map(|c| c.id).collect();
+        Some(format!(
+            "{spec:?}|{:?}|{:?}|{:?}|{:?}|{stream:?}|{claimed:?}|{caps:?}|{token:?}",
+            effort.started_at, effort.ended_at, effort.start_snapshot_id, effort.end_snapshot_id,
+        ))
+    }
+
+    /// The specs whose deltas were computed, in order.
+    #[cfg(test)]
+    pub(crate) fn computed_deltas(&self) -> Vec<String> {
+        self.computed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Per-file attribution for a code gauge, over facts: Σ over the effort's
@@ -5818,6 +5897,53 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .started_at
+        }
+
+        /// A spec's delta is recomputed only when what it's computed from
+        /// moved: another producer's capture (a token count landing every few
+        /// seconds) leaves it memoized; a capture of its own measure doesn't.
+        #[tokio::test]
+        async fn a_spec_delta_is_recomputed_only_when_its_inputs_move() {
+            let h = build(None).await;
+            let start = effort_start(&h, &h.effort_id).await;
+            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
+            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
+            let (m, facts) =
+                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
+            claim(&h, &h.effort_id, "src/a.rs").await;
+            seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0)]).await;
+            seed_gauge_capture(&facts, m, after, &[("src/a.rs", 3.0)]).await;
+            let computed = |svc: &CollectionService| {
+                svc.computed_deltas()
+                    .iter()
+                    .filter(|k| *k == "oxplow.rust.unsafe_blocks")
+                    .count()
+            };
+            h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(computed(&h.service), 1);
+            h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(computed(&h.service), 1, "nothing moved");
+            let tokens = facts
+                .upsert_measure(oxplow_db::NewMeasure::new("acme.tokens", "tokens"))
+                .await
+                .unwrap();
+            facts
+                .record_facts(
+                    oxplow_db::NewMetricCapture::done(1, "otel-tokens", "otel"),
+                    vec![oxplow_db::NewFact::new(tokens, 10.0)],
+                )
+                .await
+                .unwrap();
+            h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(computed(&h.service), 1, "another producer's capture");
+            seed_gauge_capture(&facts, m, after, &[("src/a.rs", 4.0)]).await;
+            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(computed(&h.service), 2, "its own measure's capture");
+            let row = deltas
+                .iter()
+                .find(|d| d.key == "oxplow.rust.unsafe_blocks")
+                .unwrap();
+            assert_eq!(row.current, 4.0);
         }
 
         #[tokio::test]
