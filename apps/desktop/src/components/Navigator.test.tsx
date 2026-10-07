@@ -114,10 +114,10 @@ test("strip glyphs carry their full title as a tooltip", () => {
   expect(getByTestId("navigator-strip-thread-thr2").title).toBe("Research");
 });
 
-test("clicking a stream glyph in the strip switches to that stream", () => {
+test("clicking a stream glyph in the strip switches to that stream and expands the panel", () => {
   const switched: string[] = [];
   const selected: string[] = [];
-  const { getByTestId } = renderNavigator({
+  const { getByTestId, queryByTestId } = renderNavigator({
     onSwitchStream: (id) => switched.push(id),
     onSelectThread: (_s, t) => selected.push(t),
   });
@@ -128,15 +128,30 @@ test("clicking a stream glyph in the strip switches to that stream", () => {
   // Dispatching onSelectThread alongside it races the thread-state
   // writes and can leave the old thread selected — switch only.
   expect(selected).toEqual([]);
+  // A stream glyph heads its threads: it opens the panel to show them.
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 });
 
 test("clicking a thread glyph in the strip selects that thread", () => {
   const selected: string[] = [];
-  const { getByTestId } = renderNavigator({ onSelectThread: (_s, t) => selected.push(t) });
+  const { getByTestId, queryByTestId } = renderNavigator({ onSelectThread: (_s, t) => selected.push(t) });
 
   fireEvent.click(getByTestId("navigator-strip-thread-thr2"));
 
   expect(selected).toEqual(["thr2"]);
+  expect(queryByTestId("navigator-overlay") === null).toBe(true);
+});
+
+test("clicking the selected thread's glyph expands the panel", () => {
+  const selected: string[] = [];
+  const { getByTestId, queryByTestId } = renderNavigator({ onSelectThread: (_s, t) => selected.push(t) });
+
+  // Selecting it again would do nothing, so the click opens the panel —
+  // as a click in the strip's empty space does.
+  fireEvent.click(getByTestId("navigator-strip-thread-thr1"));
+
+  expect(selected).toEqual([]);
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 });
 
 // --- Expanding ------------------------------------------------------------

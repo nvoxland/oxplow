@@ -644,8 +644,9 @@ declaring *what it is* and mounting the generic layer.
     **right-click** — there are no per-row `*-kebab-<id>` testids any
     more. Right-click the row, then click `menu-item-<id>`.
   - Navigator strip glyphs are `navigator-strip-stream-<id>` /
-    `navigator-strip-thread-<id>` (click to switch; `title` carries the
-    full name). To open the panel in a test, click `navigator-expand` —
+    `navigator-strip-thread-<id>` (click to switch; a stream glyph also
+    opens the panel, and the selected thread's glyph only opens it;
+    `title` carries the full name). To open the panel in a test, click `navigator-expand` —
     **hover does not open it** (tsk269). `navigator-collapse` closes it,
     as does a click on the `navigator-overlay` background;
     `navigator-strip-empty` is the strip's dead-space expand target and

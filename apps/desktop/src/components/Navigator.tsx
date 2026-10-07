@@ -49,7 +49,8 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  * nothing else.
  *
  * The panel expands only on an explicit click: the bottom-pinned chevron,
- * or dead space in the strip. It re-renders the same rows with full
+ * dead space in the strip, a stream glyph (which also switches to it) or
+ * the selected thread's glyph. It re-renders the same rows with full
  * titles — y-positions are identical between the strip and the panel so
  * items don't move when switching modes.
  *
@@ -179,6 +180,19 @@ export function Navigator({
     strip.closePanel();
   };
 
+  // In the collapsed strip a stream glyph heads its threads, so it
+  // switches to the stream and opens the panel to show them; the selected
+  // thread's glyph (selecting it again would do nothing) opens the panel,
+  // as a click in the strip's empty space does.
+  const handleStripStream = (streamId: string) => {
+    void onSwitchStream(streamId);
+    strip.openPanel();
+  };
+  const handleStripThread = (streamId: string, threadId: string, isSelected: boolean) => {
+    if (isSelected) strip.openPanel();
+    else handleSelectThread(streamId, threadId);
+  };
+
   // Build the list of "rows" so the strip and overlay can both walk
   // the same sequence — guaranteeing matching y-positions row-by-row.
   // `add-thread` rows are flyout-only (skipped in the strip render).
@@ -245,7 +259,7 @@ export function Navigator({
                 isWriter={false}
                 selected={false}
                 status={undefined}
-                onClick={() => handleSwitchStream(g.stream.id)}
+                onClick={() => handleStripStream(g.stream.id)}
                 testId={`navigator-strip-stream-${g.stream.id}`}
               />
               {g.threads.map(({ thread, isWriter }) => {
@@ -262,7 +276,7 @@ export function Navigator({
                     selected={isSelected}
                     status={agentStatuses[thread.id]}
                     question={agentQuestions?.[thread.id]}
-                    onClick={() => handleSelectThread(g.stream.id, thread.id)}
+                    onClick={() => handleStripThread(g.stream.id, thread.id, isSelected)}
                     testId={`navigator-strip-thread-${thread.id}`}
                   />
                 );
