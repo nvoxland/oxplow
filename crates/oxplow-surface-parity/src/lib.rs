@@ -148,6 +148,10 @@ pub const MANIFEST: &[Capability] = &[
         "get_command",
         "one command's spec, for a form or a confirmation; an agent lists them with `list_commands`",
     ),
+    ui(
+        "list_person_commands",
+        "the commands a person is offered (their `ui`); an agent lists all it may run with `list_commands`",
+    ),
     ui("undo_command", "undo is a person's (P5.A1)"),
     ui(
         "decide_proposal",

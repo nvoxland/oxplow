@@ -31,8 +31,8 @@ export function createPersonCommands(deps: PersonCommandDeps) {
     pending = next;
     for (const l of [...listeners]) l();
   };
-  /** Whether the command ran (false when it failed, or waits for the
-   *  person's confirmation). */
+  /** The run's outcome — `null` when it failed, or waits for the
+   *  person's confirmation (truthy exactly when it ran). */
   // Taking a toast's Undo: the run undone, as the person (tsk975).
   const undo = async (label: string, auditId: number) => {
     try {
@@ -42,22 +42,22 @@ export function createPersonCommands(deps: PersonCommandDeps) {
       deps.recordError(`Undo ${label}`, e instanceof Error ? e.message : String(e));
     }
   };
-  const attempt = async (p: PendingCommand, confirmed: boolean): Promise<boolean> => {
+  const attempt = async (p: PendingCommand, confirmed: boolean): Promise<CommandOutcome | null> => {
     try {
       const out = await deps.runCommand(p.command, p.input, confirmed);
       set(null);
       // A run that came back undoable offers its Undo.
       const auditId = out.inverse && out.audit_id != null ? out.audit_id : null;
       deps.toast(`${p.label}: done.`, auditId === null ? undefined : () => void undo(p.label, auditId));
-      return true;
+      return out;
     } catch (e) {
       if (!confirmed && needsConfirmation(e)) {
         set(p);
-        return false;
+        return null;
       }
       set(null);
       deps.recordError(p.label, e instanceof Error ? e.message : String(e));
-      return false;
+      return null;
     }
   };
   return {

@@ -80,7 +80,7 @@ fn schema<T: JsonSchema>() -> Value {
 
 fn spec(name: &str, summary: &str, schema: Value, undoable: bool) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers: Invokers::ALL,
@@ -90,6 +90,7 @@ fn spec(name: &str, summary: &str, schema: Value, undoable: bool) -> CommandSpec
         atomicity: Atomicity::Tx,
         effect: CommandEffect::Record,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

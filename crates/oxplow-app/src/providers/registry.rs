@@ -3021,7 +3021,7 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
         .filter(|decl| !verbs.contains(&decl.name.as_str()))
         .map(|decl| {
             let spec = CommandSpec {
-                name: super::command_id(&id, &instance.spec.capability, &decl.name),
+                id: super::command_id(&id, &instance.spec.capability, &decl.name),
                 summary: format!("{} (provider `{}`)", decl.summary, instance.name),
                 input_schema: decl.input_schema.clone(),
                 invokers: Invokers::ALL,
@@ -3031,6 +3031,7 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
                 atomicity: Atomicity::External,
                 effect: host::effect_of(&decl.effect)?,
                 needs: Vec::new(),
+                ui: None,
             };
             let (instance, verb, id) = (instance.clone(), decl.name.clone(), id.clone());
             Command::new(

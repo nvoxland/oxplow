@@ -372,7 +372,7 @@ const BACKFILL_SUMMARY: &str = "Have an effect react to the matching events it n
 pub fn backfill_command(services: Weak<Services>) -> Command {
     Command::new(
         CommandSpec {
-            name: BACKFILL.into(),
+            id: BACKFILL.into(),
             summary: BACKFILL_SUMMARY.into(),
             input_schema: serde_json::to_value(schemars::schema_for!(BackfillInput))
                 .expect("schema serializes"),
@@ -383,6 +383,7 @@ pub fn backfill_command(services: Weak<Services>) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();
@@ -425,7 +426,7 @@ pub fn backfill_command(services: Weak<Services>) -> Command {
 pub fn backfill_plan_command(services: Weak<Services>) -> Command {
     Command::new(
         CommandSpec {
-            name: BACKFILL_PLAN.into(),
+            id: BACKFILL_PLAN.into(),
             summary:
                 "How many events an `oxplow.effect.backfill` would have an effect react to: the \
                       matching ones it never reacted to, the log positions they span (pass \
@@ -441,6 +442,7 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Read,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::Tx(Arc::new(move |ctx, input| {
             let input: BackfillInput =
@@ -481,7 +483,7 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
 pub fn retry_command(services: Weak<Services>) -> Command {
     Command::new(
         CommandSpec {
-            name: RETRY.into(),
+            id: RETRY.into(),
             summary: "Have an effect react again to an event its reaction to failed, as its \
                       next attempt. If the failed attempt was interrupted with a step outside \
                       oxplow under way, that step may already have run: retrying sends it \
@@ -496,6 +498,7 @@ pub fn retry_command(services: Weak<Services>) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();

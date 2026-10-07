@@ -526,7 +526,7 @@ mod tests {
                     stream_id: None,
                 })
                 .into_iter()
-                .map(|s| s.name),
+                .map(|s| s.id),
         );
         out
     }

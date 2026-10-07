@@ -32,7 +32,8 @@ pub mod work_items;
 pub use agent::AgentKind;
 pub use commands::{
     namespace_of, Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandOutcome,
-    CommandSpec, Confirm, InputValidator, Invoker, Invokers, Lifecycle, Preview, OXPLOW_NAMESPACE,
+    CommandSpec, CommandUi, Confirm, InputValidator, Invoker, Invokers, Lifecycle, Preview,
+    OXPLOW_NAMESPACE,
 };
 pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,

@@ -112,12 +112,12 @@ export function repairWithAgent(repairItem: string, insert: (text: string) => vo
 }
 
 /** Enable Again: `oxplow.plugin.enable` as the person. */
-export function enableAgain(h: PluginHealth, commands: PersonCommands = personCommands): Promise<boolean> {
-  return commands.run(`Enable ${h.plugin}/${h.contribution}`, "oxplow.plugin.enable", {
+export async function enableAgain(h: PluginHealth, commands: PersonCommands = personCommands): Promise<boolean> {
+  return !!(await commands.run(`Enable ${h.plugin}/${h.contribution}`, "oxplow.plugin.enable", {
     plugin: h.plugin,
     kind: h.kind,
     contribution: h.contribution,
-  });
+  }));
 }
 
 /** Every contribution's health, and what was read. */

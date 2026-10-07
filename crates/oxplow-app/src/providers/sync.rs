@@ -548,7 +548,7 @@ pub fn sync_command(registry: &Arc<ProviderRegistry>) -> Command {
     let registry = Arc::downgrade(registry);
     Command::new(
         CommandSpec {
-            name: SYNC.into(),
+            id: SYNC.into(),
             summary: "Read a provider instance's collectors now (all, or one), restating the \
                       items it tracks (runs the provider process, a system the bus doesn't own)."
                 .into(),
@@ -561,6 +561,7 @@ pub fn sync_command(registry: &Arc<ProviderRegistry>) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Record,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let registry = registry.clone();

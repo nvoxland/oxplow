@@ -548,13 +548,14 @@ declaring *what it is* and mounting the generic layer.
   the pair (`launcher-new-project` accented, `launcher-open-project`
   secondary). Don't reintroduce an "open initializes it for you" path.
 - **The menu bar is File and Edit only** (decided 2026-10-07). Every
-  other command is a **search command**: its group (`inMenuBar: false` in
-  `commands.ts` — Git: `Commit Changes…` / `Pull Changes` / `Push
-  Changes`; Tasks, group id still `plan`: `New Task…` / `New Dashboard…`
-  / `New Lens with Your Agent…` / `New Thread…` / `New Stream…`) is
-  listed by the launcher under its label, and its keybinding still runs
-  (`commandMap` holds every group; `menuBarGroups` picks the bar's for
-  the native menu and the in-window `Menubar`). **Pages aren't
+  other command is a **search command**. The command bus's offers come
+  first (`commandOffers`, `.context/commands.md` "Offering a command to a
+  person": Pull / Push Changes, New Task… (⌘⇧N), New Dashboard…, New
+  Stream…); what's left of the app's own groups (`inMenuBar: false` in
+  `commands.ts` — Git: `Commit Changes…`; Tasks, group id `plan`: `New
+  Lens with Your Agent…` / `New Thread…`) is listed by the launcher under
+  its label too (`commandMap` holds every group; `menuBarGroups` picks the
+  bar's for the native menu and the in-window `Menubar`). **Pages aren't
   commands:** the View / Git / Tasks "Dashboard" items that only opened
   a page are gone — the launcher lists every page as a page row. Pull /
   Push run as background tasks (failures record an op-error and a "Show

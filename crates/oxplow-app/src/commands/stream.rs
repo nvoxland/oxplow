@@ -165,7 +165,7 @@ fn person_external(
     confirm: Confirm,
 ) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers: Invokers::HUMAN_ONLY,
@@ -175,6 +175,7 @@ fn person_external(
         atomicity: Atomicity::External,
         effect: CommandEffect::Write,
         needs: Vec::new(),
+        ui: None,
     }
 }
 
@@ -185,7 +186,7 @@ fn row_spec(
     invokers: Invokers,
 ) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers,
@@ -195,6 +196,7 @@ fn row_spec(
         atomicity: Atomicity::Tx,
         effect: CommandEffect::Record,
         needs: Vec::new(),
+        ui: None,
     }
 }
 
@@ -231,6 +233,13 @@ pub fn create_worktree_command(deps: StreamDeps) -> Command {
         })),
     )
     .expect("oxplow.stream.create_worktree is a valid command")
+    .with_ui(oxplow_domain::CommandUi {
+        label: "New Stream…".into(),
+        group: Some("Tasks".into()),
+        keywords: vec!["worktree".into(), "branch".into()],
+        form: Some("page:new-stream".into()),
+        ..Default::default()
+    })
 }
 
 /// `stream.adopt_worktree { path, title }`.

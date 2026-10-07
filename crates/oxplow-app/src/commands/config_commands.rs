@@ -164,7 +164,7 @@ fn schema_of<T: JsonSchema>() -> Value {
 /// Every config write records its inverse; the reads have none.
 fn spec(name: &str, summary: &str, input_schema: Value, effect: CommandEffect) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema,
         invokers: Invokers::ALL,
@@ -174,6 +174,7 @@ fn spec(name: &str, summary: &str, input_schema: Value, effect: CommandEffect) -
         atomicity: Atomicity::Tx,
         effect,
         needs: Vec::new(),
+        ui: None,
     }
 }
 
@@ -481,7 +482,7 @@ mod tests {
         let (dir, target, _bus) = setup(None);
         let set = commands(target.clone())
             .into_iter()
-            .find(|c| c.spec.name == SET)
+            .find(|c| c.spec.id == SET)
             .unwrap();
         let Handler::Tx(handler) = &set.handler else {
             panic!("config.set is a Tx handler")

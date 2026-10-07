@@ -311,7 +311,7 @@ fn show(target: LensTarget) -> Command {
     }));
     Command::new(
         CommandSpec {
-            name: SHOW.into(),
+            id: SHOW.into(),
             summary: "Show the person an answer in their thread: an existing lens with params, \
                       or a lens of your own (title, query, viz). It renders beside the \
                       conversation, where they can keep it."
@@ -325,6 +325,7 @@ fn show(target: LensTarget) -> Command {
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Record,
             needs: Vec::new(),
+            ui: None,
         },
         handler,
     )
@@ -553,7 +554,7 @@ fn keep(target: LensTarget) -> Command {
     }));
     Command::new(
         CommandSpec {
-            name: KEEP.into(),
+            id: KEEP.into(),
             summary: "Keep an answer from a thread, or a lens spec of your own, as a private \
                       lens (a page the person can reopen, pin and share), recording where it \
                       came from. Kept in another stream's worktree, it shows in the app once \
@@ -568,6 +569,7 @@ fn keep(target: LensTarget) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         handler,
     )
@@ -606,7 +608,7 @@ fn share(target: LensTarget) -> Command {
     }));
     Command::new(
         CommandSpec {
-            name: SHARE.into(),
+            id: SHARE.into(),
             summary: "Move a private lens into a shared extension (created shared when \
                       missing), refused unless it passes the shared checks; committing it is \
                       how the team gets it."
@@ -620,6 +622,7 @@ fn share(target: LensTarget) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         handler,
     )

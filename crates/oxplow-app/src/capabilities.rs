@@ -267,7 +267,7 @@ impl Active {
     /// Why `spec` isn't offered — its owner isn't active, or a need is
     /// unmet — or `None` when it is.
     pub fn refusal(&self, spec: &oxplow_domain::CommandSpec) -> Option<String> {
-        self.command_refusal(&spec.name, &spec.needs)
+        self.command_refusal(&spec.id, &spec.needs)
     }
 
     /// Why the command `name` needing `needs` isn't offered, or `None`.
@@ -1070,7 +1070,7 @@ mod tests {
             .commands
             .list(&agent)
             .into_iter()
-            .map(|c| c.name)
+            .map(|c| c.id)
             .collect();
         for name in [
             "oxplow.work_item.create",
@@ -1159,7 +1159,7 @@ mod tests {
             .commands
             .list(&oxplow_domain::Actor::Human)
             .into_iter()
-            .map(|c| c.name)
+            .map(|c| c.id)
             .collect();
         assert!(offered.iter().any(|n| n == "oxplow.work_item.link"));
         assert!(!offered.iter().any(|n| n == "oxplow.work_item.comment"));

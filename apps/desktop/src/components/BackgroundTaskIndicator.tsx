@@ -11,6 +11,7 @@ const KIND_LABEL: Record<BackgroundTask["kind"], string> = {
   "code-quality": "Code quality",
   lsp: "LSP",
   "notes-resync": "Notes",
+  command: "Command",
   snapshot: "Snapshot",
   metrics: "Metrics",
 };

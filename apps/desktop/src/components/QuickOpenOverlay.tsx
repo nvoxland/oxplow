@@ -1,3 +1,4 @@
+import type { CommandEntry } from "./quickOpenResults.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
 import { refKindInfo, useRefKinds } from "../refKinds.js";
@@ -47,6 +48,8 @@ interface Props {
   /** Menu commands flattened into the launcher so actions (Commit,
    *  New Task, …) are discoverable here too — this is the only palette. */
   menuGroups: MenuGroup[];
+  /** What the command bus offers a person here (`commandOffers`). */
+  offers: CommandEntry[];
   onClose(): void;
   onOpenFile(path: string): void;
   onOpenPage(ref: TabRef): void;
@@ -118,7 +121,7 @@ function persistRecentCollapsed(collapsed: boolean): void {
   }
 }
 
-export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages: staticPages, menuGroups, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
+export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages: staticPages, menuGroups, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
@@ -312,6 +315,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const commands = useMemo(
     () => [
       ...flattenCommands(menuGroups),
+      ...offers,
       ...launcherActions.map((a) => {
         const t = a.target;
         return {
@@ -326,7 +330,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
         };
       }),
     ],
-    [menuGroups, launcherActions],
+    [menuGroups, offers, launcherActions],
   );
 
   // Empty input = launcher mode (pages only, grouped by category in the

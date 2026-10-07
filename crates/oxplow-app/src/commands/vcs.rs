@@ -95,7 +95,7 @@ where
     Fut: Future<Output = Result<Value, CommandError>> + Send + 'static,
 {
     let spec = CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: serde_json::to_value(schemars::schema_for!(I)).expect("schema serializes"),
         invokers: PERSON_ONLY,
@@ -105,6 +105,7 @@ where
         atomicity: Atomicity::External,
         effect: CommandEffect::Write,
         needs: Vec::new(),
+        ui: None,
     };
     let target = target.clone();
     let op = Arc::new(op);
@@ -368,7 +369,14 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 let from = i.remote_branch()?;
                 outcome(t.vcs.pull(&ws, from).await.map_err(vcs_err)?)
             },
-        ),
+        )
+        .with_ui(oxplow_domain::CommandUi {
+            label: "Pull Changes".into(),
+            group: Some("Git".into()),
+            input: Some(serde_json::json!({ "stream": "{{stream}}" })),
+            background: true,
+            ..Default::default()
+        }),
         command(
             "oxplow.vcs.push",
             "Push the stream's branch (to its upstream, or a named remote branch).",
@@ -379,7 +387,14 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 let to = i.remote_branch()?;
                 outcome(t.vcs.push(&ws, to).await.map_err(vcs_err)?)
             },
-        ),
+        )
+        .with_ui(oxplow_domain::CommandUi {
+            label: "Push Changes".into(),
+            group: Some("Git".into()),
+            input: Some(serde_json::json!({ "stream": "{{stream}}" })),
+            background: true,
+            ..Default::default()
+        }),
         command(
             "oxplow.vcs.merge",
             "Merge a revision into the stream's branch; the result lists any conflicts \

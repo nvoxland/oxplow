@@ -2193,7 +2193,7 @@ are commands on the bus whose handler is a Starlark script that
 
 ```yaml
 commands:
-  - name: finish_review                # [a-z][a-z0-9_]*; registered as <namespace>.finish_review
+  - name: review.finish                # <area>.<verb>, each [a-z][a-z0-9_]*; id <namespace>.review.finish
     summary: Mark the task done and leave a note.
     input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }
     entry: handlers/finish_review.star # defines transform(x), x = { input, rows }
@@ -2201,11 +2201,18 @@ commands:
     confirm: never                     # never (default) | always | destructive; children only add
     effect: write                      # write (default) | record; `read` is refused (a lens reads)
     invokers: { human: true, agent: true, lens: true }   # default: all
+    needs: [work_items.comments]       # capabilities / features it needs active (as a lens declares)
+    ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
+      label: Finish Review
+      group: Review
+      about: work_item                 # ref-bound; absent: search offers it
+      input: { ref: "{{ref}}" }
     examples:
       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
 ```
 
-`transform` returns `{ commands: [{ name, input }], result?, events? }`, or
+A shared extension's commands are `Stable`, a private one's
+`Experimental`. `transform` returns `{ commands: [{ name, input }], result?, events? }`, or
 `{ refuse: "<why>" }` to decline — the run is `Invalid` with that reason
 and writes nothing (`composed` → `Composed::{Run, Refused}`). An example
 may give `rows:` — standing in for the `input` query's result, so it

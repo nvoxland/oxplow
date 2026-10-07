@@ -264,7 +264,7 @@ pub fn enable_command(
 ) -> Command {
     Command::new(
         CommandSpec {
-            name: ENABLE.into(),
+            id: ENABLE.into(),
             summary: "Enable a disabled extension provider, collector or effect on this machine \
                       again, clearing an automatic disable (a provider's process restarts, a \
                       system the bus doesn't own)."
@@ -278,6 +278,7 @@ pub fn enable_command(
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let (health, providers) = (health.clone(), providers.clone());

@@ -12,8 +12,6 @@ import {
   deleteWorkspacePath,
   getCurrentStream,
   getWorkspaceContext,
-  vcsPull,
-  vcsPush,
   type GitOpKickoff,
   desktopBridge,
   listStreams,
@@ -31,7 +29,7 @@ import {
   recordUsage,
   reorderThreads,
   switchStream,
-  createDashboard,
+  runCommandInBackground,
   writeWorkspaceFile,
   type ThreadState,
   type AgentKind,
@@ -143,7 +141,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, customDashboardRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -170,6 +168,10 @@ import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING, shortRevisionLabel } from "./revision.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
+import { commandOffers } from "./commandOffers.js";
+import { usePersonCommands } from "./personCommandsStore.js";
+import { personCommands } from "./personCommands.js";
+import type { CommandId } from "./commands.js";
 import { logUi, setUiLogContext } from "./logger.js";
 
 // Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
@@ -1247,22 +1249,6 @@ export function App() {
       setCenterActive(fileRef(selectedFilePath).id);
       setEditorFindRequest((current) => current + 1);
     },
-    newTask() {
-      // handleOpenPage is declared further down; forward through the ref
-      // so the menu/keyboard handler routes to a NewTaskPage tab.
-      handleOpenPageRef.current?.(newTaskRef());
-    },
-    newStream() {
-      handleOpenPageRef.current?.(newStreamRef());
-    },
-    newDashboard() {
-      // Create-then-open: no form, mirroring the NewStreamPage
-      // create→navigate pattern. The new dashboard opens ready to
-      // populate (rename via its in-body H1, add tiles via right-click).
-      void createDashboard("Untitled dashboard").then((d) => {
-        handleOpenPageRef.current?.(customDashboardRef(d.id));
-      });
-    },
     newLensWithAgent() {
       insertIntoAgent(NEW_LENS_PROMPT);
     },
@@ -1276,14 +1262,6 @@ export function App() {
       if (!stream || !workspaceContext.vcsEnabled) return;
       handleOpenPageRef.current?.(indexRef("files"));
       setCommitFilesRequest((n) => n + 1);
-    },
-    pullChanges() {
-      if (!stream || !workspaceContext.vcsEnabled) return;
-      void runGitMenuOp("Pull", "pull", () => vcsPull(stream.id));
-    },
-    pushChanges() {
-      if (!stream || !workspaceContext.vcsEnabled) return;
-      void runGitMenuOp("Push", "push", () => vcsPush(stream.id));
     },
     openProject() {
       void pickAndOpenProject(false);
@@ -1320,6 +1298,22 @@ export function App() {
     () => new Map(menuGroups.flatMap((group) => group.items.map((item) => [item.id, item] as const))),
     [menuGroups],
   );
+  // What the command bus offers a person (Pull, New Task, …): search lists
+  // them with the app's own commands, and a shortcut may run one.
+  const personSpecs = usePersonCommands();
+  const offers = useMemo(
+    () =>
+      commandOffers(personSpecs, { streamId: stream?.id ?? null, threadId: selectedThreadId ?? null }, {
+        openPage: (tabId) => {
+          const ref = refFromTabId(tabId);
+          if (ref) handleOpenPageRef.current?.(ref);
+        },
+        run: (label, id, input) => personCommands.run(label, id, input),
+        runInBackground: (label, id, input) =>
+          void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
+      }),
+    [personSpecs, stream?.id, selectedThreadId, runGitMenuOp],
+  );
 
   // The launcher (QuickOpen) is the single discovery surface — pages,
   // files, commands, and body search in one box — and has exactly one
@@ -1339,12 +1333,18 @@ export function App() {
     function handleKeyDown(event: KeyboardEvent) {
       const commandId = getCommandIdForShortcut(event);
       if (!commandId) return;
-      // Only "plan.newTask" suppresses itself inside a text input — the
+      // Only New Task suppresses itself inside a text input — the
       // rest (save, find, quick-open) are explicitly useful while editing.
       // Rationale: a user in the middle of typing a description shouldn't
       // lose focus to a New-Task modal and drop their half-typed text.
-      if (commandId === "plan.newTask" && isEditableTarget(event.target)) return;
-      const command = commandMap.get(commandId);
+      if (commandId === "oxplow.work_item.create" && isEditableTarget(event.target)) return;
+      const offer = offers.find((o) => o.id === commandId);
+      if (offer) {
+        event.preventDefault();
+        offer.run();
+        return;
+      }
+      const command = commandMap.get(commandId as CommandId);
       if (!command || !command.enabled || !command.run) return;
       event.preventDefault();
       command.run();
@@ -1352,7 +1352,7 @@ export function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [commandMap]);
+  }, [commandMap, offers]);
 
   useEffect(() => {
     if (!shellAvailable()) return;
@@ -3244,6 +3244,7 @@ export function App() {
           backlogReadyCount: backlogState?.items.length ?? 0,
         })}
         menuGroups={menuGroups}
+        offers={offers}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {
           void handleOpenFile(path);

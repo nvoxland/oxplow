@@ -93,7 +93,7 @@ fn id_of(item: &str, kind: &str, field: &str) -> Result<i64, CommandError> {
 
 fn spec(name: &str, summary: &str, schema: serde_json::Value) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers: REVIEWERS,
@@ -103,6 +103,7 @@ fn spec(name: &str, summary: &str, schema: serde_json::Value) -> CommandSpec {
         atomicity: Atomicity::Tx,
         effect: CommandEffect::Record,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

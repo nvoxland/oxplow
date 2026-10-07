@@ -203,7 +203,7 @@ async fn run_command_over_http_is_audited_to_the_thread_in_the_headers() {
         json!({
             "jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": {"name": "run_command", "arguments": {
-                "name": "oxplow.config.set",
+                "id": "oxplow.config.set",
                 "input": {"key": "zones", "value": [{"match": "src/**", "zone": "core"}]}
             }}
         }),
@@ -254,7 +254,7 @@ async fn run_command_over_http_is_audited_to_the_thread_in_the_headers() {
         json!({
             "jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": {"name": "run_command", "arguments": {
-                "name": "oxplow.config.set", "input": {"key": "zones", "value": []}
+                "id": "oxplow.config.set", "input": {"key": "zones", "value": []}
             }}
         }),
     )

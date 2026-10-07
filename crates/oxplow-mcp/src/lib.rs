@@ -117,9 +117,9 @@ const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (n
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunCommandParams {
-    /// The command's name, as `list_commands` reports it (`oxplow.config.set`,
+    /// The command id, as `list_commands` reports it (`oxplow.config.set`,
     /// `oxplow.work_item.transition`).
-    pub name: String,
+    pub id: String,
     /// The command's input, matching its `input_schema`.
     #[serde(default)]
     pub input: serde_json::Value,
@@ -2256,7 +2256,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run a command by name with its input (see `list_commands`). Returns \
+        description = "Run a command by its id with its input (see `list_commands`). Returns \
                        `{ result, audit_id, event_id, inverse? }`. Invalid input names the \
                        failing field; a denied command says why. A command that needs a \
                        person's confirmation is not run: it is recorded as a proposal and \
@@ -3069,7 +3069,7 @@ impl OxplowMcp {
         let outcome = match self
             .services
             .commands
-            .run(&actor, &params.name, params.input, false)
+            .run(&actor, &params.id, params.input, false)
             .await
         {
             Ok(outcome) => outcome,
@@ -4026,7 +4026,7 @@ mod tests {
             .run_command_as(
                 &McpCaller::default(),
                 RunCommandParams {
-                    name: "oxplow.config.set".into(),
+                    id: "oxplow.config.set".into(),
                     input: serde_json::json!({"key": "zones", "value": []}),
                 },
             )
@@ -4039,7 +4039,7 @@ mod tests {
             .run_command_as(
                 &McpCaller::default(),
                 RunCommandParams {
-                    name: "oxplow.metric.record".into(),
+                    id: "oxplow.metric.record".into(),
                     input: serde_json::json!({"key": "oxplow.rust.unsafe_blocks", "value": 1.0}),
                 },
             )
@@ -4053,7 +4053,7 @@ mod tests {
             .unwrap();
         let text = listed.content[0].as_text().unwrap().text.clone();
         let specs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
-        let names: Vec<&str> = specs.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = specs.iter().map(|s| s["id"].as_str().unwrap()).collect();
         for expected in [
             "oxplow.config.set",
             "oxplow.config.list_keys",
@@ -4087,7 +4087,7 @@ mod tests {
             .next()
             .unwrap();
         let list = || RunCommandParams {
-            name: "oxplow.config.list_keys".into(),
+            id: "oxplow.config.list_keys".into(),
             input: serde_json::json!({}),
         };
         let err = server
@@ -4162,7 +4162,7 @@ mod tests {
             .run_command(
                 extensions_for(parts),
                 Parameters(RunCommandParams {
-                    name: "oxplow.config.set".into(),
+                    id: "oxplow.config.set".into(),
                     input: serde_json::json!({
                         "key": "zones",
                         "value": [{"match": "src/**", "zone": "core"}]
@@ -4196,7 +4196,7 @@ mod tests {
                     stream_id: Some(stream.id),
                 },
                 RunCommandParams {
-                    name: "oxplow.config.set".into(),
+                    id: "oxplow.config.set".into(),
                     input: serde_json::json!({"key": "agentPromptAppend", "value": "be brief"}),
                 },
             )

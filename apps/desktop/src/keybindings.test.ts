@@ -6,6 +6,8 @@ describe("getCommandIdForShortcut", () => {
     expect(getCommandIdForShortcut(eventLike("s", { metaKey: true }))).toBe("file.save");
     expect(getCommandIdForShortcut(eventLike("p", { ctrlKey: true }))).toBe("file.quickOpen");
     expect(getCommandIdForShortcut(eventLike("f", { metaKey: true }))).toBe("edit.find");
+    // New Task is the bus command's offer (its form), not an app command.
+    expect(getCommandIdForShortcut(eventLike("N", { metaKey: true, shiftKey: true }))).toBe("oxplow.work_item.create");
   });
 
   test("ignores non-command key presses", () => {

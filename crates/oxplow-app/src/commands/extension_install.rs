@@ -84,7 +84,7 @@ fn stream_for(named: Option<&str>) -> Result<Option<StreamId>, CommandError> {
 
 fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers: Invokers::ALL,
@@ -94,6 +94,7 @@ fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
         atomicity: Atomicity::External,
         effect: CommandEffect::Write,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

@@ -101,7 +101,7 @@ pub struct SequenceCall {
 /// audited as (`effect_triggers`).
 pub fn sequence_spec() -> CommandSpec {
     CommandSpec {
-        name: SEQUENCE.into(),
+        id: SEQUENCE.into(),
         summary: "Run several commands as one, each one's own policy and confirmation \
                   checked before any runs; the run has one audit row. In oxplow's own \
                   records they run in one transaction and undo together; when one goes to \
@@ -118,6 +118,7 @@ pub fn sequence_spec() -> CommandSpec {
         atomicity: Atomicity::Dispatch,
         effect: CommandEffect::Write,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

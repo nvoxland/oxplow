@@ -34,7 +34,7 @@ describe("buildMenuGroups", () => {
     expect(findCommandById(groups, "thread.new")?.enabled).toBe(false);
   });
 
-  test("exposes new-thread and new-stream commands", () => {
+  test("exposes the new-thread command", () => {
     const groups = buildMenuGroups(
       {
         hasStream: true,
@@ -45,7 +45,6 @@ describe("buildMenuGroups", () => {
       noopHandlers(),
     );
 
-    expect(findCommandById(groups, "stream.new")?.enabled).toBe(true);
     expect(findCommandById(groups, "thread.new")?.enabled).toBe(true);
   });
 
@@ -60,7 +59,6 @@ describe("buildMenuGroups", () => {
       noopHandlers(),
     );
 
-    expect(findCommandById(groups, "stream.new")?.enabled).toBe(true);
     expect(findCommandById(groups, "thread.new")?.enabled).toBe(false);
   });
 
@@ -107,7 +105,7 @@ describe("buildMenuGroups", () => {
       noopHandlers(),
     );
 
-    for (const id of ["git.commit", "git.pull", "git.push"] as const) {
+    for (const id of ["git.commit"] as const) {
       expect(findCommandById(withGit, id)?.enabled).toBe(true);
       expect(findCommandById(withoutGit, id)?.enabled).toBe(false);
     }
@@ -164,19 +162,19 @@ describe("the menu bar and search", () => {
     const commands = flattenCommands(buildMenuGroups(state, noopHandlers()));
     const byId = new Map(commands.map((c) => [c.id, c.group]));
     expect(Object.fromEntries(
-      ["git.commit", "git.pull", "git.push", "plan.newTask", "dashboard.new", "lens.newWithAgent", "thread.new", "stream.new"].map(
-        (id) => [id, byId.get(id as never)],
-      ),
+      ["git.commit", "lens.newWithAgent", "thread.new"].map((id) => [id, byId.get(id as never)]),
     )).toEqual({
       "git.commit": "Git",
-      "git.pull": "Git",
-      "git.push": "Git",
-      "plan.newTask": "Tasks",
-      "dashboard.new": "Tasks",
       "lens.newWithAgent": "Tasks",
       "thread.new": "Tasks",
-      "stream.new": "Tasks",
     });
+  });
+
+  test("what the command bus offers isn't an app command too (Pull, New Task: `commandOffers`)", () => {
+    const groups = buildMenuGroups(state, noopHandlers());
+    for (const id of ["git.pull", "git.push", "plan.newTask", "dashboard.new", "stream.new"]) {
+      expect(findCommandById(groups, id as never)).toBeUndefined();
+    }
   });
 
   test("pages aren't commands: they're search's page rows", () => {
@@ -192,14 +190,9 @@ function noopHandlers() {
     save() {},
     quickOpen() {},
     find() {},
-    newTask() {},
-    newStream() {},
-    newDashboard() {},
     newLensWithAgent() {},
     newThread() {},
     commitFiles() {},
-    pullChanges() {},
-    pushChanges() {},
     openProject() {},
     openProjectNewWindow() {},
     newProject() {},
