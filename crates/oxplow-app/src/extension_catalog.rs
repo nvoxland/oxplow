@@ -5,7 +5,8 @@
 //! lens file on each call — ~3 ms — and it used to run on every
 //! advisory check, extension listing and lens run. This caches the
 //! result per worktree root behind a **stat-only fingerprint** of
-//! `root/oxplow/extensions/**` and `root/.oxplow/project.yaml` (paths,
+//! `root/oxplow/extensions/**` and the project's `.oxplow/project.yaml`
+//! (the main worktree's in the daemon, whatever the root; paths,
 //! sizes, mtimes): a hit walks the tree with `stat` and parses nothing;
 //! any edit, add or delete under the folder — or a change to the
 //! project config that disables an extension — misses and reloads. No
@@ -40,6 +41,10 @@ struct Entry {
 }
 
 pub struct ExtensionCatalog {
+    /// The project whose `.oxplow/project.yaml` governs every load (the
+    /// daemon's main worktree). `None` standalone (the CLI, the SDK's
+    /// checks): each root is its own project.
+    project: Option<PathBuf>,
     by_root: Mutex<HashMap<PathBuf, Entry>>,
     /// Full loads performed; tests read it to prove a hit parses nothing.
     loads: AtomicUsize,
@@ -50,6 +55,7 @@ pub struct ExtensionCatalog {
 impl Default for ExtensionCatalog {
     fn default() -> Self {
         Self {
+            project: None,
             by_root: Mutex::default(),
             loads: AtomicUsize::default(),
             changes: tokio::sync::broadcast::channel(64).0,
@@ -58,8 +64,24 @@ impl Default for ExtensionCatalog {
 }
 
 impl ExtensionCatalog {
+    /// Standalone: each root it reads is its own project.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The daemon's: every root it reads — the main worktree, or a stream's
+    /// working copy an authoring tool checks — takes its config
+    /// (`extensions.disabled`) from `project_dir`, the main worktree.
+    pub fn for_project(project_dir: &Path) -> Self {
+        Self {
+            project: Some(project_dir.to_path_buf()),
+            ..Self::default()
+        }
+    }
+
+    /// The project whose config governs a load of `root`.
+    pub fn project_of<'a>(&'a self, root: &'a Path) -> &'a Path {
+        self.project.as_deref().unwrap_or(root)
     }
 
     /// Hear that the primary worktree's extensions may have changed.
@@ -77,14 +99,15 @@ impl ExtensionCatalog {
     /// `load_extensions` returns them, reloaded only when a file under
     /// `oxplow/extensions/` or the project config changed.
     pub fn get(&self, root: &Path) -> Arc<Vec<Extension>> {
-        let fingerprint = fingerprint(root);
+        let project = self.project_of(root);
+        let fingerprint = fingerprint(root, project);
         let mut cache = self.by_root.lock();
         if let Some(entry) = cache.get(root) {
             if entry.fingerprint == fingerprint {
                 return entry.extensions.clone();
             }
         }
-        let extensions = Arc::new(extensions::load_extensions(root));
+        let extensions = Arc::new(extensions::load_extensions_in(root, project));
         self.loads.fetch_add(1, Ordering::Relaxed);
         cache.insert(
             root.to_path_buf(),
@@ -129,11 +152,11 @@ impl ExtensionCatalog {
 }
 
 /// What a load of `root` depends on: every file under its extensions
-/// folder, and the project config (which can disable an extension).
-fn fingerprint(root: &Path) -> Fingerprint {
+/// folder, and `project`'s config (which can disable an extension).
+fn fingerprint(root: &Path, project: &Path) -> Fingerprint {
     let mut out = Fingerprint::new();
     walk(&root.join(EXTENSIONS_DIR), &mut out);
-    push_file(&oxplow_config::config_path(root), &mut out);
+    push_file(&oxplow_config::config_path(project), &mut out);
     out.sort();
     out
 }
@@ -220,6 +243,35 @@ mod tests {
             Err(DomainError::NotFound)
         ));
         assert_eq!(catalog.loads(), 4);
+    }
+
+    /// The daemon's catalog reads a stream's working copy for its files but
+    /// the main worktree's `project.yaml` for what's enabled — and a change
+    /// there is seen on the next read of the working copy.
+    #[test]
+    fn a_projects_catalog_takes_config_from_the_project_for_every_root() {
+        let main = tempfile::tempdir().unwrap();
+        let side = tempfile::tempdir().unwrap();
+        write(side.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(
+            side.path(),
+            ".oxplow/project.yaml",
+            "extensions:\n  disabled: [oxplow-bundled]\n",
+        );
+        let catalog = ExtensionCatalog::for_project(main.path());
+        assert!(catalog.named(side.path(), "review").is_ok());
+        assert!(
+            catalog.named(side.path(), "oxplow-bundled").is_ok(),
+            "the working copy's own project.yaml doesn't count"
+        );
+        write(
+            main.path(),
+            ".oxplow/project.yaml",
+            "extensions:\n  disabled: [review]\n",
+        );
+        let err = catalog.named(side.path(), "review").unwrap_err();
+        assert!(err.to_string().contains("disabled"), "{err}");
+        assert_eq!(catalog.project_of(side.path()), main.path());
     }
 
     #[test]

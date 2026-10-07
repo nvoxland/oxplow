@@ -51,15 +51,15 @@ export function CustomComponentViz({
 }) {
   const component = run.lens.custom?.component ?? null;
   const lensId = run.lens.id;
-  // The bundle its frame runs, loaded for the lens and the stream it's
-  // shown in (tsk984): the daemon serves the frame that snapshot, by its
-  // version, and the frame invokes with it.
-  const loadKey = base && component ? `${lensId}\u0000${streamId ?? ""}` : null;
+  // The bundle its frame runs, loaded for the lens (from the main
+  // worktree, whatever the stream): the daemon serves the frame that
+  // snapshot, by its version, and the frame invokes with it.
+  const loadKey = base && component ? lensId : null;
   const [loaded, setLoaded] = useState<{ key: string; version?: string; error?: string } | null>(null);
   useEffect(() => {
     if (loadKey === null) return;
     let live = true;
-    loadComponent(lensId, streamId).then(
+    loadComponent(lensId).then(
       (version) => {
         if (live) setLoaded({ key: loadKey, version });
       },
@@ -70,7 +70,7 @@ export function CustomComponentViz({
     return () => {
       live = false;
     };
-    // `loadKey` names the lens and stream it loads for.
+    // `loadKey` names the lens it loads for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadKey]);
   const current = loaded?.key === loadKey ? loaded : null;
@@ -115,7 +115,7 @@ export function CustomComponentViz({
       <span data-testid="custom-component-badge" style={badgeStyle} title={`${run.lens.extension}'s own component, sandboxed`}>
         custom
       </span>
-      {/* Keyed by its URL: another version (a stream switch) mounts a new
+      {/* Keyed by its URL: another version (an edited bundle) mounts a new
           frame, whose first load is its own — never the old frame
           navigating away. */}
       <ComponentFrame
@@ -201,7 +201,7 @@ function ComponentFrame({
         query: (asset, params) => runComponentQuery(runRef.current.lens.id, asset, params, streamId),
         invoke: async (command, input, confirmed) => {
           try {
-            const out = await invokeComponentCommand(runRef.current.lens.id, command, input, streamId, confirmed, version);
+            const out = await invokeComponentCommand(runRef.current.lens.id, command, input, confirmed, version);
             setRefused(null);
             return out;
           } catch (e) {

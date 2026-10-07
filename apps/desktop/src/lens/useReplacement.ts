@@ -53,7 +53,7 @@ export function useReplacement(
   /** The provider whose thing the component shows; none: the active one. */
   provider: string | null = null,
 ): Replacement {
-  const exts = useExtensions(streamId);
+  const exts = useExtensions();
   const candidates = (exts ?? [])
     .filter((e) => e.enabled)
     .flatMap((e) => e.ui.replacements)

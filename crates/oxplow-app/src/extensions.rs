@@ -1174,9 +1174,18 @@ pub struct LensInactive {
 }
 
 /// Load bundled extensions plus every project extension under
-/// `root/oxplow/extensions/`, sorted by name. A project extension using a
-/// bundled name is listed with an error and never shadows the bundled one.
+/// `root/oxplow/extensions/`, sorted by name, with `root` as its own
+/// project (its `.oxplow/project.yaml` says what's disabled). A project
+/// extension using a bundled name is listed with an error and never
+/// shadows the bundled one.
 pub fn load_extensions(root: &Path) -> Vec<Extension> {
+    load_extensions_in(root, root)
+}
+
+/// [`load_extensions`] of `root`'s files, with `project`'s config saying
+/// what's disabled — a stream's working copy read under the main
+/// worktree's `project.yaml`.
+pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
     let mut out: Vec<Extension> = crate::bundled_extensions::BUNDLED
         .iter()
         .map(|b| {
@@ -1233,7 +1242,7 @@ pub fn load_extensions(root: &Path) -> Vec<Extension> {
         }
         ext.lenses.retain(|l| !bad.contains(&l.id));
     }
-    let disabled = oxplow_config::disabled_extensions(root);
+    let disabled = oxplow_config::disabled_extensions(project);
     let mut out: Vec<Extension> = out
         .into_iter()
         .map(|e| apply_disabled(e, &disabled))
@@ -3482,7 +3491,7 @@ pub async fn review_update(
     name: &str,
     commands: CommandSchemas<'_>,
 ) -> Result<ExtensionReview, DomainError> {
-    let source = installed_source(root, name)?;
+    let source = installed_source(root, catalog.project_of(root), name)?;
     review_extension(
         layer,
         catalog,
@@ -3500,26 +3509,30 @@ pub async fn review_update(
 /// `oxplow/extensions/<name>/` without `.git`, and record its source.
 /// Installs only `reviewed_sha`, the commit a person looked at with
 /// [`review_extension`], and only when it loads without errors. Refuses
-/// to overwrite an existing folder; use [`update_extension`].
+/// to overwrite an existing folder; use [`update_extension`]. `project`'s
+/// config says what's disabled.
 pub fn install_extension(
     root: &Path,
+    project: &Path,
     git_url: &str,
     git_ref: Option<&str>,
     reviewed_sha: &str,
 ) -> Result<Extension, DomainError> {
-    install_from_git(root, git_url, git_ref, None, reviewed_sha)
+    install_from_git(root, project, git_url, git_ref, None, reviewed_sha)
 }
 
 /// Re-install an installed extension from its recorded source (same URL
 /// and ref), at the new commit a person reviewed with [`review_update`].
 pub fn update_extension(
     root: &Path,
+    project: &Path,
     name: &str,
     reviewed_sha: &str,
 ) -> Result<Extension, DomainError> {
-    let source = installed_source(root, name)?;
+    let source = installed_source(root, project, name)?;
     install_from_git(
         root,
+        project,
         &source.git,
         source.git_ref.as_deref(),
         Some(name),
@@ -3527,11 +3540,12 @@ pub fn update_extension(
     )
 }
 
-/// One extension by name, read from disk now — for the write paths
-/// (install, update, save), which must see their own result whatever a
-/// cache holds. Reads go through `extension_catalog::ExtensionCatalog`.
-fn load_fresh(root: &Path, name: &str) -> Result<Extension, DomainError> {
-    let all = load_extensions(root);
+/// One extension by name, read from `root` now under `project`'s config —
+/// for the write paths (install, update, save), which must see their own
+/// result whatever a cache holds. Reads go through
+/// `extension_catalog::ExtensionCatalog`.
+fn load_fresh(root: &Path, project: &Path, name: &str) -> Result<Extension, DomainError> {
+    let all = load_extensions_in(root, project);
     let ext = all
         .iter()
         .find(|e| e.name == name && e.origin == "bundled")
@@ -3544,8 +3558,12 @@ fn load_fresh(root: &Path, name: &str) -> Result<Extension, DomainError> {
 }
 
 /// Where an installed extension came from.
-fn installed_source(root: &Path, name: &str) -> Result<ExtensionSource, DomainError> {
-    load_fresh(root, name)?.source.ok_or_else(|| {
+fn installed_source(
+    root: &Path,
+    project: &Path,
+    name: &str,
+) -> Result<ExtensionSource, DomainError> {
+    load_fresh(root, project, name)?.source.ok_or_else(|| {
         DomainError::Invalid(format!(
             "extension `{name}` wasn't installed from git (no {SOURCE_FILE}); edit it in place instead"
         ))
@@ -3672,6 +3690,7 @@ fn fetch(
 /// that, so a failed update changes nothing.
 fn install_from_git(
     root: &Path,
+    project: &Path,
     git_url: &str,
     git_ref: Option<&str>,
     replacing: Option<&str>,
@@ -3715,7 +3734,7 @@ fn install_from_git(
     let yaml = serde_yaml::to_string(&source)
         .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
     std::fs::write(target.join(SOURCE_FILE), yaml).map_err(storage)?;
-    Ok(load_fresh(root, &name)
+    Ok(load_fresh(root, project, &name)
         .unwrap_or_else(|_| empty_extension(&name, &format!("{EXTENSIONS_DIR}/{name}"), "project")))
 }
 
@@ -3923,8 +3942,11 @@ pub fn writable_extension_dir(root: &Path, name: &str) -> Result<PathBuf, Domain
     Ok(dir)
 }
 
+/// Write `spec` as lens `<extension>/<slug>` under `root`, `project`'s
+/// config saying what's disabled.
 pub fn save_lens(
     root: &Path,
+    project: &Path,
     extension: &str,
     slug: &str,
     spec: &LensSpec,
@@ -3948,7 +3970,7 @@ pub fn save_lens(
     let manifest = dir.join("extension.yaml");
     // A kept lens goes to a private extension; moving one into a shared
     // extension is `lens.share`, a person's (tsk988).
-    if manifest.exists() && load_fresh(root, extension)?.sharing == Sharing::Shared {
+    if manifest.exists() && load_fresh(root, project, extension)?.sharing == Sharing::Shared {
         return Err(invalid(format!(
             "`{extension}` is shared: keep the lens in a private extension, then a person moves it with `lens.share`"
         )));
@@ -3974,7 +3996,7 @@ pub fn save_lens(
     }
     let body = lens_file_yaml(spec)?;
     std::fs::write(&file, body).map_err(storage)?;
-    let ext = load_fresh(root, extension)?;
+    let ext = load_fresh(root, project, extension)?;
     match ext.lenses.into_iter().find(|l| l.slug == slug) {
         Some(lens) => Ok(lens),
         None => {
@@ -4553,7 +4575,7 @@ empty: No tasks.
         let first = review_extension(&sl, &cat(), project.path(), &url, None, None, none)
             .await
             .unwrap();
-        install_extension(project.path(), &url, None, &first.sha).unwrap();
+        install_extension(project.path(), project.path(), &url, None, &first.sha).unwrap();
         write(repo.path(), "models/x.sql", "SELECT 2 AS n\n");
         git(repo.path(), &["commit", "-qam", "two"]);
         let update = review_update(&sl, &cat(), project.path(), "shared", none)
@@ -4618,7 +4640,7 @@ empty: No tasks.
             .lenses
             .iter()
             .all(|l| l.change == crate::extension_effects::Change::Added));
-        install_extension(project.path(), &url, None, &first.sha).unwrap();
+        install_extension(project.path(), project.path(), &url, None, &first.sha).unwrap();
         write(
             repo.path(),
             "lenses/count.yaml",
@@ -4720,13 +4742,21 @@ empty: No tasks.
         // A commit that isn't the reviewed one is refused.
         write(repo.path(), "sync.sh", "curl evil.example\n");
         git(repo.path(), &["commit", "-q", "-am", "swap"]);
-        let err = install_extension(project.path(), &url, None, &review.sha).unwrap_err();
+        let err =
+            install_extension(project.path(), project.path(), &url, None, &review.sha).unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("changed since")),
             "{err:?}"
         );
         assert!(!project.path().join("oxplow/extensions").exists());
-        let ext = install_extension(project.path(), &url, None, &head(repo.path())).unwrap();
+        let ext = install_extension(
+            project.path(),
+            project.path(),
+            &url,
+            None,
+            &head(repo.path()),
+        )
+        .unwrap();
         assert_eq!(ext.name, "shared");
     }
 
@@ -4742,7 +4772,14 @@ empty: No tasks.
         );
         git(repo.path(), &["commit", "-q", "-am", "bad"]);
         let url = repo.path().to_string_lossy().to_string();
-        let err = install_extension(project.path(), &url, None, &head(repo.path())).unwrap_err();
+        let err = install_extension(
+            project.path(),
+            project.path(),
+            &url,
+            None,
+            &head(repo.path()),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("bogus")),
             "{err:?}"
@@ -4756,7 +4793,14 @@ empty: No tasks.
         let repo = published_repo("Count");
         let url = repo.path().to_string_lossy().to_string();
 
-        let ext = install_extension(project.path(), &url, None, &head(repo.path())).unwrap();
+        let ext = install_extension(
+            project.path(),
+            project.path(),
+            &url,
+            None,
+            &head(repo.path()),
+        )
+        .unwrap();
         assert_eq!(ext.name, "shared");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.lenses[0].title, "Count");
@@ -4784,9 +4828,23 @@ empty: No tasks.
         let project = tempfile::tempdir().unwrap();
         let repo = published_repo("Count");
         let url = repo.path().to_string_lossy().to_string();
-        install_extension(project.path(), &url, None, &head(repo.path())).unwrap();
+        install_extension(
+            project.path(),
+            project.path(),
+            &url,
+            None,
+            &head(repo.path()),
+        )
+        .unwrap();
 
-        let err = install_extension(project.path(), &url, None, &head(repo.path())).unwrap_err();
+        let err = install_extension(
+            project.path(),
+            project.path(),
+            &url,
+            None,
+            &head(repo.path()),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("already")),
             "{err:?}"
@@ -4798,7 +4856,8 @@ empty: No tasks.
             "title: Count v2\nquery: SELECT 2 AS n\nviz: number\n",
         );
         git(repo.path(), &["commit", "-q", "-am", "v2"]);
-        let ext = update_extension(project.path(), "shared", &head(repo.path())).unwrap();
+        let ext =
+            update_extension(project.path(), project.path(), "shared", &head(repo.path())).unwrap();
         assert_eq!(ext.lenses[0].title, "Count v2");
     }
 
@@ -4810,13 +4869,13 @@ empty: No tasks.
             "oxplow/extensions/local/extension.yaml",
             "manifest: 2\nname: local\nintent:\n  purpose: test\n",
         );
-        let err = update_extension(project.path(), "local", "x").unwrap_err();
+        let err = update_extension(project.path(), project.path(), "local", "x").unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("wasn't installed")),
             "{err:?}"
         );
         assert!(matches!(
-            update_extension(project.path(), "nope", "x"),
+            update_extension(project.path(), project.path(), "nope", "x"),
             Err(DomainError::NotFound)
         ));
     }
@@ -4829,16 +4888,28 @@ empty: No tasks.
         git(repo.path(), &["init", "-q", "-b", "main"]);
         git(repo.path(), &["add", "."]);
         git(repo.path(), &["commit", "-q", "-m", "init"]);
-        let err = install_extension(project.path(), &repo.path().to_string_lossy(), None, "x")
-            .unwrap_err();
+        let err = install_extension(
+            project.path(),
+            project.path(),
+            &repo.path().to_string_lossy(),
+            None,
+            "x",
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("extension.yaml")),
             "{err:?}"
         );
         assert!(!project.path().join("oxplow/extensions").exists());
 
-        let err =
-            install_extension(project.path(), "/definitely/not/a/repo", None, "x").unwrap_err();
+        let err = install_extension(
+            project.path(),
+            project.path(),
+            "/definitely/not/a/repo",
+            None,
+            "x",
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("clone")),
             "{err:?}"
@@ -4853,8 +4924,14 @@ empty: No tasks.
         git(repo.path(), &["init", "-q", "-b", "main"]);
         git(repo.path(), &["add", "."]);
         git(repo.path(), &["commit", "-q", "-m", "init"]);
-        let err = install_extension(project.path(), &repo.path().to_string_lossy(), None, "x")
-            .unwrap_err();
+        let err = install_extension(
+            project.path(),
+            project.path(),
+            &repo.path().to_string_lossy(),
+            None,
+            "x",
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("name")),
             "{err:?}"
@@ -4889,6 +4966,37 @@ empty: No tasks.
         }
     }
 
+    /// A lens kept into a stream's working copy answers to the main
+    /// worktree's `project.yaml`, not the copy's own.
+    #[test]
+    fn a_lens_kept_in_a_working_copy_answers_to_the_projects_config() {
+        let main = tempfile::tempdir().unwrap();
+        let side = tempfile::tempdir().unwrap();
+        let origin = LensOrigin {
+            purpose: "Busy",
+            origin: None,
+        };
+        let spec = LensSpec {
+            title: "Busy".into(),
+            query: "SELECT 1 AS n".into(),
+            ..spec_base()
+        };
+        save_lens(side.path(), main.path(), "mine", "one", &spec, &origin).unwrap();
+        let disable = |dir: &Path| {
+            std::fs::create_dir_all(dir.join(".oxplow")).unwrap();
+            std::fs::write(
+                dir.join(".oxplow/project.yaml"),
+                "extensions:\n  disabled: [mine]\n",
+            )
+            .unwrap();
+        };
+        disable(side.path());
+        save_lens(side.path(), main.path(), "mine", "two", &spec, &origin).unwrap();
+        disable(main.path());
+        let err = save_lens(side.path(), main.path(), "mine", "three", &spec, &origin).unwrap_err();
+        assert!(err.to_string().contains("disabled"), "{err}");
+    }
+
     /// P6.C1: a spec round-trips through a lens file, and one with a
     /// problem is refused before anything is written.
     #[test]
@@ -4909,7 +5017,15 @@ empty: No tasks.
             purpose: "Busy Files",
             origin: Some("thread:thr1"),
         };
-        let lens = save_lens(project.path(), "my-lenses", "busy", &spec, &origin).unwrap();
+        let lens = save_lens(
+            project.path(),
+            project.path(),
+            "my-lenses",
+            "busy",
+            &spec,
+            &origin,
+        )
+        .unwrap();
         assert_eq!(lens.spec(), spec);
         let manifest = std::fs::read_to_string(
             project
@@ -4923,7 +5039,15 @@ empty: No tasks.
             chart: None,
             ..spec.clone()
         };
-        let err = save_lens(project.path(), "my-lenses", "bad", &bad, &origin).unwrap_err();
+        let err = save_lens(
+            project.path(),
+            project.path(),
+            "my-lenses",
+            "bad",
+            &bad,
+            &origin,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("chart"), "{err}");
         assert!(!project
             .path()
@@ -4944,7 +5068,15 @@ empty: No tasks.
             }),
             ..spec_base()
         };
-        let lens = save_lens(project.path(), "mine", "new-task", &spec, &todo_origin()).unwrap();
+        let lens = save_lens(
+            project.path(),
+            project.path(),
+            "mine",
+            "new-task",
+            &spec,
+            &todo_origin(),
+        )
+        .unwrap();
         assert_eq!(lens.spec(), spec);
     }
 
@@ -4957,7 +5089,15 @@ empty: No tasks.
             query: "SELECT id, title FROM v_task".into(),
             ..spec_base()
         };
-        let lens = save_lens(project.path(), "mine", "open-tasks", &new(), &todo_origin()).unwrap();
+        let lens = save_lens(
+            project.path(),
+            project.path(),
+            "mine",
+            "open-tasks",
+            &new(),
+            &todo_origin(),
+        )
+        .unwrap();
         assert_eq!(lens.id, "mine/open-tasks");
         assert_eq!(lens.title, "Open Tasks");
         assert!(project
@@ -4967,14 +5107,28 @@ empty: No tasks.
         let ext = &project_extensions(project.path())[0];
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
 
-        let err =
-            save_lens(project.path(), "mine", "open-tasks", &new(), &todo_origin()).unwrap_err();
+        let err = save_lens(
+            project.path(),
+            project.path(),
+            "mine",
+            "open-tasks",
+            &new(),
+            &todo_origin(),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("already exists")),
             "{err:?}"
         );
-        let err =
-            save_lens(project.path(), "mine", "Bad Slug", &new(), &todo_origin()).unwrap_err();
+        let err = save_lens(
+            project.path(),
+            project.path(),
+            "mine",
+            "Bad Slug",
+            &new(),
+            &todo_origin(),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("slug")),
             "{err:?}"
@@ -4995,6 +5149,7 @@ empty: No tasks.
             "git: x\ngitRef: null\nsha: abc\n",
         );
         let err = save_lens(
+            project.path(),
             project.path(),
             "shared",
             "x",
@@ -5554,6 +5709,7 @@ commands:
             "Decisions Made"
         );
         let err = save_lens(
+            dir.path(),
             dir.path(),
             "oxplow-bundled",
             "x",

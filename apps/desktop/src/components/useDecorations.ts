@@ -11,10 +11,10 @@ import { decorationQueries, decorationsFromResult, decoratorsFor, type Decoratio
  *  re-run when a model it read changes or the extensions do. A decorator
  *  whose query fails shows nothing — decorations are additive. An answer
  *  for inputs that have since changed is dropped. */
-export function useDecorations(placement: DecoratorPlacement, refs: string[], streamId: string | null): Decoration[] {
+export function useDecorations(placement: DecoratorPlacement, refs: string[]): Decoration[] {
   const [decorations, setDecorations] = useState<Decoration[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);
-  const exts = useExtensions(streamId);
+  const exts = useExtensions();
   const decorators = useMemo(() => decoratorsFor(exts ?? [], placement), [exts, placement]);
   const refsKey = JSON.stringify([...new Set(refs)].sort());
   const guard = useRequestGuard();

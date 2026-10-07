@@ -22,7 +22,7 @@ export function GitHistoryPage({ stream, onOpenPage, revealSha }: GitHistoryPage
   // Extensions' lenses beside the history (`vcs.history.sidebar`), in a
   // side column only when something is mounted there.
   const streamRow = stream ? numericRowId(stream.id) : null;
-  const sidebar = useSlotMounted("vcs.history.sidebar", stream?.id ?? null) && streamRow !== null;
+  const sidebar = useSlotMounted("vcs.history.sidebar") && streamRow !== null;
   const sidebarParams = { stream_id: streamRow };
   return (
     <Page

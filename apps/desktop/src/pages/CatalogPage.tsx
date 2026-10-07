@@ -24,8 +24,8 @@ interface ConfigKeyRow {
   set: boolean;
 }
 
-export function CatalogPage({ streamId, onOpenPage }: { streamId: string | null; onOpenPage(ref: TabRef): void }) {
-  const catalog = usePromptCatalog(streamId);
+export function CatalogPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
+  const catalog = usePromptCatalog();
   const [data, setData] = useState<ModelRow[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [keys, setKeys] = useState<ConfigKeyRow[]>([]);

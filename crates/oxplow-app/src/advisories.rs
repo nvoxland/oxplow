@@ -260,8 +260,8 @@ pub struct AdvisoryDeps {
     pub config: std::sync::Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
 }
 
-/// Run the `on` advisories for `thread`, reading extensions from the
-/// thread's stream worktree, and record each hit as an undelivered nudge.
+/// Run the `on` advisories for `thread`, reading extensions from the main
+/// worktree (whatever the thread's stream), and record each hit as an undelivered nudge.
 /// For an event (`cause`), the turn and effort are the event's anchors;
 /// for a prompt, the effort is the thread's open one and there's no turn.
 pub async fn for_thread(
@@ -286,21 +286,20 @@ pub async fn for_thread(
         Ok(Some(t)) => Some(t.stream_id),
         _ => None,
     };
-    let root = svc
-        .worktrees
-        .resolve(stream.map(|s| s.to_string()).as_deref())
-        .await;
     // An advisory whose needs aren't met (no work list active) doesn't run.
     let active = svc
         .capabilities
         .snapshot(&crate::config_service::read_config(&svc.config));
-    let extensions: Vec<Extension> = consented(&svc.approvals, &svc.extension_catalog.get(&root))
-        .into_iter()
-        .map(|mut e| {
-            e.advisories.retain(|a| active.unmet(&a.needs).is_empty());
-            e
-        })
-        .collect();
+    let extensions: Vec<Extension> = consented(
+        &svc.approvals,
+        &svc.extension_catalog.get(svc.worktrees.project_dir()),
+    )
+    .into_iter()
+    .map(|mut e| {
+        e.advisories.retain(|a| active.unmet(&a.needs).is_empty());
+        e
+    })
+    .collect();
     let scope = AdvisoryScope {
         thread: thread.value(),
         stream: stream.map(|s| s.value()),
@@ -650,6 +649,43 @@ mod tests {
             for_thread(&f.svc.advisory_deps(), &f.thread, AdvisoryOn::Prompt, None)
                 .await
                 .is_empty()
+        );
+    }
+
+    /// A thread in a worktree stream runs the main worktree's advisories,
+    /// not its own copy's.
+    #[tokio::test]
+    async fn a_worktree_threads_advisories_come_from_the_main_worktree() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        approved(
+            &f.svc,
+            "guide",
+            "  - id: hello\n    on: post-tool-use\n    query: SELECT 'hi' AS message\n",
+        );
+        let worktree = tempfile::tempdir().unwrap();
+        let wt = worktree.path().to_string_lossy().to_string();
+        f.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "UPDATE streams SET worktree_path = ?1 WHERE id = 1",
+                    [wt.as_str()],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let hits = for_thread(
+            &f.svc.advisory_deps(),
+            &f.thread,
+            AdvisoryOn::PostToolUse,
+            None,
+        )
+        .await;
+        assert_eq!(
+            hits.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(),
+            vec!["guide/hello"]
         );
     }
 

@@ -273,7 +273,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   // lens files change (the agent may have just written one).
   // Their manifest `launcher:` entries join too: a ref as a page, a
   // command or prompt as an action (P6.D1).
-  const exts = useExtensions(stream?.id ?? null);
+  const exts = useExtensions();
   const { pages: lensPages, actions: launcherActions } = useMemo(() => launcherDirectory(exts ?? []), [exts]);
   const pages = useMemo(() => mergeDirectory(staticPages, lensPages), [staticPages, lensPages]);
 

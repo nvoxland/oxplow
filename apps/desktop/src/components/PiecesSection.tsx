@@ -37,7 +37,7 @@ export function PiecesSection() {
 
   const load = useCallback(async () => {
     try {
-      const [res, settings, exts] = await Promise.all([querySql(QUERY, [], 500), effectiveConfig(), listExtensions(null)]);
+      const [res, settings, exts] = await Promise.all([querySql(QUERY, [], 500), effectiveConfig(), listExtensions()]);
       setPieces(piecesFromResult(res));
       setReads(res.reads);
       setExtensions(exts);

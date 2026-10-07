@@ -355,6 +355,9 @@ impl MetricsService {
         config: Arc<RwLock<OxplowConfig>>,
         project_dir: PathBuf,
     ) -> Self {
+        let extensions_cache = Arc::new(crate::extension_catalog::ExtensionCatalog::for_project(
+            &project_dir,
+        ));
         Self {
             snapshot_store,
             thread_store,
@@ -369,7 +372,7 @@ impl MetricsService {
             background_tasks: None,
             global_catalog: Arc::new(std::sync::Mutex::new(None)),
             snapshot_captures: None,
-            extensions_cache: Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            extensions_cache,
             entity_captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
             run_log: None,
         }

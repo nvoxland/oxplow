@@ -58,7 +58,7 @@ export function ExtensionsSection() {
 
   const refresh = useCallback(async () => {
     try {
-      const listed = await listExtensions(null);
+      const listed = await listExtensions();
       setExts(listed);
       setCollectors(await listCollectors());
       const reports = await Promise.all(

@@ -4,7 +4,7 @@
  * A read returns what it read (`reads`) so the strip re-runs with
  * `useRerunOnChange`; each answer re-runs itself through `runAnswer`.
  */
-import { querySql, runCommand, type AcpToolCall, type SqlCell } from "./api.js";
+import { keptLens, querySql, runCommand, type AcpToolCall, type KeptLens, type SqlCell } from "./api.js";
 import { threadRowId } from "./modelIds.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
@@ -36,13 +36,14 @@ export async function readAnswers(threadId: string): Promise<{ answers: AnswerRo
   return { answers: answersFromRows(res.rows), reads: res.reads };
 }
 
-/** Keep This: the answer becomes a private lens (`lens.keep`); an empty
- *  slug lets the command take one from the title. Returns the lens id. */
-export async function keepAnswer(answer: string, slug: string): Promise<string> {
+/** Keep This: the answer becomes a private lens (`lens.keep`) in its
+ *  thread's worktree; an empty slug lets the command take one from the
+ *  title. Returns the lens id and whether the app shows it now. */
+export async function keepAnswer(answer: string, slug: string): Promise<KeptLens> {
   const input: Record<string, string> = { answer };
   if (slug.trim() !== "") input.slug = slug.trim();
   const outcome = await runCommand("lens.keep", input);
-  return String((outcome.result as { lens?: unknown } | null)?.lens ?? "");
+  return keptLens(outcome.result);
 }
 
 /** The answer a finished `show_lens` call showed, so an ACP transcript

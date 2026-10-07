@@ -10,17 +10,15 @@ import { usePromptCatalog } from "./usePromptCatalog.js";
 
 export function SuggestedPrompts({
   refId,
-  streamId,
   vertical = false,
   onAsked,
 }: {
   refId: string;
-  streamId: string | null;
   /** A list (the nav bar's Ask menu) rather than a row of chips. */
   vertical?: boolean;
   onAsked?(): void;
 }) {
-  const catalog = usePromptCatalog(streamId);
+  const catalog = usePromptCatalog();
   const kind = kindOf(refId);
   const prompts = kind ? promptsAbout(catalog, kind) : [];
   if (prompts.length === 0) return null;

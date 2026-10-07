@@ -1,6 +1,8 @@
 //! Cores for the `extensions` command module — project extensions and
-//! their lenses, read from a stream's worktree. See
-//! `.context/extensions.md`.
+//! their lenses. What the app shows is the main worktree's, whichever
+//! stream is open; only the authoring calls (`validate_extension`,
+//! `review_extension`) read a stream's working copy. See
+//! `.context/extensions.md` "Reading".
 
 use std::collections::BTreeMap;
 
@@ -11,30 +13,26 @@ use oxplow_domain::DomainError;
 
 use crate::error::IpcError;
 
-/// The worktree whose `oxplow/extensions/` a call reads: the stream's,
-/// or the primary's when `stream_id` is omitted.
-async fn root(svc: &Services, stream_id: Option<&str>) -> std::path::PathBuf {
+/// Where the app's extensions come from: the main worktree, for every
+/// stream. A stream's `stream_id` only scopes the data a lens reads.
+fn root(svc: &Services) -> &std::path::Path {
+    svc.worktrees.project_dir()
+}
+
+/// The working copy an authoring call checks: the stream's worktree, or
+/// the main one when `stream_id` is omitted.
+async fn working_copy(svc: &Services, stream_id: Option<&str>) -> std::path::PathBuf {
     svc.worktrees.resolve(stream_id).await
 }
 
-/// Every project extension in the stream's worktree (primary when
-/// `stream_id` is omitted), with per-extension load errors.
-pub async fn list_extensions(
-    svc: &Services,
-    stream_id: Option<String>,
-) -> Result<Vec<Extension>, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
-    Ok(svc.listed_extensions(&root).await)
+/// Every extension the app shows, with per-extension load errors.
+pub async fn list_extensions(svc: &Services) -> Result<Vec<Extension>, IpcError> {
+    Ok(svc.listed_extensions(root(svc)).await)
 }
 
 /// One lens by `<extension>/<slug>`.
-pub async fn get_lens(
-    svc: &Services,
-    id: String,
-    stream_id: Option<String>,
-) -> Result<Lens, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
-    Ok(svc.extension_catalog.find_lens(&root, &id)?)
+pub async fn get_lens(svc: &Services, id: String) -> Result<Lens, IpcError> {
+    Ok(svc.extension_catalog.find_lens(root(svc), &id)?)
 }
 
 /// Run a lens with optional param overrides; returns the rows the lens
@@ -45,12 +43,12 @@ pub async fn run_lens(
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
 ) -> Result<LensRun, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = root(svc);
     let ctx = context(svc, stream_id.as_deref()).await;
     Ok(extensions::run_lens(
         &svc.sql,
         &svc.extension_catalog,
-        &root,
+        root,
         &id,
         params.unwrap_or_default(),
         &ctx,
@@ -84,18 +82,18 @@ pub async fn lens_text(
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
 ) -> Result<String, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = root(svc);
     let ctx = context(svc, stream_id.as_deref()).await;
     let run = extensions::run_lens(
         &svc.sql,
         &svc.extension_catalog,
-        &root,
+        root,
         &id,
         params.unwrap_or_default(),
         &ctx,
     )
     .await?;
-    Ok(oxplow_app::lens_text::text_of(svc, &root, &run, &ctx).await?)
+    Ok(oxplow_app::lens_text::text_of(svc, root, &run, &ctx).await?)
 }
 
 /// What a form lens shows: its command's spec (the fields) and the values
@@ -106,10 +104,10 @@ pub async fn lens_form(
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
 ) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = root(svc);
     let ctx = context(svc, stream_id.as_deref()).await;
     Ok(
-        oxplow_app::lens_actions::form_start(svc, &root, &id, params.unwrap_or_default(), &ctx)
+        oxplow_app::lens_actions::form_start(svc, root, &id, params.unwrap_or_default(), &ctx)
             .await?,
     )
 }
@@ -124,11 +122,11 @@ pub async fn submit_lens_form(
     stream_id: Option<String>,
     confirmed: bool,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = root(svc);
     let ctx = context(svc, stream_id.as_deref()).await;
     Ok(oxplow_app::lens_actions::submit_form(
         svc,
-        &root,
+        root,
         oxplow_app::lens_actions::FormSubmission {
             lens_id: id,
             input: input.0,
@@ -150,11 +148,11 @@ pub async fn run_component_query(
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
 ) -> Result<LensRun, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = root(svc);
     let ctx = context(svc, stream_id.as_deref()).await;
     Ok(oxplow_app::lens_actions::run_component_query(
         svc,
-        &root,
+        root,
         &id,
         &asset,
         params.unwrap_or_default(),
@@ -163,29 +161,15 @@ pub async fn run_component_query(
     .await?)
 }
 
-/// The worktree a component's lens is shown in: the stream's, or the
-/// primary's outside any stream — never the primary's for a stream that is
-/// gone (tsk984).
-async fn component_root(
-    svc: &Services,
-    stream_id: Option<&str>,
-) -> Result<std::path::PathBuf, IpcError> {
-    match stream_id {
-        Some(stream) => Ok(svc.worktrees.resolve_strict(Some(stream)).await?),
-        None => Ok(svc.worktrees.project_dir().to_path_buf()),
-    }
-}
-
 /// Load the bundle of the `custom` lens `id`'s component as it is now, for
 /// its frame (tsk984): the version the daemon serves it at
 /// (`/components/v/<version>/`) and the frame invokes with.
-pub async fn load_component(
-    svc: &Services,
-    id: String,
-    stream_id: Option<String>,
-) -> Result<String, IpcError> {
-    let root = component_root(svc, stream_id.as_deref()).await?;
-    Ok(oxplow_app::lens_actions::load_component(svc, &root, &id)?)
+pub async fn load_component(svc: &Services, id: String) -> Result<String, IpcError> {
+    Ok(oxplow_app::lens_actions::load_component(
+        svc,
+        root(svc),
+        &id,
+    )?)
 }
 
 /// A custom component's frame invokes one of its declared commands, as the
@@ -197,14 +181,12 @@ pub async fn invoke_component_command(
     id: String,
     command: String,
     input: oxplow_domain::Json,
-    stream_id: Option<String>,
     confirmed: bool,
     version: String,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
-    let root = component_root(svc, stream_id.as_deref()).await?;
     Ok(oxplow_app::lens_actions::invoke_component_command(
         svc,
-        &root,
+        root(svc),
         oxplow_app::lens_actions::ComponentInvoke {
             lens_id: id,
             command,
@@ -229,11 +211,11 @@ pub async fn run_lens_action(
     stream_id: Option<String>,
     confirmed: bool,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = root(svc);
     let ctx = context(svc, stream_id.as_deref()).await;
     Ok(oxplow_app::lens_actions::run_lens_action(
         svc,
-        &root,
+        root,
         oxplow_app::lens_actions::LensActionCall {
             lens_id: id,
             action_id: action,
@@ -254,7 +236,7 @@ pub async fn validate_extension(
     name: String,
     stream_id: Option<String>,
 ) -> Result<oxplow_sdk::CheckReport, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = working_copy(svc, stream_id.as_deref()).await;
     oxplow_sdk::check(
         &root,
         &name,
@@ -291,8 +273,7 @@ pub async fn set_extension_enabled(
     }
     let value = (!disabled.is_empty()).then(|| serde_json::json!({ "disabled": disabled }));
     crate::commands::config::set_key(svc, "extensions", value).await?;
-    let root = root(svc, None).await;
-    Ok(svc.extension_catalog.get(&root).to_vec())
+    Ok(svc.extension_catalog.get(root(svc)).to_vec())
 }
 
 /// What installing (`git_url`) or updating (`name`) an extension would
@@ -304,7 +285,7 @@ pub async fn review_extension(
     name: Option<String>,
     stream_id: Option<String>,
 ) -> Result<extensions::ExtensionReview, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
+    let root = working_copy(svc, stream_id.as_deref()).await;
     let commands = svc.commands.as_ref();
     Ok(match (git_url, name) {
         (Some(url), None) => {
@@ -387,6 +368,87 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(v["errors"], json!([]));
+    }
+
+    /// A worktree stream at `dir` (a git worktree of the project, adopted
+    /// as a person would); its id.
+    async fn worktree_stream(svc: &oxplow_app::Services, dir: &std::path::Path) -> String {
+        git(
+            &svc.layout.project_dir,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "side",
+                &dir.to_string_lossy(),
+            ],
+        );
+        let out = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "stream.adopt_worktree",
+                json!({ "path": dir.to_string_lossy(), "title": "Side" }),
+                true,
+            )
+            .await
+            .unwrap();
+        let stream = out.result["stream"]
+            .as_str()
+            .or_else(|| out.result["id"].as_str())
+            .unwrap_or_else(|| panic!("{}", out.result));
+        stream.trim_start_matches("stream:").to_string()
+    }
+
+    /// The app shows the main worktree's extensions and honours its
+    /// `project.yaml` whichever stream is open; a stream's own copy only
+    /// shows once merged.
+    #[tokio::test]
+    async fn every_stream_shows_the_main_worktrees_extensions() {
+        let (svc, _dir) = crate::test_support::services();
+        seed(&svc.layout.project_dir);
+        write(
+            &svc.layout.project_dir,
+            ".oxplow/project.yaml",
+            "extensions:\n  disabled:\n  - oxplow-bundled\n",
+        );
+        let parent = tempfile::tempdir().unwrap();
+        let side = parent.path().join("side");
+        let stream = worktree_stream(&svc, &side).await;
+        write(
+            &side,
+            "oxplow/extensions/unmerged/extension.yaml",
+            "manifest: 2\nname: unmerged\nintent:\n  purpose: test\n",
+        );
+
+        let exts = crate::dispatch("list_extensions", json!({ "streamId": stream }), &svc)
+            .await
+            .unwrap();
+        let names: Vec<&str> = exts
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"demo"), "{names:?}");
+        assert!(!names.contains(&"unmerged"), "{names:?}");
+        let bundled = exts
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == "oxplow-bundled")
+            .unwrap();
+        assert_eq!(bundled["enabled"], json!(false));
+
+        let run = crate::dispatch(
+            "run_lens",
+            json!({ "id": "demo/streams", "streamId": stream }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(run["result"]["rows"], json!([["primary"]]));
     }
 
     #[tokio::test]

@@ -41,7 +41,7 @@ test("the catalog lists prompts by source, data by owner and config keys", async
   const inserted: string[] = [];
   const off = subscribeAgentInput((t) => inserted.push(t));
   const opened: string[] = [];
-  const view = render(<CatalogPage streamId={null} onOpenPage={(r) => opened.push(r.id)} />);
+  const view = render(<CatalogPage onOpenPage={(r) => opened.push(r.id)} />);
   await waitFor(() => view.getByText("Which PRs wait on me?"));
   expect(view.getByTestId("catalog-prompts-capability-vcs").textContent).toContain("Which branches exist?");
   expect(view.getByTestId("catalog-prompts-extension-gh").textContent).toContain("Which PRs wait on me?");

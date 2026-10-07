@@ -45,7 +45,7 @@ test("prompts about a kind; grouped by source, core first; asking about a ref le
 });
 
 test("a page for an effort suggests its prompts, asked about that effort", async () => {
-  const view = render(<SuggestedPrompts refId="effort:12" streamId={null} />);
+  const view = render(<SuggestedPrompts refId="effort:12" />);
   const ask = await waitFor(() => view.getByText("Which files did this effort touch?"));
   expect(view.queryByText("Who has changed this file the most?")).toBeNull();
   fireEvent.click(ask);

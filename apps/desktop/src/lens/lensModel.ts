@@ -603,6 +603,12 @@ export function childParams(child: Lens, params: Record<string, SqlCell>): Recor
 }
 
 
+/** A lens `lens.keep` wrote to its own stream's worktree (`live: false`):
+ *  the app shows the main worktree's lenses, so this one shows once the
+ *  stream is merged. */
+export const KEPT_IN_STREAM =
+  "Saved in this stream's worktree. It shows in the app once the stream is merged.";
+
 /** The starter prompt "New Lens with Your Agent…" puts in the agent's
  *  input for the person to finish and send (it's never sent for them).
  *  The agent's oxplow-extension skill takes it from there (tsk373). */

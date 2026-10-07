@@ -46,7 +46,7 @@ export function LensSlots({
   >([]);
   const paramsKey = JSON.stringify(params);
   const guard = useRequestGuard();
-  const exts = useExtensions(streamId);
+  const exts = useExtensions();
 
   const refresh = useCallback(async () => {
     if (params === null || exts === null) return;

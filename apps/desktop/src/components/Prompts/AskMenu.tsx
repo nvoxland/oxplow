@@ -13,8 +13,6 @@ import { SuggestedPrompts } from "./SuggestedPrompts.js";
 export interface AskTarget {
   /** The page's canonical ref. */
   ref: string;
-  /** Whose extensions' prompts to offer. */
-  streamId: string | null;
 }
 
 export function AskMenu({ ask, buttonStyle }: { ask: AskTarget; buttonStyle: CSSProperties }) {
@@ -46,7 +44,7 @@ export function AskMenu({ ask, buttonStyle }: { ask: AskTarget; buttonStyle: CSS
           >
             Ask About This
           </button>
-          <SuggestedPrompts refId={ask.ref} streamId={ask.streamId} vertical onAsked={() => setOpen(false)} />
+          <SuggestedPrompts refId={ask.ref} vertical onAsked={() => setOpen(false)} />
         </div>
       ) : null}
     </div>

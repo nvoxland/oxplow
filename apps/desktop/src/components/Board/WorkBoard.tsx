@@ -34,7 +34,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [over, setOver] = useState<CanonicalState | null>(null);
   const ctxMenu = useContextMenu();
-  const uiCommands = useUiCommands(null);
+  const uiCommands = useUiCommands();
   const scopeKey = JSON.stringify(scope);
   const refresh = useCallback(async () => {
     try {

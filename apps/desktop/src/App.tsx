@@ -2720,7 +2720,7 @@ export function App() {
         id: ref.id,
         label: "Catalog",
         closable: true,
-        render: () => <CatalogPage streamId={stream?.id ?? null} onOpenPage={nav.navOpen} />,
+        render: () => <CatalogPage onOpenPage={nav.navOpen} />,
       }),
       "explore-data": (ref, nav) => {
         return {
@@ -3110,7 +3110,7 @@ export function App() {
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
         pageKey: selectedThreadId ? `${selectedThreadId}::${tabId}` : undefined,
-        ask: ref && parseRef(ref.id) ? { ref: ref.id, streamId: stream?.id ?? null } : undefined,
+        ask: ref && parseRef(ref.id) ? { ref: ref.id } : undefined,
         bookmark: ref ? {
           scope: bookmarkScope,
           toggle: (scope: BookmarkScope) => {

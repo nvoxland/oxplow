@@ -226,7 +226,7 @@ function RowsBody({
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
-  const uiCommands = useUiCommands(streamId);
+  const uiCommands = useUiCommands();
   // Extensions' badges for the refs these rows link to (P6b.C5).
   const linkedRefs = result.rows.flatMap((row) =>
     lens.columns.flatMap((c) => {
@@ -234,7 +234,7 @@ function RowsBody({
       return ref ? [ref.id] : [];
     }),
   );
-  const badges = useDecorations("row-badge", linkedRefs, streamId);
+  const badges = useDecorations("row-badge", linkedRefs);
   if (result.rows.length === 0) {
     return (
       <p data-testid="lens-empty" style={{ color: "var(--text-secondary)" }}>
@@ -862,7 +862,7 @@ function GridViz({
     void Promise.all(
       childIds.map(async (id) => {
         try {
-          const child = await getLens(id, streamId);
+          const child = await getLens(id);
           return { id, run: await runLens(id, childParams(child, params), streamId), error: null };
         } catch (e) {
           return { id, run: null, error: e instanceof Error ? e.message : String(e) };

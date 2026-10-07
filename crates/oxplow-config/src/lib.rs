@@ -765,7 +765,8 @@ struct RawExtensionsBlock {
 
 /// Just the `extensions.disabled` list of `project_dir/.oxplow/project.yaml`,
 /// without loading (or failing on) the rest of the file. The extension
-/// loader calls this on every load, per worktree.
+/// loader calls this on every load, for the project the load answers to
+/// (the main worktree's, in the daemon).
 pub fn disabled_extensions(project_dir: impl AsRef<Path>) -> Vec<String> {
     #[derive(Deserialize)]
     struct OnlyExtensions {

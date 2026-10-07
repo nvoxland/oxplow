@@ -68,7 +68,7 @@ const nav = {
   goForward() {},
   canGoBack: false,
   canGoForward: false,
-  ask: { ref: "work_item:fake:W-1", streamId: null },
+  ask: { ref: "work_item:fake:W-1" },
 } as unknown as PageNavigation;
 
 const page = () =>
@@ -97,7 +97,7 @@ test("a disabled extension decorates nothing", async () => {
 
 // An effort opens as its diff, the effort's ref in the navigation.
 test("an effort page shows its review verdict as a chip", async () => {
-  const effortNav = { ...nav, ask: { ref: "effort:eff7", streamId: null } } as unknown as PageNavigation;
+  const effortNav = { ...nav, ask: { ref: "effort:eff7" } } as unknown as PageNavigation;
   const view = render(
     <PageNavigationContext.Provider value={effortNav}>
       <Page title="Changes" kind="diff-view" chips={[{ label: "closed" }]}>

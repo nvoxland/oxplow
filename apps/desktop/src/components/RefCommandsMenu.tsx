@@ -12,7 +12,7 @@ import { usePopoverDismiss } from "./usePopoverDismiss.js";
 import { useUiCommands } from "./useUiCommands.js";
 
 export function RefCommandsMenu({ target, buttonStyle }: { target: AskTarget; buttonStyle: CSSProperties }) {
-  const all = useUiCommands(target.streamId);
+  const all = useUiCommands();
   const [open, setOpen] = useState(false);
   const boxRef = usePopoverDismiss<HTMLDivElement>(open, () => setOpen(false));
   const commands = uiCommandsAbout(all, target.ref, "menu");
