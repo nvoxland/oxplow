@@ -333,8 +333,10 @@ analytics pages move out of core into the `oxplow-bundled` extension as
 nav and the content (decided 2026-10-07): `stream › thread` at the
 start, and at the right end the stream's branch (`BranchPicker`) with the
 global search field just after it. The stream and thread names open the
-navigator panel (`navigator-bus.ts`, `requestNavigatorOpen`), the branch the
-branch picker. On macOS it *is* the window's top (an
+navigator panel (`navigator-bus.ts`, `requestNavigatorOpen`); right-clicked,
+they ask the Navigator for that stream's or thread's menu at the pointer
+(`requestNavigatorMenu`) — the same menu as its rows, which the Navigator
+owns. The branch opens the branch picker. On macOS it *is* the window's top (an
 Overlay titlebar): its start leaves 78 px for the floating traffic lights,
 and its empty space carries `data-tauri-drag-region` (Tauri drags only from
 elements that carry it, so the controls stay clickable). Elsewhere it sits

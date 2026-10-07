@@ -368,7 +368,10 @@ another branch.
   - **An item has one menu wherever it shows.** The Navigator builds each
     stream's and thread's menu once (`streamMenu` / `threadMenu`) and
     binds it to both the strip glyph and the panel row; an action whose
-    inline field lives in the panel (Rename, Add thread) opens it.
+    inline field lives in the panel (Rename, Add thread) opens it. A
+    surface outside the Navigator that names a stream or thread (the title
+    bar) asks for the menu over `navigator-bus` (`requestNavigatorMenu`,
+    opened with `useContextMenu().openAt`) rather than building its own.
   - `useContextMenu()` — call once in a parent that renders rows in a
     `.map()` (a per-row hook can't run there); each row does
     `onContextMenu={(e) => open(e, items)}` and the parent renders

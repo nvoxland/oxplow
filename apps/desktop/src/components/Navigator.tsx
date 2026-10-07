@@ -1,15 +1,19 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSlideoutStrip } from "./useSlideoutStrip.js";
 import { SlideoutChevron } from "./SlideoutChevron.js";
-import { subscribeNavigatorOpenRequests } from "../navigator-bus.js";
+import {
+  subscribeNavigatorMenuRequests,
+  subscribeNavigatorOpenRequests,
+  type NavigatorMenuRequest,
+} from "../navigator-bus.js";
 import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
 import { agentChoices, parseAgentChoice } from "../agentKinds.js";
 import { listAcpAgents } from "../api.js";
 import type { AcpAgentListing } from "../tauri-bridge/generated/bindings.js";
 import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
-import { useRowContextMenu } from "./useRowContextMenu.js";
+import { useContextMenu, useRowContextMenu } from "./useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
 import { Slideover } from "./Slideover.js";
 import { titleInitials } from "../initials.js";
@@ -293,6 +297,32 @@ export function Navigator({
   // mirroring the main rail's panel look. The strip and the slide-over
   // overlay both map this same structure so glyph y-positions stay in
   // lock-step when the overlay opens.
+  // A stream's or thread's menu asked for from outside (the title bar's
+  // names): the same menu, headed the same way, at the asker's point.
+  const requested = useContextMenu();
+  const menuFor = (r: NavigatorMenuRequest): { items: MenuItem[]; header: string } | null => {
+    if (r.kind === "stream") {
+      const s = streams.find((x) => x.id === r.id);
+      return s ? { items: streamMenu(s), header: s.title } : null;
+    }
+    for (const [streamId, ts] of Object.entries(threadStates)) {
+      const t = ts.threads.find((x) => x.id === r.id);
+      if (t) return { items: threadMenu(t, threadStates[streamId]?.activeThreadId === t.id), header: t.title };
+    }
+    return null;
+  };
+  const menuForRef = useRef(menuFor);
+  menuForRef.current = menuFor;
+  const openAt = requested.openAt;
+  useEffect(
+    () =>
+      subscribeNavigatorMenuRequests((r) => {
+        const menu = menuForRef.current(r);
+        if (menu) openAt({ x: r.x, y: r.y }, menu.items, menu.header);
+      }),
+    [openAt],
+  );
+
   const streamGroups = useMemo(
     () =>
       orderedStreams.map((s) => {
@@ -567,6 +597,7 @@ export function Navigator({
           </div>
         ) : null}
       </Slideover>
+      {requested.menu}
     </div>
   );
 }

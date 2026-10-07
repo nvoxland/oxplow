@@ -29,6 +29,9 @@ import { ContextMenu } from "./ContextMenu.js";
  */
 export function useContextMenu(): {
   open(event: MouseEvent, items: MenuItem[], header?: string): void;
+  /** Open at a point — for a menu asked for from elsewhere, whose own
+   *  right-click already cancelled the native menu. */
+  openAt(pos: { x: number; y: number }, items: MenuItem[], header?: string): void;
   openForKey(event: KeyboardEvent, items: MenuItem[], header?: string): void;
   menu: ReactNode;
 } {
@@ -41,6 +44,11 @@ export function useContextMenu(): {
     event.stopPropagation();
     if (items.length === 0) return;
     setState({ pos: { x: event.clientX, y: event.clientY }, items, header });
+  }, []);
+
+  const openAt = useCallback((pos: { x: number; y: number }, items: MenuItem[], header?: string) => {
+    if (items.length === 0) return;
+    setState({ pos, items, header });
   }, []);
 
   const openForKey = useCallback((event: KeyboardEvent, items: MenuItem[], header?: string) => {
@@ -57,7 +65,7 @@ export function useContextMenu(): {
     <ContextMenu items={state.items} header={state.header} position={state.pos} onClose={() => setState(null)} />
   ) : null;
 
-  return { open, openForKey, menu };
+  return { open, openAt, openForKey, menu };
 }
 
 /**
