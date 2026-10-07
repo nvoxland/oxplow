@@ -1021,7 +1021,7 @@ mod tests {
     /// item, that an item a commit landed is still in progress.
     #[tokio::test]
     async fn bundled_landed_hint_tells_the_person_once() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let svc = &f.svc;
         svc.commands
             .run(

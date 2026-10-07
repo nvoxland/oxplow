@@ -464,8 +464,8 @@ mod tests {
     use serde_json::json;
 
     /// A task, and a lens over it whose actions run commands.
-    async fn fixture() -> (crate::test_fixtures::EffortFixture, std::path::PathBuf) {
-        let fx = crate::test_fixtures::services_with_effort().await;
+    async fn fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let root = fx.svc.layout.project_dir.clone();
         let ext = root.join("oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
@@ -688,7 +688,7 @@ actions:
 
     /// P6b.D2: a private extension with a component (`board`) that may
     /// query `acme/tasks` and invoke `work_item.transition`.
-    async fn component_fixture() -> (crate::test_fixtures::EffortFixture, std::path::PathBuf) {
+    async fn component_fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join("oxplow/extensions/acme");
         std::fs::write(
@@ -730,7 +730,7 @@ actions:
 
     /// An invoke of `command` from `acme/view`'s frame loaded at `version`.
     fn board_invoke(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::TaskEffortFixture,
         command: &str,
         version: &str,
     ) -> ComponentInvoke {

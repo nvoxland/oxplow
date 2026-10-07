@@ -984,7 +984,7 @@ mod tests {
     /// what it needs; efforts stay.
     #[tokio::test]
     async fn only_what_is_active_is_offered() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let agent = oxplow_domain::Actor::Agent {
             thread_id: Some(fx.thread),

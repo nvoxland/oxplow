@@ -922,7 +922,7 @@ mod tests {
     /// P5.C3: one run writes the row, the file and the event.
     #[tokio::test]
     async fn one_run_writes_the_row_the_file_and_the_event() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
         std::fs::write(dir(&fx).join("src/lib.rs"), "fn x() {}\n").unwrap();
         let body = format!("# VCS notes\n\nSee [[src/lib.rs]] and [[{}]].\n", fx.task);

@@ -154,6 +154,14 @@ need `lint:collect` clean before they're pushed.
 instead of running every migration, ~330 ms → a few ms). A new migration
 or model needs nothing: a rebuilt test binary is a new template key.
 
+**An effort needs no task, and neither does its fixture.**
+`test_fixtures::services_with_effort()` opens an effort linked to nothing
+(through `effort.open`, so its event is logged like a real one); a test
+about oxplow's tasks takes `services_with_task_effort()` instead (an
+in-progress task, the effort linked to it; it derefs to the plain
+fixture, so helpers take either). Reach for the task one only when the
+test reads or relies on the task.
+
 ### The browser suite (`bun run e2e`, P11)
 
 `tests-e2e/` drives the built frontend in Chromium (and, for custom

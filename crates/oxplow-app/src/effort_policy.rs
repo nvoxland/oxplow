@@ -536,7 +536,7 @@ mod tests {
     /// closes the effort and opens the next.
     #[tokio::test]
     async fn a_child_refines_the_link_and_an_unrelated_item_switches() {
-        let fx = services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let parent = work_item_ref(fx.task);
         let child = item(&fx, "child", Some(&parent), true).await;
         transition(&fx, &agent(&fx), &child, "in_progress").await;
@@ -588,7 +588,7 @@ mod tests {
     /// alone.
     #[tokio::test]
     async fn the_none_policy_leaves_efforts_alone() {
-        let fx = services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         fx.svc
             .config
             .write()
@@ -612,7 +612,7 @@ mod tests {
     /// policy they were opened under is no longer the one.
     #[tokio::test]
     async fn switching_the_policy_closes_the_open_efforts() {
-        let fx = services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let mut config = crate::config_service::read_config(&fx.svc.config);
         fx.svc
             .capabilities
@@ -690,11 +690,7 @@ mod tests {
         settle(&fx).await;
         assert_eq!(
             efforts(&fx).await,
-            vec![(
-                fx.effort.value(),
-                Some(work_item_ref(fx.task)),
-                Some("open".into())
-            )]
+            vec![(fx.effort.value(), None, Some("open".into()))]
         );
     }
 }

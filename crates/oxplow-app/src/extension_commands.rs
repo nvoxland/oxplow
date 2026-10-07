@@ -1008,7 +1008,7 @@ mod tests {
     /// A changed script re-registers its command with the new script.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_changed_script_reregisters_its_command() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
             "def transform(x):\n    return {\"commands\": [], \"result\": 1}\n",
@@ -1236,7 +1236,7 @@ mod tests {
         }
     }
 
-    async fn task(fx: &crate::test_fixtures::EffortFixture) -> oxplow_domain::Task {
+    async fn task(fx: &crate::test_fixtures::TaskEffortFixture) -> oxplow_domain::Task {
         use oxplow_domain::stores::TaskStore as _;
         fx.svc.task_store.get(fx.task).await.unwrap().unwrap()
     }
@@ -1270,7 +1270,7 @@ mod tests {
     /// caused by the run's `command.executed`.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_command_emits_its_own_extensions_event_type() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         with_emitting_finish(&fx, "my_review.finished").await;
         let r = oxplow_domain::refs::build::work_item_ref(fx.task);
         let out = fx
@@ -1304,7 +1304,7 @@ mod tests {
     /// that it doesn't declare, refuses the run, which writes nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_command_may_not_emit_a_foreign_or_undeclared_type() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let r = oxplow_domain::refs::build::work_item_ref(fx.task);
         for foreign in ["work_item.created", "my_review.undeclared"] {
             with_emitting_finish(&fx, foreign).await;
@@ -1329,7 +1329,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn an_extension_command_composes_core_commands_in_one_run() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(&fx, FINISH).await;
         let r = oxplow_domain::refs::build::work_item_ref(fx.task);
         let out = fx
@@ -1373,7 +1373,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_destructive_child_makes_the_agents_run_a_proposal_with_its_children() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
             "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.delete\", \"input\": {\"ref\": x[\"input\"][\"ref\"]}}]}\n",
@@ -1422,7 +1422,7 @@ mod tests {
                 "the script must return",
             ),
         ] {
-            let fx = crate::test_fixtures::services_with_effort().await;
+            let fx = crate::test_fixtures::services_with_task_effort().await;
             with_finish(&fx, script).await;
             let r = oxplow_domain::refs::build::work_item_ref(fx.task);
             let err = fx
@@ -1440,7 +1440,7 @@ mod tests {
     /// not run until the stack overflows; nothing it composed is kept.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_self_composing_command_stops_at_the_nesting_limit() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
             "def transform(x):\n    r = x[\"input\"][\"ref\"]\n    return {\"commands\": [\n        {\"name\": \"work_item.update\", \"input\": {\"ref\": r, \"title\": \"again\"}},\n        {\"name\": \"my_review.finish\", \"input\": {\"ref\": r}},\n    ]}\n",
@@ -1472,7 +1472,7 @@ mod tests {
     /// collectors' two minutes.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runaway_script_is_given_up_on_within_the_budget() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
             "def transform(x):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"commands\": []}\n",
@@ -1584,7 +1584,7 @@ mod tests {
     /// with that reason and writes nothing. A refusal composes nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_script_refuses_with_its_reason() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
             "def transform(x):\n    return {\"refuse\": \"it has unverified claims\"}\n",

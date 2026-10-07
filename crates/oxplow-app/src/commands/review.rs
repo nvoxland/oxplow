@@ -361,9 +361,10 @@ mod tests {
     use oxplow_db::{NewClaim, NewDecision};
     use oxplow_domain::{Actor, ThreadId};
 
-    async fn fixture() -> (crate::test_fixtures::EffortFixture, i64, i64) {
-        let fx = crate::test_fixtures::services_with_effort().await;
+    async fn fixture() -> (crate::test_fixtures::TaskEffortFixture, i64, i64) {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let effort = fx.effort.value();
+        let (thread, task) = (fx.thread, fx.task);
         let claim = fx
             .svc
             .db
@@ -371,8 +372,8 @@ mod tests {
                 oxplow_db::record_claim_tx(
                     tx,
                     &NewClaim {
-                        thread_id: fx.thread.value(),
-                        task_id: Some(fx.task.value()),
+                        thread_id: thread.value(),
+                        task_id: Some(task.value()),
                         effort_id: Some(effort),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),

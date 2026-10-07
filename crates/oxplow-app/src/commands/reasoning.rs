@@ -114,7 +114,8 @@ fn place(
                 "SELECT id, work_item FROM effort WHERE thread_id = ?1 AND ended_at IS NULL
                  ORDER BY started_at DESC LIMIT 1",
                 [thread.value()],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+                // An effort linked to nothing has no work item.
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)),
             )
             .optional()
             .map_err(sql)?;
@@ -122,7 +123,8 @@ fn place(
             thread,
             task: effort
                 .as_ref()
-                .and_then(|(_, item)| task_of_work_item_ref(item))
+                .and_then(|(_, item)| item.as_deref())
+                .and_then(task_of_work_item_ref)
                 .map(|t| t.value()),
             effort: effort.map(|(id, _)| id),
         });
@@ -323,7 +325,7 @@ mod tests {
     /// error, and a person must name the thread.
     #[tokio::test]
     async fn a_decision_attaches_to_its_work_items_effort() {
-        let fx = services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,
@@ -363,7 +365,7 @@ mod tests {
     #[tokio::test]
     async fn a_claim_on_another_streams_work_is_refused() {
         use oxplow_domain::stores::{StreamStore as _, TaskStore as _};
-        let fx = services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let mut other = fx.svc.stream_store.list().await.unwrap().pop().unwrap();
         other.id = StreamId::placeholder();
         other.title = "other".into();

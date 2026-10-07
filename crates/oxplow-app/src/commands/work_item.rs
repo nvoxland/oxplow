@@ -1589,7 +1589,7 @@ mod tests {
     /// exact status.
     #[tokio::test]
     async fn a_transition_takes_a_state_and_an_optional_native_state() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
         let err = fx
             .svc
@@ -1717,7 +1717,7 @@ mod tests {
     /// oxplow's own isn't shown as the person's.
     #[tokio::test]
     async fn a_comment_is_recorded_as_whoever_made_it() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let item = oxplow_domain::refs::build::work_item_ref(fx.task);
         for (actor, author) in [
             (Actor::Human, "user"),
@@ -1753,7 +1753,7 @@ mod tests {
     /// effort's link; one it doesn't declare is refused naming the shapes.
     #[tokio::test]
     async fn a_loose_id_resolves_against_the_active_work_list() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let loose = fx.task.to_string();
         let out = fx
             .svc
@@ -1938,7 +1938,7 @@ mod tests {
     /// linked task's thread; two backlog tasks can't be linked that way.
     #[tokio::test]
     async fn a_persons_link_takes_the_tasks_thread() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let from = work_item_ref(fx.task);
         let other = file_on(&fx, "other", None).await;
         let out = fx
@@ -1987,7 +1987,7 @@ mod tests {
     #[tokio::test]
     async fn a_deleted_task_takes_no_comments_or_links() {
         use oxplow_domain::stores::TaskStore as _;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let other = fx
             .svc
             .commands
@@ -2032,7 +2032,7 @@ mod tests {
     /// note, each with its event, caused by the run.
     #[tokio::test]
     async fn links_and_comments_are_commands_with_their_events() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,
@@ -2100,7 +2100,7 @@ mod tests {
     /// The effort policy closes the item's effort after it, as a reaction.
     #[tokio::test]
     async fn a_transition_commits_with_its_audit_and_names_its_cause() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
@@ -2158,7 +2158,7 @@ mod tests {
     /// undoable — an undo restores both.
     #[tokio::test]
     async fn an_update_edits_fields_and_state_atomically_and_undoes() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let bus = &fx.svc.commands;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
@@ -2224,7 +2224,7 @@ mod tests {
     /// `in_progress`: task bookkeeping isn't a claim on the worktree.
     #[tokio::test]
     async fn a_queued_thread_edits_and_finishes_tasks() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let queued = queued_agent(&fx).await;
         let out = fx
             .svc
@@ -2282,7 +2282,7 @@ mod tests {
     /// thread's effort to it; the body's mentions are projected by the pump.
     #[tokio::test]
     async fn a_create_is_audited_and_its_start_switches_the_effort() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
@@ -2476,7 +2476,7 @@ mod tests {
     /// in its own list; undo puts it back where it was.
     #[tokio::test]
     async fn reorder_places_an_item_and_undo_puts_it_back() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
         let a = file_on(&fx, "a", Some(fx.thread)).await;
         let b = file_on(&fx, "b", Some(fx.thread)).await;
@@ -2553,7 +2553,7 @@ mod tests {
     /// an item there); undo brings it back to its place.
     #[tokio::test]
     async fn move_takes_an_item_to_another_list_and_undo_brings_it_back() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
         let a = file_on(&fx, "a", Some(fx.thread)).await;
         let x = file_on(&fx, "x", None).await;
@@ -2628,7 +2628,7 @@ mod tests {
     /// caused by the run.
     #[tokio::test]
     async fn delete_asks_first_then_removes_the_task() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
         let err = fx
             .svc

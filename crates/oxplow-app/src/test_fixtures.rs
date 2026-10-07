@@ -57,13 +57,59 @@ pub struct EffortFixture {
     /// Keep alive: the project directory.
     pub _dir: tempfile::TempDir,
     pub thread: ThreadId,
-    pub task: TaskId,
     pub effort: EffortId,
 }
 
 /// In-memory services over a fresh repo with a primary stream, its first
-/// thread, an in-progress task on it and an open effort.
+/// thread and an open effort linked to nothing — an effort needs no work
+/// item (`.context/work-tracking.md`), so a test that isn't about one
+/// doesn't make one.
 pub async fn services_with_effort() -> EffortFixture {
+    let dir = tempfile::tempdir().unwrap();
+    init_git_repo(dir.path());
+    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    svc.streams.ensure_primary().await.unwrap();
+    let thread = ThreadId::new(1);
+    let opened = svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            crate::commands::effort::OPEN,
+            serde_json::json!({ "thread": thread.to_string() }),
+            false,
+        )
+        .await
+        .unwrap();
+    let effort = opened.result["effort"]
+        .as_str()
+        .and_then(|e| e.parse().ok())
+        .expect("effort.open names the effort");
+    EffortFixture {
+        svc,
+        _dir: dir,
+        thread,
+        effort,
+    }
+}
+
+/// [`EffortFixture`] whose effort is linked to an in-progress oxplow task
+/// on the thread: for a test about tasks.
+pub struct TaskEffortFixture {
+    pub fx: EffortFixture,
+    pub task: TaskId,
+}
+
+impl std::ops::Deref for TaskEffortFixture {
+    type Target = EffortFixture;
+
+    fn deref(&self) -> &EffortFixture {
+        &self.fx
+    }
+}
+
+/// In-memory services over a fresh repo with a primary stream, its first
+/// thread, an in-progress task on it and an open effort linked to it.
+pub async fn services_with_task_effort() -> TaskEffortFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
     let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
@@ -97,12 +143,14 @@ pub async fn services_with_effort() -> EffortFixture {
         .await
         .unwrap()
         .id;
-    EffortFixture {
-        svc,
-        _dir: dir,
-        thread,
+    TaskEffortFixture {
+        fx: EffortFixture {
+            svc,
+            _dir: dir,
+            thread,
+            effort,
+        },
         task,
-        effort,
     }
 }
 

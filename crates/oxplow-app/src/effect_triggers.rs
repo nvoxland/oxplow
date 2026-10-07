@@ -988,7 +988,7 @@ mod tests {
         )
     }
 
-    async fn title(fx: &crate::test_fixtures::EffortFixture) -> String {
+    async fn title(fx: &crate::test_fixtures::TaskEffortFixture) -> String {
         use oxplow_domain::stores::TaskStore as _;
         fx.svc.task_store.get(fx.task).await.unwrap().unwrap().title
     }
@@ -1002,7 +1002,7 @@ mod tests {
     /// that run; a redelivery writes nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_approved_effect_reacts_once_with_its_run_caused_by_the_event() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         approve(svc).await;
@@ -1039,7 +1039,7 @@ mod tests {
     /// event's own row (its subject, its cause) from `v_event`.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effects_input_binds_the_events_id_and_seq() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.transitioned]\n    where: { to: done }\n    input: \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\"\n    entry: stamp.star\n";
         let script = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": ref, \"title\": x[\"rows\"][0][\"type\"] + \" #\" + str(x[\"rows\"][0][\"seq\"])}}]}\n";
@@ -1077,7 +1077,7 @@ mod tests {
     /// effect stops until a person approves it again.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_folder_is_hashed_once_per_catalog_load() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         approve(svc).await;
@@ -1139,7 +1139,7 @@ mod tests {
     /// Nothing before approval, and a `where` that doesn't match skips.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_never_reacts_to_the_past_or_to_what_where_excludes() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
@@ -1159,7 +1159,7 @@ mod tests {
     /// and then interrupted is recorded failed and never sent again.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_interrupted_reaction_is_failed_not_sent_again() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         approve(svc).await;
@@ -1179,7 +1179,7 @@ mod tests {
     /// and a person may retry it. A live one is the pump's to find.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_cut_off_backfill_or_automatic_attempt_is_recovered_at_start() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         approve(svc).await;
@@ -1296,7 +1296,7 @@ mod tests {
     /// own run of the command carries none.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_step_sends_the_same_key_on_every_attempt() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", PROBE)]);
         approve(svc).await;
@@ -1340,7 +1340,7 @@ mod tests {
         use crate::commands::{Command, Handler, HandlerOutput, Invocation};
         use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2};
         use oxplow_domain::{Atomicity, CommandEffect, CommandSpec, Confirm, Invokers, Lifecycle};
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"probe.write\", \"input\": {\"n\": 2}}]}\n";
         extension(
@@ -1429,7 +1429,7 @@ mod tests {
     /// can't; a reaction that didn't fail isn't retried.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_retries_an_interrupted_reaction() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         approve(svc).await;
@@ -1506,7 +1506,7 @@ mod tests {
     /// live reaction needs — the effect enabled, and approved as it is.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_retry_needs_a_current_approval_and_an_enabled_effect() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         approve(svc).await;
@@ -1561,7 +1561,7 @@ mod tests {
     /// and stops after a chain of [`MAX_CHAIN`] effect runs.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_loop_guard_holds() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    input: \"SELECT title FROM v_work_item WHERE ref = :work_item\"\n    entry: bang.star\n";
         let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": x[\"rows\"][0][\"title\"] + \"!\"}}]}\n";
@@ -1634,7 +1634,7 @@ mod tests {
     /// reaction is recorded `proposed`, with the proposal.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_command_that_asks_leaves_a_proposal() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n";
         extension(
@@ -1667,7 +1667,7 @@ mod tests {
     /// its failures.
     #[tokio::test(flavor = "multi_thread")]
     async fn three_failures_disable_an_effect_and_file_a_repair_item() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(
             &svc.layout.project_dir,
@@ -1719,7 +1719,7 @@ mod tests {
     /// Skipped and proposed reactions aren't failures.
     #[tokio::test(flavor = "multi_thread")]
     async fn skipped_and_proposed_reactions_dont_count_as_failures() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let skip = MARK_DONE
             .replace("id: mark-done", "id: skips")
@@ -1774,7 +1774,7 @@ mod tests {
     /// counts the other extension's runs.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_reacts_to_another_extensions_type_at_its_latest_version() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let owner = |types: &str| {
@@ -1920,7 +1920,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_and_the_live_consumer_keep_off_each_others_events() {
         use crate::commands::effect::BACKFILL_PLAN;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         register(svc);
@@ -1983,7 +1983,7 @@ mod tests {
     /// filling the first pages never hide the matches after them.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_plan_reads_past_what_where_excludes() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         for _ in 0..5 {
@@ -2027,7 +2027,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_never_plans_the_effects_own_events() {
         use crate::commands::effect::BACKFILL_PLAN;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    input: \"SELECT title FROM v_work_item WHERE ref = :work_item\"\n    entry: bang.star\n";
         let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": x[\"rows\"][0][\"title\"] + \"!\"}}]}\n";
@@ -2058,7 +2058,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_reacts_to_what_the_effect_never_saw() {
         use crate::commands::effect::{BACKFILL, BACKFILL_PLAN};
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         register(svc);
@@ -2158,7 +2158,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_keeps_to_its_range_and_its_batch() {
         use crate::commands::effect::{backfill, Range, BACKFILL, BACKFILL_PLAN};
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         register(svc);
@@ -2210,7 +2210,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_needs_approval_and_stops_when_the_effect_is_disabled() {
         use crate::commands::effect::BACKFILL;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let broken = "def transform(x):\n    return 1 // 0\n";
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", broken)]);

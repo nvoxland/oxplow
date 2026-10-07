@@ -147,7 +147,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use crate::test_fixtures::{commit_all, services_with_effort};
+    use crate::test_fixtures::commit_all;
 
     /// The project's tasks per commit, as `v_commit_task` reads them.
     async fn tasks_of(svc: &crate::Services, sha: &str) -> serde_json::Value {
@@ -251,7 +251,7 @@ mod tests {
     /// the task closed; a commit of other content doesn't link.
     #[tokio::test]
     async fn a_commit_of_an_efforts_work_links_its_task() {
-        let f = services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/a.rs"), "fn a() {}\n").unwrap();
@@ -277,7 +277,7 @@ mod tests {
     /// effort that does.
     #[tokio::test]
     async fn an_expired_effort_doesnt_stop_a_commit_linking() {
-        let f = services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/a.rs"), "fn a() {}\n").unwrap();
@@ -310,7 +310,7 @@ mod tests {
     /// Committed before the task closed: the effort's finish links it.
     #[tokio::test]
     async fn an_effort_finished_after_its_commit_links_it() {
-        let f = services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/a.rs"), "fn a() { 1 }\n").unwrap();

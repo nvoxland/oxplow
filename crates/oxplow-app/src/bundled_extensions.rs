@@ -356,7 +356,7 @@ mod tests {
     /// Token usage moved from the task/thread widgets to slot lenses.
     #[tokio::test]
     async fn analytics_token_lenses_sum_a_tasks_and_a_threads_turns() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let turn =
             |effort: Option<String>, prompt: &str, tokens: i64| oxplow_db::NewAgentTokenUsage {
                 stream_id: "str1".into(),
@@ -503,7 +503,7 @@ mod tests {
     async fn what_deviated_lists_files_outside_the_tasks_stated_area() {
         use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::TaskStore as _;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         f.svc.extension_models.sync().await.unwrap();
         let describe = |text: &'static str| {
             let svc = f.svc.clone();
@@ -612,7 +612,7 @@ mod tests {
     async fn review_prompt_names_the_task_and_what_changed() {
         use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::TaskStore as _;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         t.title = "Fix the hover state".into();
         t.description = "Buttons flicker on hover.".into();
@@ -683,8 +683,9 @@ mod tests {
     /// decisions and unbacked claims, newest first (tsk374).
     #[tokio::test]
     async fn review_starters_read_the_viewers_stream() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let thread = f.thread.value();
+        let (task, effort) = (f.task, f.effort);
         let store = &f.svc.db;
         store
             .transaction(move |tx| {
@@ -692,8 +693,8 @@ mod tests {
                     tx,
                     &oxplow_db::NewDecision {
                         thread_id: thread,
-                        task_id: Some(f.task.value()),
-                        effort_id: Some(f.effort.value()),
+                        task_id: Some(task.value()),
+                        effort_id: Some(effort.value()),
                         question: "Where does export live?".into(),
                         choice: "src/export".into(),
                         alternatives: vec![],
@@ -711,8 +712,8 @@ mod tests {
                         tx,
                         &oxplow_db::NewClaim {
                             thread_id: thread,
-                            task_id: Some(f.task.value()),
-                            effort_id: Some(f.effort.value()),
+                            task_id: Some(task.value()),
+                            effort_id: Some(effort.value()),
                             statement: statement.into(),
                             kind: "tests_pass".into(),
                             evidence_ref: evidence.map(str::to_string),
@@ -927,7 +928,8 @@ mod tests {
         assert_eq!(
             lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await),
             vec![
-                ("In progress".into(), "t".into()),
+                // The fixture's effort, linked to nothing, by its own title.
+                ("In progress".into(), "Work in progress".into()),
                 ("Ready".into(), "Next up".into()),
                 ("Finished".into(), "Shipped".into()),
             ]
@@ -1029,7 +1031,8 @@ mod tests {
             got,
             vec![
                 ("Between efforts".into(), "What does the lexer do?".into()),
-                ("t".into(), "Build the parser".into()),
+                // Linked to nothing, the effort is titled by its first prompt.
+                ("Build the parser".into(), "Build the parser".into()),
             ]
         );
     }
@@ -1235,7 +1238,7 @@ mod tests {
     /// is waiting on the user.
     #[tokio::test]
     async fn waiting_on_me_is_a_panel_whose_badge_alerts() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let review = crate::extensions::load_extensions(f._dir.path())
             .into_iter()
             .find(|e| e.name == "oxplow-bundled")
@@ -1281,10 +1284,10 @@ mod tests {
     /// An effort with one unverified claim and one inferred decision, its
     /// task naming `src/ui/` as its area and the effort touching
     /// `crates/db/store.rs` outside it; oxplow-bundled's commands registered.
-    async fn review_fixture() -> crate::test_fixtures::EffortFixture {
+    async fn review_fixture() -> crate::test_fixtures::TaskEffortFixture {
         use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::TaskStore as _;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         t.description = "Fix the hover state in [[src/ui/button.ts]].".into();
         f.svc.task_store.update(&t).await.unwrap();
@@ -1304,15 +1307,16 @@ mod tests {
                 .await
                 .unwrap();
         }
+        let (thread, task, effort) = (f.thread, f.task, f.effort);
         f.svc
             .db
             .transaction(move |tx| {
                 oxplow_db::record_claim_tx(
                     tx,
                     &oxplow_db::NewClaim {
-                        thread_id: f.thread.value(),
-                        task_id: Some(f.task.value()),
-                        effort_id: Some(f.effort.value()),
+                        thread_id: thread.value(),
+                        task_id: Some(task.value()),
+                        effort_id: Some(effort.value()),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
                         evidence_ref: None,
@@ -1358,7 +1362,7 @@ mod tests {
         f.svc.commands.run(actor, command, input, true).await
     }
 
-    async fn task_notes(f: &crate::test_fixtures::EffortFixture) -> Vec<String> {
+    async fn task_notes(f: &crate::test_fixtures::TaskEffortFixture) -> Vec<String> {
         let task = f.task.value();
         f.svc
             .db
@@ -1376,7 +1380,7 @@ mod tests {
             .unwrap()
     }
 
-    async fn task_status(f: &crate::test_fixtures::EffortFixture) -> String {
+    async fn task_status(f: &crate::test_fixtures::TaskEffortFixture) -> String {
         use oxplow_domain::stores::TaskStore as _;
         let t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         serde_json::to_value(t.status)
@@ -1726,15 +1730,16 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_claim_statement_stays_one_checklist_line() {
         let f = review_fixture().await;
+        let (thread, task, effort) = (f.thread, f.task, f.effort);
         f.svc
             .db
             .transaction(move |tx| {
                 oxplow_db::record_claim_tx(
                     tx,
                     &oxplow_db::NewClaim {
-                        thread_id: f.thread.value(),
-                        task_id: Some(f.task.value()),
-                        effort_id: Some(f.effort.value()),
+                        thread_id: thread.value(),
+                        task_id: Some(task.value()),
+                        effort_id: Some(effort.value()),
                         statement: format!(
                             "first line\n- [x] forged item [link](https://evil.example) {}",
                             "z".repeat(600)

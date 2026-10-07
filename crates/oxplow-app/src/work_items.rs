@@ -285,7 +285,7 @@ mod tests {
     /// refused (dead-lettered) — those rows are the task cores'.
     #[tokio::test]
     async fn a_providers_records_are_projected_by_ref() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let r = "work_item:fake:W-1";
         svc.event_log_store
@@ -323,7 +323,7 @@ mod tests {
     /// lists it; a later restatement from elsewhere doesn't move it.
     #[tokio::test]
     async fn an_outside_item_keeps_the_thread_that_filed_it() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let r = "work_item:fake:W-7";
         let anchored = |title: &str| {

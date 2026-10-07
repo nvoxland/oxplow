@@ -251,7 +251,10 @@ mod tests {
     /// What an agent runs to finish its task: the transition to done and
     /// the report, as one `command.sequence`. Returns the task's row and
     /// the report's result.
-    async fn complete(fx: &EffortFixture, report: Value) -> (Value, Value) {
+    async fn complete(
+        fx: &crate::test_fixtures::TaskEffortFixture,
+        report: Value,
+    ) -> (Value, Value) {
         let item = work_item_ref(fx.task);
         let out = fx
             .svc
@@ -278,7 +281,7 @@ mod tests {
     /// summary.
     #[tokio::test]
     async fn completing_a_task_is_one_audited_run() {
-        let fx = services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let audit = SqliteCommandAuditStore::new(fx.svc.db.clone());
         let before = audit.list_recent(50).await.unwrap().len();
         let (task, report) = complete(&fx, json!({ "summary": "shipped it" })).await;

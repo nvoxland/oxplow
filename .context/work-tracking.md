@@ -258,6 +258,8 @@ The three in progress:
   `/work-next` moved from core into `oxplow-bundled`. A work list
   declares its id pattern, and a loose id in a command (`tsk12`) is the
   active list's item.
-- Next: a test fixture without a task, then "none" as a work list end to
-  end, and the three swappable pieces.
+  The app's test fixture opens an effort with no task; only tests about
+  tasks make one (which found a claim on an unlinked effort failing).
+- Next: "none" as a work list end to end, then the three swappable
+  pieces.
 

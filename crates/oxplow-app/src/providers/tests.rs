@@ -11,7 +11,9 @@ use serde_json::json;
 use super::*;
 use crate::exec_consent::{self, ProgramKind};
 use crate::extensions::Extension;
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{
+    services_with_effort, services_with_task_effort, EffortFixture, TaskEffortFixture,
+};
 use crate::work_items_conformance::{suite, ServicesProbe, WorkItemsProbe as _};
 
 const EXT: &str = "tracker";
@@ -557,10 +559,16 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .into_iter()
         .map(|r| r.command)
         .collect();
-    // Starting it read it once (as the system), then the two writes.
+    // The fixture opened its effort; starting the instance read it once
+    // (as the system), then the two writes.
     assert_eq!(
         commands,
-        vec!["work_item.transition", "work_item.create", "provider.sync"]
+        vec![
+            "work_item.transition",
+            "work_item.create",
+            "provider.sync",
+            "effort.open"
+        ]
     );
 
     // Undo dispatches again: the provider's inverse is renamed to
@@ -721,7 +729,8 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
         "{err:?}"
     );
     let ours = crate::work_items::PROVIDER;
-    let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+    // An oxplow item: refused for its provider before it's looked up.
+    let task = "work_item:oxplow:tsk1".to_string();
     let err = run(
         json!({ "title": "x", "parent_ref": task }),
         "work_item.create",
@@ -4533,13 +4542,13 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
 /// The tracker extension with the fake (running with `hooks`) and an
 /// effect `file` that reacts to an oxplow task moved to done with the
 /// calls `script` composes; both approved, the provider enabled.
-async fn with_effect(hooks: &str, script: &str) -> EffortFixture {
+async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     with_effect_reading(hooks, None, script).await
 }
 
 /// [`with_effect`], its effect reading `input` rows first when given.
-async fn with_effect_reading(hooks: &str, input: Option<&str>, script: &str) -> EffortFixture {
-    let fx = services_with_effort().await;
+async fn with_effect_reading(hooks: &str, input: Option<&str>, script: &str) -> TaskEffortFixture {
+    let fx = services_with_task_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, hooks);
     let dir = project.join("oxplow/extensions").join(EXT);
@@ -4587,7 +4596,7 @@ const FILE_ON_FAKE: &str = "def transform(x):\n    return {\"commands\": [{\"nam
 
 /// Move the fixture's task to done (what the effect reacts to) and let
 /// the effect react.
-async fn react(fx: &EffortFixture) -> oxplow_domain::StoredEvent {
+async fn react(fx: &TaskEffortFixture) -> oxplow_domain::StoredEvent {
     use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
     let env = oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
         "human",
@@ -4955,7 +4964,10 @@ async fn a_long_overdue_retry_is_a_persons() {
 /// off with its write under way — what oxplow stopping does: `run` drives
 /// the attempt, and is dropped once the fake has the call (its write still
 /// lands after). The fake's hooks are cleared after.
-async fn cut_off<F, Fut>(fx: &EffortFixture, run: F) -> oxplow_domain::StoredEvent
+async fn cut_off<F, Fut>(
+    fx: &crate::test_fixtures::TaskEffortFixture,
+    run: F,
+) -> oxplow_domain::StoredEvent
 where
     F: FnOnce(std::sync::Arc<crate::Services>, oxplow_domain::StoredEvent) -> Fut,
     Fut: std::future::Future<Output = ()> + Send + 'static,

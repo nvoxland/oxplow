@@ -836,7 +836,7 @@ mod tests {
     /// runs as the person will see it.
     #[tokio::test]
     async fn show_stores_logs_and_runs_an_answer() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let out = fx
             .svc
             .commands
@@ -871,7 +871,7 @@ mod tests {
     /// lenses: what the app shows never comes from a stream's copy.
     #[tokio::test]
     async fn a_worktree_thread_shows_the_main_worktrees_lens() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let ext = fx.svc.layout.project_dir.join("oxplow/extensions/demo");
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
         std::fs::write(
