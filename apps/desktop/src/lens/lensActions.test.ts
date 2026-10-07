@@ -5,7 +5,7 @@ import type { LensAction, LensRun } from "../tauri-bridge/generated/bindings.js"
 import { addLensToContext, copyLens, performLensAction, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
-const action: LensAction = { id: "finish", label: "Finish", command: "work_item.transition", input: {}, row: false };
+const action: LensAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
 
 function deps(fail?: Error) {
   const log: string[] = [];

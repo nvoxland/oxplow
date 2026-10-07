@@ -55,14 +55,14 @@ export function matchesSearch(s: EffectiveSetting, query: string): boolean {
 
 /** The prompt Ask the Agent to Change This puts in the agent's input:
  *  which setting, what it's for, what it is now — the agent changes it
- *  with `config.set` (and a person-only one asks the person first). */
+ *  with `oxplow.config.set` (and a person-only one asks the person first). */
 export function askToChange(s: EffectiveSetting): string {
   const now = `${valueText(s.value)}${s.origin === "default" ? " (the default)" : ""}`;
   const from = s.origin === "extension" && s.extension ? ` from the \`${s.extension}\` extension` : "";
-  // Project keys are `.oxplow/project.yaml`'s (config.set); scoped ones
+  // Project keys are `.oxplow/project.yaml`'s (oxplow.config.set); scoped ones
   // (`ai.roles.*`, `metrics.*`) live where their origin says.
   const how = s.key.includes(".")
     ? `(It comes from ${s.origin === "default" ? "the defaults" : `the ${s.origin} config`}; tell me how you'd change it.)`
-    : "(Use config.set; tell me what you changed.)";
+    : "(Use oxplow.config.set; tell me what you changed.)";
   return `Change the setting \`${s.key}\`${from} — ${s.doc || "no description"} It is now ${now}. Change it to: \n${how}`;
 }

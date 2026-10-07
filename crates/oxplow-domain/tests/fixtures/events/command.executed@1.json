@@ -1,5 +1,5 @@
 {
-  "command": "config.set",
+  "command": "oxplow.config.set",
   "actor_kind": "agent",
   "actor_id": "thr3",
   "outcome": "ok",

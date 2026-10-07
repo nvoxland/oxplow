@@ -3,8 +3,8 @@
 //! the collectors that record facts (`collectors:` with `facts:`, the
 //! project's, an extension's, or a built-in one a `metrics: - use:`
 //! enables). The `collector.triggers` pump consumer hands it the ones an
-//! event triggers (`snapshot.taken`, `effort.finished`, …); `collector.sync`
-//! runs one by hand; `metric.rebuild` baselines them.
+//! event triggers (`snapshot.taken`, `effort.finished`, …); `oxplow.collector.sync`
+//! runs one by hand; `oxplow.metric.rebuild` baselines them.
 //!
 //! A fact collector's Starlark script runs with a [`TreeHost`] exposing the
 //! snapshot's file map, so it can call `files(glob)` / `ast_query(...)`; its
@@ -1332,7 +1332,7 @@ impl MetricsService {
     /// invented.
     ///
     /// This is deliberately callable, not buried in boot: it's the one entry point
-    /// boot, the `metric.rebuild` command, and the end-to-end test all share, so
+    /// boot, the `oxplow.metric.rebuild` command, and the end-to-end test all share, so
     /// the boot baseline path is finally exercisable without a process restart —
     /// four metrics bugs in a row (tsk47/48/49) were caught only by restarting.
     ///
@@ -1668,7 +1668,7 @@ impl MetricsService {
         // snapshot at its current fingerprint (tsk50). Otherwise a re-delivered
         // snapshot event — or the direct baseline run PLUS the event loop reacting to
         // the same snapshot — would tree-sitter-parse the whole tree twice (minutes of
-        // CPU). The manual `collector.sync` path doesn't come through here, so an explicit
+        // CPU). The manual `oxplow.collector.sync` path doesn't come through here, so an explicit
         // "run now" still runs.
         let mut to_run: Vec<&FactCollector> = Vec::new();
         for g in gauges {
@@ -1903,7 +1903,7 @@ impl MetricsService {
     }
 
     /// Run one fact collector now, by owner and id, over the stream's latest
-    /// snapshot (the `collector.sync` command). Returns the facts recorded,
+    /// snapshot (the `oxplow.collector.sync` command). Returns the facts recorded,
     /// or why it couldn't run (unknown, an unapproved program, a missing
     /// script) or failed — never a silent zero.
     pub async fn run_collector_by_key(
@@ -1928,7 +1928,7 @@ impl MetricsService {
             {
                 return Err(format!(
                     "collector `{owner}/{key}` is disabled: {reason}. A person can enable it \
-                     again (`plugin.enable`, Settings → Extensions)."
+                     again (`oxplow.plugin.enable`, Settings → Extensions)."
                 ));
             }
         }
@@ -3262,7 +3262,7 @@ impl crate::event_pump::AsyncEventConsumer for EntityStates {
 #[cfg(test)]
 mod tests {
 
-    /// Switch metrics through the real path — the `metric.enable` command —
+    /// Switch metrics through the real path — the `oxplow.metric.enable` command —
     /// then reseed, as the service's event loop does on `ConfigChanged`.
     async fn enable(svc: &crate::Services, keys: &[String], enabled: bool) {
         // The catalog the command checks keys against (boot seeds it).

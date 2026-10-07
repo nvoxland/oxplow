@@ -22,10 +22,10 @@ use crate::{
 /// activity is kept (`eventRetention`), or steers every agent (`agentPromptAppend`, `testing` — its agent hint —
 /// where an agent setting it could persist instructions into all threads): an agent asking to change one
 /// gets a proposal the person approves or declines. Everything else is the
-/// agent's to set through `config.set`. A key whose doc says it runs
+/// agent's to set through `oxplow.config.set`. A key whose doc says it runs
 /// programs or steers agents must be listed here (a test enforces it).
 ///
-/// The gate is `config.set`'s: an edit to `.oxplow/project.yaml` on disk
+/// The gate is `oxplow.config.set`'s: an edit to `.oxplow/project.yaml` on disk
 /// is reloaded whole, person-only keys included — a known gap, left as is
 /// (tsk997; `.context/commands.md`).
 pub const HUMAN_ONLY_KEYS: &[&str] = &[
@@ -131,7 +131,7 @@ pub fn with_key(
 ) -> Result<OxplowConfig, ConfigError> {
     if !is_config_key(key) {
         return Err(ConfigError::Invalid(format!(
-            "`{key}` is not a project.yaml key; see config.list_keys"
+            "`{key}` is not a project.yaml key; see oxplow.config.list_keys"
         )));
     }
     let fallback = basename(project_dir);

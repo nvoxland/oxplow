@@ -509,7 +509,7 @@ pub enum CommandOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommandExecutedV1 {
-    /// The command's name (`work_item.transition`, `config.set`).
+    /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKindV1,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -534,7 +534,7 @@ impl EventType for CommandExecutedAtV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommandExecutedV2 {
-    /// The command's name (`work_item.transition`, `config.set`).
+    /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -568,7 +568,7 @@ impl EventType for CommandExecuted {
 pub struct CommandProposedV1 {
     /// `proposal:<id>`.
     pub proposal: String,
-    /// The command's name (`config.set`).
+    /// The command's name (`oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKindV1,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -598,7 +598,7 @@ impl EventType for CommandProposedAtV1 {
 pub struct CommandProposedV2 {
     /// `proposal:<id>`.
     pub proposal: String,
-    /// The command's name (`config.set`).
+    /// The command's name (`oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1543,8 +1543,8 @@ impl EventType for EffortOpened {
 }
 
 /// `effort.claim_verified@1` (P7.C4): a reviewer verified one of an
-/// effort's claims (`effort.verify_claim`), naming what backs it — or
-/// took that back (`effort.unverify_claim`, `evidence` absent).
+/// effort's claims (`oxplow.effort.verify_claim`), naming what backs it — or
+/// took that back (`oxplow.effort.unverify_claim`, `evidence` absent).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortClaimVerifiedV1 {
@@ -1586,7 +1586,7 @@ impl EventType for EffortDecisionReviewed {
 }
 
 /// `collector.synced@1` (P7.B3): a collector ran — by hand
-/// (`collector.sync`), on its schedule, or for an event its `on:` trigger
+/// (`oxplow.collector.sync`), on its schedule, or for an event its `on:` trigger
 /// names (then the envelope's `cause` is that event). Logged in the
 /// transaction that wrote what it collected; a run that failed logs one
 /// too, with what went wrong.
@@ -1681,7 +1681,7 @@ impl EventType for WorkItemStateChanged {
 }
 
 /// `effort.linked@1`: an effort's work item was set, changed or cleared
-/// (`effort.link`).
+/// (`oxplow.effort.link`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortLinkedV1 {
@@ -1720,7 +1720,7 @@ impl EventType for EffortLanded {
 }
 
 /// `effort.retitled@1`: an effort's own title was set or cleared
-/// (`effort.update`); cleared, it shows its default again.
+/// (`oxplow.effort.update`); cleared, it shows its default again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortRetitledV1 {
@@ -1930,7 +1930,7 @@ impl EventType for CodeDiagnosticsChanged {
 /// provider instance, a collector — was stopped on this machine after
 /// repeated failures (or a provider whose handshake no longer matches what
 /// was approved), and stays off until a person enables it again
-/// (`plugin.enable`).
+/// (`oxplow.plugin.enable`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PluginDisabledV1 {
@@ -1952,7 +1952,7 @@ impl EventType for PluginDisabled {
 }
 
 /// `plugin.enabled@1` (P7.C1): a person enabled a disabled contribution
-/// again on this machine (`plugin.enable`).
+/// again on this machine (`oxplow.plugin.enable`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PluginEnabledV1 {
@@ -1971,7 +1971,7 @@ impl EventType for PluginEnabled {
 }
 
 /// `knowledge.page.written@1`: a knowledge page's row and edges were
-/// restated from its body — by `knowledge.write_page` / `link` /
+/// restated from its body — by `oxplow.knowledge.write_page` / `link` /
 /// `resync`, or by the wiki watcher after a hand edit
 /// (`system:wiki_watch`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1995,7 +1995,7 @@ impl EventType for KnowledgePageWritten {
 }
 
 /// `lens.shown@1`: an agent showed the person an answer in a thread —
-/// an existing lens or its own lens spec (`lens.show`, P6.C1).
+/// an existing lens or its own lens spec (`oxplow.lens.show`, P6.C1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LensShownV1 {
@@ -2016,7 +2016,7 @@ impl EventType for LensShown {
 }
 
 /// `lens.kept@1`: an answer was kept — written as a private lens
-/// (`lens.keep`, P6.C1).
+/// (`oxplow.lens.keep`, P6.C1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LensKeptV1 {
@@ -2063,7 +2063,7 @@ impl EventType for LensKept {
 }
 
 /// `ui.op_failed@1` (tsk1072): an operation the person started in the
-/// app failed, as the app showed it (`ui.report_error`). Its captured
+/// app failed, as the app showed it (`oxplow.ui.report_error`). Its captured
 /// stderr and stdout are the `output` body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

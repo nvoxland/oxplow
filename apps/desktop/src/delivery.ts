@@ -8,7 +8,7 @@
  * `v_effect_run`'s latest attempts). One whose every step went to a
  * provider keeping `idempotent_writes` is sent again by itself (P10,
  * `retry_at`); any other — a step outside oxplow may already have run —
- * waits for a person's retry (`effect.retry`, asked first).
+ * waits for a person's retry (`oxplow.effect.retry`, asked first).
  */
 import { useCallback, useEffect, useState } from "react";
 

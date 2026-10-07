@@ -458,7 +458,7 @@ struct MachineEnv {
 /// hands out another sender into the same backing task.
 pub struct Services {
     pub config: Arc<RwLock<OxplowConfig>>,
-    /// Woken each time the in-memory config is swapped (`config.set`'s
+    /// Woken each time the in-memory config is swapped (`oxplow.config.set`'s
     /// after-commit apply) — what a `config.changed` reactor waits on.
     pub config_applied: Arc<tokio::sync::Notify>,
     pub db: Database,
@@ -557,9 +557,9 @@ pub struct Services {
     pub dashboard_store: Arc<oxplow_db::SqliteDashboardStore>,
     /// Extension-source entity data + run state (see `collector_runner`).
     pub collector_store: Arc<oxplow_db::SqliteCollectorStore>,
-    /// Runs collectors (the `collector.sync` command and the scheduler).
+    /// Runs collectors (the `oxplow.collector.sync` command and the scheduler).
     pub collector_runner: collector_runner::CollectorRunner,
-    /// An agent's answers in threads (`v_thread_answer`, `lens.show`).
+    /// An agent's answers in threads (`v_thread_answer`, `oxplow.lens.show`).
     pub thread_answer_store: oxplow_db::SqliteThreadAnswerStore,
     /// The person's left-nav layout (P6.G1).
     pub panel_layout_store: oxplow_db::SqlitePanelLayoutStore,
@@ -1777,51 +1777,51 @@ mod tests {
             services.commands.external_commands(),
             [
                 // The collector's own program or script (P7.B3).
-                "collector.sync",
+                "oxplow.collector.sync",
                 // A tile's SQL is checked by the semantic engine first (P8.A5).
-                "dashboard.add_item",
-                "dashboard.update_item",
+                "oxplow.dashboard.add_item",
+                "oxplow.dashboard.update_item",
                 // The worktree and the snapshot diff a report is checked
                 // against (P8.A7).
-                "effort.report",
+                "oxplow.effort.report",
                 // A clone into a stream's worktree, a person's call (P8.A9).
-                "extension.install",
-                "extension.update",
-                "git.cherry_pick",
-                "git.ignore",
-                "git.rebase",
-                "git.revert",
+                "oxplow.extension.install",
+                "oxplow.extension.update",
+                "oxplow.git.cherry_pick",
+                "oxplow.git.ignore",
+                "oxplow.git.rebase",
+                "oxplow.git.revert",
                 // Lens files on disk (P6 review, tsk597): a Tx handler may
                 // run twice, and a retried file write strands the first.
-                "lens.keep",
-                "lens.share",
+                "oxplow.lens.keep",
+                "oxplow.lens.share",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
-                "lsp.install_server",
-                "lsp.remove_server",
-                "metric.rebuild",
+                "oxplow.lsp.install_server",
+                "oxplow.lsp.remove_server",
+                "oxplow.metric.rebuild",
                 // A provider's process restarts (P7.C1; was provider.enable).
-                "plugin.enable",
+                "oxplow.plugin.enable",
                 // The provider process's collectors (P7.A3).
-                "provider.sync",
+                "oxplow.provider.sync",
                 // Overwrites a worktree file (P8.A9).
-                "snapshot.restore_file",
+                "oxplow.snapshot.restore_file",
                 // A stream's worktree and its capture service (P8.A4).
-                "stream.adopt_worktree",
-                "stream.archive",
-                "stream.create_worktree",
+                "oxplow.stream.adopt_worktree",
+                "oxplow.stream.archive",
+                "oxplow.stream.create_worktree",
                 // A run's capture, through the collection service (P8.A8).
-                "test.record_run",
-                "vcs.checkout_branch",
-                "vcs.commit",
-                "vcs.delete_branch",
-                "vcs.discard",
-                "vcs.fetch",
-                "vcs.merge",
-                "vcs.pull",
-                "vcs.push",
-                "vcs.rename_branch",
-                "vcs.resolve_conflict",
-                "vcs.stage",
+                "oxplow.test.record_run",
+                "oxplow.vcs.checkout_branch",
+                "oxplow.vcs.commit",
+                "oxplow.vcs.delete_branch",
+                "oxplow.vcs.discard",
+                "oxplow.vcs.fetch",
+                "oxplow.vcs.merge",
+                "oxplow.vcs.pull",
+                "oxplow.vcs.push",
+                "oxplow.vcs.rename_branch",
+                "oxplow.vcs.resolve_conflict",
+                "oxplow.vcs.stage",
             ]
         );
     }
@@ -1838,15 +1838,15 @@ mod tests {
         assert_eq!(
             services.commands.dispatch_commands(),
             [
-                "command.sequence",
-                "work_item.comment",
-                "work_item.create",
-                "work_item.delete",
-                "work_item.link",
-                "work_item.move",
-                "work_item.reorder",
-                "work_item.transition",
-                "work_item.update",
+                "oxplow.command.sequence",
+                "oxplow.work_item.comment",
+                "oxplow.work_item.create",
+                "oxplow.work_item.delete",
+                "oxplow.work_item.link",
+                "oxplow.work_item.move",
+                "oxplow.work_item.reorder",
+                "oxplow.work_item.transition",
+                "oxplow.work_item.update",
             ]
         );
     }

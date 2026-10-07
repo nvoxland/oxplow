@@ -109,8 +109,11 @@ pub enum CommandEffect {
 /// What a command declares about itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct CommandSpec {
-    /// `<capability|plugin>.<verb>`, snake_case: `work_item.transition`,
-    /// `config.set`.
+    /// The command id: `<namespace>.<area>.<verb>`, snake_case —
+    /// `oxplow.work_item.transition`, `acme_pr.issue.close`. The namespace
+    /// is its owner's (`oxplow` for core and oxplow's own extensions, an
+    /// extension's declared `namespace:` otherwise), so two extensions'
+    /// areas never collide.
     pub name: String,
     /// One sentence for `list_commands` and the launcher.
     pub summary: String,
@@ -130,14 +133,28 @@ pub struct CommandSpec {
     pub needs: Vec<String>,
 }
 
+/// The namespace oxplow's own commands are under: core's and its shipped
+/// extensions' (`oxplow-bundled`, …) alike, so a command moving between
+/// them keeps its id.
+pub const OXPLOW_NAMESPACE: &str = "oxplow";
+
+/// The namespace of a command id — its first segment.
+pub fn namespace_of(id: &str) -> &str {
+    id.split('.').next().unwrap_or_default()
+}
+
 impl CommandSpec {
-    /// A command name has the event-type grammar: `namespace.verb`.
-    pub fn validate_name(name: &str) -> Result<(), DomainError> {
-        validate_type_name(name).map_err(|_| {
-            DomainError::Invalid(format!(
-                "command name `{name}` must be `<capability>.<verb>` in snake_case"
-            ))
-        })
+    /// A command id is `<namespace>.<area>.<verb>`: exactly three
+    /// snake_case segments.
+    pub fn validate_id(id: &str) -> Result<(), DomainError> {
+        let three = id.split('.').count() == 3;
+        if three && validate_type_name(id).is_ok() {
+            return Ok(());
+        }
+        Err(DomainError::Invalid(format!(
+            "command id `{id}` must be `<namespace>.<area>.<verb>` in snake_case \
+             (e.g. `oxplow.work_item.transition`)"
+        )))
     }
 }
 
@@ -500,10 +517,19 @@ mod tests {
     }
 
     #[test]
-    fn command_names_follow_the_type_grammar() {
-        assert!(CommandSpec::validate_name("work_item.transition").is_ok());
-        assert!(CommandSpec::validate_name("transition").is_err());
-        assert!(CommandSpec::validate_name("Work.Item").is_err());
+    fn a_command_id_is_namespace_area_verb() {
+        assert!(CommandSpec::validate_id("oxplow.work_item.transition").is_ok());
+        assert!(CommandSpec::validate_id("acme_pr.issue.close").is_ok());
+        for bad in [
+            "work_item.transition",
+            "transition",
+            "oxplow.work_item.transition.now",
+            "Oxplow.work_item.transition",
+            "oxplow..transition",
+        ] {
+            assert!(CommandSpec::validate_id(bad).is_err(), "{bad}");
+        }
+        assert_eq!(namespace_of("oxplow.work_item.create"), "oxplow");
     }
 
     #[test]

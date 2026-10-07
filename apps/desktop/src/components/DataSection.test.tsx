@@ -8,13 +8,13 @@ const realApi = await import("../api.js");
 let answer: () => Promise<unknown> = () => new Promise(() => {});
 const decided: string[] = [];
 const ran: Array<[string, unknown, boolean]> = [];
-/** What `effect.retry` answers. */
+/** What `oxplow.effect.retry` answers. */
 let retried: unknown = { effect: "acme/mark-done", event: "event:e1", attempt: 2, outcome: "ok" };
 const letter = { id: 7, consumer: "change.analyze", event_seq: 41, error: "boom", attempts: 2, first_failed_at: "t", last_failed_at: "t" };
 /** The models Settings → Data lists, and what counting each answers (none: it times out). */
 let entities: Array<{ name: string; owner: string; kind: string; description: string }> = [];
 let counts: Record<string, number> = {};
-/** What `effect.backfill_plan` counts. */
+/** What `oxplow.effect.backfill_plan` counts. */
 let plannedCount = 3;
 mock.module("../api.js", () => ({
   ...realApi,
@@ -44,9 +44,9 @@ mock.module("../api.js", () => ({
   runCommand: async (name: string, input: unknown, confirmed = false) => {
     ran.push([name, input, confirmed]);
     const result =
-      name === "effect.backfill_plan"
+      name === "oxplow.effect.backfill_plan"
         ? { effect: "acme/mark-done", planned: plannedCount, from_seq: 4, to_seq: 9, batch: 200 }
-        : name === "effect.backfill"
+        : name === "oxplow.effect.backfill"
           ? { effect: "acme/mark-done", planned: 3, ran: 3, skipped: 0, proposed: 0, failed: 0, remaining: 0 }
           : retried;
     return { result, audit_id: 1, event_id: null, inverse: null };
@@ -153,7 +153,7 @@ test("Delivery retries at once and discards only once confirmed", async () => {
 });
 
 // P9.D4: a failed reaction is listed with why, and Retry — armed first,
-// since a step outside oxplow may already have run — runs `effect.retry`
+// since a step outside oxplow may already have run — runs `oxplow.effect.retry`
 // as the person, confirmed.
 test("Delivery lists a failed reaction and retries it only once confirmed", async () => {
   const view = render(<DataSection />);
@@ -163,7 +163,7 @@ test("Delivery lists a failed reaction and retries it only once confirmed", asyn
   fireEvent.click(view.getByTestId("reaction-retry-acme/mark-done-e1-trigger"));
   expect(ran).toEqual([]);
   fireEvent.click(view.getByTestId("reaction-retry-acme/mark-done-e1-confirm"));
-  await waitFor(() => expect(ran).toEqual([["effect.retry", { effect: "acme/mark-done", event: "event:e1" }, true]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.effect.retry", { effect: "acme/mark-done", event: "event:e1" }, true]]));
 });
 
 // P9.D5: an approved effect's row offers Backfill…: it says how many past
@@ -176,11 +176,11 @@ test("Backfill… asks with the count and runs effect.backfill once confirmed", 
   fireEvent.click(view.getByTestId("effect-backfill-effect:acme/mark-done"));
   const ask = await waitFor(() => view.getByTestId("effect-backfill-ask-effect:acme/mark-done"));
   expect(ask.textContent).toContain("never reacted to 3 matching events");
-  expect(ran).toEqual([["effect.backfill_plan", { effect: "acme/mark-done" }, false]]);
+  expect(ran).toEqual([["oxplow.effect.backfill_plan", { effect: "acme/mark-done" }, false]]);
   expect(view.getByTestId("effect-backfill-run-effect:acme/mark-done").textContent).toBe("Run on 3 events");
   fireEvent.click(view.getByTestId("effect-backfill-run-effect:acme/mark-done"));
   // It runs on the range it showed (tsk849): what was logged since isn't in it.
-  await waitFor(() => expect(ran[1]).toEqual(["effect.backfill", { effect: "acme/mark-done", to_seq: 9 }, true]));
+  await waitFor(() => expect(ran[1]).toEqual(["oxplow.effect.backfill", { effect: "acme/mark-done", to_seq: 9 }, true]));
   await waitFor(() => expect(view.queryByTestId("effect-backfill-ask-effect:acme/mark-done")).toBeNull());
 });
 

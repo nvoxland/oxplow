@@ -85,12 +85,12 @@ each row's menu (right-click, or Menu key / Shift+F10 on a row):
 actions:
   - id: finish
     label: Finish
-    command: work_item.transition
+    command: oxplow.work_item.transition
     input: { ref: "{{row.ref}}", to: done }
     row: true
   - id: sync
     label: Sync PRs
-    command: collector.sync
+    command: oxplow.collector.sync
     input: { owner: github, id: prs }
 ```
 
@@ -116,7 +116,7 @@ depth: level             # a whole number indents the row
 columns:
   - { key: title, link: { kind: task, from: id }, icon: status, tone: hue }
 actions:
-  - { id: add, label: "+", command: work_item.create, group: Ready, input: { title: New task } }
+  - { id: add, label: "+", command: oxplow.work_item.create, group: Ready, input: { title: New task } }
 ```
 
 The `group`, `emphasis` and `depth` columns aren't shown as cells. An
@@ -218,7 +218,7 @@ for the lenses and commands it declares.
 custom_components:
   - id: burndown
     assets: [open-tasks]                # lenses it may query
-    commands: [work_item.transition]    # commands it may run
+    commands: [oxplow.work_item.transition]    # commands it may run
 ```
 
 ```yaml
@@ -253,7 +253,7 @@ oxplow.connect().then((component) => {
 });
 // Elsewhere, with `component` in hand:
 //   await component.query("open-tasks", {})
-//   await component.invoke("work_item.transition", { ref, to: "done" })
+//   await component.invoke("oxplow.work_item.transition", { ref, to: "done" })
 //   await component.navigate("work_item:oxplow:tsk42")   // oxplow pages only
 ```
 

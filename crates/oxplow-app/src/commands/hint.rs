@@ -15,7 +15,7 @@ use serde_json::json;
 
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
-pub const DISMISS: &str = "hint.dismiss";
+pub const DISMISS: &str = "oxplow.hint.dismiss";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -66,7 +66,7 @@ pub fn dismiss_command() -> Command {
             })
         })),
     )
-    .expect("hint.dismiss is a valid command")
+    .expect("oxplow.hint.dismiss is a valid command")
 }
 
 /// The hint commands, for the bus.

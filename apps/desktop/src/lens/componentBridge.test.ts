@@ -14,9 +14,9 @@ test("frame messages parse into the three requests and ready; anything else is r
     type: "request",
     request: { id: "1", method: "query", asset: "open-tasks", params: { n: 1, s: "x", z: null } },
   });
-  expect(parseFrameMessage({ id: "2", method: "invoke", command: "work_item.transition", input: { to: "done" } })).toEqual({
+  expect(parseFrameMessage({ id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } })).toEqual({
     type: "request",
-    request: { id: "2", method: "invoke", command: "work_item.transition", input: { to: "done" } },
+    request: { id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } },
   });
   expect(parseFrameMessage({ id: "3", method: "navigate", ref: "work_item:oxplow:tsk1" })).toEqual({
     type: "request",
@@ -109,19 +109,19 @@ test("a query runs the declared lens through the host and answers ok", async () 
 
 test("an invoke that asks is confirmed in the host, then runs confirmed; declined, it's CANCELLED", async () => {
   const yes = harness();
-  yes.send({ id: "i1", method: "invoke", command: "work_item.transition", input: { to: "done" } });
+  yes.send({ id: "i1", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } });
   await yes.settle();
   expect(yes.calls).toEqual([
-    ["invoke", "work_item.transition", { to: "done" }, false],
-    ["invoke", "work_item.transition", { to: "done" }, true],
+    ["invoke", "oxplow.work_item.transition", { to: "done" }, false],
+    ["invoke", "oxplow.work_item.transition", { to: "done" }, true],
   ]);
   expect(yes.received).toEqual([{ id: "i1", ok: true, result: null }]);
   yes.channel.port1.close();
 
   const no = harness({ confirm: async () => false });
-  no.send({ id: "i2", method: "invoke", command: "work_item.transition", input: {} });
+  no.send({ id: "i2", method: "invoke", command: "oxplow.work_item.transition", input: {} });
   await no.settle();
-  expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `work_item.transition`." } }]);
+  expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `oxplow.work_item.transition`." } }]);
   no.channel.port1.close();
 });
 

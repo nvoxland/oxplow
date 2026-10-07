@@ -6,8 +6,8 @@
 //!   each `agent.tool.finished` (`RunOrigin::Event`). It detects a test or
 //!   analysis run, runs the report collectors whose `on_run` matches, and
 //!   records what they parsed (`observed`).
-//! - **A command**: `collector.sync` runs one report collector by hand
-//!   (`sync_report_collector`), and `test.record_run` records a run an
+//! - **A command**: `oxplow.collector.sync` runs one report collector by hand
+//!   (`sync_report_collector`), and `oxplow.test.record_run` records a run an
 //!   agent asserts (`record_test_run`) — `RunOrigin::Command`.
 //!
 //! Coverage numbers come **only** from oxplow parsing the report
@@ -325,7 +325,7 @@ pub enum ReportSync {
 }
 
 impl ReportSync {
-    /// As `collector.sync` answers: `status` (`stored`, or why nothing
+    /// As `oxplow.collector.sync` answers: `status` (`stored`, or why nothing
     /// landed) with what was recorded.
     pub fn to_json(&self) -> serde_json::Value {
         match self {
@@ -496,7 +496,7 @@ pub enum RunOrigin<'a> {
     /// reactor detects a run in, or a `test.run.recorded` whose coverage
     /// the run-reports reactor reads (tsk1015).
     Event(&'a RunCause),
-    /// A command (`collector.sync`, `test.run.record`): `turn` is its
+    /// A command (`oxplow.collector.sync`, `test.run.record`): `turn` is its
     /// actor's open turn when that actor is the thread's own agent, and
     /// none for anyone else — a person's sync during an agent's turn isn't
     /// the agent's.
@@ -779,7 +779,7 @@ impl CollectionService {
                 Ok(Some(reason)) => {
                     return ReportRead::Disabled(format!(
                         "collector `{}` is disabled: {reason}. A person can enable it again \
-                         (`plugin.enable`, Settings → Extensions).",
+                         (`oxplow.plugin.enable`, Settings → Extensions).",
                         spec.id
                     ))
                 }
@@ -972,7 +972,7 @@ impl CollectionService {
     /// for every way a run is reported: a run logged with a cause is one
     /// the collection reactor detected in a tool call, whose reports it
     /// read inline (its same-call advisories and nudge depend on them), so
-    /// its event reads nothing more; every other run — `test.record_run`,
+    /// its event reads nothing more; every other run — `oxplow.test.record_run`,
     /// a by-hand sync of a test-report collector — has its coverage read
     /// here. A run's own test report isn't read here: it *is* the run.
     pub async fn on_test_run_recorded(
@@ -1408,10 +1408,10 @@ impl CollectionService {
             .flatten()
     }
 
-    /// Run report collector `id` by hand (`collector.sync`, tsk863): read
+    /// Run report collector `id` by hand (`oxplow.collector.sync`, tsk863): read
     /// its report now, whenever it was written, and record what it parsed
     /// in `thread` — a test run, a coverage capture or a static-analysis
-    /// capture — like a detected run's, with `collector.sync project/<id>`
+    /// capture — like a detected run's, with `oxplow.collector.sync project/<id>`
     /// as the run's command. The run is recorded as the collector's.
     pub async fn sync_report_collector(
         &self,
@@ -1449,7 +1449,7 @@ impl CollectionService {
             }
             ReportRead::NotFresh => unreachable!("a by-hand run reads the report as it is"),
         }
-        let command = format!("collector.sync project/{id}");
+        let command = format!("oxplow.collector.sync project/{id}");
         let storage = RunCollectorError::Storage;
         Ok(match spec.records {
             Some(Records::Tests) => {
@@ -4186,7 +4186,7 @@ mod tests {
                 .await
         }
 
-        /// Run the harness's coverage collector by hand (`collector.sync`).
+        /// Run the harness's coverage collector by hand (`oxplow.collector.sync`).
         async fn sync_coverage(h: &Harness) -> CoverageIngest {
             match h
                 .service
@@ -5152,7 +5152,7 @@ mod tests {
         }
 
         /// tsk1015: a run reported any way but the agent's own shell command
-        /// (`test.record_run`, a by-hand sync) has its coverage read from its
+        /// (`oxplow.test.record_run`, a by-hand sync) has its coverage read from its
         /// `test.run.recorded` — the coverage collectors whose report it
         /// wrote — owned by the run's effort. A run the collection reactor
         /// saw read its reports already: its event reads nothing more.
@@ -6854,7 +6854,7 @@ mod tests {
             assert_eq!(collector_run(&h, "tests.parse").await.unwrap().0, "ok");
         }
 
-        /// tsk935: a by-hand sync (`collector.sync`, whoever asks — an
+        /// tsk935: a by-hand sync (`oxplow.collector.sync`, whoever asks — an
         /// agent can't approve) runs no unapproved program, and an approved
         /// one whose program changed asks again before it runs.
         #[tokio::test]
@@ -6976,7 +6976,7 @@ mod tests {
             ));
         }
 
-        /// tsk863: `collector.sync` runs a collector the project declares.
+        /// tsk863: `oxplow.collector.sync` runs a collector the project declares.
         #[tokio::test]
         async fn an_undeclared_report_collector_is_not_found() {
             let h = build(None).await;

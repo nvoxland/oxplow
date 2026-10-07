@@ -35,7 +35,7 @@ command):
 | a change's analysis (`ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
 | AI providers and roles, credentials, approving a program or source | secrets and consent: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
-| a person's global provider instances (`instances.yaml`, P9.B2: `add_provider_instance` / `set_provider_instance` / `remove_provider_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `config.set`) |
+| a person's global provider instances (`instances.yaml`, P9.B2: `add_provider_instance` / `set_provider_instance` / `remove_provider_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `oxplow.config.set`) |
 
 **Guards** (`crates/oxplow-app/src/source_guards.rs`). The thin
 callers — oxplow-rpc, oxplow-mcp, oxplow-control-plane, oxplow-daemon,
@@ -279,7 +279,7 @@ comparisons through the neutral RPCs ([vcs.md](./vcs.md)):
 - `listRecentRemoteBranches(streamId, limit?)` —
   `RemoteBranchEntry[]` sorted by committer date.
 - `vcsPush(streamId, { remote, branch })` / `vcsPull(streamId, { remote,
-  branch })` — the `vcs.push` / `vcs.pull` commands aimed at a remote
+  branch })` — the `oxplow.vcs.push` / `oxplow.vcs.pull` commands aimed at a remote
   branch (a refspec push of HEAD; fetch + merge), each run inside a
   `BackgroundTaskStore` row.
 - `listSiblingWorktrees(streamId)` — every git worktree of this repo
@@ -288,7 +288,7 @@ comparisons through the neutral RPCs ([vcs.md](./vcs.md)):
   returns only worktrees NOT yet tracked as oxplow streams (used by
   the new-stream adoption flow).
 
-The cross-worktree merge action is the `vcs.merge` command (`vcsMerge`);
+The cross-worktree merge action is the `oxplow.vcs.merge` command (`vcsMerge`);
 nothing more is needed because merging only ever runs in
 the *current* stream's working dir. See
 [git-integration.md](./git-integration.md) for the rationale on why
@@ -376,7 +376,7 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   baseline excluded, each with `label`/`label_kind`.
 - `listFileSnapshotsForPath(path)` (RPC `list_file_snapshots { path }`)
   — every captured row of one file, newest first.
-- Restoring a captured file is the `snapshot.restore_file { file_snapshot }`
+- Restoring a captured file is the `oxplow.snapshot.restore_file { file_snapshot }`
   command (P8.A9; destructive, so a person confirms and an agent's run is
   a proposal) — it writes the row's bytes back into its stream's worktree
   (`oxplow_app::snapshot_files::SnapshotFiles`, shared with the reads). Ids are honest
@@ -458,10 +458,10 @@ UI). Active producers:
   wires them to `start`/`complete`. Indeterminate.
 - **LSP install** — `crates/oxplow-app/src/lsp_installer.rs` wraps
   `crates/oxplow-lsp-installer/` (Mason-registry-backed). The
-  `lsp.install_server` command (P8.A9, `Confirm::Always`) downloads a release asset, drops it under `.oxplow/lsp/<name>/`,
+  `oxplow.lsp.install_server` command (P8.A9, `Confirm::Always`) downloads a release asset, drops it under `.oxplow/lsp/<name>/`,
   and registers the binary with `LspSessionManager`'s
   `InstalledServers` overlay. Manifest at `.oxplow/lsp/installed.json`
-  replays into the session manager on boot. `lsp.remove_server`
+  replays into the session manager on boot. `oxplow.lsp.remove_server`
   reverses all of that. Both emit `LspServersChanged` on the oxplow
   event bus so the renderer refetches `list_lsp_servers`. The shared
   session surface (`lsp_request` / `lsp_notify` / `list_lsp_servers` /
@@ -513,7 +513,7 @@ state.
 
 ## Thread and stream order
 
-- `thread.reorder { stream, order }` (P8.A3) gives the named threads
+- `oxplow.thread.reorder { stream, order }` (P8.A3) gives the named threads
   sequential `sort_index` values (each must be on `stream`); undo restores
   the previous order. The desktop's `reorderThreads` runs it. **No UI
   reaches it today** (tsk272) — the drag-to-reorder lived in the
@@ -633,7 +633,7 @@ The collection subsystem (`.context/collection.md`) follows the same
   panel reads the model, and MCP `list_effort_observations` (agent-only in
   the surface-parity manifest) reads the same stored rows
   (`SqliteEffortEvidenceStore::list_observations`, tsk862). Mutations are the
-  `test.record_run` command and `collector.sync` on a report collector
+  `oxplow.test.record_run` command and `oxplow.collector.sync` on a report collector
   (agents run them; P8.A8, tsk863) since the UI never writes observations. A view of them re-runs on
   `ModelsChanged` (P8.A2: the bespoke `EffortObservationsChanged` had no
   listener and is gone).
@@ -763,7 +763,7 @@ surface passes one. The reads stay RPCs (`list_comments_for_target`,
 
 Views re-read on `ModelsChanged` naming `v_comment` (comments and their
 messages) — `subscribeCommentEvents` in `api.ts`. The renderer's
-re-anchor after it re-finds a quote is `knowledge.relocate_comment`
+re-anchor after it re-finds a quote is `oxplow.knowledge.relocate_comment`
 (`relocateComment`, tsk861): recorded when the anchor moved; one already
 where it was is `HandlerOutput::unchanged` and leaves no audit row and no
 event (commands.md step 5), so the re-read it causes ends the loop. The

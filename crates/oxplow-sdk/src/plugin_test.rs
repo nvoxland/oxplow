@@ -1325,7 +1325,7 @@ async fn suite(
                     .map_err(|e| e.to_string())?
                     .active_providers
                     .insert("work_items".into(), provider.id.clone());
-                // …and published, as a `config.set` would: the interface
+                // …and published, as a `oxplow.config.set` would: the interface
                 // reads the active list's items.
                 let config = oxplow_app::config_service::read_config(&svc.config);
                 svc.capabilities
@@ -1443,7 +1443,7 @@ models:
       - {{ name: id, type: INTEGER, doc: The thing. }}
       - {{ name: label, type: TEXT, doc: Its label. }}
 commands:
-  - name: note
+  - name: work.note
     summary: Note a work item.
     input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
     entry: handlers/note.star
@@ -1470,7 +1470,7 @@ commands:
         write(
             root,
             "oxplow/extensions/tally/handlers/note.star",
-            "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"noted\"}}]}\n",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"noted\"}}]}\n",
         );
         write(
             root,
@@ -1497,12 +1497,12 @@ commands:
         write(
             root,
             "oxplow/extensions/tally/README.md",
-            "Read `v_tally_labelled`; note a work item with `tally.note`.\n",
+            "Read `v_tally_labelled`; note a work item with `tally.work.note`.\n",
         );
         write(
             root,
             "oxplow/extensions/tally/questions.yaml",
-            "- question: Which things are labelled?\n  skill: README.md\n  reaches:\n    sql: SELECT id, label FROM v_tally_labelled\n  shape: { columns: [id, label] }\n- question: Note a work item.\n  skill: README.md\n  reaches:\n    command: tally.note\n    input: { ref: \"work_item:oxplow:tsk1\" }\n",
+            "- question: Which things are labelled?\n  skill: README.md\n  reaches:\n    sql: SELECT id, label FROM v_tally_labelled\n  shape: { columns: [id, label] }\n- question: Note a work item.\n  skill: README.md\n  reaches:\n    command: tally.work.note\n    input: { ref: \"work_item:oxplow:tsk1\" }\n",
         );
     }
 
@@ -1517,7 +1517,7 @@ commands:
         tally(
             dir.path(),
             "{ entities: { thing: 2 } }",
-            "[work_item.comment]",
+            "[oxplow.work_item.comment]",
         );
         let report = test_extension(dir.path(), "tally", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
@@ -1538,7 +1538,7 @@ commands:
         tally(
             dir.path(),
             "{ entities: { thing: 3 } }",
-            "[work_item.comment]",
+            "[oxplow.work_item.comment]",
         );
         let report = test_extension(dir.path(), "tally", false).await.unwrap();
         let errors = report.errors.join("\n");
@@ -1554,12 +1554,12 @@ commands:
         tally(
             dir.path(),
             "{ entities: { thing: 2 } }",
-            "[work_item.transition]",
+            "[oxplow.work_item.transition]",
         );
         let report = test_extension(dir.path(), "tally", false).await.unwrap();
         let errors = report.errors.join("\n");
         assert!(
-            errors.contains("example `happy`: composed [work_item.comment] but `expect_commands` is [work_item.transition]"),
+            errors.contains("example `happy`: composed [oxplow.work_item.comment] but `expect_commands` is [oxplow.work_item.transition]"),
             "{errors}"
         );
     }
@@ -1660,8 +1660,8 @@ after:
         std::fs::write(
             &fixture,
             text.replace(
-                "commands: [work_item.comment]",
-                "commands: [knowledge.add_note]",
+                "commands: [oxplow.work_item.comment]",
+                "commands: [oxplow.knowledge.add_note]",
             ),
         )
         .unwrap();

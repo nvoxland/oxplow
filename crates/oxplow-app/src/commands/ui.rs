@@ -1,4 +1,4 @@
-//! What the person saw go wrong in the app (tsk1072): `ui.report_error`
+//! What the person saw go wrong in the app (tsk1072): `oxplow.ui.report_error`
 //! records an operation that failed in front of them — a merge, a save,
 //! a query — as `ui.op_failed@1`, so the agent can read what they read
 //! (`v_op_error`, the output through `read_event_content`). A person's
@@ -21,9 +21,9 @@ use serde_json::{json, Map, Value};
 
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
-pub const REPORT_ERROR: &str = "ui.report_error";
+pub const REPORT_ERROR: &str = "oxplow.ui.report_error";
 
-/// `ui.report_error`: an operation failed in front of the person.
+/// `oxplow.ui.report_error`: an operation failed in front of the person.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReportErrorInput {
@@ -160,7 +160,7 @@ pub fn commands() -> Vec<Command> {
             report(ctx, parse(input)?)
         })),
     )
-    .expect("ui.report_error is a valid command")]
+    .expect("oxplow.ui.report_error is a valid command")]
 }
 
 #[cfg(test)]

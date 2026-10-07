@@ -40,4 +40,5 @@ tests-e2e/*.json
 # (CLAUDE.local.md points agents at the spec)
 ACCEPTANCE-TEST.md
 .context/target-architecture.md
+.context/command-model-design.md
 CLAUDE.local.md

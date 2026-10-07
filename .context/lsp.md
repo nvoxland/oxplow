@@ -48,7 +48,7 @@ manager owns:
   name/version). `NoConfig` errors are self-describing — they embed
   the curated Mason suggestion (`mason_suggestion`, mirrored by
   `apps/desktop/src/lspSuggestions.ts`; keep the two in sync) and both
-  fix paths (the `lsp.install_server` command / yaml entry).
+  fix paths (the `oxplow.lsp.install_server` command / yaml entry).
 
 > **LSP id ↔ analysis `Language` bridge (tsk321).** The session `language`
 > here is a free string (`languageId`), a separate namespace from the
@@ -75,7 +75,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   broken `Value` reference into bindings.ts otherwise), `list_lsp_servers`,
   `restart_lsp_server`, `list_installed_lsp_packages`,
   `respond_lsp_apply_edit`. Installing and removing a server are the
-  `lsp.install_server` / `lsp.remove_server` commands (`commands/lsp.rs`,
+  `oxplow.lsp.install_server` / `oxplow.lsp.remove_server` commands (`commands/lsp.rs`,
   P8.A9: `External`, `Confirm::Always` — a person's call; each pushes
   `LspServersChanged`).
 - **Events**: `lsp:event` carries `LspSessionEvent` (camelCase, tagged
@@ -140,7 +140,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `{ stream_id, path, line, col }` (1-based) and answering typed JSON.
   They replaced the seven `lsp_*` tools that each built raw LSP requests.
   `lsp_list_servers` stays (provider-native); installing is the
-  `lsp.install_server` command. The
+  `oxplow.lsp.install_server` command. The
   symbol tools work for **any** configured LSP language, not just the
   tree-sitter set; the call hierarchy runs `prepareCallHierarchy` then
   incoming/outgoing calls on the first item. Each MCP tool is registered

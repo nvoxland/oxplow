@@ -114,7 +114,7 @@ export function useWikiPageController(slug: string, onClosed: () => void): WikiP
   }, [slug]);
 
   // The page's Delete asks inline first; that is the confirmation the
-  // destructive `knowledge.delete_page` asks for.
+  // destructive `oxplow.knowledge.delete_page` asks for.
   const remove = useCallback(async () => {
     try {
       await deleteWikiPage(slug, true);

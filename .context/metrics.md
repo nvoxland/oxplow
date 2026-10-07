@@ -85,7 +85,7 @@ welded to collection.
 >   tree while anchored to an ordinary delta snapshot, so no full-tree snapshot
 >   is ever fabricated.
 > - **`asserted`** — exactly the paths it emitted facts for (agent
->   `metric.record`, synthetic writes). Its snapshot is **provenance only**,
+>   `oxplow.metric.record`, synthetic writes). Its snapshot is **provenance only**,
 >   never a scanned set; the insert coerces any snapshot-less capture to
 >   `asserted` (delta/full require an anchor).
 >
@@ -137,7 +137,7 @@ welded to collection.
 > the on-demand entry point — it waits for the startup sweep, drains genuinely
 > pending edits into a NORMAL snapshot (real authored work, correctly attributed;
 > none dirty ⇒ **no snapshot is created**, it anchors to the latest existing one),
-> then runs the sweep. **Boot, the `metric.rebuild` command, and the end-to-end
+> then runs the sweep. **Boot, the `oxplow.metric.rebuild` command, and the end-to-end
 > tests all call it** (tsk50) — see
 > `rebuild_does_not_fabricate_a_snapshot_on_a_clean_tree`. **Not** needed on a
 > branch switch — checkout rewrites the differing files, the watcher marks them
@@ -146,7 +146,7 @@ welded to collection.
 > The sweep is **idempotent per (snapshot, collector, fingerprint, scan_kind)**
 > (`collector_done_for_snapshot` — kind-scoped so a delta capture can't satisfy a
 > pending full baseline over the same snapshot): a repeat rebuild or a redelivered
-> `snapshot.taken` won't double-scan the tree (an explicit `collector.sync`
+> `snapshot.taken` won't double-scan the tree (an explicit `oxplow.collector.sync`
 > bypasses it — "run now" always runs).
 >
 > **Dominated-capture GC (tsk75).** A fresh baseline makes every effort-less
@@ -308,7 +308,7 @@ welded to collection.
 >
 > `per-path` today: `oxplow.ast_hit`, `oxplow.complexity`, `oxplow.fn_length`,
 > `oxplow.parameter_count`, `oxplow.todo` (+ any project measure a snapshot collector
-> records per-file facts on — `metric.scaffold` sets it automatically). Validated in
+> records per-file facts on — `oxplow.metric.scaffold` sets it automatically). Validated in
 > config + `CaptureScope::parse`, deliberately **NOT** a DB CHECK: the
 > `temporal_semantics` CHECK is exactly why adding a value *there* would need a
 > `measure` table rebuild, which fires `fact.measure_id ON DELETE CASCADE` and wipes
@@ -777,7 +777,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   the catalog declares it. A fact collector asks first
   (`SqliteFactStore::refused_dims`, tsk986): a run whose facts would be
   refused is a **failed run** — its `collector_run` row and a failed
-  capture say why, health counts it, a `collector.sync` errors — never a
+  capture say why, health counts it, a `oxplow.collector.sync` errors — never a
   capture rolled back behind a run reported as recorded. The engine
   refuses a bare key to slice or filter by (`series_in_stream` →
   `bare_dimension`, tsk989), naming the conformed one — a bare key would
@@ -993,7 +993,7 @@ program content.
 
 - **Background runs** (snapshot / event triggers) log "fact collector: not run"
   and record a failed run (`collector_run` + `collector.synced`).
-- **Explicit runs** (`run_collector_by_key`, the `collector.sync` command)
+- **Explicit runs** (`run_collector_by_key`, the `oxplow.collector.sync` command)
   return the reason as the command's error.
 - **Approving.** Settings → Data → Programs (IPC `list_project_programs` /
   `approve_project_program`, UI-only; kind label "collector"). See
@@ -1036,7 +1036,7 @@ Landed:
 
 **Every close, one place.** `project_effort_lifecycle_metrics` runs from the
 effort-lifecycle pump consumer on `effort.closed` — however the effort closed
-(the policy, `effort.close`, a thread closing, a stream archived) — once per
+(the policy, `oxplow.effort.close`, a thread closing, a stream archived) — once per
 effort (it stops at an existing `effort-lifecycle` capture).
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage (tsk123)** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files (tsk124)** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
@@ -1219,18 +1219,18 @@ facts and 1.6 s from the cube; the measurement is in
 
 **Writes are `metric.*` commands** (`crates/oxplow-app/src/commands/metric.rs`,
 reached through `run_command`, audited like every command):
-- `metric.enable { keys, enabled }` — `Tx`, through `config.set`'s core.
-- `metric.record { key, value, subject?, dims?, stream? }` — `Tx`: an
+- `oxplow.metric.enable { keys, enabled }` — `Tx`, through `oxplow.config.set`'s core.
+- `oxplow.metric.record { key, value, subject?, dims?, stream? }` — `Tx`: an
   asserted fact (below) written in the bus transaction with its audit
   (`fact_store::record_facts_tx`); after commit it clears the fact memo
   (the change loop announces `MetricSamplesChanged` for the measure).
-- `metric.rebuild { force }` — `BestEffort` over
+- `oxplow.metric.rebuild { force }` — `BestEffort` over
   `MetricsService::rebuild_baseline`, the whole-tree baseline boot runs.
-- `metric.scaffold { key, title?, language?, glob? }` — a `Read`: the
+- `oxplow.metric.scaffold { key, title?, language?, glob? }` — a `Read`: the
   starter collector script and the config entries, which the agent adds with
-  `config.set` (`collectors` is person-only, so that step asks the person).
+  `oxplow.config.set` (`collectors` is person-only, so that step asks the person).
 
-Running one fact collector now is **`collector.sync { owner, id }`** (the
+Running one fact collector now is **`oxplow.collector.sync { owner, id }`** (the
 one manual run for every collector; `metric.run` is deleted) — it reaches
 `MetricsService::run_collector_by_key` and returns the `facts` count (see
 "Producers" below and [commands.md](./commands.md)).
@@ -1296,7 +1296,7 @@ dimensions:                        # custom conformed slice axes
   `fact_collectors`), so a `use:` naming nothing is reported by
   `unknown_uses` once per `seed_catalog` (boot, config or extension
   change), never per call (tsk1076).
-- **Adding one** is `config.set` on `measures` / `dimensions` (a global one
+- **Adding one** is `oxplow.config.set` on `measures` / `dimensions` (a global one
   is a file under the global dir). The old `scaffold_measure` /
   `scaffold_dimension` writers had no caller and were deleted (P4.8).
 - **`promote`** now persists onto the row: `seed_catalog` threads the resolved
@@ -1417,12 +1417,12 @@ match arm. A formula spec (no source measure) falls through to Window and no-ops
 > tsk923): a run, coverage, analysis or nudge capture the reactor saw
 > takes its causing tool event's turn anchor however late it is recorded
 > (`RunOrigin::Tool` — none when the event had none); one reported by a
-> command (`test.record_run`, `collector.sync`) takes its actor's open
+> command (`oxplow.test.record_run`, `oxplow.collector.sync`) takes its actor's open
 > turn **only when that actor is the thread's own agent**
 > (`CollectionService::command_turn`) — a person's sync while the agent
 > is mid-turn has none — and its `test.run.recorded` is anchored alike.
 > A nudge row and its capture take the same turn (`RunOrigin::turn`). An
-> agent's `metric.record` capture carries its thread and open turn; a
+> agent's `oxplow.metric.record` capture carries its thread and open turn; a
 > person's, neither. The per-turn
 > `oxplow.turn` facts' capture takes the turn whose `agent.turn.ended`
 > counted them. A capture no turn produced (a scheduled collector, a
@@ -1473,7 +1473,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest` — tsk22, tsk860) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/effort_service.rs` (`project_effort_lifecycle_metrics`, run by the effort-lifecycle consumer on `effort.closed`) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `work_item.efforts` (efforts-so-far on its work item, the redo-rate signal) from `effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' ∪ `use:`-enabled built-ins and the default-on ones (`DEFAULT_ON`, unless a marker disables them); an id two owners declare runs once, project > extension > built-in) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
+| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' ∪ `use:`-enabled built-ins and the default-on ones (`DEFAULT_ON`, unless a marker disables them); an id two owners declare runs once, project > extension > built-in) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `oxplow.collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
@@ -1509,7 +1509,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 
 - **Agents** read through `query_sql` and change metrics through the
   `metric.*` commands (see "Read and write surface (P4.8)"). An asserted
-  fact (`metric.record`) lands on the metric's source measure under a
+  fact (`oxplow.metric.record`) lands on the metric's source measure under a
   `provenance: asserted` / `source: agent-reported` / `scan_kind: asserted`
   capture **anchored to the stream's latest snapshot for provenance**
   (tsk71/tsk72 — the snapshot says which tree state the value described;
@@ -1547,7 +1547,7 @@ configure surface was split off as a fourth "Metric Settings" page in
 tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
 lives on the Metric Detail page; see "The configure surface" below.) Explorer
 and Recorded observe; Detail both observes and **writes** (its Configure block).
-Authoring a *new* metric is **agent work** (the `metric.scaffold` command +
+Authoring a *new* metric is **agent work** (the `oxplow.metric.scaffold` command +
 the `/oxplow:new-metric` skill, tsk122) — no page writes one; Recorded Metrics
 just carries a Help blurb pointing there.
 
@@ -1595,7 +1595,7 @@ just carries a Help blurb pointing there.
   `useRouteDispatch(metricRef(key))`, passing the **sibling chain**
   (`metricSiblings`) so the detail page gets up/down nav (tsk119). A Help
   blurb (`recorded-new-metric-help`) points at the agent for new metrics
-  (`metric.scaffold` + `/oxplow:new-metric`). Re-runs when a model or measure
+  (`oxplow.metric.scaffold` + `/oxplow:new-metric`). Re-runs when a model or measure
   its reads read changed (`useRerunOnChange`, single-flight). **Simplified (tsk309):** the Line value
   stat picker, the Off target mode and the saved-view presets are gone.
 
@@ -1682,7 +1682,7 @@ folded it into the surfaces where you already look at a metric:
 - **"+ New metric" scaffolding is agent-driven (tsk122).** The inline
   `NewMetricBar.tsx` form was **removed** — authoring a metric always needs the
   collector script edited anyway, which is agent work. The scaffold backend
-  is now the `metric.scaffold` command (see below), and Recorded Metrics' details rail carries
+  is now the `oxplow.metric.scaffold` command (see below), and Recorded Metrics' details rail carries
   a Help blurb (`recorded-new-metric-help`) telling the user to ask their agent
   (the `/oxplow:new-metric` skill).
 - **Retired with the page:** the per-section **tri-state bulk enable/disable**
@@ -1715,10 +1715,10 @@ The mechanics behind those controls (unchanged by tsk117):
   tsk1034), which `resolved_specs` uses unless the project mentions them;
   producers/plugins are default-ON unless an `enabled: false` marker
   disables them, and so are those four.
-- **Enable/disable** via the `metric.enable { keys, enabled }` command
+- **Enable/disable** via the `oxplow.metric.enable { keys, enabled }` command
   (`commands/metric.rs`; the desktop's `enable_metrics` IPC runs it as the
   person) — it computes the new `metrics:` list and hands it to
-  `config.set`'s core, so it is audited, logged as `config.changed` and
+  `oxplow.config.set`'s core, so it is audited, logged as `config.changed` and
   undoable. Its config shape is
   default-aware (`apply_metric_enabled` + `is_default_on`): a default-OFF
   metric (built-in code metric / global def) toggles by the presence of a bare
@@ -1738,7 +1738,7 @@ The mechanics behind those controls (unchanged by tsk117):
   in `.oxplow/project.yaml`. **Trigger is inherent to the definition** —
   `resolve_one` reads it from the definition (like `compute`) and a `use:`
   entry can't override it (tsk290).
-- **`metric.scaffold` (a command since P4.8; a template since tsk391)** returns the
+- **`oxplow.metric.scaffold` (a command since P4.8; a template since tsk391)** returns the
   **trio** (measure + collector + metric) and a starter fact-returning Starlark stub,
   and **writes nothing**: `MetricsService::metric_scaffold` → `MetricScaffold {
   scriptPath: oxplow/collectors/<slug>.star, script, projectYaml }`, the entries a
@@ -1746,7 +1746,7 @@ The mechanics behind those controls (unchanged by tsk117):
   starlark, `trigger: { on: [snapshot.taken] }`, `facts: [<key>.count]`) and a
   `metrics:` spec (`<key>`, `sum` over the measure), rendered by
   `oxplow_config::entries_yaml`. The agent writes the script with its own
-  tools and adds the entries through `config.set` (`collectors` is person-only,
+  tools and adds the entries through `oxplow.config.set` (`collectors` is person-only,
   so the person confirms); the `config.metrics` reactor reseeds. It used to write the files itself
   (and had a `global` scope writing the global config dir), which let a
   read-only thread change the repo and always wrote to the primary worktree.
@@ -1764,10 +1764,10 @@ left out). A row links to the metric's detail page.
 
 Catalog reads/writes: `v_metric_catalog` (the `metric_catalog` table, V106,
 which `seed_catalog` rewrites from `MetricsService::catalog()` on every
-reseed) and the `metric.enable` command — consumed by the Metric Detail
+reseed) and the `oxplow.metric.enable` command — consumed by the Metric Detail
 Configure block and the Metrics rows.
 **Scaffolding is not here** (tsk122): its UI button was retired, and it is
-now the `metric.scaffold` command (P4.8), which calls
+now the `oxplow.metric.scaffold` command (P4.8), which calls
 `MetricsService::metric_scaffold`.
 Token and page analytics are oxplow-bundled lenses (`usage`) over
 `v_token_usage` / `v_page_visit`; `page_visit`/`usage_event` are deliberately
@@ -1919,13 +1919,13 @@ metrics:                              # the read SPEC (the chartable metric)
 The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
 + the **`/oxplow:new-metric`** command (assets in `crates/oxplow-plugin/`,
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
-the measure+collector+metric trio + script + verification (`collector.sync`
+the measure+collector+metric trio + script + verification (`oxplow.collector.sync`
 runs it now), no oxplow-team involvement.
-The skill's fast path is the **`metric.scaffold` command** (P4.8) →
+The skill's fast path is the **`oxplow.metric.scaffold` command** (P4.8) →
 `MetricsService::metric_scaffold`, which returns that trio (measure `<key>.count`,
 collector `<key>`, metric `<key>`) + a starter fact-returning script under
 `oxplow/collectors/` as a template the agent writes and adapts (tsk391), adding
-the entries through `config.set`; or the agent hand-authors the four blocks the
+the entries through `oxplow.config.set`; or the agent hand-authors the four blocks the
 same way.
 
 ## Targets & feedback (advise-only, P5/tsk220)

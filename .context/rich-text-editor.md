@@ -212,7 +212,7 @@ item.thread_id }`.
   **cross-block selections match** (capture uses the same flatten, so
   stored quote/context agree). `buildAnchorJson` re-persists the enriched
   anchor (from/to + textOffset + prefix/suffix + `approx`) via
-  `relocateComment` (`knowledge.relocate_comment`; the stored anchor
+  `relocateComment` (`oxplow.knowledge.relocate_comment`; the stored anchor
   then equals the recomputed one, so the re-read stops); fuzzy matches get the dashed
   `--approx` highlight.
 - **Typed context on create.** When composing a comment,
@@ -235,7 +235,7 @@ item.thread_id }`.
   re-anchor queues the moved anchors (`pendingAnchorsRef`), and
   `flushAnchors` stores them — at once when the editor isn't focused, on
   blur, and on unmount — never per typing pause, since each
-  `knowledge.relocate_comment` is a command run (an audit row and events)
+  `oxplow.knowledge.relocate_comment` is a command run (an audit row and events)
   on the person's behalf. A store that fails (the comment deleted
   meanwhile) is caught; the bus audited it.
 - **Relinking.** When a selection is active, the editor context menu

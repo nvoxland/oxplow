@@ -19,8 +19,8 @@ use serde_json::{json, Value};
 
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
-pub const SET: &str = "bookmark.set";
-pub const REMOVE: &str = "bookmark.remove";
+pub const SET: &str = "oxplow.bookmark.set";
+pub const REMOVE: &str = "oxplow.bookmark.remove";
 
 /// A person, or a lens acting for one: bookmarks are the person's
 /// navigation, not the agent's.
@@ -197,7 +197,7 @@ pub fn set_command() -> Command {
             })
         })),
     )
-    .expect("bookmark.set is a valid command")
+    .expect("oxplow.bookmark.set is a valid command")
 }
 
 /// `bookmark.remove { ref, thread?, stream? }`.
@@ -222,7 +222,7 @@ pub fn remove_command() -> Command {
             })
         })),
     )
-    .expect("bookmark.remove is a valid command")
+    .expect("oxplow.bookmark.remove is a valid command")
 }
 
 /// The bookmark commands, for the bus.

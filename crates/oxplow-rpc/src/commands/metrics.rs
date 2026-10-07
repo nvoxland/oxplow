@@ -1,7 +1,7 @@
 //! Metric commands for the desktop (P4.7). Metric *reads* are SQL — the
 //! grid (`metric_grid()`), `v_metric_spec` and `v_metric_catalog` through
 //! `query_sql`; what's left here is the person's switch, which runs the
-//! `metric.enable` bus command like every other write.
+//! `oxplow.metric.enable` bus command like every other write.
 
 use oxplow_app::Services;
 use oxplow_domain::Actor;
@@ -9,7 +9,7 @@ use oxplow_domain::Actor;
 use crate::error::IpcError;
 
 /// Turn metrics on or off in this project — the Catalog toggle and its
-/// per-section "enable all" — as the person, through `metric.enable`.
+/// per-section "enable all" — as the person, through `oxplow.metric.enable`.
 pub async fn enable_metrics(
     svc: &Services,
     keys: Vec<String>,

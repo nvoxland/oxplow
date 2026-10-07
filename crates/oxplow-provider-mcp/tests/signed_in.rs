@@ -64,7 +64,7 @@ async fn create(svc: &oxplow_app::Services, title: &str) -> Result<(), String> {
     svc.commands
         .run(
             &Actor::Human,
-            "work_item.create",
+            "oxplow.work_item.create",
             json!({ "title": title }),
             false,
         )

@@ -1,5 +1,5 @@
-//! Bringing an extension in from git (P8.A9): `extension.install` and
-//! `extension.update`. `External` (a clone and a copy into a stream's
+//! Bringing an extension in from git (P8.A9): `oxplow.extension.install` and
+//! `oxplow.extension.update`. `External` (a clone and a copy into a stream's
 //! worktree) and `Confirm::Always`: what an extension can run is a
 //! person's call, made against the review (`review_extension`) of the
 //! commit they saw — `reviewed_sha` is the only commit installed. An
@@ -21,8 +21,8 @@ use serde_json::Value;
 use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::worktrees::WorktreeRouter;
 
-pub const INSTALL: &str = "extension.install";
-pub const UPDATE: &str = "extension.update";
+pub const INSTALL: &str = "oxplow.extension.install";
+pub const UPDATE: &str = "oxplow.extension.update";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -47,7 +47,7 @@ pub struct UpdateInput {
     pub name: String,
     /// The commit the person reviewed.
     pub reviewed_sha: String,
-    /// As for `extension.install`.
+    /// As for `oxplow.extension.install`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
 }
@@ -116,7 +116,7 @@ pub fn install_command(deps: InstallDeps) -> Command {
             "Install a published extension from a git repo (its root holds `extension.yaml`) \
              into `oxplow/extensions/<name>/` of a stream's worktree, at the commit a person \
              reviewed (`reviewed_sha`, from `review_extension`). Always a person's decision: an \
-             agent's run becomes a proposal. Refuses to overwrite — `extension.update` does that.",
+             agent's run becomes a proposal. Refuses to overwrite — `oxplow.extension.update` does that.",
             schema::<InstallInput>(),
         ),
         Handler::External(Arc::new(move |_: Invocation, input| {
@@ -146,7 +146,7 @@ pub fn install_command(deps: InstallDeps) -> Command {
             })
         })),
     )
-    .expect("extension.install is a valid command")
+    .expect("oxplow.extension.install is a valid command")
 }
 
 /// `extension.update { name, reviewed_sha, stream? }`.
@@ -155,7 +155,7 @@ pub fn update_command(deps: InstallDeps) -> Command {
         spec(
             UPDATE,
             "Update an installed extension to the reviewed commit of the git URL and ref it was \
-             installed from. Only for extensions installed with `extension.install`; ones \
+             installed from. Only for extensions installed with `oxplow.extension.install`; ones \
              written in this repo are edited in place. Always a person's decision.",
             schema::<UpdateInput>(),
         ),
@@ -192,7 +192,7 @@ pub fn update_command(deps: InstallDeps) -> Command {
             })
         })),
     )
-    .expect("extension.update is a valid command")
+    .expect("oxplow.extension.update is a valid command")
 }
 
 pub fn commands(deps: InstallDeps) -> Vec<Command> {

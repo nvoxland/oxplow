@@ -587,7 +587,7 @@ mod tests {
         let e2 = Envelope::typed::<CommandExecuted>(
             "agent:thr4",
             &CommandExecutedV2 {
-                command: "work_item.transition".into(),
+                command: "oxplow.work_item.transition".into(),
                 actor_kind: ActorKind::Agent,
                 actor_id: Some("thr4".into()),
                 outcome: CommandOutcome::Ok,

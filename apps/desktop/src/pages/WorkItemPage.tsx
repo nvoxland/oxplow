@@ -88,7 +88,7 @@ export function WorkItemPage({
   const remove = async () => {
     if (!item) return;
     try {
-      await runCommand("work_item.delete", { ref: item.ref }, true);
+      await runCommand("oxplow.work_item.delete", { ref: item.ref }, true);
     } catch (e) {
       recordOpError({ label: "Delete", message: e instanceof Error ? e.message : String(e) });
     }
@@ -96,7 +96,7 @@ export function WorkItemPage({
   const run = async (label: string, verb: "comment" | "link", input: Record<string, unknown>) => {
     if (!item) return;
     setBusy(true);
-    const ran = await personCommands.run(label, `work_item.${verb}`, { ref: item.ref, ...input });
+    const ran = await personCommands.run(label, `oxplow.work_item.${verb}`, { ref: item.ref, ...input });
     setBusy(false);
     if (ran) setPrompt(null);
   };

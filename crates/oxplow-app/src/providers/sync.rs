@@ -40,7 +40,7 @@ use super::spec;
 use crate::commands::{Command, Handler, HandlerOutput, Invocation};
 
 /// The command that reads a provider's collectors.
-pub const SYNC: &str = "provider.sync";
+pub const SYNC: &str = "oxplow.provider.sync";
 
 /// What one collector's read delivered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -448,7 +448,7 @@ fn activity_of(collector: &str, p: &notify::Progress) -> String {
 
 impl ProviderRegistry {
     /// Read every collector of `instance` that is due on its schedule
-    /// (`syncMinutes`), as the system, through `provider.sync` so each is
+    /// (`syncMinutes`), as the system, through `oxplow.provider.sync` so each is
     /// audited. Called on a timer; returns how many reads it started.
     pub async fn sync_due(&self) -> usize {
         let Some(bus) = self.bus.upgrade() else {
@@ -603,7 +603,7 @@ pub fn sync_command(registry: &Arc<ProviderRegistry>) -> Command {
             })
         })),
     )
-    .expect("provider.sync is a valid command")
+    .expect("oxplow.provider.sync is a valid command")
 }
 
 /// Run [`ProviderRegistry::sync_due`] every minute for the app's life.

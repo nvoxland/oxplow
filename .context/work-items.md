@@ -91,7 +91,7 @@ It is also the **only** way the UI reads and writes oxplow's tasks
 `readThreadWork`, `readBacklog`, `readTask`, `readTasksById`,
 `readTaskEfforts` and `readRecentlyFinished` read the models;
 `createTask`, `updateTask`, `deleteTask`, `reorderTasks` (a drag's new
-order becomes one `work_item.reorder` by neighbour, `placementFromOrder`)
+order becomes one `oxplow.work_item.reorder` by neighbour, `placementFromOrder`)
 and `moveTask` run commands. Every read returns what it read (`reads`;
 `ThreadWorkState` and `BacklogState` carry theirs), and a consumer
 re-runs it through `useRerunOnChange` — or `readsChanged`, outside a
@@ -106,16 +106,16 @@ to keep in step with the queries (P6 review, tsk610). The typed task RPCs
 (`create_task`, `update_task`, `complete_task`, `upsert_task`,
 `transition_tasks`, `reorder_tasks`, `file_epic_with_children`, P8.A10):
 an agent runs the same `work_item.*` commands through MCP `run_command`
-as itself, so its reorders are `work_item.reorder { ref, before?, after?
+as itself, so its reorders are `oxplow.work_item.reorder { ref, before?, after?
 }` by neighbour, audited and dense like the UI's. An agent has no delete,
-since `work_item.delete` is destructive and an agent never confirms one
+since `oxplow.work_item.delete` is destructive and an agent never confirms one
 (an agent cancels or archives). `TaskService::reorder` and `soft_delete` went
 with them (P6 review, tsk609).
 
 The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
 items as cards in one column per canonical state (archived tasks left
 out). Drag a card to a column, or right-click → Move To, to transition
-it (`transitionWorkItem`: `work_item.transition { ref, to: <canonical
+it (`transitionWorkItem`: `oxplow.work_item.transition { ref, to: <canonical
 state> }` for any provider — the bus dispatches it). Like Comment… and
 Link… it runs through `personCommands` (one person path: its
 confirmation and its error reporting). Every card opens its item's page
@@ -135,10 +135,10 @@ payload. It reads the item (`readWorkItem`) and the provider's features
 (canonical and native), body and Move To; its Parent only with
 `hierarchy`, **Comment…** only with `comments` and **Link…** only with
 `links`, each an `InlinePromptStrip` run through `personCommands` as
-`work_item.comment` / `work_item.link` (the strip keeps its text until
+`oxplow.work_item.comment` / `oxplow.work_item.link` (the strip keeps its text until
 the run succeeds — `personCommands.run` returns whether it ran), and a
 rail **Delete** only with `delete` (an `InlineConfirm`, which is the
-person's confirmation of the destructive `work_item.delete`). Link…'s
+person's confirmation of the destructive `oxplow.work_item.delete`). Link…'s
 link type is free text (default `relates_to`): the provider names its
 own types, so oxplow's enum isn't offered as a list. The tab is titled
 with the item's title (`usePageTitle`), and the page has backlinks and
@@ -221,11 +221,11 @@ oxplow's mapping: its status is its `native_state` (`ready` is `todo`;
 `archived` rides on `done` or `canceled` — archiving as `done` a task that
 wasn't completed passes through `done` first, so the row reads as
 asked); `native` holds `{ priority? }` (`deny_unknown_fields`; a task
-changes lists with `work_item.move`).
+changes lists with `oxplow.work_item.move`).
 A `native_state` alone (no `state`) is a valid update or create: that is
 how the task writes send a status. A person's link (no thread of their
 own) belongs to the linked task's thread, else the target's.
-`work_item.comment` and `work_item.link` refuse a deleted task (tsk572).
+`oxplow.work_item.comment` and `oxplow.work_item.link` refuse a deleted task (tsk572).
 A comment's `task_note.author` names who made it (`note_author`, tsk1000):
 `user`, `agent` (a lens acting for one included), `effect:<extension>/<id>`
 or `oxplow` — as a task's `author` is left empty for an effect or oxplow
@@ -278,8 +278,8 @@ A work-item field (`ref`, `parent_ref`, `target`, `work_item`, and
 `reorder` / `move`'s refs) holding a loose id that matches the active
 list's is that list's item — `tsk12` is `work_item:oxplow:tsk12` while
 oxplow's tasks are active (`commands/work_item.rs` `with_loose_refs`, on
-every path: routing, the transaction, the provider; also `effort.link` /
-`effort.open`). One that doesn't match is `Invalid` at its field, naming
+every path: routing, the transaction, the provider; also `oxplow.effort.link` /
+`oxplow.effort.open`). One that doesn't match is `Invalid` at its field, naming
 both shapes. Free-text recognition (wikilinks, commit bodies) is still
 core's. The
 conformance suite runs with the provider under test active, and checks it. The desktop reads it with
@@ -294,7 +294,7 @@ generated from `v_capability_provider`: for each choosable capability
 `CapabilitySpec`, on every row since v4) the active implementation and
 why (`chosenNote`: personal, project, default, or which chosen one fell
 back), the project's choice as radios ("The default" unsets the
-capability's entry) and "Just for me" (`config.set` / `config.unset` with
+capability's entry) and "Just for me" (`oxplow.config.set` / `oxplow.config.unset` with
 `layer: personal`). An optional capability's `none` names what it turns
 off: the enabled extensions' lenses and hints that declare a `needs:` on
 it (`offWithout`). A click is the confirmation (`activeProviders` is
@@ -329,7 +329,7 @@ changed the item logged an event naming it (oxplow's
 `work_item.created` / `edited` / `transitioned` / `linked` /
 `commented`, an external provider's `work_item.recorded`); reading the
 provider back restates what its writes recorded — after a
-`provider.sync` (`WorkItemsProbe::sync`; nothing to read for oxplow's
+`oxplow.provider.sync` (`WorkItemsProbe::sync`; nothing to read for oxplow's
 own or a provider without collectors) every item it filed is the row it
 was (P7.A7; the fake's `stale-read` hook is the red); a provider that
 declares `idempotent_writes` keeps it — a create sent twice with one key

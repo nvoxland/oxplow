@@ -1,6 +1,6 @@
 ---
 name: oxplow-wiki-capture
-description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on v_knowledge_page, v_knowledge_ref, mcp__oxplow__search (kind wiki), list_backlinks, knowledge.write_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on v_knowledge_page, v_knowledge_ref, mcp__oxplow__search (kind wiki), list_backlinks, oxplow.knowledge.write_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
 # Wiki pages — exploratory capture
@@ -33,7 +33,7 @@ otherwise fire.
 
 ## On a read-only thread
 
-`knowledge.write_page` is open to every thread — capture exactly the
+`oxplow.knowledge.write_page` is open to every thread — capture exactly the
 same way as on the writer thread. Don't punt the user's
 exploration answer just because you can't edit code; the wiki is
 where exploration goes regardless of writer status.
@@ -111,7 +111,7 @@ wired up by [[src/ui/index.tsx]]."
    are `v_knowledge_ref` rows with `stale = 1`; `wiki_ref_drift` shows
    what changed in one.
 2. Write the whole page with `mcp__oxplow__run_command`:
-   `knowledge.write_page { slug, body, verified_refs, removed_refs }`
+   `oxplow.knowledge.write_page { slug, body, verified_refs, removed_refs }`
    (`title` optionally sets the `# ` heading). That one run writes the
    row, the links and `.oxplow/wiki/<slug>.md` — don't Write the file
    yourself. Every `[[link]]` must resolve: a dangling one is refused
@@ -122,10 +122,10 @@ wired up by [[src/ui/index.tsx]]."
    - `removed_refs`: files you took out of the body.
    - Refs left in place without re-checking go in NEITHER list, keeping
      their pin.
-   `knowledge.link { page, target }` adds one link under the page's
-   Related heading; `knowledge.delete_page { slug }` deletes a page (the
+   `oxplow.knowledge.link { page, target }` adds one link under the page's
+   Related heading; `oxplow.knowledge.delete_page { slug }` deletes a page (the
    person confirms).
-3. Optionally, declare the page in `effort.report`'s `impacts`:
+3. Optionally, declare the page in `oxplow.effort.report`'s `impacts`:
    `{ kind:"wiki", id:"<slug>", action:"created"|"updated" }` — this
    backlinks your effort's item to the page.
 
@@ -144,7 +144,7 @@ auto-loads when you write a fence and carries the syntax rules.
 ## Folding in Explore findings
 
 If this turn dispatched Explore subagents that wrote their findings
-into thread notes (`knowledge.update_note`), call
+into thread notes (`oxplow.knowledge.update_note`), call
 `mcp__oxplow__list_thread_notes` and
 incorporate their findings into the wiki page rather than discarding
 them. Subagent notes are otherwise invisible — the wiki is where they

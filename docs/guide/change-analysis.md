@@ -25,7 +25,7 @@ keep just their file lists (see [Lenses](lenses.md)).
   architectural zone. A 40-file branch reads as "mostly the store
   layer, one config edit" instead of a wall of paths. Zones come from
   the `zones:` block in `.oxplow/project.yaml`; ask your agent to set
-  them up (it sets them with the `config.set` command on `zones`).
+  them up (it sets them with the `oxplow.config.set` command on `zones`).
 - **Function Changes.** Functions added, deleted, or modified outside
   tests, with the complexity and length deltas and how many lines
   changed inside each. Click one to open the diff at that function.

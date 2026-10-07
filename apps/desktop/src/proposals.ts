@@ -136,9 +136,9 @@ const field = (value: unknown, name: string): unknown =>
 export function summarizeProposal(p: Proposal): ProposalSummary {
   const key = field(p.input, "key");
   const title =
-    p.command === "config.set" && typeof key === "string"
+    p.command === "oxplow.config.set" && typeof key === "string"
       ? `Set ${key}`
-      : p.command === "config.unset" && typeof key === "string"
+      : p.command === "oxplow.config.unset" && typeof key === "string"
         ? `Unset ${key}`
         : p.preview?.summary || p.command;
   // The thread by its title, as the person knows it, never its id.

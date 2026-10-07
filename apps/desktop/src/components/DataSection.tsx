@@ -140,7 +140,7 @@ export function DataSection() {
     setBusy(key);
     try {
       // Approve & Run approves exactly the version this listing showed,
-      // then runs it (`collector.sync` itself never approves).
+      // then runs it (`oxplow.collector.sync` itself never approves).
       if (!l.approved) {
         if (!l.version) throw new Error(`${key} can't be read, so it can't be approved`);
         await approveCollector(l.owner, l.spec.id, l.version);
@@ -321,10 +321,10 @@ const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--se
 /** Backfill… on an approved effect's row (P9.D5): the live consumer never
  *  reacts to what was logged before the effect's approval, so a person has
  *  it react to those events — told first how many there are
- *  (`effect.backfill_plan`), and that the effect may call outside oxplow
- *  for each. The second click is the confirmation `effect.backfill` asks
+ *  (`oxplow.effect.backfill_plan`), and that the effect may call outside oxplow
+ *  for each. The second click is the confirmation `oxplow.effect.backfill` asks
  *  for; Escape (or Cancel) backs out. */
-/** What `effect.backfill_plan` answered: the run is bound to its range. */
+/** What `oxplow.effect.backfill_plan` answered: the run is bound to its range. */
 interface BackfillPlan {
   planned: number;
   toSeq: number | null;
@@ -339,7 +339,7 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
   async function count() {
     setBusy(true);
     try {
-      const out = await runCommand("effect.backfill_plan", { effect });
+      const out = await runCommand("oxplow.effect.backfill_plan", { effect });
       const r = (out.result ?? {}) as { planned?: number; to_seq?: number | null; batch?: number };
       setPlan({ planned: Number(r.planned ?? 0), toSeq: r.to_seq ?? null, batch: Number(r.batch ?? 0) });
     } catch (e) {
@@ -354,7 +354,7 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
     if (plan === null || plan.toSeq === null) return;
     setBusy(true);
     try {
-      const out = await runCommand("effect.backfill", { effect, to_seq: plan.toSeq }, true);
+      const out = await runCommand("oxplow.effect.backfill", { effect, to_seq: plan.toSeq }, true);
       showToast({ message: backfillDone(out.result as BackfillResult) });
       setPlan(null);
     } catch (e) {

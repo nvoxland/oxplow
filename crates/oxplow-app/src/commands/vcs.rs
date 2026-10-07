@@ -300,7 +300,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
     let t = &target;
     vec![
         command(
-            "vcs.commit",
+            "oxplow.vcs.commit",
             "Commit the stream's changes (untracked files too, unless \
              `include_untracked: false`); returns the new revision.",
             Confirm::Never,
@@ -322,7 +322,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.stage",
+            "oxplow.vcs.stage",
             "Stage paths for the next commit.",
             Confirm::Never,
             Touched::Workspace,
@@ -333,7 +333,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.discard",
+            "oxplow.vcs.discard",
             "Throw away the workspace's changes to paths, back to the head's version.",
             Confirm::Destructive,
             Touched::Workspace,
@@ -344,7 +344,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.fetch",
+            "oxplow.vcs.fetch",
             "Fetch from a remote.",
             Confirm::Never,
             Touched::AllRefs,
@@ -359,7 +359,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.pull",
+            "oxplow.vcs.pull",
             "Pull into the stream's branch (its upstream, or a named remote branch).",
             Confirm::Never,
             Touched::Refs,
@@ -370,7 +370,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.push",
+            "oxplow.vcs.push",
             "Push the stream's branch (to its upstream, or a named remote branch).",
             Confirm::Never,
             Touched::AllRefs,
@@ -381,7 +381,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.merge",
+            "oxplow.vcs.merge",
             "Merge a revision into the stream's branch; the result lists any conflicts \
              left after oxplow's smart merge.",
             Confirm::Destructive,
@@ -392,7 +392,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.checkout_branch",
+            "oxplow.vcs.checkout_branch",
             "Switch the stream's workspace to a branch (creating it with `create`).",
             Confirm::Never,
             Touched::Refs,
@@ -406,7 +406,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.rename_branch",
+            "oxplow.vcs.rename_branch",
             "Rename a branch.",
             Confirm::Never,
             Touched::AllRefs,
@@ -420,7 +420,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.delete_branch",
+            "oxplow.vcs.delete_branch",
             "Delete a branch (`force` even when unmerged).",
             Confirm::Destructive,
             Touched::AllRefs,
@@ -434,7 +434,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "vcs.resolve_conflict",
+            "oxplow.vcs.resolve_conflict",
             "Settle one conflicted path: take `ours`, `theirs`, or `auto` (smart merge).",
             Confirm::Never,
             Touched::Workspace,
@@ -448,7 +448,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "git.rebase",
+            "oxplow.git.rebase",
             "Rebase the stream's branch onto a revision (rewrites its commits).",
             Confirm::Destructive,
             Touched::Refs,
@@ -458,7 +458,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "git.cherry_pick",
+            "oxplow.git.cherry_pick",
             "Apply one commit onto the stream's branch.",
             Confirm::Never,
             Touched::Refs,
@@ -468,7 +468,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "git.revert",
+            "oxplow.git.revert",
             "Commit the inverse of one commit onto the stream's branch.",
             Confirm::Destructive,
             Touched::Refs,
@@ -478,7 +478,7 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
             },
         ),
         command(
-            "git.ignore",
+            "oxplow.git.ignore",
             "Add a pattern to the workspace's `.gitignore`.",
             Confirm::Never,
             Touched::Workspace,
@@ -520,7 +520,7 @@ mod tests {
             .commands
             .run(
                 &agent,
-                "vcs.commit",
+                "oxplow.vcs.commit",
                 json!({ "stream": stream, "message": "by an agent" }),
                 false,
             )
@@ -531,7 +531,7 @@ mod tests {
         let discard = json!({ "stream": stream, "paths": ["a.txt"] });
         let err = svc
             .commands
-            .run(&Actor::Human, "vcs.discard", discard.clone(), false)
+            .run(&Actor::Human, "oxplow.vcs.discard", discard.clone(), false)
             .await
             .unwrap_err();
         assert!(format!("{err:?}").contains("NeedsConfirmation"), "{err:?}");
@@ -542,7 +542,7 @@ mod tests {
 
         let out = svc
             .commands
-            .run(&Actor::Human, "vcs.discard", discard, true)
+            .run(&Actor::Human, "oxplow.vcs.discard", discard, true)
             .await
             .unwrap();
         assert_eq!(
@@ -561,7 +561,7 @@ mod tests {
             .commands
             .run(
                 &Actor::Human,
-                "vcs.merge",
+                "oxplow.vcs.merge",
                 json!({ "stream": stream, "rev": "HEAD" }),
                 true,
             )
@@ -581,7 +581,7 @@ mod tests {
             .commands
             .run(
                 &Actor::Human,
-                "vcs.commit",
+                "oxplow.vcs.commit",
                 json!({ "stream": "str999", "message": "m" }),
                 false,
             )

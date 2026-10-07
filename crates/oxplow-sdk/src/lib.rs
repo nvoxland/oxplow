@@ -152,15 +152,15 @@ pub fn scaffold(
             Some("{ entities: { item: 1 } }".to_string()),
         ),
         Kind::Command => (
-            format!("{{ command: {ns}.note, input: {{ ref: \"work_item:oxplow:tsk1\" }} }}"),
+            format!("{{ command: {ns}.notes.add, input: {{ ref: \"work_item:oxplow:tsk1\" }} }}"),
             "a comment on the work item",
-            Some("{ commands: [work_item.comment] }".to_string()),
+            Some("{ commands: [oxplow.work_item.comment] }".to_string()),
         ),
         Kind::Effect => (
             "{ effect: on-done, event: { type: work_item.transitioned, payload: { work_item: \"work_item:oxplow:tsk1\", from: in_progress, to: done } } }"
                 .to_string(),
             "a comment on the finished work item",
-            Some("{ commands: [work_item.comment] }".to_string()),
+            Some("{ commands: [oxplow.work_item.comment] }".to_string()),
         ),
     };
     let provider_id = name.replace('-', "_");
@@ -199,9 +199,9 @@ pub fn scaffold(
         )),
         Kind::Command => manifest.push_str(&format!(
             "commands:\n\
-             \x20 # Registered as {ns}.note; its script composes core commands, run as the\n\
+             \x20 # Registered as {ns}.notes.add (<namespace>.<area>.<verb>); its script composes core commands, run as the\n\
              \x20 # caller in one transaction.\n\
-             \x20 - name: note\n\
+             \x20 - name: notes.add\n\
              \x20   summary: \"TODO: what it does. Here: comment on a work item.\"\n\
              \x20   input_schema:\n\
              \x20     type: object\n\
@@ -211,11 +211,11 @@ pub fn scaffold(
              \x20     additionalProperties: false\n\
              \x20   entry: handlers/note.star\n\
              \x20   examples:\n\
-             \x20     - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: [work_item.comment] }}\n\
+             \x20     - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: [oxplow.work_item.comment] }}\n\
              ui:\n\
              \x20 commands:\n\
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
-             \x20   - {{ command: {ns}.note, label: Add Note, about: work_item }}\n"
+             \x20   - {{ command: {ns}.notes.add, label: Add Note, about: work_item }}\n"
         )),
         Kind::Effect => manifest.push_str(
             "effects:\n\
@@ -296,7 +296,7 @@ pub fn scaffold(
                  actions:\n\
                  \x20 # In each row's right-click menu: a command run as the person, the\n\
                  \x20 # row's values bound in (`{{{{row.<column>}}}}`).\n\
-                 \x20 - {{ id: start, label: Start, command: work_item.transition, input: {{ ref: \"{{{{row.ref}}}}\", to: in_progress }}, row: true }}\n\
+                 \x20 - {{ id: start, label: Start, command: oxplow.work_item.transition, input: {{ ref: \"{{{{row.ref}}}}\", to: in_progress }}, row: true }}\n\
                  empty: No open tasks in this stream.\n\
                  launcher: {{ category: Work }}\n",
                 title = title_case(name)
@@ -340,7 +340,7 @@ pub fn scaffold(
              # as the caller, in one transaction — or {\"refuse\": \"why\"}. No I/O.\n\
              def transform(x):\n\
              \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"TODO: the note\"}},\n\
+             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"TODO: the note\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?,
@@ -351,7 +351,7 @@ pub fn scaffold(
              def transform(x):\n\
              \x20   ref = x[\"event\"][\"payload\"][\"work_item\"]\n\
              \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"work_item.comment\", \"input\": {\"ref\": ref, \"body\": \"TODO: the note\"}},\n\
+             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"ref\": ref, \"body\": \"TODO: the note\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?,
@@ -926,7 +926,7 @@ mod tests {
         write(
             dir.path(),
             "oxplow/extensions/acme/extension.yaml",
-            "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\nlauncher:\n  - { label: New Bug, category: Work, target: { command: work_item.create, input: { title: 7 } } }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\nlauncher:\n  - { label: New Bug, category: Work, target: { command: oxplow.work_item.create, input: { title: 7 } } }\n",
         );
         let throwaway = check(
             dir.path(),
@@ -951,7 +951,7 @@ mod tests {
             "properties": { "title": { "type": "string" } },
             "required": ["title"]
         });
-        let schemas = move |name: &str| (name == "work_item.create").then(|| schema.clone());
+        let schemas = move |name: &str| (name == "oxplow.work_item.create").then(|| schema.clone());
         let checked = check(
             dir.path(),
             "acme",

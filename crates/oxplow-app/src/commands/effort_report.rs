@@ -1,4 +1,4 @@
-//! Reporting on an effort: `effort.report` — optional words on the
+//! Reporting on an effort: `oxplow.effort.report` — optional words on the
 //! thread's current (else latest) effort: a summary and the impacts beyond
 //! its edits. It opens and closes nothing; which files and runs were the
 //! effort's is observed, and an effort closed without a summary takes its
@@ -28,7 +28,7 @@ use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::effort_service::EffortService;
 use crate::sql_gateway::SqlGateway;
 
-pub const REPORT: &str = "effort.report";
+pub const REPORT: &str = "oxplow.effort.report";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -226,7 +226,7 @@ pub fn report_command(deps: EffortDeps) -> Command {
             })
         })),
     )
-    .expect("effort.report is a valid command")
+    .expect("oxplow.effort.report is a valid command")
 }
 
 /// The reporting commands, for the bus.
@@ -250,7 +250,7 @@ mod tests {
     }
 
     /// What an agent runs to finish its task: the transition to done and
-    /// the report, as one `command.sequence`. Returns the task's row and
+    /// the report, as one `oxplow.command.sequence`. Returns the task's row and
     /// the report's result.
     async fn complete(
         fx: &crate::test_fixtures::TaskEffortFixture,
@@ -278,7 +278,7 @@ mod tests {
     }
 
     /// Finishing a task is one run: the transition and the report land
-    /// under one audit row (`command.sequence`), and the effort carries the
+    /// under one audit row (`oxplow.command.sequence`), and the effort carries the
     /// summary.
     #[tokio::test]
     async fn completing_a_task_is_one_audited_run() {

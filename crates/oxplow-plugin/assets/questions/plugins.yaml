@@ -30,5 +30,5 @@
 - question: Run my fixed collector again to see that it works.
   skill: oxplow-extension
   reaches:
-    command: collector.sync
+    command: oxplow.collector.sync
     input: { owner: tracker, id: issues }

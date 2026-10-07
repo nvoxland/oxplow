@@ -14,7 +14,7 @@
 //!     title: Burndown
 //!     bundle: components/burndown        # default components/<id>; holds index.html
 //!     assets: [open-tasks, oxplow-bundled/visits]   # a bare slug is this extension's
-//!     commands: [work_item.transition]
+//!     commands: [oxplow.work_item.transition]
 //! ```
 
 use std::path::Path;
@@ -516,7 +516,7 @@ pub fn parse_custom_components(
         } else if let Some(bad) = c
             .commands
             .iter()
-            .find(|n| oxplow_domain::CommandSpec::validate_name(n).is_err())
+            .find(|n| oxplow_domain::CommandSpec::validate_id(n).is_err())
         {
             Some(format!(
                 "custom component `{}`: `{bad}` isn't a command name",
@@ -834,7 +834,7 @@ mod tests {
         let ext = load(
             d.path(),
             "private",
-            "  - { id: burndown, title: Burndown, assets: [open-tasks, oxplow-bundled/visits], commands: [work_item.transition] }\n",
+            "  - { id: burndown, title: Burndown, assets: [open-tasks, oxplow-bundled/visits], commands: [oxplow.work_item.transition] }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let c = &ext.custom_components[0];
@@ -1007,7 +1007,7 @@ mod tests {
         load(
             d.path(),
             "private",
-            "  - { id: burndown, commands: [nope.cmd, work_item.transition] }\n",
+            "  - { id: burndown, commands: [nope.no.cmd, oxplow.work_item.transition] }\n",
         );
         write(
             d.path(),
@@ -1017,17 +1017,17 @@ mod tests {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let cat = crate::extension_catalog::ExtensionCatalog::new();
         let schema = |n: &str| {
-            (n == "work_item.transition").then(|| serde_json::json!({ "type": "object" }))
+            (n == "oxplow.work_item.transition").then(|| serde_json::json!({ "type": "object" }))
         };
         let v = crate::extensions::validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
             .await
             .unwrap();
         let errs = v.errors.join("\n");
         assert!(
-            errs.contains("declares command `nope.cmd`, which isn't registered"),
+            errs.contains("declares command `nope.no.cmd`, which isn't registered"),
             "{errs}"
         );
-        assert!(!errs.contains("work_item.transition"), "{errs}");
+        assert!(!errs.contains("oxplow.work_item.transition"), "{errs}");
         assert!(
             v.warnings
                 .join("\n")

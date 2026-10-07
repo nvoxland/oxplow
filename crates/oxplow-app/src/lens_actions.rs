@@ -480,10 +480,10 @@ mod tests {
 query: "SELECT id, title FROM v_task"
 params: [{ name: item, default: "" }]
 actions:
-  - { id: finish, label: Finish, command: work_item.transition, input: { ref: "{{param.item}}", to: done } }
-  - { id: finish-row, label: Finish, command: work_item.transition, row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }
-  - { id: commit, label: Commit, command: vcs.commit, input: { stream: str1, message: "x" } }
-  - { id: prompt, label: Prompt, command: config.set, input: { key: agentPromptAppend, value: be brief } }
+  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: "{{param.item}}", to: done } }
+  - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }
+  - { id: commit, label: Commit, command: oxplow.vcs.commit, input: { stream: str1, message: "x" } }
+  - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
 "#,
         )
         .unwrap();
@@ -634,7 +634,7 @@ actions:
         let (fx, root) = fixture().await;
         std::fs::write(
             root.join("oxplow/extensions/acme/lenses/new-task.yaml"),
-            "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: work_item.create, defaults: { body: '{{param.body}}' } }\n",
+            "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: oxplow.work_item.create, defaults: { body: '{{param.body}}' } }\n",
         )
         .unwrap();
         let out = submit_form(
@@ -687,13 +687,13 @@ actions:
     }
 
     /// P6b.D2: a private extension with a component (`board`) that may
-    /// query `acme/tasks` and invoke `work_item.transition`.
+    /// query `acme/tasks` and invoke `oxplow.work_item.transition`.
     async fn component_fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join("oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks], commands: [work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
@@ -772,7 +772,10 @@ actions:
             .find(|p| p.kind == crate::exec_consent::ProgramKind::Component)
             .expect("listed on Programs");
         assert_eq!(board.name, "acme/board");
-        assert_eq!(board.commands, vec!["work_item.transition".to_string()]);
+        assert_eq!(
+            board.commands,
+            vec!["oxplow.work_item.transition".to_string()]
+        );
         assert!(!board.approved);
         let version = load_board(&fx, &root);
         assert_eq!(
@@ -780,7 +783,7 @@ actions:
             Some(version.as_str()),
             "the listing's version is the frame's"
         );
-        let invoke = || board_invoke(&fx, "work_item.transition", &version);
+        let invoke = || board_invoke(&fx, "oxplow.work_item.transition", &version);
         refused(
             invoke_component_command(&fx.svc, &root, invoke())
                 .await
@@ -805,7 +808,7 @@ actions:
             invoke_component_command(
                 &fx.svc,
                 &root,
-                board_invoke(&fx, "work_item.transition", &changed),
+                board_invoke(&fx, "oxplow.work_item.transition", &changed),
             )
             .await
             .unwrap_err(),
@@ -840,7 +843,7 @@ actions:
             invoke_component_command(
                 &fx.svc,
                 &root,
-                board_invoke(&fx, "work_item.transition", &tampered),
+                board_invoke(&fx, "oxplow.work_item.transition", &tampered),
             )
             .await
             .unwrap_err(),
@@ -851,7 +854,7 @@ actions:
             invoke_component_command(
                 &fx.svc,
                 &root,
-                board_invoke(&fx, "work_item.transition", "0123abcd"),
+                board_invoke(&fx, "oxplow.work_item.transition", "0123abcd"),
             )
             .await
             .unwrap_err(),
@@ -861,7 +864,7 @@ actions:
         invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "work_item.transition", &approved),
+            board_invoke(&fx, "oxplow.work_item.transition", &approved),
         )
         .await
         .unwrap();
@@ -884,7 +887,7 @@ actions:
         }
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, bundle: components/Board, assets: [tasks], commands: [work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, bundle: components/Board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
         )
         .unwrap();
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
@@ -968,7 +971,7 @@ actions:
         let (fx, root) = component_fixture().await;
         let version = load_board(&fx, &root);
         let invoke = |command: &str| board_invoke(&fx, command, &version);
-        let err = invoke_component_command(&fx.svc, &root, invoke("config.set"))
+        let err = invoke_component_command(&fx.svc, &root, invoke("oxplow.config.set"))
             .await
             .unwrap_err();
         assert!(
@@ -977,7 +980,7 @@ actions:
             "{err}"
         );
         approve_board(&fx, &root);
-        let out = invoke_component_command(&fx.svc, &root, invoke("work_item.transition"))
+        let out = invoke_component_command(&fx.svc, &root, invoke("oxplow.work_item.transition"))
             .await
             .unwrap();
         let audit = fx
@@ -1013,7 +1016,7 @@ actions:
                 &root,
                 ComponentInvoke {
                     lens_id: "acme/view".into(),
-                    command: "work_item.transition".into(),
+                    command: "oxplow.work_item.transition".into(),
                     input: input.clone(),
                     on_behalf_of: Actor::Human,
                     confirmed: false,

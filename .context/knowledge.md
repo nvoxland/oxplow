@@ -4,9 +4,9 @@ The per-project wiki: pages at `.oxplow/wiki/<slug>.md`, their row in
 `wiki_page` and their links in `page_ref` (P5.C3). Pages are agent-written writeups, diagrams and explanations; the
 file is the page, the row and edges are derived from it.
 
-## One write path: `knowledge.write_page`
+## One write path: `oxplow.knowledge.write_page`
 
-`knowledge.write_page { slug, title?, body, verified_refs?, removed_refs? }`
+`oxplow.knowledge.write_page { slug, title?, body, verified_refs?, removed_refs? }`
 (`crates/oxplow-app/src/knowledge.rs`, a `Tx` command) is how a page is
 written — by an agent (`run_command`), by the desktop editor, and by
 "Mark verified" on the Freshness page. In the bus's transaction it:
@@ -45,15 +45,15 @@ no wiki event of its own). `@version` literals in links are stripped from the
 body: a version is the edge's pin, not the prose's. `title` sets the
 body's `# ` heading.
 
-Beside it: `knowledge.delete_page { slug }` (Destructive; row, edges and
+Beside it: `oxplow.knowledge.delete_page { slug }` (Destructive; row, edges and
 file — the file removed inside the run, a failure failing it;
-`knowledge.page.deleted@1`), `knowledge.link { page, target }`
+`knowledge.page.deleted@1`), `oxplow.knowledge.link { page, target }`
 (adds `- [[target]]` at the end of the page's `## Related` section —
 before any section after it — or a new one at the end, validated and
 with `@version` literals stripped like any write; tsk572), and
-`knowledge.resync { slug }` (restate from the file; the repair when a row
+`oxplow.knowledge.resync { slug }` (restate from the file; the repair when a row
 and its file disagree). All are `Record`: a read-only thread captures
-what it explored too. `knowledge.write_page` replaced MCP
+what it explored too. `oxplow.knowledge.write_page` replaced MCP
 `record_wiki_page_update`, `resync_wiki_page` and `delete_wiki_page`, and
 RPCs `write_wiki_page_body`, `upsert_wiki_page`, `delete_wiki_page`,
 `mark_wiki_ref_verified` and `mark_all_wiki_refs_verified`.

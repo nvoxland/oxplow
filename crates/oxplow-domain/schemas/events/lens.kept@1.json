@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`lens.kept@1`: an answer was kept — written as a private lens\n(`lens.keep`, P6.C1).",
+  "description": "`lens.kept@1`: an answer was kept — written as a private lens\n(`oxplow.lens.keep`, P6.C1).",
   "properties": {
     "answer": {
       "description": "`answer:<id>`.",

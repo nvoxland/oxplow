@@ -277,7 +277,7 @@ fn written(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Vec<Envelop
         .collect())
 }
 
-/// What a new comment is (`knowledge.add_comment`, P8.A6).
+/// What a new comment is (`oxplow.knowledge.add_comment`, P8.A6).
 #[derive(Debug, Clone)]
 pub struct NewComment {
     pub stream: StreamId,

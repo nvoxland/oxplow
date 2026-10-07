@@ -1,5 +1,5 @@
 /// One answer an agent showed in a thread (P6.C2): the lens it showed,
-/// re-run live, with Keep This (`lens.keep`) — or, once it is a lens, a
+/// re-run live, with Keep This (`oxplow.lens.keep`) — or, once it is a lens, a
 /// link to it. Rendered by the Answers strip and inline in an ACP
 /// transcript. See `.context/extensions.md` → "Thread answers".
 import type { CSSProperties } from "react";

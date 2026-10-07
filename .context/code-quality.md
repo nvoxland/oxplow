@@ -293,12 +293,12 @@ rule is visible rather than silently never matching.
 This repo's own table lives in its `.oxplow/project.yaml` and is the
 worked example.
 
-### MCP: `list_zones`; writing the table is `config.set`
+### MCP: `list_zones`; writing the table is `oxplow.config.set`
 
 The agent owns this table. `list_zones` returns the rules plus what they
 actually match — a file count per zone over the worktree and a sample of
 paths that fell through to `other`, which is the signal that the table
-has gone stale as the repo grew. Writing it is the `config.set { key:
+has gone stale as the repo grew. Writing it is the `oxplow.config.set { key:
 "zones", value: [rules] }` command ([commands.md](./commands.md)) — the
 WHOLE ordered table, validated by the loader's rules (reserved labels,
 glob shapes), written to `.oxplow/project.yaml` (committed, so a team

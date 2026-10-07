@@ -1,4 +1,4 @@
-# oxplow_bundled.accept { ref, force? }: comment the review on the effort's
+# oxplow.review.accept { ref, force? }: comment the review on the effort's
 # work item, then mark it done. Refuses while a claim is unverified or an
 # inferred decision unreviewed, unless forced. The verdict is logged as
 # `oxplow_bundled.accepted` with the run: its subject — kept when the
@@ -37,8 +37,8 @@ def transform(x):
     item = row["work_item"]
     return {
         "commands": [
-            {"name": "work_item.comment", "input": {"ref": item, "body": "\n".join(lines)}},
-            {"name": "work_item.transition", "input": {"ref": item, "to": "done"}},
+            {"name": "oxplow.work_item.comment", "input": {"ref": item, "body": "\n".join(lines)}},
+            {"name": "oxplow.work_item.transition", "input": {"ref": item, "to": "done"}},
         ],
         "events": [{
             "type": "oxplow_bundled.accepted",

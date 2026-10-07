@@ -17,7 +17,7 @@
 //! ([`crate::plugin_health`]): a start or call that fails (not a refused
 //! input) counts, three in a row stop the instance and log
 //! `plugin.disabled@1`, and it stays off — across restarts, since
-//! `plugin_health` says so — until a person runs `plugin.enable`.
+//! `plugin_health` says so — until a person runs `oxplow.plugin.enable`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -921,7 +921,7 @@ impl Instance {
 
     /// A returned event as the envelope the bus logs: a type it declared,
     /// and (for a work-item record) an item of its own. `filed_on` is the
-    /// thread a new item was filed on (`work_item.create`'s, tsk1058).
+    /// thread a new item was filed on (`oxplow.work_item.create`'s, tsk1058).
     pub(crate) fn envelope(
         &self,
         actor: &Actor,
@@ -1850,7 +1850,7 @@ impl ProviderRegistry {
             match super::work_items::ExternalWorkItems::provider(instance) {
                 Ok(provider) => self.work_items.register(provider),
                 Err(e) => {
-                    bus.unregister_namespace(id);
+                    bus.unregister_source(&format!("provider:{}", instance.name));
                     return Err(e);
                 }
             }
@@ -1871,7 +1871,7 @@ impl ProviderRegistry {
     /// Unregister a stopped instance and end its process.
     async fn tear_down(&self, running: Arc<Instance>) {
         if let Some(bus) = self.bus.upgrade() {
-            bus.unregister_namespace(&running.id);
+            bus.unregister_source(&format!("provider:{}", running.name));
         }
         self.work_items.unregister(&running.id);
         self.deps.capabilities.set_external(
@@ -1918,8 +1918,8 @@ impl ProviderRegistry {
     }
 
     /// A person's Check / Enable / Disable on Settings → Integrations:
-    /// write `extensionInstances.<instance>` through `config.set` and, to
-    /// enable, run `plugin.enable`. Enabling checks first: an
+    /// write `extensionInstances.<instance>` through `oxplow.config.set` and, to
+    /// enable, run `oxplow.plugin.enable`. Enabling checks first: an
     /// unapproved or unconfigured instance is refused and nothing is
     /// written.
     pub async fn set_instance(
@@ -2021,7 +2021,7 @@ impl ProviderRegistry {
 
     /// A person adds another instance of `provider`: `instance`
     /// (`<extension>/<instance id>`), off and unconfigured until they set
-    /// it up — the project's (written through `config.set`:
+    /// it up — the project's (written through `oxplow.config.set`:
     /// `extensionInstances` is a person's key, so an agent's is refused or
     /// proposed) or, with `Scope::Global`, their own on this machine
     /// (`instances.yaml`, a person's only). Refused when
@@ -2078,7 +2078,7 @@ impl ProviderRegistry {
     /// off, with the global one's config and provider — which replaces it
     /// here (and is the project's, credentials included, tsk838); every
     /// other project keeps running it, and removing the entry brings it
-    /// back here. Written through `config.set`, so an agent's is refused
+    /// back here. Written through `oxplow.config.set`, so an agent's is refused
     /// or proposed.
     pub async fn off_here(
         &self,
@@ -2209,7 +2209,7 @@ impl ProviderRegistry {
     /// Change `scope`'s instances as `actor` by `edit`, which sees them as
     /// they are now — under the `instances_gate` the caller holds (`_gate`)
     /// and, for the machine's file, its cross-process lock: the project's
-    /// through `config.set` (`extensionInstances` is a person's key), the
+    /// through `oxplow.config.set` (`extensionInstances` is a person's key), the
     /// machine's file directly — a person's only: no command reaches it,
     /// so no agent or lens can. The caller reconciles once it lets go of
     /// the gate.
@@ -2702,7 +2702,7 @@ impl ProviderRegistry {
         Ok(view)
     }
 
-    /// A person enabled `instance` again (`plugin.enable`): its failure
+    /// A person enabled `instance` again (`oxplow.plugin.enable`): its failure
     /// count and backoff start over.
     pub(crate) async fn reset(&self, instance: &str) {
         if let Some(h) = self.health.lock().get_mut(instance) {
@@ -3021,7 +3021,7 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
         .filter(|decl| !verbs.contains(&decl.name.as_str()))
         .map(|decl| {
             let spec = CommandSpec {
-                name: format!("{id}.{}", decl.name),
+                name: super::command_id(&id, &instance.spec.capability, &decl.name),
                 summary: format!("{} (provider `{}`)", decl.summary, instance.name),
                 input_schema: decl.input_schema.clone(),
                 invokers: Invokers::ALL,
@@ -3042,6 +3042,7 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
                           },
                           input| {
                         let (instance, verb, id) = (instance.clone(), verb.clone(), id.clone());
+                        let capability = instance.spec.capability.clone();
                         Box::pin(async move {
                             let out = instance.invoke(&verb, input, idempotency_key).await?;
                             let events = out
@@ -3052,7 +3053,7 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
                             Ok(HandlerOutput {
                                 result: out.result,
                                 inverse: out.inverse.map(|c| CommandCall {
-                                    name: format!("{id}.{}", c.command),
+                                    name: super::command_id(&id, &capability, &c.command),
                                     input: c.input,
                                 }),
                                 events,

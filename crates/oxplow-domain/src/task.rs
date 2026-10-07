@@ -125,7 +125,7 @@ pub mod limits {
 /// attached to any thread).
 pub const BACKLOG_SCOPE: &str = "__backlog__";
 
-/// A comment on an oxplow task (`task_note:<id>`; a `work_item.comment`).
+/// A comment on an oxplow task (`task_note:<id>`; a `oxplow.work_item.comment`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct TaskNote {
     pub id: crate::ids::NoteId,
@@ -145,7 +145,7 @@ pub struct TaskNote {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct TaskImpact {
     /// Page kind being impacted — `wiki | work_item | file | directory
-    /// | git_commit | finding`, and no other (`effort.report` refuses
+    /// | git_commit | finding`, and no other (`oxplow.effort.report` refuses
     /// one). Projected to the canonical `page_ref` kinds (`git_commit`
     /// → `commit`, `directory` → `dir`; see `impact_kind`). A
     /// `work_item`'s id is its ref or one of the active list's own ids.

@@ -13,7 +13,7 @@
 //!     effect: write                      # write | record
 //!     invokers: { human: true, agent: true, lens: true }
 //!     examples:
-//!       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [work_item.transition] }
+//!       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
 //!       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, rows: [], refuses: no such task }
 //! ```
 //!
@@ -109,16 +109,41 @@ struct ExampleFile {
     refuses: Option<String>,
 }
 
-/// The namespace an extension's commands register under: its name with
-/// `-` → `_` (a command name's segments are snake_case).
+/// The namespace an extension's commands register under when its
+/// manifest declares none: its name with `-` → `_` (a command id's
+/// segments are snake_case).
 pub fn command_namespace(extension: &str) -> String {
     extension.replace('-', "_")
 }
 
-fn valid_command_name(name: &str) -> bool {
-    let mut chars = name.chars();
+fn valid_segment(segment: &str) -> bool {
+    let mut chars = segment.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// A manifest's `namespace:`: one snake_case segment, and `oxplow` only
+/// for an extension that ships with oxplow (`ships_with_oxplow`).
+pub fn check_namespace(namespace: &str, ships_with_oxplow: bool) -> Result<(), String> {
+    if !valid_segment(namespace) {
+        return Err(format!(
+            "`namespace` `{namespace}` must be lowercase letters, digits and underscores, \
+             starting with a letter"
+        ));
+    }
+    if namespace == oxplow_domain::OXPLOW_NAMESPACE && !ships_with_oxplow {
+        return Err(format!(
+            "`namespace: {namespace}` is reserved for the extensions that ship with oxplow"
+        ));
+    }
+    Ok(())
+}
+
+/// A manifest command's `name`: `<area>.<verb>`, each snake_case — its id
+/// is `<namespace>.<area>.<verb>`.
+fn valid_command_name(name: &str) -> bool {
+    let parts: Vec<&str> = name.split('.').collect();
+    parts.len() == 2 && parts.iter().all(|p| valid_segment(p))
 }
 
 /// A path inside the extension folder.
@@ -134,14 +159,13 @@ fn inside(rel: &str) -> bool {
 /// error (`file:line: …`) for each broken one. `manifest` is the
 /// manifest's text (for lines); `read` reads a file in the extension.
 pub fn parse_commands(
-    extension: &str,
+    namespace: &str,
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
     read: &dyn Fn(&str) -> Option<String>,
 ) -> (Vec<ExtensionCommand>, Vec<String>) {
     let block_line = key_line(manifest, "commands");
-    let namespace = command_namespace(extension);
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
@@ -159,7 +183,7 @@ pub fn parse_commands(
             }
         };
         let line = entry_line(manifest, "commands", "name", &entry.name).or(block_line);
-        match command_of(&namespace, entry, read) {
+        match command_of(namespace, entry, read) {
             Ok(c) if out.iter().any(|o| o.name == c.name) => errors.push(at(
                 file,
                 line,
@@ -179,13 +203,13 @@ fn command_of(
 ) -> Result<ExtensionCommand, String> {
     if !valid_command_name(&f.name) {
         return Err(format!(
-            "command name `{}` must be lowercase letters, digits and underscores, starting with a \
-             letter",
+            "command name `{}` must be `<area>.<verb>` — lowercase letters, digits and \
+             underscores, each starting with a letter (its id is `{namespace}.<area>.<verb>`)",
             f.name
         ));
     }
     let name = format!("{namespace}.{}", f.name);
-    CommandSpec::validate_name(&name).map_err(|e| e.to_string())?;
+    CommandSpec::validate_id(&name).map_err(|e| e.to_string())?;
     let at_name = |m: String| format!("command `{}`: {m}", f.name);
     let effect = match f.effect.as_deref() {
         None | Some("write") => CommandEffect::Write,
@@ -274,8 +298,10 @@ fn command_of(
 pub fn refuse_shared_namespaces(extensions: &mut [Extension]) {
     let mut by_ns: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (i, e) in extensions.iter().enumerate() {
-        if e.enabled && !e.commands.is_empty() {
-            by_ns.entry(command_namespace(&e.name)).or_default().push(i);
+        // `oxplow` is shared by oxplow's own extensions (only they may
+        // declare it); any other namespace is one extension's.
+        if e.enabled && !e.commands.is_empty() && e.namespace != oxplow_domain::OXPLOW_NAMESPACE {
+            by_ns.entry(e.namespace.clone()).or_default().push(i);
         }
     }
     for (ns, owners) in by_ns.into_iter().filter(|(_, o)| o.len() > 1) {
@@ -287,7 +313,7 @@ pub fn refuse_shared_namespaces(extensions: &mut [Extension]) {
             let ext = &mut extensions[i];
             ext.errors.push(format!(
                 "{}/extension.yaml: {} both register commands under `{ns}` (an extension's \
-                 command namespace is its name with `-` → `_`); rename one",
+                 `namespace:`, else its name with `-` → `_`); declare another `namespace:` in one",
                 ext.path,
                 names.join(" and ")
             ));
@@ -594,30 +620,28 @@ impl ExtensionCommands {
             .get(&self.root)
             .iter()
             .filter(|e| e.enabled && !e.commands.is_empty())
-            .map(|e| {
-                (
-                    command_namespace(&e.name),
-                    (e.name.clone(), e.commands.clone()),
-                )
-            })
+            .map(|e| (e.name.clone(), (e.namespace.clone(), e.commands.clone())))
             .collect();
+        // Keyed by extension: several of oxplow's share the `oxplow`
+        // namespace, so it is the extension whose commands come and go.
         let stale: Vec<String> = registered
             .iter()
-            .filter(|(ns, have)| wanted.get(*ns) != Some(*have))
-            .map(|(ns, _)| ns.clone())
+            .filter(|(extension, have)| wanted.get(*extension) != Some(*have))
+            .map(|(extension, _)| extension.clone())
             .collect();
-        for ns in stale {
-            self.bus.unregister_namespace(&ns);
-            registered.remove(&ns);
+        for extension in stale {
+            self.bus
+                .unregister_source(&format!("extension:{extension}"));
+            registered.remove(&extension);
         }
         let mut problems = BTreeMap::new();
-        for (ns, (extension, commands)) in wanted {
-            if registered.contains_key(&ns) {
+        for (extension, (ns, commands)) in wanted {
+            if registered.contains_key(&extension) {
                 continue;
             }
             match self.register(&ns, &extension, &commands) {
                 Ok(()) => {
-                    registered.insert(ns, (extension, commands));
+                    registered.insert(extension, (ns, commands));
                 }
                 Err(problem) => {
                     tracing::warn!(extension, problem, "extension commands not registered");
@@ -646,7 +670,7 @@ impl ExtensionCommands {
             .register_namespace(ns, &format!("extension:{extension}"), built)
             .map_err(|e| match e {
                 oxplow_domain::CommandError::Invalid { message, .. } => {
-                    format!("{message}; rename the extension")
+                    format!("{message}; declare another `namespace:`")
                 }
                 other => other.to_string(),
             })
@@ -683,12 +707,17 @@ pub async fn check_extension_commands(
     commands: Option<CommandSchemas<'_>>,
 ) {
     if let (Some(registry), false) = (commands, ext.commands.is_empty()) {
-        let ns = command_namespace(&ext.name);
+        let ns = ext.namespace.clone();
         let mine = format!("extension:{}", ext.name);
-        if let Some(owner) = registry.namespace_owner(&ns).filter(|o| *o != mine) {
+        // `oxplow` is shared by oxplow's own extensions (its namespace check
+        // already refused it to anyone else); any other is one owner's.
+        if let Some(owner) = registry
+            .namespace_owner(&ns)
+            .filter(|o| *o != mine && ns != oxplow_domain::OXPLOW_NAMESPACE)
+        {
             ext.errors.push(format!(
-                "{}/extension.yaml: the command namespace `{ns}` is {owner}'s (an extension's \
-                 commands register under its name with `-` → `_`); rename the extension",
+                "{}/extension.yaml: the command namespace `{ns}` is {owner}'s; declare another \
+                 `namespace:`",
                 ext.path
             ));
         }
@@ -837,14 +866,14 @@ mod tests {
     }
 
     /// Moves a task to done.
-    const HANDLER: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.transition\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"to\": \"done\"}}]}\n";
+    const HANDLER: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"to\": \"done\"}}]}\n";
 
-    const GOOD: &str = "  - name: finish_review
+    const GOOD: &str = "  - name: review.finish
     summary: Mark the task done.
     input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }
     entry: handlers/finish_review.star
     examples:
-      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [work_item.transition] }
+      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [oxplow.work_item.transition] }
 ";
 
     /// Write extension `name` with `commands` (the block's entries) and
@@ -881,7 +910,7 @@ mod tests {
         assert_eq!(ext.commands.len(), 1);
         let c = &ext.commands[0];
         assert_eq!(
-            c.name, "my_review.finish_review",
+            c.name, "my_review.review.finish",
             "the namespace is the name, `-` → `_`"
         );
         assert_eq!(c.summary, "Mark the task done.");
@@ -892,7 +921,10 @@ mod tests {
         assert_eq!(c.effect, CommandEffect::Write);
         assert_eq!(c.invokers, Invokers::ALL);
         assert_eq!(c.examples.len(), 1);
-        assert_eq!(c.examples[0].expect_commands, vec!["work_item.transition"]);
+        assert_eq!(
+            c.examples[0].expect_commands,
+            vec!["oxplow.work_item.transition"]
+        );
         assert_eq!(command_namespace("my-review"), "my_review");
     }
 
@@ -906,54 +938,54 @@ mod tests {
         };
         for (block, files, says) in [
             (entry("Finish", ""), vec![("handlers/h.star", HANDLER)], "command name `Finish`"),
-            (entry("a", ""), vec![], "entry `handlers/h.star` isn't a file"),
+            (entry("a.b", ""), vec![], "entry `handlers/h.star` isn't a file"),
             (
-                entry("a", ""),
+                entry("a.b", ""),
                 vec![("handlers/h.star", "def transform(x:\n")],
                 "doesn't parse",
             ),
             (
-                entry("a", ""),
+                entry("a.b", ""),
                 vec![("handlers/h.star", "def other(x):\n    return {}\n")],
                 "define `transform`",
             ),
             (
-                entry("a", "    effect: read\n"),
+                entry("a.b", "    effect: read\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "a command that only reads",
             ),
             (
-                entry("a", "    effect: often\n"),
+                entry("a.b", "    effect: often\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "effect",
             ),
             (
-                entry("a", "    confirm: maybe\n"),
+                entry("a.b", "    confirm: maybe\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "confirm",
             ),
             (
-                entry("a", "    input: \"DELETE FROM task\"\n"),
+                entry("a.b", "    input: \"DELETE FROM task\"\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "one read",
             ),
             (
-                "  - name: a\n    summary: S.\n    input_schema: { type: nope }\n    entry: handlers/h.star\n".into(),
+                "  - name: a.b\n    summary: S.\n    input_schema: { type: nope }\n    entry: handlers/h.star\n".into(),
                 vec![("handlers/h.star", HANDLER)],
                 "input_schema",
             ),
             (
-                format!("{}{}", entry("a", ""), entry("a", "")),
+                format!("{}{}", entry("a.b", ""), entry("a.b", "")),
                 vec![("handlers/h.star", HANDLER)],
                 "declared twice",
             ),
             (
-                entry("a", "    entry_point: x\n"),
+                entry("a.b", "    entry_point: x\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "entry_point",
             ),
             (
-                entry("a", "    examples:\n      - { name: e0 }\n      - { name: e1 }\n      - { name: e2 }\n      - { name: e3 }\n      - { name: e4 }\n      - { name: e5 }\n      - { name: e6 }\n      - { name: e7 }\n      - { name: e8 }\n      - { name: e9 }\n      - { name: e10 }\n"),
+                entry("a.b", "    examples:\n      - { name: e0 }\n      - { name: e1 }\n      - { name: e2 }\n      - { name: e3 }\n      - { name: e4 }\n      - { name: e5 }\n      - { name: e6 }\n      - { name: e7 }\n      - { name: e8 }\n      - { name: e9 }\n      - { name: e10 }\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "at most 10 examples",
             ),
@@ -1020,7 +1052,7 @@ mod tests {
                 .commands
                 .run(
                     &oxplow_domain::Actor::Human,
-                    "my_review.finish",
+                    "my_review.review.finish",
                     json!({ "ref": r }),
                     false,
                 )
@@ -1040,26 +1072,51 @@ mod tests {
     }
 
     /// Checked against the running registry, an extension whose command
-    /// namespace something else holds (oxplow's own `vcs.*`) is an error;
+    /// namespace something else holds (a provider's `held.*`) is an error;
     /// its own registered namespace is not.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_namespace_the_registry_holds_is_a_check_error() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx._dir.path();
         let files = [("handlers/finish_review.star", HANDLER)];
-        write_ext(root, "vcs", GOOD, &files);
+        fx.svc
+            .commands
+            .register_namespace(
+                "held",
+                "provider:held",
+                vec![crate::commands::Command::new(
+                    oxplow_domain::CommandSpec {
+                        name: "held.review.held".into(),
+                        summary: "A provider's.".into(),
+                        input_schema: json!({ "type": "object" }),
+                        invokers: Invokers::ALL,
+                        confirm: Confirm::Never,
+                        undoable: false,
+                        lifecycle: oxplow_domain::Lifecycle::Experimental,
+                        atomicity: oxplow_domain::Atomicity::Tx,
+                        effect: CommandEffect::Write,
+                        needs: Vec::new(),
+                    },
+                    crate::commands::Handler::Tx(std::sync::Arc::new(|_, _| {
+                        Ok(crate::commands::HandlerOutput::default())
+                    })),
+                )
+                .unwrap()],
+            )
+            .unwrap();
+        write_ext(root, "held", GOOD, &files);
         let v = crate::extensions::validate_extension(
             &fx.svc.sql,
             &fx.svc.extension_catalog,
             root,
-            "vcs",
+            "held",
             Some(fx.svc.commands.as_ref()),
         )
         .await
         .unwrap();
         let errs = v.errors.join("\n");
         assert!(
-            errs.contains("the command namespace `vcs` is oxplow's"),
+            errs.contains("the command namespace `held` is provider:held's"),
             "{errs}"
         );
 
@@ -1092,8 +1149,9 @@ mod tests {
             "properties": { "ref": { "type": "string" }, "to": { "type": "string" } },
             "additionalProperties": false
         });
-        let schema =
-            move |name: &str| (name == "work_item.transition").then(|| transition_schema.clone());
+        let schema = move |name: &str| {
+            (name == "oxplow.work_item.transition").then(|| transition_schema.clone())
+        };
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let cat = crate::extension_catalog::ExtensionCatalog::new();
         let check = |handler: &'static str, tail: &'static str| {
@@ -1124,7 +1182,7 @@ mod tests {
             ),
             &[(
                 "handlers/finish_review.star",
-                "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.transition\", \"input\": {\"ref\": x[\"rows\"][0][\"r\"], \"to\": \"done\"}}]}\n",
+                "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": x[\"rows\"][0][\"r\"], \"to\": \"done\"}}]}\n",
             )],
         );
         let v = validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
@@ -1138,12 +1196,12 @@ mod tests {
                 "example `happy`: no command `no.such`",
             ),
             (
-                "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.transition\", \"input\": {\"ref\": 1}}]}\n",
-                "example `happy`: the input doesn't fit `work_item.transition`",
+                "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": 1}}]}\n",
+                "example `happy`: the input doesn't fit `oxplow.work_item.transition`",
             ),
             (
                 "def transform(x):\n    return {\"commands\": []}\n",
-                "example `happy`: composed [] but `expect_commands` is [work_item.transition]",
+                "example `happy`: composed [] but `expect_commands` is [oxplow.work_item.transition]",
             ),
             (
                 "def transform(x):\n    return [1]\n",
@@ -1170,7 +1228,7 @@ mod tests {
                     "    entry: handlers/finish_review.star\n    input: \"SELECT title FROM task\"\n",
                 )
                 .replace(
-                    "    examples:\n      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [work_item.transition] }\n",
+                    "    examples:\n      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [oxplow.work_item.transition] }\n",
                     "",
                 ),
             &[("handlers/finish_review.star", HANDLER)],
@@ -1180,7 +1238,7 @@ mod tests {
             .unwrap();
         let errs = v.errors.join("\n");
         assert!(
-            errs.contains("command `x.finish_review` `input`") && errs.contains("task"),
+            errs.contains("command `x.review.finish` `input`") && errs.contains("task"),
             "{errs}"
         );
 
@@ -1206,7 +1264,7 @@ mod tests {
         write_ext(
             fx._dir.path(),
             "my-review",
-            "  - name: finish
+            "  - name: review.finish
     summary: Finish the task.
     input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }
     entry: handlers/finish.star
@@ -1222,8 +1280,8 @@ mod tests {
     row = x[\"rows\"][0]
     return {
         \"commands\": [
-            {\"name\": \"work_item.update\", \"input\": {\"ref\": row[\"ref\"], \"title\": row[\"title\"] + \" (reviewed)\"}},
-            {\"name\": \"work_item.transition\", \"input\": {\"ref\": row[\"ref\"], \"to\": \"done\"}},
+            {\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": row[\"ref\"], \"title\": row[\"title\"] + \" (reviewed)\"}},
+            {\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": row[\"ref\"], \"to\": \"done\"}},
         ],
         \"result\": {\"finished\": row[\"ref\"]},
     }
@@ -1248,7 +1306,7 @@ mod tests {
         write(
             root,
             "oxplow/extensions/my-review/extension.yaml",
-            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }\n    entry: finish.star\n",
+            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: review.finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }\n    entry: finish.star\n",
         );
         write(
             root,
@@ -1278,7 +1336,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "my_review.finish",
+                "my_review.review.finish",
                 json!({ "ref": r }),
                 false,
             )
@@ -1313,7 +1371,7 @@ mod tests {
                 .commands
                 .run(
                     &oxplow_domain::Actor::Human,
-                    "my_review.finish",
+                    "my_review.review.finish",
                     json!({ "ref": r }),
                     false,
                 )
@@ -1335,7 +1393,12 @@ mod tests {
         let out = fx
             .svc
             .commands
-            .run(&agent(&fx), "my_review.finish", json!({ "ref": r }), false)
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "ref": r }),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(out.result["result"], json!({ "finished": r }));
@@ -1349,7 +1412,7 @@ mod tests {
             .filter(|a| a.outcome == oxplow_domain::events::schema::CommandOutcome::Ok)
             .collect();
         assert_eq!(ok.len(), 1, "one audit row for the run");
-        assert_eq!(ok[0].command, "my_review.finish");
+        assert_eq!(ok[0].command, "my_review.review.finish");
         let events = fx.svc.event_log_store.read_after(0, 200).await.unwrap();
         let transitioned = events
             .iter()
@@ -1376,14 +1439,19 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
-            "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.delete\", \"input\": {\"ref\": x[\"input\"][\"ref\"]}}]}\n",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"input\"][\"ref\"]}}]}\n",
         )
         .await;
         let r = oxplow_domain::refs::build::work_item_ref(fx.task);
         let err = fx
             .svc
             .commands
-            .run(&agent(&fx), "my_review.finish", json!({ "ref": r }), false)
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "ref": r }),
+                false,
+            )
             .await
             .unwrap_err();
         let oxplow_domain::CommandError::Proposed { preview, .. } = err else {
@@ -1399,7 +1467,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             pending[0].dry_run.as_ref().unwrap()["children"][0]["name"],
-            "work_item.delete"
+            "oxplow.work_item.delete"
         );
         assert!(task(&fx).await.deleted_at.is_none(), "nothing ran");
     }
@@ -1428,7 +1496,7 @@ mod tests {
             let err = fx
                 .svc
                 .commands
-                .run(&oxplow_domain::Actor::Human, "my_review.finish", json!({ "ref": r }), false)
+                .run(&oxplow_domain::Actor::Human, "my_review.review.finish", json!({ "ref": r }), false)
                 .await
                 .unwrap_err();
             assert!(err.to_string().contains(says), "{script}: {err}");
@@ -1443,7 +1511,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
-            "def transform(x):\n    r = x[\"input\"][\"ref\"]\n    return {\"commands\": [\n        {\"name\": \"work_item.update\", \"input\": {\"ref\": r, \"title\": \"again\"}},\n        {\"name\": \"my_review.finish\", \"input\": {\"ref\": r}},\n    ]}\n",
+            "def transform(x):\n    r = x[\"input\"][\"ref\"]\n    return {\"commands\": [\n        {\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": r, \"title\": \"again\"}},\n        {\"name\": \"my_review.review.finish\", \"input\": {\"ref\": r}},\n    ]}\n",
         )
         .await;
         let r = oxplow_domain::refs::build::work_item_ref(fx.task);
@@ -1453,7 +1521,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "my_review.finish",
+                "my_review.review.finish",
                 json!({ "ref": r }),
                 false,
             )
@@ -1485,7 +1553,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "my_review.finish",
+                "my_review.review.finish",
                 json!({ "ref": r }),
                 false,
             )
@@ -1509,10 +1577,10 @@ mod tests {
         let bus = &fx.svc.commands;
         with_finish(&fx, FINISH).await;
         assert!(
-            bus.spec("my_review.finish").is_some(),
+            bus.spec("my_review.review.finish").is_some(),
             "enabled: registered"
         );
-        let spec = bus.spec("my_review.finish").unwrap();
+        let spec = bus.spec("my_review.review.finish").unwrap();
         assert_eq!(spec.lifecycle, oxplow_domain::Lifecycle::Experimental);
         assert!(
             spec.summary.contains("extension `my-review`"),
@@ -1527,7 +1595,7 @@ mod tests {
             label: "Finish".into(),
             category: crate::extensions::LauncherCategory::Work,
             target: crate::extensions::manifest_v2::LauncherTarget::Command {
-                command: "my_review.finish".into(),
+                command: "my_review.review.finish".into(),
                 input: json!({ "ref": "work_item:oxplow:tsk1" }),
             },
         }];
@@ -1540,7 +1608,10 @@ mod tests {
             "extensions:\n  disabled: [my-review]\n",
         );
         fx.svc.extension_commands.reconcile().await;
-        assert!(bus.spec("my_review.finish").is_none(), "disabled: gone");
+        assert!(
+            bus.spec("my_review.review.finish").is_none(),
+            "disabled: gone"
+        );
 
         // A namespace someone else holds (a provider's) is refused whole.
         std::fs::remove_file(fx._dir.path().join(".oxplow/project.yaml")).unwrap();
@@ -1549,7 +1620,7 @@ mod tests {
             "provider:held",
             vec![crate::commands::Command::new(
                 oxplow_domain::CommandSpec {
-                    name: "my_review.held".into(),
+                    name: "my_review.review.held".into(),
                     summary: "A provider's.".into(),
                     input_schema: json!({ "type": "object" }),
                     invokers: Invokers::ALL,
@@ -1568,13 +1639,16 @@ mod tests {
         )
         .unwrap();
         fx.svc.extension_commands.reconcile().await;
-        assert!(bus.spec("my_review.finish").is_none());
-        assert!(bus.spec("my_review.held").is_some(), "the holder keeps it");
+        assert!(bus.spec("my_review.review.finish").is_none());
+        assert!(
+            bus.spec("my_review.review.held").is_some(),
+            "the holder keeps it"
+        );
         assert!(
             fx.svc
                 .extension_commands
                 .problem("my-review")
-                .is_some_and(|p| p == "the command namespace `my_review` is already provider:held's; rename the extension"),
+                .is_some_and(|p| p == "the command namespace `my_review` is already provider:held's; declare another `namespace:`"),
             "{:?}",
             fx.svc.extension_commands.problem("my-review")
         );
@@ -1596,7 +1670,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "my_review.finish",
+                "my_review.review.finish",
                 json!({ "ref": r }),
                 false,
             )
@@ -1622,14 +1696,15 @@ mod tests {
             "properties": { "ref": { "type": "string" }, "to": { "type": "string" } },
             "additionalProperties": false
         });
-        let schema =
-            move |name: &str| (name == "work_item.transition").then(|| transition_schema.clone());
+        let schema = move |name: &str| {
+            (name == "oxplow.work_item.transition").then(|| transition_schema.clone())
+        };
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let cat = crate::extension_catalog::ExtensionCatalog::new();
         const SCRIPT: &str = "def transform(x):
     if not x[\"rows\"]:
         return {\"refuse\": \"no such item\"}
-    return {\"commands\": [{\"name\": \"work_item.transition\", \"input\": {\"ref\": x[\"rows\"][0][\"ref\"], \"to\": \"done\"}}]}
+    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": x[\"rows\"][0][\"ref\"], \"to\": \"done\"}}]}
 ";
         let check = |examples: &str| {
             let d = tempfile::tempdir().unwrap();
@@ -1637,7 +1712,7 @@ mod tests {
                 d.path(),
                 "x",
                 &format!(
-                    "  - name: finish_review
+                    "  - name: review.finish
     summary: Mark the task done.
     input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
     entry: handlers/finish_review.star
@@ -1663,25 +1738,25 @@ mod tests {
 
         // The project has no such item, but the example's rows stand in.
         let d = check(
-            "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [{ ref: \"work_item:oxplow:tsk1\" }], expect_commands: [work_item.transition] }\n      - { name: missing, input: { ref: \"work_item:oxplow:tsk9\" }, rows: [], refuses: no such item }\n",
+            "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [{ ref: \"work_item:oxplow:tsk1\" }], expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { ref: \"work_item:oxplow:tsk9\" }, rows: [], refuses: no such item }\n",
         );
         assert_eq!(errors(d).await, "");
 
         for (example, says) in [
             (
-                "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [work_item.transition] }\n",
-                "example `happy`: refused (no such item) but `expect_commands` is [work_item.transition]",
+                "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [oxplow.work_item.transition] }\n",
+                "example `happy`: refused (no such item) but `expect_commands` is [oxplow.work_item.transition]",
             ),
             (
                 "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [{ ref: \"work_item:oxplow:tsk1\" }], refuses: no such item }\n",
-                "example `missing`: composed [work_item.transition] but it should refuse (no such item)",
+                "example `missing`: composed [oxplow.work_item.transition] but it should refuse (no such item)",
             ),
             (
                 "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [], refuses: unverified }\n",
                 "example `missing`: refused (no such item) but it should refuse (unverified)",
             ),
             (
-                "      - { name: both, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [], refuses: x, expect_commands: [work_item.transition] }\n",
+                "      - { name: both, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [], refuses: x, expect_commands: [oxplow.work_item.transition] }\n",
                 "example `both` expects commands and a refusal",
             ),
         ] {

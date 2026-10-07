@@ -304,7 +304,7 @@ source.
 
 Installs are **explicit**, not automatic. Use the **Language
 Servers** section of the Settings page, or ask the agent: it proposes
-the `lsp.install_server` command, and the install runs once you
+the `oxplow.lsp.install_server` command, and the install runs once you
 approve it. Nothing is fetched just because
 you opened a file.
 

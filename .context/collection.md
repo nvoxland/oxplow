@@ -192,7 +192,7 @@ hook + MCP wiring):
   `test.run.recorded` (subject `run:<capture>`, anchored to the tool's turn,
   caused by the tool event) and each coverage capture `test.coverage.recorded`
   in the capture's transaction (`SqliteFactStore::record_facts_logged`); the
-  `test.record_run` command and a by-hand `collector.sync` of a report
+  `oxplow.test.record_run` command and a by-hand `oxplow.collector.sync` of a report
   collector log them too, anchored
   to the thread (in the collector's transaction: they're `External`, so their
   events aren't caused by the run's `command.executed`). The hook waits ≤2.5 s for the `collection` and
@@ -233,13 +233,13 @@ hook + MCP wiring):
   the analyzer-ran record: when an analyzer is detected but regenerated no
   parseable report, it's stored command-only (no findings, no metric), the
   same way a `test-run` records command-only when no JUnit report is fresh.
-- **Active (commands)** — `collector.sync { owner: "project", id,
+- **Active (commands)** — `oxplow.collector.sync { owner: "project", id,
   thread? }` runs a report collector by hand
   (`CollectionService::sync_report_collector`, tsk863): it reads the
   report as it is now, whenever it was written, records what it parsed in
   the thread (an agent's own; a person names one) like a detected run's —
   a test run, a coverage capture or a static-analysis capture, with
-  `collector.sync project/<id>` as the run's command — and answers
+  `oxplow.collector.sync project/<id>` as the run's command — and answers
   `{ recorded: { status, records, run } }` (`run:<capture>`, the real
   capture for every kind).
   `status` is `stored`, or why nothing landed: `no_stream`, `no_cases`
@@ -249,7 +249,7 @@ hook + MCP wiring):
   replaced `test.ingest_coverage` / `test.ingest_analysis` (P8.A8). **No
   baseline gate** for analysis: findings are *absolute* (current-file),
   so they store even when the effort has no start snapshot (tsk86).
-  `test.record_run` is the one `asserted` writer, for richer
+  `oxplow.test.record_run` is the one `asserted` writer, for richer
   pass/fail counts the exit code alone can't give; its counts also become
   status-sliced `oxplow.test_case` facts (no case identity) so the
   `oxplow.tests.*` specs read them, and it returns the capture id. A report-less, count-less run records its
@@ -271,7 +271,7 @@ hook + MCP wiring):
   reported: a run logged **with a cause** is one the collection reactor
   detected in a tool call and read inline — the hook's same-call
   advisories and report-less nudge depend on it — so its event reads
-  nothing more; `test.record_run` and a by-hand sync of a test-report
+  nothing more; `oxplow.test.record_run` and a by-hand sync of a test-report
   collector have theirs read here. A run's own **test** report isn't
   read from the event: it *is* the run, and reading it after the run was
   recorded would split one run across two rows (`v_test_run`'s grain).
@@ -292,7 +292,7 @@ carries its time. With no start known (no tool use id), the window reaches
 judged at the event's own time (`RunCause.at`), not at delivery, so a redelivery
 (a crash before the checkpoint, a retried dead letter, a pump backlog) sees what
 the first delivery saw; a run delivered more than 10 minutes late is recorded
-but gets no nudges (tsk505). A by-hand `collector.sync` reads the report
+but gets no nudges (tsk505). A by-hand `oxplow.collector.sync` reads the report
 whenever it was written. Neither needs an open effort. **A run's effort is the one its event was anchored
 to** (`run_effort`, tsk507) — for the effort-relative advisories, the
 static-analysis snapshot pin and the `oxplow.nudge` fact — so a late delivery
@@ -321,7 +321,7 @@ optimization.
 
 **Sub-agent runs.** A subagent's tool calls reach the hooks like the
 parent's, anchored to the same thread, so its runs are recorded and
-attributed like any other. `test.record_run` is only for pass/fail counts
+attributed like any other. `oxplow.test.record_run` is only for pass/fail counts
 oxplow couldn't parse from a run's output.
 
 Both paths classify by the collector's `records:` (its parser's kind), not a
@@ -655,5 +655,5 @@ built on the JS compiler API, so it's a pinned root devDependency whose
 Don't run it via `bunx type-coverage@latest` — bunx auto-installs the newest
 `typescript` as the peer and it crashes on TS 7 (`ts.SyntaxKind` undefined).
 `trigger: { on: [snapshot.taken] }` re-reads the report each snapshot — there
-is no "report written" event, so a snapshot trigger (or `collector.sync`
+is no "report written" event, so a snapshot trigger (or `oxplow.collector.sync`
 by hand) is how this fact collector runs.

@@ -29,7 +29,7 @@ mock.module("../api.js", () => ({
     };
   },
   runCommand: async (name: string, ...rest: unknown[]) => {
-    if (name !== "config.list_keys") return (realRunCommand as (...a: unknown[]) => unknown)(name, ...rest);
+    if (name !== "oxplow.config.list_keys") return (realRunCommand as (...a: unknown[]) => unknown)(name, ...rest);
     return { result: [{ key: "zones", doc: "Code areas.", human_only: false, schema: {}, set: true, value: [] }], audit_id: null, event_id: null, undo: null };
   },
 }));

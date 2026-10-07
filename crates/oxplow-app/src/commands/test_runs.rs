@@ -1,9 +1,9 @@
-//! Test evidence an agent hands oxplow: `test.record_run`, a run whose
+//! Test evidence an agent hands oxplow: `oxplow.test.record_run`, a run whose
 //! counts oxplow couldn't read from its output. `External` over the
 //! `CollectionService`: the capture with its `test.run.recorded` commits in
 //! the collector's own transaction. Audited to the actor; an agent's goes
 //! on its own thread whatever it names, a person names one. A report file
-//! oxplow parses itself is a report collector's, run by `collector.sync`.
+//! oxplow parses itself is a report collector's, run by `oxplow.collector.sync`.
 
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ use super::thread::acting_thread_of;
 use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::collection::CollectionService;
 
-pub const RECORD_RUN: &str = "test.record_run";
+pub const RECORD_RUN: &str = "oxplow.test.record_run";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -104,7 +104,7 @@ pub fn record_run_command(collection: CollectionService) -> Command {
             })
         })),
     )
-    .expect("test.record_run is a valid command")
+    .expect("oxplow.test.record_run is a valid command")
 }
 
 /// The test-evidence commands, for the bus.
@@ -125,7 +125,7 @@ mod tests {
   </lines></class>
 </classes></package></packages></coverage>"#;
 
-    /// tsk863: `collector.sync` runs a project report collector by hand —
+    /// tsk863: `oxplow.collector.sync` runs a project report collector by hand —
     /// the agent's own thread records it, audited to the agent; a person
     /// names the thread, and `thread` is refused for any other collector.
     #[tokio::test]
@@ -148,7 +148,7 @@ mod tests {
         };
         let sync = |actor: Actor, input: Value| {
             let bus = fx.svc.commands.clone();
-            async move { bus.run(&actor, "collector.sync", input, false).await }
+            async move { bus.run(&actor, "oxplow.collector.sync", input, false).await }
         };
         let out = sync(
             agent.clone(),

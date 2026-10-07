@@ -89,11 +89,11 @@ pub struct NewProposal {
 }
 
 /// What a newer proposal replaces an older pending one on: the config key
-/// for `config.set` / `config.unset` (`config:<key>`), else the command and
+/// for `oxplow.config.set` / `oxplow.config.unset` (`config:<key>`), else the command and
 /// its input with keys sorted.
 pub fn proposal_key(command: &str, input: &Value) -> String {
     match (command, input.get("key").and_then(Value::as_str)) {
-        ("config.set" | "config.unset", Some(key)) => format!("config:{key}"),
+        ("oxplow.config.set" | "oxplow.config.unset", Some(key)) => format!("config:{key}"),
         _ => format!("{command} {}", canonical(input)),
     }
 }
@@ -320,7 +320,7 @@ mod tests {
 
     fn config_set(key: &str, value: Value) -> NewProposal {
         NewProposal {
-            command: "config.set".into(),
+            command: "oxplow.config.set".into(),
             input: json!({ "key": key, "value": value }),
             actor_kind: ActorKind::Agent,
             actor_id: Some("thr3".into()),
@@ -334,17 +334,23 @@ mod tests {
     #[test]
     fn the_key_is_the_config_key_or_the_command_and_its_sorted_input() {
         assert_eq!(
-            proposal_key("config.set", &json!({ "key": "zones", "value": [] })),
+            proposal_key("oxplow.config.set", &json!({ "key": "zones", "value": [] })),
             "config:zones"
         );
         assert_eq!(
-            proposal_key("config.unset", &json!({ "key": "zones" })),
+            proposal_key("oxplow.config.unset", &json!({ "key": "zones" })),
             "config:zones"
         );
-        let a = proposal_key("work_item.delete", &json!({ "ref": "r", "hard": true }));
-        let b = proposal_key("work_item.delete", &json!({ "hard": true, "ref": "r" }));
+        let a = proposal_key(
+            "oxplow.work_item.delete",
+            &json!({ "ref": "r", "hard": true }),
+        );
+        let b = proposal_key(
+            "oxplow.work_item.delete",
+            &json!({ "hard": true, "ref": "r" }),
+        );
         assert_eq!(a, b);
-        assert_eq!(a, r#"work_item.delete {"hard":true,"ref":"r"}"#);
+        assert_eq!(a, r#"oxplow.work_item.delete {"hard":true,"ref":"r"}"#);
     }
 
     #[tokio::test]
@@ -357,7 +363,7 @@ mod tests {
             .unwrap()
             .id;
         let p = store.get(id).await.unwrap().unwrap();
-        assert_eq!(p.command, "config.set");
+        assert_eq!(p.command, "oxplow.config.set");
         assert_eq!(p.input["value"], "hi");
         assert_eq!(p.actor_kind, ActorKind::Agent);
         assert_eq!(p.actor_id.as_deref(), Some("thr3"));
@@ -445,7 +451,7 @@ mod tests {
                 crate::command_audit_store::insert_tx(
                     tx,
                     &crate::NewCommandAudit {
-                        command: "config.set".into(),
+                        command: "oxplow.config.set".into(),
                         actor_kind: ActorKind::Human,
                         actor_id: None,
                         thread_id: None,
@@ -495,7 +501,7 @@ mod tests {
                 crate::command_audit_store::insert_tx(
                     tx,
                     &crate::NewCommandAudit {
-                        command: "config.set".into(),
+                        command: "oxplow.config.set".into(),
                         actor_kind: ActorKind::Human,
                         actor_id: None,
                         thread_id: None,

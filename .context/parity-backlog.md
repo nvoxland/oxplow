@@ -13,7 +13,7 @@ in case any of these regress; delete when comfortable.
 | 5 | Resume-tracker: capture session_id from hooks                   | done   |
 | 6 | `read_task_options` MCP tool                                    | done   |
 | 7 | `delegate_query` + `record_query_finding` MCP tools             | done; later removed |
-| 8 | `reorder_tasks` MCP tool                                   | done; removed in P8.A10 (`work_item.reorder` through `run_command`) |
+| 8 | `reorder_tasks` MCP tool                                   | done; removed in P8.A10 (`oxplow.work_item.reorder` through `run_command`) |
 | 9 | Wiki-note refs parser + backlinks (`find_wiki_pages_for_file`/`for_note`) | done   |
 | 10 | Per-thread wiki-note attribution (`wiki_page_thread_update`)    | done   |
 | 11 | Wiki-notes fs watcher                                           | done   |

@@ -90,7 +90,7 @@ test("query, invoke and navigate resolve with the host's replies", async () => {
   const answer = await c.query("open-tasks", { n: 1 });
   expect(answer.lens.id).toBe("open-tasks");
   expect(answer.params).toEqual({ n: 1 });
-  expect(await c.invoke("work_item.transition", { to: "done" })).toEqual({ done: true });
+  expect(await c.invoke("oxplow.work_item.transition", { to: "done" })).toEqual({ done: true });
   expect(await c.navigate("work_item:oxplow:tsk1")).toBeNull();
   h.close();
 });
@@ -105,7 +105,7 @@ test("a refused request rejects with the host's code and message", async () => {
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  await expect(c.invoke("vcs.commit", {})).rejects.toEqual({ code: "DENIED", message: "no" });
+  await expect(c.invoke("oxplow.vcs.commit", {})).rejects.toEqual({ code: "DENIED", message: "no" });
   await expect(c.navigate("https://example.com")).rejects.toMatchObject({ code: "INVALID" });
   h.close();
 });

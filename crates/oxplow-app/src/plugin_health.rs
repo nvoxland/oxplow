@@ -5,7 +5,7 @@
 //! read as `v_plugin_health`). A failure counts; [`FAILURES_TO_DISABLE`]
 //! in a row disable it — the row and `plugin.disabled@1` commit together
 //! — and it stays off, across restarts, until a person runs
-//! `plugin.enable` (`plugin.enabled@1`). A success starts the count over.
+//! `oxplow.plugin.enable` (`plugin.enabled@1`). A success starts the count over.
 //! What "off" means is the contribution's: the provider registry stops
 //! the instance; a collector's scheduler skips it; an effect stops
 //! reacting (`effect_triggers`).
@@ -30,7 +30,7 @@ use crate::commands::{Command, Handler, HandlerOutput, Invocation};
 /// Failures in a row that disable a contribution.
 pub const FAILURES_TO_DISABLE: i64 = 3;
 /// The command a person runs to enable a disabled contribution again.
-pub const ENABLE: &str = "plugin.enable";
+pub const ENABLE: &str = "oxplow.plugin.enable";
 /// What a disable is logged as.
 const SOURCE: &str = "system:plugins";
 
@@ -167,7 +167,7 @@ impl PluginHealth {
             .await
     }
 
-    /// A person enabled it again (`plugin.enable`, logged as `source`):
+    /// A person enabled it again (`oxplow.plugin.enable`, logged as `source`):
     /// `ok`, its count starting over, and `plugin.enabled@1`.
     pub async fn enable(&self, key: &PluginKey, source: &str) -> Result<(), DomainError> {
         let (key, source, vocabulary) = (key.clone(), source.to_string(), self.vocabulary.clone());
@@ -222,7 +222,7 @@ impl PluginHealth {
     }
 }
 
-/// Which kind of contribution `plugin.enable` names.
+/// Which kind of contribution `oxplow.plugin.enable` names.
 #[derive(Deserialize, schemars::JsonSchema, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Kind {
@@ -329,7 +329,7 @@ pub fn enable_command(
             })
         })),
     )
-    .expect("plugin.enable is a valid command")
+    .expect("oxplow.plugin.enable is a valid command")
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@
     }
     document.getElementById("sync").addEventListener("click", () => {
       status.textContent = "Syncing…";
-      component.invoke("collector.sync", { owner: "github", id: "prs" }).then(() => {
+      component.invoke("oxplow.collector.sync", { owner: "github", id: "prs" }).then(() => {
         status.textContent = "Synced.";
         refresh();
       }, say);

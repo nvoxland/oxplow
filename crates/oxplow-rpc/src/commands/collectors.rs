@@ -1,7 +1,7 @@
 //! Cores for the `collectors` command module — extension-declared
 //! collectors: list with their last run, approve (a person's consent) and
 //! credentials. Collectors are read from the primary stream's worktree:
-//! their data is project-global. Running one is the `collector.sync`
+//! their data is project-global. Running one is the `oxplow.collector.sync`
 //! command. See `.context/semantic-layer.md` → "Collectors".
 
 use oxplow_app::collector_runner::{self, CollectorListing, Collectors};
@@ -18,7 +18,7 @@ pub async fn list_collectors(svc: &Services) -> Result<Vec<CollectorListing>, Ip
 
 /// A person approves an exec collector at the listing's `version` they
 /// reviewed; one that changed since is refused (UI only; agents can't
-/// approve). Running it is the `collector.sync` command.
+/// approve). Running it is the `oxplow.collector.sync` command.
 pub async fn approve_collector(
     svc: &Services,
     owner: String,
@@ -262,12 +262,12 @@ mod tests {
         assert_eq!(list[0]["approved"], false);
         assert_eq!(list[0]["run"], serde_json::Value::Null);
 
-        // `collector.sync` never approves: unapproved, it's refused.
+        // `oxplow.collector.sync` never approves: unapproved, it's refused.
         let sync = || {
             crate::dispatch(
                 "run_command",
                 json!({
-                    "name": "collector.sync",
+                    "name": "oxplow.collector.sync",
                     "input": { "owner": "my-gh", "id": "gh" },
                     "confirmed": false,
                 }),

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Lens, LensRun } from "../../tauri-bridge/generated/bindings.js";
 
 // The Answers strip (P6.C2): an agent's `show_lens` answers, newest first,
-// each live, with Keep This running `lens.keep`.
+// each live, with Keep This running `oxplow.lens.keep`.
 
 const realApi = await import("../../api.js");
 const commands: Array<[string, unknown]> = [];
@@ -52,13 +52,13 @@ mock.module("../../api.js", () => ({
               p.id,
               `proposal:${p.id}`,
               "2026-10-03T00:00:00Z",
-              "work_item.delete",
+              "oxplow.work_item.delete",
               '{"ref":"work_item:oxplow:tsk1"}',
               "agent",
               `thr${p.thread}`,
               p.thread,
               "k",
-              '{"command":"work_item.delete","summary":"Delete a work item","input":{},"destructive":false}',
+              '{"command":"oxplow.work_item.delete","summary":"Delete a work item","input":{},"destructive":false}',
               null,
               p.decision,
               null,
@@ -146,7 +146,7 @@ test("Keep This asks for a slug inline; Enter keeps it with lens.keep, Escape ca
   fireEvent.click(view.getByTestId("thread-answer-keep"));
   fireEvent.change(view.getByTestId("thread-answer-slug"), { target: { value: "churn" } });
   fireEvent.submit(view.getByTestId("thread-answer-slug"));
-  await waitFor(() => expect(commands).toEqual([["lens.keep", { answer: "answer:2", slug: "churn" }]]));
+  await waitFor(() => expect(commands).toEqual([["oxplow.lens.keep", { answer: "answer:2", slug: "churn" }]]));
   // Kept: a link to the lens replaces Keep This.
   await waitFor(() => expect(view.getByTestId("thread-answer-lens").textContent).toContain("my-lenses/churn"));
   expect(view.queryByTestId("thread-answer-keep")).toBeNull();

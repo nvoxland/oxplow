@@ -739,8 +739,10 @@ doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
 `Services::in_memory`) up to 60 s. `stop(instance)` removes both and
 kills the process. Its commands register whole as the namespace's
 owner (`register_namespace(id, "provider:<instance>", …)`, all or
-none); an id whose namespace is already held (`namespace_owner`) or
-that is already a provider is refused. **A provider emits only its capability's event
+none), each with the interim id `<instance>.<capability>.<name>`
+(`providers::command_id`: `fake.work_items.estimate`); an id whose
+namespace is already held (`namespace_owner`) or that is already a
+provider is refused. A stopped instance's go with `unregister_source`. **A provider emits only its capability's event
 types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@1`
 or `@2` — a published version's schema never changes, since declarations
 are compared to it exactly;
@@ -760,7 +762,7 @@ one of its own refs (`check_subject`: `work_item:<id>:…` or
 app, 2 s in `Services::in_memory`); a timeout sends `$/cancel` and
 counts as a failure. A restart runs under its own `starting` lock,
 never holding `live`, so a start that hangs can't block `stop` (and
-through it reconcile, `plugin.enable` or `set_instance`). `Peer::start`
+through it reconcile, `oxplow.plugin.enable` or `set_instance`). `Peer::start`
 refuses once the other side's stream has closed, instead of leaving a
 waiter that nothing resolves.
 
@@ -791,7 +793,7 @@ it, and a restarted instance never inherits the old one's results.
 **A stopped instance never starts again**: `tear_down` marks it
 `stopped` before it ends its process, and `connection()` refuses to
 start one that is (and ends a process whose start finished after the
-stop). So a `provider.sync` still holding the old instance when a person
+stop). So a `oxplow.provider.sync` still holding the old instance when a person
 turned it off and on, or when an approval restarted it, can't bring a
 process back — nor report its restart's `unapproved`, `unconfigured`,
 changed declarations or failure against the successor. An enable's first
@@ -824,7 +826,7 @@ flight** (tsk569): each disable bumps the instance's epoch under the
 `running` lock, and a start registers (`admit`) only if the epoch it
 began with still holds, so a concurrent reconcile can't bring back
 what was just disabled.
-Only a person turns it back on — **`plugin.enable { plugin, kind,
+Only a person turns it back on — **`oxplow.plugin.enable { plugin, kind,
 contribution }`** (human-only, `External`, not undoable; it replaced
 `provider.enable`), which marks the row `ok`, logs `plugin.enabled@1`,
 resets the backoff and reconciles. Settings → Integrations' Enable runs
@@ -857,7 +859,7 @@ instance's health like a failed call (a refused input or a cancel
 doesn't). The projection (`work_items.project`) then restates
 `v_work_item`.
 
-**`provider.sync { instance, collector? }`** is the one way to read
+**`oxplow.provider.sync { instance, collector? }`** is the one way to read
 ([commands.md](./commands.md)): Settings → Integrations' **Sync Now**, an
 agent, the schedule and the start. **The schedule** (`sync_due`, every
 minute from `spawn_sync_scheduler`) reads each running instance's
@@ -879,8 +881,8 @@ it with that config and `check`, enabling and saving nothing — the
 outcome is the view's state) and `set_provider_instance { instance,
 enabled, config }` (`ProviderRegistry::set_instance`: enabling checks
 first and refuses an unapproved or unconfigured instance, writing
-nothing, with the problem's field as `/config/<path>`; then `config.set`
-of `extensionInstances` — to enable, `plugin.enable` runs **first**, so
+nothing, with the problem's field as `/config/<path>`; then `oxplow.config.set`
+of `extensionInstances` — to enable, `oxplow.plugin.enable` runs **first**, so
 a failed enable writes nothing and the config never says enabled for
 an instance that wasn't — then a reconcile). Each row
 shows its state, its credentials (each set into the keychain through
@@ -921,7 +923,7 @@ the instance; an unconfigured instance can't be enabled (nothing
 written) and a configured one enables, writes `extensionInstances` and
 disables again; `fail-next:3` disables it after three failures with the
 reason logged, keeps it off across a reconcile, refuses an agent's
-`plugin.enable` and comes back on a person's; and the work-items
+`oxplow.plugin.enable` and comes back on a person's; and the work-items
 conformance suite passes through the dispatching `work_item.*` over the
 fake; `work_item.*` writes the fake's items through its process with one
 audit row (and undo dispatches again), its verbs aren't on the bus but
@@ -966,7 +968,7 @@ tell it is the same write. The contract (P10, built):
   step it composed was a write to such a provider, at most twice, and it
   sends exactly what the failed attempt composed, so its keys are the
   same ([extensions.md](./extensions.md) "Attempts"); anything else waits for
-  a person's `effect.retry`, asked first. A failed command a person ran
+  a person's `oxplow.effect.retry`, asked first. A failed command a person ran
   is reported, not retried.
 - **The kit checks the promise** (the work-items suite,
   [work-items.md](./work-items.md) "Conformance"): a provider that

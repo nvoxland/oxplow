@@ -1,4 +1,4 @@
 {
   "proposal": "proposal:12",
-  "command": "config.set"
+  "command": "oxplow.config.set"
 }

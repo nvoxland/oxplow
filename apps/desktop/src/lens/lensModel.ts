@@ -315,7 +315,7 @@ export function limitRows(result: SqlQueryResult, max: number | undefined): SqlQ
 }
 
 /** A title as a lens slug: lowercase letters, digits and single dashes
- *  (what `lens.keep` accepts). Falls back to `lens` when nothing's left. */
+ *  (what `oxplow.lens.keep` accepts). Falls back to `lens` when nothing's left. */
 export function slugify(title: string): string {
   const slug = title
     .toLowerCase()
@@ -603,7 +603,7 @@ export function childParams(child: Lens, params: Record<string, SqlCell>): Recor
 }
 
 
-/** A lens `lens.keep` wrote to its own stream's worktree (`live: false`):
+/** A lens `oxplow.lens.keep` wrote to its own stream's worktree (`live: false`):
  *  the app shows the main worktree's lenses, so this one shows once the
  *  stream is merged. */
 export const KEPT_IN_STREAM =

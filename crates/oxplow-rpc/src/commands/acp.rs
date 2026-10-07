@@ -190,7 +190,7 @@ mod tests {
         let stream = ctx.streams.ensure_primary().await.unwrap();
         let t = crate::dispatch(
             "run_command",
-            json!({"name": "thread.create", "input": {
+            json!({"name": "oxplow.thread.create", "input": {
                 "stream": oxplow_domain::refs::build::stream_ref(stream.id),
                 "title": "c", "agent": "claude",
             }, "confirmed": false}),

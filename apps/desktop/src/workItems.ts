@@ -190,11 +190,11 @@ export function boardColumns(items: WorkItem[]): BoardColumn[] {
   return CANONICAL_STATES.map((state) => ({ state, items: items.filter((i) => i.state === state) }));
 }
 
-/** Move an item to a canonical state: `work_item.transition`, which the
+/** Move an item to a canonical state: `oxplow.work_item.transition`, which the
  *  bus dispatches to the item's provider (one write path for every
  *  provider). */
 export function transitionWorkItem(ref: string, state: CanonicalState): Promise<boolean> {
-  return personCommands.run(`Move to ${STATE_LABEL[state]}`, "work_item.transition", { ref, to: state });
+  return personCommands.run(`Move to ${STATE_LABEL[state]}`, "oxplow.work_item.transition", { ref, to: state });
 }
 
 /** A canonical state as a person reads it. */
@@ -439,7 +439,7 @@ export async function readTaskEfforts(taskId: string): Promise<{ efforts: Effort
 
 const taskRef = (id: string) => `work_item:oxplow:${id}`;
 
-/** What `work_item.create` takes for a new item on a thread (or none,
+/** What `oxplow.work_item.create` takes for a new item on a thread (or none,
  *  `null`). It names no tracker: every create files on the active one
  *  (tsk1058). The thread is the common field and the state canonical —
  *  every tracker takes them; a parent and priority are oxplow's own, sent
@@ -463,7 +463,7 @@ export async function createTask(
   threadId: string | null,
   input: { title: string; description?: string; parentId?: string | null; state?: CanonicalState; priority?: TaskPriority },
 ): Promise<string> {
-  const out = await runCommand("work_item.create", createTaskInput(threadId, input));
+  const out = await runCommand("oxplow.work_item.create", createTaskInput(threadId, input));
   return String((out.result as { ref?: unknown } | null)?.ref ?? "");
 }
 
@@ -472,7 +472,7 @@ export async function updateTask(
   id: string,
   changes: { title?: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
 ): Promise<void> {
-  await runCommand("work_item.update", {
+  await runCommand("oxplow.work_item.update", {
     ref: taskRef(id),
     ...(changes.title !== undefined ? { title: changes.title } : {}),
     ...(changes.description !== undefined ? { body: changes.description } : {}),
@@ -485,11 +485,11 @@ export async function updateTask(
 /** Delete a task. The command asks first: call with `confirmed` once the
  *  person has (an inline confirm). */
 export async function deleteTask(id: string, confirmed: boolean): Promise<void> {
-  await runCommand("work_item.delete", { ref: taskRef(id) }, confirmed);
+  await runCommand("oxplow.work_item.delete", { ref: taskRef(id) }, confirmed);
 }
 
 /** The one item a drag moved, and its new neighbour: what
- *  `work_item.reorder` takes. `null` when nothing moved. */
+ *  `oxplow.work_item.reorder` takes. `null` when nothing moved. */
 export function placementFromOrder(
   before: string[],
   after: string[],
@@ -504,10 +504,10 @@ export function placementFromOrder(
   return null;
 }
 
-/** Apply a drag's new order to a list with `work_item.reorder`. */
+/** Apply a drag's new order to a list with `oxplow.work_item.reorder`. */
 export async function reorderTasks(before: string[], after: string[]): Promise<void> {
   const moved = placementFromOrder(before, after);
-  if (moved) await runCommand("work_item.reorder", { ref: taskRef(moved.id), ...prefixed(moved.place) });
+  if (moved) await runCommand("oxplow.work_item.reorder", { ref: taskRef(moved.id), ...prefixed(moved.place) });
 }
 
 const prefixed = (place: { before: string } | { after: string }) =>
@@ -515,5 +515,5 @@ const prefixed = (place: { before: string } | { after: string }) =>
 
 /** Take a task to a thread's list or the backlog (`null`), at its end. */
 export async function moveTask(id: string, threadId: string | null): Promise<void> {
-  await runCommand("work_item.move", { ref: taskRef(id), to: threadId ? { thread: threadId } : "backlog" });
+  await runCommand("oxplow.work_item.move", { ref: taskRef(id), to: threadId ? { thread: threadId } : "backlog" });
 }

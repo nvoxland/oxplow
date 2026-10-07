@@ -19,17 +19,17 @@ List the bundled metrics with `query_sql`:
 `SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'built-in'`.
 If one already measures it (unsafe blocks, unwrap/expect, TODO markers, function
 count, high-complexity functions, `any` usage, …), just turn it on with the
-`metric.enable` command (`run_command`):
+`oxplow.metric.enable` command (`run_command`):
 `{ "keys": ["oxplow.rust.unsafe_blocks"], "enabled": true }`.
 
 ## 3. Otherwise define the trio (measure + collector + metric)
 
-Fastest path — the **`metric.scaffold` command** (`run_command`). It writes
+Fastest path — the **`oxplow.metric.scaffold` command** (`run_command`). It writes
 nothing: it returns a starter collector script and the measure + collector + metric
 trio as a `.oxplow/project.yaml` snippet.
 
 ```
-metric.scaffold { key: "repo.todo_count", title: "TODO comments", language: "rust" }
+oxplow.metric.scaffold { key: "repo.todo_count", title: "TODO comments", language: "rust" }
 → { "scriptPath": "oxplow/collectors/repo_todo_count.star", "script": "…", "projectYaml": "measures: …" }
 ```
 
@@ -37,10 +37,10 @@ metric.scaffold { key: "repo.todo_count", title: "TODO comments", language: "rus
    actually asked for (the starter just counts TODO/FIXME per file; it can
    call `files(glob)` / `ast_query(text, language, sexpr)` /
    `code_metrics(text, language)`).
-2. Add each entry with `config.set` (`run_command`): `config.get` the
+2. Add each entry with `oxplow.config.set` (`run_command`): `oxplow.config.get` the
    `measures` / `collectors` / `metrics` list, append the new entry, and set the
    list back. `collectors` is person-only (a collector runs a program), so that
-   `config.set` asks the person to confirm. The catalog reseeds on the change.
+   `oxplow.config.set` asks the person to confirm. The catalog reseeds on the change.
 
 Then jump to **Verify**.
 
@@ -92,7 +92,7 @@ templates.
 
 ## 4. Verify
 
-1. `collector.sync { owner: "project", id: "repo.todo" }` (`run_command`) —
+1. `oxplow.collector.sync { owner: "project", id: "repo.todo" }` (`run_command`) —
    runs the collector now, returns the `facts` count.
 2. `query_sql`: `SELECT bucket, MEASURE('repo.todo_count') FROM metric_grid('day')`
    — confirm the value.

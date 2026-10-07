@@ -3,13 +3,13 @@
 //! (`effect.triggers`) reacts to each event once, and only to events
 //! logged after the effect's approval; everything else is a person's:
 //!
-//! - **`effect.retry`** — have an effect react again to an event its
+//! - **`oxplow.effect.retry`** — have an effect react again to an event its
 //!   reaction to **failed**: the one way a failed reaction is ever
 //!   attempted again;
-//! - **`effect.backfill`** — have it react to matching events it never
+//! - **`oxplow.effect.backfill`** — have it react to matching events it never
 //!   reacted to, whenever they were logged (before its approval, or while
 //!   it waited to be re-approved): the one way the past is reacted to;
-//! - **`effect.backfill_plan`** — a read: what a backfill would do.
+//! - **`oxplow.effect.backfill_plan`** — a read: what a backfill would do.
 //!
 //! Both writes are a person's, asked first every time
 //! (`Confirm::Always`), because of what they can do outside oxplow. A
@@ -30,7 +30,7 @@
 //! There is no consumer-level replay: core's consumers are re-derivable
 //! (a projection is rebuilt, not replayed), and replaying the log through
 //! every consumer would re-fire collectors noisily and effects without
-//! consent. Reacting to the past exists only as `effect.backfill`.
+//! consent. Reacting to the past exists only as `oxplow.effect.backfill`.
 
 use std::sync::{Arc, Weak};
 
@@ -50,11 +50,11 @@ use crate::extensions::Extension;
 use crate::plugin_health::PluginHealth;
 use crate::Services;
 
-pub const RETRY: &str = "effect.retry";
-pub const BACKFILL: &str = "effect.backfill";
-pub const BACKFILL_PLAN: &str = "effect.backfill_plan";
+pub const RETRY: &str = "oxplow.effect.retry";
+pub const BACKFILL: &str = "oxplow.effect.backfill";
+pub const BACKFILL_PLAN: &str = "oxplow.effect.backfill_plan";
 
-/// The most reactions one `effect.backfill` run makes; the rest are
+/// The most reactions one `oxplow.effect.backfill` run makes; the rest are
 /// `remaining`, for another run.
 pub const BACKFILL_BATCH: usize = 200;
 /// How many candidate events a backfill's plan reads at a time.
@@ -165,7 +165,7 @@ async fn ready(
         return Err(invalid(
             "/effect",
             format!(
-                "effect `{name}` is disabled ({why}): enable it first (`plugin.enable`, \
+                "effect `{name}` is disabled ({why}): enable it first (`oxplow.plugin.enable`, \
                  Settings → Extensions)"
             ),
         ));
@@ -366,9 +366,9 @@ pub async fn backfill(
 const BACKFILL_SUMMARY: &str = "Have an effect react to the matching events it never reacted to \
      — those logged before its approval, or while it waited to be approved again — oldest \
      first, once each. The effect may call outside oxplow for every one of them. It runs as it \
-     is now; `effect.backfill_plan` says how many events that is.";
+     is now; `oxplow.effect.backfill_plan` says how many events that is.";
 
-/// `effect.backfill { effect, from_seq? | since?, to_seq? }`.
+/// `oxplow.effect.backfill { effect, from_seq? | since?, to_seq? }`.
 pub fn backfill_command(services: Weak<Services>) -> Command {
     Command::new(
         CommandSpec {
@@ -417,20 +417,21 @@ pub fn backfill_command(services: Weak<Services>) -> Command {
             })
         })),
     )
-    .expect("effect.backfill is a valid command")
+    .expect("oxplow.effect.backfill is a valid command")
 }
 
-/// `effect.backfill_plan { effect, from_seq? | since?, to_seq? }`: what
-/// `effect.backfill` would react to — a read.
+/// `oxplow.effect.backfill_plan { effect, from_seq? | since?, to_seq? }`: what
+/// `oxplow.effect.backfill` would react to — a read.
 pub fn backfill_plan_command(services: Weak<Services>) -> Command {
     Command::new(
         CommandSpec {
             name: BACKFILL_PLAN.into(),
-            summary: "How many events an `effect.backfill` would have an effect react to: the \
+            summary:
+                "How many events an `oxplow.effect.backfill` would have an effect react to: the \
                       matching ones it never reacted to, the log positions they span (pass \
                       `to_seq` to the backfill to run on just these), and how many one run \
                       reacts to (`batch`)."
-                .into(),
+                    .into(),
             input_schema: serde_json::to_value(schemars::schema_for!(BackfillInput))
                 .expect("schema serializes"),
             invokers: Invokers::ALL,
@@ -460,7 +461,7 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
             let planned =
                 unreacted_tx(ctx.conn, ctx.events.vocabulary, &decl, &range, 0, SCAN_PAGE)?;
             Ok(HandlerOutput {
-                // `batch`: one `effect.backfill` reacts to at most that
+                // `batch`: one `oxplow.effect.backfill` reacts to at most that
                 // many; pass `to_seq` to it to run on just this range.
                 result: json!({
                     "effect": input.effect,
@@ -473,10 +474,10 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
             })
         })),
     )
-    .expect("effect.backfill_plan is a valid command")
+    .expect("oxplow.effect.backfill_plan is a valid command")
 }
 
-/// `effect.retry { effect, event }`.
+/// `oxplow.effect.retry { effect, event }`.
 pub fn retry_command(services: Weak<Services>) -> Command {
     Command::new(
         CommandSpec {
@@ -543,5 +544,5 @@ pub fn retry_command(services: Weak<Services>) -> Command {
             })
         })),
     )
-    .expect("effect.retry is a valid command")
+    .expect("oxplow.effect.retry is a valid command")
 }

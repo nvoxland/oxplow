@@ -46,5 +46,5 @@ test("Ask the Agent to Change This names the key, its doc and its value", () => 
   expect(text).toContain("`snapshotRetentionDays`");
   expect(text).toContain("Days to keep snapshots.");
   expect(text).toContain("7 (the default)");
-  expect(text).toContain("config.set");
+  expect(text).toContain("oxplow.config.set");
 });

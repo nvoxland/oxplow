@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 // tsk898: a git action asks first exactly when its command's spec does.
 
 const realApi = await import("../api.js");
-const confirms: Record<string, string> = { "vcs.push": "never", "vcs.merge": "destructive" };
+const confirms: Record<string, string> = { "oxplow.vcs.push": "never", "oxplow.vcs.merge": "destructive" };
 mock.module("../api.js", () => ({
   ...realApi,
   getCommand: async (name: string) => ({ name, summary: name, confirm: confirms[name] }),
@@ -28,20 +28,20 @@ function button(command: string, ran: string[]) {
 
 test("a command that never asks runs on the click", async () => {
   const ran: string[] = [];
-  const view = button("vcs.push", ran);
+  const view = button("oxplow.vcs.push", ran);
   // Until the spec loads it asks; once it says `never`, the click runs.
   await waitFor(() => {
     fireEvent.click(view.getByTestId("action"));
-    expect(ran).toEqual(["vcs.push"]);
+    expect(ran).toEqual(["oxplow.vcs.push"]);
   });
 });
 
 test("a command that asks arms on the first click and runs on the confirm", async () => {
   const ran: string[] = [];
-  const view = button("vcs.merge", ran);
+  const view = button("oxplow.vcs.merge", ran);
   await new Promise((r) => setTimeout(r, 20));
   fireEvent.click(view.getByTestId("action"));
   expect(ran).toEqual([]);
   fireEvent.click(view.getByTestId("t-confirm"));
-  expect(ran).toEqual(["vcs.merge"]);
+  expect(ran).toEqual(["oxplow.vcs.merge"]);
 });

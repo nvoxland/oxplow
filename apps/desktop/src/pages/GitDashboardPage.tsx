@@ -499,7 +499,7 @@ export function UpstreamCard({
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           {hasUpstream ? (
             <>
-              <SpecConfirm command="vcs.push" onConfirm={onPush} confirmLabel="Push" testIdPrefix="git-dashboard-push">
+              <SpecConfirm command="oxplow.vcs.push" onConfirm={onPush} confirmLabel="Push" testIdPrefix="git-dashboard-push">
                 {(run) => (
                   <button
                     type="button"
@@ -512,7 +512,7 @@ export function UpstreamCard({
                   </button>
                 )}
               </SpecConfirm>
-              <SpecConfirm command="vcs.pull" onConfirm={onPullUpstream} confirmLabel="Pull" testIdPrefix="git-dashboard-pull">
+              <SpecConfirm command="oxplow.vcs.pull" onConfirm={onPullUpstream} confirmLabel="Pull" testIdPrefix="git-dashboard-pull">
                 {(run) => (
                   <button
                     type="button"
@@ -897,7 +897,7 @@ export function MergeReadinessCard({
                   <span style={{ flex: 1 }} />
                   {canMerge ? (
                     <SpecConfirm
-                      command="vcs.merge"
+                      command="oxplow.vcs.merge"
                       onConfirm={() => onMerge(row.branch)}
                       confirmLabel="Merge"
                       testIdPrefix="git-dashboard-divergence-merge"
@@ -1021,7 +1021,7 @@ function MergeRebaseSplitButton({
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
       <SpecConfirm
-        command={mode === "merge" ? "vcs.merge" : "git.rebase"}
+        command={mode === "merge" ? "oxplow.vcs.merge" : "oxplow.git.rebase"}
         onConfirm={onPrimary}
         confirmLabel={mode === "merge" ? "Merge" : "Rebase"}
         testIdPrefix="git-dashboard-stream-merge-rebase"
@@ -1252,7 +1252,7 @@ function RemoteBranchesCard({
                   context={row.short_name}
                 />
                 <SpecConfirm
-                  command="vcs.pull"
+                  command="oxplow.vcs.pull"
                   onConfirm={() => {
                     const [remote, ...rest] = row.short_name.split("/");
                     onPull(remote, rest.join("/"));
@@ -1277,7 +1277,7 @@ function RemoteBranchesCard({
                   )}
                 </SpecConfirm>
                 <SpecConfirm
-                  command="vcs.push"
+                  command="oxplow.vcs.push"
                   onConfirm={() => {
                     const [remote, ...rest] = row.short_name.split("/");
                     onPush(remote, rest.join("/"));

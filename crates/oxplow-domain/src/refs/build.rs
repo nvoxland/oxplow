@@ -73,7 +73,7 @@ pub fn commit_ref(sha: &str) -> String {
     format!("commit:{sha}")
 }
 
-/// A command by name (`config.set`).
+/// A command by name (`oxplow.config.set`).
 pub fn command_ref(name: &str) -> String {
     format!("command:{name}")
 }
@@ -185,7 +185,7 @@ mod tests {
             turn_ref(AgentTurnId::new(7)),
             snapshot_ref(42),
             commit_ref("4c44d495"),
-            command_ref("config.set"),
+            command_ref("oxplow.config.set"),
             config_ref("metricRetentionDays"),
             work_item_ref(TaskId::new(42)),
             proposal_ref(12),

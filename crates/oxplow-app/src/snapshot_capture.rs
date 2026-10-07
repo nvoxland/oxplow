@@ -71,7 +71,7 @@ pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 /// draining the dirty set, giving the fs-watch debouncer (250 ms in
 /// `workspace_watch`) time to deliver any in-flight events through
 /// the broadcast channel and into the dirty set. Without this, an
-/// edit followed almost immediately by the close (`effort.report`) produces an
+/// edit followed almost immediately by the close (`oxplow.effort.report`) produces an
 /// empty bracket — the edit hasn't propagated yet, so
 /// `end_snapshot_id == start_snapshot_id` and the file-review diff
 /// reports the claim as unchanged.

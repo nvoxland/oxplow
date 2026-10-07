@@ -67,7 +67,7 @@ custom_components:
   - id: pr-lifetimes
     title: PR lifetimes
     assets: [pr-lifetimes]
-    commands: [collector.sync]
+    commands: [oxplow.collector.sync]
 # A pull request is a kind of thing a ref can name: `github_pr:12`, or
 # `[[pr:12]]` in any text oxplow renders. It links to its `pr` page.
 ref_kinds:

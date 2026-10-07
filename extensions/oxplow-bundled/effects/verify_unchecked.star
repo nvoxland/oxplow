@@ -41,7 +41,7 @@ def transform(x):
         lines.append("… and %d more; the review lists them all." % (len(items) - _ITEMS))
     return {
         "commands": [{
-            "name": "work_item.create",
+            "name": "oxplow.work_item.create",
             "input": {
                 "title": "Verify what the review of %s accepted unchecked" % effort,
                 "body": "\n".join(lines),

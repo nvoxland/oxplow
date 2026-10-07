@@ -1640,7 +1640,7 @@ export type CollectorRuntime =
 // A sandboxed jq program: no I/O, so no approval.
 "jaq" | 
 /**
- *  A provider instance's collector (`provider.sync`): its records
+ *  A provider instance's collector (`oxplow.provider.sync`): its records
  *  land in the capability's model (`v_work_item`).
  */
 "read";
@@ -1796,8 +1796,11 @@ export type CommandOutcome = {
 // What a command declares about itself.
 export type CommandSpec = {
 	/**
-	 *  `<capability|plugin>.<verb>`, snake_case: `work_item.transition`,
-	 *  `config.set`.
+	 *  The command id: `<namespace>.<area>.<verb>`, snake_case —
+	 *  `oxplow.work_item.transition`, `acme_pr.issue.close`. The namespace
+	 *  is its owner's (`oxplow` for core and oxplow's own extensions, an
+	 *  extension's declared `namespace:` otherwise), so two extensions'
+	 *  areas never collide.
 	 */
 	name: string,
 	// One sentence for `list_commands` and the launcher.
@@ -2503,7 +2506,7 @@ export type ExtensionInstanceConfig = {
 	/**
 	 *  How often its collectors are read, in minutes (absent:
 	 *  [`DEFAULT_SYNC_MINUTES`]; `0`: only when someone runs
-	 *  `provider.sync`).
+	 *  `oxplow.provider.sync`).
 	 */
 	syncMinutes?: number | null,
 	/**
@@ -2655,6 +2658,11 @@ export type ExtensionUi = {
 // A loaded extension and anything wrong with it.
 export type Extension_Deserialize = {
 	name: string,
+	/**
+	 *  The namespace its commands' ids are under: the manifest's
+	 *  `namespace:`, else the name with `-` → `_`.
+	 */
+	namespace: string,
 	description: string,
 	// Repo-relative path of the extension folder.
 	path: string,
@@ -2777,6 +2785,11 @@ export type Extension_Deserialize = {
 // A loaded extension and anything wrong with it.
 export type Extension_Serialize = {
 	name: string,
+	/**
+	 *  The namespace its commands' ids are under: the manifest's
+	 *  `namespace:`, else the name with `-` → `_`.
+	 */
+	namespace: string,
 	description: string,
 	// Repo-relative path of the extension folder.
 	path: string,
@@ -3340,7 +3353,7 @@ export type LensAction = {
 	// Unique within the lens; `run_lens_action` names it.
 	id: string,
 	label: string,
-	// The command it runs (`work_item.transition`).
+	// The command it runs (`oxplow.work_item.transition`).
 	command: string,
 	/**
 	 *  The command's input. A string that is exactly `{{param.<name>}}`
@@ -5384,7 +5397,7 @@ export type ThreadId = string;
 
 /**
  *  A note on a thread: the per-thread capture pad an agent writes as it
- *  works (`knowledge.add_note`). Its ref is `thread_note:not<n>`.
+ *  works (`oxplow.knowledge.add_note`). Its ref is `thread_note:not<n>`.
  */
 export type ThreadNote = {
 	id: NoteId,
@@ -5462,7 +5475,7 @@ export type TranscriptItem = {
 
 // When a collector runs by itself.
 export type Trigger = 
-// Only when someone runs it (`collector.sync`).
+// Only when someone runs it (`oxplow.collector.sync`).
 { kind: "manual" } | 
 // Every `minutes` minutes (an exec collector once approved).
 { kind: "every"; minutes: number } | 
@@ -5613,7 +5626,7 @@ export type WorkItemsFeatures = {
 	hierarchy: boolean,
 	comments: boolean,
 	links: boolean,
-	// Items can be deleted (`work_item.delete`).
+	// Items can be deleted (`oxplow.work_item.delete`).
 	delete?: boolean,
 	/**
 	 *  A write sent twice with one idempotency key is done once, the
@@ -5623,13 +5636,13 @@ export type WorkItemsFeatures = {
 	 */
 	idempotent_writes?: boolean,
 	/**
-	 *  Items have an order on their list (`work_item.reorder`; read as
+	 *  Items have an order on their list (`oxplow.work_item.reorder`; read as
 	 *  `v_work_item.rank`).
 	 */
 	ordering?: boolean,
 	/**
 	 *  Items are on a thread's list or the backlog, and move between them
-	 *  (`work_item.move`; read as `v_work_item.thread_id`).
+	 *  (`oxplow.work_item.move`; read as `v_work_item.thread_id`).
 	 */
 	lists?: boolean,
 };

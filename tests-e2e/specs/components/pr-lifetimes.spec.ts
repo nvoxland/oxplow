@@ -18,7 +18,7 @@ import { openFromLauncher } from "../../support/ui.js";
  *  extension's files, so a changed `prs.json` is approved again. */
 async function collect(daemon: Daemon, count: number) {
   await approveCollector(daemon, "github", "prs");
-  await run(daemon, "collector.sync", { owner: "github", id: "prs" });
+  await run(daemon, "oxplow.collector.sync", { owner: "github", id: "prs" });
   await until(`${count} pull requests to be collected`, 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_github_pr" });
     return out.rows[0]?.[0] === count;

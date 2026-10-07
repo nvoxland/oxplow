@@ -2,7 +2,7 @@
  * Each plugin contribution's health on this machine (P7.C1–C3,
  * `.context/extensions.md` → "Health, disable and repair"): read from
  * `v_plugin_health`. Three failures in a row disable a provider instance
- * or collector until a person runs `plugin.enable` (Enable Again); the
+ * or collector until a person runs `oxplow.plugin.enable` (Enable Again); the
  * disable files a repair work item, which Repair with the Agent mentions
  * in the agent's input — filled, never sent.
  */
@@ -111,9 +111,9 @@ export function repairWithAgent(repairItem: string, insert: (text: string) => vo
   insert(repairMention(repairItem));
 }
 
-/** Enable Again: `plugin.enable` as the person. */
+/** Enable Again: `oxplow.plugin.enable` as the person. */
 export function enableAgain(h: PluginHealth, commands: PersonCommands = personCommands): Promise<boolean> {
-  return commands.run(`Enable ${h.plugin}/${h.contribution}`, "plugin.enable", {
+  return commands.run(`Enable ${h.plugin}/${h.contribution}`, "oxplow.plugin.enable", {
     plugin: h.plugin,
     kind: h.kind,
     contribution: h.contribution,

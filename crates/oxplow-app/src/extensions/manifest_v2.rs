@@ -196,7 +196,7 @@ fn prompt_line_problem(prompt: &str) -> Option<String> {
 fn launcher_target(v: &Value) -> Result<LauncherTarget, String> {
     const FORMS: &str =
         "a target is one of `ref`, `command` or `prompt`: `{ ref: page:settings }`, \
-                         `{ command: work_item.create, input: { … } }` or `{ prompt: … }`";
+                         `{ command: oxplow.work_item.create, input: { … } }` or `{ prompt: … }`";
     let Some(map) = v.as_mapping() else {
         return Err(FORMS.into());
     };
@@ -224,7 +224,7 @@ fn launcher_target(v: &Value) -> Result<LauncherTarget, String> {
         }
         (false, true, false) if keys.iter().all(|k| *k == "command" || *k == "input") => {
             let command = key("command").and_then(|v| v.as_str()).unwrap_or_default();
-            oxplow_domain::CommandSpec::validate_name(command)
+            oxplow_domain::CommandSpec::validate_id(command)
                 .map_err(|e| e.to_string().replacen("invalid value: ", "", 1))?;
             let input = match key("input") {
                 None => serde_json::json!({}),
@@ -260,6 +260,11 @@ fn launcher_target(v: &Value) -> Result<LauncherTarget, String> {
 pub struct ManifestV2 {
     pub manifest: u32,
     pub name: String,
+    /// The namespace its commands' ids are under
+    /// (`<namespace>.<area>.<verb>`); defaults to the name with `-` → `_`.
+    /// `oxplow` is reserved for the extensions that ship with oxplow.
+    #[serde(default)]
+    pub namespace: Option<String>,
     #[serde(default)]
     pub description: String,
     #[serde(default)]

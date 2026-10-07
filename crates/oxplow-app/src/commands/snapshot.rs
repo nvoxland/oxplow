@@ -1,4 +1,4 @@
-//! `snapshot.restore_file` (P8.A9): write a captured file's bytes back to
+//! `oxplow.snapshot.restore_file` (P8.A9): write a captured file's bytes back to
 //! its path in its stream's worktree (`snapshot_files`). `External` (the
 //! worktree) and destructive — it overwrites what's there now — so a
 //! person confirms it and an agent's run becomes a proposal.
@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::snapshot_files::{SnapshotFileError, SnapshotFiles};
 
-pub const RESTORE_FILE: &str = "snapshot.restore_file";
+pub const RESTORE_FILE: &str = "oxplow.snapshot.restore_file";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -69,7 +69,7 @@ pub fn restore_file_command(files: SnapshotFiles) -> Command {
             })
         })),
     )
-    .expect("snapshot.restore_file is a valid command")
+    .expect("oxplow.snapshot.restore_file is a valid command")
 }
 
 #[cfg(test)]

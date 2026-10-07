@@ -141,7 +141,7 @@ fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
 
 /// Make `provider` the active work-items tracker: where every create
 /// files (tsk1058).
-/// `provider` the active work list, as a `config.set` would leave it:
+/// `provider` the active work list, as a `oxplow.config.set` would leave it:
 /// the config, and the capability rows the interface reads.
 fn make_active(fx: &EffortFixture, provider: &str) {
     fx.svc
@@ -305,7 +305,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
 
 /// P5.D4's red: three failures in a row disable the instance, logged
 /// with the reason; it stays off across reconciles until a person runs
-/// `plugin.enable`.
+/// `oxplow.plugin.enable`.
 #[tokio::test]
 async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it() {
     let (fx, _ext) = approved("fail-next:3").await;
@@ -325,7 +325,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
             .commands
             .run(
                 &Actor::Human,
-                "work_item.create",
+                "oxplow.work_item.create",
                 json!({ "title": "x" }),
                 false,
             )
@@ -360,7 +360,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
                 thread_id: Some(ThreadId::new(fx.thread.value())),
                 stream_id: None,
             },
-            "plugin.enable",
+            "oxplow.plugin.enable",
             json!({ "plugin": "tracker", "kind": "provider", "contribution": "fake" }),
             false,
         )
@@ -376,7 +376,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         .commands
         .run(
             &Actor::Human,
-            "plugin.enable",
+            "oxplow.plugin.enable",
             json!({ "plugin": "tracker", "kind": "provider", "contribution": "fake" }),
             false,
         )
@@ -487,7 +487,7 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
         .db
         .read(|c| {
             c.query_row(
-                "SELECT count(*) FROM command_audit WHERE command = 'work_item.transition' AND outcome = 'ok'",
+                "SELECT count(*) FROM command_audit WHERE command = 'oxplow.work_item.transition' AND outcome = 'ok'",
                 [],
                 |r| r.get::<_, i64>(0),
             )
@@ -502,7 +502,7 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
 }
 
 /// P7.A1: `work_item.*` is the one write surface — another provider's
-/// item moves through its process as `work_item.transition`, one audit
+/// item moves through its process as `oxplow.work_item.transition`, one audit
 /// row, its `work_item.recorded` caused by the run. The provider's verbs
 /// aren't commands of their own; its extra command is.
 #[tokio::test]
@@ -515,12 +515,12 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .unwrap();
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
-    assert!(fx.svc.commands.spec("fake.transition").is_none());
-    assert!(fx.svc.commands.spec("fake.create").is_none());
+    assert!(fx.svc.commands.spec("fake.work_items.transition").is_none());
+    assert!(fx.svc.commands.spec("fake.work_items.create").is_none());
     let estimate = fx
         .svc
         .commands
-        .spec("fake.estimate")
+        .spec("fake.work_items.estimate")
         .expect("its own command");
     assert_eq!(estimate.atomicity, oxplow_domain::Atomicity::External);
     assert_eq!(
@@ -576,16 +576,19 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
     assert_eq!(
         commands,
         vec![
-            "work_item.transition",
-            "work_item.create",
-            "provider.sync",
-            "effort.open"
+            "oxplow.work_item.transition",
+            "oxplow.work_item.create",
+            "oxplow.provider.sync",
+            "oxplow.effort.open"
         ]
     );
 
     // Undo dispatches again: the provider's inverse is renamed to
-    // `work_item.transition` and moves the item back.
-    assert_eq!(moved.inverse.as_ref().unwrap().name, "work_item.transition");
+    // `oxplow.work_item.transition` and moves the item back.
+    assert_eq!(
+        moved.inverse.as_ref().unwrap().name,
+        "oxplow.work_item.transition"
+    );
     items
         .undo(&Actor::Human, moved.audit_id.unwrap())
         .await
@@ -687,10 +690,10 @@ async fn a_composite_writes_another_providers_item_as_steps() {
         .commands
         .run(
             &Actor::Human,
-            "command.sequence",
+            "oxplow.command.sequence",
             json!({ "calls": [
-                { "name": "work_item.comment", "input": { "ref": item, "body": "Looks good." } },
-                { "name": "work_item.transition", "input": { "ref": item, "to": "done" } },
+                { "name": "oxplow.work_item.comment", "input": { "ref": item, "body": "Looks good." } },
+                { "name": "oxplow.work_item.transition", "input": { "ref": item, "to": "done" } },
             ] }),
             false,
         )
@@ -706,8 +709,10 @@ async fn a_composite_writes_another_providers_item_as_steps() {
         .count();
     assert_eq!(caused, 2, "each step's record, caused by the one run");
     let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
-    assert_eq!(audits[0].command, "command.sequence");
-    assert!(!audits.iter().any(|a| a.command == "work_item.comment"));
+    assert_eq!(audits[0].command, "oxplow.command.sequence");
+    assert!(!audits
+        .iter()
+        .any(|a| a.command == "oxplow.work_item.comment"));
     fx.svc.event_pump.run_once().await.unwrap();
     let state = ServicesProbe(&fx.svc).record(&item).await.unwrap().state;
     assert_eq!(state, oxplow_domain::work_items::CanonicalState::Done);
@@ -733,7 +738,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     };
     let err = run(
         json!({ "title": "x", "native": { "points": "many" } }),
-        "work_item.create",
+        "oxplow.work_item.create",
     )
     .await
     .unwrap_err();
@@ -746,7 +751,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     let task = "work_item:oxplow:tsk1".to_string();
     let err = run(
         json!({ "title": "x", "parent_ref": task }),
-        "work_item.create",
+        "oxplow.work_item.create",
     )
     .await
     .unwrap_err();
@@ -755,7 +760,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
             if f == "/parent_ref" && message.contains(ours)),
         "{err:?}"
     );
-    let item = run(json!({ "title": "x" }), "work_item.create")
+    let item = run(json!({ "title": "x" }), "oxplow.work_item.create")
         .await
         .unwrap()
         .result["ref"]
@@ -764,7 +769,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
         .to_string();
     let err = run(
         json!({ "ref": item, "target": task, "link_type": "relates_to" }),
-        "work_item.link",
+        "oxplow.work_item.link",
     )
     .await
     .unwrap_err();
@@ -774,7 +779,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     );
     let err = run(
         json!({ "ref": item, "to": "done", "native_state": "Doing" }),
-        "work_item.transition",
+        "oxplow.work_item.transition",
     )
     .await
     .unwrap_err();
@@ -789,7 +794,12 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     let err = fx
         .svc
         .commands
-        .run(&agent, "work_item.delete", json!({ "ref": item }), false)
+        .run(
+            &agent,
+            "oxplow.work_item.delete",
+            json!({ "ref": item }),
+            false,
+        )
         .await
         .unwrap_err();
     let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
@@ -859,7 +869,7 @@ async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarati
     std::fs::write(
         &manifest,
         format!(
-            "{base}ui:\n  commands:\n    - {{ command: fake.estimate, label: Estimate, about: work_item, input: {{ ref: \"{{{{ref}}}}\", points: 3 }} }}\n    - {{ command: fake.comment, label: Comment, about: work_item, input: {{ ref: \"{{{{ref}}}}\", body: hi }} }}\n    - {{ command: fake.nope, label: Nope, about: work_item }}\n    - {{ command: work_item.transition, label: Done, about: work_item, input: {{ ref: \"{{{{ref}}}}\", to: done }} }}\n    - {{ command: work_item.transition, label: Bad, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n"
+            "{base}ui:\n  commands:\n    - {{ command: fake.work_items.estimate, label: Estimate, about: work_item, input: {{ ref: \"{{{{ref}}}}\", points: 3 }} }}\n    - {{ command: fake.work_items.comment, label: Comment, about: work_item, input: {{ ref: \"{{{{ref}}}}\", body: hi }} }}\n    - {{ command: fake.work_items.nope, label: Nope, about: work_item }}\n    - {{ command: oxplow.work_item.transition, label: Done, about: work_item, input: {{ ref: \"{{{{ref}}}}\", to: done }} }}\n    - {{ command: oxplow.work_item.transition, label: Bad, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n"
         ),
     )
     .unwrap();
@@ -881,19 +891,19 @@ async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarati
         !errs.contains("`Estimate`"),
         "the provider declares it: {errs}"
     );
-    // A capability verb isn't a command of its own: `work_item.comment`
+    // A capability verb isn't a command of its own: `oxplow.work_item.comment`
     // is (P7.A1).
     assert!(
-        errs.contains("`ui.commands` `Comment`: no command `fake.comment`"),
+        errs.contains("`ui.commands` `Comment`: no command `fake.work_items.comment`"),
         "{errs}"
     );
     assert!(!errs.contains("`Done`"), "{errs}");
     assert!(
-        errs.contains("`ui.commands` `Nope`: no command `fake.nope`"),
+        errs.contains("`ui.commands` `Nope`: no command `fake.work_items.nope`"),
         "{errs}"
     );
     assert!(
-        errs.contains("`ui.commands` `Bad`: the input doesn't fit `work_item.transition`"),
+        errs.contains("`ui.commands` `Bad`: the input doesn't fit `oxplow.work_item.transition`"),
         "{errs}"
     );
 }
@@ -1307,7 +1317,7 @@ async fn a_hung_invoke_times_out_and_counts() {
         std::time::Duration::from_secs(10),
         fx.svc.commands.run(
             &Actor::Human,
-            "work_item.create",
+            "oxplow.work_item.create",
             json!({ "title": "x" }),
             false,
         ),
@@ -1542,7 +1552,7 @@ fn a_capability_verb_is_record_and_never_confirms() {
     assert!(err.contains("`delete`"), "{err}");
 }
 
-/// The fake's three items, filed through `work_item.create`.
+/// The fake's three items, filed through `oxplow.work_item.create`.
 async fn three_items(fx: &EffortFixture) -> Vec<String> {
     let items = fx.svc.work_items_client();
     let mut refs = Vec::new();
@@ -1914,7 +1924,7 @@ async fn the_fakes_hooks_are_replaced_not_merged() {
     created.unwrap();
 }
 
-/// Run `work_item.create` on the fake as the person.
+/// Run `oxplow.work_item.create` on the fake as the person.
 async fn create_on_fake(
     fx: &EffortFixture,
 ) -> Result<oxplow_domain::CommandOutcome, oxplow_domain::CommandError> {
@@ -1923,7 +1933,7 @@ async fn create_on_fake(
         .commands
         .run(
             &Actor::Human,
-            "work_item.create",
+            "oxplow.work_item.create",
             json!({ "title": "x" }),
             false,
         )
@@ -2081,7 +2091,7 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     .unwrap();
     std::fs::write(
         dir.join("shout.star"),
-        "def transform(x):\n    item = x[\"event\"][\"payload\"][\"item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": item[\"ref\"], \"title\": item[\"title\"] + \"!\"}}]}\n",
+        "def transform(x):\n    item = x[\"event\"][\"payload\"][\"item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": item[\"ref\"], \"title\": item[\"title\"] + \"!\"}}]}\n",
     )
     .unwrap();
     let ext = extension(&project);
@@ -2457,8 +2467,12 @@ async fn two_instances_of_one_provider_run_side_by_side() {
         fx.svc.commands.namespace_owner("fake_second").as_deref(),
         Some("provider:tracker/fake_second")
     );
-    assert!(fx.svc.commands.spec("fake.estimate").is_some());
-    assert!(fx.svc.commands.spec("fake_second.estimate").is_some());
+    assert!(fx.svc.commands.spec("fake.work_items.estimate").is_some());
+    assert!(fx
+        .svc
+        .commands
+        .spec("fake_second.work_items.estimate")
+        .is_some());
 
     let items = fx.svc.work_items_client();
     let new = |provider: &str| {
@@ -2510,8 +2524,12 @@ async fn two_instances_of_one_provider_run_side_by_side() {
 
     // Stopping one leaves the other.
     assert!(fx.svc.providers.stop(SECOND).await);
-    assert!(fx.svc.commands.spec("fake_second.estimate").is_none());
-    assert!(fx.svc.commands.spec("fake.estimate").is_some());
+    assert!(fx
+        .svc
+        .commands
+        .spec("fake_second.work_items.estimate")
+        .is_none());
+    assert!(fx.svc.commands.spec("fake.work_items.estimate").is_some());
     assert!(items.create(&Actor::Human, new("fake")).await.is_ok());
 }
 
@@ -2591,7 +2609,11 @@ async fn a_named_instance_says_which_provider_it_is() {
         }
         other => panic!("{other:?}"),
     }
-    assert!(fx.svc.commands.spec("fake_second.estimate").is_none());
+    assert!(fx
+        .svc
+        .commands
+        .spec("fake_second.work_items.estimate")
+        .is_none());
 
     // A person adds one by naming the provider; a provider the extension
     // doesn't declare, or an id already taken, is refused.
@@ -2801,7 +2823,10 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
         (there.scope, there.health.state),
         (Scope::Global, InstanceState::Ready)
     );
-    assert!(other.commands.spec("fake_shared.estimate").is_some());
+    assert!(other
+        .commands
+        .spec("fake_shared.work_items.estimate")
+        .is_some());
 
     let (bare, _bare_dir) = sibling_project(&fx, "", false).await;
     bare.providers.reconcile().await;
@@ -2828,7 +2853,10 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
     assert_eq!(state_of(&fx.svc, SHARED).await, None);
     assert!(other.providers.reconcile_if_global_changed().await);
     assert_eq!(state_of(&other, SHARED).await, None);
-    assert!(other.commands.spec("fake_shared.estimate").is_none());
+    assert!(other
+        .commands
+        .spec("fake_shared.work_items.estimate")
+        .is_none());
 }
 
 /// tsk843: a person turns a global instance off in one project from its
@@ -3143,7 +3171,7 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
 }
 
 /// tsk836: a stopped instance never starts again. A read still holding
-/// it — a `provider.sync` looping over collectors when a person turned
+/// it — a `oxplow.provider.sync` looping over collectors when a person turned
 /// it off and on — doesn't restart its process, and whatever that late
 /// read meets is never the running successor's: here the extension's
 /// folder changed since its approval, which a restart of the old one
@@ -4507,7 +4535,7 @@ async fn calls_refused_together_renew_once() {
                 svc.commands
                     .run(
                         &Actor::Human,
-                        "work_item.create",
+                        "oxplow.work_item.create",
                         json!({ "title": "x" }),
                         false,
                     )
@@ -4545,7 +4573,7 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
             svc.commands
                 .run(
                     &Actor::Human,
-                    "work_item.create",
+                    "oxplow.work_item.create",
                     json!({ "title": "cut off" }),
                     false,
                 )
@@ -4616,7 +4644,7 @@ async fn with_effect_reading(hooks: &str, input: Option<&str>, script: &str) -> 
 }
 
 /// The effect's script: one write to the fake.
-const FILE_ON_FAKE: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
+const FILE_ON_FAKE: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
 
 /// Move the fixture's task to done (what the effect reacts to) and let
 /// the effect react.
@@ -4717,7 +4745,7 @@ async fn a_lost_reply_is_sent_again_and_lands_once() {
 /// changed in between.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
-    let titled_from_the_task = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"title\": \"after \" + x[\"rows\"][0][\"title\"]}}]}\n";
+    let titled_from_the_task = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + x[\"rows\"][0][\"title\"]}}]}\n";
     let fx = with_effect_reading(
         "lose-reply",
         // The oxplow task that moved (the fake is the active list, so the
@@ -4797,7 +4825,7 @@ async fn a_retry_whose_provider_went_away_is_not_sent() {
 /// failure waits for a person's retry, and counts.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
-    let with_a_task_step = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": ref, \"title\": \"filed\"}}, {\"name\": \"work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
+    let with_a_task_step = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": \"filed\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
     for (hooks, script) in [
         ("lose-reply,plain-writes", FILE_ON_FAKE),
         ("lose-reply", with_a_task_step),
@@ -4825,7 +4853,7 @@ async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
 /// a refusal of credentials renewal can't fix wait for a person.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_that_wont_pass_isnt_retried() {
-    let bad_second = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"title\": \"from effect\"}}, {\"name\": \"work_item.create\", \"input\": {\"title\": \"second\", \"native_state\": \"Nonsense\"}}]}\n";
+    let bad_second = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"second\", \"native_state\": \"Nonsense\"}}]}\n";
     for (hooks, script) in [("", bad_second), ("refuse-auth", FILE_ON_FAKE)] {
         let fx = with_effect(hooks, script).await;
         react(&fx).await;
@@ -5192,7 +5220,7 @@ async fn a_cut_off_attempt_found_an_hour_late_is_a_persons() {
 /// person's, and theirs files on oxplow.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_retry_files_on_the_tracker_active_when_sent() {
-    let unnamed = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
+    let unnamed = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
     let fx = with_effect("lose-reply", unnamed).await;
     crate::effect_triggers::register(&fx.svc);
     let set_active = |provider: Option<&str>| {
@@ -5293,7 +5321,7 @@ async fn a_cut_off_attempt_whose_start_cant_be_read_is_a_persons() {
 /// each write lands once.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reaction_cut_off_midway_lands_each_step_once() {
-    let two = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"title\": \"first\"}}, {\"name\": \"work_item.create\", \"input\": {\"title\": \"second\"}}]}\n";
+    let two = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"first\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"second\"}}]}\n";
     let fx = with_effect("lose-reply", two).await;
     react(&fx).await;
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));

@@ -56,7 +56,7 @@ commands are in the `testing:` block of `.oxplow/project.yaml`.
   the project has none yet) → run `/oxplow:configure`, which wires
   **every** test stack in the repo.
 - **A report was written outside a run oxplow saw** → run its collector
-  by hand: `collector.sync { owner: "project", id }`
+  by hand: `oxplow.collector.sync { owner: "project", id }`
   (`mcp__oxplow__run_command`); it reads the report now and records it
   in your thread, through the same deterministic parse.
 

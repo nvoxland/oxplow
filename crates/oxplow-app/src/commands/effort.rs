@@ -38,10 +38,10 @@ use serde_json::json;
 
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
-pub const OPEN: &str = "effort.open";
-pub const CLOSE: &str = "effort.close";
-pub const LINK: &str = "effort.link";
-pub const UPDATE: &str = "effort.update";
+pub const OPEN: &str = "oxplow.effort.open";
+pub const CLOSE: &str = "oxplow.effort.close";
+pub const LINK: &str = "oxplow.effort.link";
+pub const UPDATE: &str = "oxplow.effort.update";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

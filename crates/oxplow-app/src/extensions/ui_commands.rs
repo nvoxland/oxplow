@@ -6,7 +6,7 @@
 //! ui:
 //!   commands:
 //!     - { command: fake.estimate, label: "Estimate in Fake…", about: work_item, placement: [menu, context] }
-//!     - { command: work_item.transition, label: Move to Done, about: work_item, input: { ref: "{{ref}}", to: done } }
+//!     - { command: oxplow.work_item.transition, label: Move to Done, about: work_item, input: { ref: "{{ref}}", to: done } }
 //! ```
 //!
 //! A launcher has no current ref, so there's no launcher placement:
@@ -116,7 +116,7 @@ pub fn parse_ui_commands(
         };
         let line = entry_line(manifest, "ui", "command", &entry.command).or(block);
         let input = entry.input.unwrap_or_else(|| json!({ "ref": "{{ref}}" }));
-        let problem = if let Err(e) = oxplow_domain::CommandSpec::validate_name(&entry.command) {
+        let problem = if let Err(e) = oxplow_domain::CommandSpec::validate_id(&entry.command) {
             Some(e.to_string())
         } else if kinds.get(&entry.about).is_none() {
             Some(format!(
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn commands_group_by_provider_and_default_to_the_ref() {
         let (cmds, errors) = parse(
-            "    - { command: fake.estimate, label: Estimate in Fake…, about: work_item }\n    - { command: work_item.transition, label: Done, about: work_item, placement: [context], input: { ref: \"{{ref}}\", to: done } }\n",
+            "    - { command: fake.work_items.estimate, label: Estimate in Fake…, about: work_item }\n    - { command: oxplow.work_item.transition, label: Done, about: work_item, placement: [context], input: { ref: \"{{ref}}\", to: done } }\n",
             &["fake"],
         );
         assert!(errors.is_empty(), "{errors:?}");
@@ -200,27 +200,27 @@ mod tests {
         for (entry, says) in [
             ("{ command: Bad, label: L, about: work_item }", "`Bad`"),
             (
-                "{ command: a.b, label: L, about: nonsense }",
+                "{ command: a.b.c, label: L, about: nonsense }",
                 "isn't a kind of ref",
             ),
             (
-                "{ command: a.b, label: L, about: commit, placement: [] }",
+                "{ command: a.b.c, label: L, about: commit, placement: [] }",
                 "`placement` is empty",
             ),
             (
-                "{ command: a.b, label: L, about: commit, input: [1] }",
+                "{ command: a.b.c, label: L, about: commit, input: [1] }",
                 "must be a map",
             ),
             (
-                "{ command: a.b, label: L, about: commit, input: { sha: \"x{{ref.id}}\" } }",
+                "{ command: a.b.c, label: L, about: commit, input: { sha: \"x{{ref.id}}\" } }",
                 "as a whole value",
             ),
             (
-                "{ command: a.b, label: L, about: commit, input: { sha: \"{{row.id}}\" } }",
+                "{ command: a.b.c, label: L, about: commit, input: { sha: \"{{row.id}}\" } }",
                 "as a whole value",
             ),
             (
-                "{ command: a.b, label: L, about: commit, placement: [launcher] }",
+                "{ command: a.b.c, label: L, about: commit, placement: [launcher] }",
                 "unknown variant",
             ),
         ] {

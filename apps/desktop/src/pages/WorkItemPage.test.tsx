@@ -35,7 +35,7 @@ mock.module("../api.js", () => ({
     return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
   },
   runCommand: async (name: string, input: unknown, ...rest: unknown[]) => {
-    if (!name.startsWith("work_item.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
+    if (!name.startsWith("oxplow.work_item.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
     ran.push([name, rest[0] === true ? { ...(input as object), confirmed: true } : input]);
     return { result: null, audit_id: 1, event_id: null, inverse: null };
   },
@@ -85,16 +85,16 @@ test("a provider without comments, links or hierarchy offers none of them", asyn
 
 // P7.A1: Delete shows only when the provider declares `delete`; the
 // inline confirm is the person's confirmation.
-test("Delete shows with the provider's delete feature and runs work_item.delete confirmed", async () => {
+test("Delete shows with the provider's delete feature and runs oxplow.work_item.delete confirmed", async () => {
   features = { delete: true };
   const view = page();
   fireEvent.click(await waitFor(() => view.getByTestId("work-item-delete-trigger")));
   fireEvent.click(view.getByTestId("work-item-delete-confirm"));
-  await waitFor(() => expect(ran).toEqual([["work_item.delete", { ref: "work_item:fake:W-1", confirmed: true }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.delete", { ref: "work_item:fake:W-1", confirmed: true }]]));
 });
 
 // P7.A1: every write is a `work_item.*` command, whatever the provider.
-test("comments, links and a parent show when the provider declares them; Comment runs work_item.comment", async () => {
+test("comments, links and a parent show when the provider declares them; Comment runs oxplow.work_item.comment", async () => {
   features = { comments: true, links: true, hierarchy: true };
   const view = page();
   const open = await waitFor(() => view.getByTestId("work-item-comment-open"));
@@ -104,7 +104,7 @@ test("comments, links and a parent show when the provider declares them; Comment
   fireEvent.change(view.getByTestId("work-item-comment-body"), { target: { value: "Seen it too." } });
   fireEvent.keyDown(view.getByTestId("work-item-comment-body"), { key: "Enter", metaKey: true });
   await waitFor(() =>
-    expect(ran).toEqual([["work_item.comment", { ref: "work_item:fake:W-1", body: "Seen it too." }]]),
+    expect(ran).toEqual([["oxplow.work_item.comment", { ref: "work_item:fake:W-1", body: "Seen it too." }]]),
   );
   await waitFor(() => expect(view.queryByTestId("work-item-comment-body")).toBeNull());
 });
@@ -118,7 +118,7 @@ test("Link… takes any link type the provider names, not oxplow's list", async 
   fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "work_item:fake:W-9" } });
   fireEvent.click(view.getByTestId("work-item-link-submit"));
   await waitFor(() =>
-    expect(ran).toEqual([["work_item.link", { ref: "work_item:fake:W-1", target: "work_item:fake:W-9", link_type: "caused_by" }]]),
+    expect(ran).toEqual([["oxplow.work_item.link", { ref: "work_item:fake:W-1", target: "work_item:fake:W-9", link_type: "caused_by" }]]),
   );
 });
 
@@ -138,7 +138,7 @@ test("Move To runs the provider's transition; the item's slots get its ref", asy
   features = {};
   const view = page();
   fireEvent.click(await waitFor(() => view.getByTestId("work-item-move-done")));
-  await waitFor(() => expect(ran).toEqual([["work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
   await waitFor(() =>
     expect(lensRuns.map(([id, p]) => [id, p])).toEqual(
       expect.arrayContaining([

@@ -206,7 +206,7 @@ that are exactly a canonical ref's: kinds `work_item`, `commit`, `dir`,
 `task_note`, `thread_note`, `wiki`, `file`, `finding`; a work item's id is
 `<provider>:<id>` (`oxplow:tsk<n>`). An effort's impacts name their kind
 in the agent tools' vocabulary (`IMPACT_KINDS`: `wiki | work_item | file
-| directory | git_commit | finding`; `effort.report` refuses any other,
+| directory | git_commit | finding`; `oxplow.effort.report` refuses any other,
 V165 renamed stored spellings and V20 made `task` `work_item`, its ids
 canonical refs), which `impact_kind` projects to the canonical ones; a
 `work_item` impact's id is its ref or one of the active list's own ids. Migration V92 wiped the old rows; the boot

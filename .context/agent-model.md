@@ -162,10 +162,10 @@ at the outer oxplow. It's a list, not a prefix: `CLAUDE_CONFIG_DIR`,
 and pass. Oxplow's own `OXPLOW_*` for the agent ride its command.
 Project configuration is changed through the `config.*` commands on the
 command bus ([commands.md](./commands.md)) — an agent sets `zones`,
-`metricRetentionDays`, `generated`, … with `config.set`, while the keys
+`metricRetentionDays`, `generated`, … with `oxplow.config.set`, while the keys
 that run a program or pick the model (`agents`, `lsp`, `collection`,
 `ai`, `acpAgents`, `agentModels`, `extensions`, `agentPromptAppend`, …)
-need a person's confirmation: the agent's `config.set` is kept as a
+need a person's confirmation: the agent's `oxplow.config.set` is kept as a
 proposal (`proposal:N`, with the before/after) that the person approves
 or declines, and `run_command` tells the agent so ([commands.md](./commands.md),
 "Proposals"). `set_zones` is gone; `zones` is just a key.
@@ -486,7 +486,7 @@ resolved path (`agent_path::resolve_program`). Presets may always start;
 a project entry needs a person's approval in Settings → Data → Programs
 (`exec_consent`, `ProgramKind::AcpAgent`).
 
-**Creating threads.** `thread.create` takes `acp_agent`. It's required for
+**Creating threads.** `oxplow.thread.create` takes `acp_agent`. It's required for
 `agent: acp`, refused otherwise, and must name a known agent. The
 new-thread picker lists "ACP · <name>" per agent when ACP is enabled in
 `agents:`, flagged "not installed" or "needs approval" (`agentChoices` in
@@ -547,7 +547,7 @@ the same JSON.
   - `open` reserves the thread's slot under one lock before spawning anything, so concurrent opens start one agent.
   - `close` marks the handle closed at once.
   - A closed session still winding down is replaced and marked not current; its actor then records no Interrupt over the new session's status.
-- **Thread lifecycle.** Closing a thread (`thread.close`) closes its open effort in the same transaction; closing an ACP thread also stops its session and agent process once the close commits. A fork (`thread.create { from }`) keeps the source's `acp_agent`.
+- **Thread lifecycle.** Closing a thread (`oxplow.thread.close`) closes its open effort in the same transaction; closing an ACP thread also stops its session and agent process once the close commits. A fork (`oxplow.thread.create { from }`) keeps the source's `acp_agent`.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
 **Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:
@@ -728,7 +728,7 @@ Subagent tool calls reach the hooks like any other, so a subagent's
 edits and test runs land in the thread's effort with nothing from it:
 there is no dispatch protocol, brief or subagent skill. An Explore
 subagent can still write its finding to a thread note allocated for it
-(`knowledge.add_note`, then `knowledge.update_note`), read back with
+(`oxplow.knowledge.add_note`, then `oxplow.knowledge.update_note`), read back with
 `list_thread_notes`.
 
 `read_task_options` (`crates/oxplow-mcp/src/lib.rs`, backed by
@@ -756,7 +756,7 @@ the endpoint URL for Codex); `oxplow_mcp::caller_of` turns it into the
 through `run_command` (`list_commands` shows what the agent may run);
 an anonymous connection may read but not run commands. Any thread in
 the stream may file, edit and finish tasks (`work_item.*` are `Record`
-commands); claiming — moving a task to `in_progress`, or `effort.open` —
+commands); claiming — moving a task to `in_progress`, or `oxplow.effort.open` —
 takes the stream's writer thread (tsk466). Per-harness plumbing and the
 rule live in [commands.md](./commands.md).
 
@@ -861,7 +861,7 @@ mutations stay on Bash); **snapshots / local history**
 — a whole capture; `get_file_snapshot` and `read_file_snapshot` take a
 `file_snapshot_id` — one captured file row; `read_file_at_snapshot
 { snapshot_id, path }` reads a path as of a capture. Restoring is the
-destructive `snapshot.restore_file` command (an agent's is a proposal —
+destructive `oxplow.snapshot.restore_file` command (an agent's is a proposal —
 P8.A9). Reads and restore share `oxplow_app::snapshot_files::SnapshotFiles`, and a
 restore writes into the row's stream's worktree, not the primary
 checkout — P2.9, tsk433);
@@ -879,7 +879,7 @@ effort's files (claimed or observed) `v_effort_file`; git mutations
 stay on the agent's own git.
 
 The `kind` discriminator (`epic`/`task`/`subtask`/`bug`/`note`) was
-removed end-to-end — `work_item.create` takes none and a task row no
+removed end-to-end — `oxplow.work_item.create` takes none and a task row no
 longer carries one. An "epic" is just any task that has children
 (create the epic, then each child with `parent_ref`); the bucketing is
 computed on read.
@@ -906,7 +906,7 @@ the top of any new tool handler — see `IdPrefix` and the
 parameter validator is the separate `parse_task_id` helper (digits
 only, returns `Some(TaskId)` or an `invalid_params` error).
 
-`work_item.transition { ref, to, native_state? }` moves an item
+`oxplow.work_item.transition { ref, to, native_state? }` moves an item
 between canonical states directly — `blocked → in_progress` (unblock)
 and `done → in_progress` (reopen) need no hop through `todo`; archive
 is `{ to: done|canceled, native_state: archived }`.
@@ -916,17 +916,17 @@ is `{ to: done|canceled, native_state: archived }`.
   write is `run_command` (P8.A10 deleted the MCP task-write tools —
   `create_task`, `update_task`, `complete_task`, `upsert_task`,
   `transition_tasks`, `reorder_tasks`, `file_epic_with_children`):
-  `work_item.create { title, body?, parent_ref?, state?, native?,
+  `oxplow.work_item.create { title, body?, parent_ref?, state?, native?,
   thread? }` — always on the active tracker; filed on the agent's own
   thread unless `thread` names another; `native` is the tracker's own
   fields (oxplow: `{ priority? }`); `state` defaults to `todo` = oxplow
-  `ready`; the result carries `ref` — `work_item.update`,
-  `work_item.transition`, `work_item.reorder { ref, before?, after? }`,
-  `work_item.link` / `work_item.comment`. There is no agent delete —
-  `work_item.delete` is destructive, and an agent never confirms one:
-  cancel or archive instead. Closing is `work_item.transition → done`;
+  `ready`; the result carries `ref` — `oxplow.work_item.update`,
+  `oxplow.work_item.transition`, `oxplow.work_item.reorder { ref, before?, after? }`,
+  `oxplow.work_item.link` / `oxplow.work_item.comment`. There is no agent delete —
+  `oxplow.work_item.delete` is destructive, and an agent never confirms one:
+  cancel or archive instead. Closing is `oxplow.work_item.transition → done`;
   the effort policy closes the thread's effort.
-- `effort.report { thread?, summary?, impacts? }` is optional and returns
+- `oxplow.effort.report { thread?, summary?, impacts? }` is optional and returns
   `{ effort, link_warnings }`. It records a summary and the impacts
   beyond the edits on the thread's open effort, else its latest
   (`SqliteEffortStore::latest_for_thread`) — never opening, closing or
@@ -970,14 +970,14 @@ is `{ to: done|canceled, native_state: archived }`.
   effort anchor, else the thread's open effort — as
   `metric_capture.effort_id`, and an effort that adopts a turn restamps
   its captures. Subagent tool calls reach the hooks like any other, so a
-  subagent's runs need nothing from it; `test.record_run` is only for
+  subagent's runs need nothing from it; `oxplow.test.record_run` is only for
   counts oxplow couldn't parse from a run's output.
 - `add_followup({ threadId, note })` / `remove_followup({ threadId, id })` /
   `list_followups({ threadId })` — orchestrator-only, in-memory transient
   follow-up reminders. No DB row, lost on runtime restart. Surfaces as
   italic muted "↳ follow-up: …" lines at the top of the To Do section
   in the Work panel. Use when you defer a sub-ask mid-turn that doesn't
-  warrant a full `work_item.create`. Always call `remove_followup` in
+  warrant a full `oxplow.work_item.create`. Always call `remove_followup` in
   the same turn you handle it. Never file both a follow-up and a real
   task for the same concern. NOT exposed to subagents — the dispatch
   brief deliberately omits any mention of follow-ups so subagents can't
@@ -987,10 +987,10 @@ is `{ to: done|canceled, native_state: archived }`.
   `crates/oxplow-app/src/followup.rs`; runtime publishes the bus event
   `followup.changed` so the UI re-reads that thread's work
   (`workItems.readThreadWork`).
-- Forking a thread is `run_command thread.create { from }` — see
+- Forking a thread is `run_command oxplow.thread.create { from }` — see
   "Forking a thread" above.
 - `list_comments({ id, scope?, status? })`, then `run_command
-  knowledge.reply_comment { comment, body }` / `knowledge.update_comment
+  oxplow.knowledge.reply_comment { comment, body }` / `oxplow.knowledge.update_comment
   { comment, status: "resolved" }` (P8.A6) — the user's
   threaded annotations anchored to text in pages (wiki / file / task).
   `id` is a thread id (`thr…`) or stream id (`str…`, the whole
@@ -1044,7 +1044,7 @@ typed answers from the code-intelligence capability, over the same
 shared language-server sessions the editor uses (`.context/lsp.md`). When no
 server is configured for a language, the error is self-describing — it
 names the suggested Mason package and both fix paths. The agent can fix
-it: `run_command lsp.install_server { package }` installs from the
+it: `run_command oxplow.lsp.install_server { package }` installs from the
 Mason registry (picked up immediately by editor + tools) once a person
 approves the proposal — what binaries oxplow downloads and runs is their
 call (P8.A9) — and
@@ -1088,7 +1088,7 @@ drifted | unchanged | not_a_ref | no_pin | binary; the diff is capped
 (`truncated` flags it). The wiki-only
 `find_wiki_pages_for_file` was removed in favour of `list_backlinks`
 (below) — every cross-kind backlinks question goes through one tool
-now. **Writes are commands** — `run_command knowledge.write_page` /
+now. **Writes are commands** — `run_command oxplow.knowledge.write_page` /
 `delete_page` / `link` / `resync` ([knowledge.md](./knowledge.md)); the
 write guard refuses an agent's Write/Edit into `.oxplow/wiki/`.
 
@@ -1136,14 +1136,14 @@ paths out of `[[ ]]` because the bracket characters fall outside its
 lookbehind,
 so backlinks/freshness work without parser changes. The
 
-**Link checker (write-command feedback).** `effort.report` (over its
-`summary`) and the `knowledge.add_note` / `update_note` commands (through
+**Link checker (write-command feedback).** `oxplow.effort.report` (over its
+`summary`) and the `oxplow.knowledge.add_note` / `update_note` commands (through
 `check_links_in`) run `oxplow_app::link_check` over the text they just
 persisted and return a `link_warnings` array naming each invalid `[[…]]`
 — unrecognized syntax or a dangling target — so the authoring agent
-self-corrects in the same turn; `work_item.create` / `work_item.update`
+self-corrects in the same turn; `oxplow.work_item.create` / `oxplow.work_item.update`
 check an oxplow item's body the same way (tsk775).
-`knowledge.write_page` refuses instead, through the same synchronous core
+`oxplow.knowledge.write_page` refuses instead, through the same synchronous core
 (`check_links_in`). **Every kind the vocabulary knows is a link**
 (tsk894): a typed `Reference` (task, wiki, file, dir, commit, finding) is
 probed for existence; another known kind (an effort, another provider's
@@ -1175,8 +1175,8 @@ before completing (so a report exists) and — critically — to **never parse
 or report coverage numbers itself**, because oxplow parses the report
 deterministically (`observed`). Both are wired in `write_plugin`
 (`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
-detector, the report collectors a detected run reads, `collector.sync` for
-one run by hand, `test.record_run`, and the `list_effort_observations` /
+detector, the report collectors a detected run reads, `oxplow.collector.sync` for
+one run by hand, `oxplow.test.record_run`, and the `list_effort_observations` /
 `get_open_effort` MCP reads) is documented in `.context/collection.md`.
 `get_open_effort({ thread_id })` answers "what is this thread's
 currently-open effort?" — returns `{ open, effortId, workItem,
@@ -1340,7 +1340,7 @@ in-progress changes.
   `crates/oxplow-app/src/lib.rs`.
 - **Wiki pages are written by command.** A direct write to
   `.oxplow/wiki/` is denied for every thread (`write_guard::wiki_page_reason`);
-  pages go through `knowledge.write_page`, which any thread may run.
+  pages go through `oxplow.knowledge.write_page`, which any thread may run.
   Other `.oxplow/` paths (`local.sqlite`, `snapshots/`, `runtime/`) stay
   blocked.
 - **Bash isn't classified.** A non-writer's shell commands aren't
@@ -1464,7 +1464,7 @@ The banner reaches the agent via two complementary injection points:
 
 ## Decisions fed back to the agent (tsk298)
 
-Decisions the agent records (`effort.record_decision` → `v_decision`) are fed
+Decisions the agent records (`oxplow.effort.record_decision` → `v_decision`) are fed
 back to it in two places. Only `provenance = 'recorded'` rows: decisions
 oxplow *inferred* after the fact ([ai-providers.md](./ai-providers.md))
 are guesses for the reviewer, never presented to the agent as its own.
@@ -1677,7 +1677,7 @@ when takes happen.
   take lock (queued takes wait in parallel), and a take with no rows
   skips the git branch/status/HEAD probes.
 - **The budget.** The Stop hook waits at most `snapshotTurnBudgetMs`
-  (default 2000, min 100; a `config.set` key, not human-only). A slower
+  (default 2000, min 100; a `oxplow.config.set` key, not human-only). A slower
   take is never aborted: it finishes in the background and its op and
   `snapshot.taken` record `over_budget` (plus a warn log). The clock
   starts before the per-stream take lock, so waiting behind another take
@@ -1747,9 +1747,9 @@ between turns go to none). Nothing is reconciled at close.
 and the MCP `create_task` `redoHint` (a soft warning when a new row was
 filed on a thread with an agent-authored `done` item closed in the last
 10 minutes) no longer exist — the latter went with the MCP task tools
-(P8.A10), and `work_item.create` carries no such check. What remains is
+(P8.A10), and `oxplow.work_item.create` carries no such check. What remains is
 the PreToolUse filing directive, whose second door is "fix/redo of a
-recently-closed done item → `work_item.transition` it to `in_progress`".
+recently-closed done item → `oxplow.work_item.transition` it to `in_progress`".
 
 **1-vs-many rendering rule.** The Local History panel renders one row
 per effort ending at a snapshot, *not* one row per snapshot. For a
@@ -1778,9 +1778,9 @@ panel's in_progress bucket is driven purely by `task` rows —
 there are no synthesized "live turn" rows, no auto-file /
 auto-complete / adoption. Per-effort attribution and snapshots are
 anchored to `effort`, which opens and closes in the same transaction as
-a task's status change (`work_item.create` / `.update` / `.transition`,
+a task's status change (`oxplow.work_item.create` / `.update` / `.transition`,
 all audited to the actor); work tracked outside oxplow brackets itself
-with `effort.open` / `effort.close` (any thread; [commands.md](./commands.md)). No edit waits on an open effort.
+with `oxplow.effort.open` / `oxplow.effort.close` (any thread; [commands.md](./commands.md)). No edit waits on an open effort.
 
 Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
 

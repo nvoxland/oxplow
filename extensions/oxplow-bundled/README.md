@@ -30,11 +30,11 @@ The rest of this page is about the review packet.
 
 On an effort's page, **Commands**:
 
-- **Accept Review** (`oxplow_bundled.accept { ref, force? }`) comments the
+- **Accept Review** (`oxplow.review.accept { ref, force? }`) comments the
   review on the effort's work item and marks it done. It refuses while a
   claim is unverified or an inferred decision unreviewed; `force` accepts
   anyway and lists them in the comment.
-- **Request Changes** (`oxplow_bundled.request_changes { ref, note? }`)
+- **Request Changes** (`oxplow.review.request_changes { ref, note? }`)
   comments a checklist — each unverified claim, each inferred decision,
   each file outside the area, and the note — and moves the item back to
   todo (an oxplow task: ready).
@@ -57,8 +57,8 @@ stays — and can't be undone from oxplow. An effort with no work item is
 refused.
 
 On the packet's rows: **Mark Verified** on an unverified claim
-(`effort.verify_claim`), **Confirm** / **Dismiss** on an inferred
-decision (`effort.confirm_decision`, `effort.dismiss_decision`), and the
+(`oxplow.effort.verify_claim`), **Confirm** / **Dismiss** on an inferred
+decision (`oxplow.effort.confirm_decision`, `oxplow.effort.dismiss_decision`), and the
 Verify a Claim With Evidence form for citing a test run or a file.
 
 All of these are a person's: an agent can read the packet, but it can't

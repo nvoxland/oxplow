@@ -13,5 +13,5 @@
 - question: Save what I just learned as a wiki page.
   skill: oxplow-wiki-capture
   reaches:
-    command: knowledge.write_page
+    command: oxplow.knowledge.write_page
     input: { slug: auth-flow, body: "# Auth flow\n\nHow a login becomes a session." }

@@ -11,8 +11,8 @@ oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
 >   - running and validating lenses over IPC and MCP;
 >   - the `oxplow-extension` agent skill;
 >   - the lens page and the launcher's "Lenses" section;
->   - sharing: team via the repo, world via the `extension.install` /
->     `extension.update` commands and Settings → Extensions;
+>   - sharing: team via the repo, world via the `oxplow.extension.install` /
+>     `oxplow.extension.update` commands and Settings → Extensions;
 >   - the core explorer: the Explore Data page (with Save as Lens) and
 >     lens tiles on dashboards;
 >   - **bundled extensions** (compiled in, read-only, reserved names) and
@@ -63,7 +63,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 - **Reading.** What the app shows is read from the **main worktree**
   (the daemon's project dir), whichever stream is open: listings, lens
   pages, slots and panels, custom components, prompts, advisories,
-  `lens.show` / thread answers and `get_open_page`. A stream's `stream_id`
+  `oxplow.lens.show` / thread answers and `get_open_page`. A stream's `stream_id`
   only scopes the data a lens reads (`:stream_id` / `:thread_id`). See
   "Per stream" below. Reads go through
   `Services.extension_catalog` (`crates/oxplow-app/src/extension_catalog.rs`):
@@ -95,8 +95,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (its header, else its thread's; the primary only for an anonymous
     caller), so an agent in a worktree can check the extension it just
     wrote before it's merged — the same for `list_lenses`,
-    `preview_collector`, `review_extension`, `extension.install`,
-    `extension.update`, `run_lens_action` and `ensure_change`.
+    `preview_collector`, `review_extension`, `oxplow.extension.install`,
+    `oxplow.extension.update`, `run_lens_action` and `ensure_change`.
     `site_search` is the exception by design: omitted, it searches every
     stream.
   - **Over IPC (the UI)** they show the main worktree's extensions:
@@ -201,7 +201,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       agent's input, never sent) — kit affordances, not declared. A
       compact strip and a grid's children (`toolbar={false}`) show no
       toolbar.
-    - Running a collector is the command **`collector.sync { owner, id }`**
+    - Running a collector is the command **`oxplow.collector.sync { owner, id }`**
       (External, `Invokers::ALL`; `collector_runner::CollectorRunner::sync`,
       which the scheduler uses too). It **never approves**: approving is
       `collector_runner::approve_reviewed` behind the UI-only
@@ -212,7 +212,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       `lens/lensActions.ts` (`performLensAction`, `copyLens`,
       `addLensToContext`, `rowRecord`).
     - The GitHub example's PR lens has a Sync PRs action
-      (`command: collector.sync`).
+      (`command: oxplow.collector.sync`).
   - **Viz** (`LensResultView.tsx`): `table`, `list`, `number`, `markdown`,
     plus `bar` (`DailyBarChart`), `line` (`components/charts/TrendChart`,
     one chart per `chart.series`), `treemap` (two-level
@@ -246,7 +246,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `oxplow/extensions/`.
   - **The world.** Publish an extension as a git repo with
     `extension.yaml` at its root. Others run `review_extension(git_url,
-    git_ref?)` then the `extension.install { git_url, git_ref?,
+    git_ref?)` then the `oxplow.extension.install { git_url, git_ref?,
     reviewed_sha, stream? }` command (`commands/extension_install.rs`,
     P8.A9: `External`, `Confirm::Always` — an agent's run becomes a
     proposal a person approves; Settings → Extensions' install box runs it
@@ -259,7 +259,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       yet). Settings shows it as an inline panel spelling out each exec
       source's program, hosts and credentials, derived sources,
       advisories, fact collectors and slots (`reviewModel`); Install/Update
-      confirms. `extension.install` / `extension.update` take the
+      confirms. `oxplow.extension.install` / `oxplow.extension.update` take the
       `reviewed_sha` and refuse a clone at any other commit, or one with
       load errors.
     - The repo is cloned inside `.oxplow/tmp/`, because workspace
@@ -271,7 +271,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       The loader surfaces it as `Extension.source`.
     - Installing never overwrites an existing folder, and a name must be
       lowercase letters, digits and single dashes.
-    - `extension.update { name, reviewed_sha }` re-clones from the recorded source. The old
+    - `oxplow.extension.update { name, reviewed_sha }` re-clones from the recorded source. The old
       folder is replaced only after the new clone validates, and only for
       git-installed extensions.
     - Installing is a write tool on MCP. The skill says to do it only when
@@ -314,9 +314,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       (`keepBlockedReason`): a lens or a tile reads only models.
     - **Pin to Dashboard** adds the query as a `query` tile shown with
       the chosen viz (`PinToDashboard.tsx`, shared with the lens page).
-    - **Save as Lens** runs `lens.keep` with the query as a `spec` (P11,
+    - **Save as Lens** runs `oxplow.lens.keep` with the query as a `spec` (P11,
       tsk943 — on the bus like Keep This, in the stream's worktree; its
-      shape checked as `lens.show` checks one, its query through the SQL
+      shape checked as `oxplow.lens.show` checks one, its query through the SQL
       gateway as the explorer runs it, so a `metric_grid()` chart is kept,
       tsk987), then opens the new lens — or, kept in a non-main stream's
       worktree (`live: false`), toasts that it shows once the stream is
@@ -329,22 +329,22 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - **Thread answers** (P6.C1, `commands/lens.rs`,
     `oxplow-db/src/thread_answer_store.rs`). An agent answers with a lens
     rather than pasting rows: MCP **`show_lens { lens | spec, params? }`**
-    runs `lens.show`, which stores a `thread_answer` (V124, model
+    runs `oxplow.lens.show`, which stores a `thread_answer` (V124, model
     `v_thread_answer`, ref `answer:<id>`) and returns the text rendering.
     - **One lens shape, `LensSpec`**: what a lens file holds, what an
-      answer stores and what `lens.keep` writes (`Lens::from_spec`,
+      answer stores and what `oxplow.lens.keep` writes (`Lens::from_spec`,
       `Lens::spec`). `extensions::save_lens(root, ext, slug, &spec,
       &LensOrigin)` refuses a spec with a `spec_problem`, writes the YAML
       pruned of nulls and empties, and — when the file doesn't then load —
       removes it and reports the loader's errors. Serialize a spec's JSON
       values with `plain_json` (serde_json's `arbitrary_precision` makes
       numbers maps under `serde_yaml`).
-    - An answer's query is agent SQL: `lens.show` checks it with the same
+    - An answer's query is agent SQL: `oxplow.lens.show` checks it with the same
       read-only authorizer as `query_sql` before storing anything.
       `run_answer` (RPC and MCP) re-runs it.
-    - **Keep This** is `lens.keep`: the answer becomes a private lens in
+    - **Keep This** is `oxplow.lens.keep`: the answer becomes a private lens in
       `my-lenses` (params → defaults, `intent.origin` the thread).
-      **`lens.share`** (a person's only) moves a lens into a shared
+      **`oxplow.lens.share`** (a person's only) moves a lens into a shared
       extension, created with `sharing: shared` and `engine`
       (`ManifestScaffold.shared`), and refuses one that doesn't load or
       reads beyond models. The target goes through
@@ -363,7 +363,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       finds `answer:<id>` in the call's result). Each `ThreadAnswer`
       re-runs through `run_answer` with `useRerunOnChange`, and offers
       **Keep This** (an inline name — empty takes it from the title —
-      Enter keeps via `lens.keep`, Escape cancels) or, once it is a lens
+      Enter keeps via `oxplow.lens.keep`, Escape cancels) or, once it is a lens
       (kept, or an existing lens shown), a link to it. A **kept** answer
       is one line — its title and lens link — with Show / Hide, so kept
       answers don't crowd the terminal; the strip is capped at 35% of the
@@ -371,11 +371,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       when the strip grows (tsk1042: a `height: 100%` under a flex item
       doesn't resolve, so the terminal was clipped and never refit). The
       agent tab has no route context, so `AgentPage` takes `onOpenPage`.
-    - Explore Data's **Save as Lens** (`lens.keep { spec, stream }`) uses
+    - Explore Data's **Save as Lens** (`oxplow.lens.keep { spec, stream }`) uses
       the lens's title as a new extension's `intent.purpose`, and the
       caller's thread, when it has one, as its `intent.origin`.
   - **Lens tiles.** A lens can be pinned to a dashboard: "Pin to
-    Dashboard" on a lens page, or `dashboard.add_item { kind: "lens",
+    Dashboard" on a lens page, or `oxplow.dashboard.add_item { kind: "lens",
     lens_id }`.
     - The tile is kind `lens`, with `lensId` stored in `options_json`.
     - `LensTile` renders it with the shared `LensResultView`, capped at 8
@@ -409,8 +409,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Their names are reserved:
     - a project folder with that name is listed with an error and never
       shadows the bundled one;
-    - `extension.install` refuses the name;
-    - `extensions::save_lens` (the writer behind `lens.keep`) refuses to
+    - `oxplow.extension.install` refuses the name;
+    - `extensions::save_lens` (the writer behind `oxplow.lens.keep`) refuses to
       write into a bundled extension.
 - **Slots (current: see "Slots" below).**
   - `extension.yaml` declares `ui: { slots: [{slot, lens}] }` (v1:
@@ -471,9 +471,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
   - Unverified Claims (`v_claim` where `verified = 0`), each row with
-    **Mark Verified** (`effort.verify_claim`)
+    **Mark Verified** (`oxplow.effort.verify_claim`)
   - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
-    (`effort.confirm_decision` / `effort.dismiss_decision`)
+    (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)
   - What Deviated (its own model `v_oxplow_bundled_deviation`: each
     effort's files against its work item's title and body — a file is in
     the area when the text names it or one of its directories at least
@@ -493,20 +493,20 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     stated)
   - Context Read (`v_context_read`)
   - Verify a Claim With Evidence (hidden, `viz: form` over
-    `effort.verify_claim`, `claim` a param)
+    `oxplow.effort.verify_claim`, `claim` a param)
 
   **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
   effort's page under **Commands** (`ui.commands` about `effort`):
-  `oxplow_bundled.accept { ref, force? }` comments the review on the
+  `oxplow.review.accept { ref, force? }` comments the review on the
   effort's work item then transitions it to `done`, refusing (`{ refuse }`)
   while a claim is unverified or an inferred decision unreviewed unless
   `force` (then it lists them in the comment);
-  `oxplow_bundled.request_changes { ref, note? }` comments a checklist —
+  `oxplow.review.request_changes { ref, note? }` comments a checklist —
   each unverified claim, inferred decision, file outside the area, and
   the note — then transitions to `todo`. Both read one `input` query
   (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
-  `v_oxplow_bundled_deviation`), compose `work_item.comment` and
-  `work_item.transition` — one transaction (and one undo) on oxplow's own
+  `v_oxplow_bundled_deviation`), compose `oxplow.work_item.comment` and
+  `oxplow.work_item.transition` — one transaction (and one undo) on oxplow's own
   item, steps through the provider on another provider's (not undoable;
   [commands.md](./commands.md) → "Composition", tsk713) — refuse an
   effort without a work item by name, are `confirm: always`, and are a person's or
@@ -552,7 +552,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   on the CLI (`plugin check --effects`) and in an effort's review
   ("Reviewing by effect"). Models declare keys and may materialize on a
   clock or incrementally ([semantic-layer.md](./semantic-layer.md)).
-  Installs and updates are the `extension.install` / `extension.update`
+  Installs and updates are the `oxplow.extension.install` / `oxplow.extension.update`
   commands.
 
 ## The rules
@@ -600,8 +600,8 @@ comes from the main worktree, the same in every stream. Extensions are
 mostly cross-stream concerns, so branching them per stream was the wrong
 separation. Writes still go where code goes: an agent in a worktree stream
 edits its own worktree's `oxplow/extensions/` (the write guard keeps it
-out of the main checkout), and `lens.keep` / `lens.share` /
-`extension.install` / `extension.update` write to the named stream's
+out of the main checkout), and `oxplow.lens.keep` / `oxplow.lens.share` /
+`oxplow.extension.install` / `oxplow.extension.update` write to the named stream's
 worktree. The app shows that work once it's merged into the main
 worktree, like any other code change. Until then the MCP authoring tools
 (`validate_extension`, `run_lens`, `get_lens`, …) read the agent's own
@@ -629,6 +629,7 @@ loader resolves cross-references with `file:line` messages.
 ```yaml
 manifest: 2
 name: oxplow-bundled   # must equal the folder name
+namespace: oxplow      # its command ids' namespace (default: the name, `-` → `_`); `oxplow` only for oxplow's own
 description: …
 sharing: shared          # private (default) | shared — see below
 engine: ">=0.7"          # the oxplow it targets; required when shared
@@ -721,17 +722,17 @@ and one calling MCP read identical `file:line: what — fix` lines.
   one example) and, but for a bare extension, that example's fixture
   `fixtures/basic.yaml` — then the kind's starter (P7.C6):
   - `lens` — `lenses/<name>.yaml`, open tasks in the viewer's stream, with
-    a Start row action (`work_item.transition`, a `ref` column it selects
+    a Start row action (`oxplow.work_item.transition`, a `ref` column it selects
     but doesn't show);
   - `collector` — a Starlark collector `items` over `v_task` declaring
     entity `item`, a model `open_items` over `ref('item')` and a lens over
     the model; its example runs the collector over fixture rows;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
-    `work_item.comment`, with an example and a `ui.commands` entry on
+    `oxplow.work_item.comment`, with an example and a `ui.commands` entry on
     `work_item`; its intent example dry-runs it;
   - `effect` (P8.D12) — `effects: [on-done]` on `work_item.transitioned`
     `where: { to: done }`, whose `effects/on-done.star` composes
-    `work_item.comment`; its intent example dry-runs it on a fixture
+    `oxplow.work_item.comment`; its intent example dry-runs it on a fixture
     event;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and a non-ref origin. **What
@@ -1072,7 +1073,7 @@ provider that needs them. Every target has a label a person reads
 — its `label` in the same table ("board", "state control"), carried on
 each `UiReplacement` so the desktop names it from there (tsk935; no
 second list to keep in step). A state control replacement lists the
-tracker's own states, each with **Move Here** (`work_item.transition` with
+tracker's own states, each with **Move Here** (`oxplow.work_item.transition` with
 the `native_state`); oxplow's Move To stays beside it: the canonical
 states every provider takes.
 
@@ -1092,7 +1093,7 @@ what renders a core region; validated against the table, an unknown
 target is an error listing the real ones). Listed, oxplow's own
 component shows. Settings → Integrations lists the replaced components
 under the active-provider chooser, each with "Always use oxplow's own
-<component>" (`config.set` / `config.unset` as the person).
+<component>" (`oxplow.config.set` / `oxplow.config.unset` as the person).
 
 **At render** (`lens/useReplacement.ts`, `components/Replaceable.tsx`).
 A core page wraps the component: `<Replaceable target props streamId
@@ -1321,7 +1322,7 @@ in core menus, **for a ref**:
 ui:
   commands:
     - { command: fake.estimate, label: "Estimate in Fake…", about: work_item, placement: [menu, context] }
-    - { command: work_item.transition, label: Move to Done, about: work_item, input: { ref: "{{ref}}", to: done } }
+    - { command: oxplow.work_item.transition, label: Move to Done, about: work_item, input: { ref: "{{ref}}", to: done } }
 ```
 
 `about` (a core ref kind) is required; `placement` is `menu` (the page
@@ -1408,7 +1409,7 @@ custom_components:
     title: Burndown
     bundle: components/burndown        # default components/<id>; holds index.html
     assets: [open-tasks, oxplow-bundled/visits]   # lens ids; a bare slug is this extension's
-    commands: [work_item.transition]
+    commands: [oxplow.work_item.transition]
 ```
 ```yaml
 # lenses/burn.yaml
@@ -1520,7 +1521,7 @@ a shared extension's component acts with it. The github example's **PR
 Lifetimes** (`lenses/pr-lifetimes.yaml`, `components/pr-lifetimes/`)
 draws each pull request as a bar from opened to merged — a range the
 kit's charts don't draw; its filters re-run its own lens (`query`), a
-bar opens `github_pr:<n>` (`navigate`), and Sync runs `collector.sync`
+bar opens `github_pr:<n>` (`navigate`), and Sync runs `oxplow.collector.sync`
 (`invoke`) — refused until a person approves the component on
 Programs. The host's own re-run (`onUpdate`, at the lens's params) is
 asked again with a selected filter rather than drawn over it; a pull
@@ -2044,7 +2045,7 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    stale against what the run then sees (each command's own validation
    is what holds — the composer doesn't re-read).
 
-A run is the registered `command.sequence` — its spec and compiled input
+A run is the registered `oxplow.command.sequence` — its spec and compiled input
 schema, shared (`Command::with_handler`) — over what the script composed
 (calls, and its own events through `own_events`), run by
 `CommandBus::run_effect` as `Actor::Effect` with
@@ -2066,7 +2067,7 @@ event)`; `effect_run` holds its **attempts** (`attempt` from 1, `origin`
 its latest attempt's (`v_effect_run.latest`). The live consumer makes one
 attempt and never another; a failed one is sent again **by itself** only
 when that is safe (below). Otherwise a failed reaction is attempted
-again only by a person: `effect.retry { effect, event }` (`commands/effect.rs` —
+again only by a person: `oxplow.effect.retry { effect, event }` (`commands/effect.rs` —
 human-only, `Confirm::Always`, `External`, registered with the consumer
 at boot) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
 the same steps as a live reaction from the loop guard on, as the next
@@ -2109,7 +2110,7 @@ instead of running the script again (tsk887): composing afresh could read
 changed rows, change a step's input and so its key, and make a write that
 landed again. It is sent only while every step still goes to a provider
 keeping the promise; otherwise it isn't sent (`Reacted::NotResent`) and the
-failure counts, a person's. A composed `work_item.create` files on the
+failure counts, a person's. A composed `oxplow.work_item.create` files on the
 tracker active when it's **sent**, like every create (tsk1058): pointed
 elsewhere meanwhile, the retry goes there — or, when that tracker keeps
 no idempotent writes (oxplow's own), isn't sent by itself and waits for a
@@ -2140,7 +2141,7 @@ person may still retry it first.
 
 **Backfill** (P9.D5). The live consumer never reacts to what was logged
 before an effect's approval. A person has it react to that past with
-`effect.backfill { effect, from_seq? | since?, to_seq? }` (human-only,
+`oxplow.effect.backfill { effect, from_seq? | since?, to_seq? }` (human-only,
 `Confirm::Always`, `External`): the events in the range that match its
 `on` and `where` — each read at its type's newest version, as the pump
 delivers it — and that it **never reacted to** (`unreacted_tx`: no
@@ -2163,7 +2164,7 @@ an outage. A run makes at most
 proposed, failed, remaining, stopped? }` says what is left for another
 run. The effect must be enabled and approved as it is now.
 
-`effect.backfill_plan` (a read, anyone's) answers `{ planned, from_seq,
+`oxplow.effect.backfill_plan` (a read, anyone's) answers `{ planned, from_seq,
 to_seq, batch }` for the same input: what a backfill would react to. Both read
 the candidates by log position a page at a time (`SCAN_PAGE`) to the end
 of the range, applying `where` to every one — never to a first window of
@@ -2181,7 +2182,7 @@ when the plan is more than a `batch` (`backfillRunLabel`, tsk849).
 **There is no consumer-level replay.** Core's consumers are re-derivable
 (a projection is rebuilt, not replayed); replaying the log through every
 consumer would re-fire collectors noisily and effects without consent.
-Reacting to the past exists only as `effect.backfill`.
+Reacting to the past exists only as `oxplow.effect.backfill`.
 
 ## Commands
 
@@ -2200,7 +2201,7 @@ commands:
     effect: write                      # write (default) | record; `read` is refused (a lens reads)
     invokers: { human: true, agent: true, lens: true }   # default: all
     examples:
-      - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [work_item.transition] }
+      - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
 ```
 
 `transform` returns `{ commands: [{ name, input }], result?, events? }`, or
@@ -2209,16 +2210,23 @@ and writes nothing (`composed` → `Composed::{Run, Refused}`). An example
 may give `rows:` — standing in for the `input` query's result, so it
 doesn't depend on the project's data (the query is still compiled) — and
 may expect a refusal with `refuses: <part of the reason>` instead of
-`expect_commands` (not both). The **namespace** is the extension's name with `-` → `_`
-(`command_namespace`). Who holds a namespace is the bus's to say
-(`CommandBus::namespace_owner`: `oxplow` for core commands,
-`extension:<name>` / `provider:<instance>` for one registered whole with
-`register_namespace`) — there is no hand-kept list: checked against the
-running registry (`RunningCommands`, which the bus implements), a
-namespace something else holds is an error, and at run time the
-reconciler's `register_namespace` refuses it all-or-nothing under one
-lock (reported as the extension's problem). Two enabled extensions
-mapping to one namespace are both refused at load
+`expect_commands` (not both). A command's manifest `name` is
+`<area>.<verb>`; its **command id** is `<namespace>.<area>.<verb>`. The
+**namespace** is the manifest's `namespace:`, else the extension's name with
+`-` → `_` (`command_namespace`; `check_namespace`: one snake_case segment,
+and `oxplow` only for an extension that ships with oxplow — the bundled one
+declares it, so its commands are `oxplow.review.accept`,
+`oxplow.review.request_changes`, `oxplow.work.clear_finished`). Its event
+types are declared by full name and unaffected. Who holds a namespace is the
+bus's to say (`CommandBus::namespace_owner`: `oxplow`, or the one source —
+`extension:<name>` / `provider:<instance>` — holding it) — there is no
+hand-kept list: checked against the running registry (`RunningCommands`,
+which the bus implements), a namespace another source holds is an error, and
+at run time the reconciler's `register_namespace` refuses it all-or-nothing
+under one lock (reported as the extension's problem). The reconciler keys
+registrations by extension (several of oxplow's share `oxplow`) and removes a
+disabled one's with `unregister_source`. Two enabled extensions declaring one
+namespace (other than `oxplow`) are both refused at load
 (`refuse_shared_namespaces`, after disabling applies). Each entry is
 checked at load, its error at its line (`entry_line`: the line whose
 `name:` is exactly that name — `a` never lands on `abc`; ids, lenses,
@@ -2335,7 +2343,7 @@ Every contribution that runs — a provider instance, a collector, an effect
   and logs `plugin.disabled@1` (the row and the event commit together). A
   provider instance stops. A disabled collector doesn't run: the
   scheduler, the `collector.triggers` consumer and the snapshot sweep skip
-  it, and `collector.sync` refuses it with its reason (`Invalid` at
+  it, and `oxplow.collector.sync` refuses it with its reason (`Invalid` at
   `/id`). A disabled effect stops reacting (`effect.triggers` skips it).
   For an effect only a `failed` reaction counts — an interrupted one
   included, a lost race to another delivery not; `skipped` and `proposed`
@@ -2356,7 +2364,7 @@ Every contribution that runs — a provider instance, a collector, an effect
   once it's done or canceled the next disable files a new one
   (`plugin_health.repair_item`, `v_plugin_health.repair_item` while open).
   oxplow never sends it to an agent.
-- **Enabling.** Only a person: `plugin.enable { plugin, kind,
+- **Enabling.** Only a person: `oxplow.plugin.enable { plugin, kind,
   contribution }` (human-only). It names the kind — a provider and a
   collector may share an id; there must be a failed one of that kind (or
   a provider instance the registry knows).
@@ -2364,7 +2372,7 @@ Every contribution that runs — a provider instance, a collector, an effect
   contribution under its extension (`pluginHealth.ts`, live over
   `v_plugin_health`): `OK` with its average time, a missed schedule and
   undelivered events; `Failing (N in a row): <error>`; or `Disabled:
-  <reason>` with **Enable Again** (`plugin.enable` through
+  <reason>` with **Enable Again** (`oxplow.plugin.enable` through
   `personCommands`) and, while its repair item is open, **Repair with
   the Agent** — one line in the agent's input, `Repair the extension
   described in [oxplow ref <repair item>] — read it first.`, never sent
@@ -2376,8 +2384,8 @@ Every contribution that runs — a provider instance, a collector, an effect
 - **For agents.** `questions/plugins.yaml` and the extension skill's
   "Health and repair" section: read `v_plugin_health`,
   `v_collector_run` and `v_event_dead_letter`, read the repair item
-  first, fix, check, test, `collector.sync` — and ask the person to
-  Enable Again (an agent can't run `plugin.enable`).
+  first, fix, check, test, `oxplow.collector.sync` — and ask the person to
+  Enable Again (an agent can't run `oxplow.plugin.enable`).
 
 ## Implementations
 
@@ -2493,7 +2501,7 @@ advisories:
   it has rows. Marks live in `once_mark`, per effort or thread.
 - **Audience.** `agent` hints go to the coding agent; `person` hints are
   raised in Alerts ("Hints for you", `apps/desktop/src/hints.ts`) until
-  the person dismisses one (`hint.dismiss`, which an agent can't run).
+  the person dismisses one (`oxplow.hint.dismiss`, which an agent can't run).
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
   `<extension>/<id>`, with its `audience`), undelivered. The thread's
   next prompt (`AgentContext::prompt_context`) or tool call
@@ -2618,7 +2626,7 @@ tool list stable no matter how many extensions are installed.
     then enabled extensions by name); RPC `prompt_catalog { stream_id }`
     (UI only) serves it.
   - The UI: the **Catalog** page (`page:catalog`, `pages/CatalogPage.tsx`:
-    prompts by source, `v_model` by owner, `config.list_keys`), the nav
+    prompts by source, `v_model` by owner, `oxplow.config.list_keys`), the nav
     bar's Ask menu (suggested prompts for the page's ref kind), and
     `EmptyState`'s prompts (usability.md → "Empty states").
 - **Launcher entries (current, P6.D1):** the manifest's `launcher:` lists
@@ -2654,7 +2662,7 @@ tool list stable no matter how many extensions are installed.
 - **No scaffold tools (decided).** A scaffold tool would write project
   files outside the write guard and the caller's worktree. The skill carries the templates instead, and humans have
   Save as Lens in Explore Data. The same rule holds for metrics:
-  the `metric.scaffold` command returns a template the agent writes itself
+  the `oxplow.metric.scaffold` command returns a template the agent writes itself
   (tsk391).
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
@@ -2662,7 +2670,7 @@ tool list stable no matter how many extensions are installed.
   (never approves).
 - **Worktree streams: preview, don't run (tsk377).** Collected data is
   project-wide (one `ext__<ext>__<entity>` table), so a run (the
-  `collector.sync` command over `CollectorRunner::sync`, from any caller)
+  `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)
   always runs the **primary** worktree's copy. An agent
   writing a collector in a worktree stream checks it with MCP
   `preview_collector(owner, id, stream_id)`: `collector_runner::

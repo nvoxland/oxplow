@@ -26,11 +26,11 @@ use serde_json::json;
 
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
-pub const VERIFY_CLAIM: &str = "effort.verify_claim";
-pub const UNVERIFY_CLAIM: &str = "effort.unverify_claim";
-pub const CONFIRM_DECISION: &str = "effort.confirm_decision";
-pub const DISMISS_DECISION: &str = "effort.dismiss_decision";
-pub const REOPEN_DECISION: &str = "effort.reopen_decision";
+pub const VERIFY_CLAIM: &str = "oxplow.effort.verify_claim";
+pub const UNVERIFY_CLAIM: &str = "oxplow.effort.unverify_claim";
+pub const CONFIRM_DECISION: &str = "oxplow.effort.confirm_decision";
+pub const DISMISS_DECISION: &str = "oxplow.effort.dismiss_decision";
+pub const REOPEN_DECISION: &str = "oxplow.effort.reopen_decision";
 
 /// What a claim cites when a person verified it by looking.
 pub const REVIEWER: &str = "reviewer";

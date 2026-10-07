@@ -16,7 +16,7 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         commands: [
-          { id: "tracker/0", extension: "tracker", group: "fake", command: "fake.estimate", label: "Estimate in Fake…", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}", points: 3 } },
+          { id: "tracker/0", extension: "tracker", group: "fake", command: "fake.work_items.estimate", label: "Estimate in Fake…", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}", points: 3 } },
           { id: "tracker/1", extension: "tracker", group: "tracker", command: "tracker.sync", label: "Sync", about: "commit", placement: ["menu"], input: { sha: "{{ref.id}}" } },
         ],
         decorators: [],
@@ -28,15 +28,15 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         commands: [
-          { id: "oxplow-bundled/0", extension: "oxplow-bundled", group: "oxplow-bundled", command: "oxplow_bundled.accept", label: "Accept Review", about: "effort", placement: ["menu", "context"], input: { ref: "{{ref}}" } },
-          { id: "oxplow-bundled/1", extension: "oxplow-bundled", group: "oxplow-bundled", command: "oxplow_bundled.request_changes", label: "Request Changes", about: "effort", placement: ["menu", "context"], input: { ref: "{{ref}}" } },
+          { id: "oxplow-bundled/0", extension: "oxplow-bundled", group: "oxplow-bundled", command: "oxplow.review.accept", label: "Accept Review", about: "effort", placement: ["menu", "context"], input: { ref: "{{ref}}" } },
+          { id: "oxplow-bundled/1", extension: "oxplow-bundled", group: "oxplow-bundled", command: "oxplow.review.request_changes", label: "Request Changes", about: "effort", placement: ["menu", "context"], input: { ref: "{{ref}}" } },
         ],
         decorators: [],
       },
     },
   ],
   runCommand: async (name: string, input: unknown, ...rest: unknown[]) => {
-    if (!name.startsWith("fake.") && !name.startsWith("oxplow_bundled.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
+    if (!name.startsWith("fake.") && !name.startsWith("oxplow.review.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
     ran.push([name, input]);
     return { result: null, audit_id: 1, event_id: null, inverse: null };
   },
@@ -51,7 +51,7 @@ test("a page's ref gets its kind's commands, run as the person with the ref boun
   expect(view.getByTestId("page-nav-commands-menu").textContent).toContain("fake");
   expect(view.queryByTestId("page-nav-command-tracker/1")).toBeNull();
   fireEvent.click(view.getByTestId("page-nav-command-tracker/0"));
-  await waitFor(() => expect(ran).toEqual([["fake.estimate", { ref: "work_item:fake:W-1", points: 3 }]]));
+  await waitFor(() => expect(ran).toEqual([["fake.work_items.estimate", { ref: "work_item:fake:W-1", points: 3 }]]));
 });
 
 test("no commands for the page's kind, no menu", async () => {
@@ -70,5 +70,5 @@ test("an effort's page offers Accept Review and Request Changes", async () => {
   expect(menu).toContain("Accept Review");
   expect(menu).toContain("Request Changes");
   fireEvent.click(view.getByTestId("page-nav-command-oxplow-bundled/0"));
-  await waitFor(() => expect(ran).toEqual([["oxplow_bundled.accept", { ref: "effort:eff3" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.review.accept", { ref: "effort:eff3" }]]));
 });

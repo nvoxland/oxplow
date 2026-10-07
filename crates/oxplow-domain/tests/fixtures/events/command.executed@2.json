@@ -1,5 +1,5 @@
 {
-  "command": "config.set",
+  "command": "oxplow.config.set",
   "actor_kind": "effect",
   "actor_id": "acme/notify",
   "outcome": "ok",

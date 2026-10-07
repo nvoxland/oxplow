@@ -191,7 +191,7 @@ fn sql_tokens(sql: &str) -> Vec<SqlToken> {
 
 /// Whether `text` names `name` (a model or a command) as a whole word,
 /// in any case: `v_commit_file` doesn't name `v_commit`, and a sentence's
-/// full stop after `work_item.link` doesn't hide it.
+/// full stop after `oxplow.work_item.link` doesn't hide it.
 pub fn names(text: &str, name: &str) -> bool {
     let (text, name) = (text.to_lowercase(), name.to_lowercase());
     let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
@@ -394,9 +394,15 @@ mod tests {
         assert!(names("Read V_COMMIT.", "v_commit"));
         assert!(!names("read v_commit_file", "v_commit"));
         assert!(!names("read xv_commit", "v_commit"));
-        assert!(names("run work_item.link.", "work_item.link"));
-        assert!(!names("run work_item.link_all", "work_item.link"));
-        assert!(!names("run work_item.links", "work_item.link"));
+        assert!(names("run oxplow.work_item.link.", "oxplow.work_item.link"));
+        assert!(!names(
+            "run oxplow.work_item.link_all",
+            "oxplow.work_item.link"
+        ));
+        assert!(!names(
+            "run oxplow.work_item.links",
+            "oxplow.work_item.link"
+        ));
     }
 
     #[test]

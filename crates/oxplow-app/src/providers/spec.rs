@@ -664,8 +664,12 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
         ));
     }
     for command in &declared.commands {
-        oxplow_domain::CommandSpec::validate_name(&format!("{id}.{}", command.name))
-            .map_err(|e| format!("provider `{id}`: {e}"))?;
+        oxplow_domain::CommandSpec::validate_id(&crate::providers::command_id(
+            id,
+            &spec.capability,
+            &command.name,
+        ))
+        .map_err(|e| format!("provider `{id}`: {e}"))?;
         crate::providers::host::confirm_of(&command.confirm)
             .and(crate::providers::host::effect_of(&command.effect))
             .map_err(|e| format!("provider `{id}` command `{}`: {e}", command.name))?;

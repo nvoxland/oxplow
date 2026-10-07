@@ -117,7 +117,7 @@ handler (which runs in the bus's transaction).
 V5 unique index `idx_effort_open_per_thread`), and a task's status never
 opens or closes one: `task_store::apply_status_tx` (the core of
 `set_status_tx` / `update_with_status_tx` / `insert_logged_tx`, behind
-`work_item.transition` / `update` / `create`), `soft_delete` and
+`oxplow.work_item.transition` / `update` / `create`), `soft_delete` and
 `move_task` touch the task alone — `get_task_tx` sees live rows only, so
 a deleted task takes no edits. Efforts open, close and link through the
 `effort.*` commands, which the effort policy runs as it reacts to
@@ -259,7 +259,7 @@ Each stream owns:
   nothing may drop before it).
 - a `custom_prompt` column (migration V6, nullable TEXT) — per-stream
   standing instructions appended to the agent's system prompt after the
-  global `agentPromptAppend` section. Set via the `stream.set_prompt`
+  global `agentPromptAppend` section. Set via the `oxplow.stream.set_prompt`
   command (`apps/desktop/src/api.ts`'s `setStreamPrompt`); the stream
   list re-reads on `ModelsChanged` naming `v_stream`.
   V6 also dropped a legacy `summary` column that was carried over from
@@ -284,7 +284,7 @@ denied — see [agent-model.md](./agent-model.md)'s write-guard section).
 Exactly one thread per stream is `active`; the rest are `queued`. A
 newly-seeded stream ships with one thread titled `Thread`, running the
 project's default agent — `oxplow_config::default_thread_agent`, the
-same rule `thread.create` uses when no agent is named: the first enabled
+same rule `oxplow.thread.create` uses when no agent is named: the first enabled
 agent, and for `acp` the project's first `acpAgents:` entry, else the
 first preset (tsk970). `StreamService` reads it through the source
 `Services` gives it, so it's the config as it is when the thread is
@@ -393,7 +393,7 @@ distinguish backlog changes from in-thread changes.
 `author` (migration v26, nullable TEXT) — semantic origin of the row,
 distinct from `created_by` (which just classifies the SQL writer as
 `user`/`agent`/`system`). Values: `'user'` (explicit user-initiated
-create), `'agent'` (a `work_item.create` run by an agent-driven
+create), `'agent'` (a `oxplow.work_item.create` run by an agent-driven
 actor), or `NULL` (legacy rows). Pre-v29 DBs
 also held `'agent-auto'` rows synthesized by the removed auto-file
 listener; migration v29 cancels any such still-in_progress rows, and
@@ -487,7 +487,7 @@ same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
 
 **`thread_note`** is a thread's capture pad: what an agent records as it
 works (a finding, why it paused) and what an Explore subagent fills in
-(`knowledge.add_note` / `update_note`, `.context/agent-model.md`). Each
+(`oxplow.knowledge.add_note` / `update_note`, `.context/agent-model.md`). Each
 row has `id`, `thread_id`, `body`, `author` (free-form: `agent`, `user`,
 `explore-subagent`) and `created_at`. Its ref is `thread_note:not<n>`;
 its `[[…]]` links are `page_ref` edges from `thread_note`, and each
@@ -496,17 +496,17 @@ change logs `knowledge.note.written@2` / `deleted@2` (v1 named the note
 `v_search_note` indexes it.
 
 **`task_note`** holds only the comments on oxplow's tasks
-(`work_item.comment`; `task_id` NOT NULL, id `task_note:<id>`), which
+(`oxplow.work_item.comment`; `task_id` NOT NULL, id `task_note:<id>`), which
 reach `work_item_comment` by trigger. The two shared one table, one of
 `task_id` / `thread_id` set, until V24 moved thread notes out, keeping
 their ids and re-kinding their `page_ref` edges; both tables continue
 past every id the shared one gave out.
 
 Thread-scoped rows (`thread_id` set, `task_id` NULL) are the per-thread
-capture pad, written by `knowledge.add_note` / `knowledge.update_note`
+capture pad, written by `oxplow.knowledge.add_note` / `oxplow.knowledge.update_note`
 (P8.A6). An orchestrator handing a question to an Explore subagent
 allocates an empty note first and the subagent fills in its body with
-`knowledge.update_note`. The orchestrator reads them
+`oxplow.knowledge.update_note`. The orchestrator reads them
 back via `oxplow__list_thread_notes` / `listThreadNotes(threadId)` —
 reverse-chronological, capped at 100.
 
@@ -576,7 +576,7 @@ provider's item gets edges too. The UI mirrors the helpers in
 and has no task page. Columns: `work_item`,
 `thread_id`, `started_at`, `ended_at`,
 `start_snapshot_id`, `end_snapshot_id`, `summary` (free-form text
-an optional `effort.report` wrote describing what shipped; `v_effort`
+an optional `oxplow.effort.report` wrote describing what shipped; `v_effort`
 (v3) reads it, else the final message of the effort's last turn),
 `impacts_json` (V12 — nullable TEXT holding a JSON array of declared
 `TaskImpact` rows of the form `{kind, id, action?}`; the LLM uses this
@@ -596,10 +596,10 @@ them as items start and finish; `.context/work-tracking.md`):
   effort in progress. There is no time-based minimum gap.
 
 `summary` is the effort's single canonical prose body, written by
-`effort.report` on the thread's open (else latest) effort; nothing writes
+`oxplow.effort.report` on the thread's open (else latest) effort; nothing writes
 it otherwise — `v_effort.summary` falls back to the last turn's
-`agent_turn.answer` at read. Closing a thread (`thread.close`) or
-archiving its stream (`stream.archive`, end snapshot taken first) closes
+`agent_turn.answer` at read. Closing a thread (`oxplow.thread.close`) or
+archiving its stream (`oxplow.stream.archive`, end snapshot taken first) closes
 its open effort, `closed_by` `system`.
 
 Re-opening a task (done → in_progress) on a thread gives it a second effort. At most one effort is open per thread.
@@ -711,8 +711,8 @@ histories, and `listSnapshotsForStream` queries `WHERE stream_id =
 service per active stream, each watching its own
 `worktree_path`. `Services::boot` enumerates every active stream
 and registers a service for each; the stream lifecycle
-commands (`stream.create_worktree`, `stream.adopt_worktree`,
-`stream.archive`) register/unregister at
+commands (`oxplow.stream.create_worktree`, `oxplow.stream.adopt_worktree`,
+`oxplow.stream.archive`) register/unregister at
 runtime. Callers resolve the right service via
 `snapshot_captures.get(&stream_id)` (when the stream is known)
 or `snapshot_captures.primary()` (for project-shared surfaces
@@ -948,7 +948,7 @@ what's derived from it: `slug`, `title`,
 the hash of the body it was written from), and `body` (V125, P6.E2:
 the text itself, which `v_knowledge_body` publishes). The one writer is
 `wiki_page_store::upsert_tx` / `delete_tx`, inside
-`knowledge.write_page`'s transaction or the watcher's — see
+`oxplow.knowledge.write_page`'s transaction or the watcher's — see
 [knowledge.md](./knowledge.md) for the write path, pins and hand-edit
 convergence.
 
@@ -1006,12 +1006,12 @@ to "edges not in the body are deleted": a `wiki_file_ref` edge whose
 `target_id` is a file under a directory the body cites
 (`[[dir:…]]`) is re-included (`path_under_any_dir`) so `merge_source`
 preserves it and its pin. These are **verification edges**, made by
-`knowledge.write_page`'s `verified_refs` when the agent verifies a fact
+`oxplow.knowledge.write_page`'s `verified_refs` when the agent verifies a fact
 against a specific file it references only by directory. They self-clean: once
 the covering `[[dir:…]]` ref leaves the body, the edge is no longer
 re-included and gets pruned.
 
-**`verified_refs` / `removed_refs`.** `knowledge.write_page` takes
+**`verified_refs` / `removed_refs`.** `oxplow.knowledge.write_page` takes
 the paths the agent re-read against the new body (`verified_refs`: re-
 pinned to the current snapshot; a file under a cited directory is
 materialized as an edge) and the paths it took out (`removed_refs`:
@@ -1026,7 +1026,7 @@ primary-stream `file_snapshot` per target path, a `stale` flag per ref.
 `WikiFreshnessPage` renders
 the table with per-ref + per-page "Mark verified" buttons, which
 re-write the page with those refs in `verified_refs`
-(`knowledge.write_page`). The wiki page chrome adds a `Freshness (N stale)` action
+(`oxplow.knowledge.write_page`). The wiki page chrome adds a `Freshness (N stale)` action
 chip that routes to the page.
 
 Every stored `(source_kind, source_id)` / `(target_kind, target_id)`
@@ -1377,7 +1377,7 @@ decisions — a model call; failures logged). (`effort.gauges` is gone:
 `{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
 They hold `Services` weakly (the pump is part
 of it).
-`TaskService::update` / `create`, `effort.report`, and MCP / IPC
+`TaskService::update` / `create`, `oxplow.effort.report`, and MCP / IPC
 `run_command` after any write call `settle` on `effort.lifecycle` (up to 10 min; a
 start baseline on a huge repo waits for the startup sweep) so a report
 lands on the effort a close just before it closed and a batch's opens
@@ -1419,8 +1419,8 @@ P2.6, tsk460). `update_with_status_tx` writes fields, logs
 `work_item.edited@1 { work_item, fields }` when title / description /
 priority / parent / thread changed (`move_task` logs `thread` too, anchored
 to the destination), then moves the status — the core of
-`work_item.update` and `TaskService::update`. Filing a task
-(`insert_logged_tx`, the core of `work_item.create` and
+`oxplow.work_item.update` and `TaskService::update`. Filing a task
+(`insert_logged_tx`, the core of `oxplow.work_item.create` and
 `TaskService::create`) logs **`work_item.created@1 { work_item, status }`**;
 filing into a status is a creation
 with that status, not a `ready →` transition. Every provider's state
@@ -1435,12 +1435,12 @@ only in_progress crossings, thread-less tasks too) goes through one
 core, `task_store::apply_status_tx`, via `update_logged_tx` (an edited
 row), `insert_logged_tx` (filing straight into a status logs it as a
 change from `ready`) or `set_status_tx` (read-modify-write, the core of
-the `work_item.transition` command). It appends `work_item.transitioned@1`
+the `oxplow.work_item.transition` command). It appends `work_item.transitioned@1`
 in the same transaction as the status flip — subject
 `work_item:oxplow:tskN`, anchors `stream` (looked up from the thread
 inside the transaction; none for a backlog task) / `thread`, payload
 `{ work_item, from, to }`. Run as
-`work_item.transition`, its source is the actor and its cause the run's
+`oxplow.work_item.transition`, its source is the actor and its cause the run's
 `command.executed`; from `TaskService` directly it is
 `system:task_service`. A same-status re-issue logs
 nothing; a failed transition rolls the row back with the rest. It sets
@@ -1452,8 +1452,8 @@ post-commit `TasksChanged` broadcast as the UI wake-up.
 cores that open or close an effort — append
 `effort.opened@2 { effort, work_item?, thread, start_snapshot? }` and
 `effort.closed@2 { effort, work_item?, end_snapshot?, closed_by? }`
-themselves, so every path logs: the `effort.*` commands, `thread.close`,
-`stream.archive`, and the async `start` / `finish` / `close`. They are
+themselves, so every path logs: the `effort.*` commands, `oxplow.thread.close`,
+`oxplow.stream.archive`, and the async `start` / `finish` / `close`. They are
 v2 only (V8 moved logged v1 rows to v2 and stripped the old
 `retroactive` flag). Subject `[effort:effN, <work_item ref>]`; anchors
 stream / thread / effort (+ `snapshot` when pinned at open or close). A
@@ -1796,8 +1796,8 @@ viewer — a thread and its stream — sees its thread's, its stream's and
 the project's, and a ref is bookmarked at most once across those:
 `set_tx` takes it out of every scope the viewer sees before inserting, so
 bookmarking at another scope moves it. Read through `v_bookmark` (the UI's
-`tabs/bookmarks.ts`, a lens, the agent); every write is `bookmark.set` /
-`bookmark.remove` (commands.md). They used to live in webview localStorage, where neither lenses nor the
+`tabs/bookmarks.ts`, a lens, the agent); every write is `oxplow.bookmark.set` /
+`oxplow.bookmark.remove` (commands.md). They used to live in webview localStorage, where neither lenses nor the
 agent could see them; those weren't carried over.
 
 ### `capability_provider` — `SqliteCapabilityStore` (`crates/oxplow-db/src/capability_store.rs`)
@@ -1849,7 +1849,7 @@ logs its `collector.synced@1`. Read as `v_collector_run`; see
 V149 (P8.D10), rebuilt by V156 (P9.D4). Each **attempt** at an
 extension effect's reaction to an event: `effect` (`<extension>/<id>`),
 `event_id` / `event_seq`, `attempt` (from 1), `origin` (`live` — the
-event's delivery; `retry` — a person's `effect.retry`; `backfill`),
+event's delivery; `retry` — a person's `oxplow.effect.retry`; `backfill`),
 `state` (`started` / `ok` / `skipped` / `proposed` / `failed`), `reason`,
 `audit_id`, `proposal_id`, `started_at`, `finished_at`. `UNIQUE (effect,
 event_id, attempt)`: an attempt is made once, and the reaction's state is
@@ -1876,7 +1876,7 @@ runs now) plus the interval plus one scheduler tick
 `on:`, unapproved, disabled, `syncMinutes: 0`). A rate-limited instance
 keeps its last plan (tsk722). The policy is `oxplow-app/src/plugin_health.rs`:
 three failures in a row disable it, the row and `plugin.disabled@1` in
-one transaction; `plugin.enable` clears it (`plugin.enabled@1`).
+one transaction; `oxplow.plugin.enable` clears it (`plugin.enabled@1`).
 `v_plugin_health` adds `dead_letters` (pending dead letters of its
 consumer `extension:<plugin>/<contribution>`, or of events whose subject
 is `plugin:<plugin>`) and `fresh` (0 once `next_due_at` has passed).
@@ -1894,7 +1894,7 @@ own opaque `$/state` checkpoint), `status` (`never` / `reading` / `ok` /
 `checkpoint_tx` runs in the same transaction as the
 `work_item.recorded@1` events a checkpoint covers, so a read that fails
 midway resumes from the last batch that landed; `finish_tx` records the
-outcome. Read by `provider.sync` and Settings → Integrations; see
+outcome. Read by `oxplow.provider.sync` and Settings → Integrations; see
 [providers.md](./providers.md) "Reading: collectors and sync".
 
 ### `command_proposal` — `SqliteProposalStore` (`crates/oxplow-db/src/proposal_store.rs`)
@@ -1905,8 +1905,8 @@ kept until a person decides: the command and input, who proposed it
 `preview_json`, `dry_run_json` (what it would have done when proposed;
 NULL when it can't be dry-run), and `decision` — `pending`, `approved`
 (with the approving run's `audit_id`), `declined` or `superseded`.
-`proposal_key(command, input)` is `config:<key>` for `config.set` /
-`config.unset`, else the command and its input with keys sorted;
+`proposal_key(command, input)` is `config:<key>` for `oxplow.config.set` /
+`oxplow.config.unset`, else the command and its input with keys sorted;
 `insert_tx` marks pending rows with the same key `superseded` (with
 `superseded_by`) and returns which (`Inserted { id, superseded }`, for
 `command.proposed@1.supersedes`). `approve_tx` / `decline_tx` decide a
@@ -1915,7 +1915,7 @@ An `External` command's approval is the claim trio instead: `claim_tx`
 marks it approved with no `audit_id` before the run, `finish_claim_tx`
 names the run's audit row, and `release_claim_tx` makes it pending again
 when the run failed. `dry_run_json` is the `Tx` handler's `result` run
-confirmed and rolled back: `config.set` / `config.unset` give `{ key,
+confirmed and rolled back: `oxplow.config.set` / `oxplow.config.unset` give `{ key,
 before, after, changed }`, a composite `{ result, children: [{ name,
 input, result, inverse? }] }`, any other command its own result. No
 expiry. Written

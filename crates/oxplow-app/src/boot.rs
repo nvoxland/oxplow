@@ -171,7 +171,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // A collector that registered a new entity may let a model compile.
     crate::extension_models::register(state);
     state.event_pump.clone().spawn();
-    // `every:` collectors: the scheduler runs `collector.sync` as the system.
+    // `every:` collectors: the scheduler runs `oxplow.collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state.clone());
     // Paced `on:` collectors: run each deferred one once its pacing allows.
     crate::pacing::spawn(state.clone());

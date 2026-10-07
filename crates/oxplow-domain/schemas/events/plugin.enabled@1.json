@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`plugin.enabled@1` (P7.C1): a person enabled a disabled contribution\nagain on this machine (`plugin.enable`).",
+  "description": "`plugin.enabled@1` (P7.C1): a person enabled a disabled contribution\nagain on this machine (`oxplow.plugin.enable`).",
   "properties": {
     "contribution": {
       "type": "string"

@@ -1,5 +1,5 @@
 //! An agent's answers in a thread (`thread_answer` → `v_thread_answer`,
-//! P6.C1): what `lens.show` recorded, and what `lens.keep` made of it.
+//! P6.C1): what `oxplow.lens.show` recorded, and what `oxplow.lens.keep` made of it.
 //! Written inside the commands' transactions; read here and as the model.
 
 use oxplow_domain::{DomainError, Timestamp};

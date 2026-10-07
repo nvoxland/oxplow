@@ -11,7 +11,7 @@ test("an extension's launcher entries: a ref is a page, a command or prompt an a
     ext({
       launcher: [
         { label: "Settings", category: "System", target: { kind: "ref", ref: "commit:abc123" } },
-        { label: "New Bug", category: "Work", target: { kind: "command", command: "work_item.create", input: { title: "Bug" } } },
+        { label: "New Bug", category: "Work", target: { kind: "command", command: "oxplow.work_item.create", input: { title: "Bug" } } },
         { label: "Why slow", category: "Code", target: { kind: "prompt", prompt: "Why is the build slow?" } },
       ],
     }),
@@ -23,7 +23,7 @@ test("an extension's launcher entries: a ref is a page, a command or prompt an a
   ]);
   expect(out.pages.map((p) => [p.label, p.category, p.ref.id])).toEqual([["Settings", "System", "commit:abc123"]]);
   expect(out.actions).toEqual([
-    { id: "x:New Bug", extension: "x", label: "New Bug", category: "Work", target: { kind: "command", command: "work_item.create", input: { title: "Bug" } } },
+    { id: "x:New Bug", extension: "x", label: "New Bug", category: "Work", target: { kind: "command", command: "oxplow.work_item.create", input: { title: "Bug" } } },
     { id: "x:Why slow", extension: "x", label: "Why slow", category: "Code", target: { kind: "prompt", prompt: "Why is the build slow?" } },
   ]);
 });

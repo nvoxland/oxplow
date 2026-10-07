@@ -13,5 +13,5 @@ columns:
   - { key: statement, label: Claim }
   - { key: kind, label: Kind }
 actions:
-  - { id: verify, label: Mark Verified, command: effort.verify_claim, input: { claim: "{{row.claim}}" }, row: true }
+  - { id: verify, label: Mark Verified, command: oxplow.effort.verify_claim, input: { claim: "{{row.claim}}" }, row: true }
 empty: Every claim for this effort is backed by evidence (or none were made).

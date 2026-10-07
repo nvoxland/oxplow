@@ -1,7 +1,7 @@
 //! Reactions to `config.changed` (`.context/commands.md`): a config key
 //! whose new value has to reach something running. Driven by the event
 //! log, so a change made by anyone — the person's Settings page, an
-//! agent's `config.set`, an undo — takes effect the same way.
+//! agent's `oxplow.config.set`, an undo — takes effect the same way.
 //!
 //! The new value comes from the event's own `after`, never from the
 //! in-memory config: the pump can see the committed event before the
@@ -32,12 +32,12 @@ pub const PROVIDERS: &str = "config.providers";
 /// `dimensions`, `collectors`, the retention and visibility keys).
 pub const METRICS: &str = "config.metrics";
 
-/// How long a reactor waits for `config.set`'s after-commit swap.
+/// How long a reactor waits for `oxplow.config.set`'s after-commit swap.
 const APPLY_WAIT: Duration = Duration::from_secs(5);
 
 /// Wait until the in-memory config has `change` applied — its key no
 /// longer reads `before` (it reads `after`, or a later change's value) —
-/// or [`APPLY_WAIT`] passes. `config.set` swaps it right after the commit
+/// or [`APPLY_WAIT`] passes. `oxplow.config.set` swaps it right after the commit
 /// the pump may already have seen.
 pub async fn applied(svc: &crate::Services, change: &ConfigChangedV2) {
     let deadline = tokio::time::Instant::now() + APPLY_WAIT;
@@ -183,7 +183,7 @@ mod tests {
             .ignore(&svc.layout.project_dir.join(Path::new(path)), false)
     }
 
-    /// tsk515: an agent's `config.set` on `generated` (not only the
+    /// tsk515: an agent's `oxplow.config.set` on `generated` (not only the
     /// Settings page) reaches the snapshot captures; unsetting it lifts
     /// the exclusion again.
     #[tokio::test]
@@ -198,7 +198,7 @@ mod tests {
         svc.commands
             .run(
                 &agent,
-                "config.set",
+                "oxplow.config.set",
                 json!({ "key": "generated", "value": { "exclude": ["out"] } }),
                 false,
             )
@@ -211,7 +211,12 @@ mod tests {
         );
         assert!(ignores(svc, "out/bundle.js"));
         svc.commands
-            .run(&agent, "config.unset", json!({ "key": "generated" }), false)
+            .run(
+                &agent,
+                "oxplow.config.unset",
+                json!({ "key": "generated" }),
+                false,
+            )
             .await
             .unwrap();
         assert!(
@@ -232,7 +237,7 @@ mod tests {
         svc.commands
             .run(
                 &Actor::Human,
-                "config.set",
+                "oxplow.config.set",
                 json!({ "key": "metrics", "value": [
                     { "key": "work.ready_now", "entity": "v_task", "where": "status = 'ready'" }
                 ] }),
@@ -264,7 +269,7 @@ mod tests {
         svc.commands
             .run(
                 &Actor::Human,
-                "config.set",
+                "oxplow.config.set",
                 json!({ "key": "extensions", "value": { "disabled": ["oxplow-bundled"] } }),
                 true,
             )

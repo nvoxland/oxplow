@@ -86,21 +86,21 @@ pub trait TaskStore: Send + Sync {
 
 #[async_trait]
 pub trait TaskNoteStore: Send + Sync {
-    // A note on a task is a work-item comment: the `work_item.comment`
+    // A note on a task is a work-item comment: the `oxplow.work_item.comment`
     // command (`oxplow_db::task_satellite::add_task_note_tx`).
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError>;
 }
 
 #[async_trait]
 pub trait ThreadNoteStore: Send + Sync {
-    // Written by `knowledge.add_note` / `update_note`
+    // Written by `oxplow.knowledge.add_note` / `update_note`
     // (`oxplow_db::thread_note_store`).
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<ThreadNote>, DomainError>;
 }
 
 #[async_trait]
 pub trait TaskLinkStore: Send + Sync {
-    // Links are made by the `work_item.link` command
+    // Links are made by the `oxplow.work_item.link` command
     // (`oxplow_db::task_satellite::create_link_tx`).
     async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
     async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;

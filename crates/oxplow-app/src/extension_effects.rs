@@ -2712,14 +2712,14 @@ mod tests {
             std::fs::write(dir.join("e.star"), script).unwrap();
             std::fs::write(
                 dir.join("fixtures/basic.yaml"),
-                "input: { effect: on-done, event: { type: work_item.transitioned, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [work_item.comment] }\n",
+                "input: { effect: on-done, event: { type: work_item.transitioned, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.work_item.comment] }\n",
             )
             .unwrap();
         };
         write(
             old.path(),
             "",
-            "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.comment\", \"input\": {}}]}\n",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.comment\", \"input\": {}}]}\n",
         );
         write(
             new.path(),
@@ -2766,7 +2766,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "Effect on-done: on work_item.transitioned → on work_item.transitioned where to = done",
-                "Effect on-done on fixture basic: runs [work_item.comment] → skips (not today)",
+                "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
             ]
         );
     }
@@ -3114,7 +3114,7 @@ mod tests {
                         input: "fixture basic".into(),
                         change: Change::Changed,
                         before: Some(Composes {
-                            commands: vec!["work_item.comment".into()],
+                            commands: vec!["oxplow.work_item.comment".into()],
                             skip: None,
                             error: None,
                         }),
@@ -3152,7 +3152,7 @@ mod tests {
                 "Collector gh: now reaches api.example.com (was none)",
                 "Provider fake: command `delete` added (destructive)",
                 "Effect on-done: on work_item.transitioned → on work_item.transitioned where to = done",
-                "Effect on-done on fixture basic: runs [work_item.comment] → skips (not today)",
+                "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
                 "Effect ping: added — on vcs.head.moved",
                 "Collector gh on fixture two: 2 thing → fails (boom)",
                 "Model v_shared_x: column `y` added; read by v_b_y",

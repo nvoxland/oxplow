@@ -15,4 +15,4 @@ empty: No open task has gone a week untouched — or the collector hasn't synced
 launcher: { category: Work }
 alert: { min_rows: 1, label: Stale tasks }
 actions:
-  - { id: sync, label: Sync, command: collector.sync, input: { owner: stale-work, id: stale_tasks } }
+  - { id: sync, label: Sync, command: oxplow.collector.sync, input: { owner: stale-work, id: stale_tasks } }

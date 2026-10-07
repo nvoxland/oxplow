@@ -180,7 +180,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
             setContextMenu(null);
             // A menu has nowhere to ask inline: the destructive command
             // asks through the shared confirmation (`personCommands`).
-            await personCommands.run(`Delete "${slug}"`, "knowledge.delete_page", { slug });
+            await personCommands.run(`Delete "${slug}"`, "oxplow.knowledge.delete_page", { slug });
           },
         },
       ]

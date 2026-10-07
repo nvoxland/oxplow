@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`knowledge.page.written@1`: a knowledge page's row and edges were\nrestated from its body — by `knowledge.write_page` / `link` /\n`resync`, or by the wiki watcher after a hand edit\n(`system:wiki_watch`).",
+  "description": "`knowledge.page.written@1`: a knowledge page's row and edges were\nrestated from its body — by `oxplow.knowledge.write_page` / `link` /\n`resync`, or by the wiki watcher after a hand edit\n(`system:wiki_watch`).",
   "properties": {
     "outbound": {
       "description": "Every ref the page now points at (`file:src/lib.rs`, `wiki:x`, …).",

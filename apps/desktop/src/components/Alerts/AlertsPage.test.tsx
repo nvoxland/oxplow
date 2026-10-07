@@ -38,7 +38,7 @@ mock.module("../../api.js", () => ({
     if (sql.includes("FROM v_command_proposal")) {
       return {
         columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run"],
-        rows: [[7, "proposal:7", "t", "config.set", '{"key":"zones","value":[]}', "agent", "thr3", 3, "config:zones", '{"command":"config.set","summary":"Set zones","input":{},"destructive":false}', null]],
+        rows: [[7, "proposal:7", "t", "oxplow.config.set", '{"key":"zones","value":[]}', "agent", "thr3", 3, "config:zones", '{"command":"oxplow.config.set","summary":"Set zones","input":{},"destructive":false}', null]],
         truncated: false,
         reads: { models: ["v_command_proposal"], tables: [], measures: [] },
         freshness: {},
@@ -102,7 +102,7 @@ test("a hint raised to the person is listed with its thread, and Dismiss dismiss
   expect(within(hints).getByTestId("alerts-hint-4").textContent).toContain("“t” is still in progress");
   expect(within(hints).getByTestId("alerts-hint-4").textContent).toContain("Main");
   fireEvent.click(within(hints).getByTestId("alerts-hint-dismiss-4"));
-  await waitFor(() => expect(ran).toEqual([["hint.dismiss", { nudge: 4 }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.hint.dismiss", { nudge: 4 }]]));
 });
 
 test("the bell counts everything, red for a problem, and opens Alerts", async () => {

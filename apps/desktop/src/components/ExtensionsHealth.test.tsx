@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 // P7.C3: a disabled contribution shows why; Enable Again runs
-// `plugin.enable` as the person; Repair with the Agent fills the agent's
+// `oxplow.plugin.enable` as the person; Repair with the Agent fills the agent's
 // input with one mention and sends nothing.
 
 const realApi = await import("../api.js");
@@ -48,7 +48,7 @@ test("Enable Again runs plugin.enable through the person's commands", async () =
   const view = render(<HealthRow health={disabled} />);
   fireEvent.click(view.getByTestId("extension-enable-tracker-issues"));
   await waitFor(() => expect(ran).toHaveLength(1));
-  expect(ran[0]).toEqual({ name: "plugin.enable", input: { plugin: "tracker", kind: "collector", contribution: "issues" }, confirmed: false });
+  expect(ran[0]).toEqual({ name: "oxplow.plugin.enable", input: { plugin: "tracker", kind: "collector", contribution: "issues" }, confirmed: false });
 });
 
 test("Repair with the Agent fills the agent input and runs nothing", () => {

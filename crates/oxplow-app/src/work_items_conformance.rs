@@ -44,7 +44,7 @@ pub trait WorkItemsProbe: Send + Sync {
     async fn record(&self, item_ref: &str) -> Option<WorkItemRecord>;
     /// The type of every logged event whose subject names `item_ref`.
     async fn event_types(&self, item_ref: &str) -> Vec<String>;
-    /// Read `provider` back through its collectors (`provider.sync`), its
+    /// Read `provider` back through its collectors (`oxplow.provider.sync`), its
     /// records restating its items; `false` when it has none to read
     /// (oxplow's own, a provider that declares no collector).
     async fn sync(&self, provider: &str) -> Result<bool, String>;

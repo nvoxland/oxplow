@@ -1,5 +1,7 @@
 manifest: 2
 name: oxplow-bundled
+# Its commands are oxplow's own: `oxplow.<area>.<verb>`, like core's.
+namespace: oxplow
 description: What comes with oxplow, built as an ordinary extension. The effort review packet and its verdicts, metric and coverage guidance for the agent, and the usage, quality and change analysis lenses.
 sharing: shared
 engine: ">=0.7"
@@ -58,8 +60,8 @@ ui:
     - { slot: effort.review.details, lens: context-read }
     - { slot: effort.review.details, lens: review-prompt }
   commands:
-    - { command: oxplow_bundled.accept, label: Accept Review, about: effort }
-    - { command: oxplow_bundled.request_changes, label: Request Changes, about: effort }
+    - { command: oxplow.review.accept, label: Accept Review, about: effort }
+    - { command: oxplow.review.request_changes, label: Request Changes, about: effort }
   # The verdict where the effort is shown: it shows; it never acts.
   decorators:
     - { model: verdict, kind: effort, placement: ref-chip, label: label, color: color }
@@ -231,7 +233,7 @@ models:
   - name: finished_cleared
     version: 1
     key: [thread_id]
-    description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow_bundled.clear_finished`), read from the events' envelopes."
+    description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow.work.clear_finished`), read from the events' envelopes."
     columns:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
@@ -291,7 +293,7 @@ effects:
              AND r.effect = 'oxplow-bundled/verify-unchecked' AND r.latest = 1
              AND r.state IN ('ok', 'proposed'))
 commands:
-  - name: accept
+  - name: review.accept
     summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.
     input_schema:
       type: object
@@ -317,7 +319,7 @@ commands:
       - name: reviewed
         input: { ref: "effort:eff1" }
         rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]
-        expect_commands: [work_item.comment, work_item.transition]
+        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: an unverified claim
         input: { ref: "effort:eff1" }
         rows: [{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]
@@ -325,16 +327,16 @@ commands:
       - name: forced
         input: { ref: "effort:eff1", force: true }
         rows: [{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]
-        expect_commands: [work_item.comment, work_item.transition]
+        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: another provider's item
         input: { ref: "effort:eff2" }
         rows: [{ work_item: "work_item:issues:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
-        expect_commands: [work_item.comment, work_item.transition]
+        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: no work item
         input: { ref: "effort:eff3" }
         rows: [{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]
         refuses: has no work item
-  - name: request_changes
+  - name: review.request_changes
     summary: Send an effort's work back — comment a checklist of its unverified claims, inferred decisions and files outside its work item's area (and your note) on the item, and move it back to todo.
     input_schema:
       type: object
@@ -360,7 +362,7 @@ commands:
       - name: a file outside the area
         input: { ref: "effort:eff1" }
         rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: '["crates/db/store.rs"]' }]
-        expect_commands: [work_item.comment, work_item.transition]
+        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: nothing to ask for
         input: { ref: "effort:eff1" }
         rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]
@@ -368,12 +370,12 @@ commands:
       - name: another provider's item
         input: { ref: "effort:eff2", note: "Add the migration." }
         rows: [{ work_item: "work_item:issues:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
-        expect_commands: [work_item.comment, work_item.transition]
+        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: no work item
         input: { ref: "effort:eff3", note: "x" }
         rows: [{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]
         refuses: has no work item
-  - name: clear_finished
+  - name: work.clear_finished
     summary: Clear a thread's Finished list in the Work panel — what finished before now stops showing there.
     input_schema:
       type: object

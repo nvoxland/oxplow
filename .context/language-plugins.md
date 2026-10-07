@@ -68,7 +68,7 @@ new languages:
   `files()`/`ast_query()`/`code_metrics()`/`source_files()`/`markers()`
   host builtins (see `.context/metrics.md`).
 - **LSP servers** — `.oxplow/project.yaml` `lsp.servers[]` (any `languageId`), or
-  the `lsp.install_server` command (see `.context/lsp.md`).
+  the `oxplow.lsp.install_server` command (see `.context/lsp.md`).
 
 Adding a brand-new language **with static analysis** (complexity, containers,
 markers, merge) requires a recompile — that's the deliberate trade.

@@ -105,7 +105,7 @@ Things I keep forgetting. Read this before adding any UI.
   GitDashboardPage), call `onOpenPage(alertsRef())` after recording so
   the person lands where it's shown. The store stays in memory (gone on reload),
   but each record is also reported to the daemon, fire-and-forget, as
-  the person-only `ui.report_error` (tsk1072), so the agent reads what
+  the person-only `oxplow.ui.report_error` (tsk1072), so the agent reads what
   the person saw in `v_op_error`. A report that fails is logged with
   `logUi`, never recorded as another op error (it would loop).
 - **Every `<button>` needs an explicit `type`.** HTML defaults
@@ -265,7 +265,7 @@ click is the confirmation — plus saying what is about to happen.
 - **A count a person should see comes before the confirming click**
   (P9.D5). A command's confirmation shows its summary and input, not
   something computed; so **Backfill…** on an approved effect's row first
-  reads the plan (`effect.backfill_plan`), says how many events the
+  reads the plan (`oxplow.effect.backfill_plan`), says how many events the
   effect never reacted to and that it may call outside oxplow for each,
   and offers "Run on N events" beside Cancel. Escape cancels; nothing to
   do says so, with Close (`effect-backfill-<key>`,

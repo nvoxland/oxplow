@@ -788,7 +788,7 @@ impl EffortService {
 ///  - `Updated` if the file is present (the dominant case)
 ///
 /// Agents that want explicit "created" attribution should declare
-/// it via the `impacts` parameter on the close (`effort.report`). Returns
+/// it via the `impacts` parameter on the close (`oxplow.effort.report`). Returns
 /// `Updated` when `worktree_root` is `None` so test fixtures that
 /// don't carry a real worktree keep their old behavior.
 fn classify_change(worktree_root: Option<&Path>, path: &str) -> EffortFileChange {

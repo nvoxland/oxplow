@@ -27,13 +27,13 @@ use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
 use crate::dashboard_tiles::{new_tile, TileInput};
 use crate::sql_gateway::SqlGateway;
 
-pub const CREATE: &str = "dashboard.create";
-pub const RENAME: &str = "dashboard.rename";
-pub const DELETE: &str = "dashboard.delete";
-pub const ADD_ITEM: &str = "dashboard.add_item";
-pub const UPDATE_ITEM: &str = "dashboard.update_item";
-pub const REMOVE_ITEM: &str = "dashboard.remove_item";
-pub const REORDER_ITEMS: &str = "dashboard.reorder_items";
+pub const CREATE: &str = "oxplow.dashboard.create";
+pub const RENAME: &str = "oxplow.dashboard.rename";
+pub const DELETE: &str = "oxplow.dashboard.delete";
+pub const ADD_ITEM: &str = "oxplow.dashboard.add_item";
+pub const UPDATE_ITEM: &str = "oxplow.dashboard.update_item";
+pub const REMOVE_ITEM: &str = "oxplow.dashboard.remove_item";
+pub const REORDER_ITEMS: &str = "oxplow.dashboard.reorder_items";
 
 /// A person, or a lens acting for one.
 const PEOPLE: Invokers = Invokers {
@@ -186,7 +186,7 @@ pub fn create_command() -> Command {
     Command::new(
         spec(
             CREATE,
-            "Create an empty dashboard (a grid of tiles); fill it with `dashboard.add_item`.",
+            "Create an empty dashboard (a grid of tiles); fill it with `oxplow.dashboard.add_item`.",
             schema::<CreateInput>(),
             Invokers::ALL,
             Confirm::Never,
@@ -203,7 +203,7 @@ pub fn create_command() -> Command {
             })
         })),
     )
-    .expect("dashboard.create is a valid command")
+    .expect("oxplow.dashboard.create is a valid command")
 }
 
 /// `dashboard.rename { dashboard, title }`; undone by renaming it back.
@@ -235,7 +235,7 @@ pub fn rename_command() -> Command {
             })
         })),
     )
-    .expect("dashboard.rename is a valid command")
+    .expect("oxplow.dashboard.rename is a valid command")
 }
 
 /// `dashboard.delete { dashboard }`: it and its tiles. A person's,
@@ -262,7 +262,7 @@ pub fn delete_command() -> Command {
             })
         })),
     )
-    .expect("dashboard.delete is a valid command")
+    .expect("oxplow.dashboard.delete is a valid command")
 }
 
 /// `dashboard.add_item { dashboard, kind, sql?, display?, lens_id?,
@@ -323,7 +323,7 @@ pub fn add_item_command(db: Database, sql: SqlGateway) -> Command {
             })
         })),
     )
-    .expect("dashboard.add_item is a valid command")
+    .expect("oxplow.dashboard.add_item is a valid command")
 }
 
 /// `dashboard.update_item { item, options_json? }`: a query tile's SQL is
@@ -378,7 +378,7 @@ pub fn update_item_command(db: Database, sql: SqlGateway) -> Command {
             })
         })),
     )
-    .expect("dashboard.update_item is a valid command")
+    .expect("oxplow.dashboard.update_item is a valid command")
 }
 
 /// `dashboard.remove_item { item }`; undone by adding it back where it was.
@@ -418,7 +418,7 @@ pub fn remove_item_command() -> Command {
             })
         })),
     )
-    .expect("dashboard.remove_item is a valid command")
+    .expect("oxplow.dashboard.remove_item is a valid command")
 }
 
 /// `dashboard.reorder_items { dashboard, order }`; undone by the previous
@@ -460,7 +460,7 @@ pub fn reorder_items_command() -> Command {
             })
         })),
     )
-    .expect("dashboard.reorder_items is a valid command")
+    .expect("oxplow.dashboard.reorder_items is a valid command")
 }
 
 /// The dashboard commands, for the bus.

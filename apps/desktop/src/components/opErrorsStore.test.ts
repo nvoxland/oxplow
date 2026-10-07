@@ -110,7 +110,7 @@ describe("reportOpErrorTo", () => {
     await Promise.resolve();
     expect(calls).toEqual([
       {
-        name: "ui.report_error",
+        name: "oxplow.ui.report_error",
         input: {
           label: "List data",
           command: "query_sql",
@@ -124,7 +124,7 @@ describe("reportOpErrorTo", () => {
       },
       // tsk1079: from no thread, it names the stream on screen, so that
       // stream's agent can read its output.
-      { name: "ui.report_error", input: { label: "Save note", stream: "str1" } },
+      { name: "oxplow.ui.report_error", input: { label: "Save note", stream: "str1" } },
     ]);
   });
 

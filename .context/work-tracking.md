@@ -89,7 +89,7 @@ per turn.
 
 Built so far: rule 1, in `crate::effort_policy` — a pump consumer on
 `work_item.state_changed` (core's, logged for every provider), `effort.linked`
-and `effort.opened`. It runs the `effort.*` and `work_item.transition`
+and `effort.opened`. It runs the `effort.*` and `oxplow.work_item.transition`
 commands as the effect `oxplow:effort-policy` and ignores events its own
 runs caused. The thread is the event's (the agent that moved the item),
 else the item's (`v_work_item.thread_id`); a person moving a backlog item
@@ -113,10 +113,10 @@ the thread has none open; a later item start links it (rule 1).
 ## No gates
 
 - The edit guard keeps only isolation: a non-writer thread, another
-  stream's worktree, wiki pages (written through `knowledge.write_page`).
+  stream's worktree, wiki pages (written through `oxplow.knowledge.write_page`).
   It never asks for tracked work.
 - The Stop hook never refuses a stop.
-- Nothing the agent must call to close work. `effort.report {thread?,
+- Nothing the agent must call to close work. `oxplow.effort.report {thread?,
   summary?, impacts?}` is optional and only annotates the thread's open
   (else latest) effort; `v_effort.summary` defaults to the effort's last
   turn's final message.
@@ -163,7 +163,7 @@ own — heavier ones included (beads as a work list).
   implementation may declare): the work list and the effort policy may
   be none, snapshots may not, and `vcs` / `knowledge` aren't chosen. A
   person's override is `activeProviders` in `.oxplow/personal.yaml`
-  (`config.set { layer: personal }`).
+  (`oxplow.config.set { layer: personal }`).
 - **No special-casing our own implementations.** Core calls every
   implementation of an interface the same way and never branches on
   whether it is ours or compiled in. Compiled-in, scripted and
@@ -216,8 +216,8 @@ The three in progress:
   their causing tool call. An effort's start pin is where its span began:
   the predecessor's end snapshot when it starts at that close, else the
   stream's last snapshot before it when it adopted work already taken.
-  Efforts close with their thread (`thread.close`) and stream
-  (`stream.archive`, end snapshot first); `effort.report` is optional and
+  Efforts close with their thread (`oxplow.thread.close`) and stream
+  (`oxplow.stream.archive`, end snapshot first); `oxplow.effort.report` is optional and
   never creates an effort, and the summary defaults to the last turn's
   final message. "Waiting on you" is derived; `await_user` is gone.
   The Work panel shows the thread's open effort even when unlinked (In
@@ -229,7 +229,7 @@ The three in progress:
   (`:thread_id`, `:stream_id`, `:turn_id`, nullable `:effort_id`),
   `once_per: thread`, and one delivery path — every hit is a nudge the
   next prompt or tool call takes and stamps; bundled `large-uncommitted`.
-  Second cut: `audience: person` (Alerts, `hint.dismiss`), `once_per:
+  Second cut: `audience: person` (Alerts, `oxplow.hint.dismiss`), `once_per:
   session | day`, a per-hook character budget, evaluation counts
   (`v_hint_stat`) and muting after three deliveries; bundled
   `landed-in-progress` to the person.

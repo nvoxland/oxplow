@@ -82,7 +82,7 @@ pub struct HandlerOutput {
     pub events: Vec<Envelope>,
     /// Runs once the run has committed: the in-memory broadcast that wakes
     /// the UI (`OxplowEvent`), and side effects outside the database that
-    /// mirror the committed change (`config.set` writes project.yaml here).
+    /// mirror the committed change (`oxplow.config.set` writes project.yaml here).
     /// Never a database write, and it must tolerate failure — the run is
     /// already recorded. The handler itself must stay pure: it can run
     /// more than once (`Database::transaction` retries on SQLITE_BUSY).
@@ -112,7 +112,7 @@ pub struct NestedChild {
 /// What a composite's children produced, for the parent's `HandlerOutput`.
 pub struct NestedOutcome {
     pub children: Vec<NestedChild>,
-    /// The children's inverses reversed, as a `command.sequence`; `None`
+    /// The children's inverses reversed, as a `oxplow.command.sequence`; `None`
     /// when a child has none.
     pub inverse: Option<CommandCall>,
     pub events: Vec<Envelope>,
@@ -145,7 +145,7 @@ pub struct TxCtx<'a> {
     pub depth: usize,
 }
 
-/// The deepest a composite may nest (`command.sequence` and extension
+/// The deepest a composite may nest (`oxplow.command.sequence` and extension
 /// commands composing one another).
 pub const MAX_NESTING: usize = 8;
 
@@ -265,7 +265,7 @@ pub struct Command {
     /// Compiled once, shared by [`Command::with_handler`]'s copies.
     validator: Arc<InputValidator>,
     /// Per-input confirmation, when the spec's `confirm` depends on the
-    /// input (`config.set` on a human-only key). Overrides `spec.confirm`.
+    /// input (`oxplow.config.set` on a human-only key). Overrides `spec.confirm`.
     confirm_for: Option<Arc<ConfirmFor>>,
     /// Its check before the transaction, if it has one ([`Precheck`]).
     precheck: Option<Arc<Precheck>>,
@@ -273,7 +273,7 @@ pub struct Command {
 
 impl Command {
     /// This command run by `handler` instead — its spec and compiled
-    /// schema shared (an effect's reaction: `command.sequence` over what
+    /// schema shared (an effect's reaction: `oxplow.command.sequence` over what
     /// its script composed). The handler must be of the same atomicity.
     pub fn with_handler(&self, handler: Handler) -> Result<Self, CommandError> {
         let copy = Self {
@@ -293,7 +293,7 @@ impl Command {
     }
 
     pub fn new(spec: CommandSpec, handler: Handler) -> Result<Self, CommandError> {
-        CommandSpec::validate_name(&spec.name)?;
+        CommandSpec::validate_id(&spec.name)?;
         if spec.confirm.required() {
             Self::may_ask(&spec)?;
         }
@@ -398,25 +398,94 @@ impl crate::extensions::RunningCommands for CommandBus {
     }
 }
 
-/// The registered commands by name, and who holds each namespace
-/// registered whole (`register_namespace`); a namespace with commands but
-/// no owner is oxplow's.
+/// Who registered a command: core itself.
+pub const CORE_SOURCE: &str = "core";
+
+/// May `source` register under the reserved `oxplow` namespace? Core and
+/// the extensions that ship with oxplow — nothing else.
+fn ships_with_oxplow(source: &str) -> bool {
+    source == CORE_SOURCE
+        || source
+            .strip_prefix("extension:")
+            .is_some_and(|name| crate::bundled_extensions::find(name).is_some())
+}
+
+/// The registered commands by id, who registered each (its source:
+/// `core`, `extension:<name>`, `provider:<name>`), and who holds each
+/// namespace: `oxplow` for the reserved one — shared by core and oxplow's
+/// own extensions, collisions checked per id — else the one source that
+/// registered it.
 #[derive(Default)]
 struct Registry {
     commands: BTreeMap<String, Arc<Command>>,
-    owners: BTreeMap<String, String>,
+    sources: BTreeMap<String, String>,
+    holders: BTreeMap<String, String>,
 }
 
 impl Registry {
     fn owner(&self, namespace: &str) -> Option<String> {
-        if let Some(owner) = self.owners.get(namespace) {
-            return Some(owner.clone());
+        self.holders.get(namespace).cloned()
+    }
+
+    /// Add `commands` from `source` under `namespace`, all or none.
+    fn add(
+        &mut self,
+        namespace: &str,
+        source: &str,
+        commands: Vec<Command>,
+    ) -> Result<(), CommandError> {
+        let invalid = |field: Option<&str>, message: String| CommandError::Invalid {
+            field: field.map(str::to_string),
+            message,
+        };
+        let reserved = namespace == oxplow_domain::OXPLOW_NAMESPACE;
+        if reserved && !ships_with_oxplow(source) {
+            return Err(invalid(
+                None,
+                format!(
+                    "the command namespace `{namespace}` is reserved for oxplow's own commands"
+                ),
+            ));
         }
-        let prefix = format!("{namespace}.");
-        self.commands
-            .keys()
-            .any(|n| n.starts_with(&prefix))
-            .then(|| "oxplow".to_string())
+        match self.holders.get(namespace) {
+            Some(held) if !reserved && held != source => {
+                return Err(invalid(
+                    None,
+                    format!("the command namespace `{namespace}` is already {held}'s"),
+                ))
+            }
+            _ => {}
+        }
+        for command in &commands {
+            let id = &command.spec.name;
+            CommandSpec::validate_id(id).map_err(|e| invalid(Some("/name"), e.to_string()))?;
+            if oxplow_domain::namespace_of(id) != namespace {
+                return Err(invalid(
+                    Some("/name"),
+                    format!("`{id}` isn't under `{namespace}`"),
+                ));
+            }
+            if self.commands.contains_key(id) {
+                return Err(invalid(
+                    Some("/name"),
+                    format!("command `{id}` is already registered"),
+                ));
+            }
+        }
+        let holder = if reserved {
+            oxplow_domain::OXPLOW_NAMESPACE
+        } else {
+            source
+        };
+        self.holders
+            .insert(namespace.to_string(), holder.to_string());
+        for command in commands {
+            self.sources
+                .insert(command.spec.name.clone(), source.to_string());
+            self.commands
+                .insert(command.spec.name.clone(), Arc::new(command));
+        }
+        Ok(())
     }
 
     fn get(&self, name: &str) -> Option<&Arc<Command>> {
@@ -532,84 +601,62 @@ impl CommandBus {
         self
     }
 
-    /// Register a command. A second command of the same name is refused:
-    /// two handlers for one name is a bug, not an override.
+    /// Register one of core's commands (under `oxplow`). A second command
+    /// with the same id is refused: two handlers for one id is a bug, not
+    /// an override.
     pub fn register(&self, command: Command) -> Result<(), CommandError> {
-        let mut registry = self.commands.write();
-        let namespace = command.spec.name.split('.').next().unwrap_or_default();
-        if let Some(owner) = registry.owners.get(namespace) {
-            return Err(CommandError::Invalid {
-                field: Some("/name".into()),
-                message: format!("the command namespace `{namespace}` is {owner}'s"),
-            });
-        }
-        if registry.commands.contains_key(&command.spec.name) {
-            return Err(CommandError::Invalid {
-                field: Some("/name".into()),
-                message: format!("command `{}` is already registered", command.spec.name),
-            });
-        }
-        registry
-            .commands
-            .insert(command.spec.name.clone(), Arc::new(command));
-        Ok(())
+        let namespace = oxplow_domain::namespace_of(&command.spec.name).to_string();
+        self.commands
+            .write()
+            .add(&namespace, CORE_SOURCE, vec![command])
     }
 
-    /// Register `commands` as the whole of `namespace`, held by `owner`
-    /// (`extension:<name>`, `provider:<instance>`) — all of them or none,
-    /// under one lock: refused when the namespace is taken (by another
-    /// owner, or by oxplow's own commands) or a command isn't under it.
+    /// Register `commands` from `source` (`extension:<name>`,
+    /// `provider:<name>`) under `namespace` — all of them or none, under
+    /// one lock. Refused when the namespace is another source's, when it is
+    /// the reserved `oxplow` and `source` doesn't ship with oxplow, or when
+    /// an id is taken or isn't under it.
     pub fn register_namespace(
         &self,
         namespace: &str,
-        owner: &str,
+        source: &str,
         commands: Vec<Command>,
     ) -> Result<(), CommandError> {
-        let mut registry = self.commands.write();
-        if let Some(held) = registry.owner(namespace) {
-            return Err(CommandError::Invalid {
-                field: None,
-                message: format!("the command namespace `{namespace}` is already {held}'s"),
-            });
-        }
-        let prefix = format!("{namespace}.");
-        if let Some(stray) = commands.iter().find(|c| !c.spec.name.starts_with(&prefix)) {
-            return Err(CommandError::Invalid {
-                field: Some("/name".into()),
-                message: format!("`{}` isn't under `{namespace}`", stray.spec.name),
-            });
-        }
-        registry
-            .owners
-            .insert(namespace.to_string(), owner.to_string());
-        for command in commands {
-            registry
-                .commands
-                .insert(command.spec.name.clone(), Arc::new(command));
-        }
-        Ok(())
+        self.commands.write().add(namespace, source, commands)
     }
 
-    /// Remove `namespace` and every command under it (an extension
-    /// disabled, a provider instance stopped); returns their names.
-    pub fn unregister_namespace(&self, namespace: &str) -> Vec<String> {
-        let prefix = format!("{namespace}.");
+    /// Remove every command `source` registered (an extension disabled, a
+    /// provider instance stopped); returns their ids. A namespace left
+    /// with no commands is free again.
+    pub fn unregister_source(&self, source: &str) -> Vec<String> {
         let mut registry = self.commands.write();
-        registry.owners.remove(namespace);
-        let names: Vec<String> = registry
+        let ids: Vec<String> = registry
+            .sources
+            .iter()
+            .filter(|(_, s)| s.as_str() == source)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &ids {
+            registry.commands.remove(id);
+            registry.sources.remove(id);
+        }
+        let held: std::collections::BTreeSet<String> = registry
             .commands
             .keys()
-            .filter(|n| n.starts_with(&prefix))
-            .cloned()
+            .map(|id| oxplow_domain::namespace_of(id).to_string())
             .collect();
-        for n in &names {
-            registry.commands.remove(n);
-        }
-        names
+        registry.holders.retain(|ns, _| held.contains(ns));
+        ids
     }
 
-    /// Who holds `namespace`: its registered owner, `oxplow` for core
-    /// commands, `None` when nothing is under it.
+    /// Who registered command `id`: `core`, `extension:<name>`,
+    /// `provider:<name>`.
+    pub fn source_of(&self, id: &str) -> Option<String> {
+        self.commands.read().sources.get(id).cloned()
+    }
+
+    /// Who holds `namespace`: `oxplow` for the reserved one, else the
+    /// source that registered it; `None` when nothing is under it.
     pub fn namespace_owner(&self, namespace: &str) -> Option<String> {
         self.commands.read().owner(namespace)
     }
@@ -1371,7 +1418,7 @@ impl CommandBus {
         Ok(proposal)
     }
 
-    /// Run `calls` as one: the children of a composite (`command.sequence`,
+    /// Run `calls` as one: the children of a composite (`oxplow.command.sequence`,
     /// an extension's command) inside the parent's transaction and audit
     /// row (P6b.A1). First a pass that writes nothing — every call must
     /// name a `Tx` command (an `External` one can't join the transaction),
@@ -1380,7 +1427,7 @@ impl CommandBus {
     /// allow; a child that asks makes the parent ask, unless the run was
     /// confirmed — then every handler runs on `ctx`, one level deeper. The
     /// children's events ride out on the parent's; the inverse is the
-    /// children's inverses, reversed, as a `command.sequence`, or none when
+    /// children's inverses, reversed, as a `oxplow.command.sequence`, or none when
     /// a child has none — so a composite declared undoable whose child
     /// isn't (or gave no inverse) is recorded with no inverse, and its
     /// undo is refused as "not undoable" rather than half-applied.
@@ -2088,13 +2135,17 @@ mod tests {
             })
         }));
         bus.register(
-            Command::new(kv_spec("kv.flaky", Invokers::ALL, Confirm::Never), flaky).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.flaky", Invokers::ALL, Confirm::Never),
+                flaky,
+            )
+            .unwrap(),
         )
         .unwrap();
         let out = bus
             .run(
                 &Actor::Human,
-                "kv.flaky",
+                "oxplow.kv.flaky",
                 json!({"k": "a", "v": "once"}),
                 false,
             )
@@ -2107,7 +2158,7 @@ mod tests {
         let err = bus
             .run(
                 &Actor::Human,
-                "kv.flaky",
+                "oxplow.kv.flaky",
                 json!({"k": "a", "v": "always"}),
                 false,
             )
@@ -2167,7 +2218,7 @@ mod tests {
             Ok(HandlerOutput {
                 result: json!({ "k": k, "v": v }),
                 inverse: Some(CommandCall {
-                    name: "kv.set".into(),
+                    name: "oxplow.kv.set".into(),
                     input: json!({ "k": k, "v": before.clone().unwrap_or_default() }),
                 }),
                 events: vec![Envelope::typed::<ConfigChanged>(
@@ -2210,19 +2261,24 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_read_commands_write_never_lands() {
         let (db, bus) = bus();
-        let mut spec = kv_spec("kv.sneaky", Invokers::ALL, Confirm::Never);
+        let mut spec = kv_spec("oxplow.kv.sneaky", Invokers::ALL, Confirm::Never);
         spec.effect = CommandEffect::Read;
         bus.register(Command::new(spec, kv_set()).unwrap()).unwrap();
-        bus.run(&agent(), "kv.sneaky", json!({"k": "a", "v": "1"}), false)
-            .await
-            .unwrap();
+        bus.run(
+            &agent(),
+            "oxplow.kv.sneaky",
+            json!({"k": "a", "v": "1"}),
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(kv_value(&db, "a").await, None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_read_command_is_not_recorded() {
         let (_db, bus) = bus();
-        let mut spec = kv_spec("kv.get", Invokers::ALL, Confirm::Never);
+        let mut spec = kv_spec("oxplow.kv.get", Invokers::ALL, Confirm::Never);
         spec.effect = CommandEffect::Read;
         bus.register(
             Command::new(
@@ -2238,7 +2294,12 @@ mod tests {
         )
         .unwrap();
         let out = bus
-            .run(&agent(), "kv.get", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.get",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(out.result["k"], "a");
@@ -2254,11 +2315,20 @@ mod tests {
             Box::pin(async move { thread != ThreadId::new(7) })
         }));
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let err = bus
-            .run(&agent(), "kv.set", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.set",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
@@ -2268,16 +2338,21 @@ mod tests {
             thread_id: Some(ThreadId::new(8)),
             stream_id: None,
         };
-        bus.run(&other, "kv.set", json!({"k": "a", "v": "1"}), false)
+        bus.run(&other, "oxplow.kv.set", json!({"k": "a", "v": "1"}), false)
             .await
             .unwrap();
-        bus.run(&Actor::Human, "kv.set", json!({"k": "b", "v": "1"}), false)
-            .await
-            .unwrap();
+        bus.run(
+            &Actor::Human,
+            "oxplow.kv.set",
+            json!({"k": "b", "v": "1"}),
+            false,
+        )
+        .await
+        .unwrap();
     }
 
     /// A composite carries step 3's answer to its children: a thread that
-    /// may not write can't write through `command.sequence` either.
+    /// may not write can't write through `oxplow.command.sequence` either.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_thread_that_may_not_write_cant_write_through_a_composite() {
         let (db, bus) = bus();
@@ -2285,12 +2360,16 @@ mod tests {
             Box::pin(async move { thread != ThreadId::new(7) })
         })));
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         // A `Record` composite isn't gated itself (it may only record), so
         // what refuses the run is its `Write` child seeing the answer.
-        let mut spec = kv_spec("kv.compose", Invokers::ALL, Confirm::Never);
+        let mut spec = kv_spec("oxplow.kv.compose", Invokers::ALL, Confirm::Never);
         spec.effect = CommandEffect::Record;
         spec.input_schema = json!({ "type": "object" });
         let parent = spec.clone();
@@ -2314,9 +2393,10 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let calls = json!({ "calls": [{ "name": "kv.set", "input": { "k": "a", "v": "1" } }] });
+        let calls =
+            json!({ "calls": [{ "name": "oxplow.kv.set", "input": { "k": "a", "v": "1" } }] });
         let err = bus
-            .run(&agent(), "kv.compose", calls.clone(), false)
+            .run(&agent(), "oxplow.kv.compose", calls.clone(), false)
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
@@ -2326,7 +2406,9 @@ mod tests {
             thread_id: Some(ThreadId::new(8)),
             stream_id: None,
         };
-        bus.run(&other, "kv.compose", calls, false).await.unwrap();
+        bus.run(&other, "oxplow.kv.compose", calls, false)
+            .await
+            .unwrap();
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     }
 
@@ -2334,11 +2416,20 @@ mod tests {
     async fn a_tx_command_writes_its_state_audit_and_events_together() {
         let (db, bus) = bus();
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let out = bus
-            .run(&agent(), "kv.set", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.set",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(out.result, json!({"k": "a", "v": "1"}));
@@ -2349,7 +2440,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(audit.command, "kv.set");
+        assert_eq!(audit.command, "oxplow.kv.set");
         assert_eq!(audit.thread_id, Some(ThreadId::new(7)));
         assert_eq!(audit.outcome, Outcome::Ok);
         assert_eq!(audit.event_id, out.event_id.clone());
@@ -2369,7 +2460,7 @@ mod tests {
         );
         assert_eq!(events[0].envelope.payload["actor_kind"], "agent");
         assert_eq!(events[0].envelope.source, "agent:thr7");
-        assert_eq!(events[0].envelope.subject, vec!["command:kv.set"]);
+        assert_eq!(events[0].envelope.subject, vec!["command:oxplow.kv.set"]);
         assert_eq!(events[1].envelope.event_type, "config.changed");
         assert_eq!(events[1].envelope.cause, out.event_id);
     }
@@ -2378,13 +2469,17 @@ mod tests {
     async fn a_failing_tx_handler_rolls_everything_back_and_is_audited_as_error() {
         let (db, bus) = bus();
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let err = bus
             .run(
                 &Actor::Human,
-                "kv.set",
+                "oxplow.kv.set",
                 json!({"k": "a", "v": "half"}),
                 false,
             )
@@ -2411,11 +2506,20 @@ mod tests {
     async fn schema_rejection_names_the_field_and_is_audited_invalid() {
         let (_db, bus) = bus();
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let err = bus
-            .run(&Actor::Human, "kv.set", json!({"k": "a", "v": 3}), false)
+            .run(
+                &Actor::Human,
+                "oxplow.kv.set",
+                json!({"k": "a", "v": 3}),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -2427,7 +2531,7 @@ mod tests {
             Outcome::Invalid
         );
         assert!(matches!(
-            bus.run(&Actor::Human, "kv.nope", json!({}), false)
+            bus.run(&Actor::Human, "oxplow.kv.nope", json!({}), false)
                 .await
                 .unwrap_err(),
             CommandError::Unknown { .. }
@@ -2439,7 +2543,7 @@ mod tests {
         let (db, bus) = bus();
         bus.register(
             Command::new(
-                kv_spec("kv.set", Invokers::HUMAN_ONLY, Confirm::Never),
+                kv_spec("oxplow.kv.set", Invokers::HUMAN_ONLY, Confirm::Never),
                 kv_set(),
             )
             .unwrap(),
@@ -2450,12 +2554,17 @@ mod tests {
             on_behalf_of: Box::new(Actor::Human),
         };
         let err = bus
-            .run(&lens, "kv.set", json!({"k": "a", "v": "1"}), false)
+            .run(&lens, "oxplow.kv.set", json!({"k": "a", "v": "1"}), false)
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         let err = bus
-            .run(&agent(), "kv.set", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.set",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
@@ -2472,32 +2581,46 @@ mod tests {
     async fn confirmation_is_a_persons_move_and_an_agent_never_gets_past_it() {
         let (db, bus) = bus();
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Always), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         // A person: asked first, then confirmed.
         let err = bus
-            .run(&Actor::Human, "kv.set", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &Actor::Human,
+                "oxplow.kv.set",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap_err();
         let CommandError::NeedsConfirmation { preview } = err else {
             panic!("{err:?}");
         };
-        assert_eq!(preview.command, "kv.set");
+        assert_eq!(preview.command, "oxplow.kv.set");
         assert!(!preview.destructive);
         assert_eq!(kv_value(&db, "a").await, None);
         assert!(
             bus.audit_store().list_recent(5).await.unwrap().is_empty(),
             "nothing audited"
         );
-        bus.run(&Actor::Human, "kv.set", json!({"k": "a", "v": "1"}), true)
-            .await
-            .unwrap();
+        bus.run(
+            &Actor::Human,
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "1"}),
+            true,
+        )
+        .await
+        .unwrap();
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
         // An agent: `confirmed` is ignored; nothing is written — the run
         // waits as a proposal for a person.
         let err = bus
-            .run(&agent(), "kv.set", json!({"k": "b", "v": "2"}), true)
+            .run(&agent(), "oxplow.kv.set", json!({"k": "b", "v": "2"}), true)
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
@@ -2506,7 +2629,7 @@ mod tests {
 
     /// A `Tx` handler that writes `k = v` and says it changed nothing —
     /// with `events` when `v == "with-events"`; `inverse` names
-    /// `kv.noop`.
+    /// `oxplow.kv.noop`.
     fn kv_unchanged() -> Handler {
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let k = input["k"].as_str().unwrap_or_default().to_string();
@@ -2542,7 +2665,7 @@ mod tests {
         }))
     }
 
-    /// A `Tx` handler that writes `k = v` and is undone by `kv.noop`.
+    /// A `Tx` handler that writes `k = v` and is undone by `oxplow.kv.noop`.
     fn kv_undone_by_noop() -> Handler {
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let k = input["k"].as_str().unwrap_or_default().to_string();
@@ -2555,7 +2678,7 @@ mod tests {
             Ok(HandlerOutput {
                 result: json!({ "k": k }),
                 inverse: Some(CommandCall {
-                    name: "kv.noop".into(),
+                    name: "oxplow.kv.noop".into(),
                     input: json!({ "k": format!("{k}-undo"), "v": "x" }),
                 }),
                 ..HandlerOutput::default()
@@ -2571,14 +2694,19 @@ mod tests {
         let (db, bus) = bus();
         bus.register(
             Command::new(
-                kv_spec("kv.noop", Invokers::ALL, Confirm::Never),
+                kv_spec("oxplow.kv.noop", Invokers::ALL, Confirm::Never),
                 kv_unchanged(),
             )
             .unwrap(),
         )
         .unwrap();
         let out = bus
-            .run(&Actor::Human, "kv.noop", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &Actor::Human,
+                "oxplow.kv.noop",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(out.audit_id, None);
@@ -2586,7 +2714,7 @@ mod tests {
         let err = bus
             .run(
                 &Actor::Human,
-                "kv.noop",
+                "oxplow.kv.noop",
                 json!({"k": "b", "v": "with-events"}),
                 false,
             )
@@ -2611,7 +2739,7 @@ mod tests {
         let (db, bus) = bus();
         bus.register(
             Command::new(
-                kv_spec("kv.noop", Invokers::ALL, Confirm::Always),
+                kv_spec("oxplow.kv.noop", Invokers::ALL, Confirm::Always),
                 kv_unchanged(),
             )
             .unwrap(),
@@ -2619,14 +2747,19 @@ mod tests {
         .unwrap();
         bus.register(
             Command::new(
-                kv_spec("kv.mark", Invokers::ALL, Confirm::Never),
+                kv_spec("oxplow.kv.mark", Invokers::ALL, Confirm::Never),
                 kv_undone_by_noop(),
             )
             .unwrap(),
         )
         .unwrap();
         let marked = bus
-            .run(&Actor::Human, "kv.mark", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &Actor::Human,
+                "oxplow.kv.mark",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap();
         let undo = bus
@@ -2643,7 +2776,12 @@ mod tests {
         assert_eq!(row.undone_by, undo.audit_id);
 
         let err = bus
-            .run(&agent(), "kv.noop", json!({"k": "c", "v": "1"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.noop",
+                json!({"k": "c", "v": "1"}),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
@@ -2658,14 +2796,28 @@ mod tests {
     async fn undo_applies_the_inverse_and_marks_the_row_once() {
         let (db, bus) = bus();
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
-        bus.run(&Actor::Human, "kv.set", json!({"k": "a", "v": "1"}), false)
-            .await
-            .unwrap();
+        bus.run(
+            &Actor::Human,
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "1"}),
+            false,
+        )
+        .await
+        .unwrap();
         let second = bus
-            .run(&Actor::Human, "kv.set", json!({"k": "a", "v": "2"}), false)
+            .run(
+                &Actor::Human,
+                "oxplow.kv.set",
+                json!({"k": "a", "v": "2"}),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("2"));
@@ -2697,14 +2849,28 @@ mod tests {
         let (db, bus) = bus();
         let bus = Arc::new(bus);
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
-        bus.run(&Actor::Human, "kv.set", json!({"k": "a", "v": "1"}), false)
-            .await
-            .unwrap();
+        bus.run(
+            &Actor::Human,
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "1"}),
+            false,
+        )
+        .await
+        .unwrap();
         let second = bus
-            .run(&Actor::Human, "kv.set", json!({"k": "a", "v": "2"}), false)
+            .run(
+                &Actor::Human,
+                "oxplow.kv.set",
+                json!({"k": "a", "v": "2"}),
+                false,
+            )
             .await
             .unwrap()
             .audit_id
@@ -2738,7 +2904,11 @@ mod tests {
     async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
         let (_db, bus) = bus();
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Always), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let lens = Actor::Lens {
@@ -2746,7 +2916,7 @@ mod tests {
             on_behalf_of: Box::new(agent()),
         };
         let err = bus
-            .run(&lens, "kv.set", json!({"k": "a", "v": "1"}), true)
+            .run(&lens, "oxplow.kv.set", json!({"k": "a", "v": "1"}), true)
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
@@ -2754,9 +2924,14 @@ mod tests {
             lens_id: "acme/x".into(),
             on_behalf_of: Box::new(Actor::Human),
         };
-        bus.run(&for_person, "kv.set", json!({"k": "a", "v": "1"}), true)
-            .await
-            .unwrap();
+        bus.run(
+            &for_person,
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "1"}),
+            true,
+        )
+        .await
+        .unwrap();
     }
 
     /// An `External` handler's effects have happened by the time the bus
@@ -2765,7 +2940,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn an_external_run_whose_record_fails_still_reports_success() {
         let (db, bus) = bus();
-        let mut spec = kv_spec("kv.effort", Invokers::ALL, Confirm::Never);
+        let mut spec = kv_spec("oxplow.kv.effort", Invokers::ALL, Confirm::Never);
         spec.atomicity = Atomicity::External;
         let writes = db.clone();
         bus.register(
@@ -2799,7 +2974,7 @@ mod tests {
         let out = bus
             .run(
                 &Actor::Human,
-                "kv.effort",
+                "oxplow.kv.effort",
                 json!({"k": "e", "v": "1"}),
                 false,
             )
@@ -2814,26 +2989,34 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn registration_checks_names_atomicity_and_collisions() {
         let (_db, bus) = bus();
-        let mut wrong = kv_spec("kv.set", Invokers::ALL, Confirm::Never);
+        let mut wrong = kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never);
         wrong.atomicity = Atomicity::External;
         assert!(Command::new(wrong, kv_set()).is_err());
         assert!(Command::new(kv_spec("set", Invokers::ALL, Confirm::Never), kv_set()).is_err());
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(bus
             .register(
-                Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap()
+                Command::new(
+                    kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+                    kv_set()
+                )
+                .unwrap()
             )
             .is_err());
         assert!(bus.external_commands().is_empty());
         // A read is never asked about: nothing would resolve its proposal.
-        let mut asking_read = kv_spec("kv.peek", Invokers::ALL, Confirm::Always);
+        let mut asking_read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Always);
         asking_read.effect = CommandEffect::Read;
         let err = Command::new(asking_read, kv_set()).err().unwrap();
         assert!(err.to_string().contains("only reads"), "{err}");
-        let mut read = kv_spec("kv.peek", Invokers::ALL, Confirm::Never);
+        let mut read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Never);
         read.effect = CommandEffect::Read;
         let err = Command::new(read, kv_set())
             .unwrap()
@@ -2849,11 +3032,20 @@ mod tests {
     async fn an_agents_undo_that_asks_is_denied_not_proposed() {
         let (db, bus) = bus();
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Always), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let done = bus
-            .run(&Actor::Human, "kv.set", json!({"k": "a", "v": "1"}), true)
+            .run(
+                &Actor::Human,
+                "oxplow.kv.set",
+                json!({"k": "a", "v": "1"}),
+                true,
+            )
             .await
             .unwrap();
         let err = bus
@@ -2868,40 +3060,78 @@ mod tests {
     /// A namespace is registered whole or not at all, by one owner; core
     /// commands' namespaces are oxplow's.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_namespace_registers_whole_under_one_owner() {
+    async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
         let (_db, bus) = bus();
-        bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(bus.namespace_owner("kv").as_deref(), Some("oxplow"));
-        assert_eq!(bus.namespace_owner("ext"), None);
         let cmd = |name: &str| {
             Command::new(kv_spec(name, Invokers::ALL, Confirm::Never), kv_set()).unwrap()
         };
-
-        // One command outside the namespace: nothing is registered.
-        let err = bus
-            .register_namespace("ext", "extension:x", vec![cmd("ext.a"), cmd("other.b")])
-            .unwrap_err();
-        assert!(err.to_string().contains("other.b"), "{err}");
+        bus.register(cmd("oxplow.kv.set")).unwrap();
+        assert_eq!(bus.namespace_owner("oxplow").as_deref(), Some("oxplow"));
+        assert_eq!(bus.source_of("oxplow.kv.set").as_deref(), Some(CORE_SOURCE));
         assert_eq!(bus.namespace_owner("ext"), None);
-        assert!(bus.input_schema("ext.a").is_none());
 
-        bus.register_namespace("ext", "extension:x", vec![cmd("ext.a"), cmd("ext.b")])
-            .unwrap();
-        assert_eq!(bus.namespace_owner("ext").as_deref(), Some("extension:x"));
-        // Taken: by another owner, and by a core namespace.
+        // An id that isn't `<namespace>.<area>.<verb>` is no command at
+        // all; one outside the namespace: nothing is registered.
+        let err = Command::new(kv_spec("ext.a", Invokers::ALL, Confirm::Never), kv_set())
+            .err()
+            .expect("a two-part id is refused");
+        assert!(
+            err.to_string().contains("<namespace>.<area>.<verb>"),
+            "{err}"
+        );
         let err = bus
-            .register_namespace("ext", "provider:ext", vec![cmd("ext.c")])
+            .register_namespace(
+                "ext",
+                "extension:x",
+                vec![cmd("ext.thing.a"), cmd("other.thing.b")],
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("other.thing.b"), "{err}");
+        assert_eq!(bus.namespace_owner("ext"), None);
+        assert!(bus.input_schema("ext.thing.a").is_none());
+
+        bus.register_namespace(
+            "ext",
+            "extension:x",
+            vec![cmd("ext.thing.a"), cmd("ext.thing.b")],
+        )
+        .unwrap();
+        assert_eq!(bus.namespace_owner("ext").as_deref(), Some("extension:x"));
+        // Another source's namespace is taken.
+        let err = bus
+            .register_namespace("ext", "provider:ext", vec![cmd("ext.thing.c")])
             .unwrap_err();
         assert!(err.to_string().contains("extension:x"), "{err}");
-        let err = bus
-            .register_namespace("kv", "extension:kv", vec![cmd("kv.other")])
-            .unwrap_err();
-        assert!(err.to_string().contains("oxplow"), "{err}");
 
-        assert_eq!(bus.unregister_namespace("ext").len(), 2);
+        // `oxplow` is reserved: an extension that doesn't ship with oxplow
+        // is refused; one that does shares it, ids checked one by one.
+        let err = bus
+            .register_namespace("oxplow", "extension:acme", vec![cmd("oxplow.kv.other")])
+            .unwrap_err();
+        assert!(err.to_string().contains("reserved"), "{err}");
+        let err = bus
+            .register_namespace(
+                "oxplow",
+                "extension:oxplow-bundled",
+                vec![cmd("oxplow.kv.set")],
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("already registered"), "{err}");
+        bus.register_namespace(
+            "oxplow",
+            "extension:oxplow-bundled",
+            vec![cmd("oxplow.review.accept")],
+        )
+        .unwrap();
+        assert_eq!(bus.namespace_owner("oxplow").as_deref(), Some("oxplow"));
+
+        // Unregistering a source takes only its commands.
+        assert_eq!(
+            bus.unregister_source("extension:oxplow-bundled"),
+            vec!["oxplow.review.accept".to_string()]
+        );
+        assert!(bus.input_schema("oxplow.kv.set").is_some());
+        assert_eq!(bus.unregister_source("extension:x").len(), 2);
         assert_eq!(bus.namespace_owner("ext"), None);
     }
 
@@ -2915,7 +3145,7 @@ mod tests {
             if !ctx.confirmed {
                 return Err(CommandError::NeedsConfirmation {
                     preview: Box::new(Preview {
-                        command: "kv.careful".into(),
+                        command: "oxplow.kv.careful".into(),
                         summary: "asks".into(),
                         input: input.clone(),
                         destructive: false,
@@ -2946,7 +3176,7 @@ mod tests {
         let (db, bus) = bus();
         bus.register(
             Command::new(
-                kv_spec("kv.careful", Invokers::ALL, Confirm::Never),
+                kv_spec("oxplow.kv.careful", Invokers::ALL, Confirm::Never),
                 kv_set_if_confirmed(),
             )
             .unwrap(),
@@ -2955,7 +3185,7 @@ mod tests {
         let err = bus
             .run(
                 &Actor::Human,
-                "kv.careful",
+                "oxplow.kv.careful",
                 json!({"k": "a", "v": "1"}),
                 false,
             )
@@ -2972,7 +3202,7 @@ mod tests {
         );
         bus.run(
             &Actor::Human,
-            "kv.careful",
+            "oxplow.kv.careful",
             json!({"k": "a", "v": "1"}),
             true,
         )
@@ -2981,7 +3211,7 @@ mod tests {
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     }
 
-    /// `command.sequence` composes Tx commands in one run: each child's
+    /// `oxplow.command.sequence` composes Tx commands in one run: each child's
     /// own invokers, policy and confirmation apply; the children share the
     /// parent's transaction and audit row; the inverse is the children's
     /// inverses, reversed.
@@ -2989,12 +3219,8 @@ mod tests {
         let (db, bus) = bus();
         let bus = Arc::new(bus);
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
-        )
-        .unwrap();
-        bus.register(
             Command::new(
-                kv_spec("kv.secret", Invokers::HUMAN_ONLY, Confirm::Never),
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
                 kv_set(),
             )
             .unwrap(),
@@ -3002,19 +3228,27 @@ mod tests {
         .unwrap();
         bus.register(
             Command::new(
-                kv_spec("kv.danger", Invokers::ALL, Confirm::Destructive),
+                kv_spec("oxplow.kv.secret", Invokers::HUMAN_ONLY, Confirm::Never),
                 kv_set(),
             )
             .unwrap(),
         )
         .unwrap();
-        let mut plain = kv_spec("kv.plain", Invokers::ALL, Confirm::Never);
+        bus.register(
+            Command::new(
+                kv_spec("oxplow.kv.danger", Invokers::ALL, Confirm::Destructive),
+                kv_set(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut plain = kv_spec("oxplow.kv.plain", Invokers::ALL, Confirm::Never);
         plain.undoable = false;
         bus.register(Command::new(plain, kv_set()).unwrap())
             .unwrap();
         // A system outside the bus's transaction: it writes `kv` in its own
         // transaction, and refuses the value `fail`.
-        let mut ext = kv_spec("kv.external", Invokers::ALL, Confirm::Never);
+        let mut ext = kv_spec("oxplow.kv.external", Invokers::ALL, Confirm::Never);
         ext.atomicity = Atomicity::External;
         let outside = db.clone();
         bus.register(
@@ -3070,8 +3304,8 @@ mod tests {
         let err = bus
             .run(
                 &agent,
-                "command.sequence",
-                calls(&[("kv.set", "a", "1"), ("kv.secret", "b", "2")]),
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.secret", "b", "2")]),
                 false,
             )
             .await
@@ -3086,8 +3320,8 @@ mod tests {
         let err = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
-                json!({ "calls": [{ "name": "kv.set", "input": { "k": "a", "v": "1" } }, { "name": "kv.set", "input": { "k": "b" } }] }),
+                "oxplow.command.sequence",
+                json!({ "calls": [{ "name": "oxplow.kv.set", "input": { "k": "a", "v": "1" } }, { "name": "oxplow.kv.set", "input": { "k": "b" } }] }),
                 false,
             )
             .await
@@ -3100,12 +3334,15 @@ mod tests {
 
         // A composite whose steps leave the transaction can't be one step
         // of another: its steps would land outside the outer run.
-        let inner = calls(&[("kv.set", "a", "1"), ("kv.external", "b", "2")]);
+        let inner = calls(&[
+            ("oxplow.kv.set", "a", "1"),
+            ("oxplow.kv.external", "b", "2"),
+        ]);
         let err = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
-                json!({ "calls": [{ "name": "kv.set", "input": { "k": "c", "v": "3" } }, { "name": "command.sequence", "input": inner }] }),
+                "oxplow.command.sequence",
+                json!({ "calls": [{ "name": "oxplow.kv.set", "input": { "k": "c", "v": "3" } }, { "name": "oxplow.command.sequence", "input": inner }] }),
                 false,
             )
             .await
@@ -3142,11 +3379,11 @@ mod tests {
         let out = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
+                "oxplow.command.sequence",
                 calls(&[
-                    ("kv.set", "a", "1"),
-                    ("kv.external", "b", "2"),
-                    ("kv.set", "c", "3"),
+                    ("oxplow.kv.set", "a", "1"),
+                    ("oxplow.kv.external", "b", "2"),
+                    ("oxplow.kv.set", "c", "3"),
                 ]),
                 false,
             )
@@ -3161,13 +3398,16 @@ mod tests {
             .iter()
             .map(|c| c["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["kv.set", "kv.external", "kv.set"]);
+        assert_eq!(
+            names,
+            ["oxplow.kv.set", "oxplow.kv.external", "oxplow.kv.set"]
+        );
         assert!(out.inverse.is_none(), "not undoable");
-        let rows = audits_of(&db, "command.sequence").await;
+        let rows = audits_of(&db, "oxplow.command.sequence").await;
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert_eq!(rows[0].outcome, Outcome::Ok);
         assert!(rows[0].inverse.is_none());
-        for child in ["kv.set", "kv.external"] {
+        for child in ["oxplow.kv.set", "oxplow.kv.external"] {
             assert!(
                 audits_of(&db, child).await.is_empty(),
                 "{child} has no row of its own"
@@ -3183,7 +3423,7 @@ mod tests {
         use super::compose::{Compose, Composer, Composition};
         let (db, bus) = composing_bus();
         let spec = CommandSpec {
-            name: "kv.announce".into(),
+            name: "oxplow.kv.announce".into(),
             summary: "Set over an external step and announce it.".into(),
             input_schema: json!({ "type": "object" }),
             invokers: Invokers::ALL,
@@ -3197,7 +3437,7 @@ mod tests {
         let compose: Arc<Composer> = Arc::new(|_conn, input: &Value| {
             Ok(Composition {
                 calls: vec![CommandCall {
-                    name: "kv.external".into(),
+                    name: "oxplow.kv.external".into(),
                     input: input.clone(),
                 }],
                 result: None,
@@ -3229,7 +3469,7 @@ mod tests {
         let out = bus
             .run(
                 &Actor::Human,
-                "kv.announce",
+                "oxplow.kv.announce",
                 json!({ "k": "a", "v": "1" }),
                 false,
             )
@@ -3241,7 +3481,7 @@ mod tests {
 
         bus.run(
             &Actor::Human,
-            "kv.announce",
+            "oxplow.kv.announce",
             json!({ "k": "b", "v": "fail" }),
             false,
         )
@@ -3259,11 +3499,11 @@ mod tests {
         let err = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
+                "oxplow.command.sequence",
                 calls(&[
-                    ("kv.set", "a", "1"),
-                    ("kv.external", "b", "fail"),
-                    ("kv.set", "c", "3"),
+                    ("oxplow.kv.set", "a", "1"),
+                    ("oxplow.kv.external", "b", "fail"),
+                    ("oxplow.kv.set", "c", "3"),
                 ]),
                 false,
             )
@@ -3271,17 +3511,17 @@ mod tests {
             .unwrap_err();
         let message = err.to_string();
         assert!(
-            message.contains("`kv.external`") && message.contains("`kv.set`"),
+            message.contains("`oxplow.kv.external`") && message.contains("`oxplow.kv.set`"),
             "names the failed step and what landed: {message}"
         );
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"), "it stands");
         assert_eq!(kv_value(&db, "c").await, None, "nothing after the failure");
-        let rows = audits_of(&db, "command.sequence").await;
+        let rows = audits_of(&db, "oxplow.command.sequence").await;
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert_eq!(rows[0].outcome, Outcome::Error);
         let result = rows[0].result.clone().unwrap();
         assert_eq!(result["children"].as_array().unwrap().len(), 1);
-        assert_eq!(result["failed"]["name"], "kv.external");
+        assert_eq!(result["failed"]["name"], "oxplow.kv.external");
         assert!(rows[0].inverse.is_none());
     }
 
@@ -3295,8 +3535,8 @@ mod tests {
         let err = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
-                json!({ "calls": [{ "name": "kv.external", "input": { "k": "a", "v": "1" } }, { "name": "kv.set", "input": { "k": "b" } }] }),
+                "oxplow.command.sequence",
+                json!({ "calls": [{ "name": "oxplow.kv.external", "input": { "k": "a", "v": "1" } }, { "name": "oxplow.kv.set", "input": { "k": "b" } }] }),
                 false,
             )
             .await
@@ -3308,8 +3548,11 @@ mod tests {
         let err = bus
             .run(
                 &agent(),
-                "command.sequence",
-                calls(&[("kv.external", "a", "1"), ("kv.secret", "b", "2")]),
+                "oxplow.command.sequence",
+                calls(&[
+                    ("oxplow.kv.external", "a", "1"),
+                    ("oxplow.kv.secret", "b", "2"),
+                ]),
                 false,
             )
             .await
@@ -3317,9 +3560,17 @@ mod tests {
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         assert_eq!(kv_value(&db, "a").await, None, "nothing ran");
 
-        let asks = calls(&[("kv.external", "a", "1"), ("kv.danger", "b", "2")]);
+        let asks = calls(&[
+            ("oxplow.kv.external", "a", "1"),
+            ("oxplow.kv.danger", "b", "2"),
+        ]);
         let err = bus
-            .run(&Actor::Human, "command.sequence", asks.clone(), false)
+            .run(
+                &Actor::Human,
+                "oxplow.command.sequence",
+                asks.clone(),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -3327,7 +3578,7 @@ mod tests {
             "{err:?}"
         );
         let err = bus
-            .run(&agent(), "command.sequence", asks.clone(), false)
+            .run(&agent(), "oxplow.command.sequence", asks.clone(), false)
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
@@ -3337,7 +3588,7 @@ mod tests {
             "nothing ran before a person decided"
         );
 
-        bus.run(&Actor::Human, "command.sequence", asks, true)
+        bus.run(&Actor::Human, "oxplow.command.sequence", asks, true)
             .await
             .unwrap();
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
@@ -3348,14 +3599,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_nested_run_refuses_a_read_child() {
         let (db, bus) = composing_bus();
-        let mut read = kv_spec("kv.peek", Invokers::ALL, Confirm::Never);
+        let mut read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Never);
         read.effect = CommandEffect::Read;
         bus.register(Command::new(read, kv_set()).unwrap()).unwrap();
         let err = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
-                calls(&[("kv.set", "a", "1"), ("kv.peek", "b", "2")]),
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.peek", "b", "2")]),
                 false,
             )
             .await
@@ -3371,15 +3622,20 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_nested_run_asks_when_any_child_asks() {
         let (db, bus) = composing_bus();
-        let input = calls(&[("kv.set", "a", "1"), ("kv.danger", "b", "2")]);
+        let input = calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.danger", "b", "2")]);
         let err = bus
-            .run(&Actor::Human, "command.sequence", input.clone(), false)
+            .run(
+                &Actor::Human,
+                "oxplow.command.sequence",
+                input.clone(),
+                false,
+            )
             .await
             .unwrap_err();
         match err {
             CommandError::NeedsConfirmation { preview } => {
                 assert!(preview.destructive);
-                assert_eq!(preview.command, "command.sequence");
+                assert_eq!(preview.command, "oxplow.command.sequence");
             }
             other => panic!("{other:?}"),
         }
@@ -3392,7 +3648,7 @@ mod tests {
             audits(&db).await.is_empty(),
             "no audit row for a confirmation"
         );
-        bus.run(&Actor::Human, "command.sequence", input, true)
+        bus.run(&Actor::Human, "oxplow.command.sequence", input, true)
             .await
             .unwrap();
         assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
@@ -3404,8 +3660,8 @@ mod tests {
         let err = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
-                calls(&[("kv.set", "a", "1"), ("kv.set", "b", "half")]),
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.set", "b", "half")]),
                 false,
             )
             .await
@@ -3420,8 +3676,8 @@ mod tests {
         let out = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
-                calls(&[("kv.set", "a", "1"), ("kv.set", "b", "2")]),
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.set", "b", "2")]),
                 false,
             )
             .await
@@ -3438,31 +3694,36 @@ mod tests {
             1,
             "one audit row for the parent, none for the children"
         );
-        assert_eq!(rows[0].command, "command.sequence");
+        assert_eq!(rows[0].command, "oxplow.command.sequence");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_nested_runs_inverse_is_the_reversed_children_and_undoes() {
         let (db, bus) = composing_bus();
-        bus.run(&Actor::Human, "kv.set", json!({"k": "a", "v": "0"}), false)
-            .await
-            .unwrap();
+        bus.run(
+            &Actor::Human,
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "0"}),
+            false,
+        )
+        .await
+        .unwrap();
         let out = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
-                calls(&[("kv.set", "a", "1"), ("kv.set", "b", "2")]),
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.set", "b", "2")]),
                 false,
             )
             .await
             .unwrap();
         let inverse = out.inverse.clone().expect("undoable");
-        assert_eq!(inverse.name, "command.sequence");
+        assert_eq!(inverse.name, "oxplow.command.sequence");
         assert_eq!(
             inverse.input["calls"],
             json!([
-                { "name": "kv.set", "input": { "k": "b", "v": "" } },
-                { "name": "kv.set", "input": { "k": "a", "v": "0" } }
+                { "name": "oxplow.kv.set", "input": { "k": "b", "v": "" } },
+                { "name": "oxplow.kv.set", "input": { "k": "a", "v": "0" } }
             ])
         );
         bus.undo(&Actor::Human, out.audit_id.unwrap(), false)
@@ -3475,8 +3736,8 @@ mod tests {
         let out = bus
             .run(
                 &Actor::Human,
-                "command.sequence",
-                calls(&[("kv.set", "c", "3"), ("kv.plain", "d", "4")]),
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "c", "3"), ("oxplow.kv.plain", "d", "4")]),
                 false,
             )
             .await
@@ -3509,16 +3770,20 @@ mod tests {
     fn confirming_bus() -> (Database, CommandBus) {
         let (db, bus) = bus();
         bus.register(
-            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Always), kv_set()).unwrap(),
+            Command::new(
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
+                kv_set(),
+            )
+            .unwrap(),
         )
         .unwrap();
         (db, bus)
     }
 
-    /// Propose `kv.set k=v` as the agent; the proposal's id.
+    /// Propose `oxplow.kv.set k=v` as the agent; the proposal's id.
     async fn propose(bus: &CommandBus, k: &str, v: &str) -> i64 {
         let err = bus
-            .run(&agent(), "kv.set", json!({ "k": k, "v": v }), false)
+            .run(&agent(), "oxplow.kv.set", json!({ "k": k, "v": v }), false)
             .await
             .unwrap_err();
         let CommandError::Proposed { proposal, .. } = err else {
@@ -3537,7 +3802,12 @@ mod tests {
         let (_db, bus) = confirming_bus();
         let first = propose(&bus, "a", "1").await;
         let err = bus
-            .run(&agent(), "kv.set", json!({ "k": "a", "v": "1" }), false)
+            .run(
+                &agent(),
+                "oxplow.kv.set",
+                json!({ "k": "a", "v": "1" }),
+                false,
+            )
             .await
             .unwrap_err();
         let CommandError::Proposed { supersedes, .. } = &err else {
@@ -3565,7 +3835,7 @@ mod tests {
     async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
         let (db, bus) = confirming_bus();
         let err = bus
-            .run(&agent(), "kv.set", json!({"k": "a", "v": "1"}), true)
+            .run(&agent(), "oxplow.kv.set", json!({"k": "a", "v": "1"}), true)
             .await
             .unwrap_err();
         let CommandError::Proposed {
@@ -3574,12 +3844,12 @@ mod tests {
         else {
             panic!("{err:?}");
         };
-        assert_eq!(preview.command, "kv.set");
+        assert_eq!(preview.command, "oxplow.kv.set");
         let rows = pending(&db).await;
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
         assert_eq!(proposal, format!("proposal:{}", row.id));
-        assert_eq!(row.command, "kv.set");
+        assert_eq!(row.command, "oxplow.kv.set");
         assert_eq!(row.actor_kind, ActorKind::Agent);
         assert_eq!(row.thread_id, Some(ThreadId::new(7)));
         assert_eq!(
@@ -3603,7 +3873,12 @@ mod tests {
         assert!(events[0].envelope.subject.contains(&proposal));
         // A dry run that fails is the run's failure, not a proposal.
         let err = bus
-            .run(&agent(), "kv.set", json!({"k": "a", "v": "boom"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.set",
+                json!({"k": "a", "v": "boom"}),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
@@ -3616,8 +3891,8 @@ mod tests {
         let err = bus
             .run(
                 &agent(),
-                "command.sequence",
-                calls(&[("kv.set", "a", "1"), ("kv.danger", "b", "2")]),
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.danger", "b", "2")]),
                 false,
             )
             .await
@@ -3632,7 +3907,7 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(children.len(), 2);
-        assert_eq!(children[1]["name"], "kv.danger");
+        assert_eq!(children[1]["name"], "oxplow.kv.danger");
         assert_eq!(kv_value(&db, "a").await, None);
         assert!(audits(&db).await.is_empty());
         // Approving runs the whole composite as the person, once.
@@ -3682,7 +3957,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_failed_external_approval_leaves_the_proposal_pending() {
         let (db, bus) = bus();
-        let mut spec = kv_spec("kv.remote", Invokers::ALL, Confirm::Always);
+        let mut spec = kv_spec("oxplow.kv.remote", Invokers::ALL, Confirm::Always);
         spec.atomicity = Atomicity::External;
         bus.register(
             Command::new(
@@ -3698,9 +3973,14 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        bus.run(&agent(), "kv.remote", json!({"k": "a", "v": "1"}), false)
-            .await
-            .unwrap_err();
+        bus.run(
+            &agent(),
+            "oxplow.kv.remote",
+            json!({"k": "a", "v": "1"}),
+            false,
+        )
+        .await
+        .unwrap_err();
         let id = pending(&db).await.remove(0).id;
         let err = bus.approve(&Actor::Human, id).await.unwrap_err();
         assert!(err.to_string().contains("the remote said no"), "{err}");
@@ -3718,7 +3998,7 @@ mod tests {
         let fired_c = fired.clone();
         bus.register(
             Command::new(
-                kv_spec("kv.set", Invokers::ALL, Confirm::Always),
+                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
                 Handler::Tx(Arc::new(move |_ctx: &TxCtx<'_>, input| {
                     let fired = fired_c.clone();
                     Ok(HandlerOutput {
@@ -3790,7 +4070,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn an_external_command_is_proposed_without_a_dry_run_and_approved_after_it_runs() {
         let (db, bus) = bus();
-        let mut spec = kv_spec("kv.remote", Invokers::ALL, Confirm::Always);
+        let mut spec = kv_spec("oxplow.kv.remote", Invokers::ALL, Confirm::Always);
         spec.atomicity = Atomicity::External;
         bus.register(
             Command::new(
@@ -3808,7 +4088,12 @@ mod tests {
         )
         .unwrap();
         let err = bus
-            .run(&agent(), "kv.remote", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.remote",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
@@ -3860,7 +4145,7 @@ mod tests {
             let err = bus
                 .run(
                     &effect(),
-                    "kv.set",
+                    "oxplow.kv.set",
                     json!({ "k": "a", "v": "1" }),
                     confirmed,
                 )
@@ -3871,18 +4156,23 @@ mod tests {
         assert_eq!(kv_value(&db, "a").await, None);
         bus.register(
             Command::new(
-                kv_spec("kv.mine", Invokers::HUMAN_ONLY, Confirm::Never),
+                kv_spec("oxplow.kv.mine", Invokers::HUMAN_ONLY, Confirm::Never),
                 kv_set(),
             )
             .unwrap(),
         )
         .unwrap();
         let err = bus
-            .run(&effect(), "kv.mine", json!({ "k": "b", "v": "1" }), false)
+            .run(
+                &effect(),
+                "oxplow.kv.mine",
+                json!({ "k": "b", "v": "1" }),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        let rows = audits_of(&db, "kv.mine").await;
+        let rows = audits_of(&db, "oxplow.kv.mine").await;
         assert_eq!(
             rows[0].actor_kind,
             oxplow_domain::events::schema::ActorKind::Effect
@@ -3911,11 +4201,11 @@ mod tests {
         assert_eq!(kv_value(&db, "a").await, None);
     }
 
-    /// `kv.put`, a `Dispatch` command: a key starting `far:` routes to an
+    /// `oxplow.kv.put`, a `Dispatch` command: a key starting `far:` routes to an
     /// External handler (the "far" system), any other key to `kv_set`'s
     /// Tx handler.
     fn kv_dispatch(confirm: Confirm) -> Command {
-        let mut spec = kv_spec("kv.put", Invokers::ALL, confirm);
+        let mut spec = kv_spec("oxplow.kv.put", Invokers::ALL, confirm);
         spec.atomicity = Atomicity::Dispatch;
         let Handler::Tx(tx) = kv_set() else {
             unreachable!("kv_set is a Tx handler");
@@ -3937,7 +4227,7 @@ mod tests {
                         Ok(HandlerOutput {
                             result: json!({ "far": input["k"] }),
                             inverse: Some(CommandCall {
-                                name: "kv.put".into(),
+                                name: "oxplow.kv.put".into(),
                                 input: json!({ "k": input["k"], "v": "was" }),
                             }),
                             ..HandlerOutput::default()
@@ -3961,9 +4251,12 @@ mod tests {
         let bus = Arc::new(bus);
         bus.register(kv_dispatch(Confirm::Never)).unwrap();
         bus.register(compose::sequence_command(&bus)).unwrap();
-        assert_eq!(bus.dispatch_commands(), ["command.sequence", "kv.put"]);
+        assert_eq!(
+            bus.dispatch_commands(),
+            ["oxplow.command.sequence", "oxplow.kv.put"]
+        );
         assert!(bus.external_commands().is_empty());
-        let mut wrong = kv_spec("kv.wrong", Invokers::ALL, Confirm::Never);
+        let mut wrong = kv_spec("oxplow.kv.wrong", Invokers::ALL, Confirm::Never);
         wrong.atomicity = Atomicity::Tx;
         let Handler::Dispatch(d) = kv_dispatch(Confirm::Never).handler else {
             unreachable!()
@@ -3971,7 +4264,12 @@ mod tests {
         assert!(Command::new(wrong, Handler::Dispatch(d)).is_err());
 
         let near = bus
-            .run(&Actor::Human, "kv.put", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &Actor::Human,
+                "oxplow.kv.put",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
@@ -3979,7 +4277,7 @@ mod tests {
         let far = bus
             .run(
                 &Actor::Human,
-                "kv.put",
+                "oxplow.kv.put",
                 json!({"k": "far:a", "v": "1"}),
                 false,
             )
@@ -3991,13 +4289,13 @@ mod tests {
             None,
             "the far system's, not ours"
         );
-        assert_eq!(far.inverse.unwrap().name, "kv.put");
+        assert_eq!(far.inverse.unwrap().name, "oxplow.kv.put");
         assert_eq!(audits(&db).await.len(), 2);
 
         let err = bus
             .run(
                 &Actor::Human,
-                "kv.put",
+                "oxplow.kv.put",
                 json!({"k": "nowhere:a", "v": "1"}),
                 false,
             )
@@ -4011,7 +4309,7 @@ mod tests {
         bus.run(
             &Actor::Human,
             compose::SEQUENCE,
-            json!({ "calls": [{ "name": "kv.put", "input": { "k": "b", "v": "2" } }] }),
+            json!({ "calls": [{ "name": "oxplow.kv.put", "input": { "k": "b", "v": "2" } }] }),
             false,
         )
         .await
@@ -4021,7 +4319,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 compose::SEQUENCE,
-                json!({ "calls": [{ "name": "kv.put", "input": { "k": "far:b", "v": "2" } }] }),
+                json!({ "calls": [{ "name": "oxplow.kv.put", "input": { "k": "far:b", "v": "2" } }] }),
                 false,
             )
             .await
@@ -4048,13 +4346,23 @@ mod tests {
                 .unwrap()
         };
         let near = bus
-            .run(&agent(), "kv.put", json!({"k": "a", "v": "1"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.put",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap_err();
         let near = proposal(&db, proposed(near)).await;
         assert_eq!(near.dry_run.as_ref().map(|d| &d["v"]), Some(&json!("1")));
         let far = bus
-            .run(&agent(), "kv.put", json!({"k": "far:a", "v": "1"}), false)
+            .run(
+                &agent(),
+                "oxplow.kv.put",
+                json!({"k": "far:a", "v": "1"}),
+                false,
+            )
             .await
             .unwrap_err();
         let far = proposal(&db, proposed(far)).await;

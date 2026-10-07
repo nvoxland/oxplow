@@ -154,7 +154,7 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
     }
 }
 
-/// A new thread on `stream`, made as a person through `thread.create`.
+/// A new thread on `stream`, made as a person through `oxplow.thread.create`.
 pub async fn new_thread(
     svc: &crate::Services,
     stream: oxplow_domain::StreamId,

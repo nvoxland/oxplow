@@ -1,7 +1,7 @@
 //! Cores for Settings → Integrations (P5.D4, `.context/providers.md`):
 //! extension providers' instances on this machine. UI only — enabling an
 //! instance runs a program, so it is a person's (the config key is
-//! human-only and `plugin.enable` is human-only too).
+//! human-only and `oxplow.plugin.enable` is human-only too).
 
 use oxplow_app::providers::ProviderInstanceView;
 use oxplow_app::Services;

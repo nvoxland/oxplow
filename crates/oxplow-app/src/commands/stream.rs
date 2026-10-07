@@ -21,11 +21,11 @@ use serde_json::json;
 use super::thread::agent_scope;
 use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
 
-pub const CREATE_WORKTREE: &str = "stream.create_worktree";
-pub const ADOPT_WORKTREE: &str = "stream.adopt_worktree";
-pub const ARCHIVE: &str = "stream.archive";
-pub const RENAME: &str = "stream.rename";
-pub const SET_PROMPT: &str = "stream.set_prompt";
+pub const CREATE_WORKTREE: &str = "oxplow.stream.create_worktree";
+pub const ADOPT_WORKTREE: &str = "oxplow.stream.adopt_worktree";
+pub const ARCHIVE: &str = "oxplow.stream.archive";
+pub const RENAME: &str = "oxplow.stream.rename";
+pub const SET_PROMPT: &str = "oxplow.stream.set_prompt";
 
 /// A person, or a lens acting for one.
 const PEOPLE: Invokers = Invokers {
@@ -230,7 +230,7 @@ pub fn create_worktree_command(deps: StreamDeps) -> Command {
             })
         })),
     )
-    .expect("stream.create_worktree is a valid command")
+    .expect("oxplow.stream.create_worktree is a valid command")
 }
 
 /// `stream.adopt_worktree { path, title }`.
@@ -256,7 +256,7 @@ pub fn adopt_worktree_command(deps: StreamDeps) -> Command {
             })
         })),
     )
-    .expect("stream.adopt_worktree is a valid command")
+    .expect("oxplow.stream.adopt_worktree is a valid command")
 }
 
 /// `stream.archive { stream, delete_worktree? }`: refused while an agent
@@ -338,7 +338,7 @@ pub fn archive_command(deps: StreamDeps) -> Command {
             })
         })),
     )
-    .expect("stream.archive is a valid command")
+    .expect("oxplow.stream.archive is a valid command")
 }
 
 /// `stream.rename { stream, title }`; an agent renames only its own
@@ -377,7 +377,7 @@ pub fn rename_command() -> Command {
             })
         })),
     )
-    .expect("stream.rename is a valid command")
+    .expect("oxplow.stream.rename is a valid command")
 }
 
 /// `stream.set_prompt { stream, prompt? }` — a person's: it steers every
@@ -409,7 +409,7 @@ pub fn set_prompt_command() -> Command {
             })
         })),
     )
-    .expect("stream.set_prompt is a valid command")
+    .expect("oxplow.stream.set_prompt is a valid command")
 }
 
 /// The stream commands, for the bus.

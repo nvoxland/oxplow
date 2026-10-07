@@ -38,7 +38,7 @@ the current directory's (or --project <dir>); the acting thread is
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match run(args).await {
+    match run(args, std::env::var("OXPLOW_THREAD_ID").ok()).await {
         Ok(out) => println!("{out}"),
         Err(e) => {
             eprintln!("oxplow-dev: {e}");
@@ -47,12 +47,14 @@ async fn main() {
     }
 }
 
-async fn run(mut args: Vec<String>) -> Result<String, String> {
+/// Run `args`, acting as `--thread`, else `env_thread` (main passes
+/// `$OXPLOW_THREAD_ID`; read there, not here, so a test isn't acting as
+/// whatever thread its shell runs in).
+async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String, String> {
     let project = take_flag(&mut args, "--project")
         .map(PathBuf::from)
         .unwrap_or(std::env::current_dir().map_err(|e| e.to_string())?);
-    let thread =
-        take_flag(&mut args, "--thread").or_else(|| std::env::var("OXPLOW_THREAD_ID").ok());
+    let thread = take_flag(&mut args, "--thread").or(env_thread);
     match args.first().map(String::as_str) {
         Some("task") => {
             let tasks = Tasks::open(&project, thread.as_deref())?;
@@ -152,13 +154,13 @@ impl Tasks {
                 put(&mut input, "body", body);
                 put(&mut input, "parent_ref", parent);
                 put(&mut input, "state", state);
-                self.command("work_item.create", input).await
+                self.command("oxplow.work_item.create", input).await
             }
             Some("transition") => {
                 let mut input = Map::new();
                 input.insert("ref".into(), json!(arg(1, "<id>")?));
                 input.insert("to".into(), json!(arg(2, "<state>")?));
-                self.command("work_item.transition", input).await
+                self.command("oxplow.work_item.transition", input).await
             }
             Some("update") => {
                 let mut input = Map::new();
@@ -166,20 +168,20 @@ impl Tasks {
                 put(&mut input, "title", title);
                 put(&mut input, "body", body);
                 put(&mut input, "parent_ref", parent);
-                self.command("work_item.update", input).await
+                self.command("oxplow.work_item.update", input).await
             }
             Some("comment") => {
                 let mut input = Map::new();
                 input.insert("ref".into(), json!(arg(1, "<id>")?));
                 input.insert("body".into(), json!(arg(2, "<body>")?));
-                self.command("work_item.comment", input).await
+                self.command("oxplow.work_item.comment", input).await
             }
             Some("link") => {
                 let mut input = Map::new();
                 input.insert("ref".into(), json!(arg(1, "<id>")?));
                 input.insert("target".into(), json!(arg(2, "<target-id>")?));
                 input.insert("link_type".into(), json!(arg(3, "<link type>")?));
-                self.command("work_item.link", input).await
+                self.command("oxplow.work_item.link", input).await
             }
             _ => Err(format!("usage:\n{USAGE}")),
         }
@@ -296,7 +298,7 @@ mod tests {
     async fn dev(dir: &Path, args: &[&str]) -> Result<String, String> {
         let mut all = vec!["--project".to_string(), dir.display().to_string()];
         all.extend(args.iter().map(|a| a.to_string()));
-        run(all).await
+        run(all, None).await
     }
 
     /// Tasks are filed, moved, commented on and listed through the task

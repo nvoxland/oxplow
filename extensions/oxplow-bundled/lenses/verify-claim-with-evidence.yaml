@@ -5,5 +5,5 @@ params:
   - { name: claim, label: Claim }
 viz: form
 form:
-  command: effort.verify_claim
+  command: oxplow.effort.verify_claim
   defaults: { claim: "{{param.claim}}" }

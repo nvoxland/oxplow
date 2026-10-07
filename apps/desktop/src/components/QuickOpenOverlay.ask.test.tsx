@@ -22,7 +22,7 @@ mock.module("../api.js", () => ({
       panels: [],
       launcher: [
         { label: "Ask why slow", category: "Code", target: { kind: "prompt", prompt: "Why is the build slow?" } },
-        { label: "File a bug", category: "Work", target: { kind: "command", command: "work_item.create", input: { title: "Bug" } } },
+        { label: "File a bug", category: "Work", target: { kind: "command", command: "oxplow.work_item.create", input: { title: "Bug" } } },
       ],
     },
   ],
@@ -87,5 +87,5 @@ test("an extension's prompt entry fills the input; its command entry runs as the
 
   fireEvent.change(input, { target: { value: "file a bug" } });
   fireEvent.click(await waitFor(() => view.getByText("File a bug")));
-  await waitFor(() => expect(ran).toEqual([["work_item.create", { title: "Bug" }, false]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.create", { title: "Bug" }, false]]));
 });

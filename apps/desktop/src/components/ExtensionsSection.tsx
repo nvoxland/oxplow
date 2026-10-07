@@ -7,7 +7,7 @@
 /// the person confirmed (tsk378).
 /// Each provider instance's and collector's health shows on its
 /// extension's row: a disabled one with its reason, **Enable Again**
-/// (`plugin.enable` as the person) and **Repair with the Agent** (fills
+/// (`oxplow.plugin.enable` as the person) and **Repair with the Agent** (fills
 /// the agent's input with a mention of the repair item; never sends).
 /// Running sources is under Data (DataSection.tsx). See
 /// `.context/extensions.md` → "Health, disable and repair".

@@ -114,7 +114,7 @@ fn role_description(role: RoleMode) -> &'static str {
 pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
     match (initial, current) {
         (RoleMode::ReadOnly, RoleMode::Writer) => "**Access changed:** This thread was promoted to writer after the session started. It may now edit the worktree; the earlier read-only instruction no longer applies.".to_string(),
-        (RoleMode::Writer, RoleMode::ReadOnly) => "**Access changed:** This thread was changed to read-only after the session started. Project file edits are now blocked; wiki pages are still written with `knowledge.write_page`.".to_string(),
+        (RoleMode::Writer, RoleMode::ReadOnly) => "**Access changed:** This thread was changed to read-only after the session started. Project file edits are now blocked; wiki pages are still written with `oxplow.knowledge.write_page`.".to_string(),
         // Same-role pairs never reach this fn — caller skips.
         _ => String::new(),
     }

@@ -1,7 +1,7 @@
 /**
  * The person's bookmarks: pages starred at one scope — the
  * thread, its stream or the project. Read from `v_bookmark`, written
- * through the `bookmark.set` / `bookmark.remove` commands. From one thread
+ * through the `oxplow.bookmark.set` / `oxplow.bookmark.remove` commands. From one thread
  * a page is bookmarked once across what it sees, so setting another scope
  * moves it. `.context/pages-and-tabs.md` → "Bookmarks".
  */
@@ -103,11 +103,11 @@ export function setBookmarkInput(viewer: BookmarkViewer, ref: TabRef, label: str
 
 /** Bookmark `ref` at `scope`, moving it if it's at another. */
 export async function setBookmark(viewer: BookmarkViewer, ref: TabRef, label: string | null, scope: BookmarkScope): Promise<void> {
-  await runCommand("bookmark.set", setBookmarkInput(viewer, ref, label, scope));
+  await runCommand("oxplow.bookmark.set", setBookmarkInput(viewer, ref, label, scope));
 }
 
 /** Take `ref`'s bookmark off; the outcome carries the audit id its undo
  *  needs (`undoCommand`). */
 export function removeBookmark(viewer: BookmarkViewer, refId: string): ReturnType<typeof runCommand> {
-  return runCommand("bookmark.remove", { ref: refId, ...viewerInput(viewer) });
+  return runCommand("oxplow.bookmark.remove", { ref: refId, ...viewerInput(viewer) });
 }

@@ -2286,7 +2286,7 @@ impl SqliteFactStore {
     }
 
     /// The PATH-LESS, SUBJECT-LESS facts of a measure — agent-asserted repo
-    /// scalars (`metric.record` with no subject). The per-path read supplements
+    /// scalars (`oxplow.metric.record` with no subject). The per-path read supplements
     /// its tree fold with these (they have no path, so nothing supersedes them
     /// per-path); it used to load the measure's entire history to find the
     /// usually-zero of them (tsk75).
@@ -2674,7 +2674,7 @@ impl SqliteFactStore {
                                     OR (c3.captured_at = c.captured_at AND c3.id > c.id))
                           )
                        UNION
-                       -- An ASSERTED capture (agent `metric.record`, synthetic writes)
+                       -- An ASSERTED capture (agent `oxplow.metric.record`, synthetic writes)
                        -- restates exactly the paths it emitted facts for; its snapshot,
                        -- when present, is provenance only — never a scanned set.
                        SELECT c.id, c.stream_id, c.producer, c.captured_at,
@@ -3852,7 +3852,7 @@ mod tests {
 
     #[tokio::test]
     async fn asserted_capture_with_snapshot_restates_only_its_emitted_paths() {
-        // tsk72 direction: `metric.record` captures now carry a snapshot for
+        // tsk72 direction: `oxplow.metric.record` captures now carry a snapshot for
         // PROVENANCE — but their scanned set stays "exactly what I emitted".
         // If the snapshot were treated as a delta scanned set, this assertion
         // over snapshot 1 (which lists b.rs) would wipe b.rs's gauge fact.
