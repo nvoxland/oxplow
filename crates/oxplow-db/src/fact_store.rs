@@ -1777,7 +1777,7 @@ impl SqliteFactStore {
         // Declines to cache if a fact write landed while the query ran.
         self.db
             .memo()
-            .producers_put(measure_id, generation, &producers);
+            .producers_put(measure_id, generation, producers.clone());
         Ok(producers)
     }
 
@@ -2452,7 +2452,12 @@ impl SqliteFactStore {
         &self,
         measure_id: i64,
     ) -> Result<Vec<FactSliceKey>, DomainError> {
-        self.db
+        let (generation, hit) = self.db.memo().slice_keys_get(measure_id);
+        if let Some(hit) = hit {
+            return Ok(hit);
+        }
+        let keys = self
+            .db
             .call(move |conn| {
                 let mut stmt = conn.prepare_cached(
                     "SELECT DISTINCT c.producer, f.rule, f.severity, f.dims_json
@@ -2469,7 +2474,11 @@ impl SqliteFactStore {
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-            .await
+            .await?;
+        self.db
+            .memo()
+            .slice_keys_put(measure_id, generation, keys.clone());
+        Ok(keys)
     }
 
     /// One representative fact per distinct `(producer, rule, severity,
@@ -2496,7 +2505,12 @@ impl SqliteFactStore {
         &self,
         measure_id: i64,
     ) -> Result<Vec<FactRow>, DomainError> {
-        self.db
+        let (generation, hit) = self.db.memo().representatives_get(measure_id);
+        if let Some(hit) = hit {
+            return Ok(hit);
+        }
+        let rows = self
+            .db
             .call(move |conn| {
                 let sql = format!(
                     "SELECT {FACT_ROW_COLS} FROM fact f
@@ -2513,7 +2527,11 @@ impl SqliteFactStore {
                 let rows = stmt.query_map(params![measure_id], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-            .await
+            .await?;
+        self.db
+            .memo()
+            .representatives_put(measure_id, generation, rows.clone());
+        Ok(rows)
     }
 
     /// Facts of a measure belonging to the given captures (the attribution-by-claim
@@ -2790,7 +2808,8 @@ impl SqliteFactStore {
     /// alone — `rebuild_baseline` prunes on every boot, and wiping a healthy
     /// cube each start would turn tsk96's fix off for nothing.
     pub async fn prune_dominated_tree_captures(&self, stream_id: i64) -> Result<u64, DomainError> {
-        self.db
+        let n = self
+            .db
             .transaction(move |tx| {
                 let n = tx
                     .execute(
@@ -2856,7 +2875,13 @@ impl SqliteFactStore {
                 }
                 Ok(n as u64)
             })
-            .await
+            .await?;
+        // Deleted captures took their facts with them: forget what was
+        // memoized about any measure.
+        if n > 0 {
+            self.db.memo().invalidate_all();
+        }
+        Ok(n)
     }
 
     /// Apply one BUILD BATCH — a chunk of captures' folds — in a single
@@ -2994,7 +3019,8 @@ impl SqliteFactStore {
     /// and the epoch fenced (the tsk100 rule: replay inputs changed).
     pub async fn prune_aged_captures(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
         let cutoff = ts_to_string(cutoff);
-        self.db
+        let n = self
+            .db
             .transaction(move |tx| {
                 let doomed_where = "captured_at < ?1
                        AND effort_id IS NULL
@@ -3066,7 +3092,13 @@ impl SqliteFactStore {
                 }
                 Ok(n as u64)
             })
-            .await
+            .await?;
+        // Deleted captures took their facts with them: forget what was
+        // memoized about any measure.
+        if n > 0 {
+            self.db.memo().invalidate_all();
+        }
+        Ok(n)
     }
 
     /// Whether a producer has EVER completed a `scan_kind = 'full'` baseline
@@ -5993,6 +6025,54 @@ mod tests {
         let mut got = store.producers_for_measure(b).await.unwrap();
         got.sort();
         assert_eq!(got, vec!["alpha", "beta"]);
+    }
+
+    /// A measure's slice keys and representative rows are memoized like its
+    /// producers: kept across other measures' writes, forgotten by its own,
+    /// and by a prune that deleted facts.
+    #[tokio::test]
+    async fn slice_reads_are_memoized_per_measure() {
+        let store = fixture().await;
+        let a = measure(&store, "acme.a").await;
+        let b = measure(&store, "acme.b").await;
+        for m in [a, b] {
+            store
+                .record_facts(
+                    NewMetricCapture::done(1, "alpha", "builtin"),
+                    vec![NewFact::new(m, 1.0)],
+                )
+                .await
+                .unwrap();
+        }
+        store.distinct_slice_keys(a).await.unwrap();
+        store.representative_facts_by_slice(a).await.unwrap();
+        let memoized = |m: i64| {
+            let memo = store.db.memo();
+            (
+                memo.slice_keys_get(m).1.is_some(),
+                memo.representatives_get(m).1.is_some(),
+            )
+        };
+        assert_eq!(memoized(a), (true, true));
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "beta", "builtin"),
+                vec![NewFact::new(b, 2.0)],
+            )
+            .await
+            .unwrap();
+        assert_eq!(memoized(a), (true, true), "another measure's write");
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "beta", "builtin"),
+                vec![NewFact::new(a, 2.0)],
+            )
+            .await
+            .unwrap();
+        assert_eq!(memoized(a), (false, false), "its own write");
+        assert_eq!(store.distinct_slice_keys(a).await.unwrap().len(), 2);
+        store.db.memo().invalidate_all();
+        assert_eq!(memoized(a), (false, false), "a deletion forgets everything");
     }
 
     #[tokio::test]

@@ -1991,8 +1991,16 @@ It is now **memoized by `measure_id`**, and two things about that are load-beari
   it would otherwise install a result missing the new producer, with nothing
   to clear it until the next write.
 
+The same per-measure entry memoizes the measure's slice reads,
+`distinct_slice_keys` and `representative_facts_by_slice` (each a GROUP BY
+over the measure's whole history, which the effort deltas ran per spec,
+per effort, per recompute). A **deletion** of facts (a capture prune; facts
+cascade) can't cheaply say which measures it touched, so it bumps the
+memo's epoch (`invalidate_all`) and every entry is forgotten.
+
 If you add another path that inserts into `fact`, it must call
-`db.memo().invalidate_measures(<the measures written>)` after committing.
+`db.memo().invalidate_measures(<the measures written>)` after committing;
+one that deletes facts, `db.memo().invalidate_all()`.
 
 ## Gotchas
 

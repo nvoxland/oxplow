@@ -25,64 +25,158 @@ mod embedded {
 /// correctness bug (a new producer's facts silently missing from reads), not
 /// just a missed optimization. Cloning a `Database` shares this, exactly as it
 /// already shares the pool.
+///
+/// Every read here is a property of one measure's facts, so each measure has
+/// its own entry and write generation: a fact write forgets only the
+/// measures it wrote. A deletion (a prune) can't cheaply say which measures
+/// lost facts, so it bumps the epoch, which every entry is read under.
 #[derive(Default)]
 pub struct QueryMemo {
-    /// `measure_id` → the producers that have emitted facts for it, and
-    /// each measure's write generation: bumped by a fact write to it. A read
-    /// stores the generation it queried under and refuses to cache a result
-    /// computed across a write — see [`Self::producers_put`].
-    producers_for_measure: Mutex<HashMap<i64, Producers>>,
+    measures: Mutex<HashMap<i64, MeasureMemo>>,
+    /// Bumped by a deletion of facts: everything memoized is forgotten.
+    epoch: std::sync::atomic::AtomicU64,
 }
 
+/// What's memoized about one measure, and its write generation.
 #[derive(Default)]
-struct Producers {
+struct MeasureMemo {
     generation: u64,
-    list: Option<Vec<String>>,
+    epoch: u64,
+    /// The producers that have emitted facts for it (tsk130).
+    producers: Option<Vec<String>>,
+    /// Its distinct `(producer, rule, severity, dims_json)` slices.
+    slice_keys: Option<Vec<crate::fact_store::FactSliceKey>>,
+    /// One representative fact per slice.
+    representatives: Option<Vec<crate::fact_store::FactRow>>,
 }
+
+/// The generation a memoized read was taken under: the epoch and the
+/// measure's write generation.
+pub(crate) type MemoGeneration = (u64, u64);
 
 impl QueryMemo {
     /// A poisoned memo is not a reason to take the process down: it's a cache,
     /// and the worst a poisoned map holds is a value we'd have recomputed.
-    fn producers(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Producers>> {
-        self.producers_for_measure
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+    fn measures(&self) -> std::sync::MutexGuard<'_, HashMap<i64, MeasureMemo>> {
+        self.measures.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Look up a memoized producer list, along with the generation it was read
-    /// under — pass that back to [`Self::producers_put`].
-    pub(crate) fn producers_get(&self, measure_id: i64) -> (u64, Option<Vec<String>>) {
-        let memo = self.producers();
+    fn epoch(&self) -> u64 {
+        self.epoch.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Read `field` of `measure_id`'s entry, with the generation it's under —
+    /// pass that back to [`Self::put`]. An entry from an earlier epoch reads
+    /// as empty.
+    fn get<T: Clone>(
+        &self,
+        measure_id: i64,
+        field: impl Fn(&MeasureMemo) -> &Option<T>,
+    ) -> (MemoGeneration, Option<T>) {
+        let epoch = self.epoch();
+        let memo = self.measures();
         let entry = memo.get(&measure_id);
-        (
-            entry.map_or(0, |e| e.generation),
-            entry.and_then(|e| e.list.clone()),
-        )
+        let generation = entry.map_or(0, |e| e.generation);
+        let hit = entry
+            .filter(|e| e.epoch == epoch)
+            .and_then(|e| field(e).clone());
+        ((epoch, generation), hit)
     }
 
-    /// Memoize a producer list, but **only if no fact write landed since
-    /// `generation`**. Without that check a query that started before a write
-    /// and finished after it would install a result missing the new producer,
-    /// and nothing would clear it until the *next* write — a metric silently
-    /// blind to a producer.
-    pub(crate) fn producers_put(&self, measure_id: i64, generation: u64, value: &[String]) {
-        let mut memo = self.producers();
-        let entry = memo.entry(measure_id).or_default();
-        if entry.generation == generation {
-            entry.list = Some(value.to_vec());
+    /// Memoize `value` into `field`, but **only if no fact write (to this
+    /// measure) or deletion landed since `generation`**. Without that check a
+    /// query that started before a write and finished after it would install
+    /// a result missing the new rows, and nothing would clear it until the
+    /// *next* write — a metric silently blind to a producer.
+    fn put<T>(
+        &self,
+        measure_id: i64,
+        generation: MemoGeneration,
+        value: T,
+        field: impl Fn(&mut MeasureMemo) -> &mut Option<T>,
+    ) {
+        if self.epoch() != generation.0 {
+            return;
         }
+        let mut memo = self.measures();
+        let entry = memo.entry(measure_id).or_default();
+        if entry.generation != generation.1 {
+            return;
+        }
+        if entry.epoch != generation.0 {
+            // A stale epoch's fields are forgotten as the entry is reused.
+            *entry = MeasureMemo {
+                generation: entry.generation,
+                epoch: generation.0,
+                ..MeasureMemo::default()
+            };
+        }
+        *field(entry) = Some(value);
+    }
+
+    pub(crate) fn producers_get(&self, measure_id: i64) -> (MemoGeneration, Option<Vec<String>>) {
+        self.get(measure_id, |e| &e.producers)
+    }
+
+    pub(crate) fn producers_put(
+        &self,
+        measure_id: i64,
+        generation: MemoGeneration,
+        value: Vec<String>,
+    ) {
+        self.put(measure_id, generation, value, |e| &mut e.producers)
+    }
+
+    pub(crate) fn slice_keys_get(
+        &self,
+        measure_id: i64,
+    ) -> (MemoGeneration, Option<Vec<crate::fact_store::FactSliceKey>>) {
+        self.get(measure_id, |e| &e.slice_keys)
+    }
+
+    pub(crate) fn slice_keys_put(
+        &self,
+        measure_id: i64,
+        generation: MemoGeneration,
+        value: Vec<crate::fact_store::FactSliceKey>,
+    ) {
+        self.put(measure_id, generation, value, |e| &mut e.slice_keys)
+    }
+
+    pub(crate) fn representatives_get(
+        &self,
+        measure_id: i64,
+    ) -> (MemoGeneration, Option<Vec<crate::fact_store::FactRow>>) {
+        self.get(measure_id, |e| &e.representatives)
+    }
+
+    pub(crate) fn representatives_put(
+        &self,
+        measure_id: i64,
+        generation: MemoGeneration,
+        value: Vec<crate::fact_store::FactRow>,
+    ) {
+        self.put(measure_id, generation, value, |e| &mut e.representatives)
     }
 
     /// Called after facts for `measures` are committed: bump those measures'
     /// generations (so an in-flight read of one declines to cache) and drop
     /// what's memoized for them. Other measures keep theirs.
     pub(crate) fn invalidate_measures(&self, measures: impl IntoIterator<Item = i64>) {
-        let mut memo = self.producers();
+        let mut memo = self.measures();
         for m in measures {
             let entry = memo.entry(m).or_default();
-            entry.generation += 1;
-            entry.list = None;
+            *entry = MeasureMemo {
+                generation: entry.generation + 1,
+                epoch: entry.epoch,
+                ..MeasureMemo::default()
+            };
         }
+    }
+
+    /// Called after facts were deleted: forget everything.
+    pub(crate) fn invalidate_all(&self) {
+        self.epoch.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
 }
 
