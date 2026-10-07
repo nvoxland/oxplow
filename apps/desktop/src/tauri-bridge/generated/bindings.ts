@@ -719,6 +719,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listPersonCommands: () => typedError<CommandSpec[], IpcError>(__TAURI_INVOKE("list_person_commands")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	undoCommand: (auditId: number, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1353,7 +1358,9 @@ export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "notes-resync"
  *  Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
  *  has no answer.
  */
-"metrics";
+"metrics" | 
+// A command a person ran in the background (its `CommandUi.background`).
+"command";
 
 export type BackgroundTaskStatus = "running" | "done" | "failed";
 
@@ -1821,6 +1828,51 @@ export type CommandSpec = {
 	 *  (`.context/commands.md`).
 	 */
 	needs: string[],
+	/**
+	 *  How a person meets it — label, group, where it's offered and how
+	 *  it runs from there. `None`: it isn't offered to a person by itself
+	 *  (a step other commands compose, an agent's tool).
+	 */
+	ui?: CommandUi | null,
+};
+
+/**
+ *  A command as a person meets it (`.context/commands.md` "Offering a
+ *  command to a person"). Agents ignore it.
+ */
+export type CommandUi = {
+	// What a person reads: `Pull Changes`, `New Task…`.
+	label: string,
+	// What search lists it under: `Git`, `Tasks`.
+	group?: string | null,
+	// More words search matches it by.
+	keywords?: string[],
+	/**
+	 *  The ref kind it acts on (`work_item`, `effort`): offered on that
+	 *  ref's page and rows. `None`: it needs no ref, and search offers it.
+	 */
+	about?: string | null,
+	/**
+	 *  The input it runs with. A string that is exactly `{{stream}}`,
+	 *  `{{thread}}`, `{{ref}}` or `{{ref.id}}` is bound from where it runs;
+	 *  a binding there's nothing for makes it unavailable there.
+	 */
+	input?: unknown | null,
+	/**
+	 *  The page that gathers its input (a tab id, `page:new-task`):
+	 *  choosing it opens that page rather than running it.
+	 */
+	form?: string | null,
+	/**
+	 *  The page to open once it ran: a tab id whose `{{result.<field>}}`
+	 *  takes the result's field (`page:custom-dashboard?id={{result.id}}`).
+	 */
+	open_after?: string | null,
+	/**
+	 *  It runs as a background task (a slow call out: pull, push) whose
+	 *  failure is reported, rather than awaited where it was chosen.
+	 */
+	background?: boolean,
 };
 
 /**
@@ -2495,6 +2547,18 @@ export type ExtensionCommand = {
 	confirm: Confirm,
 	effect: CommandEffect,
 	invokers: Invokers,
+	/**
+	 *  The capabilities (or features) it needs active, as core's commands
+	 *  declare them (`oxplow_domain::capability::check_need`).
+	 */
+	needs: string[],
+	// How a person meets it (label, group, …), as core's commands do.
+	ui: CommandUi | null,
+	/**
+	 *  Stable: a shared extension's commands are; a private one's are
+	 *  experimental.
+	 */
+	stable: boolean,
 	examples: CommandExample[],
 };
 

@@ -1138,6 +1138,20 @@ async function runAsBackgroundTask(
   return attachAwait(taskId);
 }
 
+/** The commands a person is offered — those with a `ui` they may run now
+ *  (`list_person_commands`); search lists the ref-less ones. */
+export async function listPersonCommands(): Promise<CommandSpec[]> {
+  return unwrap(await commands.listPersonCommands());
+}
+
+/** Run command `id` as a background task (its `ui.background`: a slow
+ *  call out). Resolves once it started; `awaitGitOp` on the kickoff for
+ *  its outcome. */
+export async function runCommandInBackground(label: string, id: string, input: unknown): Promise<GitOpKickoff> {
+  const kind = id.startsWith("oxplow.vcs.") ? "vcs" : "command";
+  return runAsBackgroundTask(label, kind, id, async () => (await runCommand(id, input)).result as OpOutcome);
+}
+
 export async function vcsMerge(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
   return runAsBackgroundTask(`Merge ${rev}`, "vcs", `merge ${rev}`, () =>
     runVcs("oxplow.vcs.merge", { stream: streamId, rev }, confirmed),

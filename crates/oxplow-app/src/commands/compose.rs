@@ -118,6 +118,7 @@ pub fn sequence_spec() -> CommandSpec {
         atomicity: Atomicity::Dispatch,
         effect: CommandEffect::Write,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

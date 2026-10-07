@@ -142,6 +142,7 @@ fn spec(
         atomicity,
         effect,
         needs: Vec::new(),
+        ui: None,
     }
 }
 
@@ -380,6 +381,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
             let input: EnableInput =

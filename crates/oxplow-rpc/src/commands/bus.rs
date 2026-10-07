@@ -31,6 +31,21 @@ pub async fn run_command(
     Ok(outcome)
 }
 
+/// The commands a person is offered: those they may run now (invokers,
+/// needs active) that say how a person meets them (`ui`) — what search,
+/// menus and pages list (`.context/commands.md` "Offering a command to a
+/// person").
+pub async fn list_person_commands(svc: &Services) -> Result<Vec<CommandSpec>, IpcError> {
+    let mut specs: Vec<CommandSpec> = svc
+        .commands
+        .list(&Actor::Human)
+        .into_iter()
+        .filter(|s| s.ui.is_some())
+        .collect();
+    specs.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(specs)
+}
+
 /// A command's spec — what a form renders from its `input_schema`, and
 /// what a confirmation says (its summary, whether it's destructive).
 pub async fn get_command(svc: &Services, name: String) -> Result<CommandSpec, IpcError> {
@@ -85,6 +100,49 @@ mod tests {
     /// P5.A1 (tsk519): the person runs a command over IPC. A human-only
     /// key needs their confirmation — refused without it, done with it —
     /// and the run is audited to a human.
+    /// What a person can run now and is offered: every command with
+    /// person-facing metadata the person may invoke — Pull, New Task —
+    /// and none without (a step, an agent's tool).
+    #[tokio::test]
+    async fn a_person_is_offered_the_commands_with_a_label() {
+        let (svc, _dir) = services();
+        let listed = crate::dispatch("list_person_commands", json!({}), &svc)
+            .await
+            .unwrap();
+        let by_id = |id: &str| {
+            listed
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["id"] == id)
+                .cloned()
+        };
+        let pull = by_id("oxplow.vcs.pull").expect("pull is offered");
+        assert_eq!(pull["ui"]["label"], "Pull Changes");
+        assert_eq!(pull["ui"]["group"], "Git");
+        assert_eq!(pull["ui"]["input"], json!({ "stream": "{{stream}}" }));
+        assert_eq!(pull["ui"]["background"], true);
+        let new_task = by_id("oxplow.work_item.create").expect("New Task is offered");
+        assert_eq!(new_task["ui"]["form"], "page:new-task");
+        let dashboard = by_id("oxplow.dashboard.create").expect("New Dashboard is offered");
+        assert_eq!(
+            dashboard["ui"]["open_after"],
+            "page:custom-dashboard?id={{result.id}}"
+        );
+        assert!(
+            by_id("oxplow.config.get").is_none(),
+            "no label: not offered"
+        );
+        assert!(
+            listed
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|c| c["ui"].is_object()),
+            "{listed}"
+        );
+    }
+
     #[tokio::test]
     async fn a_person_runs_a_command_confirming_where_asked() {
         let (svc, dir) = services();

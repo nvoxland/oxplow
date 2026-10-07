@@ -11,7 +11,7 @@ import { querySql, runCommand, type EffortDetail, type SqlCell } from "./api.js"
 import { NO_READS } from "./lens/lensRerun.js";
 import { threadIdOf, threadRowId } from "./modelIds.js";
 import { personCommands } from "./personCommands.js";
-import type { FieldDecl, Followup, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, FieldDecl, Followup, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
 import { commands } from "./tauri-bridge/index.js";
 
 /** The state every provider maps to. */
@@ -442,7 +442,7 @@ export async function updateWorkItem(ref: string, changes: WorkItemChanges): Pro
 
 /** Move an item to a canonical state: `oxplow.work_item.transition`, which the
  *  bus dispatches to the item's provider. */
-export function transitionWorkItem(ref: string, state: CanonicalState): Promise<boolean> {
+export function transitionWorkItem(ref: string, state: CanonicalState): Promise<CommandOutcome | null> {
   return personCommands.run(`Move to ${STATE_LABEL[state]}`, "oxplow.work_item.transition", { ref, to: state });
 }
 

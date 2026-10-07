@@ -72,6 +72,14 @@ pub struct ExtensionCommand {
     pub confirm: Confirm,
     pub effect: CommandEffect,
     pub invokers: Invokers,
+    /// The capabilities (or features) it needs active, as core's commands
+    /// declare them (`oxplow_domain::capability::check_need`).
+    pub needs: Vec<String>,
+    /// How a person meets it (label, group, …), as core's commands do.
+    pub ui: Option<oxplow_domain::CommandUi>,
+    /// Stable: a shared extension's commands are; a private one's are
+    /// experimental.
+    pub stable: bool,
     pub examples: Vec<CommandExample>,
 }
 
@@ -91,6 +99,10 @@ struct CommandFile {
     effect: Option<String>,
     #[serde(default)]
     invokers: Option<Invokers>,
+    #[serde(default)]
+    needs: Vec<String>,
+    #[serde(default)]
+    ui: Option<oxplow_domain::CommandUi>,
     #[serde(default)]
     examples: Vec<ExampleFile>,
 }
@@ -160,6 +172,7 @@ fn inside(rel: &str) -> bool {
 /// manifest's text (for lines); `read` reads a file in the extension.
 pub fn parse_commands(
     namespace: &str,
+    shared: bool,
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -183,7 +196,7 @@ pub fn parse_commands(
             }
         };
         let line = entry_line(manifest, "commands", "name", &entry.name).or(block_line);
-        match command_of(namespace, entry, read) {
+        match command_of(namespace, shared, entry, read) {
             Ok(c) if out.iter().any(|o| o.name == c.name) => errors.push(at(
                 file,
                 line,
@@ -198,6 +211,7 @@ pub fn parse_commands(
 
 fn command_of(
     namespace: &str,
+    shared: bool,
     f: CommandFile,
     read: &dyn Fn(&str) -> Option<String>,
 ) -> Result<ExtensionCommand, String> {
@@ -237,6 +251,12 @@ fn command_of(
     };
     InputValidator::compile(&f.input_schema)
         .map_err(|e| at_name(format!("`input_schema` doesn't compile: {e}")))?;
+    for need in &f.needs {
+        oxplow_domain::capability::check_need(need).map_err(at_name)?;
+    }
+    if f.ui.as_ref().is_some_and(|ui| ui.label.trim().is_empty()) {
+        return Err(at_name("`ui.label` must say what a person reads".into()));
+    }
     if let Some(sql) = &f.input {
         oxplow_db::sql_tokens::check_single_read(sql).map_err(|e| {
             at_name(format!(
@@ -271,6 +291,9 @@ fn command_of(
         confirm,
         effect,
         invokers: f.invokers.unwrap_or(Invokers::ALL),
+        needs: f.needs,
+        ui: f.ui,
+        stable: shared,
         examples: f
             .examples
             .into_iter()
@@ -532,10 +555,15 @@ pub fn extension_command(
         invokers: decl.invokers,
         confirm: decl.confirm,
         undoable: true,
-        lifecycle: Lifecycle::Experimental,
+        lifecycle: if decl.stable {
+            Lifecycle::Stable
+        } else {
+            Lifecycle::Experimental
+        },
         atomicity: Atomicity::Dispatch,
         effect: decl.effect,
-        needs: Vec::new(),
+        needs: decl.needs.clone(),
+        ui: decl.ui.clone(),
     };
     let (script, query) = (decl.script.clone(), decl.input.clone());
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
@@ -928,6 +956,30 @@ mod tests {
         assert_eq!(command_namespace("my-review"), "my_review");
     }
 
+    /// A command declares the capabilities it needs and how a person meets
+    /// it, like core's; a private extension's is experimental.
+    #[test]
+    fn a_command_declares_its_needs_and_how_a_person_meets_it() {
+        let d = tempfile::tempdir().unwrap();
+        let tail = "    needs: [work_items.comments]\n    ui:\n      label: Finish Review\n      group: Review\n      keywords: [done]\n      about: work_item\n      input: { ref: \"{{ref}}\" }\n";
+        write_ext(
+            d.path(),
+            "my-review",
+            &format!("{GOOD}{tail}"),
+            &[("handlers/finish_review.star", HANDLER)],
+        );
+        let ext = project(d.path(), "my-review");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let c = &ext.commands[0];
+        assert_eq!(c.needs, vec!["work_items.comments".to_string()]);
+        let ui = c.ui.as_ref().unwrap();
+        assert_eq!(ui.label, "Finish Review");
+        assert_eq!(ui.group.as_deref(), Some("Review"));
+        assert_eq!(ui.about.as_deref(), Some("work_item"));
+        assert_eq!(ui.input, Some(serde_json::json!({ "ref": "{{ref}}" })));
+        assert!(!c.stable, "a private extension's command is experimental");
+    }
+
     /// Each broken entry is an error at its line, and is dropped.
     #[test]
     fn a_broken_command_is_an_error_at_its_line() {
@@ -953,6 +1005,16 @@ mod tests {
                 entry("a.b", "    effect: read\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "a command that only reads",
+            ),
+            (
+                entry("a.b", "    needs: [warp_drive]\n"),
+                vec![("handlers/h.star", HANDLER)],
+                "isn't a capability",
+            ),
+            (
+                entry("a.b", "    ui: { group: Review }\n"),
+                vec![("handlers/h.star", HANDLER)],
+                "label",
             ),
             (
                 entry("a.b", "    effect: often\n"),
@@ -1096,6 +1158,7 @@ mod tests {
                         atomicity: oxplow_domain::Atomicity::Tx,
                         effect: CommandEffect::Write,
                         needs: Vec::new(),
+                        ui: None,
                     },
                     crate::commands::Handler::Tx(std::sync::Arc::new(|_, _| {
                         Ok(crate::commands::HandlerOutput::default())
@@ -1630,6 +1693,7 @@ mod tests {
                     atomicity: oxplow_domain::Atomicity::Tx,
                     effect: CommandEffect::Write,
                     needs: Vec::new(),
+                    ui: None,
                 },
                 crate::commands::Handler::Tx(std::sync::Arc::new(|_, _| {
                     Ok(crate::commands::HandlerOutput::default())

@@ -1754,6 +1754,7 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::External(std::sync::Arc::new(
             move |Invocation { actor, .. }, input| {

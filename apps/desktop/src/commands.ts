@@ -9,12 +9,7 @@ export type CommandId =
   | "file.quickOpen"
   | "edit.find"
   | "git.commit"
-  | "git.pull"
-  | "git.push"
-  | "plan.newTask"
-  | "dashboard.new"
   | "lens.newWithAgent"
-  | "stream.new"
   | "thread.new"
   | "project.new"
   | "project.open"
@@ -33,8 +28,8 @@ export type CommandId =
   | "native.separator.2";
 
 // `plan` is the historical id of the Tasks group (label "Tasks"); the id
-// is internal-only and kept stable so `plan.newTask` and its keybinding
-// don't churn.
+// is internal-only. Most of what the Git and Tasks groups held now comes
+// from the command bus (`commandOffers`); they shrink to what doesn't yet.
 export type MenuId = "file" | "edit" | "git" | "plan";
 
 export interface MenuCommand extends MenuItem {
@@ -85,15 +80,10 @@ export interface CommandHandlers {
   save(): void;
   quickOpen(): void;
   find(): void;
-  newTask(): void;
-  newStream(): void;
-  newDashboard(): void;
   /** Put a starter "build me a lens" prompt in the agent's input (never sent). */
   newLensWithAgent(): void;
   newThread(): void;
   commitFiles(): void;
-  pullChanges(): void;
-  pushChanges(): void;
   openProject(): void;
   openProjectNewWindow(): void;
   newProject(): void;
@@ -146,8 +136,6 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       items: [
         // Mutations, gated on git actually being available (`canCommit`).
         { id: "git.commit", label: "Commit Changes…", enabled: !!state.canCommit },
-        { id: "git.pull", label: "Pull Changes", enabled: !!state.canCommit },
-        { id: "git.push", label: "Push Changes", enabled: !!state.canCommit },
       ],
     },
     {
@@ -157,11 +145,8 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       // Search only.
       inMenuBar: false,
       items: [
-        { id: "plan.newTask", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
-        { id: "dashboard.new", label: "New Dashboard…", enabled: state.hasStream },
         { id: "lens.newWithAgent", label: "New Lens with Your Agent…", enabled: state.hasThread },
         { id: "thread.new", label: "New Thread…", enabled: state.hasStream },
-        { id: "stream.new", label: "New Stream…", enabled: true },
       ],
     },
   ];
@@ -174,12 +159,7 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "file.quickOpen": handlers.quickOpen,
     "edit.find": handlers.find,
     "git.commit": handlers.commitFiles,
-    "git.pull": handlers.pullChanges,
-    "git.push": handlers.pushChanges,
-    "plan.newTask": handlers.newTask,
-    "dashboard.new": handlers.newDashboard,
     "lens.newWithAgent": handlers.newLensWithAgent,
-    "stream.new": handlers.newStream,
     "thread.new": handlers.newThread,
     "project.new": handlers.newProject,
     "project.open": handlers.openProject,

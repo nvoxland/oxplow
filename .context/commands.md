@@ -49,6 +49,33 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
 `agent:thr3`, `lens:acme/x`) is what the event and audit record.
 
+## Offering a command to a person
+
+A command says how a person meets it with an optional `ui`
+(`oxplow_domain::CommandUi`; agents ignore it; `Command::with_ui`):
+
+| Field | Meaning |
+|---|---|
+| `label` | what a person reads (`Pull Changes`, `New Task…`) |
+| `group` | what search lists it under (`Git`, `Tasks`) |
+| `keywords` | more words search matches it by |
+| `about` | the ref kind it acts on: offered on that ref's page and rows; absent, it needs no ref and **search** offers it |
+| `input` | the input it runs with; a string exactly `{{stream}}`, `{{thread}}`, `{{ref}}` or `{{ref.id}}` binds from where it runs, and one with nothing to bind there makes it unavailable there |
+| `form` | the page that gathers its input (`page:new-task`): choosing it opens that page instead of running it |
+| `open_after` | a tab id to open once it ran, `{{result.<field>}}` from its result (`page:custom-dashboard?id={{result.id}}`) |
+| `background` | it runs as a background task (kind `vcs` for `oxplow.vcs.*`, else `command`), its failure an op error |
+
+RPC `list_person_commands` lists what a person is offered: what they may
+run now (invokers, `needs` active) that has a `ui`. The desktop keeps one
+listing (`personCommandsStore.ts`, reloaded when extensions or config
+change) and turns the ref-less ones into search entries with
+`commandOffers.ts` (pure: binding, availability, run / form / background /
+open-after); a shortcut may run one by id (⌘⇧N → `oxplow.work_item.create`'s
+form). Offered now: `oxplow.vcs.pull` / `push`, `oxplow.work_item.create`,
+`oxplow.dashboard.create`, `oxplow.stream.create_worktree`. Commit, New
+Thread and New Lens with Your Agent are still the app's own commands
+(`commands.ts`) until the window provides them as capabilities.
+
 ## The pipeline (`crates/oxplow-app/src/commands/mod.rs`)
 
 `CommandBus::run(actor, name, input, confirmed)`:

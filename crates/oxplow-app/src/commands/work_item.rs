@@ -746,6 +746,7 @@ fn spec(
         atomicity,
         effect: oxplow_domain::CommandEffect::Record,
         needs,
+        ui: None,
     }
 }
 
@@ -1002,6 +1003,13 @@ pub fn create_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
         create_target,
         tx_create(registry, links),
     )
+    .with_ui(oxplow_domain::CommandUi {
+        label: "New Task…".into(),
+        group: Some("Tasks".into()),
+        keywords: vec!["work item".into()],
+        form: Some("page:new-task".into()),
+        ..Default::default()
+    })
 }
 
 // ---- oxplow.work_item.update ----

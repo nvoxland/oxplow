@@ -155,6 +155,7 @@ pub fn commands() -> Vec<Command> {
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Record,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             report(ctx, parse(input)?)

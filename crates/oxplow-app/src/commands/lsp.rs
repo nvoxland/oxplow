@@ -50,6 +50,7 @@ fn spec(name: &str, summary: &str) -> CommandSpec {
         atomicity: Atomicity::External,
         effect: CommandEffect::Write,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

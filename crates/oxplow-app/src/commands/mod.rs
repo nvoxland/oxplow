@@ -272,6 +272,12 @@ pub struct Command {
 }
 
 impl Command {
+    /// This command, offered to a person as `ui` says (label, group, …).
+    pub fn with_ui(mut self, ui: oxplow_domain::CommandUi) -> Self {
+        self.spec.ui = Some(ui);
+        self
+    }
+
     /// This command run by `handler` instead — its spec and compiled
     /// schema shared (an effect's reaction: `oxplow.command.sequence` over what
     /// its script composed). The handler must be of the same atomicity.
@@ -2177,6 +2183,7 @@ mod tests {
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         }
     }
 
@@ -3426,6 +3433,7 @@ mod tests {
             atomicity: oxplow_domain::Atomicity::Dispatch,
             effect: oxplow_domain::CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         };
         let compose: Arc<Composer> = Arc::new(|_conn, input: &Value| {
             Ok(Composition {

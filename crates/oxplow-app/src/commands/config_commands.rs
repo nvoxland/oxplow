@@ -174,6 +174,7 @@ fn spec(name: &str, summary: &str, input_schema: Value, effect: CommandEffect) -
         atomicity: Atomicity::Tx,
         effect,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

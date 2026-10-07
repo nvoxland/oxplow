@@ -132,6 +132,48 @@ pub struct CommandSpec {
     /// needs active; unmet, it isn't offered and doesn't run
     /// (`.context/commands.md`).
     pub needs: Vec<String>,
+    /// How a person meets it — label, group, where it's offered and how
+    /// it runs from there. `None`: it isn't offered to a person by itself
+    /// (a step other commands compose, an agent's tool).
+    #[serde(default)]
+    pub ui: Option<CommandUi>,
+}
+
+/// A command as a person meets it (`.context/commands.md` "Offering a
+/// command to a person"). Agents ignore it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandUi {
+    /// What a person reads: `Pull Changes`, `New Task…`.
+    pub label: String,
+    /// What search lists it under: `Git`, `Tasks`.
+    #[serde(default)]
+    pub group: Option<String>,
+    /// More words search matches it by.
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// The ref kind it acts on (`work_item`, `effort`): offered on that
+    /// ref's page and rows. `None`: it needs no ref, and search offers it.
+    #[serde(default)]
+    pub about: Option<String>,
+    /// The input it runs with. A string that is exactly `{{stream}}`,
+    /// `{{thread}}`, `{{ref}}` or `{{ref.id}}` is bound from where it runs;
+    /// a binding there's nothing for makes it unavailable there.
+    #[serde(default)]
+    #[specta(type = Option<crate::Json>)]
+    pub input: Option<Value>,
+    /// The page that gathers its input (a tab id, `page:new-task`):
+    /// choosing it opens that page rather than running it.
+    #[serde(default)]
+    pub form: Option<String>,
+    /// The page to open once it ran: a tab id whose `{{result.<field>}}`
+    /// takes the result's field (`page:custom-dashboard?id={{result.id}}`).
+    #[serde(default)]
+    pub open_after: Option<String>,
+    /// It runs as a background task (a slow call out: pull, push) whose
+    /// failure is reported, rather than awaited where it was chosen.
+    #[serde(default)]
+    pub background: bool,
 }
 
 /// The namespace oxplow's own commands are under: core's and its shipped

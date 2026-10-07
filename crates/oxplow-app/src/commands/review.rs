@@ -103,6 +103,7 @@ fn spec(name: &str, summary: &str, schema: serde_json::Value) -> CommandSpec {
         atomicity: Atomicity::Tx,
         effect: CommandEffect::Record,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

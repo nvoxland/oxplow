@@ -33,6 +33,8 @@ pub enum BackgroundTaskKind {
     /// Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
     /// has no answer.
     Metrics,
+    /// A command a person ran in the background (its `CommandUi.background`).
+    Command,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]

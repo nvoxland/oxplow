@@ -278,6 +278,7 @@ pub fn enable_command(
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let (health, providers) = (health.clone(), providers.clone());

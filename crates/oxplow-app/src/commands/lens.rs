@@ -325,6 +325,7 @@ fn show(target: LensTarget) -> Command {
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Record,
             needs: Vec::new(),
+            ui: None,
         },
         handler,
     )
@@ -568,6 +569,7 @@ fn keep(target: LensTarget) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         handler,
     )
@@ -620,6 +622,7 @@ fn share(target: LensTarget) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
             needs: Vec::new(),
+            ui: None,
         },
         handler,
     )

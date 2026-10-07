@@ -165,6 +165,7 @@ fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
         atomicity: Atomicity::Tx,
         effect: CommandEffect::Record,
         needs: Vec::new(),
+        ui: None,
     }
 }
 

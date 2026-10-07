@@ -178,6 +178,7 @@ fn spec(
         atomicity,
         effect: CommandEffect::Record,
         needs: Vec::new(),
+        ui: None,
     }
 }
 
@@ -204,6 +205,14 @@ pub fn create_command() -> Command {
         })),
     )
     .expect("oxplow.dashboard.create is a valid command")
+    // Choosing it makes one ready to fill: create, then open it.
+    .with_ui(oxplow_domain::CommandUi {
+        label: "New Dashboard…".into(),
+        group: Some("Tasks".into()),
+        input: Some(json!({ "title": "Untitled dashboard" })),
+        open_after: Some("page:custom-dashboard?id={{result.id}}".into()),
+        ..Default::default()
+    })
 }
 
 /// `dashboard.rename { dashboard, title }`; undone by renaming it back.

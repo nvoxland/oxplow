@@ -1938,6 +1938,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = &m.commands {
             let (commands, errors) = crate::extension_commands::parse_commands(
                 &ext.namespace,
+                m.sharing == Sharing::Shared,
                 v,
                 &file,
                 &manifest,

@@ -57,6 +57,7 @@ function renderOverlay(onClose = () => {}) {
       selectedFilePath={null}
       pages={[]}
       menuGroups={[]}
+      offers={[]}
       onClose={onClose}
       onOpenFile={() => {}}
       onOpenPage={() => {}}
