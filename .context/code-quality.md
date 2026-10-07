@@ -130,6 +130,17 @@ in the background. `DuplicationRecorder::record`
   path-list fingerprint) and its findings, read through
   `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-bundled
   `findings` and `duplicate-blocks` lenses);
+- **stored in one write** (`SqliteCodeQualityStore::finish_scan_with_findings`):
+  the findings, their `finding → file` page refs and the scan's `done`
+  status commit together, so a scan announces one `ModelsChanged`, not
+  two per finding. That burst (`page_ref` feeds `v_knowledge_page` and
+  `v_thread_work`) used to keep the webview re-reading the wiki and Work
+  models for the whole store and made typing lag;
+- **only the latest scan per scope is kept**: the same write deletes the
+  older finished scans of its tool and scope (findings cascade; their page
+  refs are deleted explicitly). Readers only ever want a scope's latest;
+- **only parseable files are read** into the corpus
+  (`oxplow_code_metrics::is_supported_path`), not every file in the tree;
 - **no facts**: a change scan anchors only its changed files, so a capture
   from it would restate the whole tree from a slice and zero out every
   untouched file's duplicates (tsk365). `oxplow.duplicate_lines` is the

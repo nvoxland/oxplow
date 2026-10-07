@@ -1,6 +1,6 @@
 ---
 name: oxplow-collection
-description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when finishing a change or committing, when the user asks about test coverage or "what tests ran", and on /oxplow:configure. Keeps coverage flowing without bit-rot after a one-time configure.
+description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when running tests, when the user asks about test coverage or "what tests ran", and on /oxplow:configure. Keeps the runs you make visible to oxplow without bit-rot after a one-time configure.
 ---
 
 # Collection — keep coverage flowing per effort
@@ -12,31 +12,25 @@ automatic; your job is small and is about making sure the data exists,
 
 ## The one rule
 
-When you finish a change, **run the project's full tests before you
-commit it or call it done**, so fresh test + coverage reports exist for
-oxplow to attribute to the effort. The test command is recorded in the
-`testing:` block of `.oxplow/project.yaml` (`command`).
+Which tests you run, and when, is up to you and the project — oxplow
+doesn't ask for any. What it needs is to **see the runs you do make**,
+so their results and coverage attach to the effort. The project's
+commands are in the `testing:` block of `.oxplow/project.yaml`.
 
-Run it three specific ways:
+- **Run tests through a report-emitting command.** A bare
+  `bun test <file>` / `cargo test <name>` writes no report, so the run
+  never reaches the Tests panel.
 
-- **Run EVERY test invocation through a report-emitting command** — including
-  **red-phase / failing** runs and quick **single-test** runs, not just the
-  final green one. A bare `bun test <file>` / `cargo test <name>` is a
-  report-less run and won't reach the Tests panel, so your red→green
-  progression and any failures stay invisible.
+    - **`fastCommand`** (when the project declares one) emits the test
+      report without coverage instrumentation and takes a filter — for
+      quick, focused runs.
+    - **`command`** is the full run with coverage. Diff coverage for the
+      effort comes only from this one.
 
-    Which command depends on what you're doing:
-
-    - **Iterating (red/green, one test, one crate): `fastCommand`** when the
-      project declares one. It emits the same test report but skips coverage
-      instrumentation, and it takes a filter — so it's seconds, not minutes.
-    - **Before committing or calling it done: `command`.** The full run, with coverage.
-      Diff coverage for the effort comes only from this one.
-
-    If the project declares no `fastCommand`, use `command` throughout.
-    If that turns out to be too slow to run every cycle, say so and offer to add
-    one — do NOT quietly fall back to a bare `cargo test`, which records
-    nothing. An unrecorded run is the failure mode this rule exists to prevent.
+    If the project declares no `fastCommand`, `command` is the
+    report-emitting run. If that's too slow to use the way you want, say
+    so and offer to add one — rather than falling back to a bare
+    `cargo test`, which oxplow can't see.
 - **Run it in the FOREGROUND, never backgrounded.** The PostToolUse hook fires
   when the Bash call *returns*; a backgrounded run returns at launch (before
   the reports regenerate), so its reports are never ingested and the effort

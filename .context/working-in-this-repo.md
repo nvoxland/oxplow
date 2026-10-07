@@ -121,8 +121,10 @@ test) or a tempfile-backed DB.
 Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun run test` invokes both Rust and TS suites.
 
-**Before each commit, one full run of `bun run test:collect` with lint
-(below) — not bare `cargo test` / `bun test`.** `test:collect` (`scripts/test-collect.sh`: `cargo cov`,
+**Which tests and lint to run, and when, is the agent's call** — run
+what the change warrants; nothing requires a full run before a commit.
+Use the report-emitting commands below, not bare `cargo test` /
+`bun test`. `test:collect` (`scripts/test-collect.sh`: `cargo cov`,
 then `bun run --cwd apps/desktop test:junit` whether or not the Rust
 suite passed, failing if either did) is the configured `testing.command` — it's the only
 test run that emits the JUnit + lcov reports oxplow parses into the
@@ -141,10 +143,11 @@ Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo
 install cargo-llvm-cov cargo-nextest`) to write `target/coverage/lcov.info`.
 See `.context/collection.md`.
 
-**That run is lint and tests together** — they don't share a
-target dir: `(bun run lint:collect >/dev/null 2>&1 & bun run
-test:collect; wait)`, still one foreground command (see
-[performance.md](./performance.md) → "The dev loop").
+**A full run can take lint alongside** — they don't share a target dir:
+`(bun run lint:collect >/dev/null 2>&1 & bun run test:collect; wait)`,
+still one foreground command (see [performance.md](./performance.md) →
+"The dev loop"). CI treats clippy warnings as errors, so Rust changes
+need `lint:collect` clean before they're pushed.
 
 **A test database comes from a migrated template**
 (`Database::in_memory()` restores `<temp>/oxplow-db-templates/<build+date>.sqlite`

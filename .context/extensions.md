@@ -2460,7 +2460,7 @@ mechanism; what to say, and when, is SQL in the extension.
 
 ```yaml
 advisories:
-  - id: coverage-target
+  - id: low-coverage
     on: post-tool-use        # or prompt, or turn-end
     once_per: effort         # effort (default) | thread | session | day | row (needs a `key` column) | turn
     audience: agent          # agent (default) | person
@@ -2525,9 +2525,13 @@ advisories:
   once per effort: an open effort holding 15 or more files — a commit
   landing its work would have closed it) and `landed-in-progress`
   (turn-end, to the person, once per item: an item still in progress
-  though a commit landed its work and nothing is open on it); and three
-  metric ones, `coverage-target`,
-  `metric-deltas`, `threshold-crossed` (see [metrics.md](./metrics.md)). Advisories read
+  though a commit landed its work and nothing is open on it); and two
+  metric ones, `metric-deltas` and `threshold-crossed` (see
+  [metrics.md](./metrics.md)). **Bundled advisories set no coding
+  requirements** (decided 2026-10-07): they say what oxplow observed, never
+  how a project should code — no coverage target, no "add tests" — and
+  a project that wants one writes its own advisory (the `coverage-target`
+  nudge was removed for this). Advisories read
   stored views (`v_effort_metric_delta`, `v_effort_observation`), never the
   engine directly.
 - The report-less-run nudge stays in core: it's about collection hygiene,
@@ -2704,7 +2708,7 @@ What moves out of core, and what it becomes:
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
 | Fact collectors (`oxplow/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); the built-in catalog stays core as the opt-in standard library |
-| Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `coverage-target` and `metric-deltas`) |
+| Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |

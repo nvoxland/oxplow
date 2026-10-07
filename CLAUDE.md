@@ -36,17 +36,22 @@ or exact mechanics.
 - **Asking the user a question.** When your reply needs the user's
   answer, end it with the question itself: a final message that ends in
   a question shows the thread as waiting on them.
-- **Before each commit, one full test and lint run:** `bash -c '(bun
-  run lint:collect >/dev/null 2>&1 & bun run test:collect; wait)'`, in
-  the foreground. `test:collect` (not bare `cargo test` / `bun test`)
-  is the only run that emits the JUnit + lcov reports oxplow parses into
-  the effort's coverage panel. See `.context/collection.md`.
-- **After editing any `.rs`** run `cargo fmt --all` then `bun run
-  lint:collect` before ending the turn — CI treats warnings as errors,
-  and `lint:collect` (clippy with `-D warnings`, JSON to
-  `target/clippy.json`) is what feeds the `oxplow.analysis.*` metrics.
-  On failure re-run plain `cargo clippy --workspace --all-targets -- -D
-  warnings` for readable diagnostics. Don't `#[allow(...)]` a real lint.
+- **Which tests and lint to run, and when, is your call** — run what
+  the change warrants. Nothing requires a full run before a commit. The
+  commands, all in the foreground (a backgrounded run's reports are
+  never ingested), never bare `cargo test` / `bun test` (they emit no
+  reports):
+  - `bun run test:fast` (filtered: `-p oxplow-app some_test`) and
+    `bun run test:fast:ts` — quick, write the JUnit reports the
+    effort's Tests panel shows.
+  - `bun run test:collect` — the full suite with coverage, the only run
+    that emits lcov for the coverage panel. See `.context/collection.md`.
+  - `bun run lint:collect` — clippy with `-D warnings` (JSON to
+    `target/clippy.json`, which feeds the `oxplow.analysis.*` metrics).
+    CI treats warnings as errors, so Rust changes need it clean before
+    they're pushed. Plain `cargo clippy --workspace --all-targets -- -D
+    warnings` gives readable diagnostics. Run `cargo fmt --all` after
+    editing `.rs`. Don't `#[allow(...)]` a real lint.
 - **Plan mode** for multi-subsystem work (3+ areas touched) or ambiguous
   requirements; skip it for single-file changes, typos, renames, narrow
   refactors.

@@ -11,7 +11,7 @@
     - { name: "thread_id", type: "INTEGER", doc: "Thread." }
     - { name: "effort_id", type: "INTEGER", doc: "Effort it was about, if any." }
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
-    - { name: "kind", type: "TEXT", doc: "What kind of nudge, e.g. `coverage-target`, `report-less-run`." }
+    - { name: "kind", type: "TEXT", doc: "What kind of nudge, e.g. `report-less-run` or an advisory's `<extension>/<id>`." }
     - { name: "message", type: "TEXT", doc: "The text the agent was given." }
     - { name: "trigger", type: "TEXT", doc: "What prompted it, if recorded." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }

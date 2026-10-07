@@ -119,8 +119,9 @@ section for the column.
   the project's test tooling to emit a standard-format report at a stable
   path, and records the `testing:` block and the report collectors in
   `.oxplow/project.yaml`. The standing skill keeps
-  coverage flowing after configure (run tests before closing a task; never
-  type the numbers) so instrumentation doesn't bit-rot.
+  coverage flowing after configure (run tests through the report-emitting
+  commands — which, and when, is the agent's call; never type the numbers)
+  so instrumentation doesn't bit-rot.
 
 ## Ingestion (hybrid)
 
@@ -279,7 +280,7 @@ hook + MCP wiring):
 **whether or not an effort is open** — attribution is the capture's
 `effort_id`, never a precondition for recording. `on_post_tool_use`
 resolves a single open effort only for the effort-RELATIVE *advisories*
-(the report-less / coverage-target nudges), which legitimately
+(the report-less nudge and post-tool-use advisories), which legitimately
 no-op under 0/N efforts; every OBSERVE call runs unconditionally. Report freshness
 is a **window around the run** (`FreshWindow::of_run`): a report counts when its
 mtime is after the run **started** and at most a minute after it ended (tsk888)
@@ -406,15 +407,15 @@ general-purpose tool must not make (see also [[tsk251]]).
 
 ## Nudge persistence
 
-PostToolUse nudges (report-less-run, and post-tool-use advisories such as
-oxplow-bundled's `coverage-target`) are **persisted**
+PostToolUse nudges (report-less-run, and post-tool-use advisories) are
+**persisted**
 as well as returned to the agent, so a reviewer can see "what oxplow told the
 agent this effort" after the fact, and the persisted row is what delivers it
 (the next tool-hook response takes the thread's undelivered nudges). When `on_post_tool_use` decides to
 return a nudge, it also calls `persist_nudge` (best-effort — a write error is
 logged via `tracing::warn!` and swallowed, never failing the hook), which
 records a row in the `agent_nudge` table tagged with `kind`
-(`report-less-run` / `coverage-target`), the message, and the trigger (the
+(`report-less-run` / `<extension>/<advisory id>`), the message, and the trigger (the
 bash command); a view of `v_agent_nudge` re-runs on `ModelsChanged`. Persistence sits **after** the
 durable dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
 stored. The store

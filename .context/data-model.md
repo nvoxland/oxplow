@@ -234,7 +234,7 @@ Each stream owns:
   branch, branchRef)`, which emits `stream.changed` (kind:
   `"branch-changed"`). The runtime drives it from two sites:
   `Services.checkoutStreamBranch(streamId, branch)` (user-triggered
-  via the `BranchPicker` in the `StatusBar`) and
+  via the `BranchPicker` in the `TitleBar`) and
   `maybeSyncStreamBranch(streamId)` (fired by every `git-refs.changed`
   event so external `git checkout` in a worktree is picked up live).
   Git-level errors (dirty tree, missing branch, branch already checked
@@ -1644,7 +1644,8 @@ run and its change-only per-case facts. Published as `v_test_case_stat`
 
 The persisted record of the informational **nudges** oxplow surfaces to the
 agent from the PostToolUse hook (`crates/oxplow-app/src/collection.rs`
-`on_post_tool_use`) — the report-less-test-run and coverage-target nudges.
+`on_post_tool_use`) — the report-less-test-run nudge and post-tool-use
+advisories.
 Previously fully ephemeral (returned as `additionalContext`, then
 lost); persisting gives a reviewer/human-facing answer to "what did oxplow
 tell the agent this effort." See `.context/agent-model.md` (Nudge
@@ -1659,9 +1660,10 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   thread; today every kind fires against the open effort, but the column is
   nullable so a future thread-scoped nudge (no open effort) has a home. The
   effort FK cascades with its `effort` when present.
-- **`kind`** is open-ended (`report-less-run` | `coverage-target` |
+- **`kind`** is open-ended (`report-less-run` | `<extension>/<advisory>` |
   `configure`, …) — adding a kind needs no migration. Retired kinds keep
-  their rows: `commit-hygiene` no longer fires (tsk250) but old rows still
+  their rows: `commit-hygiene` and `oxplow-bundled/coverage-target` no
+  longer fire but old rows still
   read back.
 - **`trigger`** is the bash command (or commit sha) that caused the nudge.
 - **V10** adds `audience` (`agent` | `person`, default `agent`): a

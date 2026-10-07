@@ -24,7 +24,7 @@ export async function openNewTask(page: Page): Promise<void> {
  *  since Enter takes whatever row is first, the results update after the
  *  typing, and "Ask the Agent: <query>" names any query. */
 export async function openFromLauncher(page: Page, query: string): Promise<void> {
-  await page.getByTestId("rail-search").click();
+  await page.getByTestId("title-bar-search").click();
   await page.keyboard.type(query);
   const first = page.locator(
     '[data-row-index="0"]:is([data-testid^="launcher-page-"], [data-testid^="launcher-command-"], [data-testid^="launcher-hit-"])',

@@ -5657,7 +5657,6 @@ commands:
             [
                 "large-uncommitted",
                 "landed-in-progress",
-                "coverage-target",
                 "metric-deltas",
                 "threshold-crossed"
             ]

@@ -13,12 +13,12 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
   await searchable(daemon, "quokka", "task");
   await searchable(daemon, "quokka", "wiki");
   await page.goto("/");
-  await page.getByTestId("rail-search").click();
+  await page.getByTestId("title-bar-search").click();
   await page.keyboard.type("quokka");
   await page.getByTestId(`launcher-hit-task:${created.result.id}`).click();
   await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
   await expect(page.locator("body")).toContainText("Quokka migration");
-  await page.getByTestId("rail-search").click();
+  await page.getByTestId("title-bar-search").click();
   await page.keyboard.type("quokka");
   await page.getByTestId("launcher-hit-wiki:quokka-notes").click();
   await expect(page.getByTestId("page-wiki")).toContainText("What we know.");
@@ -29,7 +29,7 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
 test("a lens added while the page is open is in the launcher", async ({ page, daemon }) => {
   await page.goto("/");
   // The launcher has loaded the extensions once already.
-  await page.getByTestId("rail-search").click();
+  await page.getByTestId("title-bar-search").click();
   await page.keyboard.type("Wombat");
   await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat" })).toHaveCount(0);
   await page.keyboard.press("Escape");
@@ -44,7 +44,7 @@ test("a lens added while the page is open is in the launcher", async ({ page, da
     "title: Wombat Tasks\nquery: SELECT id FROM v_task\nviz: table\nlauncher: { category: Work }\n",
   );
   await expect(async () => {
-    await page.getByTestId("rail-search").click();
+    await page.getByTestId("title-bar-search").click();
     await page.keyboard.type("Wombat Tasks");
     await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat Tasks" })).toHaveCount(1, {
       timeout: 1000,

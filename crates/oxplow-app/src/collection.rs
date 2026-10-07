@@ -3435,14 +3435,14 @@ fn report_nudge_message(
         {
             Some(fast) => format!(
                 "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
-                 effort's Tests panel — only report-emitting runs do. While iterating (red and \
-                 green, filtered runs) use `{fast}`; close with `{tc}`. Both in the foreground."
+                 effort's Tests panel — only report-emitting runs do. `{fast}` is the quick \
+                 run (it takes a filter); `{tc}` is the full run with coverage. Both in the \
+                 foreground."
             ),
             None => format!(
                 "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
-                 effort's Tests panel — only report-emitting runs do. Run EVERY test invocation \
-                 (including failing/red-phase and single-test runs, not just the final green \
-                 one) via `{tc}` in the foreground so they all show."
+                 effort's Tests panel — only report-emitting runs do. Run tests via `{tc}` in \
+                 the foreground so oxplow sees them."
             ),
         }
     } else if has_report_collectors {

@@ -421,6 +421,29 @@
         margin: 0 auto;
       }
       .oxplow-rt-field:hover { background: var(--surface-card); }
+      /* The title bar's search field (TitleBar). */
+      .oxplow-title-search {
+        background: var(--surface-card);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-subtle);
+      }
+      .oxplow-title-search:hover,
+      .oxplow-title-search:focus-visible {
+        color: var(--text-primary);
+        border-color: var(--border-strong);
+      }
+      /* The slide-out strip's show / hide-panel toggle (SlideoutChevron). */
+      .oxplow-slideout-toggle {
+        background: transparent;
+        color: var(--text-secondary);
+        border: 1px solid var(--border-subtle);
+      }
+      .oxplow-slideout-toggle:hover,
+      .oxplow-slideout-toggle:focus-visible {
+        background: var(--surface-card);
+        color: var(--text-primary);
+        border-color: var(--border-strong);
+      }
       .oxplow-rt-field:focus-within {
         background: var(--surface-card);
         outline: 1px solid var(--border-strong);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { subscribeOxplowEvents } from "./api.js";
 import { readWikiPages } from "./knowledge.js";
-import { NO_READS, readsChanged } from "./lens/lensRerun.js";
+import { coalesce, NO_READS, readsChanged } from "./lens/lensRerun.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
 /**
@@ -12,13 +12,18 @@ import type { Reads } from "./tauri-bridge/generated/bindings.js";
  *
  * One load on first subscribe; refreshed when a model the read read
  * changes (`readsChanged` over the read's own `reads` — the one rerun
- * rule, outside a component). Components subscribe via `useWikiTitle`.
+ * rule, outside a component), once a burst of such commits goes quiet
+ * (`coalesce`) — a scan storing its findings is many commits, and each
+ * read lists every page. A change during a read is read once that one
+ * ends. Components subscribe via `useWikiTitle`.
  */
 
 let titles = new Map<string, string>();
 let reads: Reads = NO_READS;
 let loaded = false;
 let inFlight: Promise<void> | null = null;
+/** A change arrived while a read was running: read again after it. */
+let stale = false;
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -28,7 +33,11 @@ function notify() {
 }
 
 async function refresh(): Promise<void> {
-  if (inFlight) return inFlight;
+  if (inFlight) {
+    stale = true;
+    return inFlight;
+  }
+  stale = false;
   inFlight = (async () => {
     try {
       const result = await readWikiPages();
@@ -45,15 +54,18 @@ async function refresh(): Promise<void> {
     } finally {
       inFlight = null;
     }
+    if (stale) void refresh();
   })();
   return inFlight;
 }
+
+const refreshSoon = coalesce(() => void refresh());
 
 let unsubscribeEvents: (() => void) | null = null;
 function ensureSubscribed() {
   if (unsubscribeEvents) return;
   unsubscribeEvents = subscribeOxplowEvents((event) => {
-    if (readsChanged(event as Record<string, unknown>, reads)) void refresh();
+    if (readsChanged(event as Record<string, unknown>, reads)) refreshSoon.schedule();
   });
 }
 
@@ -85,7 +97,13 @@ export function useWikiRef(slug: string | null | undefined): { title: string | n
       return;
     }
     ensureSubscribed();
-    const update = () => setState(wikiRefSnapshot(slug));
+    // Only a real change re-renders: a re-read that left this slug's title
+    // and status alone keeps the same state.
+    const update = () =>
+      setState((prev) => {
+        const next = wikiRefSnapshot(slug);
+        return prev.title === next.title && prev.status === next.status ? prev : next;
+      });
     listeners.add(update);
     if (!loaded && !inFlight) {
       void refresh();

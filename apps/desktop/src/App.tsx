@@ -73,6 +73,7 @@ import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
+import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
@@ -3181,20 +3182,19 @@ export function App() {
     <AlertToasts onReview={() => handleOpenPage(alertsRef())} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* macOS uses an Overlay titlebar (transparent, hidden title), so the
-          webview reaches the top edge. This chrome-colored drag strip hosts
-          the floating traffic lights and matches the rest of the chrome. */}
-      {isMac ? (
-        <div
-          data-tauri-drag-region
-          style={{
-            height: 28,
-            flexShrink: 0,
-            background: "var(--surface-chrome)",
-          }}
-        />
-      ) : null}
-      <div style={{ borderBottom: (!isMac || error) ? "1px solid var(--border)" : undefined, flexShrink: 0 }}>
-        {!isMac ? <Menubar groups={menuGroups} /> : null}
+          webview reaches the top edge: the title bar is the window's top,
+          its empty space drags it and its start leaves room for the
+          floating traffic lights. Elsewhere it sits under the menu bar. */}
+      {!isMac ? <Menubar groups={menuGroups} /> : null}
+      <TitleBar
+        stream={stream}
+        thread={selectedThread ? { id: selectedThread.id, title: selectedThread.title } : null}
+        vcsEnabled={workspaceContext.vcsEnabled}
+        leftInset={isMac ? 78 : 10}
+        onOpenSearch={() => setQuickOpenVisible(true)}
+        onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
+      />
+      <div style={{ borderBottom: error ? "1px solid var(--border)" : undefined, flexShrink: 0 }}>
         {error ? (
           <div
             onClick={() => setError(null)}
@@ -3249,7 +3249,6 @@ export function App() {
         <RailHud
           streamId={stream?.id ?? null}
           onOpenPage={handleOpenPage}
-          onOpenSearch={() => setQuickOpenVisible(true)}
         />
         <div style={{
           flex: 1,
@@ -3311,7 +3310,7 @@ export function App() {
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: "flex-end",
           gap: 8,
           padding: "4px 10px",
           background: "var(--bg-2)",
@@ -3322,31 +3321,7 @@ export function App() {
           marginTop: 6,
         }}
       >
-        {(() => {
-          const parts = [stream?.title, selectedThread?.title].filter(Boolean) as string[];
-          const text = parts.join(" : ");
-          return (
-            <span
-              data-testid="status-bar-context"
-              title={text}
-              style={{
-                fontSize: "var(--text-xs)",
-                color: "var(--text-secondary)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                minWidth: 0,
-              }}
-            >
-              {text}
-            </span>
-          );
-        })()}
-        <StatusBar
-          stream={stream}
-          vcsEnabled={workspaceContext.vcsEnabled}
-          onOpenPage={handleOpenPage}
-        />
+        <StatusBar onOpenPage={handleOpenPage} />
       </div>
         </div>
       </div>

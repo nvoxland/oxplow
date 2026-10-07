@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useSlideoutStrip } from "./useSlideoutStrip.js";
 import { SlideoutChevron } from "./SlideoutChevron.js";
+import { subscribeNavigatorOpenRequests } from "../navigator-bus.js";
 import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
 import { agentChoices, parseAgentChoice } from "../agentKinds.js";
 import { listAcpAgents } from "../api.js";
@@ -127,6 +128,10 @@ export function Navigator({
   const [removeWorktree, setRemoveWorktree] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+
+  // The title bar's stream name (and any other surface pointing here)
+  // opens the panel.
+  useEffect(() => subscribeNavigatorOpenRequests(() => strip.openPanel()), [strip]);
 
   // Command-palette "New Thread…" (and any other external surface)
   // requests land here: open the overlay and show the inline creator

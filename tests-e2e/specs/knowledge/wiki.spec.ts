@@ -13,7 +13,7 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
   });
   await searchable(daemon, "wombat", "wiki");
   await page.goto("/");
-  await page.getByTestId("rail-search").click();
+  await page.getByTestId("title-bar-search").click();
   await page.keyboard.type("wombat plan");
   await page.getByTestId("launcher-hit-wiki:wombat-plan").click();
   const wiki = page.getByTestId("page-wiki");

@@ -1145,34 +1145,28 @@ mod tests {
         assert_eq!(second[0].id, "oxplow-bundled/metric-deltas");
     }
 
+    /// Oxplow sets no coding requirements for a project: a poorly covered
+    /// effort draws no bundled nudge to add tests. A project that wants a
+    /// coverage target writes its own advisory.
     #[tokio::test]
-    async fn bundled_coverage_advisory_fires_once_below_target() {
+    async fn bundled_advisories_set_no_coverage_target() {
         let f = crate::test_fixtures::services_with_effort().await;
-        let obs = |pct: f64| oxplow_db::EffortObservation {
-            kind: "diff-coverage".into(),
-            provenance: "observed".into(),
-            source: "post-tool-bash".into(),
-            metric_value: Some(pct),
-            payload_json: None,
-            local_snapshot_id: None,
-            created_at: oxplow_domain::Timestamp::now(),
-        };
         f.svc
             .effort_evidence_store
-            .replace(f.effort.value(), Vec::new(), vec![obs(91.0)], String::new())
-            .await
-            .unwrap();
-        assert!(for_thread(
-            &f.svc.advisory_deps(),
-            &f.thread,
-            AdvisoryOn::PostToolUse,
-            None
-        )
-        .await
-        .is_empty());
-        f.svc
-            .effort_evidence_store
-            .replace(f.effort.value(), Vec::new(), vec![obs(42.4)], String::new())
+            .replace(
+                f.effort.value(),
+                Vec::new(),
+                vec![oxplow_db::EffortObservation {
+                    kind: "diff-coverage".into(),
+                    provenance: "observed".into(),
+                    source: "post-tool-bash".into(),
+                    metric_value: Some(12.0),
+                    payload_json: None,
+                    local_snapshot_id: None,
+                    created_at: oxplow_domain::Timestamp::now(),
+                }],
+                String::new(),
+            )
             .await
             .unwrap();
         let hits = for_thread(
@@ -1182,25 +1176,7 @@ mod tests {
             None,
         )
         .await;
-        assert_eq!(
-            hits,
-            vec![AdvisoryHit {
-                id: "oxplow-bundled/coverage-target".into(),
-                text: "Diff coverage on this effort's changed lines is 42%, below the 80% target. Add tests for the uncovered changed lines before closing (advisory — oxplow won't block you). See the effort's coverage panel for which lines are uncovered.".into(),
-                audience: AdvisoryAudience::Agent,
-            }]
-        );
-        assert!(
-            for_thread(
-                &f.svc.advisory_deps(),
-                &f.thread,
-                AdvisoryOn::PostToolUse,
-                None
-            )
-            .await
-            .is_empty(),
-            "once per effort"
-        );
+        assert!(hits.is_empty(), "{hits:?}");
     }
 
     #[test]

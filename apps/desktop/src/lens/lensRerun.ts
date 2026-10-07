@@ -67,6 +67,26 @@ export function unionReads(list: readonly (Reads | null | undefined)[]): Reads {
 /** A burst of commits (a hook's several writes) is one re-run. */
 const COALESCE_MS = 100;
 
+/** `run` once the calls to `schedule` go quiet for {@link COALESCE_MS}:
+ *  the one way a reader of change events turns a burst of commits into
+ *  one re-read. `cancel` drops a pending run. */
+export function coalesce(run: () => void): { schedule(): void; cancel(): void } {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    schedule() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        run();
+      }, COALESCE_MS);
+    },
+    cancel() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+  };
+}
+
 /** Re-run `refresh` when an event changes what the last run read, a lens
  *  definition changed, or the daemon is reached again — the events sent
  *  while it was unreachable never arrive (tsk1050). `reads` and `refresh`
@@ -77,20 +97,13 @@ export function useRerunOnChange(reads: Reads, refresh: () => void): void {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const rerun = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        refreshRef.current();
-      }, COALESCE_MS);
-    };
+    const rerun = coalesce(() => refreshRef.current());
     const off = subscribeOxplowEvents((event) => {
-      if (lensDefinitionChanged(event) || readsChanged(event, readsRef.current)) rerun();
+      if (lensDefinitionChanged(event) || readsChanged(event, readsRef.current)) rerun.schedule();
     });
-    const offReconnect = onRemoteReconnect(rerun);
+    const offReconnect = onRemoteReconnect(rerun.schedule);
     return () => {
-      if (timer) clearTimeout(timer);
+      rerun.cancel();
       off();
       offReconnect();
     };

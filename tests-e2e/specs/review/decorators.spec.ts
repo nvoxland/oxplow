@@ -19,7 +19,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   await run(daemon, "oxplow_bundled.accept", { ref: effort });
   await searchable(daemon, "Wombat fix", "task");
   await page.goto("/");
-  await page.getByTestId("rail-search").click();
+  await page.getByTestId("title-bar-search").click();
   await page.keyboard.type("Wombat fix");
   await page.getByTestId(`launcher-hit-task:${created.result.id}`).click();
   // The task's effort, its Review: the effort's own page.
