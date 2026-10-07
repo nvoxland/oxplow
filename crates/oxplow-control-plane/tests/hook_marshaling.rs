@@ -469,7 +469,7 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
                 tx,
                 &oxplow_db::NewDecision {
                     thread_id: tid.value(),
-                    task_id: Some(task_id.value()),
+                    work_item: Some(oxplow_domain::refs::build::work_item_ref(task_id)),
                     effort_id: Some(effort.id.value()),
                     question: "Storage?".into(),
                     choice: "main DB".into(),

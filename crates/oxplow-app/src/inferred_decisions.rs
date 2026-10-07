@@ -34,8 +34,10 @@ pub struct ToolCallLine {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EffortActivity {
     pub thread_id: i64,
-    pub task_id: Option<i64>,
-    pub task_title: String,
+    /// The work item it was on (`work_item:<provider>:<id>`), if any.
+    pub work_item: Option<String>,
+    /// That work item's title (empty when none).
+    pub work_item_title: String,
     /// (what the human asked, what the agent answered).
     pub turns: Vec<(String, String)>,
     pub tool_calls: Vec<ToolCallLine>,
@@ -81,7 +83,7 @@ pub fn build_prompt(activity: &EffortActivity) -> Option<String> {
     if activity.turns.is_empty() && activity.tool_calls.is_empty() {
         return None;
     }
-    let mut head = format!("Task: {}\n", activity.task_title);
+    let mut head = format!("Work item: {}\n", activity.work_item_title);
     if !activity.recorded.is_empty() {
         head.push_str("\nDecisions it already recorded (don't repeat these):\n");
         for q in &activity.recorded {
@@ -157,13 +159,13 @@ fn clip(s: &str, max: usize) -> String {
     }
 }
 
-/// The model's reply as decisions for `thread_id` / `task_id`: entries
+/// The model's reply as decisions for `thread_id` / `work_item`: entries
 /// without a question or choice are skipped, a missing or unknown
 /// confidence is `low`, and at most [`MAX_PROPOSALS`] are kept.
 pub fn parse_proposals(
     reply: &serde_json::Value,
     thread_id: i64,
-    task_id: Option<i64>,
+    work_item: Option<String>,
 ) -> Result<Vec<NewDecision>, String> {
     let reply: Reply = serde_json::from_value(reply.clone())
         .map_err(|e| format!("the model's reply wasn't the expected JSON ({e})"))?;
@@ -176,7 +178,7 @@ pub fn parse_proposals(
         .take(MAX_PROPOSALS)
         .map(|d| NewDecision {
             thread_id,
-            task_id,
+            work_item: work_item.clone(),
             effort_id: None,
             question: str_of(d, "question"),
             choice: str_of(d, "choice"),
@@ -239,7 +241,7 @@ pub async fn infer_for_effort(
         Err(AiComputeError::Ai(AiServiceError::NotConfigured(_))) => return Ok(InferOutcome::Off),
         Err(e) => return Err(e.to_string()),
     };
-    let proposals = parse_proposals(&reply, activity.thread_id, activity.task_id)?;
+    let proposals = parse_proposals(&reply, activity.thread_id, activity.work_item.clone())?;
     let stored = svc
         .reasoning_store
         .replace_inferred(effort_id, proposals)
@@ -269,8 +271,8 @@ pub async fn gather(
         _ => None,
     };
     let effort = q(
-        "SELECT e.thread_id, e.task_id, coalesce(t.title, '') FROM v_effort e
-                    LEFT JOIN v_task t ON t.id = e.task_id WHERE e.id = ?1",
+        "SELECT e.thread_id, e.work_item, coalesce(w.title, '') FROM v_effort e
+                    LEFT JOIN v_work_item w ON w.ref = e.work_item WHERE e.id = ?1",
     )
     .await?;
     let Some(effort) = effort.first() else {
@@ -301,8 +303,8 @@ pub async fn gather(
     };
     Ok(EffortActivity {
         thread_id: int(&effort[0]).unwrap_or_default(),
-        task_id: int(&effort[1]),
-        task_title: text(&effort[2]),
+        work_item: opt_text(&effort[1]),
+        work_item_title: text(&effort[2]),
         turns: turns.iter().map(|r| (text(&r[0]), text(&r[1]))).collect(),
         tool_calls: tools
             .iter()
@@ -330,7 +332,7 @@ mod tests {
 
     fn activity() -> EffortActivity {
         EffortActivity {
-            task_title: "Add CSV export".into(),
+            work_item_title: "Add CSV export".into(),
             turns: vec![(
                 "Add CSV export to reports".into(),
                 "Done; used the csv crate.".into(),
@@ -394,12 +396,14 @@ mod tests {
         for i in 0..20 {
             items.push(serde_json::json!({"question": format!("q{i}"), "choice": "c"}));
         }
-        let got = parse_proposals(&serde_json::json!({"decisions": items}), 3, Some(9)).unwrap();
+        let item = Some("work_item:oxplow:tsk9".to_string());
+        let got =
+            parse_proposals(&serde_json::json!({"decisions": items}), 3, item.clone()).unwrap();
         assert_eq!(got.len(), MAX_PROPOSALS);
         assert_eq!(got[0].question, "Which CSV library?");
         assert_eq!(got[0].alternatives, vec!["hand-rolled"]);
         assert_eq!(got[0].confidence, "high");
-        assert_eq!((got[0].thread_id, got[0].task_id), (3, Some(9)));
+        assert_eq!((got[0].thread_id, &got[0].work_item), (3, &item));
         assert_eq!(got[1].question, "q0");
         assert_eq!(got[1].confidence, "low", "missing confidence defaults low");
         assert!(parse_proposals(&serde_json::json!([1]), 1, None).is_err());

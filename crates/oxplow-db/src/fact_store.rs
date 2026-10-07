@@ -899,8 +899,9 @@ pub struct FactRow {
     pub stream_id: i64,
     pub thread_id: Option<i64>,
     pub effort_id: Option<i64>,
-    /// The task `effort_id` belongs to (resolved per read from `effort`).
-    pub task_id: Option<i64>,
+    /// The work item `effort_id` is linked to, as a ref (resolved per read
+    /// from `effort`).
+    pub work_item: Option<String>,
     pub provenance: String,
     pub source: String,
     /// The capture's producer (gauge key / ingest kind) — identifies which scan
@@ -943,10 +944,10 @@ const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numera
 fn fact_row_mapper(
     conn: &rusqlite::Connection,
 ) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow>> {
-    // Effort → task, loaded once per read: `effort` is small next to the
-    // facts, and a per-row join would cost a lookup on every fact.
-    let tasks: std::collections::HashMap<i64, i64> = conn
-        .prepare_cached("SELECT id, task_id FROM v_effort WHERE task_id IS NOT NULL")?
+    // Effort → work item, loaded once per read: `effort` is small next to
+    // the facts, and a per-row join would cost a lookup on every fact.
+    let items: std::collections::HashMap<i64, String> = conn
+        .prepare_cached("SELECT id, work_item FROM v_effort WHERE work_item IS NOT NULL")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut last: Option<(i64, Timestamp)> = None;
@@ -970,7 +971,7 @@ fn fact_row_mapper(
             }
         };
         let mut fact = row_to_fact_row_with(row, captured_at)?;
-        fact.task_id = fact.effort_id.and_then(|e| tasks.get(&e).copied());
+        fact.work_item = fact.effort_id.and_then(|e| items.get(&e).cloned());
         Ok(fact)
     })
 }
@@ -1005,7 +1006,7 @@ fn row_to_fact_row_with(
         stream_id: row.get(20)?,
         thread_id: row.get(21)?,
         effort_id: row.get(22)?,
-        task_id: None,
+        work_item: None,
         provenance: row.get(23)?,
         source: row.get(24)?,
         producer: row.get(25)?,

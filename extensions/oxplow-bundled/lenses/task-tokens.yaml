@@ -1,6 +1,6 @@
 title: Agent Tokens
-description: What the agent was asked while working this task, and what each turn cost.
-params: [{ name: task_id }]
+description: What the agent was asked while working this work item, and what each turn cost.
+params: [{ name: ref }]
 viz: grid
 children: [task-token-summary, task-turns]
 hidden: true

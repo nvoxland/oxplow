@@ -4,7 +4,7 @@ launcher: { category: Work }
 params:
   - { name: stream_id, label: Stream }
 query: |
-  SELECT c.statement, c.kind, t.title AS thread, c.task_id, c.created_at
+  SELECT c.statement, c.kind, t.title AS thread, c.work_item, c.created_at
   FROM v_claim c
   JOIN v_thread t ON t.id = c.thread_id
   WHERE t.stream_id = :stream_id AND c.verified = 0
@@ -12,7 +12,7 @@ query: |
   LIMIT 100
 viz: table
 columns:
-  - { key: statement, label: Claim, link: { kind: task, from: task_id } }
+  - { key: statement, label: Claim, link: { kind: page, from: work_item } }
   - { key: kind, label: Kind }
   - { key: thread, label: Thread }
   - { key: created_at, label: When }

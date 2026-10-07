@@ -1,4 +1,4 @@
-SELECT c.id, c.thread_id, c.task_id, c.effort_id, c.turn_id, c.statement, c.kind,
+SELECT c.id, c.thread_id, c.work_item, c.effort_id, c.turn_id, c.statement, c.kind,
        c.evidence_ref,
        CASE
          WHEN c.evidence_ref IS NOT NULL THEN 1

@@ -180,7 +180,7 @@ export function TaskPage({
   // The newest effort (they come newest first) is the one to review.
   const latestEffort = efforts[0]?.effort.id;
   const review = onShowEffortDiff && latestEffort ? () => onShowEffortDiff(latestEffort) : undefined;
-  const slotParams = taskRow === null ? null : { ref: workItemRef(String(item.id)), task_id: taskRow };
+  const slotParams = taskRow === null ? null : { ref: workItemRef(String(item.id)) };
   const rail = (
     <>
       <TaskDetailRail

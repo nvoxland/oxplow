@@ -373,7 +373,7 @@ mod tests {
                     tx,
                     &NewClaim {
                         thread_id: thread.value(),
-                        task_id: Some(task.value()),
+                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
                         effort_id: Some(effort),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
@@ -389,7 +389,7 @@ mod tests {
                 effort,
                 vec![NewDecision {
                     thread_id: fx.thread.value(),
-                    task_id: Some(fx.task.value()),
+                    work_item: Some(oxplow_domain::refs::build::work_item_ref(fx.task)),
                     effort_id: Some(effort),
                     question: "Which store?".into(),
                     choice: "SQLite".into(),

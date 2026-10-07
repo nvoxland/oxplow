@@ -44,7 +44,7 @@ const DEFAULT_LINK_TYPE = "relates_to";
  * write is a `work_item.*` command, which the bus dispatches to the item's
  * provider. Extensions
  * mount lenses in the `work_item.detail.body` and `.sidebar` slots with
- * `{ ref, task_id: null }`.
+ * `{ ref }`.
  */
 export function WorkItemPage({
   workItemRef,
@@ -77,7 +77,7 @@ export function WorkItemPage({
   }, [workItemRef, guard]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
-  const slotParams = useMemo(() => ({ ref: workItemRef, task_id: null }), [workItemRef]);
+  const slotParams = useMemo(() => ({ ref: workItemRef }), [workItemRef]);
   usePageTitle(item?.title ?? null);
   const graphRef = useMemo(() => workItemTabRef(workItemRef), [workItemRef]);
   const backlinkEntries = useBacklinks(graphRef);

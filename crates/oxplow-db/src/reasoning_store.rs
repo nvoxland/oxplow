@@ -11,7 +11,8 @@ use crate::Database;
 #[serde(rename_all = "camelCase")]
 pub struct NewDecision {
     pub thread_id: i64,
-    pub task_id: Option<i64>,
+    /// The work item it was made on (`work_item:<provider>:<id>`).
+    pub work_item: Option<String>,
     pub effort_id: Option<i64>,
     /// The fork: what had to be decided.
     pub question: String,
@@ -28,7 +29,8 @@ pub struct NewDecision {
 #[serde(rename_all = "camelCase")]
 pub struct NewClaim {
     pub thread_id: i64,
-    pub task_id: Option<i64>,
+    /// The work item it was made on (`work_item:<provider>:<id>`).
+    pub work_item: Option<String>,
     pub effort_id: Option<i64>,
     pub statement: String,
     /// `tests_pass`, `no_behavior_change`, `handles_case` or `other`.
@@ -71,7 +73,7 @@ impl SqliteReasoningStore {
                 .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
             rows.push((
                 d.thread_id,
-                d.task_id,
+                d.work_item,
                 d.question,
                 d.choice,
                 alternatives,
@@ -86,11 +88,11 @@ impl SqliteReasoningStore {
                     [effort_id],
                 )
                 .map_err(map_sql_err)?;
-                for (thread_id, task_id, question, choice, alternatives, confidence, why) in &rows {
+                for (thread_id, work_item, question, choice, alternatives, confidence, why) in &rows {
                     tx.execute(
-                        "INSERT INTO decision (thread_id, task_id, effort_id, question, choice, alternatives_json, confidence, why, provenance, created_at)
+                        "INSERT INTO decision (thread_id, work_item, effort_id, question, choice, alternatives_json, confidence, why, provenance, created_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'inferred', ?9)",
-                        rusqlite::params![thread_id, task_id, effort_id, question, choice, alternatives, confidence, why, now],
+                        rusqlite::params![thread_id, work_item, effort_id, question, choice, alternatives, confidence, why, now],
                     )
                     .map_err(map_sql_err)?;
                 }
@@ -121,11 +123,11 @@ pub fn record_decision_tx(
     let alternatives = serde_json::to_string(&d.alternatives)
         .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
     conn.execute(
-        "INSERT INTO decision (thread_id, task_id, effort_id, question, choice, alternatives_json, confidence, why, created_at, turn_id)
+        "INSERT INTO decision (thread_id, work_item, effort_id, question, choice, alternatives_json, confidence, why, created_at, turn_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT id FROM agent_turn
             WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
         rusqlite::params![
-            d.thread_id, d.task_id, d.effort_id, d.question, d.choice,
+            d.thread_id, d.work_item, d.effort_id, d.question, d.choice,
             alternatives, d.confidence, d.why, now_string()
         ],
     )
@@ -146,10 +148,10 @@ pub fn record_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64,
         return Err(DomainError::Invalid("a claim needs a statement".into()));
     }
     conn.execute(
-        "INSERT INTO claim (thread_id, task_id, effort_id, statement, kind, evidence_ref, created_at, turn_id)
+        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence_ref, created_at, turn_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT id FROM agent_turn
             WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
-        rusqlite::params![c.thread_id, c.task_id, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string()],
+        rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string()],
     )
     .map_err(map_sql_err)?;
     Ok(conn.last_insert_rowid())
@@ -239,7 +241,7 @@ mod tests {
         store
             .record_decision(NewDecision {
                 thread_id: 1,
-                task_id: Some(1),
+                work_item: Some("work_item:oxplow:tsk1".into()),
                 effort_id: Some(1),
                 question: "Where do extensions live?".into(),
                 choice: "oxplow/extensions/".into(),
@@ -251,7 +253,7 @@ mod tests {
             .unwrap();
         let out = sl
             .query_sql(
-                "SELECT task_id, effort_id, choice, alternatives, confidence FROM v_decision",
+                "SELECT work_item, effort_id, choice, alternatives, confidence FROM v_decision",
                 vec![],
                 None,
             )
@@ -260,7 +262,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             json!([[
-                1,
+                "work_item:oxplow:tsk1",
                 1,
                 "oxplow/extensions/",
                 "[\".oxplow/extensions/\"]",
@@ -275,7 +277,7 @@ mod tests {
         let err = store
             .record_decision(NewDecision {
                 thread_id: 1,
-                task_id: None,
+                work_item: None,
                 effort_id: None,
                 question: "q".into(),
                 choice: "c".into(),
@@ -292,7 +294,7 @@ mod tests {
         let err = store
             .record_claim(NewClaim {
                 thread_id: 1,
-                task_id: None,
+                work_item: None,
                 effort_id: None,
                 statement: "s".into(),
                 kind: "vibes".into(),
@@ -321,7 +323,7 @@ mod tests {
         .unwrap();
         let claim = |effort: i64, kind: &str, evidence: Option<&str>| NewClaim {
             thread_id: 1,
-            task_id: Some(1),
+            work_item: Some("work_item:oxplow:tsk1".into()),
             effort_id: Some(effort),
             statement: format!("{kind} on effort {effort}"),
             kind: kind.into(),
@@ -364,7 +366,7 @@ mod tests {
     fn decision(question: &str) -> NewDecision {
         NewDecision {
             thread_id: 1,
-            task_id: Some(1),
+            work_item: Some("work_item:oxplow:tsk1".into()),
             effort_id: Some(1),
             question: question.into(),
             choice: "c".into(),

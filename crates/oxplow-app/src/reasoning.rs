@@ -113,7 +113,7 @@ mod tests {
         let effort = f.effort.value();
         let d = |q: &str| oxplow_db::NewDecision {
             thread_id: f.thread.value(),
-            task_id: Some(f.task.value()),
+            work_item: Some(oxplow_domain::refs::build::work_item_ref(f.task)),
             effort_id: Some(effort),
             question: q.into(),
             choice: "c".into(),

@@ -423,7 +423,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     looks for): every mounted lens, run with
     the slot params it declares (`slotRuns`), re-run on data events.
     DiffViewPage offers `effort_id` and `change_id`; TaskPage and
-    WorkItemPage `ref` and `task_id` (body and sidebar); PlanPane
+    WorkItemPage `ref` (body and sidebar; the item's ref, whichever list); PlanPane
     `thread_id` (the compact `strip` variant, which hides lenses with no
     rows); GitCommitPage and UncommittedChangesPage `change_id`, plus
     UncommittedChangesPage's strip and GitHistoryPage's side column
@@ -917,7 +917,8 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `PanelRunsProvider`); a pick the lens no longer offers falls back to
   the default (`panelChoices`).
 - **Id params are pickers (tsk1043).** On a lens page, a param named
-  `task_id`, `effort_id`, `thread_id` or `stream_id` — oxplow's own ids,
+  `ref` (a work item, over `v_work_item`), `effort_id`, `thread_id` or
+  `stream_id` — oxplow's own ids,
   the names it fills from context or a slot binds — is a picker over the
   matching model, by title (`lens/lensParams.ts`); any other param is
   typed. The details rail's header wraps, so its actions sit below its
@@ -1032,8 +1033,8 @@ they live under `ui:`.
 | Slot | Core page | Params |
 |---|---|---|
 | `effort.review.details` | diff-view for an effort | `effort_id`, `change_id` |
-| `work_item.detail.body` | TaskPage / WorkItemPage, below the body | `ref`, `task_id` (null for another provider's item) |
-| `work_item.detail.sidebar` | TaskPage / WorkItemPage, in the side rail | `ref`, `task_id` |
+| `work_item.detail.body` | TaskPage / WorkItemPage, below the body | `ref` |
+| `work_item.detail.sidebar` | TaskPage / WorkItemPage, in the side rail | `ref` |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
 | `vcs.commit.details` | GitCommitPage | `change_id` |
 | `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |

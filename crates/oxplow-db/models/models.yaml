@@ -241,12 +241,12 @@
     - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
     - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
 - name: claim
-  version: 1
+  version: 2
   description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and whether anything backs them."
   columns:
     - { name: "id", type: "INTEGER", doc: "Claim id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread it was made in." }
-    - { name: "task_id", type: "INTEGER", doc: "Task, if known." }
+    - { name: "work_item", type: "TEXT", doc: "The work item it was made on (`work_item:<provider>:<id>`), if any." }
     - { name: "effort_id", type: "INTEGER", doc: "Effort, if one was open." }
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
     - { name: "statement", type: "TEXT", doc: "The claim in words." }
@@ -369,12 +369,12 @@
     - { not_null: id }
     - { unique: id }
 - name: decision
-  version: 1
+  version: 2
   description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
   columns:
     - { name: "id", type: "INTEGER", doc: "Decision id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread it was made in." }
-    - { name: "task_id", type: "INTEGER", doc: "Task being worked on, if known." }
+    - { name: "work_item", type: "TEXT", doc: "The work item being worked on (`work_item:<provider>:<id>`), if any." }
     - { name: "effort_id", type: "INTEGER", doc: "Effort it was made during, if one was open." }
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
     - { name: "question", type: "TEXT", doc: "What had to be decided." }
@@ -404,12 +404,11 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: effort
-  version: 3
+  version: 4
   description: "Efforts: one span of a thread's work between a start and an end snapshot, opened and closed by oxplow and linked to a work item when there is one (.context/work-tracking.md). At most one is open per thread."
   columns:
     - { name: "id", type: "INTEGER", doc: "Effort id." }
     - { name: "work_item", type: "TEXT", doc: "The work item it's linked to, as a canonical ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`); NULL while unlinked. (v2: nullable)" }
-    - { name: "task_id", type: "", doc: "The oxplow task worked on (v_task.id); NULL for another provider's work item." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread that did the work." }
     - { name: "stream_id", type: "INTEGER", doc: "That thread's stream." }
     - { name: "started_at", type: "TEXT", doc: "RFC 3339 timestamp." }
@@ -420,12 +419,11 @@
     - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of its first prompt. (v2)" }
     - { name: "closed_by", type: "TEXT", doc: "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)" }
 - name: effort_file
-  version: 2
+  version: 3
   description: "Files each effort changed, with how they changed: claimed by an edit tool, or observed changing during one of its thread's turns."
   columns:
     - { name: "effort_id", type: "INTEGER", doc: "The effort (v_effort.id)." }
     - { name: "work_item", type: "TEXT", doc: "That effort's work item ref." }
-    - { name: "task_id", type: "", doc: "That effort's oxplow task (v_task.id); NULL for another provider's work item." }
     - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
     - { name: "change_kind", type: "TEXT", doc: "`created`, `updated` or `deleted`." }
     - { name: "closest_vcs_rev", type: "TEXT", doc: "The VCS revision (a git sha) nearest the file when recorded." }

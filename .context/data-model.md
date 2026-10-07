@@ -555,12 +555,15 @@ TABLE, so every child row survived; see the migration's header) and
 replaced the `task_id` FK with `work_item TEXT NOT NULL`, a canonical
 ref (`work_item:oxplow:tsk42`, or another provider's
 `work_item:issues:ENG-12`; built with `refs::build::work_item_ref`).
-`v_effort` / `v_effort_file` derive `task_id` from it (NULL for other
-providers). An effort goes with its thread (`thread_id … ON DELETE
-CASCADE`), not its task: deleting a stream cascades through its threads
-to their tasks and efforts, but an effort another stream's thread
-linked to one of those tasks survives as history about a work item that
-no longer exists — readers LEFT JOIN `v_task`.
+`v_effort` / `v_effort_file` carry the ref only (no oxplow task id: a
+reader joins `v_work_item` on it, so it sees the active list's item and
+nothing with none). An effort goes with its thread (`thread_id … ON
+DELETE CASCADE`), not its work item: an effort another stream's thread
+linked to a deleted item survives as history — readers LEFT JOIN
+`v_work_item`. Claims and decisions name the item they were made on the
+same way (`claim.work_item`, `decision.work_item`, V22, which rebuilt
+both tables from their old `task_id` foreign keys); so do metric facts'
+spine dimension `oxplow.work_item`.
 
 In Rust (P2.5b, tsk428) the row is `Effort { work_item, … }` with
 `task_id() -> Option<TaskId>`; `EffortStore` (was `TaskEffortStore`)
