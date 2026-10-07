@@ -298,6 +298,16 @@ else; a file whose YAML ties keys together (anchors) is refused, to be
 edited by hand. The whole-file re-render it replaced lost comments and
 formatting and dropped default-valued keys. Adding a field
 to `RawConfig` makes it managed, documented and settable at once.
+
+**A person's layer.** `config.set` / `config.unset` take `layer: project`
+(the default) or `layer: personal`: `.oxplow/personal.yaml`, a person's
+own layer over the project's, which git ignores (`.oxplow/.gitignore`
+keeps only `project.yaml`). It holds only `oxplow_config::PERSONAL_KEYS`
+(`activeProviders`, a person's choice of implementations); another key
+there is refused, by the command and by the loader. A personal key keeps
+its key's human-only rule. `config.changed@2` names the `layer`; `@1`
+payloads were all the project's (V14 moved them). `effective_config`
+shows the layer as its own `personal.<key>` row, origin `personal`.
 `set_zones` is gone (tsk392): `zones` is just a key.
 
 **Every key has an entry** (P6.H1): `oxplow_config::config_entries`
@@ -333,7 +343,7 @@ write: a `config.set`, and `set_ai_role` (a role's binding is an
 `ai.roles.<role>` row), which emits it too (P6 review, tsk607).
 
 **The backend reacts on the pump, never the bus** (P7.B6,
-`config_reactors.rs`): `config.changed@1` consumers, each filtered to its
+`config_reactors.rs`): `config.changed@2` consumers, each filtered to its
 keys — `config.workspace_filter` (`generated`), `config.extensions`
 (`extensions`: the extension catalog's change signal),
 `config.providers` (`extensionInstances`, `activeProviders`: the provider

@@ -31,6 +31,24 @@ pub const OXPLOW_STATE_DIR: &str = ".oxplow";
 /// (`<project>/.oxplow/project.yaml`).
 pub const OXPLOW_CONFIG_FILE: &str = "project.yaml";
 
+/// A person's own layer over the project's config, inside
+/// [`OXPLOW_STATE_DIR`] (`<project>/.oxplow/personal.yaml`): their choice of
+/// implementations (`activeProviders`), which git ignores (`.oxplow`
+/// ignores everything but `project.yaml`).
+pub const PERSONAL_CONFIG_FILE: &str = "personal.yaml";
+
+/// The keys a person's layer may set.
+pub const PERSONAL_KEYS: &[&str] = &["activeProviders"];
+
+/// Absolute path to a project's personal layer:
+/// `<project_dir>/.oxplow/personal.yaml`.
+pub fn personal_path(project_dir: impl AsRef<Path>) -> std::path::PathBuf {
+    project_dir
+        .as_ref()
+        .join(OXPLOW_STATE_DIR)
+        .join(PERSONAL_CONFIG_FILE)
+}
+
 /// Absolute path to a project's config file:
 /// `<project_dir>/.oxplow/project.yaml`.
 pub fn config_path(project_dir: impl AsRef<Path>) -> std::path::PathBuf {
@@ -706,11 +724,15 @@ pub struct OxplowConfig {
     /// (`extensionInstances: { "<ext>/<id>": { enabled, config } }`).
     #[serde(rename = "extensionInstances")]
     pub extension_instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
-    /// Each swappable capability's active provider
+    /// The project's choice of implementation per choosable capability
     /// (`activeProviders: { work_items: issues, effort_policy: none }`); a
-    /// capability absent here keeps oxplow's own.
+    /// capability absent here keeps its default.
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
+    /// A person's own choices (`activeProviders` in
+    /// `.oxplow/personal.yaml`), over the project's.
+    #[serde(rename = "personalActiveProviders")]
+    pub personal_active_providers: std::collections::BTreeMap<String, String>,
     /// Core components no extension's replacement may take over
     /// (`replacementsOff: [work_item.board]`): oxplow's own shows there
     /// even when the active provider's extension replaces it.
@@ -982,18 +1004,25 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     let config_path = config_path(project_dir);
     let fallback_name = basename(project_dir);
 
+    let personal = load_personal(project_dir)?;
     if !config_path.exists() {
         info!(
             config_path = %config_path.display(),
             agents = ?vec![AgentKind::default()],
             "project config not found; using defaults"
         );
-        return Ok(default_config(fallback_name));
+        return Ok(OxplowConfig {
+            personal_active_providers: personal,
+            ..default_config(fallback_name)
+        });
     }
 
     let raw = std::fs::read_to_string(&config_path)?;
     let doc: serde_yaml::Value = serde_yaml::from_str(&raw)?;
-    let config = parse_project_config(doc, &fallback_name)?;
+    let config = OxplowConfig {
+        personal_active_providers: personal,
+        ..parse_project_config(doc, &fallback_name)?
+    };
     info!(
         config_path = %config_path.display(),
         agents = ?config.agents,
@@ -1002,6 +1031,140 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
         "loaded project config"
     );
     Ok(config)
+}
+
+/// The person's layer (`.oxplow/personal.yaml`): their `activeProviders`,
+/// empty when the file is absent.
+fn load_personal(
+    project_dir: &Path,
+) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
+    let path = personal_path(project_dir);
+    if !path.exists() {
+        return Ok(Default::default());
+    }
+    let doc: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(&path)?)?;
+    parse_personal(doc)
+}
+
+/// Validate a personal layer: only [`PERSONAL_KEYS`], each as the project
+/// file would take it.
+fn parse_personal(
+    doc: serde_yaml::Value,
+) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
+    let map = match doc {
+        serde_yaml::Value::Mapping(m) => m,
+        serde_yaml::Value::Null => return Ok(Default::default()),
+        _ => {
+            return Err(ConfigError::Invalid(
+                ".oxplow/personal.yaml is not a mapping".into(),
+            ))
+        }
+    };
+    let mut active = Default::default();
+    for (key, value) in map {
+        match key.as_str() {
+            Some("activeProviders") => {
+                let raw: std::collections::BTreeMap<String, String> = serde_yaml::from_value(value)
+                    .map_err(|e| {
+                        ConfigError::Invalid(format!(".oxplow/personal.yaml: activeProviders: {e}"))
+                    })?;
+                active = validate_active_providers(raw)
+                    .map_err(|e| ConfigError::Invalid(format!(".oxplow/personal.yaml: {e}")))?;
+            }
+            other => {
+                return Err(ConfigError::Invalid(format!(
+                    ".oxplow/personal.yaml may set only {} (found `{}`)",
+                    PERSONAL_KEYS.join(", "),
+                    other.unwrap_or("?")
+                )))
+            }
+        }
+    }
+    Ok(active)
+}
+
+/// `key`'s value in `config`'s personal layer, as the file holds it;
+/// `None` when it's unset there.
+pub fn personal_value(config: &OxplowConfig, key: &str) -> Option<serde_json::Value> {
+    match key {
+        "activeProviders" if !config.personal_active_providers.is_empty() => {
+            serde_json::to_value(&config.personal_active_providers).ok()
+        }
+        _ => None,
+    }
+}
+
+/// `config` with `key` set (`Some`) or removed (`None`) in its personal
+/// layer, validated as the file would load.
+pub fn with_personal_key(
+    config: &OxplowConfig,
+    key: &str,
+    value: Option<&serde_json::Value>,
+) -> Result<OxplowConfig, ConfigError> {
+    if !PERSONAL_KEYS.contains(&key) {
+        return Err(ConfigError::Invalid(format!(
+            "`{key}` isn't a personal key ({})",
+            PERSONAL_KEYS.join(", ")
+        )));
+    }
+    let mut map = serde_yaml::Mapping::new();
+    if let Some(v) = value {
+        map.insert(serde_yaml::Value::String(key.to_string()), to_yaml(v));
+    }
+    Ok(OxplowConfig {
+        personal_active_providers: parse_personal(serde_yaml::Value::Mapping(map))?,
+        ..config.clone()
+    })
+}
+
+/// Set (`Some`) or remove (`None`) `key` in a person's layer
+/// (`.oxplow/personal.yaml`), validated as it would load. Only
+/// [`PERSONAL_KEYS`]; the file goes when nothing is left in it.
+pub fn write_personal_key(
+    project_dir: impl AsRef<Path>,
+    key: &str,
+    value: Option<&serde_json::Value>,
+) -> Result<(), ConfigError> {
+    if !PERSONAL_KEYS.contains(&key) {
+        return Err(ConfigError::Invalid(format!(
+            "`{key}` isn't a personal key ({})",
+            PERSONAL_KEYS.join(", ")
+        )));
+    }
+    let path = personal_path(project_dir.as_ref());
+    let mut map = if path.exists() {
+        match serde_yaml::from_str::<serde_yaml::Value>(&std::fs::read_to_string(&path)?)? {
+            serde_yaml::Value::Mapping(m) => m,
+            _ => serde_yaml::Mapping::new(),
+        }
+    } else {
+        serde_yaml::Mapping::new()
+    };
+    let yaml_key = serde_yaml::Value::String(key.to_string());
+    match value {
+        Some(v) => {
+            map.insert(yaml_key, to_yaml(v));
+        }
+        None => {
+            map.remove(&yaml_key);
+        }
+    }
+    let doc = serde_yaml::Value::Mapping(map);
+    parse_personal(doc.clone())?;
+    match &doc {
+        serde_yaml::Value::Mapping(m) if m.is_empty() => {
+            if path.exists() {
+                std::fs::remove_file(&path)?;
+            }
+        }
+        _ => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, serde_yaml::to_string(&doc)?)?;
+        }
+    }
+    Ok(())
 }
 
 /// Validate a parsed `.oxplow/project.yaml` document exactly as
@@ -1470,6 +1633,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         acp_agents: Vec::new(),
         extension_instances: std::collections::BTreeMap::new(),
         active_providers: std::collections::BTreeMap::new(),
+        personal_active_providers: std::collections::BTreeMap::new(),
         replacements_off: std::collections::BTreeSet::new(),
         event_retention: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
@@ -1734,10 +1898,6 @@ fn validate_extension_instances(
     Ok(raw)
 }
 
-/// The capabilities whose active provider a project may choose
-/// (`activeProviders`).
-pub const SWAPPABLE_CAPABILITIES: &[&str] = &["work_items", "effort_policy"];
-
 /// Validate `replacementsOff:`: each a replaceable component's target
 /// ([`oxplow_domain::replaceable`]); a repeat is one.
 fn validate_replacements_off(
@@ -1782,17 +1942,22 @@ fn validate_event_retention(
     Ok(raw)
 }
 
-/// Validate `activeProviders:`: a swappable capability each, naming an
-/// instance by its id (a provider's default instance has the provider's).
+/// Validate `activeProviders:`: a choosable capability each
+/// ([`oxplow_domain::capability`]), naming an implementation by its id (a
+/// provider's default instance has the provider's).
 fn validate_active_providers(
     raw: std::collections::BTreeMap<String, String>,
 ) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
+    use oxplow_domain::capability;
     for (capability, provider) in &raw {
-        if !SWAPPABLE_CAPABILITIES.contains(&capability.as_str()) {
+        if !capability::spec(capability).is_some_and(|c| c.choosable) {
             return Err(ConfigError::Invalid(format!(
-                "activeProviders: `{capability}` isn't a capability whose provider can be chosen \
-                 ({})",
-                SWAPPABLE_CAPABILITIES.join(", ")
+                "activeProviders: `{capability}` isn't a capability whose implementation can be \
+                 chosen ({})",
+                capability::choosable()
+                    .map(|c| c.id)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )));
         }
         if !is_instance_id(provider) {
@@ -2042,6 +2207,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         acp_agents,
         extension_instances,
         active_providers,
+        personal_active_providers: std::collections::BTreeMap::new(),
         replacements_off,
         event_retention,
         ai_roles: validate_ai_roles(raw.ai)?,
@@ -3123,6 +3289,84 @@ mod tests {
             .unwrap()
             .active_providers
             .is_empty());
+    }
+
+    /// A person's own choice (`.oxplow/personal.yaml`, which git ignores)
+    /// layers over the project's: the same `activeProviders` shape, and
+    /// nothing else. Every choosable capability may be named; one core
+    /// doesn't let a project choose may not.
+    #[test]
+    fn personal_choices_layer_over_the_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        let oxplow = dir.path().join(".oxplow");
+        std::fs::create_dir_all(&oxplow).unwrap();
+        std::fs::write(
+            oxplow.join("project.yaml"),
+            "activeProviders: { work_items: issues }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            oxplow.join("personal.yaml"),
+            "activeProviders: { effort_policy: none }\n",
+        )
+        .unwrap();
+        let config = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            config
+                .active_providers
+                .get("work_items")
+                .map(String::as_str),
+            Some("issues")
+        );
+        assert_eq!(config.active_providers.get("effort_policy"), None);
+        assert_eq!(
+            config
+                .personal_active_providers
+                .get("effort_policy")
+                .map(String::as_str),
+            Some("none")
+        );
+        std::fs::write(oxplow.join("personal.yaml"), "zones: []\n").unwrap();
+        let err = load_project_config(dir.path()).unwrap_err().to_string();
+        assert!(
+            err.contains("personal.yaml") && err.contains("activeProviders"),
+            "{err}"
+        );
+
+        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        assert!(parse("activeProviders: { snapshots: hashes }\n").is_ok());
+        let err = parse("activeProviders: { vcs: jj }\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("snapshots"), "{err}");
+    }
+
+    /// A personal choice is written to, and removed from, `personal.yaml`
+    /// alone.
+    #[test]
+    fn a_personal_choice_is_written_and_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        write_personal_key(
+            dir.path(),
+            "activeProviders",
+            Some(&serde_json::json!({ "effort_policy": "none" })),
+        )
+        .unwrap();
+        let config = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            config
+                .personal_active_providers
+                .get("effort_policy")
+                .map(String::as_str),
+            Some("none")
+        );
+        assert!(!config_path(dir.path()).exists(), "project.yaml untouched");
+        write_personal_key(dir.path(), "activeProviders", None).unwrap();
+        assert!(load_project_config(dir.path())
+            .unwrap()
+            .personal_active_providers
+            .is_empty());
+        assert!(write_personal_key(dir.path(), "zones", None).is_err());
     }
 
     /// tsk947: `eventRetention` sets a namespace's windows — a person's key.

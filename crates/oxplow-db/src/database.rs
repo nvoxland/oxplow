@@ -1637,6 +1637,35 @@ mod tests {
         assert_eq!(rows, vec![(1, Some(40)), (2, None)]);
     }
 
+    /// V14: config.changed is v2, naming the layer; every logged change
+    /// was the project's.
+    #[test]
+    fn v14_moves_config_changes_to_v2_in_the_project_layer() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(13))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload) VALUES
+                 ('a', 'config.changed', 1, '2026-04-29T00:00:00Z', 'human', '[]',
+                  '{"key":"zones","before":null,"after":[]}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let (v, payload): (i64, String) = conn
+            .query_row("SELECT v, payload FROM event_log", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(v, 2);
+        assert_eq!(
+            payload,
+            r#"{"key":"zones","before":null,"after":[],"layer":"project"}"#
+        );
+    }
+
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every

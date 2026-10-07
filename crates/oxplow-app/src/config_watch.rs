@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_config::OXPLOW_CONFIG_FILE;
+use oxplow_config::{OXPLOW_CONFIG_FILE, PERSONAL_CONFIG_FILE};
 use oxplow_fs_watch::{FsWatcher, RecursiveMode, WatchEvent};
 use tracing::{debug, warn};
 
@@ -62,7 +62,7 @@ impl ConfigWatcher {
                     Ok(WatchEvent { path, .. }) => {
                         let is_config = path
                             .file_name()
-                            .map(|n| n == OXPLOW_CONFIG_FILE)
+                            .map(|n| n == OXPLOW_CONFIG_FILE || n == PERSONAL_CONFIG_FILE)
                             .unwrap_or(false);
                         // A `.yaml`/`.yml` change under the global metrics dir
                         // also triggers a reload — the runner re-reads the

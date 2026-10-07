@@ -1337,7 +1337,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_landed_steps_events_are_logged_once_across_a_retry() {
         use crate::commands::{Command, Handler, HandlerOutput, Invocation};
-        use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
+        use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2};
         use oxplow_domain::{Atomicity, CommandEffect, CommandSpec, Confirm, Invokers, Lifecycle};
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
@@ -1370,10 +1370,11 @@ mod tests {
                     Ok(HandlerOutput {
                         events: vec![Envelope::typed::<ConfigChanged>(
                             "probe",
-                            &ConfigChangedV1 {
+                            &ConfigChangedV2 {
                                 key: "probe.noted".into(),
                                 before: Value::Null,
                                 after: json!(1),
+                                layer: oxplow_domain::events::schema::ConfigLayer::Project,
                             },
                         )],
                         ..HandlerOutput::default()

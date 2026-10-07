@@ -67,7 +67,7 @@ pub fn active_provider(config: &oxplow_config::OxplowConfig, capability: &str) -
 /// project can't swap (`vcs`, `knowledge`) has only core's, always
 /// active.
 pub fn is_active(config: &oxplow_config::OxplowConfig, capability: &str, provider: &str) -> bool {
-    !oxplow_config::SWAPPABLE_CAPABILITIES.contains(&capability)
+    !oxplow_domain::capability::spec(capability).is_some_and(|c| c.choosable)
         || active_provider(config, capability) == provider
 }
 
@@ -79,9 +79,9 @@ pub async fn apply_active(
     db: &oxplow_db::Database,
 ) -> Result<(), DomainError> {
     let store = SqliteCapabilityStore::new(db.clone());
-    for capability in oxplow_config::SWAPPABLE_CAPABILITIES {
+    for capability in oxplow_domain::capability::choosable() {
         store
-            .set_active(capability, &active_provider(config, capability))
+            .set_active(capability.id, &active_provider(config, capability.id))
             .await?;
     }
     Ok(())

@@ -4,7 +4,7 @@
 //! registry (`oxplow_config::keys`); `config.set` / `config.unset` change
 //! one key, taking the new document through the loader's own validation,
 //! writing the file, updating the in-memory config, and logging
-//! `config.changed@1 { key, before, after }` with an inverse that restores
+//! `config.changed@2 { key, before, after, layer }` with an inverse that restores
 //! the prior value. A human-only key (`ai`, `agents`, `lsp`, …) asks for
 //! confirmation per input, so an agent's change is kept as a proposal for
 //! a person (the bus's `Proposed`) while a person's confirmed call goes
@@ -23,8 +23,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use oxplow_config::keys::{config_key, config_keys, key_value, with_key, ConfigKey};
-use oxplow_config::{write_project_key, OxplowConfig};
-use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
+use oxplow_config::{
+    personal_value, with_personal_key, write_personal_key, write_project_key, OxplowConfig,
+};
+use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2, ConfigLayer};
 use oxplow_domain::{
     Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Envelope,
     InputValidator, Invokers, Lifecycle,
@@ -70,6 +72,78 @@ pub struct SetInput {
     pub key: String,
     /// The new value, in the key's own shape (see `config.list_keys`).
     pub value: Value,
+    /// `project` (the default: `.oxplow/project.yaml`, shared) or
+    /// `personal` (`.oxplow/personal.yaml`, a person's own; only
+    /// `activeProviders`).
+    #[serde(default)]
+    pub layer: Layer,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UnsetInput {
+    /// A `.oxplow/project.yaml` key.
+    pub key: String,
+    /// The layer to unset it in (see `config.set`).
+    #[serde(default)]
+    pub layer: Layer,
+}
+
+/// Which layer a config write goes to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Layer {
+    #[default]
+    Project,
+    Personal,
+}
+
+impl Layer {
+    fn logged(self) -> ConfigLayer {
+        match self {
+            Layer::Project => ConfigLayer::Project,
+            Layer::Personal => ConfigLayer::Personal,
+        }
+    }
+
+    fn value(self, cfg: &OxplowConfig, project_dir: &std::path::Path, key: &str) -> Option<Value> {
+        match self {
+            Layer::Project => key_value(cfg, project_dir, key),
+            Layer::Personal => personal_value(cfg, key),
+        }
+    }
+
+    fn apply(
+        self,
+        cfg: &OxplowConfig,
+        project_dir: &std::path::Path,
+        key: &str,
+        value: Option<&Value>,
+    ) -> Result<OxplowConfig, oxplow_config::ConfigError> {
+        match self {
+            Layer::Project => with_key(cfg, project_dir, key, value),
+            Layer::Personal => with_personal_key(cfg, key, value),
+        }
+    }
+
+    fn write(
+        self,
+        project_dir: &std::path::Path,
+        key: &str,
+        value: Option<&Value>,
+    ) -> Result<(), oxplow_config::ConfigError> {
+        match self {
+            Layer::Project => write_project_key(project_dir, key, value),
+            Layer::Personal => write_personal_key(project_dir, key, value),
+        }
+    }
+
+    fn input(self) -> Value {
+        match self {
+            Layer::Project => Value::Null,
+            Layer::Personal => json!("personal"),
+        }
+    }
 }
 
 /// One key as `config.list_keys` / `config.get` report it.
@@ -144,8 +218,18 @@ pub(crate) fn change(
     actor: &Actor,
     key: &str,
     value: Option<Value>,
+    layer: Layer,
 ) -> Result<HandlerOutput, CommandError> {
     let spec = known_key(key)?;
+    if layer == Layer::Personal && !oxplow_config::PERSONAL_KEYS.contains(&key) {
+        return Err(CommandError::Invalid {
+            field: Some("/layer".into()),
+            message: format!(
+                "`{key}` is the project's; a person's layer holds only {}",
+                oxplow_config::PERSONAL_KEYS.join(", ")
+            ),
+        });
+    }
     if let Some(v) = &value {
         if v.is_null() {
             return Err(CommandError::Invalid {
@@ -168,14 +252,14 @@ pub(crate) fn change(
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let before = key_value(&current, &target.project_dir, key);
-    let next = with_key(&current, &target.project_dir, key, value.as_ref()).map_err(|e| {
-        CommandError::Invalid {
+    let before = layer.value(&current, &target.project_dir, key);
+    let next = layer
+        .apply(&current, &target.project_dir, key, value.as_ref())
+        .map_err(|e| CommandError::Invalid {
             field: Some("/value".into()),
             message: e.to_string(),
-        }
-    })?;
-    let after = key_value(&next, &target.project_dir, key);
+        })?;
+    let after = layer.value(&next, &target.project_dir, key);
     if before == after {
         // Nothing to write, log or undo.
         return Ok(HandlerOutput {
@@ -183,22 +267,29 @@ pub(crate) fn change(
             ..HandlerOutput::default()
         });
     }
+    let with_layer = |mut input: Value| {
+        if layer == Layer::Personal {
+            input["layer"] = layer.input();
+        }
+        input
+    };
     let inverse = match &before {
         Some(prev) => CommandCall {
             name: SET.into(),
-            input: json!({ "key": key, "value": prev }),
+            input: with_layer(json!({ "key": key, "value": prev })),
         },
         None => CommandCall {
             name: UNSET.into(),
-            input: json!({ "key": key }),
+            input: with_layer(json!({ "key": key })),
         },
     };
     let event = Envelope::typed::<ConfigChanged>(
         actor.source(),
-        &ConfigChangedV1 {
+        &ConfigChangedV2 {
             key: key.to_string(),
             before: before.clone().unwrap_or(Value::Null),
             after: after.clone().unwrap_or(Value::Null),
+            layer: layer.logged(),
         },
     )
     .with_subject([oxplow_domain::refs::build::config_ref(key)]);
@@ -209,7 +300,7 @@ pub(crate) fn change(
         inverse: Some(inverse),
         events: vec![event],
         after_commit: Some(Box::new(move || {
-            apply_committed(&committed, &key_owned, value.as_ref())
+            apply_committed(&committed, &key_owned, value.as_ref(), layer)
         })),
         unchanged: false,
     })
@@ -220,17 +311,17 @@ pub(crate) fn change(
 /// the rest stays as the person wrote it (tsk1028) — swap memory, wake the
 /// UI. Holding the write lock across write + swap keeps the file and the
 /// in-memory config in step.
-fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>) {
+fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>, layer: Layer) {
     let mut guard = target.config.write().unwrap_or_else(|e| e.into_inner());
-    let next = match with_key(&guard, &target.project_dir, key, value) {
+    let next = match layer.apply(&guard, &target.project_dir, key, value) {
         Ok(next) => next,
         Err(e) => {
             tracing::error!(key, error = %e, "config.set: committed change no longer applies");
             return;
         }
     };
-    if let Err(e) = write_project_key(&target.project_dir, key, value) {
-        tracing::error!(key, error = %e, "config.set: writing project.yaml after commit failed");
+    if let Err(e) = layer.write(&target.project_dir, key, value) {
+        tracing::error!(key, ?layer, error = %e, "config.set: writing the config after commit failed");
         return;
     }
     *guard = next;
@@ -292,17 +383,18 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
         Command::new(
             spec(
                 SET,
-                "Set one .oxplow/project.yaml key. The value is validated against the key's \
-                 schema and the file's own rules, written to the file, and logged as \
-                 config.changed; undo restores the prior value. Human-only keys need a \
-                 person's confirmation.",
+                "Set one .oxplow/project.yaml key — or, with `layer: personal`, a person's own \
+                 choice in .oxplow/personal.yaml (only `activeProviders`). The value is \
+                 validated against the key's schema and the file's own rules, written to the \
+                 file, and logged as config.changed; undo restores the prior value. Human-only \
+                 keys need a person's confirmation.",
                 schema_of::<SetInput>(),
                 CommandEffect::Write,
             ),
             Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
                 let actor = ctx.actor;
                 let input: SetInput = parse(input)?;
-                change(&t, actor, &input.key, Some(input.value))
+                change(&t, actor, &input.key, Some(input.value), input.layer)
             })),
         )
         .and_then(|c| c.with_confirm_for(Arc::new(confirm_for_key)))
@@ -313,15 +405,16 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
         Command::new(
             spec(
                 UNSET,
-                "Remove one .oxplow/project.yaml key so it returns to its default; logged as \
-                 config.changed, undo restores it.",
-                schema_of::<KeyInput>(),
+                "Remove one .oxplow/project.yaml key so it returns to its default (or, with \
+                 `layer: personal`, a person's own choice); logged as config.changed, undo \
+                 restores it.",
+                schema_of::<UnsetInput>(),
                 CommandEffect::Write,
             ),
             Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
                 let actor = ctx.actor;
-                let input: KeyInput = parse(input)?;
-                change(&t, actor, &input.key, None)
+                let input: UnsetInput = parse(input)?;
+                change(&t, actor, &input.key, None, input.layer)
             })),
         )
         .and_then(|c| c.with_confirm_for(Arc::new(confirm_for_key)))
@@ -424,6 +517,60 @@ mod tests {
             file(&dir)
         );
         assert_eq!(target.config.read().unwrap().metric_retention_days, 30);
+    }
+
+    /// A person's own choice: `layer: personal` writes
+    /// `.oxplow/personal.yaml` alone and updates the config's personal
+    /// layer; unsetting it there removes it. A key a person's layer can't
+    /// hold is refused.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_personal_choice_is_set_and_unset() {
+        let (dir, target, bus) = setup(None);
+        let human = Actor::Human;
+        bus.run(
+            &human,
+            SET,
+            json!({ "key": "activeProviders", "value": { "effort_policy": "none" }, "layer": "personal" }),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(file(&dir), "", "project.yaml untouched");
+        let personal = std::fs::read_to_string(dir.path().join(".oxplow/personal.yaml")).unwrap();
+        assert!(personal.contains("effort_policy: none"), "{personal}");
+        assert_eq!(
+            target
+                .config
+                .read()
+                .unwrap()
+                .personal_active_providers
+                .get("effort_policy")
+                .map(String::as_str),
+            Some("none")
+        );
+        bus.run(
+            &human,
+            UNSET,
+            json!({ "key": "activeProviders", "layer": "personal" }),
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(target
+            .config
+            .read()
+            .unwrap()
+            .personal_active_providers
+            .is_empty());
+        assert!(bus
+            .run(
+                &human,
+                SET,
+                json!({ "key": "zones", "value": [], "layer": "personal" }),
+                true
+            )
+            .await
+            .is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]

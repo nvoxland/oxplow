@@ -156,6 +156,12 @@ own — heavier ones included (beads as a work list).
   accepts. Capabilities are independent and many: Settings lists them
   from the registry, agents propose changes through config like any
   other, and a choice is a project default with a personal override.
+  Core declares the capabilities (`oxplow_domain::capability`:
+  `CapabilitySpec` — choosable, optional, default, the features an
+  implementation may declare): the work list and the effort policy may
+  be none, snapshots may not, and `vcs` / `knowledge` aren't chosen. A
+  person's override is `activeProviders` in `.oxplow/personal.yaml`
+  (`config.set { layer: personal }`).
 - **No special-casing our own implementations.** Core calls every
   implementation of an interface the same way and never branches on
   whether it is ours or compiled in. Compiled-in, scripted and

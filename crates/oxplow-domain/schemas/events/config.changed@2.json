@@ -1,0 +1,45 @@
+{
+  "$defs": {
+    "ConfigLayer": {
+      "description": "Which layer of a project's config a change was to.",
+      "oneOf": [
+        {
+          "const": "project",
+          "description": "The project's shared config (`.oxplow/project.yaml`).",
+          "type": "string"
+        },
+        {
+          "const": "personal",
+          "description": "A person's own layer over it (`.oxplow/personal.yaml`), which git\nignores.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.changed@2`: one config key changed, in one layer.",
+  "properties": {
+    "after": {
+      "description": "`null` when the key was removed."
+    },
+    "before": {
+      "description": "`null` when the key was unset."
+    },
+    "key": {
+      "description": "The `ConfigKey` (`zones`, `metricRetentionDays`).",
+      "type": "string"
+    },
+    "layer": {
+      "$ref": "#/$defs/ConfigLayer"
+    }
+  },
+  "required": [
+    "key",
+    "before",
+    "after",
+    "layer"
+  ],
+  "title": "ConfigChangedV2",
+  "type": "object"
+}

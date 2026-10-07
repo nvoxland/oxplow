@@ -241,6 +241,7 @@ mod tests {
             acp_agents: Vec::new(),
             extension_instances: Default::default(),
             active_providers: Default::default(),
+            personal_active_providers: Default::default(),
             replacements_off: Default::default(),
             event_retention: Default::default(),
             ai_roles: Default::default(),

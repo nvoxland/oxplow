@@ -711,7 +711,7 @@ fn event_by_seq_tx(
 mod tests {
     use super::*;
     use oxplow_db::event_log_store::SqliteEventLogStore;
-    use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
+    use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2};
     use oxplow_domain::Envelope;
     use parking_lot::Mutex;
     use serde_json::{json, Value};
@@ -795,10 +795,11 @@ mod tests {
     fn config_changed(key: &str) -> Envelope {
         Envelope::typed::<ConfigChanged>(
             "test",
-            &ConfigChangedV1 {
+            &ConfigChangedV2 {
                 key: key.into(),
                 before: Value::Null,
                 after: json!(1),
+                layer: oxplow_domain::events::schema::ConfigLayer::Project,
             },
         )
     }
@@ -1217,6 +1218,7 @@ mod tests {
         store.append(config_changed("a")).await.unwrap();
         let mut other = config_changed("x");
         other.event_type = "effect.result".into();
+        other.v = 1;
         other.payload = json!({"effect": "notify.desktop", "ok": true, "detail": null});
         store.append(other).await.unwrap();
         let pump = pump(&db, &store, vec![Recorder::new("rec", None)]);

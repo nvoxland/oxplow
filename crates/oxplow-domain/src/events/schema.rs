@@ -652,23 +652,35 @@ impl EventType for CommandDeclined {
     type Payload = CommandDeclinedV1;
 }
 
-/// `config.changed@1`: one project config key changed.
+/// Which layer of a project's config a change was to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigLayer {
+    /// The project's shared config (`.oxplow/project.yaml`).
+    Project,
+    /// A person's own layer over it (`.oxplow/personal.yaml`), which git
+    /// ignores.
+    Personal,
+}
+
+/// `config.changed@2`: one config key changed, in one layer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ConfigChangedV1 {
+pub struct ConfigChangedV2 {
     /// The `ConfigKey` (`zones`, `metricRetentionDays`).
     pub key: String,
     /// `null` when the key was unset.
     pub before: Value,
     /// `null` when the key was removed.
     pub after: Value,
+    pub layer: ConfigLayer,
 }
 
 pub struct ConfigChanged;
 impl EventType for ConfigChanged {
     const TYPE: &'static str = "config.changed";
-    const V: u32 = 1;
-    type Payload = ConfigChangedV1;
+    const V: u32 = 2;
+    type Payload = ConfigChangedV2;
 }
 
 /// `effect.result@1`: the recorded outcome of a side effect (§5.3).
@@ -2183,7 +2195,7 @@ mod tests {
                 ("command.executed", 2),
                 ("command.proposed", 1),
                 ("command.proposed", 2),
-                ("config.changed", 1),
+                ("config.changed", 2),
                 ("effect.result", 1),
                 ("effect.result", 2),
                 ("effect.result", 3),
@@ -2227,7 +2239,7 @@ mod tests {
         );
         assert_eq!(r.latest("work_item.transitioned"), Some(1));
         assert_eq!(r.latest("agent.turn.ended"), Some(2));
-        assert_eq!(r.owner("config.changed", 1), Some(None));
+        assert_eq!(r.owner("config.changed", 2), Some(None));
     }
 
     /// P9.D4: `effect.result@3` says which attempt it was and what
@@ -2348,8 +2360,8 @@ mod tests {
         let extra = r
             .validate(
                 "config.changed",
-                1,
-                &json!({"key": "zones", "before": null, "after": 1, "oops": 1}),
+                2,
+                &json!({"key": "zones", "before": null, "after": 1, "layer": "project", "oops": 1}),
             )
             .unwrap_err();
         assert!(extra.to_string().contains("oops"), "{extra}");
@@ -2381,13 +2393,13 @@ mod tests {
     impl EventType for AcmeDecided {
         const TYPE: &'static str = "acme_review.decided";
         const V: u32 = 1;
-        type Payload = ConfigChangedV1;
+        type Payload = ConfigChangedV2;
     }
     struct Squatter;
     impl EventType for Squatter {
         const TYPE: &'static str = "work_item.hijacked";
         const V: u32 = 1;
-        type Payload = ConfigChangedV1;
+        type Payload = ConfigChangedV2;
     }
 
     #[test]

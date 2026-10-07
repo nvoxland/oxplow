@@ -1984,7 +1984,7 @@ fn undoable(row: &CommandAudit) -> Result<CommandCall, CommandError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::events::schema::{ActorKind, ConfigChanged, ConfigChangedV1};
+    use oxplow_domain::events::schema::{ActorKind, ConfigChanged, ConfigChangedV2};
     use oxplow_domain::{CommandEffect, Confirm, Invokers, Lifecycle, ThreadId};
     use serde_json::json;
 
@@ -2132,10 +2132,11 @@ mod tests {
                 }),
                 events: vec![Envelope::typed::<ConfigChanged>(
                     "test",
-                    &ConfigChangedV1 {
+                    &ConfigChangedV2 {
                         key: k.clone(),
                         before: before.map(Value::String).unwrap_or(Value::Null),
                         after: Value::String(v),
+                        layer: oxplow_domain::events::schema::ConfigLayer::Project,
                     },
                 )],
                 after_commit: None,
@@ -2481,10 +2482,11 @@ mod tests {
             let events = if v == "with-events" {
                 vec![Envelope::typed::<ConfigChanged>(
                     "test",
-                    &ConfigChangedV1 {
+                    &ConfigChangedV2 {
                         key: k.clone(),
                         before: Value::Null,
                         after: Value::String(v.clone()),
+                        layer: oxplow_domain::events::schema::ConfigLayer::Project,
                     },
                 )]
             } else {
@@ -3162,10 +3164,11 @@ mod tests {
                     oxplow_domain::events::schema::ConfigChanged,
                 >(
                     "test",
-                    &oxplow_domain::events::schema::ConfigChangedV1 {
+                    &oxplow_domain::events::schema::ConfigChangedV2 {
                         key: "announced".into(),
                         before: Value::Null,
                         after: input["v"].clone(),
+                        layer: oxplow_domain::events::schema::ConfigLayer::Project,
                     },
                 )],
             })

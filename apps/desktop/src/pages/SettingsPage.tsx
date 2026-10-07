@@ -342,6 +342,7 @@ const ORIGIN_LABEL: Record<EffectiveSetting["origin"], string> = {
   default: "default",
   global: "your global config",
   project: "project",
+  personal: "just for you",
   extension: "extension",
 };
 

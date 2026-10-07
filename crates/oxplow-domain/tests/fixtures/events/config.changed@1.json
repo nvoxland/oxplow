@@ -1,5 +1,0 @@
-{
-  "key": "zones",
-  "before": null,
-  "after": [{ "name": "core", "paths": ["crates/"] }]
-}

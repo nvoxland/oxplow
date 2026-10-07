@@ -21,6 +21,8 @@ pub enum ConfigOrigin {
     Default,
     Global,
     Project,
+    /// A person's own layer (`.oxplow/personal.yaml`).
+    Personal,
     Extension,
 }
 
@@ -98,6 +100,23 @@ pub fn effective_config(
             }
         })
         .collect();
+    // A person's own layer, beside the project's value it overrides.
+    for key in oxplow_config::PERSONAL_KEYS {
+        if let Some(value) = oxplow_config::personal_value(config, key) {
+            let spec = keys.iter().find(|k| k.key == *key);
+            out.push(EffectiveSetting {
+                key: format!("personal.{key}"),
+                doc: format!(
+                    "Your own `{key}`, over the project's (.oxplow/personal.yaml, which git ignores)."
+                ),
+                value,
+                origin: ConfigOrigin::Personal,
+                extension: None,
+                human_only: true,
+                schema: spec.map(|k| k.schema.clone()).unwrap_or(Value::Null),
+            });
+        }
+    }
     if let Some(ai) = ai {
         for r in &ai.roles {
             let role = serde_json::to_value(r.role)
@@ -194,6 +213,28 @@ mod tests {
         all.iter()
             .find(|s| s.key == key)
             .unwrap_or_else(|| panic!("no {key}"))
+    }
+
+    /// A person's own choices (`.oxplow/personal.yaml`) show as their own
+    /// row, `personal`, beside the project's.
+    #[test]
+    fn a_personal_choice_shows_as_personal() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            "activeProviders: { effort_policy: none }\n",
+        )
+        .unwrap();
+        let config = oxplow_config::load_project_config(dir.path()).unwrap();
+        let all = effective_config(&config, dir.path(), None, None, &[]);
+        let personal = find(&all, "personal.activeProviders");
+        assert_eq!(personal.origin, ConfigOrigin::Personal);
+        assert_eq!(
+            personal.value,
+            serde_json::json!({ "effort_policy": "none" })
+        );
+        assert_eq!(find(&all, "activeProviders").origin, ConfigOrigin::Default);
     }
 
     /// P6.H1: a project-set key is `project`; an unset one is `default`,

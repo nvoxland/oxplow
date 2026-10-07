@@ -415,7 +415,13 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
             let value = serde_json::to_value(&list).map_err(|e| CommandError::Failed {
                 message: e.to_string(),
             })?;
-            change(&target, ctx.actor, "metrics", Some(value))
+            change(
+                &target,
+                ctx.actor,
+                "metrics",
+                Some(value),
+                super::config_commands::Layer::Project,
+            )
         })),
     )
     .expect("metric.enable registers");

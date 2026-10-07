@@ -17,7 +17,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use oxplow_config::GeneratedConfig;
-use oxplow_domain::events::schema::ConfigChangedV1;
+use oxplow_domain::events::schema::ConfigChangedV2;
 use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::event_pump::AsyncEventConsumer;
@@ -39,7 +39,7 @@ const APPLY_WAIT: Duration = Duration::from_secs(5);
 /// longer reads `before` (it reads `after`, or a later change's value) —
 /// or [`APPLY_WAIT`] passes. `config.set` swaps it right after the commit
 /// the pump may already have seen.
-pub async fn applied(svc: &crate::Services, change: &ConfigChangedV1) {
+pub async fn applied(svc: &crate::Services, change: &ConfigChangedV2) {
     let deadline = tokio::time::Instant::now() + APPLY_WAIT;
     loop {
         // Registered before the check, so a swap between the two wakes it.
@@ -86,7 +86,7 @@ impl AsyncEventConsumer for KeyReactor {
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let change: ConfigChangedV1 = serde_json::from_value(event.envelope.payload.clone())
+        let change: ConfigChangedV2 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("config.changed: {e}")))?;
         if !self.keys.is_empty() && !self.keys.contains(&change.key.as_str()) {
             return Ok(());
@@ -146,7 +146,7 @@ impl AsyncEventConsumer for WorkspaceFilterConsumer {
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let change: ConfigChangedV1 = serde_json::from_value(event.envelope.payload.clone())
+        let change: ConfigChangedV2 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("config.changed: {e}")))?;
         if change.key != "generated" {
             return Ok(());

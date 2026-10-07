@@ -1925,7 +1925,9 @@ export type ConfigEffect = {
 };
 
 // Where a setting's value comes from.
-export type ConfigOrigin = "default" | "global" | "project" | "extension";
+export type ConfigOrigin = "default" | "global" | "project" | 
+// A person's own layer (`.oxplow/personal.yaml`).
+"personal" | "extension";
 
 // A config problem `check` reported.
 export type ConfigProblem = {
@@ -4255,11 +4257,16 @@ export type OxplowConfig = {
 	 */
 	extensionInstances: { [key in string]: ExtensionInstanceConfig },
 	/**
-	 *  Each swappable capability's active provider
+	 *  The project's choice of implementation per choosable capability
 	 *  (`activeProviders: { work_items: issues, effort_policy: none }`); a
-	 *  capability absent here keeps oxplow's own.
+	 *  capability absent here keeps its default.
 	 */
 	activeProviders: { [key in string]: string },
+	/**
+	 *  A person's own choices (`activeProviders` in
+	 *  `.oxplow/personal.yaml`), over the project's.
+	 */
+	personalActiveProviders: { [key in string]: string },
 	/**
 	 *  Core components no extension's replacement may take over
 	 *  (`replacementsOff: [work_item.board]`): oxplow's own shows there
