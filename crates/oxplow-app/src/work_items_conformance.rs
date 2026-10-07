@@ -56,6 +56,14 @@ pub trait WorkItemsProbe: Send + Sync {
     async fn titled(&self, provider: &str, title: &str) -> Vec<String>;
     /// The host's active work-items provider: where every create files.
     async fn active(&self) -> String;
+    /// `item_ref`'s links as the interface reads them (`v_work_item_link`):
+    /// `(target, link_type)`.
+    async fn links(&self, item_ref: &str) -> Vec<(String, String)>;
+    /// `item_ref`'s comment bodies as the interface reads them.
+    async fn comments(&self, item_ref: &str) -> Vec<String>;
+    /// `item_ref`'s list and rank as the interface reads them
+    /// (`v_work_item.thread_id`, `.rank`).
+    async fn placement(&self, item_ref: &str) -> (Option<i64>, Option<f64>);
 }
 
 /// Run every check against `provider` (its id and declared features) as
@@ -285,6 +293,67 @@ pub async fn suite(
                 features.comments
             ),
         );
+    }
+    // …and read back through the interface.
+    probe.settle().await;
+    if features.links && linked.is_ok() {
+        let links = probe.links(&item).await;
+        if !links.contains(&(other.clone(), "relates_to".into())) {
+            fail(
+                "links",
+                format!("the link isn't in v_work_item_link: {links:?}"),
+            );
+        }
+    }
+    if features.comments && commented.is_ok() {
+        let comments = probe.comments(&item).await;
+        if !comments.iter().any(|c| c == "a conformance comment") {
+            fail(
+                "comments",
+                format!("the comment isn't in v_work_item_comment: {comments:?}"),
+            );
+        }
+    }
+
+    // 5b. Ordering and lists follow the features, and read back.
+    if !other.is_empty() {
+        let reordered = items.reorder_before(actor, &other, &item).await;
+        if reordered.is_ok() != features.ordering {
+            fail(
+                "ordering",
+                format!(
+                    "reorder: {reordered:?} with ordering = {}",
+                    features.ordering
+                ),
+            );
+        }
+        if features.ordering && reordered.is_ok() {
+            probe.settle().await;
+            let (_, before) = probe.placement(&other).await;
+            let (_, after) = probe.placement(&item).await;
+            if !matches!((before, after), (Some(b), Some(a)) if b < a) {
+                fail(
+                    "ordering",
+                    format!("reordered before it, `{other}` ranks {before:?} against {after:?}"),
+                );
+            }
+        }
+        let moved = items.move_to_backlog(actor, &other).await;
+        if moved.is_ok() != features.lists {
+            fail(
+                "lists",
+                format!("move: {moved:?} with lists = {}", features.lists),
+            );
+        }
+        if features.lists && moved.is_ok() {
+            probe.settle().await;
+            if let (Some(thread), _) = probe.placement(&other).await {
+                fail(
+                    "lists",
+                    format!("moved to the backlog, it's on thread {thread}"),
+                );
+            }
+        }
     }
 
     // 6. What happened is in the log, naming the item: every write that
@@ -528,6 +597,9 @@ impl WorkItemsProbe for ServicesProbe<'_> {
                         native: serde_json::from_str(&native).ok()?,
                         parent_ref,
                         deleted: false,
+                        rank: None,
+                        links: None,
+                        comments: None,
                     })
                 },
             )
@@ -593,6 +665,62 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             })
             .await
             .unwrap_or_default()
+    }
+
+    async fn links(&self, item_ref: &str) -> Vec<(String, String)> {
+        let item_ref = item_ref.to_string();
+        self.0
+            .db
+            .read(move |c| {
+                let mut stmt = c
+                    .prepare("SELECT to_ref, link_type FROM v_work_item_link WHERE from_ref = ?1")
+                    .map_err(sql)?;
+                let rows = stmt
+                    .query_map([item_ref], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(sql)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn comments(&self, item_ref: &str) -> Vec<String> {
+        let item_ref = item_ref.to_string();
+        self.0
+            .db
+            .read(move |c| {
+                let mut stmt = c
+                    .prepare("SELECT body FROM v_work_item_comment WHERE ref = ?1")
+                    .map_err(sql)?;
+                let rows = stmt
+                    .query_map([item_ref], |r| r.get(0))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(sql)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn placement(&self, item_ref: &str) -> (Option<i64>, Option<f64>) {
+        let item_ref = item_ref.to_string();
+        self.0
+            .db
+            .read(move |c| {
+                use rusqlite::OptionalExtension;
+                c.query_row(
+                    "SELECT thread_id, rank FROM v_work_item WHERE ref = ?1",
+                    [item_ref],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(sql)
+            })
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or((None, None))
     }
 
     async fn event_types(&self, item_ref: &str) -> Vec<String> {

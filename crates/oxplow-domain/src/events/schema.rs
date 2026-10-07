@@ -190,6 +190,8 @@ impl EventSchemaRegistry {
         r.register::<WorkItemLinked>().expect("core type registers");
         r.register::<WorkItemCommented>()
             .expect("core type registers");
+        r.register::<WorkItemRecordedAtV1>()
+            .expect("core type registers");
         r.register::<WorkItemRecorded>()
             .expect("core type registers");
         r.register::<WorkItemStateChanged>()
@@ -1840,6 +1842,9 @@ impl EventType for WorkItemCommented {
     type Payload = WorkItemCommentedV1;
 }
 
+// v1 as published (its schema is compared exactly to providers'
+// checked-in declarations): v1's own words. It carried no rank, links or
+// comments.
 /// `work_item.recorded@1`: a provider's item as it now stands — how an
 /// external provider's items reach `work_item` (the `work_items.project`
 /// consumer upserts it by ref). oxplow's own tasks don't log it: their
@@ -1847,14 +1852,43 @@ impl EventType for WorkItemCommented {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemRecordedV1 {
+    pub item: crate::work_items::WorkItemRecordV1,
+}
+
+/// The v1 shape of `work_item.recorded`, as a registry entry.
+pub struct WorkItemRecordedAtV1;
+impl EventType for WorkItemRecordedAtV1 {
+    const TYPE: &'static str = "work_item.recorded";
+    const V: u32 = 1;
+    type Payload = WorkItemRecordedV1;
+}
+
+/// `work_item.recorded@2`: a provider's item as it now stands — how an
+/// external provider's items reach the work-item interface (the
+/// `work_items.project` consumer upserts it by ref), with its rank, links
+/// and comments when it states them. oxplow's own tasks don't log it:
+/// their rows are written with the task, in the same transaction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemRecordedV2 {
     pub item: crate::work_items::WorkItemRecord,
 }
 
 pub struct WorkItemRecorded;
 impl EventType for WorkItemRecorded {
     const TYPE: &'static str = "work_item.recorded";
-    const V: u32 = 1;
-    type Payload = WorkItemRecordedV1;
+    const V: u32 = 2;
+    type Payload = WorkItemRecordedV2;
+
+    /// v1 → v2 adds three optional fields: a v1 payload is a valid v2 one.
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "work_item.recorded@{from_v} cannot be upcast to v2"
+            ))),
+        }
+    }
 }
 
 /// How many diagnostics of each severity a file has.
@@ -2260,6 +2294,7 @@ mod tests {
                 ("work_item.edited", 1),
                 ("work_item.linked", 1),
                 ("work_item.recorded", 1),
+                ("work_item.recorded", 2),
                 ("work_item.state_changed", 1),
                 ("work_item.transitioned", 1),
             ]

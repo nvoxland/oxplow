@@ -140,11 +140,75 @@ pub struct WorkItemsFeatures {
     pub lists: bool,
 }
 
+/// One of an item's links, as its provider records it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LinkRecord {
+    /// The item it points at (`work_item:<provider>:<id>`).
+    pub target: String,
+    /// `blocks`, `discovered_from`, `relates_to`, `duplicates`,
+    /// `supersedes` or `replies_to`.
+    pub link_type: String,
+}
+
+/// One of an item's comments, as its provider records it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommentRecord {
+    /// The provider's own id for it, unique on the item.
+    pub id: String,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// RFC 3339; absent, when the host recorded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+}
+
+/// An item as its provider now has it — what `v_work_item` holds, and
+/// what a provider's `work_item.recorded` event carries. `rank`, `links`
+/// and `comments` are stated when the provider keeps them: absent, the
+/// host keeps what it has; present, it's the whole set.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemRecord {
+    /// `work_item:<provider>:<id>`.
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    pub state: CanonicalState,
+    pub native_state: String,
+    /// Provider-specific fields.
+    #[serde(default)]
+    pub native: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_ref: Option<String>,
+    /// Gone at the provider.
+    #[serde(default)]
+    pub deleted: bool,
+    /// Its order on its list (ascending).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rank: Option<f64>,
+    /// Its links (from it to others), the whole set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<LinkRecord>>,
+    /// Its comments, the whole set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments: Option<Vec<CommentRecord>>,
+}
+
+// [`WorkItemRecord`] as `work_item.recorded@1` carried it: no rank, links
+// or comments. Its schema is v1's as published — name and descriptions
+// included, since a provider's checked-in declarations are compared to it
+// exactly — so its doc comments are v1's own words.
 /// An item as its provider now has it — what `v_work_item` holds, and
 /// what a provider's `work_item.recorded` event carries.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemRecord {
+#[schemars(rename = "WorkItemRecord")]
+pub struct WorkItemRecordV1 {
     /// `work_item:<provider>:<id>`.
     #[serde(rename = "ref")]
     pub item_ref: String,
@@ -443,6 +507,9 @@ mod tests {
             native: serde_json::json!({ "points": 3 }),
             parent_ref: None,
             deleted: false,
+            rank: None,
+            links: None,
+            comments: None,
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["ref"], "work_item:fake:W-1");

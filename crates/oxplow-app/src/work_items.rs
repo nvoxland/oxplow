@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use oxplow_domain::events::schema::{EventType, WorkItemRecorded, WorkItemRecordedV1};
+use oxplow_domain::events::schema::{EventType, WorkItemRecorded, WorkItemRecordedV2};
 use oxplow_domain::work_items::{
     provider_of, CanonicalState, WorkItemsFeatures, WorkItemsProvider,
 };
@@ -207,6 +207,35 @@ impl WorkItems {
         .await
     }
 
+    /// Put `item_ref` just before `before` on its list (`ordering`).
+    pub async fn reorder_before(
+        &self,
+        actor: &Actor,
+        item_ref: &str,
+        before: &str,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.run(
+            actor,
+            work_item::REORDER,
+            json!({ "ref": item_ref, "before": before }),
+        )
+        .await
+    }
+
+    /// Move `item_ref` to the backlog (`lists`).
+    pub async fn move_to_backlog(
+        &self,
+        actor: &Actor,
+        item_ref: &str,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.run(
+            actor,
+            work_item::MOVE,
+            json!({ "ref": item_ref, "to": "backlog" }),
+        )
+        .await
+    }
+
     /// Destructive: `confirmed` is the person's confirmation (an agent's
     /// is ignored — its run is proposed).
     pub async fn delete(
@@ -251,7 +280,7 @@ impl EventConsumer for WorkItemsProjection {
     }
 
     fn handle(&self, conn: &rusqlite::Connection, event: &StoredEvent) -> Result<(), DomainError> {
-        let WorkItemRecordedV1 { item } = serde_json::from_value(event.envelope.payload.clone())
+        let WorkItemRecordedV2 { item } = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("work_item.recorded payload: {e}")))?;
         let provider = provider_of(&item.item_ref)
             .map_err(|e| DomainError::Invalid(e.to_string()))?
@@ -294,6 +323,52 @@ impl EventConsumer for WorkItemsProjection {
             ],
         )
         .map_err(|e| DomainError::Storage(e.to_string()))?;
+        let storage = |e: rusqlite::Error| DomainError::Storage(e.to_string());
+        // What the record states, it restates whole; what it leaves out,
+        // the host keeps.
+        if let Some(rank) = item.rank {
+            conn.execute(
+                "UPDATE work_item SET rank = ?2 WHERE ref = ?1",
+                rusqlite::params![item.item_ref, rank],
+            )
+            .map_err(storage)?;
+        }
+        if let Some(links) = &item.links {
+            conn.execute(
+                "DELETE FROM work_item_link WHERE from_ref = ?1",
+                [&item.item_ref],
+            )
+            .map_err(storage)?;
+            for l in links {
+                conn.execute(
+                    "INSERT OR IGNORE INTO work_item_link (from_ref, to_ref, link_type, created_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![item.item_ref, l.target, l.link_type, at],
+                )
+                .map_err(|e| DomainError::Invalid(format!("link `{}`: {e}", l.link_type)))?;
+            }
+        }
+        if let Some(comments) = &item.comments {
+            conn.execute(
+                "DELETE FROM work_item_comment WHERE ref = ?1",
+                [&item.item_ref],
+            )
+            .map_err(storage)?;
+            for c in comments {
+                conn.execute(
+                    "INSERT INTO work_item_comment (id, ref, body, author, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![
+                        format!("{}#{}", item.item_ref, c.id),
+                        item.item_ref,
+                        c.body,
+                        c.author,
+                        c.created_at.as_deref().unwrap_or(&at),
+                    ],
+                )
+                .map_err(storage)?;
+            }
+        }
         Ok(())
     }
 }
@@ -390,7 +465,7 @@ mod tests {
     fn recorded(item_ref: &str, title: &str, deleted: bool) -> Envelope {
         Envelope::typed::<WorkItemRecorded>(
             "provider:fake",
-            &WorkItemRecordedV1 {
+            &WorkItemRecordedV2 {
                 item: WorkItemRecord {
                     item_ref: item_ref.into(),
                     title: title.into(),
@@ -400,6 +475,9 @@ mod tests {
                     native: json!({ "points": 3 }),
                     parent_ref: None,
                     deleted,
+                    rank: None,
+                    links: None,
+                    comments: None,
                 },
             },
         )

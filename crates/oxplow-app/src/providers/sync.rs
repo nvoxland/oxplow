@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use oxplow_domain::events::schema::{WorkItemRecorded, WorkItemRecordedV1};
+use oxplow_domain::events::schema::{WorkItemRecorded, WorkItemRecordedV2};
 use oxplow_domain::work_items::{provider_of, WorkItemRecord};
 use oxplow_domain::{
     Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Envelope, Invokers,
@@ -367,7 +367,7 @@ impl Instance {
         }
         let subject = item.item_ref.clone();
         Ok(
-            Envelope::typed::<WorkItemRecorded>(actor.source(), &WorkItemRecordedV1 { item })
+            Envelope::typed::<WorkItemRecorded>(actor.source(), &WorkItemRecordedV2 { item })
                 .with_subject([subject]),
         )
     }

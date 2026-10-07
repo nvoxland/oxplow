@@ -102,7 +102,10 @@ re-enabling the extension shows everything done meanwhile. The database
 is opened as it is (`Database::open_existing`: no migrating, no model
 recompile under the running app; refused at another schema version).
 The running app picks up the new events with its next pump pass; with
-the work list none, no effort policy reacts to them.
+the work list none, no effort policy reacts to them. Its reads (`list`,
+`show`) are oxplow's `task` table itself, not the work-item interface
+(which shows only the active list's items) — the one reader of oxplow's
+tables outside its implementation, on purpose.
 
 ## Repo layout (post-Tauri rewrite)
 

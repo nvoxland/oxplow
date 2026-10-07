@@ -80,7 +80,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_domain::events::schema::{EventType, WorkItemRecorded};
-use oxplow_domain::work_items::{CanonicalState, WorkItemRecord};
+use oxplow_domain::work_items::{CanonicalState, CommentRecord, LinkRecord, WorkItemRecord};
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
@@ -323,8 +323,6 @@ struct Item {
     /// The world's revision when it last changed: a read streams the
     /// items changed after its cursor.
     rev: u64,
-    links: Vec<(String, String)>,
-    comments: Vec<String>,
 }
 
 #[derive(Default)]
@@ -861,20 +859,17 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 native,
                 parent_ref,
                 deleted: false,
+                rank: None,
+                // It keeps its links and comments, so every record states
+                // them.
+                links: Some(Vec::new()),
+                comments: Some(Vec::new()),
             };
             let events = vec![recorded(&record)];
             let result = json!({ "ref": record.item_ref });
             w.rev += 1;
             let rev = w.rev;
-            w.items.insert(
-                n,
-                Item {
-                    record,
-                    rev,
-                    links: Vec::new(),
-                    comments: Vec::new(),
-                },
-            );
+            w.items.insert(n, Item { record, rev });
             (result, events)
         }
         "update" | "transition" | "link" | "comment" | "delete" | "estimate" => {
@@ -928,12 +923,23 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     item.record.native_state = native_of(state).into();
                 }
                 "link" => {
-                    item.links.push((
-                        str_field(&input, "target")?,
-                        str_field(&input, "link_type")?,
-                    ));
+                    item.record
+                        .links
+                        .get_or_insert_with(Vec::new)
+                        .push(LinkRecord {
+                            target: str_field(&input, "target")?,
+                            link_type: str_field(&input, "link_type")?,
+                        });
                 }
-                "comment" => item.comments.push(str_field(&input, "body")?),
+                "comment" => {
+                    let comments = item.record.comments.get_or_insert_with(Vec::new);
+                    comments.push(CommentRecord {
+                        id: format!("c{}", comments.len() + 1),
+                        body: str_field(&input, "body")?,
+                        author: None,
+                        created_at: None,
+                    });
+                }
                 "estimate" => {
                     let points = input.get("points").and_then(Value::as_i64).ok_or_else(|| {
                         ProtocolError::InvalidInput {

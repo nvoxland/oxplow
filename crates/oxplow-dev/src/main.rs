@@ -8,7 +8,10 @@
 //! and the log are the task system's own, and turning the extension back
 //! on shows all of it. The database is opened as it is
 //! (`Database::open_existing`): nothing migrated or recompiled under the
-//! running app. See `.context/working-in-this-repo.md` "oxplow-dev".
+//! running app. Its reads are oxplow's own task table, not the work-item
+//! interface (which shows only the active list's items): the one place
+//! outside oxplow's implementation that reads it, on purpose. See
+//! `.context/working-in-this-repo.md` "oxplow-dev".
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -192,16 +195,18 @@ impl Tasks {
         serde_json::to_string_pretty(&out.result).map_err(|e| e.to_string())
     }
 
+    /// Oxplow's tasks, from its own table: whatever work list is active
+    /// (the interface shows only the active one's), this is oxplow's.
     async fn list(&self, all: bool) -> Result<String, String> {
         let rows = self
             .rows(
                 &format!(
-                    "SELECT ref, state, title FROM v_work_item WHERE provider = 'oxplow' {}
-                     ORDER BY length(ref), ref",
+                    "SELECT 'tsk' || id, status, title FROM task WHERE deleted_at IS NULL {}
+                     ORDER BY id",
                     if all {
                         ""
                     } else {
-                        "AND state NOT IN ('done', 'canceled')"
+                        "AND status NOT IN ('done', 'canceled', 'archived')"
                     }
                 ),
                 vec![],
@@ -209,30 +214,26 @@ impl Tasks {
             .await?;
         Ok(rows
             .iter()
-            .map(|r| {
-                let id = r[0].strip_prefix("work_item:oxplow:").unwrap_or(&r[0]);
-                format!("{id}\t{}\t{}", r[1], r[2])
-            })
+            .map(|r| format!("{}\t{}\t{}", r[0], r[1], r[2]))
             .collect::<Vec<_>>()
             .join("\n"))
     }
 
     async fn show(&self, id: &str) -> Result<String, String> {
-        let item_ref = if id.starts_with("work_item:") {
-            id.to_string()
-        } else {
-            format!("work_item:oxplow:{id}")
-        };
+        let id = id
+            .strip_prefix("work_item:oxplow:")
+            .unwrap_or(id)
+            .trim_start_matches("tsk")
+            .to_string();
         let rows = self
             .rows(
-                "SELECT ref, state, title, coalesce(parent_ref, ''), coalesce(body, '')
-                   FROM v_work_item WHERE ref = ?1",
-                vec![item_ref.clone()],
+                "SELECT 'tsk' || id, status, title,
+                        coalesce('tsk' || parent_id, ''), coalesce(description, '')
+                   FROM task WHERE id = ?1 AND deleted_at IS NULL",
+                vec![id.clone()],
             )
             .await?;
-        let r = rows
-            .first()
-            .ok_or_else(|| format!("no task `{item_ref}`"))?;
+        let r = rows.first().ok_or_else(|| format!("no task `tsk{id}`"))?;
         Ok(format!(
             "{}\nstate: {}\ntitle: {}\nparent: {}\n\n{}",
             r[0], r[1], r[2], r[3], r[4]

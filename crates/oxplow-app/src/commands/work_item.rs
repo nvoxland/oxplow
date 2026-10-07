@@ -699,7 +699,7 @@ fn external_state_change(
         .iter()
         .filter(|e| e.event_type == WorkItemRecorded::TYPE)
         .filter_map(|e| {
-            serde_json::from_value::<oxplow_domain::events::schema::WorkItemRecordedV1>(
+            serde_json::from_value::<oxplow_domain::events::schema::WorkItemRecordedV2>(
                 e.payload.clone(),
             )
             .ok()

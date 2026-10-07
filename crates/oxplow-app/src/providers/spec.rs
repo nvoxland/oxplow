@@ -45,7 +45,8 @@ pub const WORK_ITEMS: &str = "work_items";
 /// types of its own yet.
 pub fn allowed_event_types(capability: &str) -> &'static [(&'static str, u32)] {
     match capability {
-        WORK_ITEMS => &[("work_item.recorded", 1)],
+        // v1 still parses (upcast); v2 states rank, links and comments.
+        WORK_ITEMS => &[("work_item.recorded", 1), ("work_item.recorded", 2)],
         _ => &[],
     }
 }

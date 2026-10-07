@@ -52,9 +52,12 @@ There are two writers, one schema:
   renumbers the moved item's neighbours and restates each one it changed
   (`native.sort_index`), checked by the reorder test's `stale_native_rows`.
 - **Another provider's rows** arrive by projection: its
-  `work_item.recorded@1 { item }` events (the item as it now stands —
+  `work_item.recorded@2 { item }` events (the item as it now stands —
   ref, title, body, canonical and native state, native fields, parent,
-  deleted) are upserted by ref by the pump consumer `work_items.project`
+  deleted, and — when the provider keeps them — `rank`, `links` and
+  `comments`, each the whole set: stated, the host restates it; absent,
+  it keeps what it has; `@1` lacked the three and upcasts as "not
+  stated") are upserted by ref by the pump consumer `work_items.project`
   (`crates/oxplow-app/src/work_items.rs`). A replay restates the same
   row. An `oxplow` record is refused (dead-lettered): those rows are the
   task cores' alone. Why one record event rather than state on each of
@@ -314,7 +317,11 @@ lands a `todo` row; an update changes only what it names; every
 canonical state round-trips, and moving again to the native state the
 row reports lands there, and core logs `work_item.state_changed` for
 the create and every move to another state; a parent resolves with `hierarchy` and is refused
-without it; links and comments follow their features; every write that
+without it; links and comments follow their features and read back
+through `v_work_item_link` / `v_work_item_comment`; `reorder` follows
+`ordering` (the reordered item ranks ahead in `v_work_item.rank`) and
+`move` follows `lists` (moved to the backlog, its `thread_id` is NULL);
+every write that
 changed the item logged an event naming it (oxplow's
 `work_item.created` / `edited` / `transitioned` / `linked` /
 `commented`, an external provider's `work_item.recorded`); reading the

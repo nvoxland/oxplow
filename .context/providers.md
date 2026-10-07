@@ -73,7 +73,9 @@ the work-items verbs `create` / `update` / `transition` (undoable: its
 inverse moves the item back) / `link` / `comment` / `delete` over the contract's inputs (`state` /
 `native_state`, its `native.points`; `additionalProperties: false`), one
 command of its own, `estimate { ref, points }`, the
-`work_item.recorded@1` event type with the core schema, a `work_items`
+`work_item.recorded@2` event type with the core schema (its records
+state its links and comments; it declares no `ordering` or `lists`), a
+`work_items`
 collector over the `work_item` entity, and a config schema requiring
 `team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
 live in memory as `work_item:fake:W-<n>` with native states `Backlog`,
@@ -739,7 +741,9 @@ kills the process. Its commands register whole as the namespace's
 owner (`register_namespace(id, "provider:<instance>", …)`, all or
 none); an id whose namespace is already held (`namespace_owner`) or
 that is already a provider is refused. **A provider emits only its capability's event
-types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@1`;
+types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@1`
+or `@2` — a published version's schema never changes, since declarations
+are compared to it exactly;
 tsk548): declaring any other type — another core one such as
 `plugin.enabled`, which would clear another contribution's disable — is
 refused when the manifest loads, and the declared schema must equal
@@ -833,7 +837,7 @@ checkpoint it last stored
 (`provider_collector_state`, [data-model.md](./data-model.md)), through
 `start_streaming`. Each `$/record` must be the collector's entity and —
 for a work-items provider — a `WorkItemRecord` of its own item; it is
-kept as a `work_item.recorded@1` envelope (the actor's source) until the
+kept as a `work_item.recorded@2` envelope (the actor's source) until the
 next `$/state`, which commits the batch **and** the checkpoint in one
 transaction, so a read that fails midway keeps exactly what its last
 checkpoint covered and the next read resumes there. A record equal to its
