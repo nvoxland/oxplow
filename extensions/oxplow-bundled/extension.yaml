@@ -25,6 +25,14 @@ intent:
     - name: a metric pushed past its warn threshold during an effort
       input: { advisory: threshold-crossed, effort_id: 1 }
       expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
+# oxplow's default implementations: built-ins of core's, declared here so
+# they are an extension's like any other. Disabled, the work list and the
+# effort policy fall to none; snapshots, which can't be none, fall back to
+# core's default.
+implementations:
+  - { capability: work_items, id: oxplow, entry: "oxplow:tasks" }
+  - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch" }
+  - { capability: snapshots, id: oxplow, entry: "oxplow:snapshots" }
 ui:
   slots:
     - { slot: effort.review.details, lens: change-review }

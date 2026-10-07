@@ -788,7 +788,8 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
 }
 
 /// P6b.C2: a running instance's capability and features are a model row
-/// (as the host reads them); stopping it takes the row away.
+/// (as the host reads them); stopped, it's no longer available — still
+/// listed, as the project's choice, with `available = 0`.
 #[tokio::test]
 async fn a_running_instance_publishes_its_features() {
     let (fx, ext) = approved("").await;
@@ -812,12 +813,14 @@ async fn a_running_instance_publishes_its_features() {
     let declared = fx.svc.work_items.get("fake").unwrap().features;
     assert_eq!(fake.features, serde_json::to_value(declared).unwrap());
     assert!(fx.svc.providers.stop(INSTANCE).await);
-    assert!(store
+    let stopped = store
         .list()
         .await
         .unwrap()
-        .iter()
-        .all(|r| r.provider != "fake"));
+        .into_iter()
+        .find(|r| r.provider == "fake")
+        .expect("the project's choice stays listed");
+    assert!(!stopped.available && !stopped.active);
 }
 
 /// P6b.C4: an extension's `ui.commands` name registered commands — or,

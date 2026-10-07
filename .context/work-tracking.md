@@ -221,7 +221,15 @@ The three in progress:
   dispatch protocol (`dispatch_task`, the brief, the subagent skill) is
   gone, and a retired skill leaves installed runtimes on their next
   write.
-- Next: the capability framework and the three swappable pieces. Loose
+- Capability framework, first commits: core declares the capabilities
+  (`oxplow_domain::capability`), `.oxplow/personal.yaml` layers a
+  person's choices over the project's, extensions declare
+  implementations (`implementations:`, built-ins by entry), and one
+  `CapabilityRegistry` resolves the active one (personal → project →
+  default; an unavailable choice falls to none, or a required
+  capability's default) and restates `v_capability_provider` (v3).
+- Next: declared needs, Settings → Pieces, `capability.switched`, then
+  the three swappable pieces. Loose
   refs (`tsk12` for a work item) wait for it: recognising an id is the
   active work list's declaration, not core's.
 

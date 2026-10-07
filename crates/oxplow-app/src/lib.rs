@@ -501,6 +501,8 @@ pub struct Services {
     pub commands: Arc<commands::CommandBus>,
     /// The work-items providers, by name (`.context/work-items.md`).
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
+    /// Every capability's implementations and which is active.
+    pub capabilities: Arc<capabilities::CapabilityRegistry>,
     /// The enabled external provider instances (`.context/providers.md`).
     pub providers: Arc<providers::ProviderRegistry>,
     /// Enabled extensions' `commands:` on the bus (P6b).
@@ -1085,13 +1087,29 @@ impl Services {
         commands
             .register(commands::compose::sequence_command(&commands))
             .expect("command.sequence registers");
+        // Every capability's implementations (`capabilities`): core's (the
+        // VCS here, knowledge once it's built), what the project's
+        // extensions declare, and running provider instances'.
+        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(vec![
+            capabilities::Implementation {
+                capability: "vcs".into(),
+                id: vcs.rev_kind().into(),
+                title: vcs.rev_kind().into(),
+                extension: None,
+                source: capabilities::Source::Core,
+                features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
+            },
+        ]));
+        capabilities.set_declared(capabilities::declared_by(
+            &extension_catalog.get(&layout.project_dir),
+        ));
         // The work-items providers (`.context/work-items.md`); oxplow's
-        // own, over this bus.
-        // Its active provider is the config's as it is now (tsk1011).
+        // own, over this bus. Its active one is resolved from the config as
+        // it is now.
         let work_items = {
-            let config = config_arc.clone();
+            let (config, capabilities) = (config_arc.clone(), capabilities.clone());
             oxplow_domain::work_items::WorkItemsRegistry::new(Arc::new(move || {
-                capabilities::active_provider(&config_service::read_config(&config), "work_items")
+                capabilities.active(&config_service::read_config(&config), "work_items")
             }))
         };
         work_items.register(work_items::oxplow_provider());
@@ -1113,6 +1131,7 @@ impl Services {
             bus: Arc::downgrade(&commands),
             sql: sql.clone(),
             config: config_arc.clone(),
+            capabilities: capabilities.clone(),
         }));
         for command in commands::vcs::commands(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
@@ -1188,6 +1207,7 @@ impl Services {
                 call_timeout: machine.provider_call_timeout,
                 global_dir: machine.config_dir.clone(),
                 events: event_bus.clone(),
+                capabilities: capabilities.clone(),
             },
             &commands,
             work_items.clone(),
@@ -1257,6 +1277,14 @@ impl Services {
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
         let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
             Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
+        capabilities.add_core(capabilities::Implementation {
+            capability: "knowledge".into(),
+            id: knowledge.provider().into(),
+            title: knowledge.provider().into(),
+            extension: None,
+            source: capabilities::Source::Core,
+            features: serde_json::json!({}),
+        });
         for command in knowledge::commands(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
@@ -1390,6 +1418,7 @@ impl Services {
             extension_commands,
             commands,
             work_items,
+            capabilities,
             providers,
             knowledge,
             wiki_page_store,

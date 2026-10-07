@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod custom_components;
 pub mod decorators;
+pub mod implementations;
 pub mod manifest_v2;
 pub mod replacements;
 pub mod ui_commands;
@@ -1058,6 +1059,9 @@ pub struct Extension {
     /// Effects it declares (experimental: a private extension's only;
     /// valid ones — each runs only once a person approves it, `effects`).
     pub effects: Vec<crate::effects::EffectDecl>,
+    /// The capability implementations it declares (stable:
+    /// `implementations:`, each a built-in of core's).
+    pub implementations: Vec<implementations::ImplementationDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1658,6 +1662,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         event_types: Default::default(),
         ref_kinds: Vec::new(),
         effects: Vec::new(),
+        implementations: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -1781,6 +1786,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
             }
             ext.effects = effects;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.implementations.as_ref() {
+            let (declared, errors) = implementations::parse_implementations(v, &file, &manifest);
+            ext.implementations = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.collectors {
@@ -2589,6 +2599,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.event_types = Default::default();
         ext.ref_kinds.clear();
         ext.effects.clear();
+        ext.implementations.clear();
         ext.advisories.clear();
         ext.measures.clear();
         ext.dimensions.clear();

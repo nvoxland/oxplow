@@ -1774,12 +1774,13 @@ agent could see them; those weren't carried over.
 
 ### `capability_provider` — `SqliteCapabilityStore` (`crates/oxplow-db/src/capability_store.rs`)
 
-V128 (P6b.C2). Each capability's providers and the feature flags they
-declare (`capability`, `provider` — the primary key — `extension`, NULL
-for core's, `features_json`, `active`). Restated from what runs: `reset`
-at boot with core's, `upsert` / `remove` as an external instance starts
-and stops; `set_active` restates which row is a capability's active
-provider (P7.A2). An extension provider's `provider` is its **instance
+V128 (P6b.C2; V15 adds `title`, `source`, `available`, `chosen_by`).
+Each capability's implementations and their features (`capability`,
+`provider` — the primary key — `extension`, NULL for core's,
+`features_json`, `active`). Restated whole (`reset`) by the app's
+`CapabilityRegistry` (`capabilities.rs`) at boot, when the extensions
+change, as an instance starts or stops, and on each reconcile. An
+extension provider's `provider` is its **instance
 id** (P9.B1: a provider's default instance has the provider's id, a
 second instance its own — `issues_acme`), the same id its refs and
 `plugin_health.contribution` carry. Published as `v_capability_provider`;

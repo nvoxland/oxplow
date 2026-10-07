@@ -89,6 +89,8 @@ pub struct HostDeps {
     pub global_dir: Option<PathBuf>,
     /// Where the renderer hears that a sign-in finished.
     pub events: crate::events::EventBus,
+    /// Every capability's implementations: an instance's while it runs.
+    pub capabilities: Arc<crate::capabilities::CapabilityRegistry>,
 }
 
 /// Whose an instance is (P9.B2).
@@ -1575,10 +1577,10 @@ impl ProviderRegistry {
                 .enable_scoped(&ext, &spec, &id, scope, cfg.config)
                 .await;
         }
-        // The config may name another active provider (P7.A2).
+        // The config may name another active implementation.
         let config = crate::config_service::read_config(&self.deps.config);
-        if let Err(e) = crate::capabilities::apply_active(&config, &self.deps.db).await {
-            tracing::warn!(error = %e, "restating the active providers failed");
+        if let Err(e) = self.deps.capabilities.publish(&config, &self.deps.db).await {
+            tracing::warn!(error = %e, "restating the active implementations failed");
         }
     }
 
@@ -1815,18 +1817,19 @@ impl ProviderRegistry {
                 .map(|c| c.features.clone())
                 .unwrap_or(Value::Null),
         };
+        self.deps.capabilities.set_external(
+            crate::capabilities::Implementation {
+                capability: capability.clone(),
+                id: instance.id.clone(),
+                title: instance.name.clone(),
+                extension: Some(instance.ext.name.clone()),
+                source: crate::capabilities::Source::External,
+                features,
+            },
+            true,
+        );
         let config = crate::config_service::read_config(&self.deps.config);
-        let row = oxplow_db::CapabilityProvider {
-            capability: capability.clone(),
-            provider: instance.id.clone(),
-            extension: Some(instance.ext.name.clone()),
-            features,
-            active: crate::capabilities::is_active(&config, capability, &instance.id),
-        };
-        if let Err(e) = oxplow_db::SqliteCapabilityStore::new(self.deps.db.clone())
-            .upsert(row)
-            .await
-        {
+        if let Err(e) = self.deps.capabilities.publish(&config, &self.deps.db).await {
             tracing::warn!(instance = %instance.name, error = %e, "publishing a provider's features failed");
         }
     }
@@ -1869,10 +1872,19 @@ impl ProviderRegistry {
             bus.unregister_namespace(&running.id);
         }
         self.work_items.unregister(&running.id);
-        if let Err(e) = oxplow_db::SqliteCapabilityStore::new(self.deps.db.clone())
-            .remove(&running.spec.capability, &running.id)
-            .await
-        {
+        self.deps.capabilities.set_external(
+            crate::capabilities::Implementation {
+                capability: running.spec.capability.clone(),
+                id: running.id.clone(),
+                title: running.name.clone(),
+                extension: Some(running.ext.name.clone()),
+                source: crate::capabilities::Source::External,
+                features: Value::Null,
+            },
+            false,
+        );
+        let config = crate::config_service::read_config(&self.deps.config);
+        if let Err(e) = self.deps.capabilities.publish(&config, &self.deps.db).await {
             tracing::warn!(instance = %running.name, error = %e, "withdrawing a provider's features failed");
         }
         running

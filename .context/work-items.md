@@ -142,10 +142,9 @@ item).
 - **`WorkItemsRegistry`** (`Services.work_items`): providers by name;
   `for_ref` picks one by the ref's provider segment, and an unknown one
   is refused naming the registered providers; `active()` names the
-  provider every `create` files on, read each time from the
-  config's `activeProviders` through the source `Services` gives it at
-  boot — no copy, so a person's choice applies to the very next `create`
-  (tsk1011; see below).
+  provider every `create` files on, resolved each time by the capability
+  registry from the config as it is now — no copy, so a person's choice
+  applies to the very next `create` (see below).
 - **`VERBS`**: `create`, `update`, `transition`, `link`, `comment`,
   `delete` — the capability's verbs.
 
@@ -212,28 +211,26 @@ can't read, one that names a state counts, `to` taken from the
 closes no effort itself; the effort policy reacts to this event
 (`.context/work-tracking.md`).
 
-**Features reach the UI as a model** (P6b.C2): `v_capability_provider`
-(`capability`, `provider`, `extension`, `features` JSON, `active`) lists
-each capability's providers with the flags **the provider** declares —
-never a manifest. Core's (`work_items/oxplow`, `vcs/git`,
-`knowledge/oxplow`) are restated at boot (`capabilities::publish_core`,
-which also drops a previous run's external rows); an external provider's
-row is written while its instance runs (`ProviderRegistry::publish`, a
-work-items provider's features as `ExternalWorkItems` reads them) and
-removed when it stops. **`active`** is the capability's active provider
-(P7.A2): the project's `activeProviders` (`{ work_items: <instance id>
-}` — a provider's default instance has the provider's id, P9.B1 —, a
-person-only config key — an agent's change is a proposal; Settings →
-Integrations offers it as "Active for work items", oxplow's own being the
-key unset), oxplow's own when it names none; a capability nobody can swap
-(`vcs`, `knowledge`) has its one provider active. `capabilities::is_active`
-is the one rule the rows follow (`publish_core`, `ProviderRegistry::
-publish`), and `capabilities::apply_active` restates the column at boot
-and on every reconcile (each config change); the registry's `active()`
-needs no restating, as it reads the config. Every `work_item.create` files on the active
-one; one that isn't running is `Invalid` ("the active work-items provider
-isn't running: …"), never a fallback to oxplow. The conformance suite
-runs with the provider under test active, and checks it. The desktop reads it with
+**Features reach the UI as a model**: `v_capability_provider`
+(`capability`, `provider`, `extension`, `features` JSON, `active`,
+`title`, `source`, `available`, `chosen_by`) lists each capability's
+implementations, restated whole by the app's `CapabilityRegistry`
+(`crates/oxplow-app/src/capabilities.rs`) whenever what it holds or the
+choices change. oxplow's tasks are the `oxplow:tasks` built-in, which
+`oxplow-bundled` declares (`implementations:`), with its features from
+core's built-in table; an external provider's row is there while its
+instance runs (`ProviderRegistry::publish`, a work-items provider's
+features as `ExternalWorkItems` reads them). **`active`** is the
+resolved implementation: a person's own choice (`.oxplow/personal.yaml`),
+else the project's `activeProviders` (`{ work_items: <instance id> }`, a
+person-only key), else the default (`oxplow`). A choice that isn't
+available falls to `none` (the work list is optional), listed with
+`available = 0` and the active row's `chosen_by = fallback`. The
+registry's `active()` resolves from the config as it is now, so a
+person's choice applies to the very next `create`. Every
+`work_item.create` files on the active work list; with none active it is
+`Invalid` ("no work list is active …"), never another list. The
+conformance suite runs with the provider under test active, and checks it. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and
 `featuresFor(providers, provider)` → `WorkItemsFeatures` (the Rust type,
 exported through the bindings), which turns every flag a provider

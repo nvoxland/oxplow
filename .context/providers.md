@@ -922,13 +922,12 @@ under the provider and checked against its declarations
 ([extensions.md](./extensions.md)).
 
 **Its features are published** while it runs: `admit` writes the
-instance's `capability_provider` row (`v_capability_provider`, its
-`active` from the project's `activeProviders`) and `tear_down` removes
-it, so the UI offers only what the provider declares
-([work-items.md](./work-items.md)). Each reconcile restates the active
-providers (`capabilities::apply_active`), so choosing one on Settings →
-Integrations ("Active for work items", P7.A2) takes effect with the
-config change.
+instance in the capability registry (`CapabilityRegistry::set_external`)
+and `tear_down` takes it out, each restating `v_capability_provider`, so
+the UI offers only what the provider declares
+([work-items.md](./work-items.md)). Each reconcile restates the rows
+(`CapabilityRegistry::publish`), so a choice takes effect with the config
+change.
 
 ## Idempotency
 

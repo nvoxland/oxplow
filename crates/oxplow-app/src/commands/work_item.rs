@@ -306,9 +306,18 @@ fn create_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemCreateInput = parse(input.clone())?;
-    // Always the tracker the person chose (tsk1058); one that isn't
-    // running is said so, never a fallback.
-    let provider = provider_named(registry, &registry.active(), "").map_err(|e| match e {
+    // Always the work list the person and project chose. One that isn't
+    // available resolves to none, and filing says so — never another list.
+    let active = registry.active();
+    if active == oxplow_domain::capability::NONE {
+        return Err(CommandError::Invalid {
+            field: None,
+            message: "no work list is active (none was chosen, or the chosen one isn't \
+                      available); choose one in Settings → Pieces"
+                .into(),
+        });
+    }
+    let provider = provider_named(registry, &active, "").map_err(|e| match e {
         CommandError::Invalid { message, .. } => CommandError::Invalid {
             field: None,
             message: format!("the active work-items provider isn't running: {message}"),
@@ -1665,9 +1674,10 @@ mod tests {
         }
     }
 
-    /// tsk1011: the active provider is the config's as it is now — a
-    /// `create` right after a person chose another files there (or says
-    /// it isn't running), with no reconcile in between.
+    /// The active work list is resolved from the config as it is now — a
+    /// `create` right after a person chose another files there, with no
+    /// reconcile in between; one that isn't available resolves to none, and
+    /// filing says so.
     #[tokio::test]
     async fn a_create_reads_the_active_provider_the_config_names_now() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1684,10 +1694,10 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { message, .. } if message.contains("issues")),
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("no work list is active")),
             "{err:?}"
         );
-        assert_eq!(fx.svc.work_items.active(), "issues");
+        assert_eq!(fx.svc.work_items.active(), oxplow_domain::capability::NONE);
     }
 
     /// P7.A2, tsk1058: every `create` files on the active tracker — oxplow's
@@ -1725,10 +1735,6 @@ mod tests {
             .unwrap()
             .active_providers
             .insert("work_items".into(), "tracker".into());
-        let config = crate::config_service::read_config(&fx.svc.config);
-        crate::capabilities::apply_active(&config, &fx.svc.db)
-            .await
-            .unwrap();
         let before = list_order(&fx, None).await.len();
         let err = fx
             .svc
@@ -1739,11 +1745,7 @@ mod tests {
         match err {
             CommandError::Invalid { field, message } => {
                 assert_eq!(field, None);
-                assert!(
-                    message.contains("active work-items provider isn't running")
-                        && message.contains("tracker"),
-                    "{message}"
-                );
+                assert!(message.contains("no work list is active"), "{message}");
             }
             other => panic!("{other:?}"),
         }

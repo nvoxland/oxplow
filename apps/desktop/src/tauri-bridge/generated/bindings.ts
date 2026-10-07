@@ -2696,6 +2696,11 @@ export type Extension_Deserialize = {
 	 */
 	effects: EffectDecl[],
 	/**
+	 *  The capability implementations it declares (stable:
+	 *  `implementations:`, each a built-in of core's).
+	 */
+	implementations: ImplementationDecl[],
+	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
 	 *  type (`vocabulary_reactor`).
@@ -2807,6 +2812,11 @@ export type Extension_Serialize = {
 	 *  valid ones — each runs only once a person approves it, `effects`).
 	 */
 	effects: EffectDecl[],
+	/**
+	 *  The capability implementations it declares (stable:
+	 *  `implementations:`, each a built-in of core's).
+	 */
+	implementations: ImplementationDecl[],
 	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
@@ -3063,6 +3073,20 @@ export type HookKind =
  *  a permission prompt waits on them.
  */
 "notification";
+
+// One implementation as the extension declares it.
+export type ImplementationDecl = {
+	capability: string,
+	// What `activeProviders` names.
+	id: string,
+	// How a person names it; the built-in's own title when absent.
+	title: string | null,
+	/**
+	 *  The built-in it is (`oxplow:tasks`); its features are core's to
+	 *  say.
+	 */
+	entry: string,
+};
 
 // An operation paused mid-way, waiting on its conflicts.
 export type InProgressOp = "merge" | "rebase" | "cherry_pick" | "revert";

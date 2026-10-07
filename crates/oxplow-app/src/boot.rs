@@ -174,10 +174,24 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::collector_runner::spawn_scheduler(state.clone());
     // Paced `on:` collectors: run each deferred one once its pacing allows.
     crate::pacing::spawn(state.clone());
-    // Core's capability providers, before the registry publishes the
-    // external ones it starts.
-    if let Err(e) = crate::capabilities::publish_core(state).await {
-        tracing::warn!(error = %e, "publishing the core capability providers failed");
+    // Every capability's implementations and which is active, before the
+    // provider registry adds the instances it starts — and again whenever
+    // the project's extensions change (one may declare or take one away).
+    if let Err(e) = crate::capabilities::refresh(state).await {
+        tracing::warn!(error = %e, "publishing the capability implementations failed");
+    }
+    {
+        let state = state.clone();
+        let mut changes = state.extension_catalog.changes();
+        tokio::spawn(async move {
+            while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
+                changes.recv().await
+            {
+                if let Err(e) = crate::capabilities::refresh(&state).await {
+                    tracing::warn!(error = %e, "restating the capability implementations failed");
+                }
+            }
+        });
     }
     crate::providers::registry::spawn_reconciler(state.clone());
     crate::providers::sync::spawn_sync_scheduler(state.clone());

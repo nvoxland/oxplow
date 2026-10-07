@@ -60,10 +60,14 @@ pub const EFFECT: &str = "oxplow:effort-policy";
 /// How deep a parent chain is followed before giving up (a cycle).
 const MAX_DEPTH: usize = 32;
 
+/// This policy's built-in entry (`capabilities::BUILT_INS`).
+pub const BUILT_IN: &str = "oxplow:commit-or-switch";
+
 pub struct EffortPolicyConsumer {
     pub bus: Weak<CommandBus>,
     pub sql: SqlGateway,
     pub config: Arc<RwLock<OxplowConfig>>,
+    pub capabilities: Arc<crate::capabilities::CapabilityRegistry>,
 }
 
 fn actor() -> Actor {
@@ -83,9 +87,14 @@ struct Open {
 }
 
 impl EffortPolicyConsumer {
+    /// Whether this policy is the effort policy the person and project
+    /// chose (or the default): the `oxplow:commit-or-switch` built-in.
     fn active(&self) -> bool {
         let config = crate::config_service::read_config(&self.config);
-        crate::capabilities::active_provider(&config, CAPABILITY) != NONE
+        let id = self.capabilities.active(&config, CAPABILITY);
+        self.capabilities
+            .get(CAPABILITY, &id)
+            .is_some_and(|i| i.source == crate::capabilities::Source::BuiltIn(BUILT_IN))
     }
 
     async fn run(&self, name: &str, input: Value) -> Result<(), DomainError> {

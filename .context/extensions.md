@@ -2343,6 +2343,28 @@ Every contribution that runs — a provider instance, a collector, an effect
   first, fix, check, test, `collector.sync` — and ask the person to
   Enable Again (an agent can't run `plugin.enable`).
 
+## Implementations
+
+An extension declares capability implementations (stable,
+`implementations:`; `extensions/implementations.rs`):
+
+```yaml
+implementations:
+  - { capability: work_items, id: oxplow, entry: "oxplow:tasks" }
+```
+
+- `capability` is a choosable one (`oxplow_domain::capability`); `id` is
+  what `activeProviders` names (lowercase, never `none`).
+- `entry` names a built-in in core's standard library
+  (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
+  `oxplow:snapshots`), the way a collector names `oxplow:junit`. A
+  built-in's features are core's table's — it's core's code — never the
+  manifest's.
+- `oxplow-bundled` declares the three defaults. Disabled, nothing declares
+  them: the work list and the effort policy resolve to none, snapshots
+  (required) to core's default (`capabilities::CapabilityRegistry::
+  resolve`, `.context/work-tracking.md`).
+
 ## Advisories
 
 An extension gives the coding agent guidance — **hints** — with

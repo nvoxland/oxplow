@@ -1,8 +1,9 @@
-//! `capability_provider` (migration V128, P6b): which provider implements
-//! which capability, with the feature flags the provider declares —
-//! never a manifest's. Published as `v_capability_provider`, so the UI
-//! hides what a provider can't do. Restated from what's running: the core
-//! providers at boot, an external one while its instance runs.
+//! `capability_provider` (migration V128, P6b; V15 adds why): each
+//! capability's implementations, with the features each declares, which
+//! is active and why. Published as `v_capability_provider`, so the UI
+//! hides what an implementation can't do and Settings lists the choices.
+//! Restated whole by the app's capability registry whenever what it holds
+//! or the choices change (`oxplow_app::capabilities`).
 
 use rusqlite::{params, Connection};
 use serde_json::Value;
@@ -11,61 +12,48 @@ use oxplow_domain::DomainError;
 
 use crate::database::{map_sql_err, Database};
 
-/// One capability's provider and its features.
+/// One implementation of a capability.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityProvider {
-    /// `work_items`, `vcs`, `knowledge`.
+    /// `work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`.
     pub capability: String,
-    /// The provider's name (`oxplow`, `git`, `fake`).
+    /// The implementation's id (`oxplow`, `git`, `issues`, `none`).
     pub provider: String,
-    /// The extension it comes from; `None` for core's.
+    /// The extension declaring it; `None` for core's.
     pub extension: Option<String>,
-    /// The capability's feature flags as the provider declares them.
+    /// The features it declares.
     pub features: Value,
-    /// Whether it's the capability's active provider: the one the
-    /// project's `activeProviders` names (oxplow's own when it names
-    /// none). A capability nobody can swap has one, always active.
+    /// Whether it's the capability's active implementation.
     pub active: bool,
+    /// How a person names it.
+    pub title: String,
+    /// How it's loaded: `core`, `builtin`, `external`, `none` — or
+    /// `unknown` for a choice nothing provides.
+    pub source: String,
+    /// Whether it's there to be used: `false` for a chosen one that isn't
+    /// (its extension disabled, its instance stopped, its id unknown).
+    pub available: bool,
+    /// On the active row, why it's the one: `personal`, `project`,
+    /// `default` or `fallback`.
+    pub chosen_by: Option<String>,
 }
 
-pub fn upsert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainError> {
+fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainError> {
     conn.execute(
-        "INSERT INTO capability_provider (capability, provider, extension, features_json, active)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT (capability, provider) DO UPDATE SET
-           extension = excluded.extension, features_json = excluded.features_json,
-           active = excluded.active",
+        "INSERT INTO capability_provider
+           (capability, provider, extension, features_json, active, title, source, available, chosen_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             row.capability,
             row.provider,
             row.extension,
             row.features.to_string(),
-            row.active
+            row.active,
+            row.title,
+            row.source,
+            row.available,
+            row.chosen_by,
         ],
-    )
-    .map_err(map_sql_err)?;
-    Ok(())
-}
-
-/// Mark `provider` as `capability`'s active provider and every other row
-/// of it inactive.
-pub fn set_active_tx(
-    conn: &Connection,
-    capability: &str,
-    provider: &str,
-) -> Result<(), DomainError> {
-    conn.execute(
-        "UPDATE capability_provider SET active = (provider = ?2) WHERE capability = ?1",
-        params![capability, provider],
-    )
-    .map_err(map_sql_err)?;
-    Ok(())
-}
-
-pub fn remove_tx(conn: &Connection, capability: &str, provider: &str) -> Result<(), DomainError> {
-    conn.execute(
-        "DELETE FROM capability_provider WHERE capability = ?1 AND provider = ?2",
-        params![capability, provider],
     )
     .map_err(map_sql_err)?;
     Ok(())
@@ -74,7 +62,8 @@ pub fn remove_tx(conn: &Connection, capability: &str, provider: &str) -> Result<
 pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT capability, provider, extension, features_json, active
+            "SELECT capability, provider, extension, features_json, active, title, source,
+                    available, chosen_by
                FROM capability_provider ORDER BY capability, provider",
         )
         .map_err(map_sql_err)?;
@@ -87,6 +76,10 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
                 extension: r.get(2)?,
                 features: serde_json::from_str(&features).unwrap_or(Value::Null),
                 active: r.get(4)?,
+                title: r.get(5)?,
+                source: r.get(6)?,
+                available: r.get(7)?,
+                chosen_by: r.get(8)?,
             })
         })
         .map_err(map_sql_err)?;
@@ -104,31 +97,14 @@ impl SqliteCapabilityStore {
         Self { db }
     }
 
-    pub async fn upsert(&self, row: CapabilityProvider) -> Result<(), DomainError> {
-        self.db.transaction(move |tx| upsert_tx(tx, &row)).await
-    }
-
-    pub async fn remove(&self, capability: &str, provider: &str) -> Result<(), DomainError> {
-        let (c, p) = (capability.to_string(), provider.to_string());
-        self.db.transaction(move |tx| remove_tx(tx, &c, &p)).await
-    }
-
-    /// Replace every row with `rows`: what boot does, since a previous
-    /// run's external providers aren't running now.
+    /// Replace every row with `rows`.
     pub async fn reset(&self, rows: Vec<CapabilityProvider>) -> Result<(), DomainError> {
         self.db
             .transaction(move |tx| {
                 tx.execute("DELETE FROM capability_provider", [])
                     .map_err(map_sql_err)?;
-                rows.iter().try_for_each(|r| upsert_tx(tx, r))
+                rows.iter().try_for_each(|r| insert_tx(tx, r))
             })
-            .await
-    }
-
-    pub async fn set_active(&self, capability: &str, provider: &str) -> Result<(), DomainError> {
-        let (c, p) = (capability.to_string(), provider.to_string());
-        self.db
-            .transaction(move |tx| set_active_tx(tx, &c, &p))
             .await
     }
 
@@ -149,30 +125,34 @@ mod tests {
             extension: None,
             features,
             active: true,
+            title: provider.into(),
+            source: "builtin".into(),
+            available: true,
+            chosen_by: Some("default".into()),
         }
     }
 
     #[tokio::test]
-    async fn providers_round_trip_restate_and_reset() {
+    async fn rows_are_restated_whole() {
         let store = SqliteCapabilityStore::new(Database::in_memory());
-        store
-            .upsert(row("work_items", "oxplow", json!({ "comments": true })))
-            .await
-            .unwrap();
         let mut fake = row("work_items", "fake", json!({ "comments": false }));
         fake.extension = Some("tracker".into());
-        store.upsert(fake.clone()).await.unwrap();
-        fake.features = json!({ "comments": true });
-        store.upsert(fake.clone()).await.unwrap();
+        fake.available = false;
+        fake.chosen_by = None;
+        store
+            .reset(vec![
+                row("work_items", "oxplow", json!({ "comments": true })),
+                fake.clone(),
+            ])
+            .await
+            .unwrap();
         assert_eq!(
             store.list().await.unwrap(),
             vec![
-                fake.clone(),
+                fake,
                 row("work_items", "oxplow", json!({ "comments": true }))
             ]
         );
-        store.remove("work_items", "fake").await.unwrap();
-        assert_eq!(store.list().await.unwrap().len(), 1);
         store
             .reset(vec![row("vcs", "git", json!({ "remotes": true }))])
             .await

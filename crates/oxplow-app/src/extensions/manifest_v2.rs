@@ -319,6 +319,10 @@ pub struct ManifestV2 {
     /// Kinds of thing a ref can name (stable since P10).
     #[serde(default)]
     pub ref_kinds: Option<Value>,
+    /// Capability implementations: built-ins of core's it declares
+    /// (stable; `oxplow-bundled` declares the defaults).
+    #[serde(default)]
+    pub implementations: Option<Value>,
 
     // ---- experimental kinds (private extensions only) ----
     #[serde(default)]
@@ -348,6 +352,7 @@ pub const STABLE_KINDS: &[&str] = &[
     "ui.commands",
     "ui.decorators",
     "ref_kinds",
+    "implementations",
     "config",
     "advisories",
     "event_types",

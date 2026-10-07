@@ -474,10 +474,11 @@ mod tests {
             .collect()
     }
 
-    /// tsk1058: a repair item goes to the active tracker like every item.
-    /// When that tracker isn't running — it may be the very contribution
-    /// that was disabled (tsk714) — the delivery fails, naming it (retried,
-    /// then a dead letter in Delivery), and nothing lands in oxplow's list.
+    /// A repair item goes to the active work list like every item. When the
+    /// chosen tracker isn't running — it may be the very contribution that
+    /// was disabled — no work list is active, the delivery fails saying so
+    /// (retried, then a dead letter in Delivery), and nothing lands in
+    /// oxplow's list.
     #[tokio::test]
     async fn a_repair_item_waits_for_the_active_tracker() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -504,8 +505,8 @@ mod tests {
         let event = disable(&fx.svc, "3 failures in a row; the last: boom").await;
         let err = consumer.handle(&event).await.unwrap_err();
         assert!(
-            err.to_string().contains("tracker"),
-            "names the tracker that couldn't take it: {err}"
+            err.to_string().contains("no work list is active"),
+            "says no list could take it: {err}"
         );
         assert!(repair_items(&fx.svc).await.is_empty());
     }
