@@ -2896,6 +2896,29 @@ export type Extension_Serialize = {
 	commands: ExtensionCommand[],
 };
 
+/**
+ *  One of a work list's own fields: kept in an item's `native` under
+ *  `name`, declared so screens render and edit it without knowing which
+ *  list is active.
+ */
+export type FieldDecl = {
+	// Its key in `native` (snake_case).
+	name: string,
+	// How a person names it.
+	title: string,
+	kind: FieldKind,
+	/**
+	 *  An `enum`'s values, in the order they're offered (empty for any
+	 *  other kind).
+	 */
+	values?: string[],
+};
+
+// What kind of value a declared field holds.
+export type FieldKind = 
+// One of `values`.
+"enum" | "text" | "number";
+
 export type FileSnapshot = {
 	id: number,
 	stream_id: StreamId,
@@ -4762,6 +4785,12 @@ export type ProviderSpec = {
 	 *  active work list.
 	 */
 	idPattern?: string | null,
+	/**
+	 *  A work list's own fields (kept in an item's `native`), so screens
+	 *  render and edit them: `[{ name, title, kind: enum|text|number,
+	 *  values? }]`.
+	 */
+	fields?: FieldDecl[],
 };
 
 // A provider as the UI and agents see it: never its key.

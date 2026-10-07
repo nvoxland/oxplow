@@ -41,14 +41,16 @@ pub struct CapabilityProvider {
     pub capability_title: String,
     pub choosable: bool,
     pub optional: bool,
+    /// Its own fields, as it declares them (a JSON array).
+    pub fields: Value,
 }
 
 fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainError> {
     conn.execute(
         "INSERT INTO capability_provider
            (capability, provider, extension, features_json, active, title, source, available,
-            chosen_by, capability_title, choosable, optional)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            chosen_by, capability_title, choosable, optional, fields_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             row.capability,
             row.provider,
@@ -62,6 +64,7 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
             row.capability_title,
             row.choosable,
             row.optional,
+            row.fields.to_string(),
         ],
     )
     .map_err(map_sql_err)?;
@@ -79,13 +82,14 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
     let mut stmt = conn
         .prepare(
             "SELECT capability, provider, extension, features_json, active, title, source,
-                    available, chosen_by, capability_title, choosable, optional
+                    available, chosen_by, capability_title, choosable, optional, fields_json
                FROM capability_provider ORDER BY capability, provider",
         )
         .map_err(map_sql_err)?;
     let rows = stmt
         .query_map([], |r| {
             let features: String = r.get(3)?;
+            let fields: String = r.get(12)?;
             Ok(CapabilityProvider {
                 capability: r.get(0)?,
                 provider: r.get(1)?,
@@ -99,6 +103,7 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
                 capability_title: r.get(9)?,
                 choosable: r.get(10)?,
                 optional: r.get(11)?,
+                fields: serde_json::from_str(&fields).unwrap_or(Value::Null),
             })
         })
         .map_err(map_sql_err)?;
@@ -140,6 +145,7 @@ mod tests {
             capability_title: capability.into(),
             choosable: true,
             optional: false,
+            fields: serde_json::json!([]),
         }
     }
 

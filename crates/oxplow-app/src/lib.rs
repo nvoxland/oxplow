@@ -1075,6 +1075,7 @@ impl Services {
                 extension: None,
                 source: capabilities::Source::Core,
                 features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
+                fields: serde_json::Value::Array(Vec::new()),
             }],
             vocabulary.clone(),
         ));
@@ -1297,6 +1298,7 @@ impl Services {
             extension: None,
             source: capabilities::Source::Core,
             features: serde_json::json!({}),
+            fields: serde_json::Value::Array(Vec::new()),
         });
         for command in knowledge::commands(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),

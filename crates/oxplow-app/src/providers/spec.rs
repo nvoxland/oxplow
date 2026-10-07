@@ -91,6 +91,11 @@ pub struct ProviderSpec {
     /// active work list.
     #[serde(default)]
     pub id_pattern: Option<String>,
+    /// A work list's own fields (kept in an item's `native`), so screens
+    /// render and edit them: `[{ name, title, kind: enum|text|number,
+    /// values? }]`.
+    #[serde(default)]
+    pub fields: Vec<oxplow_domain::work_items::FieldDecl>,
 }
 
 /// How a credential is obtained by signing in (P9.B3): OAuth 2.1's
@@ -756,6 +761,19 @@ pub fn parse_providers(
             .find(|h| !crate::net_sandbox::valid_host_pattern(h))
         {
             Some(format!("provider `{id}`: `{bad}` isn't a host pattern"))
+        } else if let Some(problem) = (!spec.fields.is_empty() && spec.capability != "work_items")
+            .then(|| {
+                format!(
+                    "provider `{id}`: fields are a work list's; `{}` has none",
+                    spec.capability
+                )
+            })
+            .or_else(|| {
+                oxplow_domain::work_items::fields_problem(&spec.fields)
+                    .map(|p| format!("provider `{id}`: {p}"))
+            })
+        {
+            Some(problem)
         } else if let Some(pattern) = &spec.id_pattern {
             match regex::Regex::new(pattern) {
                 Err(e) => Some(format!(

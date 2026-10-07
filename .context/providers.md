@@ -304,7 +304,10 @@ providers:
     id_pattern: "[A-Z]+-\\d+"     # a work list's own ids (optional)
 ```
 
-`id_pattern` (a regex matched whole) is what a work list's ids look
+`fields` (a work list's own, kept in `native`: `[{ name, title, kind:
+enum|text|number, values? }]`, work-items.md "Declared fields") are
+published with the instance's capability row. `id_pattern` (a regex
+matched whole) is what a work list's ids look
 like: while it's the active one, a loose id (`ENG-12`) in a work-item
 command resolves to its item (`work_item::with_loose_refs`,
 work-items.md).

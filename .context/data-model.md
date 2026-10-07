@@ -441,7 +441,8 @@ the interface's links and comments, published as `v_work_item_link` /
 `v_work_item_comment` over the active list's items. oxplow's follow
 `task_link` / `task_note` (a task's notes) by triggers, however those are
 written (V17 backfilled them; a comment's id is `task_note:<id>`).
-Capability rows are published when services are built
+`capability_provider.fields_json` (V18) is an implementation's declared
+fields. Capability rows are published when services are built
 (`CapabilityRegistry::publish_now`), so the first read sees the active
 list.
 

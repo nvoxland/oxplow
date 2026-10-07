@@ -30,7 +30,16 @@ relationship holds; tsk572), and (V17) `thread_id` — the list it's on, a
 thread's or the backlog (NULL) — `rank` on that list and `closed_at`.
 `v_work_item_link` is its links (`blocks`, `discovered_from`,
 `relates_to`, `duplicates`, `supersedes`, `replies_to`),
-`v_work_item_comment` its comments. How the rows are written, the state mapping and the
+`v_work_item_comment` its comments.
+
+**Declared fields.** What a list keeps in `native` beyond those columns
+is declared, so screens render and edit it without knowing which list is
+active: `[{ name, title, kind: enum|text|number, values? }]`
+(`oxplow_domain::work_items::FieldDecl`, checked by `fields_problem`),
+published as `v_capability_provider.fields`. A built-in's are core's
+table's (`BuiltIn.fields`: oxplow's tasks declare `priority`, an enum of
+urgent/high/medium/low); an external provider's are its `providers:`
+entry's `fields:`. None declares none. How the rows are written, the state mapping and the
 cascade trigger are in [data-model.md](./data-model.md) "`work_item`".
 
 There are two writers, one schema:

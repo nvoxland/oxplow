@@ -1825,6 +1825,7 @@ impl ProviderRegistry {
                 extension: Some(instance.ext.name.clone()),
                 source: crate::capabilities::Source::External,
                 features,
+                fields: serde_json::to_value(&instance.spec.fields).unwrap_or_default(),
             },
             true,
         );
@@ -1880,6 +1881,7 @@ impl ProviderRegistry {
                 extension: Some(running.ext.name.clone()),
                 source: crate::capabilities::Source::External,
                 features: Value::Null,
+                fields: serde_json::Value::Array(Vec::new()),
             },
             false,
         );

@@ -47,6 +47,56 @@ impl CanonicalState {
     }
 }
 
+/// What kind of value a declared field holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    /// One of `values`.
+    Enum,
+    Text,
+    Number,
+}
+
+/// One of a work list's own fields: kept in an item's `native` under
+/// `name`, declared so screens render and edit it without knowing which
+/// list is active.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct FieldDecl {
+    /// Its key in `native` (snake_case).
+    pub name: String,
+    /// How a person names it.
+    pub title: String,
+    pub kind: FieldKind,
+    /// An `enum`'s values, in the order they're offered (empty for any
+    /// other kind).
+    #[serde(default)]
+    pub values: Vec<String>,
+}
+
+/// What's wrong with `fields`, if anything: names snake_case and unique,
+/// an `enum` with values, any other kind without.
+pub fn fields_problem(fields: &[FieldDecl]) -> Option<String> {
+    let snake = |n: &str| {
+        n.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+            && n.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    fields.iter().enumerate().find_map(|(i, f)| {
+        if !snake(&f.name) {
+            Some(format!("field `{}`: its name must be snake_case", f.name))
+        } else if fields[..i].iter().any(|o| o.name == f.name) {
+            Some(format!("field `{}` is declared twice", f.name))
+        } else if f.kind == FieldKind::Enum && f.values.is_empty() {
+            Some(format!("field `{}`: an enum needs its values", f.name))
+        } else if f.kind != FieldKind::Enum && !f.values.is_empty() {
+            Some(format!("field `{}`: only an enum has values", f.name))
+        } else {
+            None
+        }
+    })
+}
+
 /// The capability's verbs: the `work_item.<verb>` commands a work list
 /// answers — create, update and transition always; the rest as its
 /// features say (`links`, `comments`, `delete`, `ordering`: reorder,
@@ -309,6 +359,29 @@ impl WorkItemsRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fields_are_checked() {
+        let field = |name: &str, kind: FieldKind, values: &[&str]| FieldDecl {
+            name: name.into(),
+            title: name.into(),
+            kind,
+            values: values.iter().map(|v| v.to_string()).collect(),
+        };
+        assert_eq!(
+            fields_problem(&[field("priority", FieldKind::Enum, &["high", "low"])]),
+            None
+        );
+        let problem = |fields: &[FieldDecl]| fields_problem(fields).unwrap_or_default();
+        assert!(problem(&[field("Priority", FieldKind::Text, &[])]).contains("snake_case"));
+        assert!(problem(&[
+            field("points", FieldKind::Number, &[]),
+            field("points", FieldKind::Number, &[])
+        ])
+        .contains("twice"));
+        assert!(problem(&[field("size", FieldKind::Enum, &[])]).contains("needs its values"));
+        assert!(problem(&[field("note", FieldKind::Text, &["x"])]).contains("only an enum"));
+    }
 
     fn named(id: &str) -> WorkItemsProvider {
         WorkItemsProvider {

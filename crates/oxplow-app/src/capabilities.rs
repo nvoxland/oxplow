@@ -51,6 +51,12 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "lists",
         ],
         tools: &["list_tasks", "get_task", "read_task_options"],
+        fields: &[BuiltInField {
+            name: "priority",
+            title: "Priority",
+            kind: oxplow_domain::work_items::FieldKind::Enum,
+            values: &["urgent", "high", "medium", "low"],
+        }],
     },
     BuiltIn {
         entry: "oxplow:commit-or-switch",
@@ -58,6 +64,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         title: "A commit lands it, or the task switches",
         features: &[],
         tools: &[],
+        fields: &[],
     },
     BuiltIn {
         entry: "oxplow:snapshots",
@@ -65,6 +72,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         title: "Keep every version",
         features: &["contents"],
         tools: &[],
+        fields: &[],
     },
 ];
 
@@ -79,6 +87,33 @@ pub struct BuiltIn {
     /// The MCP tools only it offers (its own agent surface): offered while
     /// it's the active implementation, hidden otherwise.
     pub tools: &'static [&'static str],
+    /// Its own fields (a work list's, kept in `native`).
+    pub fields: &'static [BuiltInField],
+}
+
+/// A built-in's field, as core's table declares it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltInField {
+    pub name: &'static str,
+    pub title: &'static str,
+    pub kind: oxplow_domain::work_items::FieldKind,
+    pub values: &'static [&'static str],
+}
+
+/// A built-in's fields, as an implementation declares them.
+fn built_in_fields(b: &BuiltIn) -> Value {
+    serde_json::to_value(
+        b.fields
+            .iter()
+            .map(|f| oxplow_domain::work_items::FieldDecl {
+                name: f.name.into(),
+                title: f.title.into(),
+                kind: f.kind,
+                values: f.values.iter().map(|v| v.to_string()).collect(),
+            })
+            .collect::<Vec<_>>(),
+    )
+    .expect("fields serialize")
 }
 
 /// A built-in's features, as an implementation declares them.
@@ -132,6 +167,8 @@ pub struct Implementation {
     pub source: Source,
     /// The features it declares.
     pub features: Value,
+    /// Its own fields, as it declares them (a JSON array of `FieldDecl`).
+    pub fields: Value,
 }
 
 impl Implementation {
@@ -164,6 +201,7 @@ impl Implementation {
             extension: None,
             source: Source::None,
             features: Value::Object(features),
+            fields: Value::Array(Vec::new()),
         }
     }
 }
@@ -323,6 +361,7 @@ impl CapabilityRegistry {
                         extension: None,
                         source: Source::BuiltIn(b.entry),
                         features: built_in_features(b),
+                        fields: built_in_fields(b),
                     })
                 }),
         );
@@ -452,6 +491,7 @@ impl CapabilityRegistry {
                 extension: None,
                 source: Source::BuiltIn(b.entry),
                 features: Value::Null,
+                fields: serde_json::Value::Array(Vec::new()),
             })
             .map(|i| {
                 let active = by_capability
@@ -556,6 +596,7 @@ impl CapabilityRegistry {
                     capability_title: spec.title.into(),
                     choosable: spec.choosable,
                     optional: spec.optional,
+                    fields: i.fields.clone(),
                 });
             }
             if let Some(wanted) = &resolved.wanted {
@@ -576,6 +617,7 @@ impl CapabilityRegistry {
                         capability_title: spec.title.into(),
                         choosable: spec.choosable,
                         optional: spec.optional,
+                        fields: Value::Array(Vec::new()),
                     });
                 }
             }
@@ -642,6 +684,7 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
                     extension: Some(e.name.clone()),
                     source: Source::BuiltIn(b.entry),
                     features: built_in_features(b),
+                    fields: built_in_fields(b),
                 })
             })
         })
@@ -768,6 +811,7 @@ mod tests {
             extension: Some("oxplow-bundled".into()),
             source: Source::BuiltIn(entry),
             features: Value::Null,
+            fields: serde_json::Value::Array(Vec::new()),
         }
     }
 
@@ -865,6 +909,7 @@ mod tests {
             extension: Some("tracker".into()),
             source: Source::External,
             features: Value::Null,
+            fields: serde_json::Value::Array(Vec::new()),
         };
         r.set_external(issues.clone(), true);
         assert_eq!(r.active(&c, "work_items"), "issues");
@@ -1115,6 +1160,7 @@ mod tests {
                 extension: Some("tracker".into()),
                 source: Source::External,
                 features: serde_json::json!({ "comments": false, "links": true, "ordering": true }),
+                fields: serde_json::Value::Array(Vec::new()),
             },
             true,
         );
@@ -1164,6 +1210,7 @@ mod tests {
                 extension: Some("tracker".into()),
                 source: Source::External,
                 features: Value::Null,
+                fields: serde_json::Value::Array(Vec::new()),
             },
             true,
         );
@@ -1206,5 +1253,42 @@ mod tests {
         assert!(skills.join("work-items/SKILL.md").is_file());
         assert!(!commands.join("work-next.md").exists());
         assert!(commands.join("configure.md").is_file());
+    }
+
+    /// An implementation's own fields are declared, and published with its
+    /// row: oxplow's tasks have a priority, none has none.
+    #[tokio::test]
+    async fn an_implementations_fields_are_published() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let out = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT provider, fields FROM v_capability_provider
+                  WHERE capability = 'work_items' ORDER BY provider",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        let rows = serde_json::to_value(&out.rows).unwrap();
+        let fields = |provider: &str| -> Value {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r[0] == provider)
+                .map(|r| serde_json::from_str(r[1].as_str().unwrap()).unwrap())
+                .unwrap()
+        };
+        assert_eq!(
+            fields("oxplow"),
+            serde_json::json!([{
+                "name": "priority",
+                "title": "Priority",
+                "kind": "enum",
+                "values": ["urgent", "high", "medium", "low"]
+            }])
+        );
+        assert_eq!(fields(NONE), serde_json::json!([]));
     }
 }

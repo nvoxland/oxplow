@@ -1003,7 +1003,7 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: capability_provider
-  version: 4
+  version: 5
   description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
   columns:
     - { name: "capability", type: "TEXT", doc: "`work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`." }
@@ -1018,6 +1018,7 @@
     - { name: "capability_title", type: "TEXT", doc: "How a person names the capability (`Work list`). (v4)" }
     - { name: "choosable", type: "INTEGER", doc: "1 when a project chooses the capability's implementation; 0 for one core fixes (`vcs`, `knowledge`). (v4)" }
     - { name: "optional", type: "INTEGER", doc: "1 when the capability may be `none`. (v4)" }
+    - { name: "fields", type: "TEXT", doc: "Its own fields as a JSON array of `{ name, title, kind: enum|text|number, values? }`: what a work list keeps in `native` (oxplow's tasks: `priority`)." }
   tests:
     - { not_null: capability }
     - { not_null: provider }
