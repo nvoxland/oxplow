@@ -143,36 +143,6 @@ export function signInLine(s: SignInState): { text: string; action: "Sign in" | 
   }
 }
 
-/** A provider instance the project's work items can be filed on (P7.A2;
- *  by instance since P9.B1). */
-export interface WorkItemsChoice {
-  /** The instance's id — what `activeProviders.work_items` names
-   *  (`oxplow` for oxplow's own tasks). */
-  id: string;
-  label: string;
-  /** Running on this machine: new items can be filed on it now. */
-  running: boolean;
-}
-
-/** oxplow's own tasks, then every work-items provider instance. */
-export function workItemsChoices(views: ProviderInstanceView[]): WorkItemsChoice[] {
-  const choices: WorkItemsChoice[] = [{ id: "oxplow", label: "oxplow's tasks", running: true }];
-  for (const v of views) {
-    if (v.capability !== "work_items" || choices.some((c) => c.id === v.instanceId)) continue;
-    choices.push({ id: v.instanceId, label: `${v.instanceId} (${v.instance})`, running: v.health.state.state === "ready" });
-  }
-  return choices;
-}
-
-/** What to say about the active provider when filing on it can't work:
- *  nothing when it can. Never a fallback — a `create` fails naming it. */
-export function activeProviderProblem(choices: WorkItemsChoice[], active: string): string | null {
-  const choice = choices.find((c) => c.id === active);
-  if (!choice) return `No enabled extension declares \`${active}\`: new work items can't be filed until one does, or choose another.`;
-  if (!choice.running) return `\`${active}\` isn't running on this machine: new work items can't be filed until it is.`;
-  return null;
-}
-
 /** One collector's line (P7.A3): what its reads have delivered and when
  *  it last read. */
 /** When `c` was last read, in local time (tsk1038). */

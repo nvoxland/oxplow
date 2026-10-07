@@ -230,7 +230,11 @@ The three in progress:
   capability's default) and restates `v_capability_provider` (v3).
   Lenses and advisories declare `needs:`; unmet, a lens says what it
   needs instead of showing empty, and an advisory doesn't run.
-- Next: Settings → Pieces, `capability.switched`, then the three
+  Settings → Pieces, generated from `v_capability_provider` (v4 carries
+  each capability's title and whether it's choosable and optional),
+  chooses for the project and just for me, and replaces Integrations'
+  work-items radio.
+- Next: `capability.switched`, then the three
   swappable pieces. Loose
   refs (`tsk12` for a work item) wait for it: recognising an id is the
   active work list's declaration, not core's.

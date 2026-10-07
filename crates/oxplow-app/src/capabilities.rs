@@ -370,6 +370,9 @@ impl CapabilityRegistry {
                     source: i.source.as_str().into(),
                     available: true,
                     chosen_by: active.then(|| resolved.chosen_by.as_str().to_string()),
+                    capability_title: spec.title.into(),
+                    choosable: spec.choosable,
+                    optional: spec.optional,
                 });
             }
             if let Some(wanted) = &resolved.wanted {
@@ -387,6 +390,9 @@ impl CapabilityRegistry {
                         source: "unknown".into(),
                         available: false,
                         chosen_by: None,
+                        capability_title: spec.title.into(),
+                        choosable: spec.choosable,
+                        optional: spec.optional,
                     });
                 }
             }

@@ -54,38 +54,6 @@ test("integrationRow says where an instance stands and what the person can do", 
   expect(ready.enableLabel).toBe("Disable");
 });
 
-// P7.A2: the project's work items go to one provider; oxplow's own is
-// always a choice, and an active provider that can't take them is said so.
-test("work-items choices list oxplow then each declared provider, and name a provider that can't file", async () => {
-  const { workItemsChoices, activeProviderProblem } = await import("./integrationsModel.js");
-  const ready = view({ enabled: true, health: { ...view({}).health, state: { state: "ready" } } });
-  const choices = workItemsChoices([ready, view({ instance: "other/issues" })]);
-  expect(choices.map((c) => [c.id, c.running])).toEqual([
-    ["oxplow", true],
-    ["issues", true],
-  ]);
-  expect(activeProviderProblem(choices, "oxplow")).toBeNull();
-  expect(activeProviderProblem(choices, "issues")).toBeNull();
-  expect(activeProviderProblem(workItemsChoices([view({})]), "issues")).toContain("isn't running");
-  expect(activeProviderProblem(choices, "jira")).toContain("No enabled extension declares `jira`");
-});
-
-// P9.B1: a choice is an instance — a second instance of one provider is
-// its own, under its own id (what `activeProviders` names).
-test("each instance of a provider is its own choice, by instance id", async () => {
-  const { workItemsChoices } = await import("./integrationsModel.js");
-  const ready = { ...view({}).health, state: { state: "ready" as const } };
-  const choices = workItemsChoices([
-    view({ enabled: true, health: ready }),
-    view({ instance: "tracker/issues_acme", instanceId: "issues_acme", enabled: true, health: ready }),
-  ]);
-  expect(choices.map((c) => [c.id, c.label])).toEqual([
-    ["oxplow", "oxplow's tasks"],
-    ["issues", "issues (tracker/issues)"],
-    ["issues_acme", "issues_acme (tracker/issues_acme)"],
-  ]);
-});
-
 // P9.B2: a global instance is the person's on this machine — the row says
 // so, and that its program is approved per project.
 test("a global instance's row says whose it is", () => {
