@@ -169,7 +169,12 @@ fn stream_for(
 
 /// Assert `input` as a fact on its metric's measure. Returns the capture,
 /// the measure and the stream. Pure over `ctx.conn` (the bus may retry).
-fn record_tx(ctx: &TxCtx<'_>, input: &RecordInput, primary: StreamId) -> Result<i64, CommandError> {
+/// Record the asserted fact: its capture's id and the measure it's on.
+fn record_tx(
+    ctx: &TxCtx<'_>,
+    input: &RecordInput,
+    primary: StreamId,
+) -> Result<(i64, i64), CommandError> {
     let stream = stream_for(ctx.actor, input.stream.as_deref(), primary)?;
     let spec = get_spec_tx(ctx.conn, &input.key)
         .map_err(storage)?
@@ -260,7 +265,7 @@ fn record_tx(ctx: &TxCtx<'_>, input: &RecordInput, primary: StreamId) -> Result<
         ..NewFact::new(measure.id, input.value)
     };
     let capture_id = record_facts_tx(ctx.conn, &capture, &[fact], None)?;
-    Ok(capture_id)
+    Ok((capture_id, measure.id))
 }
 
 /// The `metric.*` commands.
@@ -286,7 +291,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
             ),
             Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
                 let input: RecordInput = parse(input)?;
-                let capture_id = record_tx(ctx, &input, primary_stream)?;
+                let (capture_id, measure_id) = record_tx(ctx, &input, primary_stream)?;
                 let facts = facts.clone();
                 Ok(HandlerOutput {
                     result: json!({
@@ -294,7 +299,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                         "key": input.key,
                         "provenance": "asserted",
                     }),
-                    after_commit: Some(Box::new(move || facts.facts_committed())),
+                    after_commit: Some(Box::new(move || facts.facts_committed([measure_id]))),
                     ..HandlerOutput::default()
                 })
             })),

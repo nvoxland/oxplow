@@ -1980,16 +1980,19 @@ It is now **memoized by `measure_id`**, and two things about that are load-beari
   `Database` is `Clone` over an `Arc`, so the memo is shared by exactly the
   instances that share the data. `fact_store.rs` has a test that writes through a
   *second* store and asserts the first sees it — a per-store cache fails it.
-- **Invalidation is generation-guarded.** `record_facts` (the only path that
-  inserts facts — one private `insert_fact` helper with one caller) bumps a
-  generation counter and clears the memo *after* the commit. The read side
-  records the generation it queried under and **declines to cache** if it changed,
-  because a query that started before a write and finished after it would
-  otherwise install a result missing the new producer, with nothing to clear it
-  until the next write.
+- **Invalidation is per measure and generation-guarded.** A fact write
+  forgets only the measures it wrote: each measure has its own generation,
+  bumped after the commit by `record_facts` / `record_test_run` and by
+  `facts_committed(measures)` (callers that wrote through `record_facts_tx`
+  in their own transaction). A global clear made token facts, landing every
+  ~18 s, keep every other measure's memo cold. The read side records the
+  measure's generation it queried under and **declines to cache** if it
+  changed, because a query that started before a write and finished after
+  it would otherwise install a result missing the new producer, with nothing
+  to clear it until the next write.
 
 If you add another path that inserts into `fact`, it must call
-`db.memo().invalidate_facts()` after committing.
+`db.memo().invalidate_measures(<the measures written>)` after committing.
 
 ## Gotchas
 

@@ -1421,6 +1421,8 @@ impl SqliteFactStore {
         facts: Vec<NewFact>,
         log: Option<CaptureEvent>,
     ) -> Result<i64, DomainError> {
+        let measures: std::collections::BTreeSet<i64> =
+            facts.iter().map(|f| f.measure_id).collect();
         let result = self
             .db
             .transaction(move |tx| {
@@ -1429,11 +1431,11 @@ impl SqliteFactStore {
             })
             .await;
         // New facts can introduce a producer, which is the one thing that
-        // changes `producers_for_measure`. Invalidate AFTER the commit, and only
-        // on success — a rolled-back write changed nothing. The idempotent
-        // early-return above also lands here, where clearing is merely wasteful.
+        // changes `producers_for_measure` — for their own measures only.
+        // Invalidate AFTER the commit, and only on success — a rolled-back
+        // write changed nothing.
         if result.is_ok() {
-            self.db.memo().invalidate_facts();
+            self.db.memo().invalidate_measures(measures);
         }
         result
     }
@@ -1548,7 +1550,9 @@ impl SqliteFactStore {
             })
             .await;
         if result.is_ok() {
-            self.db.memo().invalidate_facts();
+            self.db
+                .memo()
+                .invalidate_measures([case_measure].into_iter().chain(duration_measure));
         }
         result
     }
@@ -1574,10 +1578,11 @@ impl SqliteFactStore {
             .await
     }
 
-    /// Forget the memoized fact reads — after a caller's own transaction
-    /// recorded facts through [`record_facts_tx`] and committed.
-    pub fn facts_committed(&self) {
-        self.db.memo().invalidate_facts();
+    /// Forget the memoized fact reads of `measures` — after a caller's own
+    /// transaction recorded facts for them through [`record_facts_tx`] and
+    /// committed.
+    pub fn facts_committed(&self, measures: impl IntoIterator<Item = i64>) {
+        self.db.memo().invalidate_measures(measures);
     }
 
     pub async fn get_capture(&self, capture_id: i64) -> Result<Option<MetricCapture>, DomainError> {
@@ -5954,6 +5959,40 @@ mod tests {
             "a fact write through another store over the same Database must \
              invalidate the memo"
         );
+    }
+
+    /// A fact write forgets only the memo of the measures it wrote: a token
+    /// fact landing every few seconds mustn't keep every other measure's
+    /// producer list cold.
+    #[tokio::test]
+    async fn a_fact_write_forgets_only_its_own_measures_producers() {
+        let store = fixture().await;
+        let a = measure(&store, "acme.a").await;
+        let b = measure(&store, "acme.b").await;
+        for m in [a, b] {
+            store
+                .record_facts(
+                    NewMetricCapture::done(1, "alpha", "builtin"),
+                    vec![NewFact::new(m, 1.0)],
+                )
+                .await
+                .unwrap();
+            store.producers_for_measure(m).await.unwrap();
+        }
+        let memoized = |m: i64| store.db.memo().producers_get(m).1.is_some();
+        assert!(memoized(a) && memoized(b));
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "beta", "builtin"),
+                vec![NewFact::new(b, 2.0)],
+            )
+            .await
+            .unwrap();
+        assert!(memoized(a), "another measure's write leaves it");
+        assert!(!memoized(b), "its own write forgets it");
+        let mut got = store.producers_for_measure(b).await.unwrap();
+        got.sort();
+        assert_eq!(got, vec!["alpha", "beta"]);
     }
 
     #[tokio::test]

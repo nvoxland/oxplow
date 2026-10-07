@@ -2302,6 +2302,10 @@ impl MetricsService {
             }
             return;
         };
+        let measures: std::collections::BTreeSet<i64> = capture
+            .as_ref()
+            .map(|(_, rows)| rows.iter().map(|f| f.measure_id).collect())
+            .unwrap_or_default();
         let (status, facts, error) = match run {
             FactRun::Recorded(n) => ("ok", i64::try_from(*n).unwrap_or(i64::MAX), None),
             FactRun::Failed(e) => ("error", 0, Some(e.clone())),
@@ -2349,7 +2353,7 @@ impl MetricsService {
         {
             Ok(_) => {
                 if let Some(facts) = self.fact_store.as_ref() {
-                    facts.facts_committed();
+                    facts.facts_committed(measures);
                 }
             }
             Err(e) => {

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -28,18 +27,23 @@ mod embedded {
 /// already shares the pool.
 #[derive(Default)]
 pub struct QueryMemo {
-    /// `measure_id` → the producers that have emitted facts for it (tsk130).
-    producers_for_measure: Mutex<HashMap<i64, Vec<String>>>,
-    /// Bumped on every fact write. Read-side stores the generation they queried
-    /// under and refuse to cache a result computed across a write — see
-    /// [`Self::producers_put`].
-    facts_generation: AtomicU64,
+    /// `measure_id` → the producers that have emitted facts for it, and
+    /// each measure's write generation: bumped by a fact write to it. A read
+    /// stores the generation it queried under and refuses to cache a result
+    /// computed across a write — see [`Self::producers_put`].
+    producers_for_measure: Mutex<HashMap<i64, Producers>>,
+}
+
+#[derive(Default)]
+struct Producers {
+    generation: u64,
+    list: Option<Vec<String>>,
 }
 
 impl QueryMemo {
     /// A poisoned memo is not a reason to take the process down: it's a cache,
     /// and the worst a poisoned map holds is a value we'd have recomputed.
-    fn producers(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Vec<String>>> {
+    fn producers(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Producers>> {
         self.producers_for_measure
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -48,9 +52,12 @@ impl QueryMemo {
     /// Look up a memoized producer list, along with the generation it was read
     /// under — pass that back to [`Self::producers_put`].
     pub(crate) fn producers_get(&self, measure_id: i64) -> (u64, Option<Vec<String>>) {
-        let generation = self.facts_generation.load(Ordering::Acquire);
-        let hit = self.producers().get(&measure_id).cloned();
-        (generation, hit)
+        let memo = self.producers();
+        let entry = memo.get(&measure_id);
+        (
+            entry.map_or(0, |e| e.generation),
+            entry.and_then(|e| e.list.clone()),
+        )
     }
 
     /// Memoize a producer list, but **only if no fact write landed since
@@ -59,17 +66,23 @@ impl QueryMemo {
     /// and nothing would clear it until the *next* write — a metric silently
     /// blind to a producer.
     pub(crate) fn producers_put(&self, measure_id: i64, generation: u64, value: &[String]) {
-        if self.facts_generation.load(Ordering::Acquire) != generation {
-            return;
+        let mut memo = self.producers();
+        let entry = memo.entry(measure_id).or_default();
+        if entry.generation == generation {
+            entry.list = Some(value.to_vec());
         }
-        self.producers().insert(measure_id, value.to_vec());
     }
 
-    /// Called after facts are committed: bump the generation (so an in-flight
-    /// read declines to cache) and drop what's memoized.
-    pub(crate) fn invalidate_facts(&self) {
-        self.facts_generation.fetch_add(1, Ordering::AcqRel);
-        self.producers().clear();
+    /// Called after facts for `measures` are committed: bump those measures'
+    /// generations (so an in-flight read of one declines to cache) and drop
+    /// what's memoized for them. Other measures keep theirs.
+    pub(crate) fn invalidate_measures(&self, measures: impl IntoIterator<Item = i64>) {
+        let mut memo = self.producers();
+        for m in measures {
+            let entry = memo.entry(m).or_default();
+            entry.generation += 1;
+            entry.list = None;
+        }
     }
 }
 
