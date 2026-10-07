@@ -18,20 +18,20 @@ interface Props {
    *  lights float over this bar). */
   leftInset: number;
   onOpenSearch(): void;
-  onOpenThreadSettings(threadId: string): void;
 }
 
 /**
  * The bar across the top of the window, over both the left nav and the
  * content: where you are (`stream › thread` at the start) and, at the
- * right end, the stream's branch and the global search beside it. The stream name opens the navigator below it, the
- * thread name its settings, the branch the branch picker.
+ * right end, the stream's branch and the global search beside it. The
+ * stream and thread names open the navigator below them, the branch the
+ * branch picker.
  *
  * Its empty space drags the window (`data-tauri-drag-region` — Tauri drags
  * only from elements that carry it, so the controls stay clickable).
  * Alerts and background tasks stay in the bottom bar.
  */
-export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch, onOpenThreadSettings }: Props) {
+export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch }: Props) {
   return (
     <div
       data-testid="title-bar"
@@ -68,8 +68,8 @@ export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch, 
                 <button
                   type="button"
                   data-testid="title-bar-thread"
-                  title={`${thread.title} — thread settings`}
-                  onClick={() => onOpenThreadSettings(thread.id)}
+                  title={`${thread.title} — show streams and threads`}
+                  onClick={() => requestNavigatorOpen()}
                   style={{ ...nameStyle, color: "var(--text-secondary)" }}
                 >
                   {thread.title}

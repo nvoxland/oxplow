@@ -95,7 +95,7 @@ pub use fact_store::{
     NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
-pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
+pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
 pub use plugin_health_store::{PluginHealthRow, PluginKey, SqlitePluginHealthStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};

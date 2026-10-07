@@ -180,11 +180,23 @@ test("the pointer leaving the panel's bounds closes it after the grace", async (
   const { result } = setup();
   act(() => result.current.openPanel());
 
+  fireEvent.pointerMove(document, { clientX: 100, clientY: 300 });
   fireEvent.pointerMove(document, { clientX: 400, clientY: 300 });
   expect(result.current.open).toBe(true); // grace hasn't elapsed yet
   await act(settle);
 
   expect(result.current.open).toBe(false);
+});
+
+test("a pointer that was never in the panel doesn't close it", async () => {
+  // Opened from elsewhere (the title bar, above it): the pointer starts
+  // outside, and drifting there isn't leaving.
+  const { result } = setup();
+  act(() => result.current.openPanel());
+
+  fireEvent.pointerMove(document, { clientX: 400, clientY: 300 });
+  await act(settle);
+  expect(result.current.open).toBe(true);
 });
 
 test("a pointer still inside the panel keeps it open", async () => {
@@ -279,6 +291,7 @@ describe("guard", () => {
 
     // Form committed — the panel should behave normally again.
     rerender({ guard: false });
+    fireEvent.pointerMove(document, { clientX: 100, clientY: 300 });
     fireEvent.pointerMove(document, { clientX: 400, clientY: 300 });
     await act(settle);
     expect(result.current.open).toBe(false);

@@ -512,6 +512,12 @@ the last event) — `useRerunOnChange`, the wiki title cache
 that missed a change) and `useChange`. A new reader of events adopts it
 rather than re-reading per event. Writers help from their side by
 committing a unit of work once (a duplicate scan stores its findings in
-one transaction). Typing in the ACP prompt box re-renders only the box:
+one transaction). **The boot page-ref repair** (`page_ref_backfill.rs`,
+run once per build and schema version — every restart after a rebuild)
+restates every task, link, note and finding slice: it writes them in
+batches of 1000 through `SqlitePageRefStore::replace_sources`, one
+transaction each. Written one commit per row, it once sent ~250k change
+events at boot (a quarter of a million piled-up findings): the events
+socket lagged, the UI re-read for a minute and terminal input timed out. Typing in the ACP prompt box re-renders only the box:
 its draft is its own state, and the transcript and each message are
 memoized (`AcpAgentView.tsx`).

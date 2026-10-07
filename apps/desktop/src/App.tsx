@@ -3192,7 +3192,6 @@ export function App() {
         vcsEnabled={workspaceContext.vcsEnabled}
         leftInset={isMac ? 78 : 10}
         onOpenSearch={() => setQuickOpenVisible(true)}
-        onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
       />
       <div style={{ borderBottom: error ? "1px solid var(--border)" : undefined, flexShrink: 0 }}>
         {error ? (

@@ -339,6 +339,11 @@ another branch.
   panel's `getBoundingClientRect()` on a document `pointermove` instead.
   Keep a short grace delay (~180ms) so crossing a seam doesn't snap it
   shut.
+  **Only after the pointer has been in it.** A panel opened from somewhere
+  else (the title bar's stream name, above the Navigator) starts with the
+  pointer outside; counting that as "left" flashed it open and shut on the
+  first mouse move. `useSlideoutStrip` arms the passive close once the
+  pointer has entered the panel.
 - **Passive closes yield to an in-flight form; explicit ones don't.**
   Pointer-leave and background-click must not discard a rename or a
   half-typed new-item entry. Escape, the collapse control, and a press
@@ -355,8 +360,15 @@ another branch.
 
 - **Right-click a row to open its action menu.** The shared hook is
   `apps/desktop/src/components/useRowContextMenu.tsx`:
-  - `useRowContextMenu(items)` — bind the items when the row is its own
-    component; spread `onContextMenu` / `onKeyDown` and render `{menu}`.
+  - `useRowContextMenu(items, header?)` — bind the items when the row is
+    its own component; spread `onContextMenu` / `onKeyDown` and render
+    `{menu}`. `header` titles the menu with what it acts on
+    (`context-menu-header`) — the Navigator heads every stream / thread
+    menu with its name, since a strip glyph shows only initials.
+  - **An item has one menu wherever it shows.** The Navigator builds each
+    stream's and thread's menu once (`streamMenu` / `threadMenu`) and
+    binds it to both the strip glyph and the panel row; an action whose
+    inline field lives in the panel (Rename, Add thread) opens it.
   - `useContextMenu()` — call once in a parent that renders rows in a
     `.map()` (a per-row hook can't run there); each row does
     `onContextMenu={(e) => open(e, items)}` and the parent renders
