@@ -16,23 +16,20 @@ import { cardLinkButton } from "../components/Card.js";
 import type { TaskSectionKind } from "../components/Plan/plan-utils.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { type Stream, type Thread, type ThreadWorkState } from "../api.js";
+import { type Stream, type Thread } from "../api.js";
 import { useStreamThreads } from "./useStreamThreads.js";
-import { readThreadWork } from "../workItems.js";
+import { readWorkList, type WorkList } from "../workItems.js";
 import { unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 
 export type TasksPageProps =
   Omit<
     ComponentProps<typeof PlanPane>,
-    | "hideAuto"
     | "visibleSections"
     | "sectionItemLimit"
-    | "sectionLabelOverrides"
     | "extraSectionLinks"
     | "hideBacklogChip"
-    | "hideArchiveToggle"
-    | "onlyStatuses"
-    | "excludeStatuses"
+    | "onlyStates"
+    | "excludeStates"
   > & {
     onOpenPage(ref: TabRef): void;
     streams: Stream[];
@@ -78,7 +75,7 @@ export function TasksPage({
     saveScope(next);
   }, []);
 
-  const [scopedWorkStates, setScopedWorkStates] = useState<Record<string, ThreadWorkState>>({});
+  const [scopedWorkStates, setScopedWorkStates] = useState<Record<string, WorkList>>({});
   const [scopedError, setScopedError] = useState<string | null>(null);
   const [scopedLoading, setScopedLoading] = useState(false);
 
@@ -116,7 +113,7 @@ export function TasksPage({
           if (!scope.streamId || !scope.threadId) return;
           if (scopedWorkStates[scope.threadId]) return;
           setScopedLoading(true);
-          const work = await readThreadWork(scope.threadId);
+          const work = await readWorkList(scope.threadId);
           if (cancelled) return;
           setScopedWorkStates((prev) => ({ ...prev, [scope.threadId]: work }));
         } else if (scope.kind === "stream") {
@@ -126,7 +123,7 @@ export function TasksPage({
           setScopedLoading(true);
           const missing = threads.filter((t) => !scopedWorkStates[t.id]);
           const loaded = await Promise.all(
-            missing.map(async (t) => [t.id, await readThreadWork(t.id)] as const),
+            missing.map(async (t) => [t.id, await readWorkList(t.id)] as const),
           );
           if (cancelled) return;
           if (loaded.length) {
@@ -147,7 +144,7 @@ export function TasksPage({
           );
           const missing = all.filter((p) => !scopedWorkStates[p.threadId]);
           const loaded = await Promise.all(
-            missing.map(async (p) => [p.threadId, await readThreadWork(p.threadId)] as const),
+            missing.map(async (p) => [p.threadId, await readWorkList(p.threadId)] as const),
           );
           if (cancelled) return;
           if (loaded.length) {
@@ -170,7 +167,7 @@ export function TasksPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, streams, tasksVersion]);
 
-  const effectiveThreadWork: ThreadWorkState | null = useMemo(() => {
+  const effectiveThreadWork: WorkList | null = useMemo(() => {
     if (scope.kind === "currentThread") return rest.threadWork ?? null;
     if (scope.kind === "thread") {
       return scopedWorkStates[scope.threadId] ?? null;
@@ -179,14 +176,14 @@ export function TasksPage({
       const threads = threadsByStream[scope.streamId] ?? [];
       const states = threads
         .map((t) => scopedWorkStates[t.id])
-        .filter((s): s is ThreadWorkState => Boolean(s));
+        .filter((s): s is WorkList => Boolean(s));
       return mergeThreadWork(states);
     }
     if (scope.kind === "all") {
       const allIds = Object.values(threadsByStream).flat().map((t) => t.id);
       const states = allIds
         .map((id) => scopedWorkStates[id])
-        .filter((s): s is ThreadWorkState => Boolean(s));
+        .filter((s): s is WorkList => Boolean(s));
       return mergeThreadWork(states);
     }
     return null;
@@ -244,17 +241,14 @@ export function TasksPage({
             {...listProps}
             visibleSections={TASKS_PAGE_SECTIONS}
             sectionItemLimit={{ done: PREVIEW_LIMIT }}
-            sectionLabelOverrides={{ done: "Recently Done" }}
             extraSectionLinks={{ done: viewAllDone }}
             hideBacklogChip
-            hideArchiveToggle
           />
           <TaskDetailPane threadWork={effectiveThreadWork} />
         </div>
-        <BacklogDrawer
-          backlog={rest.backlog}
-          onOpenBacklog={() => onOpenPage(backlogRef())}
-        />
+        {rest.profile.features.lists ? (
+          <BacklogDrawer backlog={rest.backlog} onOpenBacklog={() => onOpenPage(backlogRef())} />
+        ) : null}
       </div>
     </Page>
   );

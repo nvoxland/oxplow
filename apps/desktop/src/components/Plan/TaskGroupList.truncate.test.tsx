@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
-import type { Task } from "../../api.js";
+import type { WorkItem } from "../../workItems.js";
 import { TaskGroupList } from "./TaskGroupList.js";
 import type { TaskGroup } from "./plan-utils.js";
 
@@ -17,14 +17,13 @@ const NOOP_ASYNC = async () => {};
 // pixel width.
 const LONG = "In progress task with an extremely long title ".repeat(12);
 
-function inProgressTask(): Task {
+function inProgressTask(): WorkItem {
   return {
-    id: "tsk-long",
+    ref: "work_item:oxplow:tsk9",
     title: LONG,
-    status: "in_progress",
-    priority: "medium",
-    sort_index: 0,
-  } as unknown as Task;
+    state: "in_progress",
+    native: { priority: "medium" },
+  } as unknown as WorkItem;
 }
 
 function renderRow() {
@@ -45,13 +44,14 @@ function renderRow() {
       isSectionCollapsed={() => false}
       onToggleSectionCollapsed={() => {}}
       visibleSections={["inProgress"]}
+      fields={[]}
     />,
   );
 }
 
 test("in-progress row shrinks and truncates its title (never overflows the column)", () => {
   const view = renderRow();
-  const row = view.getByTestId("tasks-row-tsk-long");
+  const row = view.getByTestId("tasks-row-work_item:oxplow:tsk9");
   // The row must be allowed to shrink below its content width.
   expect(["0", "0px"]).toContain(row.style.minWidth);
 

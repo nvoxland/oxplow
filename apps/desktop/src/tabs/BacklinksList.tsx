@@ -1,4 +1,5 @@
 import { EmptyState } from "../components/Prompts/EmptyState.js";
+import { workItemLabel } from "../workItemRef.js";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import type { BacklinkEntry } from "./backlinkTypes.js";
@@ -86,9 +87,9 @@ export function tabRefToContextRef(ref: TabRef): ContextRef | null {
     return null;
   }
   if (ref.kind === "work_item") {
-    const payload = ref.payload as { itemId?: unknown } | null;
-    if (payload && typeof payload.itemId === "string") {
-      return { kind: "task", itemId: payload.itemId, title: String(payload.itemId), status: "" };
+    const payload = ref.payload as { ref?: unknown } | null;
+    if (payload && typeof payload.ref === "string") {
+      return { kind: "work_item", ref: payload.ref, title: workItemLabel(payload.ref), state: "" };
     }
     return null;
   }

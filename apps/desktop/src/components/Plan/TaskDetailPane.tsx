@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { ThreadWorkState, Task } from "../../api.js";
+import type { WorkItem, WorkList } from "../../workItems.js";
 
 const paneStyle: CSSProperties = {
   flex: "0 0 280px",
@@ -37,21 +37,18 @@ const numberStyle: CSSProperties = {
  * feels informative when nothing is selected, which is the most
  * common state on a quiet thread.
  */
-/// Derive the summary view from the backend's bucketed work state.
-/// `items` carries only Ready tasks — in_progress / blocked / done
-/// rows arrive solely via their own buckets, so counting by filtering
-/// `items` would pin those numbers at zero. The done bucket also
-/// folds in canceled/archived rows; the summary counts real
-/// completions only. Exported for tests.
-export function summarizeThreadWork(threadWork: ThreadWorkState | null): {
+/// Derive the summary view from a list's buckets. The done bucket also
+/// holds canceled items; the summary counts real completions only.
+/// Exported for tests.
+export function summarizeThreadWork(threadWork: WorkList | null): {
   counts: { inProgress: number; ready: number; blocked: number; done: number };
-  oldestBlocked: Task | null;
-  recentDone: Task[];
+  oldestBlocked: WorkItem | null;
+  recentDone: WorkItem[];
 } {
   const inProgress = threadWork?.inProgress ?? [];
   const ready = threadWork?.items ?? [];
   const blocked = threadWork?.waiting ?? [];
-  const done = (threadWork?.done ?? []).filter((i) => i.status === "done");
+  const done = (threadWork?.done ?? []).filter((i) => i.state === "done");
   return {
     counts: {
       inProgress: inProgress.length,
@@ -67,7 +64,7 @@ export function summarizeThreadWork(threadWork: ThreadWorkState | null): {
 export function TaskDetailPane({
   threadWork,
 }: {
-  threadWork: ThreadWorkState | null;
+  threadWork: WorkList | null;
 }) {
   const { counts, oldestBlocked, recentDone: recent } = summarizeThreadWork(threadWork);
   return (
@@ -98,7 +95,7 @@ export function TaskDetailPane({
             {oldestBlocked.title}
           </div>
           <div style={{ color: "var(--muted)", fontSize: 11 }}>
-            {formatAge(oldestBlocked.updated_at)} old
+            {formatAge(oldestBlocked.updatedAt)} old
           </div>
         </div>
       ) : null}
@@ -106,12 +103,12 @@ export function TaskDetailPane({
         <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
           <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 4 }}>Recently completed</div>
           {recent.map((item) => (
-            <div key={item.id} style={{ marginBottom: 4 }}>
+            <div key={item.ref} style={{ marginBottom: 4 }}>
               <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 ✓ {item.title}
               </div>
               <div style={{ color: "var(--muted)", fontSize: 11 }}>
-                {formatAge(item.completed_at ?? item.updated_at)} ago
+                {formatAge(item.closedAt ?? item.updatedAt)} ago
               </div>
             </div>
           ))}
@@ -121,14 +118,14 @@ export function TaskDetailPane({
   );
 }
 
-function pickOldestBlocked(blocked: Task[]): Task | null {
+function pickOldestBlocked(blocked: WorkItem[]): WorkItem | null {
   if (blocked.length === 0) return null;
-  return blocked.reduce((best, cur) => (cur.updated_at < best.updated_at ? cur : best));
+  return blocked.reduce((best, cur) => (cur.updatedAt < best.updatedAt ? cur : best));
 }
 
-function pickRecentlyClosed(done: Task[], limit: number): Task[] {
+function pickRecentlyClosed(done: WorkItem[], limit: number): WorkItem[] {
   return [...done]
-    .sort((a, b) => (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at))
+    .sort((a, b) => (b.closedAt ?? b.updatedAt).localeCompare(a.closedAt ?? a.updatedAt))
     .slice(0, limit);
 }
 

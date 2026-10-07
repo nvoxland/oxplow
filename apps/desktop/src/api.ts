@@ -35,7 +35,6 @@ import {
   type SeriesPoint,
 } from "./metricsSql.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
-import { taskIdOfWorkItemRef, workItemRef } from "./workItemRef.js";
 import { IpcCallError, ipcErrorCode, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
@@ -286,9 +285,9 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-// Tasks are read from the models by the work-item data layer
-// (`workItems.ts`, P6.E1b), which owns their shape.
-export type { Task, TaskStatus, TaskPriority, ThreadWorkState, BacklogState } from "./workItems.js";
+// Work items are read through the work-item interface by `workItems.ts`,
+// which owns their shape.
+export type { WorkItem, WorkList } from "./workItems.js";
 
 
 /** Why a snapshot take ran (`snapshot_op.trigger`). */
@@ -2040,8 +2039,6 @@ export interface EffortAtSnapshot {
   effortId: string;
   /** The effort's work item ref; `null` while it's unlinked. */
   workItem: string | null;
-  /** The oxplow task behind `workItem`; `null` for another provider's item. */
-  tasksId: string | null;
   threadId: string;
   startSnapshotId: number | null;
   endSnapshotId: number | null;
@@ -2092,7 +2089,6 @@ export async function listEffortsAtSnapshots(
     snapshotId: r.snapshot_id,
     effortId: r.effort.id,
     workItem: r.effort.work_item,
-    tasksId: r.effort.work_item ? taskIdOfWorkItemRef(r.effort.work_item) : null,
     threadId: r.effort.thread_id,
     startSnapshotId: r.effort.start_snapshot_id,
     endSnapshotId: r.effort.end_snapshot_id,
@@ -2117,7 +2113,6 @@ function toOverlappingEffort(r: RawEffort): OverlappingEffort {
   return {
     effortId: r.id,
     workItem: r.work_item,
-    taskId: r.work_item ? taskIdOfWorkItemRef(r.work_item) : null,
     threadId: r.thread_id,
     startedAt: r.started_at,
     endedAt: r.ended_at,
@@ -2131,8 +2126,6 @@ export interface OverlappingEffort {
   effortId: string;
   /** The effort's work item ref; `null` while it's unlinked. */
   workItem: string | null;
-  /** The oxplow task behind `workItem`; `null` for another provider's item. */
-  taskId: string | null;
   threadId: string;
   startedAt: string;
   endedAt: string | null;

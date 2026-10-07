@@ -33,9 +33,6 @@ function canonicalId(kind: string, id: string, rev: string | null = null): strin
   return formatRef({ kind, id, rev, frag: null });
 }
 
-/** Tasks are work items under the oxplow provider (`oxplow:tsk42`). */
-const OXPLOW_PROVIDER = "oxplow:";
-
 // ---------------------------------------------------------------------------
 // Query params: `?k=v&k=v` after a route name or a lens id.
 //
@@ -123,18 +120,9 @@ export function wikiPageRef(slug: string): TabRef {
   return { id: canonicalId("wiki", slug), kind: "wiki", payload: { slug } };
 }
 
-/** A task page. `itemId` is the `tsk<n>` id; the tab id is the canonical
- *  work-item ref under the oxplow provider (`work_item:oxplow:tsk42`). */
-export function taskRef(itemId: string): TabRef {
-  return { id: canonicalId("work_item", `${OXPLOW_PROVIDER}${itemId}`), kind: "work_item", payload: { itemId } };
-}
-
-/** Any work item's page: oxplow's tasks open as their task page, another
- *  provider's as the provider-neutral work item page (P6b.C3). */
+/** A work item's page, whichever list it's on: the tab id is its ref
+ *  (`work_item:<provider>:<id>`). */
 export function workItemTabRef(ref: string): TabRef {
-  if (ref.startsWith(`work_item:${OXPLOW_PROVIDER}`)) {
-    return taskRef(ref.slice(`work_item:${OXPLOW_PROVIDER}`.length));
-  }
   return { id: ref, kind: "work_item", payload: { ref } };
 }
 
@@ -190,7 +178,6 @@ export type IndexKind =
   | "tasks"
   | "done-work"
   | "backlog"
-  | "archived"
   | "wiki-index"
   | "files"
   | "comments"
@@ -379,7 +366,7 @@ export function hookEventsRef(): TabRef {
 }
 
 /**
- * Named ref helpers for the four work pages. Mirrors the GitDashboard
+ * Named ref helpers for the work pages. Mirrors the GitDashboard
  * pattern (`gitDashboardRef`, `uncommittedChangesRef`) so call sites
  * read as intent rather than as stringly-typed `indexRef("…")`.
  */
@@ -391,9 +378,6 @@ export function doneWorkRef(): TabRef {
 }
 export function backlogRef(): TabRef {
   return indexRef("backlog");
-}
-export function archivedRef(): TabRef {
-  return indexRef("archived");
 }
 
 /** Git Dashboard — committed-history rollup page. */
@@ -472,10 +456,8 @@ export function dashboardRef(variant: DashboardKind): TabRef {
  */
 
 export interface NewtasksPayload {
-  /** Optional pre-selected parent epic id. */
-  parentId?: string | null;
-  /** Optional default priority. */
-  initialPriority?: string | null;
+  /** Optional pre-selected parent epic (its ref). */
+  parentRef?: string | null;
 }
 
 export function newStreamRef(): TabRef {
@@ -538,7 +520,6 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   tasks: () => indexRef("tasks"),
   "done-work": () => indexRef("done-work"),
   backlog: () => indexRef("backlog"),
-  archived: () => indexRef("archived"),
   "wiki-index": () => indexRef("wiki-index"),
   files: () => indexRef("files"),
   comments: () => indexRef("comments"),

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { Task } from "../../api.js";
+import type { FieldDecl, WorkItem } from "../../workItems.js";
 import { miniButtonStyle } from "./plan-utils.js";
 
 /**
@@ -24,25 +24,29 @@ export function summarizeSelection(markedCount: number): string {
 }
 
 export interface SelectionActionBarProps {
-  /** Marked tasks (the ones the bar's actions apply to). */
-  items: Task[];
+  /** Marked items (the ones the bar's actions apply to). */
+  items: WorkItem[];
+  /** The list's own fields: a "Change …" for each editable enum. */
+  fields: FieldDecl[];
   onClear(): void;
   onChangeStatus(): void;
-  onChangePriority(): void;
+  onChangeField(field: FieldDecl): void;
   onAddAllToAgent(): void;
-  onDelete(): void;
+  /** Absent when the list can't delete. */
+  onDelete?(): void;
 }
 
 export function SelectionActionBar({
   items,
   onClear,
+  fields,
   onChangeStatus,
-  onChangePriority,
+  onChangeField,
   onAddAllToAgent,
   onDelete,
 }: SelectionActionBarProps) {
   if (!shouldShowSelectionActionBar(items.length)) return null;
-  const lockedCount = items.filter((item) => item.status === "in_progress").length;
+  const lockedCount = items.filter((item) => item.state === "in_progress").length;
   const allLocked = lockedCount === items.length;
   return (
     <div
@@ -68,19 +72,24 @@ export function SelectionActionBar({
         onClick={onChangeStatus}
         disabled={allLocked}
         style={{ ...miniButtonStyle, opacity: allLocked ? 0.4 : 1 }}
-        title="Change status for the marked items"
+        title="Change the state of the marked items"
       >
-        Change status…
+        Change state…
       </button>
-      <button
-        type="button"
-        data-testid="selection-action-bar-priority"
-        onClick={onChangePriority}
-        style={miniButtonStyle}
-        title="Change priority for the marked items"
-      >
-        Change priority…
-      </button>
+      {fields
+        .filter((f) => f.kind === "enum" && !f.read_only)
+        .map((field) => (
+          <button
+            key={field.name}
+            type="button"
+            data-testid={`selection-action-bar-field-${field.name}`}
+            onClick={() => onChangeField(field)}
+            style={miniButtonStyle}
+            title={`Change ${field.title.toLowerCase()} for the marked items`}
+          >
+            Change {field.title.toLowerCase()}…
+          </button>
+        ))}
       <button
         type="button"
         data-testid="selection-action-bar-add-to-agent"
@@ -90,16 +99,18 @@ export function SelectionActionBar({
       >
         Add to agent context
       </button>
-      <button
-        type="button"
-        data-testid="selection-action-bar-delete"
-        onClick={onDelete}
-        disabled={allLocked}
-        style={{ ...miniButtonStyle, opacity: allLocked ? 0.4 : 1 }}
-        title={allLocked ? "Selected items are locked (in progress)" : "Delete the marked items"}
-      >
-        Delete
-      </button>
+      {onDelete ? (
+        <button
+          type="button"
+          data-testid="selection-action-bar-delete"
+          onClick={onDelete}
+          disabled={allLocked}
+          style={{ ...miniButtonStyle, opacity: allLocked ? 0.4 : 1 }}
+          title={allLocked ? "Selected items are locked (in progress)" : "Delete the marked items"}
+        >
+          Delete
+        </button>
+      ) : null}
     </div>
   );
 }

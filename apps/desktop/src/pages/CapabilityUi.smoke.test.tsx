@@ -14,7 +14,7 @@ const realBindings = await import("../tauri-bridge/generated/bindings.js");
 
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 const reads = { models: ["v_work_item"], tables: [], measures: [] };
-const WORK_ITEM_COLUMNS = ["ref", "provider", "title", "body", "state", "native_state", "parent_ref", "created_at", "updated_at", "task_id", "thread_id", "status", "priority", "sort_index", "author", "completed_at", "note_count"];
+const WORK_ITEM_COLUMNS = ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"];
 let extensions: unknown[] = [];
 let extensionLoads = 0;
 const lensRuns: Array<[string, unknown]> = [];
@@ -41,7 +41,7 @@ const answers: Record<string, (...args: unknown[]) => Promise<unknown>> = {
     if (sql.includes("FROM v_work_item w")) {
       return ok({
         columns: WORK_ITEM_COLUMNS,
-        rows: [["work_item:fake:W-1", "fake", "Their bug", "It breaks.", "todo", "Backlog", "work_item:fake:W-0", "t", "t", null, null, null, null, null, null, null, 0]],
+        rows: [["work_item:fake:W-1", "fake", "Their bug", "It breaks.", "todo", "work_item:fake:W-0", null, null, null, "t", "t", null, 0]],
         truncated: false,
         reads,
         freshness: [],
@@ -111,13 +111,13 @@ async function expectPlain(view: ReturnType<typeof render>) {
 }
 
 test("another provider's item, with every flag off, is its core content and no more", async () => {
-  const view = mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" streamId="str1" onOpenPage={() => {}} />);
+  const view = mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />);
   await waitFor(() => expect(view.getByTestId("work-item-page").textContent).toContain("It breaks."));
   expect(view.queryByTestId("work-item-comment-open")).toBeNull();
   expect(view.queryByTestId("work-item-link-open")).toBeNull();
   expect(view.queryByTestId("work-item-parent")).toBeNull();
-  expect(view.queryByTestId("work-item-delete-trigger")).toBeNull();
-  expect(view.getByTestId("work-item-move-done")).toBeTruthy();
+  expect(view.queryByTestId("task-rail-delete-trigger")).toBeNull();
+  expect(view.getByLabelText("State")).toBeTruthy();
   await expectPlain(view);
 });
 
@@ -274,35 +274,35 @@ test("a work item's own provider's extension replaces its state control, not the
   answers.querySql = async (...args) => {
     if (!String(args[0]).includes("v_capability_provider")) return realQuery(...args);
     return ok({
-      columns: ["capability", "provider", "extension", "features", "active"],
+      columns: ["capability", "provider", "extension", "features", "fields", "id_pattern", "active"],
       rows: [
-        ["work_items", "oxplow", null, "{}", 0],
-        ["work_items", "lin", "x", "{}", 1],
-        ["work_items", "fake", fakeExtension, "{}", 0],
+        ["work_items", "oxplow", null, "{}", "[]", null, 0],
+        ["work_items", "lin", "x", "{}", "[]", null, 1],
+        ["work_items", "fake", fakeExtension, "{}", "[]", null, 0],
       ],
       truncated: false,
       reads: { models: ["v_capability_provider"], tables: [], measures: [] },
       freshness: [],
     });
   };
-  const page = () => mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" streamId="str1" onOpenPage={() => {}} />);
+  const page = () => mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />);
   try {
     const replaced = page();
     await waitFor(() => expect(replaced.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by y"));
-    // Oxplow's Move To isn't the replacement's to take: whatever states the
-    // lens offers, the item can always move (tsk919).
-    expect(replaced.getByTestId("work-item-move-done")).toBeTruthy();
-    expect(replaced.getByTestId("replacement-work_item.detail.state").contains(replaced.getByTestId("work-item-move-done"))).toBe(false);
+    // Oxplow's state control isn't the replacement's to take: whatever
+    // states the lens offers, the item can always move.
+    expect(replaced.getByLabelText("State")).toBeTruthy();
+    expect(replaced.getByTestId("replacement-work_item.detail.state").contains(replaced.getByLabelText("State"))).toBe(false);
     expect(lensRuns).toEqual([["y/state", { ref: "work_item:fake:W-1" }]]);
     // The rest of the page is still oxplow's.
     expect(replaced.getByTestId("work-item-page").textContent).toContain("It breaks.");
     cleanup();
     lensRuns.length = 0;
 
-    // A provider no extension brings: oxplow's own Move To.
+    // A provider no extension brings: oxplow's own state control alone.
     fakeExtension = null;
     const own = page();
-    await waitFor(() => expect(own.getByTestId("work-item-move-done")).toBeTruthy());
+    await waitFor(() => expect(own.getByLabelText("State")).toBeTruthy());
     expect(own.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
     expect(lensRuns).toEqual([]);
   } finally {

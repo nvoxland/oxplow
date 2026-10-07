@@ -5,23 +5,18 @@ import { PlanPane } from "../components/Plan/PlanPane.js";
 export type BacklogPageProps =
   Omit<
     ComponentProps<typeof PlanPane>,
-    | "hideAuto"
     | "forceMode"
     | "hideBacklogChip"
     | "visibleSections"
     | "sectionItemLimit"
-    | "sectionLabelOverrides"
     | "extraSectionLinks"
-    | "excludeStatuses"
-    | "onlyStatuses"
-    | "hideArchiveToggle"
+    | "excludeStates"
+    | "onlyStates"
   >;
 
 /**
- * Full-pane stream-global backlog. Was previously reachable only via
- * the bottom-bar chip toggle inside AllWorkPage; now it's a
- * first-class page so the rail can link directly to it and the badge
- * count belongs to a real destination.
+ * Full-pane backlog: the active list's items on no thread, for a list
+ * that keeps items on threads (its `lists` feature).
  */
 export function BacklogPage(props: BacklogPageProps) {
   return (
@@ -31,7 +26,6 @@ export function BacklogPage(props: BacklogPageProps) {
           {...props}
           forceMode="backlog"
           hideBacklogChip
-          hideArchiveToggle
         />
       </div>
     </Page>

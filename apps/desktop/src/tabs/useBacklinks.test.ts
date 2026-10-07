@@ -6,20 +6,15 @@ import {
   directoryRef,
   fileRef,
   gitCommitRef,
-  taskRef,
   wikiPageRef,
   workItemTabRef,
 } from "./pageRefs.js";
 
 describe("canonicalIdForTarget", () => {
-  test("taskRef returns the work_item id the page_ref graph stores", () => {
-    // page_ref rows are a canonical ref's (kind, id): a task is
-    // `work_item` / `oxplow:tsk42` (.context/refs.md).
-    const ref = taskRef("tsk42");
-    expect(canonicalIdForTarget(ref)).toBe("oxplow:tsk42");
-  });
-
-  test("another provider's work item is its ref's id, as the graph stores it", () => {
+  // page_ref rows are a canonical ref's (kind, id): a work item is
+  // `work_item` / `<provider>:<id>` (.context/refs.md), whichever list.
+  test("a work item is its ref's id, as the graph stores it", () => {
+    expect(canonicalIdForTarget(workItemTabRef("work_item:oxplow:tsk42"))).toBe("oxplow:tsk42");
     expect(canonicalIdForTarget(workItemTabRef("work_item:fake:W-1"))).toBe("fake:W-1");
   });
 

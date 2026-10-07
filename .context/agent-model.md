@@ -986,7 +986,7 @@ is `{ to: done|canceled, native_state: archived }`.
   for the decision rule (follow-up vs. task). Storage:
   `crates/oxplow-app/src/followup.rs`; runtime publishes the bus event
   `followup.changed` so the UI re-reads that thread's work
-  (`workItems.readThreadWork`).
+  (`workItems.readWorkList`).
 - Forking a thread is `run_command thread.create { from }` — see
   "Forking a thread" above.
 - `list_comments({ id, scope?, status? })`, then `run_command

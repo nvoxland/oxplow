@@ -1,8 +1,8 @@
 import type { CSSProperties } from "react";
-import type { TaskPriority } from "../../api.js";
 
 /**
- * Three-bar priority glyph mirroring Linear's scannable column. Urgent /
+ * Three-bar glyph for a list's declared `priority` field, mirroring
+ * Linear's scannable column. Urgent /
  * High / Medium / Low each render the same three-bar footprint so rows
  * don't shift width when priority changes — only the number of filled bars
  * and the fill colour vary.
@@ -12,7 +12,7 @@ import type { TaskPriority } from "../../api.js";
  *   medium: ▬··  one bar filled, --priority-medium
  *   low:    ···  three empty bars, --priority-low
  */
-export function PriorityIcon({ priority, size = 10 }: { priority: TaskPriority; size?: number }) {
+export function PriorityIcon({ priority, size = 10 }: { priority: string; size?: number }) {
   const filled = priority === "urgent" ? 3 : priority === "high" ? 2 : priority === "medium" ? 1 : 0;
   const color = priorityColorVar(priority);
   const barWidth = Math.max(2, Math.round(size * 0.2));
@@ -46,12 +46,13 @@ export function PriorityIcon({ priority, size = 10 }: { priority: TaskPriority; 
   );
 }
 
-function priorityColorVar(priority: TaskPriority): string {
+/** A priority's colour; one the theme doesn't name draws as medium. */
+export function priorityColorVar(priority: string): string {
   switch (priority) {
     case "urgent": return "var(--priority-urgent)";
     case "high": return "var(--priority-high)";
-    case "medium": return "var(--priority-medium)";
     case "low": return "var(--priority-low)";
+    default: return "var(--priority-medium)";
   }
 }
 

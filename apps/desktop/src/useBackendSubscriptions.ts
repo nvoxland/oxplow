@@ -3,7 +3,6 @@ import { type Dispatch, type RefObject, type SetStateAction, useEffect } from "r
 import {
   type AgentKind,
   type AgentStatus,
-  type BacklogState,
   generatedPaths,
   getConfig,
   getThreadState,
@@ -15,11 +14,10 @@ import {
   subscribeOxplowEvents,
   subscribeWorkspaceContext,
   type ThreadState,
-  type ThreadWorkState,
   type WorkspaceContext,
 } from "./api.js";
 import { showToast } from "./components/toastStore.js";
-import { readBacklog, readThreadWork } from "./workItems.js";
+import { readWorkList, type WorkList } from "./workItems.js";
 import { NO_READS, readsChanged, readsOf, unionReads } from "./lens/lensRerun.js";
 
 /** The thread state each stream shows is read from `v_thread`. */
@@ -42,12 +40,12 @@ import { logUi } from "./logger.js";
  * mounted once instead of tearing down and re-subscribing on every change.
  */
 export interface BackendSubscriptionHandlers {
-  threadWorkStatesRef: RefObject<Record<string, ThreadWorkState>>;
+  threadWorkStatesRef: RefObject<Record<string, WorkList>>;
   /** Which streams' thread state is loaded, to re-read when `v_thread` changes. */
   threadStatesRef: RefObject<Record<string, ThreadState>>;
   setWorkspaceContext: (next: WorkspaceContext) => void;
-  setBacklogState: (next: BacklogState) => void;
-  setThreadWorkStates: Dispatch<SetStateAction<Record<string, ThreadWorkState>>>;
+  setBacklogState: (next: WorkList) => void;
+  setThreadWorkStates: Dispatch<SetStateAction<Record<string, WorkList>>>;
   setThreadStates: Dispatch<SetStateAction<Record<string, ThreadState>>>;
   setStreams: Dispatch<SetStateAction<Stream[]>>;
   setStream: Dispatch<SetStateAction<Stream | null>>;
@@ -65,8 +63,7 @@ export interface BackendSubscriptionHandlers {
  */
 export interface BackendSubscriptionApi {
   subscribeWorkspaceContext: typeof subscribeWorkspaceContext;
-  readBacklog: typeof readBacklog;
-  readThreadWork: typeof readThreadWork;
+  readWorkList: typeof readWorkList;
   subscribeOxplowEvents: typeof subscribeOxplowEvents;
   getThreadState: typeof getThreadState;
   listStreams: typeof listStreams;
@@ -78,8 +75,7 @@ export interface BackendSubscriptionApi {
 
 const defaultApi: BackendSubscriptionApi = {
   subscribeWorkspaceContext,
-  readBacklog,
-  readThreadWork,
+  readWorkList,
   subscribeOxplowEvents,
   getThreadState,
   listStreams,
@@ -109,8 +105,7 @@ export function useBackendSubscriptions(
   } = handlers;
   const {
     subscribeWorkspaceContext,
-    readBacklog,
-    readThreadWork,
+    readWorkList,
     subscribeOxplowEvents,
     getThreadState,
     listStreams,
@@ -124,7 +119,7 @@ export function useBackendSubscriptions(
     return subscribeWorkspaceContext((next) => setWorkspaceContext(next));
   }, [setWorkspaceContext]);
 
-  // Tasks are read from the models (P6.E1b): the backlog and every loaded
+  // Work lists are read through the work-item interface: the backlog and every loaded
   // thread's work re-read when a model they read changes — whoever wrote
   // it (a person's command, an agent's MCP tool). What they read is the
   // union of the reads the last loads reported (`readsChanged`, the same
@@ -134,7 +129,7 @@ export function useBackendSubscriptions(
     const reads: { backlog: Reads; threads: Record<string, Reads> } = { backlog: NO_READS, threads: {} };
     const allReads = () => unionReads([reads.backlog, ...Object.values(reads.threads)]);
     const reloadThread = (threadId: string) =>
-      readThreadWork(threadId)
+      readWorkList(threadId)
         .then((work) => {
           if (cancelled) return;
           reads.threads[threadId] = work.reads;
@@ -142,7 +137,7 @@ export function useBackendSubscriptions(
         })
         .catch((error) => logUi("warn", "failed to refresh thread work", { threadId, error: String(error) }));
     const reloadAll = () => {
-      void readBacklog()
+      void readWorkList(null)
         .then((state) => {
           if (cancelled) return;
           reads.backlog = state.reads;

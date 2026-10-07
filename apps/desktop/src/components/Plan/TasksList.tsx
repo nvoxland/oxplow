@@ -1,43 +1,31 @@
 import { useEffect, useMemo, useState, type ComponentProps } from "react";
-import type { ThreadWorkState } from "../../api.js";
+import { bucketWorkList, type WorkList } from "../../workItems.js";
 import { PlanPane } from "./PlanPane.js";
-import {
-  TasksFilterBar,
-  applyTasksFilters,
-  loadTasksFilters,
-  saveTasksFilters,
-  type TasksFilters,
-} from "./TasksFilterBar.js";
+import { TasksFilterBar, loadTasksFilters, saveTasksFilters } from "./TasksFilterBar.js";
+import type { FieldFilter } from "./plan-utils.js";
 
 type PlanPaneProps = ComponentProps<typeof PlanPane>;
 
 /**
- * Composed list shell for the Tasks page: priority filter bar above
- * + PlanPane below. Holds the filter state, persists it to local-
- * storage, and preprocesses `threadWork.items` by priority before
- * handing it to PlanPane. The section split (Ready / Blocked / Done
- * preview) replaces what the search/status/hide-auto/show-closed
- * controls used to provide.
+ * Composed list shell for the Tasks page: the declared-field filter bar
+ * above + PlanPane below. Holds the chips, persists them to local
+ * storage, and narrows the list to the matching items before handing it
+ * to PlanPane (an epic stays while any child matches).
  */
-export function TasksList(props: Omit<PlanPaneProps, "hideAuto" | "onlyStatuses" | "excludeStatuses">) {
-  const [filters, setFiltersState] = useState<TasksFilters>(() => loadTasksFilters());
-  useEffect(() => { saveTasksFilters(filters); }, [filters]);
-  const setFilters = (next: TasksFilters) => setFiltersState(next);
+export function TasksList(props: Omit<PlanPaneProps, "onlyStates" | "excludeStates">) {
+  const [filter, setFilter] = useState<FieldFilter>(() => loadTasksFilters());
+  useEffect(() => { saveTasksFilters(filter); }, [filter]);
 
-  const filteredThreadWork = useMemo<ThreadWorkState | null>(() => {
-    if (!props.threadWork) return null;
-    if (filters.priorities.size === 0) return props.threadWork;
-    const filteredItems = applyTasksFilters(props.threadWork.items, filters);
-    const allowedIds = new Set(filteredItems.map((i) => i.id));
-    return {
-      ...props.threadWork,
-      items: filteredItems,
-      waiting: props.threadWork.waiting.filter((i) => allowedIds.has(i.id)),
-      inProgress: props.threadWork.inProgress.filter((i) => allowedIds.has(i.id)),
-      done: props.threadWork.done.filter((i) => allowedIds.has(i.id)),
-      epics: props.threadWork.epics.filter((i) => allowedIds.has(i.id)),
-    };
-  }, [props.threadWork, filters]);
+  const filteredThreadWork = useMemo<WorkList | null>(() => {
+    const list = props.threadWork;
+    if (!list) return null;
+    const chosen = Object.entries(filter).filter(([name, values]) => values.length > 0 && props.fields.some((f) => f.name === name));
+    if (chosen.length === 0) return list;
+    const matches = (i: WorkList["all"][number]) =>
+      chosen.every(([name, values]) => values.includes(String(i.native[name] ?? "")));
+    const parents = new Set(list.all.filter(matches).map((i) => i.parentRef).filter((p): p is string => p !== null));
+    return bucketWorkList(list.threadId, list.all.filter((i) => matches(i) || parents.has(i.ref)), list.followups, list.reads);
+  }, [props.threadWork, props.fields, filter]);
 
   // visibleSections in props takes precedence — Tasks page passes
   // ["ready", "blocked", "done"] and we don't override.
@@ -65,12 +53,12 @@ export function TasksList(props: Omit<PlanPaneProps, "hideAuto" | "onlyStatuses"
           position: static !important;
         }
       `}</style>
-      <TasksFilterBar filters={filters} onChange={setFilters} />
+      <TasksFilterBar fields={props.fields} filter={filter} onChange={setFilter} />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "auto" }}>
         <PlanPane
           {...props}
           threadWork={filteredThreadWork}
-          excludeStatuses={["canceled", "archived"]}
+          excludeStates={["canceled"]}
         />
       </div>
     </div>

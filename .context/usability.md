@@ -568,11 +568,10 @@ declaring *what it is* and mounting the generic layer.
   Shift+click ranges from the selected anchor. A plain click clears
   marks and moves the selection. Marked rows render with a yellow
   left-stripe + tint. Dragging any marked row carries every marked
-  id in `TASK_DRAG_MIME`'s `itemIds` so drops on the backlog chip, on
-  task rows / group headers in `TaskGroupList`, or on the agent
-  terminal move all of them at once. Drop targets that handle
-  single-item payloads still work — they fall back to `itemId` when
-  `itemIds` is absent.
+  ref in the `WORK_ITEM_DRAG_MIME` payload's `refs` (with each one's
+  title and state) so drops on the backlog chip, on rows / group
+  headers in `TaskGroupList`, on a Board column or on the agent
+  terminal move all of them at once.
 - **Plan pane: a selection-aware action bar appears at the top of the
   work-group region whenever ≥1 row is marked.** Component:
   `apps/desktop/src/components/Plan/SelectionActionBar.tsx`. Buttons mirror the
@@ -747,12 +746,13 @@ declaring *what it is* and mounting the generic layer.
   a compatible drag enters it. Clear the highlight on leave/drop.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. **Every internal MIME
-  lives in `apps/desktop/src/dragMimes.ts`** — `TASK_DRAG_MIME` (task
-  reorder / multi-select moves), `CONTEXT_REF_MIME` ("Add to agent
+  lives in `apps/desktop/src/dragMimes.ts`** — `WORK_ITEM_DRAG_MIME` (list
+  rows and Board cards: reorder, restate, multi-select moves),
+  `CONTEXT_REF_MIME` ("Add to agent
   context"), `RAIL_SECTION_DRAG_MIME` (RailHud section reorder). Add a new
   MIME there rather than overloading an existing one, and rather than
   declaring a `const` next to the component that introduced it: that was
-  the old shape, and `application/x-oxplow-task` ended up defined twice
+  the old shape, and one task MIME ended up defined twice
   with a unit test whose only job was asserting the copies hadn't drifted
   (tsk271). The module is deliberately import-free so decoders, pure
   helpers, and components can all reach it.

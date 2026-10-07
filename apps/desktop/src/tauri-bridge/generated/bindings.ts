@@ -2912,6 +2912,11 @@ export type FieldDecl = {
 	 *  other kind).
 	 */
 	values?: string[],
+	/**
+	 *  Set by the list itself (who filed it, when it synced): shown, never
+	 *  edited — a `work_item.update` that names it is refused.
+	 */
+	read_only?: boolean,
 };
 
 // What kind of value a declared field holds.

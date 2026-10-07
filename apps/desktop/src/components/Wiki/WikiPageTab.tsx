@@ -9,6 +9,8 @@ import {
   type WikiFreshnessSummary,
 } from "./wikiFreshness.js";
 import { MarkdownView, preprocessWikilinks, postprocessWikilinks } from "./MarkdownView.js";
+import { useWorkListProfile } from "../../useWorkListProfile.js";
+import { workItemRefOfMention } from "../../workItems.js";
 import { contextNodeProps } from "../Comments/contextNodes.js";
 import { RichTextField } from "../RichText/RichTextField.js";
 import { recordOpError } from "../opErrorsStore.js";
@@ -65,7 +67,11 @@ export function WikiPageTab({
   // Pre-process `[[ ]]` wikilinks into standard markdown links before
   // handing the body to Tiptap; post-process back to `[[ ]]` form on
   // commit so the on-disk file keeps its authored shape.
-  const editorValue = useMemo(() => preprocessWikilinks(body), [body]);
+  const profile = useWorkListProfile();
+  const editorValue = useMemo(
+    () => preprocessWikilinks(body, (id) => workItemRefOfMention(profile, id)),
+    [body, profile],
+  );
 
   // Persist scroll position across restart — see original WikiPageTab
   // for the rationale (ref-based to avoid wheel-event setState loops).

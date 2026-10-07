@@ -36,7 +36,7 @@ export type LensIconSpec =
   | { Icon: LucideIcon; tone: null; label: string };
 
 /** The work-status glyphs, matching the rail's Work rows (and the status
- *  words `v_task` / `v_work_item` use, so a query can pass its status). */
+ *  states `v_work_item` uses, so a query can pass its state). */
 const STATUS: Record<string, { glyph: string; tone: LensTone | null; label: string }> = {
   ready: { glyph: "☐", tone: null, label: "Ready" },
   todo: { glyph: "☐", tone: null, label: "Ready" },

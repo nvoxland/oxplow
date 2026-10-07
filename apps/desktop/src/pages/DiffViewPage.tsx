@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { DiffEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
 import type { ExtensionChange } from "../tauri-bridge/generated/bindings.js";
 import { EffectReportView } from "../components/EffectReportView.js";
-import { readTask, readTasksById } from "../workItems.js";
+import { readWorkItem, readWorkItemsByRef } from "../workItems.js";
 import {
   extensionEffectsBetween,
   querySql,
@@ -37,7 +37,7 @@ import {
   effortDiffRef,
   endpointDiffRef,
   snapshotRef,
-  taskRef,
+  workItemTabRef,
   turnRef,
   type DiffViewPayload,
 } from "../tabs/pageRefs.js";
@@ -95,9 +95,9 @@ interface ResolvedDiff {
   inProgress: boolean;
   /** What the diff is of — picks the in-progress notice's wording. */
   subject: DiffSubject;
-  /** Task id of the effort this diff was opened *for* (effort mode);
-   *  null for snapshot/endpoint diffs. */
-  taskId: string | null;
+  /** The work item of the effort this diff was opened *for* (effort
+   *  mode); null for snapshot/endpoint diffs and an unlinked effort. */
+  workItem: string | null;
   /** Effort id when the diff was opened *for* an effort (effort mode).
    *  Drives the claimed-files filter; null otherwise. */
   effortId: string | null;
@@ -158,7 +158,7 @@ function DiffBody({
         end: spec.end,
         inProgress: spec.end === WORKING,
         subject: "endpoints",
-        taskId: null,
+        workItem: null,
         effortId: null,
       });
       return;
@@ -175,7 +175,7 @@ function DiffBody({
           setResolved({
             ...resolveEffortEndpoints(effort),
             subject: "effort",
-            taskId: effort.taskId,
+            workItem: effort.workItem,
             effortId: effort.effortId,
           });
         })
@@ -206,7 +206,7 @@ function DiffBody({
           setResolved({
             ...endpoints,
             subject: "turn",
-            taskId: null,
+            workItem: null,
             effortId: null,
           });
         })
@@ -232,7 +232,7 @@ function DiffBody({
         setResolved({
           ...resolveSnapshotEndpoints(snapshotId, prev),
           subject: "endpoints",
-          taskId: null,
+          workItem: null,
           effortId: null,
         });
       })
@@ -301,7 +301,7 @@ function ResolvedEndpointDiff({
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
 }) {
-  const { start, end, inProgress, taskId, effortId } = resolved;
+  const { start, end, inProgress, workItem, effortId } = resolved;
   const effortPassed = effortId != null;
 
   // Snapshot id → its capture time + pinned git commit, for the title's
@@ -352,24 +352,24 @@ function ResolvedEndpointDiff({
     };
   }, [stream?.id, start, end, extensionKey]);
 
-  // Task title for the header (effort mode).
+  // The work item's title for the header (effort mode).
   const [taskTitle, setTaskTitle] = useState<string | null>(null);
   useEffect(() => {
-    if (!taskId) {
+    if (!workItem) {
       setTaskTitle(null);
       return;
     }
     let cancelled = false;
-    void readTasksById([taskId])
-      .then(({ tasks }) => {
+    void readWorkItemsByRef([workItem])
+      .then(({ items }) => {
         if (cancelled) return;
-        setTaskTitle(tasks.find((r) => r.id === taskId)?.title ?? null);
+        setTaskTitle(items.find((r) => r.ref === workItem)?.title ?? null);
       })
       .catch(() => setTaskTitle(null));
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
+  }, [workItem]);
 
   // Efforts whose snapshot window overlaps this range. Drives both the
   // "Concurrent Efforts" list and the lined-up-effort title detection.
@@ -389,11 +389,11 @@ function ResolvedEndpointDiff({
           if (!cancelled) setEffortRows([]);
           return;
         }
-        const taskIds = overlapping.flatMap((o) => (o.taskId ? [o.taskId] : []));
-        const titles = await readTasksById(Array.from(new Set(taskIds)))
-          .then((r) => r.tasks)
-          .catch(() => [] as Array<{ id: string; title: string }>);
-        const titleByTask = new Map(titles.map((t) => [t.id, t.title] as const));
+        const itemRefs = overlapping.flatMap((o) => (o.workItem ? [o.workItem] : []));
+        const titles = await readWorkItemsByRef(Array.from(new Set(itemRefs)))
+          .then((r) => r.items)
+          .catch(() => [] as Array<{ ref: string; title: string }>);
+        const titleByItem = new Map(titles.map((t) => [t.ref, t.title] as const));
         // An unlinked effort is named by its own title (`v_effort.title`).
         const unlinked = overlapping
           .map((o) => (o.workItem ? null : effortRowId(o.effortId)))
@@ -415,17 +415,14 @@ function ResolvedEndpointDiff({
               snapshotId: range.rangeEnd,
               effortId: o.effortId,
               workItem: o.workItem,
-              tasksId: o.taskId,
               threadId: o.threadId,
               startSnapshotId: o.startSnapshotId,
               endSnapshotId: o.endSnapshotId,
               completedHere: o.endSnapshotId === range.rangeEnd,
             },
-            taskTitle: o.taskId
-              ? titleByTask.get(o.taskId) ?? `task ${o.taskId}`
-              : o.workItem
-                ? workItemLabel(o.workItem)
-                : titleByEffort.get(effortRowId(o.effortId) ?? -1) ?? "Unlinked work",
+            taskTitle: o.workItem
+              ? titleByItem.get(o.workItem) ?? workItemLabel(o.workItem)
+              : titleByEffort.get(effortRowId(o.effortId) ?? -1) ?? "Unlinked work",
             endedAt: o.endedAt,
           })),
         );
@@ -485,20 +482,20 @@ function ResolvedEndpointDiff({
   // In effort mode the header reads the effort's own title (`v_effort`).
   const [ownTitle, setOwnTitle] = useState<string | null>(null);
   const effortTitle = effortPassed ? ownTitle ?? taskTitle : linedUpEffort?.taskTitle ?? null;
-  const primaryTaskId = effortPassed ? taskId : linedUpEffort?.effort.tasksId ?? null;
+  const primaryItem = effortPassed ? workItem : linedUpEffort?.effort.workItem ?? null;
 
   // The effort's task description, rendered at the top when the diff is for
   // an effort, so the reader has its intent in context.
   const [effortDescription, setEffortDescription] = useState<string | null>(null);
   useEffect(() => {
-    if (!primaryTaskId) {
+    if (!primaryItem) {
       setEffortDescription(null);
       return;
     }
     let cancelled = false;
-    void readTask(primaryTaskId)
-      .then(({ task }) => {
-        if (!cancelled) setEffortDescription(task?.description ?? null);
+    void readWorkItem(primaryItem)
+      .then(({ item }) => {
+        if (!cancelled) setEffortDescription(item?.body ?? null);
       })
       .catch(() => {
         if (!cancelled) setEffortDescription(null);
@@ -506,7 +503,7 @@ function ResolvedEndpointDiff({
     return () => {
       cancelled = true;
     };
-  }, [primaryTaskId]);
+  }, [primaryItem]);
 
   // Concurrent efforts = every overlapping effort other than the one this
   // diff is for. Drops efforts that had already ENDED before this range began —
@@ -610,16 +607,16 @@ function ResolvedEndpointDiff({
   const dateLabel = rangeDateLabel(startDisp.iso, endDisp.iso);
   const rail = (
     <div data-testid="diff-view-range" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {/* When this diff lines up with an effort, name its task and link to it
-          (effort passed, or a snapshot range that matches an overlapping
-          effort's bracket — `primaryTaskId`/`effortTitle`). */}
-      {primaryTaskId && effortTitle ? (
+      {/* When this diff lines up with an effort, name its work item and link
+          to it (effort passed, or a snapshot range that matches an
+          overlapping effort's bracket — `primaryItem`/`effortTitle`). */}
+      {primaryItem && effortTitle ? (
         <div style={railRowStyle}>
-          <span style={railLabelStyle}>Task</span>
+          <span style={railLabelStyle}>Work item</span>
           <button
             type="button"
             data-testid="diff-view-task-link"
-            onClick={() => onOpenPage(taskRef(primaryTaskId))}
+            onClick={() => onOpenPage(workItemTabRef(primaryItem))}
             title={effortTitle}
             style={{
               ...linkButton,
@@ -735,16 +732,16 @@ function ResolvedEndpointDiff({
           <ul style={effortListStyle}>
             {concurrentEfforts.map((r) => (
               <li key={r.effort.effortId}>
-                {r.effort.tasksId ? (
+                {r.effort.workItem ? (
                   <button
                     type="button"
-                    onClick={() => onOpenPage(taskRef(r.effort.tasksId as string))}
+                    onClick={() => onOpenPage(workItemTabRef(r.effort.workItem as string))}
                     style={{ ...linkButton, fontFamily: "inherit", fontSize: "var(--text-sm)" }}
                   >
                     {r.taskTitle}
                   </button>
                 ) : (
-                  // Another provider's work item has no page here.
+                  // An unlinked effort has no item page.
                   <span style={{ fontSize: "var(--text-sm)" }}>{r.taskTitle}</span>
                 )}
               </li>

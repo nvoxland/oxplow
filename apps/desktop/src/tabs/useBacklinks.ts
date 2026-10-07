@@ -6,13 +6,11 @@ import {
   gitCommitRef,
   lensRef,
   wikiPageRef,
-  taskRef,
+  workItemTabRef,
 } from "./pageRefs.js";
+import { workItemId } from "../workItemRef.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
-
-/** Tasks are `work_item`s under the oxplow provider (`oxplow:tsk42`). */
-const OXPLOW_PROVIDER = "oxplow:";
 
 /**
  * Backlinks for a page. One IPC call to the unified `page_ref`
@@ -101,10 +99,8 @@ export function canonicalIdForTarget(ref: TabRef): string | null {
       return p?.slug ?? null;
     }
     case "work_item": {
-      // An oxplow task's page carries its id; another provider's, its ref.
-      const p = ref.payload as { itemId?: string; ref?: string } | null;
-      if (p?.itemId) return `${OXPLOW_PROVIDER}${p.itemId}`;
-      return p?.ref?.startsWith("work_item:") ? p.ref.slice("work_item:".length) : null;
+      const p = ref.payload as { ref?: string } | null;
+      return p?.ref ? workItemId(p.ref) : null;
     }
     case "file": {
       const p = ref.payload as { path?: string } | null;
@@ -232,9 +228,7 @@ function refFor(kind: string, id: string): TabRef | null {
     case "wiki":
       return wikiPageRef(id);
     case "work_item":
-      // Only oxplow's own tasks have a page; another provider's item
-      // (`issues:ENG-12`) is dropped until a provider renders it.
-      return id.startsWith(OXPLOW_PROVIDER) ? taskRef(id.slice(OXPLOW_PROVIDER.length)) : null;
+      return workItemTabRef(`work_item:${id}`);
     case "file":
       return fileRef(id);
     case "dir":

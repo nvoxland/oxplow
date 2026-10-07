@@ -4,7 +4,7 @@ import {
   ALL_DRAG_MIMES,
   CONTEXT_REF_MIME,
   RAIL_SECTION_DRAG_MIME,
-  TASK_DRAG_MIME,
+  WORK_ITEM_DRAG_MIME,
 } from "./dragMimes.js";
 
 describe("drag MIME registry", () => {
@@ -12,7 +12,7 @@ describe("drag MIME registry", () => {
     // Both ends of every drag live in this bundle, so these strings are
     // free to change — but a silent change breaks the source/sink pair
     // in a way nothing else would catch, so pin them.
-    expect(TASK_DRAG_MIME).toBe("application/x-oxplow-task");
+    expect(WORK_ITEM_DRAG_MIME).toBe("application/x-oxplow-work-item");
     expect(CONTEXT_REF_MIME).toBe("application/x-oxplow-context-ref");
     expect(RAIL_SECTION_DRAG_MIME).toBe("application/x-oxplow-rail-section");
   });
@@ -26,9 +26,9 @@ describe("drag MIME registry", () => {
   });
 
   test("no two drag kinds share a MIME", () => {
-    // This registry exists because `application/x-oxplow-task` was once
-    // declared twice, in two modules, with a test whose only job was to
-    // assert the copies hadn't drifted (tsk271). One home, one constant.
+    // This registry exists because one MIME was once declared twice, in
+    // two modules, with a test whose only job was to assert the copies
+    // hadn't drifted. One home, one constant.
     expect(new Set(ALL_DRAG_MIMES).size).toBe(ALL_DRAG_MIMES.length);
   });
 });

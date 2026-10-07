@@ -28,7 +28,7 @@ import {
   threadSettingsRef,
   wikiFreshnessRef,
   wikiPageRef,
-  taskRef,
+  workItemTabRef,
 } from "./pageRefs.js";
 import { parseRef } from "../refs/ref.js";
 
@@ -59,13 +59,13 @@ describe("pageRefs", () => {
     expect(diffRef({ ...spec, labelOverride: "wi 3" }).id).toBe("page:diff?path=src/a.ts&left=git:abc&right=working&label=wi+3");
   });
 
-  test("wikiPageRef and taskRef encode canonical refs", () => {
+  test("wikiPageRef and workItemTabRef encode canonical refs", () => {
     expect(wikiPageRef("how-x-works").id).toBe("wiki:how-x-works");
-    // A task is a work item under the oxplow provider (.context/refs.md).
-    expect(taskRef("tsk123")).toEqual({
+    // A work item's tab is its ref, whichever list (.context/refs.md).
+    expect(workItemTabRef("work_item:oxplow:tsk123")).toEqual({
       id: "work_item:oxplow:tsk123",
       kind: "work_item",
-      payload: { itemId: "tsk123" },
+      payload: { ref: "work_item:oxplow:tsk123" },
     });
     expect(gitCommitRef("abc1234")).toEqual({ id: "commit:abc1234", kind: "commit", payload: { sha: "abc1234" } });
     expect(metricRef("oxplow.todos")).toEqual({
@@ -199,7 +199,7 @@ describe("refFromTabId", () => {
   test("rebuilds payload-bearing kinds from their id", () => {
     expect(refFromTabId("wiki:some-slug")).toEqual(wikiPageRef("some-slug"));
     // `:` inside an id is legal; a naive split on the first colon breaks here.
-    expect(refFromTabId("work_item:oxplow:tsk42")).toEqual(taskRef("tsk42"));
+    expect(refFromTabId("work_item:oxplow:tsk42")).toEqual(workItemTabRef("work_item:oxplow:tsk42"));
     expect(refFromTabId("commit:abc1234")).toEqual(gitCommitRef("abc1234"));
     expect(refFromTabId("metric:oxplow.todos")).toEqual(metricRef("oxplow.todos"));
     // Single snapshot is a diff-view ref now (kind "snapshot" is gone).
@@ -254,7 +254,7 @@ describe("refFromTabId", () => {
       indexRef("git-dashboard"),
       metricRef("oxplow.todos"),
       snapshotRef(112),
-      taskRef("tsk42"),
+      workItemTabRef("work_item:oxplow:tsk42"),
       wikiPageRef("some-slug"),
       customDashboardRef("dsh1"),
       effortDiffRef("eff9"),
@@ -306,30 +306,26 @@ describe("refFromTabId", () => {
   });
 });
 
-import { taskRef, workItemTabRef } from "./pageRefs.js";
-
-// P6b.C3: any provider's work item opens — oxplow's as its task page,
-// another's as the provider-neutral work item page.
+// Every list's work item opens the one work item page, by its ref.
 test("a work item ref opens for every provider", () => {
-  expect(workItemTabRef("work_item:oxplow:tsk3")).toEqual(taskRef("tsk3"));
   const theirs = workItemTabRef("work_item:fake:W-1");
   expect(theirs).toEqual({ id: "work_item:fake:W-1", kind: "work_item", payload: { ref: "work_item:fake:W-1" } });
   expect(refFromTabId("work_item:fake:W-1")).toEqual(theirs);
-  expect(refFromTabId("work_item:oxplow:tsk3")).toEqual(taskRef("tsk3"));
+  expect(refFromTabId("work_item:oxplow:tsk3")).toEqual(workItemTabRef("work_item:oxplow:tsk3"));
 });
 
 // P9.D3: where a unified-search hit opens. A hit of an extension's ref
 // kind (a searchable kind) opens that kind's page with `?ref=`, as a
 // `[[pr:12]]` does; core kinds keep their pages; a note has none.
 test("searchHitTarget routes core kinds and an extension's kind", async () => {
-  const { searchHitTarget, taskRef, wikiPageRef, commentsRef, extPageRef } = await import("./pageRefs.js");
+  const { searchHitTarget, workItemTabRef, wikiPageRef, commentsRef, extPageRef } = await import("./pageRefs.js");
   const { setRefKinds } = await import("../refKinds.js");
   setRefKinds([
     { kind: "acme_pr", extension: "acme", label: "Pull request", idPattern: "^\\d+$", wikilinks: ["pr"], resolve: "v_acme_prs", page: "page:ext.acme.pr", icon: "git-pull-request" },
   ]);
   try {
     // A work item's hit carries its ref after `work_item:`.
-    expect(searchHitTarget({ kind: "work_item", ref_id: "oxplow:tsk1" })).toEqual({ page: taskRef("tsk1") });
+    expect(searchHitTarget({ kind: "work_item", ref_id: "oxplow:tsk1" })).toEqual({ page: workItemTabRef("work_item:oxplow:tsk1") });
     expect(searchHitTarget({ kind: "wiki", ref_id: "home" })).toEqual({ page: wikiPageRef("home") });
     expect(searchHitTarget({ kind: "comment", ref_id: "7" })).toEqual({ page: commentsRef() });
     expect(searchHitTarget({ kind: "file", ref_id: "src/a.ts" })).toEqual({ file: "src/a.ts" });

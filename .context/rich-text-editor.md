@@ -128,14 +128,16 @@ markdown links (`[label](file:path)`) for read-rendering; the new
 markdown links carrying our internal schemes (`file:`, `dir:`,
 `gitcommit:`, `task:`) back into `[[ ]]` form on save.
 
-**Task wikilinks** (`[[tsk<id>]]`, matching the backend ref extractor in
-`crates/oxplow-domain/src/refs.rs`) route to a `task:<id>` internal link
-and **resolve to the task's title** at render time via `useTaskTitle`
-(`apps/desktop/src/taskTitleCache.ts`, a lazy per-id sibling of
-`wikiTitleCache`) — same display-swap rule wiki slugs use (bare `[[tsk42]]`
-shows the title; `[[tsk42|label]]` keeps the label). Click routes through
-`taskRef` via the page-nav chokepoint. Tasks are the only object-id scheme
-wired so far; findings/etc. would follow the same pattern.
+**Work item wikilinks** — a full ref (`[[work_item:issues:ENG-1]]`) or a
+bare id of the active list's (`[[tsk42]]` with oxplow's tasks), matched
+by the id pattern the list declares (`v_capability_provider.id_pattern`,
+`workItemRefOfMention`), as the backend ref extractor does — route to the
+item's `work_item:<provider>:<id>` link and **resolve to its title** at
+render time via `useWorkItemTitle` (`apps/desktop/src/workItemTitleCache.ts`,
+a lazy per-ref sibling of `wikiTitleCache`) — same display-swap rule wiki
+slugs use (bare `[[tsk42]]` shows the title; `[[tsk42|label]]` keeps the
+label). An item that isn't on the active list renders broken. Click
+routes through `workItemTabRef` via the page-nav chokepoint.
 
 `WikiPageTab` applies `preprocessWikilinks` to the body before
 handing it to `RichTextField`, and applies `postprocessWikilinks` to
@@ -190,9 +192,9 @@ WikiPageTab passes `{ targetKind: "wiki", targetId: slug, threadId:
 null }` (wiki pages aren't thread-bound) and additionally wraps the
 body scroll host in a `wiki:<slug>` context node
 (`contextNodeProps`), so plain-DOM selections around the editor
-resolve to the page too; TaskPage passes
-`{ targetKind: "task", targetId: String(item.id), threadId:
-item.thread_id }`.
+resolve to the page too; WorkItemPage passes
+`{ targetKind: "work_item", targetId: "<provider>:<id>", threadId:
+item.threadId }`.
 
 - **`CommentDecorations.ts`** is a ProseMirror **plugin extension**,
   NOT a stored mark. This is the load-bearing rule: a stored mark

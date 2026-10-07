@@ -1,4 +1,4 @@
-import type { BacklogState } from "../../api.js";
+import type { WorkList } from "../../workItems.js";
 import { openBacklogCount } from "./plan-utils.js";
 
 const headerStyle: React.CSSProperties = {
@@ -31,7 +31,7 @@ export function BacklogDrawer({
   backlog,
   onOpenBacklog,
 }: {
-  backlog: BacklogState | null;
+  backlog: WorkList | null;
   onOpenBacklog(): void;
 }) {
   const count = openBacklogCount(backlog);

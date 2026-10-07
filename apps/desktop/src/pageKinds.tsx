@@ -130,7 +130,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return CheckCheck;
     case "backlog":
       return Inbox;
-    case "archived":
     case "closed-threads":
       return Archive;
     case "wiki-index":
@@ -205,11 +204,11 @@ export function pageKindLabel(kind: string): string {
     case "wiki":
       return "wiki page";
     case "work_item":
-      return "task";
+      return "work item";
     case "diff-view":
       return "diff";
     case "new-task":
-      return "new task";
+      return "new item";
     case "new-stream":
       return "new stream";
     case "closed-threads":

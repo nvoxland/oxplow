@@ -5,9 +5,9 @@
  * pressing Enter.
  *
  * Files and wiki pages use Claude Code's `@<path>` mention convention
- * so the agent reads the file on the next prompt. tasks have no
- * file form and instead get a short bracketed reference; the agent can
- * resolve the title to a body via `oxplow__get_task` if it cares.
+ * so the agent reads the file on the next prompt. Work items have no
+ * file form and instead get a short bracketed reference by ref; the agent
+ * reads the item through the work-item interface if it cares.
  */
 
 import { fileLinesRef } from "./refs/ref.js";
@@ -15,7 +15,7 @@ import { fileLinesRef } from "./refs/ref.js";
 export type ContextRef =
   | { kind: "file"; path: string }
   | { kind: "wiki"; slug: string }
-  | { kind: "task"; itemId: string; title: string; status: string }
+  | { kind: "work_item"; ref: string; title: string; state: string }
   | { kind: "lens"; lensId: string; params: Record<string, unknown> }
   /** Ask About This (P6.D1): any canonical ref; the agent reads it by kind. */
   | { kind: "ref"; ref: string };
@@ -51,9 +51,9 @@ export function formatContextMention(ref: ContextRef): string {
       .join("");
     return `[oxplow lens ${ref.lensId}${params}] `;
   }
-  // tasks: keep the title as plain text but strip newlines and
+  // A work item: keep the title as plain text but strip newlines and
   // collapse internal whitespace so the inserted snippet stays on one
   // line. Don't escape quotes — the agent reads it as plain text.
   const cleanTitle = ref.title.replace(/\s+/g, " ").trim();
-  return `[oxplow task ${ref.itemId}: "${cleanTitle}" (${ref.status})] `;
+  return `[oxplow ${ref.ref}: "${cleanTitle}" (${ref.state})] `;
 }

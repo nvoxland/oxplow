@@ -17,11 +17,11 @@ mock.module("../../api.js", () => ({
   querySql: async (sql: string, ...rest: unknown[]) => {
     if (!sql.includes("FROM v_work_item w")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
     return {
-      columns: ["ref", "provider", "title", "body", "state", "native_state", "parent_ref", "created_at", "updated_at", "task_id", "thread_id", "status", "priority", "sort_index", "author", "completed_at", "note_count"],
+      columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
       rows: [
-        ["work_item:oxplow:tsk1", "oxplow", "Plan it", "", "todo", "ready", null, "t", "t", 1, 1, "ready", "medium", 0, "user", null, 0],
-        ["work_item:oxplow:tsk2", "oxplow", "Ship it", "", "in_progress", "in_progress", null, "t", "t", 2, 1, "in_progress", "high", 1, "agent", null, 2],
-        ["work_item:fake:W-1", "fake", "Their bug", "", "todo", "Backlog", null, "t", "t", null, null, null, null, null, null, null, 0],
+        ["work_item:oxplow:tsk1", "oxplow", "Plan it", "", "todo", null, 1, 0, null, "t", "t", '{"priority":"medium"}', 0],
+        ["work_item:oxplow:tsk2", "oxplow", "Ship it", "", "in_progress", null, 1, 1, null, "t", "t", '{"priority":"high"}', 2],
+        ["work_item:fake:W-1", "fake", "Their bug", "", "todo", null, null, null, null, "t", "t", null, 0],
       ],
       truncated: false,
       reads: { models: ["v_work_item"], tables: [], measures: [] },
@@ -35,6 +35,9 @@ mock.module("../../api.js", () => ({
   },
 }));
 const { WorkBoard } = await import("./WorkBoard.js");
+
+/** A work-item drag carrying one card. */
+const drag = (ref: string) => JSON.stringify({ refs: [ref], items: [], fromThreadId: null });
 
 afterEach(() => {
   extensions = [];
@@ -53,7 +56,7 @@ test("cards sit in their state's column", async () => {
 test("dropping a card on a column, or its menu's Move To, transitions it", async () => {
   const view = render(<WorkBoard scope="all" onOpenPage={() => {}} />);
   await waitFor(() => view.getByText("Plan it"));
-  const data = new Map<string, string>([[WORK_ITEM_DRAG_MIME, "work_item:oxplow:tsk1"]]);
+  const data = new Map<string, string>([[WORK_ITEM_DRAG_MIME, drag("work_item:oxplow:tsk1")]]);
   const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
   fireEvent.dragOver(view.getByTestId("board-column-blocked"), { dataTransfer });
   fireEvent.drop(view.getByTestId("board-column-blocked"), { dataTransfer });
@@ -71,7 +74,7 @@ test("another provider's card links to its page and moves through work_item.tran
   const view = render(<WorkBoard scope="all" onOpenPage={(ref) => opened.push(ref.id)} />);
   fireEvent.click(await waitFor(() => view.getByText("Their bug")));
   expect(opened).toEqual(["work_item:fake:W-1"]);
-  const data = new Map<string, string>([[WORK_ITEM_DRAG_MIME, "work_item:fake:W-1"]]);
+  const data = new Map<string, string>([[WORK_ITEM_DRAG_MIME, drag("work_item:fake:W-1")]]);
   const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
   fireEvent.drop(view.getByTestId("board-column-done"), { dataTransfer });
   await waitFor(() => expect(ran).toEqual([["work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));

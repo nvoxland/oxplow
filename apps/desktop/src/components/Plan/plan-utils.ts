@@ -1,12 +1,6 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
-import type {
-  BacklogState,
-  ThreadWorkState,
-  Task,
-  TaskPriority,
-  TaskStatus,
-} from "../../api.js";
+import { STATE_LABEL, type CanonicalState, type WorkItem, type WorkList } from "../../workItems.js";
 
 // Keys for collapsible sections in the Plan pane. Extends
 // TaskSectionKind with the pseudo-sections that PlanPane injects
@@ -47,9 +41,10 @@ export function useCollapsedSections(): {
 }
 
 export interface TaskGroup {
-  epic: Task | null;
-  items: Task[];
-  epicChildren: Map<string, Task[]>;
+  epic: WorkItem | null;
+  items: WorkItem[];
+  /** Each epic's children (by its ref), in list order. */
+  epicChildren: Map<string, WorkItem[]>;
 }
 
 export type TaskSectionKind = "inProgress" | "ready" | "blocked" | "done";
@@ -57,7 +52,7 @@ export type TaskSectionKind = "inProgress" | "ready" | "blocked" | "done";
 export interface TaskSection {
   kind: TaskSectionKind;
   label: string;
-  items: Task[];
+  items: WorkItem[];
 }
 
 // Fixed top-to-bottom order and labels. Always iterated in this order by the
@@ -69,329 +64,188 @@ const SECTION_ORDER: Array<{ kind: TaskSectionKind; label: string }> = [
   { kind: "done", label: "Done" },
 ];
 
-export function classifyTaskStatus(status: TaskStatus): TaskSectionKind {
-  switch (status) {
+/** The section an item's state puts it in; done and canceled share Done. */
+export function classifyState(state: CanonicalState): TaskSectionKind {
+  switch (state) {
     case "in_progress": return "inProgress";
-    case "ready": return "ready";
+    case "todo": return "ready";
     case "blocked": return "blocked";
-    // `archived` rolls into the Done section — the done-section header
-    // owns a "Show archived" toggle that controls whether those rows are
-    // visible. Keeping archived in its own section cluttered the panel.
-    case "done": case "canceled": case "archived": return "done";
+    case "done": case "canceled": return "done";
   }
 }
+
+const closed = (state: CanonicalState) => state === "done" || state === "canceled";
 
 /**
- * Effective section for an epic, derived from its children's statuses.
+ * Effective section for an epic, derived from its children's states.
  * Epics move between sections as a block — the epic + all its children
- * render together under whichever section the rollup picks. Children
- * retain their literal statuses (badges, drag rules, etc.); only the
- * epic's *placement* changes.
+ * render together under whichever section the rollup picks. Children keep
+ * their own states; only the epic's *placement* changes.
  *
- * Priority order:
  *   1. any child blocked → blocked
- *   2. all children terminal (done/canceled/archived) → done
- *   3. any child in_progress, or any done child mixed with non-done
- *      non-blocked siblings → inProgress
- *   4. all children ready → ready
+ *   2. every child closed (done / canceled) → done
+ *   3. any child started, or a closed child beside open ones → inProgress
+ *   4. every child ready → ready
  *
- * Edge cases: an epic with no children falls back to its own literal
- * status; an empty epic that's `ready` goes to Ready, etc.
+ * An epic with no children is its own state.
  */
-export function classifyEpic(epic: Task, children: Task[]): TaskSectionKind {
-  if (children.length === 0) return classifyTaskStatus(epic.status);
-  let anyBlocked = false;
-  let anyInProgress = false;
-  let anyDone = false;
-  let allTerminal = true;
-  let allReady = true;
-  for (const child of children) {
-    const s = child.status;
-    if (s === "blocked") anyBlocked = true;
-    if (s === "in_progress") anyInProgress = true;
-    if (s === "done" || s === "canceled" || s === "archived") anyDone = true;
-    if (s !== "done" && s !== "canceled" && s !== "archived") allTerminal = false;
-    if (s !== "ready") allReady = false;
-  }
-  if (anyBlocked) return "blocked";
-  if (allTerminal) return "done";
-  if (anyInProgress || anyDone) return "inProgress";
-  if (allReady) return "ready";
-  return "inProgress";
+export function classifyEpic(epic: WorkItem, children: WorkItem[]): TaskSectionKind {
+  if (children.length === 0) return classifyState(epic.state);
+  if (children.some((c) => c.state === "blocked")) return "blocked";
+  if (children.every((c) => closed(c.state))) return "done";
+  if (children.some((c) => c.state === "in_progress" || closed(c.state))) return "inProgress";
+  return "ready";
 }
 
-// Default landing status when a tasks is dragged *into* a section. Returns
-// null for inProgress: the agent owns that status, and in-progress items are
-// drag-locked anyway, so we don't let users promote items into it by drop.
-export function sectionDefaultStatus(section: TaskSectionKind): TaskStatus | null {
+// The state an item takes when dragged *into* a section. Null for
+// inProgress: the agent owns that state, and in-progress items are
+// drag-locked anyway, so a person doesn't promote items into it by drop.
+export function sectionDefaultState(section: TaskSectionKind): CanonicalState | null {
   switch (section) {
     case "inProgress": return null;
-    case "ready": return "ready";
+    case "ready": return "todo";
     case "blocked": return "blocked";
     case "done": return "done";
   }
 }
 
 /**
- * Classify a row for section placement, applying epic rollup when the
- * row is an epic. Non-epics use their literal status. Pass the
- * epicChildrenMap from `buildGroups` so the rollup sees the same
- * children the renderer will display.
+ * A row's section, with the epic rollup when the row is an epic. Pass the
+ * epicChildrenMap from `buildGroups` so the rollup sees the same children
+ * the renderer will display.
  */
-export function classifyRow(
-  item: Task,
-  epicChildrenMap: Map<string, Task[]>,
-): TaskSectionKind {
-  const children = epicChildrenMap.get(item.id);
-  if (children && children.length > 0) {
-    return classifyEpic(item, children);
-  }
-  return classifyTaskStatus(item.status);
+export function classifyRow(item: WorkItem, epicChildrenMap: Map<string, WorkItem[]>): TaskSectionKind {
+  const children = epicChildrenMap.get(item.ref);
+  if (children && children.length > 0) return classifyEpic(item, children);
+  return classifyState(item.state);
 }
 
-export function splitIntoSections(items: Task[]): TaskSection[] {
-  const buckets: Record<TaskSectionKind, Task[]> = {
-    inProgress: [], ready: [], blocked: [], done: [],
-  };
-  for (const item of items) buckets[classifyTaskStatus(item.status)].push(item);
+/** Items (in list order) by section; Done renders newest first. */
+export function splitIntoSections(items: WorkItem[]): TaskSection[] {
+  const buckets: Record<TaskSectionKind, WorkItem[]> = { inProgress: [], ready: [], blocked: [], done: [] };
+  for (const item of items) buckets[classifyState(item.state)].push(item);
   const sections: TaskSection[] = [];
   for (const { kind, label } of SECTION_ORDER) {
     if (buckets[kind].length === 0) continue;
-    buckets[kind].sort((a, b) =>
-      kind === "done" ? b.sort_index - a.sort_index : a.sort_index - b.sort_index
-    );
-    sections.push({ kind, label, items: buckets[kind] });
+    sections.push({ kind, label, items: kind === "done" ? [...buckets[kind]].reverse() : buckets[kind] });
   }
   return sections;
 }
 
 /**
- * The Done section renders descending (newest / highest sort_index on top)
- * so recent items stay visible without scrolling. Every other section
- * renders ascending. Persistence is a single ascending sort_index space per
- * thread, so when we flatten the visual order into an id list for the store
- * we need to flip descending runs back to ascending — otherwise the
- * store's "rewrite sort_index = position" rule would invert them on the
- * next render and drag-reorders inside the section would visually jump in
- * the opposite direction.
- *
- * This helper takes a flat list of rows in **visual** order and returns the
- * list of ids in **persistence** order. Rows outside descending runs are
- * kept in place; descending runs are reversed in situ.
+ * The Done section renders descending (the latest on its list on top) so
+ * recent items stay visible without scrolling; every other section
+ * ascending. A list has one order, so a drag's visual order is flattened
+ * back to list order before it's sent: descending runs are reversed in
+ * situ, the rest kept.
  */
-const DESCENDING_STATUSES: ReadonlySet<TaskStatus> = new Set([
-  "done",
-  "canceled",
-  "archived",
-]);
-
-export function finalizeReorderIds(
-  rows: ReadonlyArray<{ id: string; status: TaskStatus }>,
-): string[] {
-  const ids = rows.map((row) => row.id);
+export function finalizeReorderRefs(rows: ReadonlyArray<{ ref: string; state: CanonicalState }>): string[] {
+  const refs = rows.map((row) => row.ref);
   let runStart = -1;
   const flipRun = (end: number) => {
     if (runStart < 0) return;
     let lo = runStart;
     let hi = end - 1;
     while (lo < hi) {
-      const tmp = ids[lo]!;
-      ids[lo] = ids[hi]!;
-      ids[hi] = tmp;
-      lo++; hi--;
+      const tmp = refs[lo]!;
+      refs[lo] = refs[hi]!;
+      refs[hi] = tmp;
+      lo++;
+      hi--;
     }
     runStart = -1;
   };
   for (let i = 0; i < rows.length; i++) {
-    const status = rows[i]!.status;
-    const inDescRun = DESCENDING_STATUSES.has(status);
-    if (inDescRun && runStart < 0) {
-      runStart = i;
-    } else if (!inDescRun) {
-      flipRun(i);
-    }
+    const inDescRun = closed(rows[i]!.state);
+    if (inDescRun && runStart < 0) runStart = i;
+    else if (!inDescRun) flipRun(i);
   }
   flipRun(rows.length);
-  return ids;
+  return refs;
+}
+
+/** Outstanding backlog work for its badge: everything not closed. */
+export function openBacklogCount(backlog: WorkList | null): number {
+  if (!backlog) return 0;
+  return backlog.items.length + backlog.waiting.length + backlog.inProgress.length;
 }
 
 /**
- * Count of outstanding backlog work for the Tasks-page badge: ready +
- * blocked + in_progress. Excludes `done` (finished items don't count as
- * backlog). Pure — exported for tests. Counting only `waiting` was the bug
- * that made a ready-only backlog read "(0) / empty".
+ * The backlog as one group. Always exactly one, even empty or loading:
+ * the Plan renders its section chrome (and "New item") through a group.
  */
-export function openBacklogCount(state: BacklogState | null): number {
-  if (!state) return 0;
-  return state.items.length + state.waiting.length + state.in_progress.length;
+export function buildBacklogGroups(backlog: WorkList | null): TaskGroup[] {
+  return [{ epic: null, items: backlog ? [...backlog.all] : [], epicChildren: new Map() }];
 }
 
-export function buildBacklogGroups(state: BacklogState | null): TaskGroup[] {
-  // Always yield exactly one root group, even when the backlog is empty or
-  // `state` is still loading — the Plan pane renders the section chrome
-  // (Ready / Done / etc. + the "⋯ New task" menu) through TaskGroupList,
-  // which only runs when a group exists. Without a group the empty backlog
-  // would fall back to a blank "Backlog is empty." label with no way to
-  // create the first task.
-  // `state.items` is the `ready` bucket — it must be included or ready backlog
-  // tasks render in no section (they'd only bump the toggle-chip count).
-  const items = state
-    ? [...state.items, ...state.waiting, ...state.in_progress, ...state.done]
-    : [];
-  items.sort((a, b) => a.sort_index - b.sort_index);
-  return [{ epic: null, items, epicChildren: new Map() }];
-}
+/** The chosen values per declared field (`{ priority: ["high"] }`); a
+ *  field with none chosen doesn't filter. */
+export type FieldFilter = Record<string, readonly string[]>;
 
 /**
- * Filter out runtime/agent-authored tasks. Used by the AllWorkPage
- * "Hide auto" toggle (`plan-toggle-hide-auto`) to suppress the auto-
- * filed "agent observed X" rows so the user can see only their own
- * work + epic rollups.
- *
- * Always passes through `epic`-kind rows regardless of author — an epic
- * with auto-filed children would otherwise lose its container row and
- * the children would silently disappear too. The visible-children set is
- * filtered in the same pass; the epic's group placement still derives
- * from whatever children remain (an epic with all-auto children just
- * renders empty, like an explicitly empty epic).
- *
- * Pure — exported for tests.
+ * Keep the rows whose own fields match every chosen value. An epic row
+ * stays whatever its own value — it anchors its children, which filter
+ * the same way.
  */
-export function filterAutoAuthored(groups: TaskGroup[]): TaskGroup[] {
+export function filterByFields(groups: TaskGroup[], filter: FieldFilter): TaskGroup[] {
+  const active = Object.entries(filter).filter(([, values]) => values.length > 0);
+  if (active.length === 0) return groups;
+  const keep = (item: WorkItem) =>
+    active.every(([name, values]) => {
+      const v = item.native[name];
+      return v !== undefined && v !== null && values.includes(String(v));
+    });
   return groups.map((group) => {
-    const isParent = (id: string) => (group.epicChildren.get(id)?.length ?? 0) > 0;
-    const items = group.items.filter((item) => isParent(item.id) || item.author !== "agent");
-    const epicChildren = new Map<string, Task[]>();
-    for (const [epicId, children] of group.epicChildren.entries()) {
-      epicChildren.set(epicId, children.filter((child) => child.author !== "agent"));
-    }
-    return { epic: group.epic, items, epicChildren };
+    const isParent = (ref: string) => (group.epicChildren.get(ref)?.length ?? 0) > 0;
+    const epicChildren = new Map<string, WorkItem[]>();
+    for (const [epic, children] of group.epicChildren.entries()) epicChildren.set(epic, children.filter(keep));
+    return { epic: group.epic, items: group.items.filter((i) => isParent(i.ref) || keep(i)), epicChildren };
   });
 }
 
-/**
- * Filter group items by status. Used by the page split: Done Work
- * passes `excludeStatuses: ["archived"]`, Archived passes
- * `onlyStatuses: ["archived"]`. Epics pass through untouched — an
- * empty epic still anchors its slot, like in `filterAutoAuthored`.
- *
- * Pure — exported for tests.
- */
-export function applyStatusFilter(
+/** Keep or drop rows by state (an epic's children too). */
+export function applyStateFilter(
   groups: TaskGroup[],
-  opts: { only?: TaskStatus[]; exclude?: TaskStatus[] },
+  opts: { only?: CanonicalState[]; exclude?: CanonicalState[] },
 ): TaskGroup[] {
-  const onlySet = opts.only ? new Set(opts.only) : null;
-  const excludeSet = opts.exclude ? new Set(opts.exclude) : null;
-  const keep = (item: Task) => {
-        if (onlySet && !onlySet.has(item.status)) return false;
-    if (excludeSet && excludeSet.has(item.status)) return false;
-    return true;
-  };
+  const keep = (item: WorkItem) =>
+    (!opts.only || opts.only.includes(item.state)) && !(opts.exclude && opts.exclude.includes(item.state));
   return groups.map((group) => {
-    const items = group.items.filter(keep);
-    const epicChildren = new Map<string, Task[]>();
-    for (const [epicId, children] of group.epicChildren.entries()) {
-      epicChildren.set(epicId, children.filter(keep));
-    }
-    return { epic: group.epic, items, epicChildren };
+    const epicChildren = new Map<string, WorkItem[]>();
+    for (const [epic, children] of group.epicChildren.entries()) epicChildren.set(epic, children.filter(keep));
+    return { epic: group.epic, items: group.items.filter(keep), epicChildren };
   });
 }
 
-export function buildGroups(threadWork: ThreadWorkState | null): TaskGroup[] {
-  if (!threadWork) return [];
-  // ThreadWorkState splits items into bucketed lists by status:
-  //   inProgress → InProgress, items → Ready, waiting → Blocked,
-  //   done → Done/Canceled/Archived, epics → kind=Epic.
-  // All four status buckets must flow into the group; omitting `items`
-  // (Ready) drops every "to do" row from the Tasks page even though
-  // the right-pane summary counts them.
-  const all = [
-    ...(threadWork.waiting ?? []),
-    ...(threadWork.inProgress ?? []),
-    ...(threadWork.items ?? []),
-    ...(threadWork.done ?? []),
-  ];
-
-  const epicChildrenMap = new Map<string, Task[]>();
-  const epicIdSet = new Set<string>(threadWork.epics.map((e) => e.id));
-
-  for (const epic of threadWork.epics) {
-    epicChildrenMap.set(epic.id, []);
+/** A thread's list as one group: epics with their children under them,
+ *  every row in list order. */
+export function buildGroups(list: WorkList | null): TaskGroup[] {
+  if (!list) return [];
+  const epics = new Set(list.epics.map((e) => e.ref));
+  const epicChildren = new Map<string, WorkItem[]>();
+  for (const e of list.epics) epicChildren.set(e.ref, []);
+  const roots: WorkItem[] = [];
+  for (const item of list.all) {
+    // Children render only inside their epic, which moves between sections
+    // as a block (`classifyEpic`).
+    if (item.parentRef && epics.has(item.parentRef)) epicChildren.get(item.parentRef)!.push(item);
+    else roots.push(item);
   }
-
-  const rootItems: Task[] = [];
-  for (const item of all) {
-        if (item.parent_id && epicIdSet.has(item.parent_id)) {
-      epicChildrenMap.get(item.parent_id)!.push(item);
-      // Children render exclusively inside the epic pane; the epic
-      // itself moves between sections as a block based on its rollup
-      // (`classifyEpic`), bringing its expand toggle + child rows with
-      // it. No surface-to-root lift.
-    } else {
-      rootItems.push(item);
-    }
-  }
-
-  for (const children of epicChildrenMap.values()) {
-    children.sort((a, b) => a.sort_index - b.sort_index);
-  }
-
-  const epicsAndRoots: Task[] = [
-    ...threadWork.epics,
-    ...rootItems,
-  ].sort((a, b) => a.sort_index - b.sort_index);
-
-  return [{ epic: null, items: epicsAndRoots, epicChildren: epicChildrenMap }];
+  return [{ epic: null, items: roots, epicChildren }];
 }
 
-// User-facing label for a status. The raw id ("in_progress") still flows
-// through the wire and the `value` on <select> options, but every label
-// the user sees goes through this helper so tweaks land in one place.
-export function statusLabel(status: TaskStatus): string {
-  switch (status) {
-    case "ready": return "Ready";
-    case "in_progress": return "In Progress";
-    case "blocked": return "Blocked";
-    case "done": return "Done";
-    case "canceled": return "Canceled";
-    case "archived": return "Archived";
-  }
+// How a person reads a state: every label goes through this helper.
+export function statusLabel(state: CanonicalState): string {
+  return STATE_LABEL[state];
 }
 
-export function statusIcon(status: TaskStatus): string {
-  switch (status) {
-    case "ready": return "○";
+export function statusIcon(state: CanonicalState): string {
+  switch (state) {
+    case "todo": return "○";
     case "in_progress": return "◐";
     case "blocked": return "⊘";
     case "done": return "✓";
     case "canceled": return "✕";
-    case "archived": return "▣";
-  }
-}
-
-export function priorityIcon(priority: TaskPriority): string {
-  // Retained for non-visual callers (tooltips, MCP descriptions). The Plan
-  // pane now renders <PriorityIcon /> (plan-icons.tsx) instead of a glyph.
-  switch (priority) {
-    case "urgent": return "!!";
-    case "high": return "▲";
-    case "medium": return "●";
-    case "low": return "▽";
-  }
-}
-
-/**
- * Used by callers that still render the priority as a coloured glyph
- * (context menus, etc.). The Plan pane now prefers <PriorityIcon /> so the
- * three bars render at a fixed pixel width — see plan-icons.tsx.
- */
-export function priorityStyle(priority: TaskPriority): CSSProperties {
-  switch (priority) {
-    case "urgent": return { color: "var(--priority-urgent)", fontWeight: "var(--weight-bold)" };
-    case "high": return { color: "var(--priority-high)" };
-    case "medium": return { color: "var(--priority-medium)" };
-    case "low": return { color: "var(--priority-low)" };
   }
 }
 

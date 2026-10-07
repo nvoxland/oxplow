@@ -9,7 +9,7 @@ import {
   directoryRef,
   fileRef,
   gitCommitRef,
-  taskRef,
+  workItemTabRef,
   wikiPageRef,
 } from "../../tabs/pageRefs.js";
 import { WORKING } from "../../revision.js";
@@ -301,33 +301,46 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
     "see [[dir:src/components|the folder]] for buttons",
     "see [[tsk42]] for the work",
     "see [[tsk42|fix the parser]] for the work",
+    "see [[work_item:issues:ENG-1]] for theirs",
   ];
+  const ids = (id: string) => (/^tsk\d+$/.test(id) ? `work_item:oxplow:${id}` : null);
   for (const sample of samples) {
-    expect(postprocessWikilinks(preprocessWikilinks(sample))).toBe(sample);
+    expect(postprocessWikilinks(preprocessWikilinks(sample, ids))).toBe(sample);
   }
 });
 
-// Task wikilinks: `[[tsk<id>]]` → the canonical `work_item:oxplow:<id>` href; the renderer swaps the
+// Work item wikilinks: a bare id of the active list's (`[[tsk42]]` with
+// oxplow's tasks, by its declared id pattern) or a full ref → the item's
+// `work_item:<provider>:<id>` href; the renderer swaps the
 // `tsk<id>` token for the task title at display time. The backend ref
 // extractor (refs.rs) already recognizes the same form for backlinks.
 
-test("preprocessWikilinks: task ref [[tsk42]] rewrites to a work_item href", () => {
-  expect(preprocessWikilinks("see [[tsk42]] for context"))
+const oxplowIds = (id: string) => (/^tsk\d+$/.test(id) ? `work_item:oxplow:${id}` : null);
+
+test("preprocessWikilinks: an id of the active list rewrites to its work_item href", () => {
+  expect(preprocessWikilinks("see [[tsk42]] for context", oxplowIds))
     .toBe("see [tsk42](work_item:oxplow:tsk42) for context");
 });
 
-test("preprocessWikilinks: task ref with custom display label", () => {
-  expect(preprocessWikilinks("[[tsk42|fix the parser]]"))
+test("preprocessWikilinks: a work item with a custom display label", () => {
+  expect(preprocessWikilinks("[[tsk42|fix the parser]]", oxplowIds))
     .toBe("[fix the parser](work_item:oxplow:tsk42)");
 });
 
-test("preprocessWikilinks: non-numeric tsk token is treated as a wiki slug", () => {
-  // Only `tsk<digits>` is a task ref; `tsk-notes` is an ordinary slug.
-  expect(preprocessWikilinks("[[tsk-notes]]")).toBe("[tsk-notes](tsk-notes)");
+test("preprocessWikilinks: a full work item ref links whichever list", () => {
+  expect(preprocessWikilinks("[[work_item:issues:ENG-1]]")).toBe("[work_item:issues:ENG-1](work_item:issues:ENG-1)");
 });
 
-test("parseMarkdownLink: work_item: scheme", () => {
-  expect(parseMarkdownLink("work_item:oxplow:tsk42")).toEqual({ kind: "work_item", id: "tsk42" });
+test("preprocessWikilinks: what isn't the active list's id is a wiki slug", () => {
+  // `tsk-notes` doesn't match the list's ids; with no list (none), even
+  // `tsk42` is an ordinary slug.
+  expect(preprocessWikilinks("[[tsk-notes]]", oxplowIds)).toBe("[tsk-notes](tsk-notes)");
+  expect(preprocessWikilinks("[[tsk42]]")).toBe("[tsk42](tsk42)");
+});
+
+test("parseMarkdownLink: work_item: scheme, any list", () => {
+  expect(parseMarkdownLink("work_item:oxplow:tsk42")).toEqual({ kind: "work_item", ref: "work_item:oxplow:tsk42" });
+  expect(parseMarkdownLink("work_item:issues:ENG-1")).toEqual({ kind: "work_item", ref: "work_item:issues:ENG-1" });
 });
 
 test("parseMarkdownLink: work_item: with empty target", () => {
@@ -389,8 +402,8 @@ test("linkTarget: a wiki link targets its page", () => {
   expect(linkTarget({ kind: "internal", slug: "some-page" })).toEqual(wikiPageRef("some-page"));
 });
 
-test("linkTarget: a task link targets its task", () => {
-  expect(linkTarget({ kind: "work_item", id: "tsk42" })).toEqual(taskRef("tsk42"));
+test("linkTarget: a work item link targets its page", () => {
+  expect(linkTarget({ kind: "work_item", ref: "work_item:oxplow:tsk42" })).toEqual(workItemTabRef("work_item:oxplow:tsk42"));
 });
 
 test("linkTarget: a directory link targets its directory", () => {

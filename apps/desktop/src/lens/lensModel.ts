@@ -7,7 +7,7 @@
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import type { Extension, Lens, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
@@ -153,8 +153,9 @@ export function cellLinkRef(
   const s = String(v);
   switch (link.kind) {
     case "task":
-      // `v_task.id` is the bare row id; task pages use `tsk<id>`.
-      return taskRef(/^\d+$/.test(s) ? `tsk${s}` : s);
+      // A bare id names nothing without its list: a lens links a work
+      // item by its ref (`kind: page`). The kind leaves the lens format.
+      return null;
     case "file": {
       const ref = fileRef(s);
       const lineIdx = link.line ? resultColumns.indexOf(link.line) : -1;

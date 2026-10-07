@@ -6,14 +6,15 @@ import { desktopBridge, onRemoteReconnect } from "../api.js";
 import { logUi } from "../logger.js";
 import { terminalSender, type TerminalMessage, type TerminalSender } from "./terminalInput.js";
 import { isSessionGone, readSessionMessage, reopened, RESTARTED_NOTICE } from "./terminalSession.js";
-import { TASK_DRAG_MIME } from "../dragMimes.js";
+import { WORK_ITEM_DRAG_MIME } from "../dragMimes.js";
 import { shouldHandleTerminalPageKey } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import { TerminalCommentLayer } from "./Comments/TerminalCommentLayer.js";
 import {
-  decodeTaskDragRefs,
+  decodeWorkItemDrag,
   dragHasContextRef,
-  dragHasTaskRefs,
+  dragHasWorkItems,
+  workItemDragRefs,
   readContextRef,
 } from "../agent-context-dnd.js";
 import { formatContextMention } from "../agent-context-ref.js";
@@ -224,7 +225,7 @@ export function TerminalPane({
     // single-row drag) or a multi-id tasks DnD payload (Plan pane
     // marked-set drag). Both end up inserted as @-mentions / bracketed
     // refs through the same `term.paste` pipeline.
-    if (!dragHasContextRef(e) && !dragHasTaskRefs(e)) return;
+    if (!dragHasContextRef(e) && !dragHasWorkItems(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     if (!dragHovering) setDragHovering(true);
@@ -242,12 +243,11 @@ export function TerminalPane({
     const term = termRef.current;
     if (!term) return;
 
-    // Multi-id tasks payload first — when present, iterate every id
-    // and paste a space-separated chain of context mentions. This is the
-    // path for "drag a marked Plan-pane row into the agent" (one or many).
-    if (dragHasTaskRefs(e)) {
-      const raw = e.dataTransfer.getData(TASK_DRAG_MIME);
-      const refs = decodeTaskDragRefs(raw);
+    // A work-item drag first — paste a space-separated chain of context
+    // mentions, one per item it carries. This is the path for "drag a
+    // marked list row (or a Board card) into the agent".
+    if (dragHasWorkItems(e)) {
+      const refs = workItemDragRefs(decodeWorkItemDrag(e.dataTransfer.getData(WORK_ITEM_DRAG_MIME)));
       if (refs.length > 0) {
         e.preventDefault();
         const text = refs.map(formatContextMention).join("");
@@ -255,8 +255,8 @@ export function TerminalPane({
         term.focus();
         return;
       }
-      // Fall through if the items slice was missing — older drag sources
-      // may not embed it; still try the standalone CONTEXT_REF_MIME path.
+      // Fall through if the items slice was missing; still try the
+      // standalone CONTEXT_REF_MIME path.
     }
 
     const ref = readContextRef(e);

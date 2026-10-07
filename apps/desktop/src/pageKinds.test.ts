@@ -34,7 +34,7 @@ describe("pageKindIconComponent", () => {
       "file",
       "directory",
       "wiki",
-      "task",
+      "work_item",
       "commit",
       "diff",
       "duplicate-block",
@@ -48,7 +48,6 @@ describe("pageKindIconComponent", () => {
       "tasks",
       "done-work",
       "backlog",
-      "archived",
       "wiki-index",
       "files",
       "local-history",
@@ -80,19 +79,18 @@ describe("pageKindIconComponent", () => {
 describe("pageKindLabel", () => {
   test("rewrites hyphenated kinds to space-separated phrases", () => {
     expect(pageKindLabel("commit")).toBe("commit");
-    expect(pageKindLabel("work_item")).toBe("task");
+    expect(pageKindLabel("work_item")).toBe("work item");
     expect(pageKindLabel("metric")).toBe("metric");
     expect(pageKindLabel("wiki")).toBe("wiki page");
     expect(pageKindLabel("done-work")).toBe("done work");
     expect(pageKindLabel("local-history")).toBe("local history");
     expect(pageKindLabel("uncommitted-changes")).toBe("uncommitted");
-    expect(pageKindLabel("new-task")).toBe("new task");
+    expect(pageKindLabel("new-task")).toBe("new item");
     expect(pageKindLabel("closed-threads")).toBe("threads");
   });
 
   test("passes plain kinds through unchanged", () => {
     expect(pageKindLabel("file")).toBe("file");
-    expect(pageKindLabel("task")).toBe("task");
     expect(pageKindLabel("finding")).toBe("finding");
     expect(pageKindLabel("diff")).toBe("diff");
   });

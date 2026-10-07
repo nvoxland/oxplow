@@ -54,20 +54,16 @@ describe("formatSnapshotSubject", () => {
 });
 
 describe("effortLabel", () => {
-  const tasks = new Map([["tsk4", "Fix the parser"]]);
+  const items = new Map([["work_item:issues:ENG-4", "Fix the parser"]]);
   const efforts = new Map([["eff9", "Tidy the lexer"]]);
-  test("a task's effort is its task", () => {
-    expect(effortLabel({ effortId: "eff1", workItem: "work_item:oxplow:tsk4", tasksId: "tsk4" }, tasks, efforts)).toBe(
-      "Fix the parser",
-    );
+  test("an effort on a work item is its item's title, whichever list", () => {
+    expect(effortLabel({ effortId: "eff1", workItem: "work_item:issues:ENG-4" }, items, efforts)).toBe("Fix the parser");
   });
-  test("another tracker's item by its ref", () => {
-    expect(effortLabel({ effortId: "eff2", workItem: "work_item:issues:ENG-1", tasksId: null }, tasks, efforts)).toBe(
-      "issues:ENG-1",
-    );
+  test("an item off the active list by its id", () => {
+    expect(effortLabel({ effortId: "eff2", workItem: "work_item:oxplow:tsk1" }, items, efforts)).toBe("tsk1");
   });
   test("an unlinked effort by its own title", () => {
-    expect(effortLabel({ effortId: "eff9", workItem: null, tasksId: null }, tasks, efforts)).toBe("Tidy the lexer");
-    expect(effortLabel({ effortId: "eff8", workItem: null, tasksId: null }, tasks, efforts)).toBe("Unlinked work");
+    expect(effortLabel({ effortId: "eff9", workItem: null }, items, efforts)).toBe("Tidy the lexer");
+    expect(effortLabel({ effortId: "eff8", workItem: null }, items, efforts)).toBe("Unlinked work");
   });
 });
