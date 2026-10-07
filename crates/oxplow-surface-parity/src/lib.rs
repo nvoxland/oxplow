@@ -22,8 +22,8 @@
 //! - [`Exposure::Model`] — a UI read whose agent counterpart is published
 //!   models: an agent reads the same rows with `query_sql`. Each model
 //!   named must be published (`tests/parity.rs`).
-//! - [`Exposure::AgentOnly`] — intentionally agent-only (dispatch,
-//!   batch/orchestration affordances).
+//! - [`Exposure::AgentOnly`] — intentionally agent-only (batch and
+//!   orchestration affordances).
 //!
 //! Every row is decided: there is no "build the MCP tool later" exposure.
 //! An agent's way to an IPC read is a tool (`Both`), a model (`Model`), or
@@ -332,7 +332,6 @@ pub const MANIFEST: &[Capability] = &[
     both_named("comment.list", "list_comments_for_stream", "list_comments"),
     // ---- agent-only (orchestration / agent affordances) ----
     agent("read_task_options"),
-    agent("dispatch_task"),
     agent("get_thread_context"),
     agent("wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----

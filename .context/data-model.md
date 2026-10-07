@@ -2092,9 +2092,6 @@ the user must re-`ready` first). All other sources are accepted:
 - `blocked → in_progress` (deliberate unblock gesture)
 - `in_progress → in_progress` (no-op)
 
-`dispatch_task`'s autoStart path only fires when the item is
-currently `ready`.
-
 `listReady` / `readWorkOptions` / `list_ready_work` filter to
 `status='ready'` only — `blocked` items are never dispatchable until
 un-blocked.

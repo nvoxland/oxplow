@@ -92,7 +92,6 @@ pub struct PluginPaths {
     pub mcp_config: PathBuf,
     pub agent_guide: PathBuf,
     pub runtime_skill: PathBuf,
-    pub subagent_skill: PathBuf,
     pub wiki_capture_skill: PathBuf,
     pub mermaid_skill: PathBuf,
     pub collection_skill: PathBuf,
@@ -109,7 +108,6 @@ pub struct CodexRuntimePaths {
     pub oxplow_executable: PathBuf,
     pub mcp_config: PathBuf,
     pub runtime_skill: PathBuf,
-    pub subagent_skill: PathBuf,
     pub wiki_capture_skill: PathBuf,
     pub mermaid_skill: PathBuf,
     pub collection_skill: PathBuf,
@@ -194,11 +192,9 @@ pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths
 /// dir with a `*` `.gitignore`. Returns the skills dir.
 fn write_opencode_skills(project_dir: &Path) -> Result<PathBuf, PluginError> {
     let skills_dir = project_dir.join(".opencode").join("skills");
-    for (name, body) in OXPLOW_SKILLS {
-        let dir = skills_dir.join(name);
-        fs::create_dir_all(&dir)?;
-        fs::write(dir.join("SKILL.md"), body)?;
-        fs::write(dir.join(".gitignore"), "*\n")?;
+    write_oxplow_skills(&skills_dir)?;
+    for (name, _) in OXPLOW_SKILLS {
+        fs::write(skills_dir.join(name).join(".gitignore"), "*\n")?;
     }
     Ok(skills_dir)
 }
@@ -308,10 +304,22 @@ fn frontmatter_description(body: &'static str) -> &'static str {
         .unwrap_or("")
 }
 
-/// Write every skill in [`OXPLOW_SKILLS`] as `<skills_dir>/<name>/SKILL.md`.
-/// The one place a runtime's skill set comes from, so adding a skill is
-/// one row in that list.
+/// Write every skill in [`OXPLOW_SKILLS`] as `<skills_dir>/<name>/SKILL.md`,
+/// and remove any other `oxplow-*` skill there: one oxplow no longer
+/// ships. The one place a runtime's skill set comes from, so adding or
+/// retiring a skill is one row in that list.
 fn write_oxplow_skills(skills_dir: &Path) -> Result<(), PluginError> {
+    if let Ok(entries) = fs::read_dir(skills_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("oxplow-")
+                && entry.path().is_dir()
+                && !OXPLOW_SKILLS.iter().any(|(n, _)| *n == name)
+            {
+                fs::remove_dir_all(entry.path())?;
+            }
+        }
+    }
     for (name, body) in OXPLOW_SKILLS {
         let dir = skills_dir.join(name);
         fs::create_dir_all(&dir)?;
@@ -327,10 +335,6 @@ const OXPLOW_SKILLS: &[(&str, &str)] = &[
     (
         "oxplow-runtime",
         include_str!("../assets/oxplow-runtime.SKILL.md"),
-    ),
-    (
-        "oxplow-subagent-work-protocol",
-        include_str!("../assets/oxplow-subagent.SKILL.md"),
     ),
     (
         "oxplow-wiki-capture",
@@ -447,9 +451,6 @@ pub fn write_plugin(
 
     write_oxplow_skills(&skills_dir)?;
     let runtime_skill = skills_dir.join("oxplow-runtime").join("SKILL.md");
-    let subagent_skill = skills_dir
-        .join("oxplow-subagent-work-protocol")
-        .join("SKILL.md");
     let wiki_capture_skill = skills_dir.join("oxplow-wiki-capture").join("SKILL.md");
     let mermaid_skill = skills_dir.join("oxplow-mermaid").join("SKILL.md");
     let collection_skill = skills_dir.join("oxplow-collection").join("SKILL.md");
@@ -480,7 +481,6 @@ pub fn write_plugin(
         mcp_config,
         agent_guide,
         runtime_skill,
-        subagent_skill,
         wiki_capture_skill,
         mermaid_skill,
         collection_skill,
@@ -616,9 +616,6 @@ pub fn write_codex_runtime(
 
     write_oxplow_skills(&skills_dir)?;
     let runtime_skill = skills_dir.join("oxplow-runtime").join("SKILL.md");
-    let subagent_skill = skills_dir
-        .join("oxplow-subagent-work-protocol")
-        .join("SKILL.md");
     let wiki_capture_skill = skills_dir.join("oxplow-wiki-capture").join("SKILL.md");
     let mermaid_skill = skills_dir.join("oxplow-mermaid").join("SKILL.md");
     let collection_skill = skills_dir.join("oxplow-collection").join("SKILL.md");
@@ -630,7 +627,6 @@ pub fn write_codex_runtime(
         oxplow_executable,
         mcp_config,
         runtime_skill,
-        subagent_skill,
         wiki_capture_skill,
         mermaid_skill,
         collection_skill,
@@ -738,7 +734,6 @@ mod tests {
         assert!(paths.hooks.exists());
         assert!(paths.mcp_config.exists());
         assert!(paths.runtime_skill.exists());
-        assert!(paths.subagent_skill.exists());
         assert!(paths.wiki_capture_skill.exists());
         assert!(paths.mermaid_skill.exists());
         assert!(paths.collection_skill.exists());
@@ -757,6 +752,22 @@ mod tests {
         assert!(paths.review_comments_command.exists());
         assert!(paths.configure_command.exists());
         assert!(paths.agent_guide.exists());
+    }
+
+    /// A skill oxplow no longer ships leaves the installed set on the next
+    /// write; a skill that isn't oxplow's is left alone.
+    #[test]
+    fn retired_oxplow_skills_are_pruned() {
+        let tmp = TempDir::new().unwrap();
+        let skills = tmp.path().join("skills");
+        for name in ["oxplow-retired", "someone-elses"] {
+            fs::create_dir_all(skills.join(name)).unwrap();
+            fs::write(skills.join(name).join("SKILL.md"), "x").unwrap();
+        }
+        write_oxplow_skills(&skills).unwrap();
+        assert!(!skills.join("oxplow-retired").exists());
+        assert!(skills.join("someone-elses").exists());
+        assert!(skills.join("oxplow-runtime").join("SKILL.md").exists());
     }
 
     #[test]
@@ -874,7 +885,6 @@ mod tests {
         assert!(paths.oxplow_executable.exists());
         assert!(paths.mcp_config.exists());
         assert!(paths.runtime_skill.exists());
-        assert!(paths.subagent_skill.exists());
         assert!(paths.wiki_capture_skill.exists());
         assert!(paths.mermaid_skill.exists());
         assert!(paths.collection_skill.exists());
@@ -960,7 +970,6 @@ mod tests {
         assert_eq!(paths.skills_dir, tmp.path().join(".opencode/skills"));
         for name in [
             "oxplow-runtime",
-            "oxplow-subagent-work-protocol",
             "oxplow-wiki-capture",
             "oxplow-mermaid",
             "oxplow-collection",

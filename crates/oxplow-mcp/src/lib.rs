@@ -20,7 +20,7 @@ use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::Services;
 use oxplow_domain::comment::CommentThread;
 use oxplow_domain::stores::{CommentStore, TaskNoteStore, TaskStore, ThreadStore};
-use oxplow_domain::{CommentStatus, StreamId, Task, TaskId, TaskPriority, TaskStatus, ThreadId};
+use oxplow_domain::{CommentStatus, StreamId, Task, TaskPriority, TaskStatus, ThreadId};
 
 mod lenient_params;
 // Drop-in for rmcp's `Parameters` that tolerates camelCase/kebab aliases
@@ -262,22 +262,6 @@ pub struct EpicChildSpec {
     /// The child task's prose body (required).
     pub description: String,
     pub kind: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DispatchTaskParams {
-    /// Thread to dispatch from. Required only when `item_id` is
-    /// omitted (it's the thread whose first ready item we pick).
-    /// When `item_id` is given the thread is inferred from that
-    /// task, so this may be left out.
-    pub thread_id: Option<String>,
-    /// The specific task to dispatch. When omitted, picks the
-    /// first ready item on `thread_id` (mirrors main's
-    /// dispatch-without-id shortcut for /work-next composition).
-    pub item_id: Option<String>,
-    /// Optional extra context appended to the brief — usually
-    /// orchestrator notes about how this fits into the larger plan.
-    pub extra_context: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1886,11 +1870,11 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Return the next dispatch unit for the orchestrator. If the highest-priority \
-                       ready item is an epic, returns the epic and all its ready descendants as one \
-                       atomic unit. Otherwise returns all ready non-epic items so you can pick one or \
-                       a related cluster to dispatch. Honors `blocks` links — items waiting on a \
-                       non-done blocker are skipped. Returns { mode: \"empty\" } when nothing is ready."
+        description = "Return what to work on next on a thread. If the highest-priority ready item \
+                       is an epic, returns the epic and all its ready descendants as one unit. \
+                       Otherwise returns all ready non-epic items so you can pick one or a related \
+                       cluster. Honors `blocks` links — items waiting on a non-done blocker are \
+                       skipped. Returns { mode: \"empty\" } when nothing is ready."
     )]
     async fn read_task_options(
         &self,
@@ -2230,89 +2214,6 @@ impl OxplowMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(
             bundle.to_string(),
         )]))
-    }
-
-    #[tool(
-        description = "Compose a ready-to-paste dispatch brief for a task. With `item_id`, \
-                       that item; otherwise the first ready non-epic item on the thread. Returns \
-                       `{ ok, prompt, itemId }` — pass `prompt` to the general-purpose Agent tool. \
-                       The brief carries the item fields, AC, recent notes, and the subagent \
-                       protocol preamble; the sub-agent moves the item to in_progress on entry \
-                       (`work_item.transition`)."
-    )]
-    async fn dispatch_task(
-        &self,
-        params: Parameters<DispatchTaskParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let parsed_item_id = match params.0.item_id.as_deref() {
-            Some(raw) => Some(parse_task_id("dispatch_task", "item_id", raw)?),
-            None => None,
-        };
-        let target = match parsed_item_id {
-            // An explicit item id fully determines the work, so the
-            // thread is inferred from the task itself — `thread_id` is
-            // not needed in this path.
-            Some(id) => self
-                .services
-                .task_store
-                .get(id)
-                .await
-                .map_err(internal)?
-                .ok_or_else(|| {
-                    McpError::invalid_params(
-                        format!("dispatch_task: item not found: {}", id.value()),
-                        None,
-                    )
-                })?,
-            // Without an item id we need a thread to pick the first
-            // ready item from. Require it here with a corrective error
-            // rather than up front, so the item-id-only call works.
-            None => {
-                let Some(raw_thread) = params.0.thread_id.as_deref() else {
-                    return Err(McpError::invalid_params(
-                        "dispatch_task: provide either `item_id` (the specific task to \
-                         dispatch) or `thread_id` (to dispatch the first ready item on that \
-                         thread)"
-                            .to_string(),
-                        None,
-                    ));
-                };
-                expect_id_kind("dispatch_task", "thread_id", raw_thread, ID_THREAD)?;
-                let thread_id = parse_thread_id(raw_thread)?;
-                let items = self
-                    .services
-                    .task_store
-                    .list_for_thread(&thread_id)
-                    .await
-                    .map_err(internal)?;
-                // Build a set of task ids that have children → epics.
-                let epic_ids: std::collections::HashSet<TaskId> =
-                    items.iter().filter_map(|i| i.parent_id).collect();
-                let mut ready_first: Vec<_> = items
-                    .into_iter()
-                    .filter(|i| {
-                        matches!(i.status, oxplow_domain::TaskStatus::Ready)
-                            && !epic_ids.contains(&i.id)
-                    })
-                    .collect();
-                ready_first.sort_by_key(|i| (i.sort_index, i.created_at));
-                let Some(it) = ready_first.into_iter().next() else {
-                    return json_result(&serde_json::json!({
-                        "ok": false,
-                        "reason": "no ready non-epic item on thread",
-                    }));
-                };
-                it
-            }
-        };
-
-        let prompt =
-            compose_dispatch_brief(&target, params.0.extra_context.as_deref().unwrap_or(""));
-        json_result(&serde_json::json!({
-            "ok": true,
-            "prompt": prompt,
-            "itemId": target.id,
-        }))
     }
 
     #[tool(
@@ -2676,7 +2577,6 @@ fn code_err(e: oxplow_domain::code_intel::CodeIntelError) -> McpError {
 /// one reviewable place; `read_write_split_covers_every_tool` fails if a new
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
-    "dispatch_task",
     "ping",
     "get_skill",
     "list_collectors",
@@ -3129,42 +3029,6 @@ fn expect_id_kind(
     }
 }
 
-/// Compose the brief the orchestrator passes to the general-purpose
-/// Agent tool to dispatch a task to a subagent. Pure so it's
-/// testable.
-///
-/// Sections: identity, description, AC, optional extra context, and
-/// the closing reminder pointing at the subagent-protocol skill.
-/// Per-item notes used to render here too but were retired —
-/// effort.summary already records what shipped on prior
-/// attempts; reviewers see it from the task activity timeline.
-fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> String {
-    let mut out: Vec<String> = vec![
-        format!("Task: {}", item.title),
-        format!("itemId: {}", item.id.value()),
-        format!("priority: {:?}", item.priority),
-        String::new(),
-    ];
-    if !item.description.is_empty() {
-        out.push("## Description".into());
-        out.push(item.description.clone());
-        out.push(String::new());
-    }
-    if !extra_context.is_empty() {
-        out.push("## Extra context".into());
-        out.push(extra_context.to_string());
-        out.push(String::new());
-    }
-    out.push("## Protocol".into());
-    out.push(
-        "Follow the `oxplow-subagent-work-protocol` skill: `work_item.transition` it to \
-         in_progress on entry and to done on exit; the files and test runs you made are \
-         observed, and your final message is the summary. Return ONE line: `oxplow-result: {\"ok\":true,\"itemId\":\"<id>\",…}`."
-            .into(),
-    );
-    out.join("\n")
-}
-
 impl OxplowMcp {
     /// The stream a stream-scoped read acts on when the call names none:
     /// the caller's (its header, else its thread's stream); the primary
@@ -3517,7 +3381,7 @@ mod tests {
     fn make_task(thread_id: Option<ThreadId>, title: &str) -> Task {
         let now = Timestamp::now();
         Task {
-            id: TaskId::placeholder(),
+            id: oxplow_domain::TaskId::placeholder(),
             thread_id,
             parent_id: None,
             title: title.into(),
@@ -4074,61 +3938,6 @@ mod tests {
             .unwrap();
         let body = text_payload(r);
         assert!(body.contains("round trip"), "unexpected body: {body}");
-    }
-
-    #[tokio::test]
-    async fn dispatch_task_infers_thread_from_item_id() {
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("primary stream must have a writer thread");
-        let id = services
-            .task_store
-            .insert(&make_task(Some(thread.id), "dispatch me"))
-            .await
-            .unwrap();
-
-        // Only item_id — thread_id is inferred from the task, so a
-        // weak model that omits it still succeeds (no -32602).
-        let r = server
-            .dispatch_task(Parameters(DispatchTaskParams {
-                thread_id: None,
-                item_id: Some(id.to_string()),
-                extra_context: None,
-            }))
-            .await
-            .unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
-        assert_eq!(parsed["ok"], true);
-        assert!(
-            parsed["prompt"].as_str().unwrap().contains("dispatch me"),
-            "brief should target the item: {parsed}",
-        );
-    }
-
-    #[tokio::test]
-    async fn dispatch_task_requires_thread_or_item() {
-        let (_proj, _services, server) = boot();
-        let err = server
-            .dispatch_task(Parameters(DispatchTaskParams {
-                thread_id: None,
-                item_id: None,
-                extra_context: None,
-            }))
-            .await
-            .unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("item_id") && msg.contains("thread_id"),
-            "error should name both ways to dispatch: {msg}",
-        );
     }
 
     fn parts_with(headers: &[(&str, &str)], uri: &str) -> http::request::Parts {
@@ -4848,38 +4657,6 @@ mod tests {
             msg.contains("\"thread\"") && msg.contains("\"stream\""),
             "lists valid scopes: {msg}"
         );
-    }
-
-    // ---- compose_dispatch_brief ----
-
-    #[test]
-    fn dispatch_brief_includes_identity_and_protocol() {
-        let mut item = make_task(None, "ship the thing");
-        item.description = String::new();
-        let s = compose_dispatch_brief(&item, "");
-        assert!(s.contains("Task: ship the thing"));
-        assert!(s.contains(&format!("itemId: {}", item.id.value())));
-        assert!(s.contains("priority:"));
-        assert!(s.contains("## Protocol"));
-        assert!(!s.contains("## Description"));
-        assert!(!s.contains("## Extra context"));
-    }
-
-    #[test]
-    fn dispatch_brief_includes_description_when_non_empty() {
-        let mut item = make_task(None, "x");
-        item.description = "do the thing carefully".into();
-        let s = compose_dispatch_brief(&item, "");
-        assert!(s.contains("## Description"));
-        assert!(s.contains("do the thing carefully"));
-    }
-
-    #[test]
-    fn dispatch_brief_appends_extra_context_when_provided() {
-        let item = make_task(None, "x");
-        let s = compose_dispatch_brief(&item, "see also note n-7");
-        assert!(s.contains("## Extra context"));
-        assert!(s.contains("see also note n-7"));
     }
 
     // ---- default_limit ----

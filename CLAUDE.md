@@ -16,7 +16,7 @@ touching its subsystem. The "concrete update triggers" checklist lives in
 the full guide below.
 
 **Full contributor guide: `.context/working-in-this-repo.md`** — repo
-layout, test/lint policy, and the complete task-filing discipline. The
+layout, test/lint policy, and how work is tracked. The
 rules below are the always-on essentials; that doc has the detail and
 rationale. Read it (or the linked subsystem doc) when you need the *why*
 or exact mechanics.
@@ -28,29 +28,25 @@ or exact mechanics.
 - **`.context/usability.md`** — UI rules (Enter submits, Escape cancels,
   drop-target highlighting, right-click for destructive actions, etc.).
   Read before adding *any* UI.
-- **Filing (convention).** File a durable `in_progress` task before
-  editing. oxplow no longer enforces it (no edit or stop is refused);
-  the rule is being reworked (`.context/work-tracking.md`).
+- **Tracking is oxplow's.** oxplow opens, links and closes efforts from
+  what it observes (`.context/work-tracking.md`); there's nothing to
+  file before editing. File a task when it helps the person follow the
+  work: a multi-step plan, or a follow-up spotted along the way (as
+  `ready`).
 - **Asking the user a question.** When your reply needs the user's
   answer, end it with the question itself: a final message that ends in
   a question shows the thread as waiting on them.
-- **Closing a task → `bun run test:collect`** (not bare `cargo test` /
-  `bun test`): it's the only run that emits the JUnit + lcov reports
-  oxplow parses into the effort's coverage panel. See
-  `.context/collection.md`.
+- **Before each commit, one full test and lint run:** `bash -c '(bun
+  run lint:collect >/dev/null 2>&1 & bun run test:collect; wait)'`, in
+  the foreground. `test:collect` (not bare `cargo test` / `bun test`)
+  is the only run that emits the JUnit + lcov reports oxplow parses into
+  the effort's coverage panel. See `.context/collection.md`.
 - **After editing any `.rs`** run `cargo fmt --all` then `bun run
   lint:collect` before ending the turn — CI treats warnings as errors,
   and `lint:collect` (clippy with `-D warnings`, JSON to
   `target/clippy.json`) is what feeds the `oxplow.analysis.*` metrics.
   On failure re-run plain `cargo clippy --workspace --all-targets -- -D
   warnings` for readable diagnostics. Don't `#[allow(...)]` a real lint.
-- **Task-filing discipline.** File a durable `in_progress` task before
-  editing; one user-visible concern per row; multiple independent asks
-  in one prompt → multiple tasks; every new (non-correction) ask gets
-  its own item (a correction/redo reopens the existing one); a mid-turn
-  user prompt is a new-ask boundary; file backlog ideas as `ready` when
-  you spot them. Full rules + rationale:
-  `.context/working-in-this-repo.md`.
 - **Plan mode** for multi-subsystem work (3+ areas touched) or ambiguous
   requirements; skip it for single-file changes, typos, renames, narrow
   refactors.

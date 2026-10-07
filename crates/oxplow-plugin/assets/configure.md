@@ -5,8 +5,7 @@ description: Set up oxplow collection — wire EVERY test stack in the project t
 Set up oxplow's **collection** so it can track which tests ran (the
 individual tests, as a tree) and the diff coverage on each effort's
 changed lines. See the `oxplow-collection` skill for the standing
-rules. File this as a task first (the normal filing rule applies —
-you'll be editing project files), then:
+rules. Then:
 
 ## 0. Inventory EVERY test stack in the repo
 

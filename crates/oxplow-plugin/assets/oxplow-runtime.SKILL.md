@@ -1,333 +1,139 @@
 ---
 name: oxplow-runtime
-description: Oxplow runtime — task filing, status transitions, closing work (effort.report is optional), work items across providers (v_work_item, work_item.* commands), and orchestrator dispatch. Loads on mcp__oxplow__run_command with work_item.*, effort.* or knowledge.add_note, on read_task_options, dispatch_task or v_work_item, and when composing a subagent brief.
+description: Oxplow work items and efforts, all optional — how oxplow tracks your work on its own, when filing a task or reporting is worth it, the work_item.* and effort.* commands, decisions and claims, and the command bus. Loads on mcp__oxplow__run_command with work_item.*, effort.* or knowledge.add_note, and on read_task_options or v_work_item.
 ---
 
-# Filing oxplow tasks
+# Your work in oxplow
 
-Active agent turns render as live rows in the Work panel passively —
-no synthesized tasks. File durable tasks explicitly when
-you want to:
+oxplow tracks your work without your help. Nothing here is required: no
+edit or stop waits on a task, and there's nothing to close before you
+finish.
 
-- Split pre-planned or multi-phase work into an epic + children.
-- Pre-queue work the user wants done in a later turn.
-- Record a follow-up you noticed but can't fix right now.
+- **Efforts.** An effort is a span of your thread's work. oxplow opens
+  one when a turn changes files, closes it when a commit lands its work,
+  and links it to an item you or the person start. The files you change
+  (with edit tools or a shell) and the test runs you make are recorded
+  against it. Its summary is your last answer.
+- **Waiting on the person.** When you need their answer, end your reply
+  with the question. oxplow shows your thread as waiting on them.
+- **Hints.** oxplow may add short guidance to your next prompt or tool
+  result (coverage below target, work grown large with nothing
+  committed). Each is advisory.
 
-Every task write is a **command** you run with `mcp__oxplow__run_command
-{ name, input }` (see "Commands" below). File one with:
+## When a task is worth filing
+
+File one when it helps the person follow the work:
+
+- a plan of several separately reviewable steps (an epic and children,
+  each child filed with `"parent_ref": "<the epic's ref>"`);
+- work the person wants done in a later turn;
+- a follow-up you noticed but can't do now.
 
 ```json
 { "name": "work_item.create",
-  "input": { "title": "Fix login redirect loop", "body": "…",
-             "state": "in_progress" } }
+  "input": { "title": "Fix login redirect loop", "body": "…", "state": "todo" } }
 ```
 
-It goes on the project's **active tracker** — oxplow's own task list, or
-the tracker the person chose — always; you don't pick one. It's filed on
-your thread (`thread` names another). `state` is `todo` (the default —
-the backlog's `ready`) or `in_progress`. The result carries the new item's
-`ref` (`work_item:oxplow:tsk42` on oxplow's list). On oxplow's list
-`in_progress` opens your effort in the same run; on another tracker, open
-it yourself with `effort.open { work_item: <ref> }` (and `effort.close`
-when done). A tracker's own fields go under `native`, as its `create`
-declares them (oxplow's: `{ "priority": "high" }`).
+It goes on the project's active tracker. `state` is `todo` (the
+default) or `in_progress`; a tracker's own fields go under `native`
+(oxplow's: `{ "priority": "high" }`). Title: imperative, ≤60 chars. One
+reviewable concern per item.
 
-## Task vs epic
+Starting an item (`work_item.transition { ref, to: "in_progress" }`)
+links your effort to it; starting an unrelated one begins a new effort.
+oxplow never marks an item done. If you're tracking one, move it to
+`done` when it ships.
 
-Pick by structure, not by whether the work was planned first (plan-mode
-outputs often describe a single task). The decision test runs once and
-covers all three call sites:
+**Statuses:** `todo` (ready), `in_progress`, `blocked` (needs an
+answer), `done`, `canceled` (decided against: keep the row, with the
+reasoning), and oxplow's `archived` (`{ to: "done" or "canceled",
+native_state: "archived" }`). Put state in the status, never in the
+title.
 
-> Could a single child close to `done` and let the user meaningfully
-> inspect just that piece? If yes → epic. If no → one task.
+When the person rejects your last attempt at an item, reopen that item
+rather than filing a new one.
 
-- **One task** (`work_item.create`) — one coherent change, even across a
-  few files. Sequential chores (edit → typecheck → test) are one task,
-  not sub-steps.
-- **An epic** — ≥3 sub-steps that each pass the test: distinct phases,
-  handoffs, or separable subsystems (e.g. schema → runtime → IPC → UI →
-  docs). File the epic, then each child with `"parent_ref": "<the epic's
-  ref>"`. Each child closes on its own as it ships.
-- Don't retroactively wrap a task in an epic if it turns out small —
-  just finish it.
+## Correcting an effort
 
-## Shaping the row
+- `effort.update { effort, title }`: rename it.
+- `effort.link { effort | thread, work_item }`: link it to an item, or
+  unlink it (`null`).
+- `effort.close { effort | thread }` / `effort.open { title?, work_item? }`:
+  split work oxplow grouped together.
+- `effort.report { summary?, impacts? }`: other words than your last
+  answer, or outcomes beyond edits. Each impact is
+  `{ kind, id, action? }`, where `kind` is `wiki`, `task` (`tsk42`),
+  `git_commit`, `file` or `directory`. The result's `link_warnings`
+  flags `[[…]]` links that don't resolve.
 
-- `title`: imperative, ≤60 chars (`Fix login redirect loop`).
-- `description`: what and why, terse. Structure it however the task
-  warrants — there is no required template. Write it for a human
-  reader and wiki-format it (markdown headings/lists, `[[…]]`
-  wikilinks) for readability.
-- `priority`: `medium` unless the user signalled otherwise.
-- **One reviewable concern per row** — at top level AND among epic
-  siblings. Two things a reviewer would accept/reject separately go in
-  two rows, never one "misc" child.
+## Generated files
 
-# task transitions
+If build output keeps showing among your effort's files, it's probably
+generated. Tells: it says so in a header; it lives under `generated/`,
+`dist/`, `build/` or `target/`; it's a lockfile or codegen artifact; it
+appears in effort after effort. Tell the person and offer to add it to
+`generated.exclude` in `.oxplow/project.yaml`. Don't add it silently:
+that file is the project's shared config.
 
-Mark an explicit item `in_progress` when you start executing it and
-`done` when you finish (see "Closing" below). Use `blocked` for items
-parked on user input. A status move is `work_item.transition { ref, to }`
-— `to` is a canonical state (`todo` for `ready`, `in_progress`,
-`blocked`, `done`, `canceled`; `archived` is `{ to: "done" or
-"canceled", native_state: "archived" }`).
+## Reading work
 
-**There are six statuses. Pick the true one.**
+`query_sql` over `v_work_item` (`ref`, `provider`, `title`, `state`,
+`native_state`, `parent_ref`) covers every tracker's items. Efforts are
+`v_effort` (`id`, `work_item`, `thread_id`, `title`, `started_at`,
+`ended_at`, `closed_by`, `summary`), their files `v_effort_file`.
+`read_task_options` suggests what's ready next on a thread.
 
-| status | when |
-|---|---|
-| `ready` | filed, waiting to be picked up. The backlog. |
-| `in_progress` | actively being worked right now. |
-| `blocked` | needs the user or an external answer before it can move. |
-| `done` | shipped. |
-| `canceled` | decided against, abandoned, or superseded. Real work that will not ship. |
-| `archived` | tidying — drops out of default views. Not a decision. |
-
-**`canceled` is the one that gets missed.** If you investigate a
-proposal and conclude it shouldn't be built, that row is `canceled`,
-not `ready`. **Keep the row** — a decision with its reasoning is worth
-more than a deleted one, because it stops the same idea being
-re-proposed from scratch. Put the evidence in the description and say
-what would change the answer.
-
-**Put state in the STATUS FIELD, never in the title.** A title prefix
-like `DECLINED:` / `WONTFIX:` / `BLOCKED:` is a workaround for not
-having chosen the right status, and it breaks things that a title can't
-fix: `list_tasks(status:"ready")` and `/oxplow:work-next` will hand you
-a decision that needs no work, and no query can distinguish it from
-real work. Titles describe the subject; the status says what's true
-about it.
-
-## Closing
-
-**Close the row in the same turn the work actually ships.** An
-`in_progress` row with finished work parked in it looks stuck to the
-user. The moment the code change lands, move it to done:
-`work_item.transition { ref, to: "done" }`. That closes the thread's
-effort.
-
-**`effort.report` is optional.** An effort's summary defaults to your last
-turn's final message. Report when you want other words, or impacts beyond
-the edits:
-
-```json
-{ "name": "effort.report",
-  "input": { "summary": "…",
-             "impacts": [{ "kind": "wiki", "id": "some-slug", "action": "updated" }] } }
-```
-
-It lands on your thread's current (else latest) effort; its result's
-`link_warnings` flags `[[…]]` links in the summary that don't resolve.
-
-**Your files and test runs are observed, not declared.** A file an edit
-tool named is claimed; any other file that changed during your turns
-(shell edits, formatters, generators) is observed; a test run is the
-effort's whose tool call ran it. There's no file list to pass.
-
-**When build output keeps showing among your effort's files, ask whether
-it's generated.** Many observed paths are **build output**, and those
-keep reappearing.
-
-Tells that a path is generated rather than authored:
-
-- it says so — `// Generated by …`, "Do not edit this file manually";
-- it lives under `generated/`, `dist/`, `build/`, `target/`, `.next/`;
-- it's a lockfile, a bindings/codegen artifact, or another tool's
-  scratch database;
-- **it shows up in effort after effort** regardless of what you were
-  working on. That repetition is the strongest signal.
-
-It costs every effort it shows up in. **Tell the user and offer to add it to
-`generated.exclude` in `.oxplow/project.yaml`.** Once declared, the path
-stops being captured and snapshotted at all.
-
-Say what you observed and let them decide, e.g.: *"`…/generated/bindings.ts`
-has shown up in most of the last several efforts. It's Tauri Specta
-output that's regenerated on every build, so it'll keep recurring — want
-me to add it to `generated.exclude`?"*
-
-Don't add it silently: the file is the project's shared, committed
-config, and what counts as disposable output is the user's call — a
-committed generated file may be deliberately tracked. Note also that
-`.gitignore` is already the baseline filter, so anything ignored by git
-needs no entry here; `generated.exclude` is for build output that **is**
-committed, or that git doesn't ignore.
-
-**Declare `impacts` for non-file outcomes.** `effort.report` accepts
-`impacts: { kind, id, action? }[]` — one per cross-page outcome beyond
-raw edits: a wiki page (`kind:"wiki"`), task (`"task"`, id `tsk42`),
-commit (`"git_commit"`), finding (`"finding"`), file (`"file"`) or
-directory (`"directory"`) you created/updated/completed/resolved. Each
-becomes a `page_ref` backlink so the target lists this task as the cause
-without parsing the summary body. In particular, name any wiki page you touched mid-turn.
-
-Legitimate reasons to *stay* `in_progress` across a stop boundary:
-
-- You have a question the user must answer before you can finish.
-- The work is genuinely multi-turn and you're pausing partway through.
-
-In either case, leave a note (`run_command knowledge.add_note { body }`
-— it lands on your own thread) explaining what's
-pending so the stop-hook nudge suppresses itself — it only fires for
-items the agent didn't touch during the turn.
-
-## Work items beyond filing
-
-Tasks are oxplow's own **work items**; an issue tracker connected as a
-provider adds its own (`work_item:<provider>:<id>`). Read every
-provider's items with `query_sql` over **`v_work_item`** (`ref`,
-`provider`, `title`, `state` — `todo`, `in_progress`, `blocked`, `done`,
-`canceled` — `native_state`, `parent_ref`): what's in progress is
-`SELECT ref, provider, title FROM v_work_item WHERE state =
-'in_progress'`, an item's children `WHERE parent_ref = '<ref>'`.
-The work done on an item is its **efforts** (`v_effort`: `id`,
-`work_item`, `thread_id`, `started_at`, `ended_at`, `summary`); the files
-an effort touched are **`v_effort_file`** (`effort_id`, `path`,
-`change_kind`).
-
-Change any provider's items with `run_command` and the item's canonical
-ref — the same commands for oxplow's tasks and another tracker's issues
-(oxplow sends them to the item's provider):
-`work_item.transition { ref, to, native_state? }` (`to` is a canonical
-state: `todo`, `in_progress`, `blocked`, `done`, `canceled`; oxplow's
-`archived` is `{ to: done, native_state: archived }`),
-`work_item.update { ref, title?, body?, parent_ref?, state?, native? }`,
-`work_item.link { ref, target, link_type }` (`blocks`, `relates_to`, …),
-`work_item.comment { ref, body }` and `work_item.reorder { ref, before?,
-after? }`; `work_item.create { title, body?, … }` always files on the
-active tracker. Another provider's item has no status-driven effort:
-bracket your work on it with `effort.open { work_item }` / `effort.close
-{ effort, summary? }`.
+The same commands change any tracker's items, by canonical ref
+(`work_item:<provider>:<id>`): `work_item.transition { ref, to,
+native_state? }`, `work_item.update { ref, title?, body?, parent_ref?,
+state?, native? }`, `work_item.link { ref, target, link_type }`,
+`work_item.comment { ref, body }`, `work_item.reorder { ref, before?,
+after? }`.
 
 ## Decisions and claims
 
-The human reviewing your work checks your **decisions** and **claims**
-first, so record them as data rather than burying them in a summary.
+The person reviewing your work checks these first, so record them as
+data:
 
-**`run_command effort.record_decision { question, choice, alternatives?, confidence?, why? }`**
+- `effort.record_decision { question, choice, alternatives?, confidence?, why? }`
+  when you resolve a real fork without asking (where something lives,
+  which approach, what you left out). Record it when you make it.
+- `effort.record_claim { statement, kind, evidence_ref? }` for "tests
+  pass", "no behavior change" and the like, citing `evidence_ref`
+  (`run:<id>`, a test name) when you have it. Unbacked claims show as
+  unverified.
 
-- Use it when you resolve a real fork without asking: where something
-  lives, which approach, what you left out, how you read an ambiguous
-  ask.
-- Record it when you make it, not at the end. Include the alternatives
-  you didn't take and why.
-- Skip trivia (naming a local variable).
+## Writing about work
 
-**`run_command effort.record_claim { statement, kind, evidence_ref? }`**
-
-- Use it for statements like "tests pass", "no behavior change" or
-  "handles empty input", before you report the work done.
-- Cite `evidence_ref` (`run:<id>`, a test name) when you have it.
-- Unbacked claims are shown to the human as **unverified**. Don't claim
-  what you didn't check.
-
-Both go on your own thread and attach to your open effort automatically.
-Pass `work_item` (`work_item:oxplow:tsk42`) if you're a sub-agent working
-a specific task. They land in `v_decision` and
-`v_claim`, which review lenses read.
-
-
-
-Refer to a task by its **quoted title**, never by id / "#N" / "the
-last task" / "the in_progress one". Ids are internal tool-call handles;
-users can't map "#14" to anything they see.
-
-- ❌ `Shipped task #14.` / `Closing the previous one.`
-- ✅ `Shipped task "Surface hidden tabs from the overflow dropdown".`
-
-This holds everywhere you name a task in user-facing prose (fix
-confirmations, summaries, commit bodies, status updates). `#N`/ids
-belong only in tool-call arguments. If you slip, restate with the
-title in the same turn.
-
-## Wikilink every reference in body text
-
-Task descriptions, acceptance criteria, effort summaries, thread
-notes, and wiki pages render through the same markdown pipeline.
-Anywhere you name a real entity that has a page, write it as a `[[…]]`
-wikilink instead of inline code or a bare path — the renderer makes it
-clickable and the `page_ref` graph records it as an outbound reference,
-so the target's backlinks list this item.
-
-Cheat sheet (every form is `[[…]]`; add `|label` to override text):
-
-- `[[src/foo.ts]]` — file by repo-relative path (`:42` for a line)
-- `[[dir:src/components]]` — directory (the `dir:` prefix is required;
-  an extensionless path would otherwise parse as a wiki slug)
-- `[[some-slug]]` — wiki page by slug (renderer shows its title)
-- `[[abc1234]]` or `[[git:abc1234]]` — git commit by SHA
-- `[[tsk42]]` — another task by id (always the `tsk` prefix; **never**
-  the GitHub `[[#42]]` / `#42` form — it isn't a ref and renders broken)
-
-Reserve inline code (`` `…` ``) for non-entities: identifiers,
-snippets, command fragments, env vars. If it has a page, wikilink it.
-The bare `[[path]]` form is correct in task summaries/descriptions
-*and* in wiki page bodies — never write `@version` literals; freshness
-is tracked in the DB (see [[oxplow-wiki-capture]]).
-
-## Redos on a just-shipped item
-
-When the user pushes back on work you just closed to `done`
-(asks you to fix, redo, revert, or take a different approach to the
-same concern), **reopen the existing item** — don't file a new one.
-
-Flow:
-
-1. `work_item.transition` the item back to `in_progress` (this opens a
-   fresh effort; the `done → in_progress` transition is the documented
-   reopen path).
-2. Do the new round of edits.
-3. Close it again (the `command.sequence` above).
-
-The item row gets a second effort recording the redo, attributed
-correctly. Filing a new "Fix the thing I just did" task fragments the
-history and makes the Work panel lie about how many concerns the user
-actually raised. A *new* concern still gets a new item — the rule is
-scoped to "user rejected my last attempt at this same item."
-
-# Dispatch mode
-
-- **Inline**: small fixes (≤20 lines, ≤2 files, no risk). Orchestrator
-  edits directly.
-- **Subagent**: anything bigger or risky. Call
-  `mcp__oxplow__dispatch_task({thread_id, item_id})` to get a ready
-  brief; pass `prompt` to the general-purpose Agent tool. The brief
-  already contains the item fields, AC, recent notes, and the
-  subagent protocol preamble — the subagent moves the item to
-  `in_progress` on entry and closes it on exit.
-
-Subagents return a one-line `oxplow-result: { ok, itemId, … }`.
-Record that as a thread note: `run_command knowledge.add_note { body }`.
+Refer to a task by its quoted title, never by id or "#N": the person
+can't map ids to what they see. In task bodies, summaries and wiki pages,
+write entities as `[[…]]` wikilinks: `[[src/foo.ts]]`,
+`[[dir:src/components]]`, `[[some-slug]]` (wiki), `[[abc1234]]`
+(commit), `[[tsk42]]` (never `#42`). Inline code is for identifiers and
+snippets.
 
 To offload a read-heavy question to an Explore subagent, allocate its
-note first (`knowledge.add_note {}` returns `note.id`), then tell the
-subagent to write its finding once, at the end, with
-`run_command knowledge.update_note { note, body }`. Read it back with
-`list_thread_notes`.
+note first (`knowledge.add_note {}` returns `note.id`) and have it write
+its finding once, at the end, with `knowledge.update_note { note, body }`.
+Read it back with `list_thread_notes`.
 
 # Commands (the one write path)
 
-Project configuration and other state changes are **commands**. Call
-`list_commands` to see what you may run — each with its input schema
-and summary — and `run_command { name, input }` to run one. Every run
-is validated, policy-checked, audited to your thread and logged as
-`command.executed`; undoable runs return an `inverse`.
+State changes are **commands**: `list_commands` shows what you may run,
+with input schemas, and `run_command { name, input }` runs one. Every
+run is validated, policy-checked and audited; undoable runs return an
+`inverse`.
 
 - `.oxplow/project.yaml` keys: `config.list_keys`, `config.get { key }`,
-  `config.set { key, value }`, `config.unset { key }`. Zones live here
-  (`config.set { key: "zones", value: [{ match, zone, color? }] }`;
-  `list_zones` shows what the table matches). Keys that run a program or
-  pick the model (`agents`, `lsp`, `testing`, `collectors`, `ai`, `acpAgents`,
-  `agentModels`, `extensions`, `agentPromptAppend`, …) need the person's
-  confirmation — your run is kept as a proposal for them.
-- Tasks and other work items: `work_item.*` (above); your effort's
-  record: `effort.report`, `effort.record_decision`,
-  `effort.record_claim`; test evidence: `test.record_run`, and
-  `collector.sync` for a report collector; notes and comments:
+  `config.set { key, value }`, `config.unset { key }`. Keys that run a
+  program or pick the model (`agents`, `lsp`, `testing`, `collectors`,
+  `ai`, `acpAgents`, `agentModels`, `extensions`, `agentPromptAppend`, …)
+  need the person's confirmation.
+- Work items `work_item.*`; efforts `effort.*`; test evidence
+  `test.record_run`, `collector.sync`; notes and comments
   `knowledge.add_note`, `knowledge.reply_comment`, ….
 
 Invalid input names the failing field; a denial says why. A run that
-needs a person's confirmation returns `{ kind: "proposed", proposal, message }`: it is
-recorded as `proposal:N` and waits in the person's Alerts panel (and on
-the setting's row in Settings). Tell the person what you proposed and why;
-don't run it again or look for another way to make the change.
+needs the person's confirmation returns `{ kind: "proposed", proposal,
+message }` and waits in their Alerts. Tell them what you proposed and
+why; don't run it again or look for another way to make the change.

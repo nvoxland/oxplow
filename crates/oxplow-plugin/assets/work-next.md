@@ -1,12 +1,10 @@
 ---
-description: Pick up the next ready oxplow task and dispatch it.
+description: Pick up the next ready oxplow task and work on it.
 ---
 
-Call `mcp__oxplow__read_task_options` for this thread and dispatch
-the resulting unit to a `general-purpose` subagent per the
-`oxplow-runtime` skill. The skill carries the protocol (mark
-`in_progress` before work, `done` after, never two items
-`in_progress` at once); follow it.
+Call `mcp__oxplow__read_task_options` for this thread. If it returns
+`{ mode: "empty" }`, nothing is ready: say so and stop.
 
-If the tool returns `{ mode: "empty" }` there's nothing ready —
-report that and stop.
+Otherwise pick the item (or, for an epic, its first ready child), move
+it to `in_progress` with `work_item.transition` so your work links to
+it, and do it. Move it to `done` when it ships.

@@ -20,7 +20,7 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction), `External`, or `Dispatch` — one or the other, decided per input (see below) |
-| `effect` | `Write` (the default), `Read` or `Record`. A read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`config.list_keys`, `config.get`). A `Write` is refused to an agent thread that may not write. A `Record` changes oxplow's own records (`work_item.*`): audited like a write, open to any thread, and its handler refuses only a **claim** — opening an effort — when `TxCtx::may_claim` is false (tsk466) |
+| `effect` | `Write` (the default), `Read` or `Record`. A read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`config.list_keys`, `config.get`). A `Write` is refused to an agent thread that may not write. A `Record` changes oxplow's own records (`work_item.*`, `effort.*`): audited like a write, open to any thread |
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
@@ -43,11 +43,8 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    command needs a thread that may write: the bus asks its `WriteGate`
    (`Services` wires "the thread exists and is its stream's writer"), so
    a queued or closed thread can read but not change state (tsk437
-   review). A `Record` command skips that refusal; the gate's answer
-   rides into the handler as `TxCtx::may_claim`, and `TxCtx::claim`
-   returns `Denied` (rolled back, audited `denied`, not `error`) when the
-   run opened an effort the actor may not claim. Filing and editing
-   tasks isn't a claim on the worktree; moving one to `in_progress` is.
+   review). A `Record` command skips that refusal: oxplow's own records
+   (tasks, efforts) aren't a claim on the worktree.
    **Pre-check** (tsk1010): a command may carry a
    `Precheck` (`Command::with_precheck`) — an async check of the input
    that needs more than a transaction can do (resolving a metric query
@@ -463,7 +460,7 @@ thread can file, edit and finish tasks but not move one to `in_progress`
 `transition_tasks`, `reorder_tasks`) and `oxplow_app::task_writes` with
 them; an epic is a `work_item.create` per row (children with
 `parent_ref`), and closing is the `command.sequence` above.
-`dispatch_task` only composes a brief. `oxplow_app::work_items::WorkItems`
+`oxplow_app::work_items::WorkItems`
 is a typed client over the commands (the conformance suite uses it).
 `TaskService::update`
 (no actor) still logs every status change, with source

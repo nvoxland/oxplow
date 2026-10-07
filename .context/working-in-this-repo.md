@@ -2,8 +2,8 @@
 
 The project root `CLAUDE.md` is a lean, always-on index: the essential
 rules plus the subsystem routing table. This doc holds the full detail
-those essentials point at — repo layout, test/lint policy, and the
-complete task-filing discipline. Read it when you need the *why* or the
+those essentials point at — repo layout, test/lint policy, and how
+work is tracked. Read it when you need the *why* or the
 exact mechanics; the always-on gist lives in `CLAUDE.md`.
 
 ## `.context/` is the knowledge base
@@ -50,21 +50,26 @@ never edit them (refinery checksums them).
 
 Use plan mode for multi-subsystem work (3+ areas touched) or ambiguous
 requirements. Skip it for single-file changes, typos, renames, or narrow
-refactors — go straight to TDD or a subagent dispatch.
+refactors — go straight to TDD.
 
-## Filing tasks (convention, not enforced)
+## Tracking work
 
-oxplow no longer refuses an edit or a stop over tracked work
-([work-tracking.md](./work-tracking.md)). Filing an `in_progress` task
-before working is still this repo's convention until its rules are
-reworked; nothing checks it.
-
-**An effort's files are observed, never declared** (`effort.report`
-takes no files, and the `OXPLOW_TASK=` prefix on a test command is no
-longer read). A path in `generated.exclude` (`.oxplow/project.yaml`) is
-build output oxplow deliberately doesn't snapshot, so no effort owns it —
-e.g. `apps/desktop/src/tauri-bridge/generated/bindings.ts`, which Tauri
+oxplow infers the work ([work-tracking.md](./work-tracking.md)): it opens
+an effort when a turn changes files, links it to an item someone starts,
+and closes it when a commit lands its work. Nothing is filed or closed
+to be allowed to edit or stop, and an effort's files and test runs are
+observed, never declared. A path in `generated.exclude`
+(`.oxplow/project.yaml`) is build output oxplow deliberately doesn't
+snapshot, so no effort owns it — e.g.
+`apps/desktop/src/tauri-bridge/generated/bindings.ts`, which Tauri
 Specta rewrites on nearly every build.
+
+File a task when it helps the person follow the work: an epic and its
+children for a plan of separately reviewable steps, one item per
+independent ask they want tracked, and a `ready` item for a follow-up
+you spot but won't do now (the backlog is the durable record; a reply
+is not). A redo of something just shipped reopens its item rather than
+filing "fix what I just did".
 
 **Asking the user a question.** When your reply needs the user's
 answer, end it with the question itself. A final message that ends in
@@ -116,8 +121,8 @@ test) or a tempfile-backed DB.
 Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun run test` invokes both Rust and TS suites.
 
-**Closing a task → run `bun run test:collect`, not bare `cargo test` /
-`bun test`.** `test:collect` (`scripts/test-collect.sh`: `cargo cov`,
+**Before each commit, one full run of `bun run test:collect` with lint
+(below) — not bare `cargo test` / `bun test`.** `test:collect` (`scripts/test-collect.sh`: `cargo cov`,
 then `bun run --cwd apps/desktop test:junit` whether or not the Rust
 suite passed, failing if either did) is the configured `testing.command` — it's the only
 test run that emits the JUnit + lcov reports oxplow parses into the
@@ -136,7 +141,7 @@ Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo
 install cargo-llvm-cov cargo-nextest`) to write `target/coverage/lcov.info`.
 See `.context/collection.md`.
 
-**Closing a change runs lint and tests together** — they don't share a
+**That run is lint and tests together** — they don't share a
 target dir: `(bun run lint:collect >/dev/null 2>&1 & bun run
 test:collect; wait)`, still one foreground command (see
 [performance.md](./performance.md) → "The dev loop").
@@ -354,78 +359,3 @@ character used as a key separator in a template literal
 If you add a genuinely binary file type, add its extension to
 `BINARY_EXTS` in the script rather than weakening the check.
 
-## Tasks are observational
-
-Oxplow passively tracks active agent turns: each open `agent_turn` row
-(`ended_at IS NULL` and started after runtime boot) renders as a live
-row in the Work panel's in_progress bucket showing the prompt and a
-spinner. When the turn Stops, the row disappears. No synthesized work
-items, no auto-file/auto-complete, no adoption — you don't need to
-narrate turn boundaries.
-
-**File a durable task before you start editing** (unless the
-change qualifies for the trivial-edit carve-out above). When you're
-about to change project files in a turn and you aren't already working
-against an existing item, file one with status `in_progress`. The item
-should describe the real piece of work you're committing to ship, not
-a placeholder. Every task write is `mcp__oxplow__run_command`: file
-with `work_item.create { title, body, state: "in_progress", native: {
-thread } }` (without `native.thread` it lands on the backlog). When it's
-settled, close it with `work_item.transition` (`to: "done"`); add
-`effort.report { summary }` only for words other than your final
-message.
-
-**File one task for one coherent change**, even if it spans a few
-files. Make an epic (file the parent, then each child with
-`parent_ref`) only when the work has ≥3 sub-steps a reviewer would naturally
-inspect independently — distinct phases, handoffs, or separable
-subsystems. The test: could a child close to `done` on its own
-and have the user inspect just that piece? If no, it's one task.
-
-**One user-visible concern per ROW.** Independent concerns must be
-separate items (sibling tasks or epic children) — a reviewer has to be
-able to accept one and push back on another. Test: if a reasonable
-reviewer would want to check them independently, they're separate
-rows.
-
-**Multiple independent asks in a single prompt → multiple tasks.**
-When the user packs two or more independent things into one message
-(e.g. "fix X. ALSO: do Y", "do A, then B"), file a separate task
-for each one before starting work — even if you'll do them in the same
-turn. They are independent concerns by definition; a reviewer must be
-able to accept one and reject the other. Don't lump them under a
-single "do everything the user asked" task.
-
-**Every new ask gets its own item.** When the user sends a new request
-mid-turn, file a new task rather than silently expanding the
-current item's scope. The exception: if the new ask is genuinely a
-correction to the same concern (a fix/redo on something you just
-shipped to `done`), reopen that item — `work_item.transition` it
-back to `in_progress`, redo the work, then close it back to `done`
-the usual way. Filing a "Fix what I just did" task
-fragments the history.
-
-**Mid-turn user prompts are a new ask boundary.** When a
-`<system-reminder>` injects a new user message while you are still
-working on something, treat it as a fresh ask — not as more scope for
-the current `in_progress` item. Default action: file a new row before
-the next edit. Only stay inside the current item if the new prompt is
-a direct correction to that exact item; otherwise the rule above
-applies. The Work panel must reflect every distinct concern the user
-raised, not just the first one. Runtime nudge: a UserPromptSubmit
-reminder fires whenever a new prompt arrives and the thread already
-has an `in_progress` item from a prior prompt — it points at the open
-item and asks you to choose explicitly. Don't ignore it.
-
-**File backlog ideas as you have them.** When you notice a follow-up
-worth doing later — a deferred polish item, a TODO surfaced while
-finishing something else — file it as a `ready` task right then.
-Don't bury follow-ups in prose at the end of a reply where they'll be
-forgotten. The backlog is the durable record; replies are not.
-
-The runtime handles the rest of the state machine for you: tasks
-persist across turn boundaries automatically, and the Stop hook
-reminds you to audit open efforts only when something
-actually changed. Nothing flags a new "Fix …" task that belongs as a
-reopen — the redo hint lived on the deleted MCP `create_task` — so
-that judgement is yours.

@@ -211,5 +211,11 @@ The three in progress:
   session | day`, a per-hook character budget, evaluation counts
   (`v_hint_stat`) and muting after three deliveries; bundled
   `landed-in-progress` to the person.
-- Next: skills and repo rules.
-  Then the capability framework and the three swappable pieces.
+  Agent text follows: the runtime skill is a short optional guide, the
+  dispatch protocol (`dispatch_task`, the brief, the subagent skill) is
+  gone, and a retired skill leaves installed runtimes on their next
+  write.
+- Next: the capability framework and the three swappable pieces. Loose
+  refs (`tsk12` for a work item) wait for it: recognising an id is the
+  active work list's declaration, not core's.
+

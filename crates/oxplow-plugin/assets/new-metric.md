@@ -4,8 +4,7 @@ description: Author an oxplow metric — a durable, chartable number tracked ove
 
 Author a metric so oxplow tracks a number over time and charts it on the
 **Metrics** page. The standing rules + full host-builtin reference live in the
-`oxplow-metrics` skill — follow it. File a task first (you'll edit project
-files), then:
+`oxplow-metrics` skill — follow it. Then:
 
 ## 1. Clarify the ask
 

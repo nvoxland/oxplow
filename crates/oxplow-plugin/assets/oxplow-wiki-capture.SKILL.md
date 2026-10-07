@@ -125,9 +125,9 @@ wired up by [[src/ui/index.tsx]]."
    `knowledge.link { page, target }` adds one link under the page's
    Related heading; `knowledge.delete_page { slug }` deletes a page (the
    person confirms).
-3. When you close the surrounding task, declare the page in
-   `effort.report`'s `impacts`: `{ kind:"wiki", id:"<slug>",
-   action:"created"|"updated" }` — this backlinks the task to the page.
+3. Optionally, declare the page in `effort.report`'s `impacts`:
+   `{ kind:"wiki", id:"<slug>", action:"created"|"updated" }` — this
+   backlinks your effort's item to the page.
 
 ## Diagrams — use mermaid
 

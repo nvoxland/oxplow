@@ -1,20 +1,20 @@
 ---
 name: oxplow-collection
-description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when finishing/closing a task (effort.report), when the user asks about test coverage or "what tests ran", and on /oxplow:configure. Keeps coverage flowing without bit-rot after a one-time configure.
+description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when finishing a change or committing, when the user asks about test coverage or "what tests ran", and on /oxplow:configure. Keeps coverage flowing without bit-rot after a one-time configure.
 ---
 
 # Collection — keep coverage flowing per effort
 
-oxplow attaches **observations** to each task effort: which tests ran,
+oxplow attaches **observations** to each effort: which tests ran,
 and diff coverage on the lines the effort changed. Collection is mostly
 automatic; your job is small and is about making sure the data exists,
 **not** producing numbers.
 
 ## The one rule
 
-When you finish work on a task, **run the project's tests before you
-close it** (`work_item.transition` to done), so fresh test + coverage reports exist for oxplow to
-attribute to the effort. The test command is recorded in the
+When you finish a change, **run the project's full tests before you
+commit it or call it done**, so fresh test + coverage reports exist for
+oxplow to attribute to the effort. The test command is recorded in the
 `testing:` block of `.oxplow/project.yaml` (`command`).
 
 Run it three specific ways:
@@ -30,7 +30,7 @@ Run it three specific ways:
     - **Iterating (red/green, one test, one crate): `fastCommand`** when the
       project declares one. It emits the same test report but skips coverage
       instrumentation, and it takes a filter — so it's seconds, not minutes.
-    - **Before closing the task: `command`.** The full run, with coverage.
+    - **Before committing or calling it done: `command`.** The full run, with coverage.
       Diff coverage for the effort comes only from this one.
 
     If the project declares no `fastCommand`, use `command` throughout.

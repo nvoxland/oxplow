@@ -142,7 +142,15 @@ fn to_snake_case(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DispatchTaskParams, FileSnapshotIdParams};
+    use crate::FileSnapshotIdParams;
+
+    /// A tool's params with multi-word fields.
+    #[derive(Debug, serde::Deserialize)]
+    struct Params {
+        thread_id: Option<String>,
+        item_id: Option<String>,
+        extra_context: Option<String>,
+    }
 
     fn obj(v: Value) -> JsonObject {
         v.as_object().unwrap().clone()
@@ -186,7 +194,7 @@ mod tests {
     fn camel_case_multiword_fields_deserialize() {
         // The headline failure: camelCase keys (`threadId`) must
         // deserialize, not -32602.
-        let p: DispatchTaskParams = lenient_from_object(obj(serde_json::json!({
+        let p: Params = lenient_from_object(obj(serde_json::json!({
             "threadId": "thr5",
             "itemId": "tsk1",
             "extraContext": "look at src/a.rs",
@@ -199,7 +207,7 @@ mod tests {
 
     #[test]
     fn snake_case_still_works_and_is_canonical() {
-        let p: DispatchTaskParams = lenient_from_object(obj(serde_json::json!({
+        let p: Params = lenient_from_object(obj(serde_json::json!({
             "thread_id": "thr5",
         })))
         .unwrap();

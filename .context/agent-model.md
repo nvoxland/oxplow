@@ -722,56 +722,30 @@ turn-end snapshot, sets the status (keeping `awaiting_user` when the
 turn set it) and acks `{}`. ACP's `turn_ended` and opencode's
 `session.idle` do the same and nothing else.
 
-## Orchestrator pattern
+## Subagents and the work queue
 
-The thread agent is a long-lived process that must stay context-lean
-across a work queue that could span dozens of items. Every file change
-is filed as a task first (traceability IS the point — local
-history attributes snapshots back to the sole in-progress item). Past
-that, the orchestrator has two modes:
+Subagent tool calls reach the hooks like any other, so a subagent's
+edits and test runs land in the thread's effort with nothing from it:
+there is no dispatch protocol, brief or subagent skill. An Explore
+subagent can still write its finding to a thread note allocated for it
+(`knowledge.add_note`, then `knowledge.update_note`), read back with
+`list_thread_notes`.
 
-1. **Inline small-fix shortcut.** For mechanical, low-risk changes (≤
-   ~20 lines across ≤ 2 files — test fixtures, import cleanup, label
-   renames), the orchestrator does the Read/Edit/Bash directly under
-   the task. Mark `in_progress`, edit, run tests, mark
-   `done`. Snapshots still fire with correct attribution; we
-   just skip the subagent round-trip.
-2. **Subagent dispatch for bigger work.** For multi-file/multi-step/
-   risky changes, the orchestrator calls `oxplow__read_work_options`,
-   launches one `general-purpose` subagent with the brief, and the
-   subagent moves the item to done (its final message is the effort's
-   summary unless it runs `effort.report`). Subagents run in isolated
-   context windows — their tokens don't count against the orchestrator,
-   so main context stays flat regardless of queue depth.
-
-The dispatch protocol (mark `in_progress` before work, `done`
-after, never two items `in_progress` at once, blocked + note on
-stuck) is identical for both modes and lives in the merged
-`oxplow-runtime` skill (orchestrator side — filing + lifecycle +
-dispatch combined) plus the `oxplow-subagent-work-protocol` skill
-(scoped to subagents). Briefs no longer need to repeat it.
-
-Related small fixes get batched into one task ("fix 4 test fixtures" =
-one item, not four). Claude Code's built-in `TaskCreate` is a
-within-turn micro-planner and never mirrors oxplow items.
-
-`oxplow__read_work_options` (defined in `crates/oxplow-mcp/src/lib.rs`, backed by
-`taskstore.readWorkOptions`) returns one of three shapes:
+`read_task_options` (`crates/oxplow-mcp/src/lib.rs`, backed by
+`taskstore.readWorkOptions`) suggests what to work on next on a thread,
+in one of three shapes:
 - `{ mode: "epic", epic, children }` — the highest-priority ready item is
   an epic; all ready descendants (filtered for blocks links, transitively)
-  are included as children. Dispatch the entire epic as one unit.
+  are included as children.
 - `{ mode: "standalone", items }` — the head is not an epic; all ready
   non-epic items are returned with link edges inline so the agent can
   pick one or a link-related cluster. Epics are excluded from this list.
-- `{ mode: "empty" }` — nothing ready; allow stop.
+- `{ mode: "empty" }` — nothing ready.
 
-`read_task_options` is the dispatch unit: the agent (or the user, via
-`/work-next`) calls it and dispatches the returned cluster to a
-`general-purpose` subagent. The grouping (epic-as-unit vs standalone
-items) lives in the tool, not the caller.
-
-`list_ready_work` remains available for inspection but is no longer the
-primary tool for queue-driven dispatch.
+`/work-next` calls it and works the item it picks, moving it to
+`in_progress` so the effort links to it. Claude Code's built-in
+`TaskCreate` is a within-turn micro-planner and never mirrors oxplow
+items.
 
 ## MCP tools
 
@@ -838,9 +812,8 @@ including future ones. See `lenient_from_object` + `to_snake_case`.
 
 Complementary hardening: required-but-inferable fields are made
 optional and inferred in-handler where safe (e.g. `list_comments`
-infers `scope` from `id`'s prefix; `dispatch_task` infers the thread
-from `item_id`, so `thread_id` is only needed when no `item_id` is
-given). The goal is the same — a reasonable call shouldn't 32602.
+infers `scope` from `id`'s prefix). The goal is the same — a reasonable
+call shouldn't 32602.
 
 ### Surface parity with the IPC adapter
 
@@ -943,9 +916,8 @@ is `{ to: done|canceled, native_state: archived }`.
   `work_item.transition`, `work_item.reorder { ref, before?, after? }`,
   `work_item.link` / `work_item.comment`. There is no agent delete —
   `work_item.delete` is destructive, and an agent never confirms one:
-  cancel or archive instead. `dispatch_task` is read-only (it composes
-  the brief). Closing is `work_item.transition → done`; the effort
-  policy closes the thread's effort.
+  cancel or archive instead. Closing is `work_item.transition → done`;
+  the effort policy closes the thread's effort.
 - `effort.report { thread?, summary?, impacts? }` is optional and returns
   `{ effort, link_warnings }`. It records a summary and the impacts
   beyond the edits on the thread's open effort, else its latest
@@ -992,17 +964,6 @@ is `{ to: done|canceled, native_state: archived }`.
   its captures. Subagent tool calls reach the hooks like any other, so a
   subagent's runs need nothing from it; `test.record_run` is only for
   counts oxplow couldn't parse from a run's output.
-- `dispatch_task({ thread_id?, item_id?, extra_context? })` composes
-  a subagent brief server-side (item fields + description + optional extra
-  context + the protocol preamble) so the orchestrator doesn't have to Read
-  the item description/AC/notes into chat context. Without `item_id` it
-  picks the thread's first ready non-epic item. It is **read-only** (P8.A10
-  dropped its old `autoStart` transition): the brief tells the sub-agent to
-  `work_item.transition` the item to `in_progress` itself on entry and to
-  done on exit (its files and runs are observed, its final message is the
-  summary). Callers pass the returned `prompt` directly to
-  Agent(prompt=…). Pure composition lives in `compose_dispatch_brief`
-  (same file) so tests can exercise it without spinning up MCP.
 - `add_followup({ threadId, note })` / `remove_followup({ threadId, id })` /
   `list_followups({ threadId })` — orchestrator-only, in-memory transient
   follow-up reminders. No DB row, lost on runtime restart. Surfaces as
