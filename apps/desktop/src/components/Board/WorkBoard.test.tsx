@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
 
 // The Board (P6.E1a): work items by canonical state; a card moves by
-// drag or by its right-click menu, through work_item.transition.
+// drag or by its right-click menu, through oxplow.work_item.transition.
 
 const realApi = await import("../../api.js");
 const realQuerySql = realApi.querySql;
@@ -29,7 +29,7 @@ mock.module("../../api.js", () => ({
     };
   },
   runCommand: async (name: string, input: unknown, ...rest: unknown[]) => {
-    if (!name.startsWith("work_item.") && !name.startsWith("fake.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
+    if (!name.startsWith("oxplow.work_item.") && !name.startsWith("fake.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
     ran.push([name, input]);
     return { result: null, audit_id: 1, event_id: null, undo: null };
   },
@@ -60,16 +60,16 @@ test("dropping a card on a column, or its menu's Move To, transitions it", async
   const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
   fireEvent.dragOver(view.getByTestId("board-column-blocked"), { dataTransfer });
   fireEvent.drop(view.getByTestId("board-column-blocked"), { dataTransfer });
-  await waitFor(() => expect(ran).toEqual([["work_item.transition", { ref: "work_item:oxplow:tsk1", to: "blocked" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "work_item:oxplow:tsk1", to: "blocked" }]]));
 
   fireEvent.contextMenu(view.getByText("Ship it"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-board-move-done")));
-  await waitFor(() => expect(ran[1]).toEqual(["work_item.transition", { ref: "work_item:oxplow:tsk2", to: "done" }]));
+  await waitFor(() => expect(ran[1]).toEqual(["oxplow.work_item.transition", { ref: "work_item:oxplow:tsk2", to: "done" }]));
 });
 
 // P6b.C3, P7.A1: every provider's card opens its page and moves through
-// `work_item.transition` with the canonical state — the bus dispatches it.
-test("another provider's card links to its page and moves through work_item.transition", async () => {
+// `oxplow.work_item.transition` with the canonical state — the bus dispatches it.
+test("another provider's card links to its page and moves through oxplow.work_item.transition", async () => {
   const opened: string[] = [];
   const view = render(<WorkBoard scope="all" onOpenPage={(ref) => opened.push(ref.id)} />);
   fireEvent.click(await waitFor(() => view.getByText("Their bug")));
@@ -77,7 +77,7 @@ test("another provider's card links to its page and moves through work_item.tran
   const data = new Map<string, string>([[WORK_ITEM_DRAG_MIME, drag("work_item:fake:W-1")]]);
   const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
   fireEvent.drop(view.getByTestId("board-column-done"), { dataTransfer });
-  await waitFor(() => expect(ran).toEqual([["work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
 });
 
 // P6b.C4: an extension's `ui.commands` about work items join a card's
@@ -90,8 +90,8 @@ test("a card's menu offers the extensions' commands for its item", async () => {
       ui: {
         slots: [],
         commands: [
-          { id: "tracker/0", extension: "tracker", command: "fake.estimate", label: "Estimate in Fake", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" }, group: "fake" },
-          { id: "tracker/1", extension: "tracker", command: "fake.only_menu", label: "Nav only", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}" }, group: "fake" },
+          { id: "tracker/0", extension: "tracker", command: "fake.work_items.estimate", label: "Estimate in Fake", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" }, group: "fake" },
+          { id: "tracker/1", extension: "tracker", command: "fake.work_items.only_menu", label: "Nav only", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}" }, group: "fake" },
         ],
         decorators: [],
       },
@@ -106,5 +106,5 @@ test("a card's menu offers the extensions' commands for its item", async () => {
   expect(item.textContent).toContain("Estimate in Fake");
   expect(view.queryByTestId("menu-item-ui-command-tracker/1")).toBeNull();
   fireEvent.click(item);
-  await waitFor(() => expect(ran).toEqual([["fake.estimate", { ref: "work_item:fake:W-1" }]]));
+  await waitFor(() => expect(ran).toEqual([["fake.work_items.estimate", { ref: "work_item:fake:W-1" }]]));
 });

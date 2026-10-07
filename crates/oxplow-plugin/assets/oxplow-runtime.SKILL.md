@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions and claims, and the command bus. Loads on mcp__oxplow__run_command with effort.* or knowledge.add_note, and on v_effort.
+description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions and claims, and the command bus. Loads on mcp__oxplow__run_command with effort.* or oxplow.knowledge.add_note, and on v_effort.
 ---
 
 # Your work in oxplow
@@ -22,12 +22,12 @@ finish.
 
 ## Correcting an effort
 
-- `effort.update { effort, title }`: rename it.
-- `effort.link { effort | thread, work_item }`: link it to a work item,
+- `oxplow.effort.update { effort, title }`: rename it.
+- `oxplow.effort.link { effort | thread, work_item }`: link it to a work item,
   or unlink it (`null`).
-- `effort.close { effort | thread }` / `effort.open { title?, work_item? }`:
+- `oxplow.effort.close { effort | thread }` / `oxplow.effort.open { title?, work_item? }`:
   split work oxplow grouped together.
-- `effort.report { summary?, impacts? }`: other words than your last
+- `oxplow.effort.report { summary?, impacts? }`: other words than your last
   answer, or outcomes beyond edits. Each impact is
   `{ kind, id, action? }`, where `kind` is `wiki`, `work_item` (its
   ref, or its id as the work list writes it), `git_commit`, `file` or
@@ -54,10 +54,10 @@ Efforts are `v_effort` (`id`, `work_item`, `thread_id`, `title`,
 The person reviewing your work checks these first, so record them as
 data:
 
-- `effort.record_decision { question, choice, alternatives?, confidence?, why? }`
+- `oxplow.effort.record_decision { question, choice, alternatives?, confidence?, why? }`
   when you resolve a real fork without asking (where something lives,
   which approach, what you left out). Record it when you make it.
-- `effort.record_claim { statement, kind, evidence_ref? }` for "tests
+- `oxplow.effort.record_claim { statement, kind, evidence_ref? }` for "tests
   pass", "no behavior change" and the like, citing `evidence_ref`
   (`run:<id>`, a test name) when you have it. Unbacked claims show as
   unverified.
@@ -72,8 +72,8 @@ write entities as `[[…]]` wikilinks: `[[src/foo.ts]]`,
 snippets.
 
 To offload a read-heavy question to an Explore subagent, allocate its
-note first (`knowledge.add_note {}` returns `note.id`) and have it write
-its finding once, at the end, with `knowledge.update_note { note, body }`.
+note first (`oxplow.knowledge.add_note {}` returns `note.id`) and have it write
+its finding once, at the end, with `oxplow.knowledge.update_note { note, body }`.
 Read it back with `list_thread_notes`.
 
 # Commands (the one write path)
@@ -83,14 +83,14 @@ with input schemas, and `run_command { name, input }` runs one. Every
 run is validated, policy-checked and audited; undoable runs return an
 `inverse`.
 
-- `.oxplow/project.yaml` keys: `config.list_keys`, `config.get { key }`,
-  `config.set { key, value }`, `config.unset { key }`. Keys that run a
+- `.oxplow/project.yaml` keys: `oxplow.config.list_keys`, `oxplow.config.get { key }`,
+  `oxplow.config.set { key, value }`, `oxplow.config.unset { key }`. Keys that run a
   program or pick the model (`agents`, `lsp`, `testing`, `collectors`,
   `ai`, `acpAgents`, `agentModels`, `extensions`, `agentPromptAppend`, …)
   need the person's confirmation.
 - Efforts `effort.*`; work items `work_item.*` (when a list is active); test evidence
-  `test.record_run`, `collector.sync`; notes and comments
-  `knowledge.add_note`, `knowledge.reply_comment`, ….
+  `oxplow.test.record_run`, `oxplow.collector.sync`; notes and comments
+  `oxplow.knowledge.add_note`, `oxplow.knowledge.reply_comment`, ….
 
 Invalid input names the failing field; a denial says why. A run that
 needs the person's confirmation returns `{ kind: "proposed", proposal,

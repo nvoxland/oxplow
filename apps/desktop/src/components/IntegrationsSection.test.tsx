@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { formatShortDateTime } from "./format.js";
 
 // P7.A2: the project's work items are filed on one provider, chosen on
-// Settings → Integrations; the choice is the person's `config.set` of
+// Settings → Integrations; the choice is the person's `oxplow.config.set` of
 // `activeProviders` (oxplow's own is the key unset).
 
 const realApi = await import("../api.js");
@@ -169,12 +169,12 @@ test("Sync Now runs provider.sync for that collector", async () => {
   expect(line.textContent).toContain(`work_items: 3 records · last read ${formatShortDateTime("2026-10-01T00:00:00Z")}`);
   fireEvent.click(view.getByTestId("integration-sync-tracker/fake-work_items"));
   await waitFor(() =>
-    expect(ran).toEqual([["provider.sync", { instance: "tracker/fake", collector: "work_items" }, false]]),
+    expect(ran).toEqual([["oxplow.provider.sync", { instance: "tracker/fake", collector: "work_items" }, false]]),
   );
 });
 
 // P9.A1: a person can keep oxplow's own component where an extension
-// replaces it — `replacementsOff`, a person's `config.set` like the active
+// replaces it — `replacementsOff`, a person's `oxplow.config.set` like the active
 // provider.
 test("a replaced component can be turned back to oxplow's own", async () => {
   const none = render(<IntegrationsSection />);
@@ -192,11 +192,11 @@ test("a replaced component can be turned back to oxplow's own", async () => {
   expect(box.checked).toBe(false);
   fireEvent.click(box);
   await waitFor(() =>
-    expect(ran).toEqual([["config.set", { key: "replacementsOff", value: ["work_item.board"] }, true]]),
+    expect(ran).toEqual([["oxplow.config.set", { key: "replacementsOff", value: ["work_item.board"] }, true]]),
   );
   await waitFor(() => expect(box.checked).toBe(true));
   fireEvent.click(box);
-  await waitFor(() => expect(ran[1]).toEqual(["config.unset", { key: "replacementsOff" }, true]));
+  await waitFor(() => expect(ran[1]).toEqual(["oxplow.config.unset", { key: "replacementsOff" }, true]));
 });
 
 // P9.B1: a provider's credential is an instance's own — saved under the

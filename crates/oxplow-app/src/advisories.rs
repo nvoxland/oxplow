@@ -913,7 +913,7 @@ mod tests {
     }
 
     /// A person's hint never reaches the agent: it waits in the ledger
-    /// until the person dismisses it (`hint.dismiss`), which an agent can't.
+    /// until the person dismisses it (`oxplow.hint.dismiss`), which an agent can't.
     #[tokio::test]
     async fn a_person_hint_waits_for_the_person() {
         let f = crate::test_fixtures::services_with_effort().await;

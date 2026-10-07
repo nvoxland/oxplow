@@ -183,7 +183,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         .find(|p| p.kind == oxplow_app::exec_consent::ProgramKind::Component)
         .expect("the component is on Programs");
     assert_eq!(component.name, "github/pr-lifetimes");
-    assert_eq!(component.commands, ["collector.sync"]);
+    assert_eq!(component.commands, ["oxplow.collector.sync"]);
     assert!(!component.approved);
 
     // tsk935: `searchable: pull_request` — site search finds the pull

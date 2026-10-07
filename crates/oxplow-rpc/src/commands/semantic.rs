@@ -58,7 +58,7 @@ pub async fn prompt_catalog(
 }
 
 /// Every setting with its value and where it comes from (P6.H1): the
-/// Settings view. UI-only: an agent reads `config.list_keys`.
+/// Settings view. UI-only: an agent reads `oxplow.config.list_keys`.
 pub async fn effective_config(
     svc: &Services,
 ) -> Result<Vec<oxplow_app::effective_config::EffectiveSetting>, IpcError> {

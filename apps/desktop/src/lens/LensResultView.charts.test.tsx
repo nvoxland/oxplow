@@ -101,8 +101,8 @@ test("treemap lenses draw a tile per positive item and link through the lens's c
 });
 
 test("every lens has Copy and Add to Agent Context; declared actions are buttons, row actions aren't", () => {
-  const finish = { id: "finish", label: "Finish", command: "work_item.transition", input: {}, row: false };
-  const perRow = { id: "row", label: "Per Row", command: "work_item.transition", input: {}, row: true };
+  const finish = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
+  const perRow = { id: "row", label: "Per Row", command: "oxplow.work_item.transition", input: {}, row: true };
   const { getByTestId, queryByTestId } = render(
     <LensResultView
       run={run({ viz: "table", actions: [finish, perRow] }, ["id"], [[1]])}

@@ -5,7 +5,7 @@
  * store, the RailHud surfaces them as red rows, and clicking a row
  * opens a dedicated page with the full output. Capped at the last
  * MAX_ENTRIES; nothing persists across reload here. Each one is also
- * reported to the daemon (`ui.report_error`, tsk1072), so the agent can
+ * reported to the daemon (`oxplow.ui.report_error`, tsk1072), so the agent can
  * read what the person saw in `v_op_error`.
  */
 
@@ -80,7 +80,7 @@ export type OpErrorReporter = (entry: OpError) => void;
 
 /**
  * A reporter that records each op error on the daemon as
- * `ui.report_error`, without waiting for it. A report that fails is
+ * `oxplow.ui.report_error`, without waiting for it. A report that fails is
  * logged, never pushed as another op error — that would report itself
  * again, without end.
  */
@@ -101,7 +101,7 @@ export function reportOpErrorTo(
     else if (entry.streamId !== null) input.stream = entry.streamId;
     if (entry.signal !== null) input.signal = entry.signal;
     if (entry.durationMs !== null) input.duration_ms = Math.round(entry.durationMs);
-    run("ui.report_error", input).catch((error: unknown) => {
+    run("oxplow.ui.report_error", input).catch((error: unknown) => {
       log("warn", "couldn't report an op error to the daemon", {
         label: entry.label,
         error: error instanceof Error ? error.message : String(error),

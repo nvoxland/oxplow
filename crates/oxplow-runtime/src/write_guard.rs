@@ -99,7 +99,7 @@ pub fn build_write_guard_response(
 
 /// Why an agent may not write `raw_path` itself, when it is a wiki page
 /// (`<project>/.oxplow/wiki/…`): pages are written with the
-/// `knowledge.write_page` command — validated, linked and audited, the
+/// `oxplow.knowledge.write_page` command — validated, linked and audited, the
 /// file following — whatever the thread (P5.C3). A person's hand edit
 /// still converges through the wiki watcher.
 pub fn wiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> Option<String> {
@@ -113,8 +113,8 @@ pub fn wiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> O
     is_inside(&abs, &project_dir.join(".oxplow").join("wiki")).then(|| {
         format!(
             "`{}` is a wiki page: write it with mcp__oxplow__run_command → \
-             `knowledge.write_page {{ slug, body, verified_refs, removed_refs }}` \
-             (it writes the file); `knowledge.delete_page {{ slug }}` deletes one.",
+             `oxplow.knowledge.write_page {{ slug, body, verified_refs, removed_refs }}` \
+             (it writes the file); `oxplow.knowledge.delete_page {{ slug }}` deletes one.",
             abs.display()
         )
     })
@@ -299,7 +299,7 @@ mod tests {
             .expect("a wiki page write is refused")
             .hook_specific_output
             .permission_decision_reason;
-        assert!(reason.contains("knowledge.write_page"), "{reason}");
+        assert!(reason.contains("oxplow.knowledge.write_page"), "{reason}");
         let mut writer = t.clone();
         writer.status = ThreadStatus::Active;
         assert!(build_write_guard_response(

@@ -1,4 +1,4 @@
--- Efforts are no longer recorded after the fact (effort.report records a
+-- Efforts are no longer recorded after the fact (oxplow.effort.report records a
 -- summary on an effort that exists; .context/work-tracking.md), so their
 -- events lose `retroactive`, and the v1 shapes go: every logged
 -- effort.opened / closed / finished is a v2 payload without it (a v1

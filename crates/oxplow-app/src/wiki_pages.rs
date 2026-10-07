@@ -151,7 +151,7 @@ fn file_mtime(path: &Path) -> Option<Timestamp> {
 
 /// Restate `slug` from `.oxplow/wiki/<slug>.md` — how a hand edit (or
 /// the boot scan) converges — through the same core as
-/// `knowledge.write_page` ([`crate::knowledge::write_page_tx`]), logged
+/// `oxplow.knowledge.write_page` ([`crate::knowledge::write_page_tx`]), logged
 /// as `system:wiki_watch`. Links aren't refused here: whatever is on
 /// disk is recorded. A body with `@version` literals is written back
 /// without them (versions live on the edges); an unchanged body (its

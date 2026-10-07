@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Stream } from "../api.js";
 import type { TabRef } from "../tabs/tabState.js";
 
-// Explore Data's Save as Lens is the `lens.keep` command with a spec — on
+// Explore Data's Save as Lens is the `oxplow.lens.keep` command with a spec — on
 // the bus like Keep This, in the stream's worktree. A lens kept in the
 // main worktree opens; one kept in another stream's shows once merged.
 
@@ -48,7 +48,7 @@ test("Save as Lens keeps the spec with lens.keep and opens the lens", async () =
   await waitFor(() => expect(opened.map((r) => r.id)).toEqual(["lens:mine/busy-tasks"]));
   expect(ran).toEqual([
     [
-      "lens.keep",
+      "oxplow.lens.keep",
       {
         spec: { title: "Busy Tasks", description: "", query: "SELECT title FROM v_task", viz: "table" },
         extension: "mine",

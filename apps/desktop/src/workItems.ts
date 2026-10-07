@@ -400,7 +400,7 @@ export interface NewWorkItem {
   native: Record<string, unknown>;
 }
 
-/** What `work_item.create` takes for a new item on a thread (or the
+/** What `oxplow.work_item.create` takes for a new item on a thread (or the
  *  backlog, `null`). It names no list: every create files on the active
  *  one. */
 export function createWorkItemInput(threadId: string | null, input: NewWorkItem): Record<string, unknown> {
@@ -417,7 +417,7 @@ export function createWorkItemInput(threadId: string | null, input: NewWorkItem)
 /** File an item on a thread (or the backlog), on the active list; its
  *  ref, or "" when the list keeps nothing (none). */
 export async function createWorkItem(threadId: string | null, input: NewWorkItem): Promise<string> {
-  const out = await runCommand("work_item.create", createWorkItemInput(threadId, input));
+  const out = await runCommand("oxplow.work_item.create", createWorkItemInput(threadId, input));
   return String((out.result as { ref?: unknown } | null)?.ref ?? "");
 }
 
@@ -431,7 +431,7 @@ export interface WorkItemChanges {
 
 /** Edit an item's fields. */
 export async function updateWorkItem(ref: string, changes: WorkItemChanges): Promise<void> {
-  await runCommand("work_item.update", {
+  await runCommand("oxplow.work_item.update", {
     ref,
     ...(changes.title !== undefined ? { title: changes.title } : {}),
     ...(changes.body !== undefined ? { body: changes.body } : {}),
@@ -440,14 +440,14 @@ export async function updateWorkItem(ref: string, changes: WorkItemChanges): Pro
   });
 }
 
-/** Move an item to a canonical state: `work_item.transition`, which the
+/** Move an item to a canonical state: `oxplow.work_item.transition`, which the
  *  bus dispatches to the item's provider. */
 export function transitionWorkItem(ref: string, state: CanonicalState): Promise<boolean> {
-  return personCommands.run(`Move to ${STATE_LABEL[state]}`, "work_item.transition", { ref, to: state });
+  return personCommands.run(`Move to ${STATE_LABEL[state]}`, "oxplow.work_item.transition", { ref, to: state });
 }
 
-/** One edit from any surface: its fields (`work_item.update`) and/or its
- *  state (`work_item.transition`). */
+/** One edit from any surface: its fields (`oxplow.work_item.update`) and/or its
+ *  state (`oxplow.work_item.transition`). */
 export interface ItemChange extends WorkItemChanges {
   state?: CanonicalState;
 }
@@ -461,11 +461,11 @@ export async function applyItemChange(ref: string, change: ItemChange): Promise<
 /** Delete an item. The command asks first: call with `confirmed` once the
  *  person has (an inline confirm). */
 export async function deleteWorkItem(ref: string, confirmed: boolean): Promise<void> {
-  await runCommand("work_item.delete", { ref }, confirmed);
+  await runCommand("oxplow.work_item.delete", { ref }, confirmed);
 }
 
 /** The one item a drag moved, and its new neighbour: what
- *  `work_item.reorder` takes. `null` when nothing moved. */
+ *  `oxplow.work_item.reorder` takes. `null` when nothing moved. */
 export function placementFromOrder(
   before: string[],
   after: string[],
@@ -480,13 +480,13 @@ export function placementFromOrder(
   return null;
 }
 
-/** Apply a drag's new order (refs) to a list with `work_item.reorder`. */
+/** Apply a drag's new order (refs) to a list with `oxplow.work_item.reorder`. */
 export async function reorderWorkItems(before: string[], after: string[]): Promise<void> {
   const moved = placementFromOrder(before, after);
-  if (moved) await runCommand("work_item.reorder", { ref: moved.id, ...moved.place });
+  if (moved) await runCommand("oxplow.work_item.reorder", { ref: moved.id, ...moved.place });
 }
 
 /** Take an item to a thread's list or the backlog (`null`), at its end. */
 export async function moveWorkItem(ref: string, threadId: string | null): Promise<void> {
-  await runCommand("work_item.move", { ref, to: threadId ? { thread: threadId } : "backlog" });
+  await runCommand("oxplow.work_item.move", { ref, to: threadId ? { thread: threadId } : "backlog" });
 }

@@ -25,8 +25,8 @@ use super::thread::{acting_thread, agent_scope};
 use super::{Command, Handler, HandlerOutput, TxCtx};
 use crate::link_check::LinkDeps;
 
-pub const ADD: &str = "knowledge.add_note";
-pub const UPDATE: &str = "knowledge.update_note";
+pub const ADD: &str = "oxplow.knowledge.add_note";
+pub const UPDATE: &str = "oxplow.knowledge.update_note";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -36,7 +36,7 @@ pub struct AddInput {
     pub thread: Option<String>,
     /// The note (markdown; `[[…]]` links are checked). May be empty: a
     /// note allocated for a subagent to fill in with
-    /// `knowledge.update_note`.
+    /// `oxplow.knowledge.update_note`.
     #[serde(default)]
     pub body: String,
 }
@@ -100,7 +100,7 @@ pub fn add_command(deps: LinkDeps) -> Command {
             ADD,
             "Add a note to a thread — an agent's own (a finding, why it paused, context for \
              whoever picks it up). An empty body allocates one for a subagent to fill in with \
-             `knowledge.update_note`. Returns the note and `link_warnings` for `[[…]]` links \
+             `oxplow.knowledge.update_note`. Returns the note and `link_warnings` for `[[…]]` links \
              that don't resolve.",
             schema::<AddInput>(),
             false,
@@ -123,7 +123,7 @@ pub fn add_command(deps: LinkDeps) -> Command {
             })
         })),
     )
-    .expect("knowledge.add_note is a valid command")
+    .expect("oxplow.knowledge.add_note is a valid command")
 }
 
 /// `knowledge.update_note { note, body }`; undone by its previous body.
@@ -166,7 +166,7 @@ pub fn update_command(deps: LinkDeps) -> Command {
             })
         })),
     )
-    .expect("knowledge.update_note is a valid command")
+    .expect("oxplow.knowledge.update_note is a valid command")
 }
 
 /// The note commands, for the bus.

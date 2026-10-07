@@ -40,11 +40,11 @@ export function DeliveryList({ emptyLabel }: { emptyLabel?: string }) {
   }
 
   /** Have an effect react again to an event it failed on: the person's
-   *  second click was the confirmation `effect.retry` asks for. */
+   *  second click was the confirmation `oxplow.effect.retry` asks for. */
   async function retryReaction(r: FailedReaction) {
     setBusy(`reaction-${r.effect}-${r.eventId}`);
     try {
-      const out = await runCommand("effect.retry", { effect: r.effect, event: `event:${r.eventId}` }, true);
+      const out = await runCommand("oxplow.effect.retry", { effect: r.effect, event: `event:${r.eventId}` }, true);
       const result = out.result as { outcome?: string; reason?: string } | null;
       showToast({
         message:

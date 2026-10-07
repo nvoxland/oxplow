@@ -27,7 +27,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`ui.op_failed@1` (tsk1072): an operation the person started in the\napp failed, as the app showed it (`ui.report_error`). Its captured\nstderr and stdout are the `output` body.",
+  "description": "`ui.op_failed@1` (tsk1072): an operation the person started in the\napp failed, as the app showed it (`oxplow.ui.report_error`). Its captured\nstderr and stdout are the `output` body.",
   "properties": {
     "command": {
       "description": "The command it ran, shell-style (\"git merge bugfixes\").",

@@ -32,14 +32,14 @@ use serde_json::json;
 
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
-pub const CREATE: &str = "thread.create";
-pub const RENAME: &str = "thread.rename";
-pub const SET_PROMPT: &str = "thread.set_prompt";
-pub const PROMOTE: &str = "thread.promote";
-pub const DEMOTE: &str = "thread.demote";
-pub const CLOSE: &str = "thread.close";
-pub const REOPEN: &str = "thread.reopen";
-pub const REORDER: &str = "thread.reorder";
+pub const CREATE: &str = "oxplow.thread.create";
+pub const RENAME: &str = "oxplow.thread.rename";
+pub const SET_PROMPT: &str = "oxplow.thread.set_prompt";
+pub const PROMOTE: &str = "oxplow.thread.promote";
+pub const DEMOTE: &str = "oxplow.thread.demote";
+pub const CLOSE: &str = "oxplow.thread.close";
+pub const REOPEN: &str = "oxplow.thread.reopen";
+pub const REORDER: &str = "oxplow.thread.reorder";
 
 /// A person, or a lens acting for one.
 const PEOPLE: Invokers = Invokers {
@@ -383,7 +383,7 @@ pub fn create_command(config: Arc<RwLock<OxplowConfig>>) -> Command {
             Ok(result(&thread))
         })),
     )
-    .expect("thread.create is a valid command")
+    .expect("oxplow.thread.create is a valid command")
 }
 
 /// `thread.rename { thread, title }`; undone by renaming it back.
@@ -409,7 +409,7 @@ pub fn rename_command() -> Command {
             })
         })),
     )
-    .expect("thread.rename is a valid command")
+    .expect("oxplow.thread.rename is a valid command")
 }
 
 /// `thread.set_prompt { thread, prompt? }` — a person's: it steers the
@@ -442,7 +442,7 @@ pub fn set_prompt_command() -> Command {
             })
         })),
     )
-    .expect("thread.set_prompt is a valid command")
+    .expect("oxplow.thread.set_prompt is a valid command")
 }
 
 /// `thread.promote { thread }` — a person's: the writer is who may change
@@ -498,7 +498,7 @@ pub fn promote_command() -> Command {
             })
         })),
     )
-    .expect("thread.promote is a valid command")
+    .expect("oxplow.thread.promote is a valid command")
 }
 
 /// `thread.demote { thread }` — a person's: the stream's writer joins the
@@ -529,7 +529,7 @@ pub fn demote_command() -> Command {
             })
         })),
     )
-    .expect("thread.demote is a valid command")
+    .expect("oxplow.thread.demote is a valid command")
 }
 
 /// `thread.close { thread }`: its open effort closes in the same
@@ -592,7 +592,7 @@ pub fn close_command(acp: Arc<crate::acp::manager::AcpManager>) -> Command {
             })
         })),
     )
-    .expect("thread.close is a valid command")
+    .expect("oxplow.thread.close is a valid command")
 }
 
 /// `thread.reopen { thread }` → `queued`; undone by closing it.
@@ -624,7 +624,7 @@ pub fn reopen_command() -> Command {
             })
         })),
     )
-    .expect("thread.reopen is a valid command")
+    .expect("oxplow.thread.reopen is a valid command")
 }
 
 /// `thread.reorder { stream, order }`: the named threads take the positions
@@ -672,7 +672,7 @@ pub fn reorder_command() -> Command {
             })
         })),
     )
-    .expect("thread.reorder is a valid command")
+    .expect("oxplow.thread.reorder is a valid command")
 }
 
 /// The thread commands, for the bus.
@@ -815,7 +815,7 @@ mod tests {
     }
 
     /// tsk787: promoting onto a stream with no writer undoes by demoting
-    /// it back; `thread.demote` is a person's, and undoes by promoting.
+    /// it back; `oxplow.thread.demote` is a person's, and undoes by promoting.
     #[tokio::test]
     async fn promote_from_no_writer_undoes_by_demoting() {
         let fx = services_with_effort().await;

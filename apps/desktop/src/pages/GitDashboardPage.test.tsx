@@ -12,7 +12,7 @@ mock.module("../api.js", () => ({
   getCommand: async (name: string) => ({
     name,
     summary: name,
-    confirm: name === "vcs.merge" || name === "git.rebase" ? "destructive" : "never",
+    confirm: name === "oxplow.vcs.merge" || name === "oxplow.git.rebase" ? "destructive" : "never",
   }),
 }));
 

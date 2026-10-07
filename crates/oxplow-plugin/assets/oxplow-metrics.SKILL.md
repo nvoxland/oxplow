@@ -1,6 +1,6 @@
 ---
 name: oxplow-metrics
-description: Author and read oxplow metrics — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the four config blocks in .oxplow/project.yaml (measures / collectors / metrics / dimensions), the fact-collector script surface (files/ast_query/code_metrics), collector.sync and the metric.* commands, and reading metrics in SQL with metric_grid().
+description: Author and read oxplow metrics — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the four config blocks in .oxplow/project.yaml (measures / collectors / metrics / dimensions), the fact-collector script surface (files/ast_query/code_metrics), oxplow.collector.sync and the metric.* commands, and reading metrics in SQL with metric_grid().
 ---
 
 # Authoring oxplow metrics
@@ -38,7 +38,7 @@ SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'built-
 metrics exist for unsafe blocks, unwrap/expect, panic macros, TODO markers,
 function count, high-complexity / long functions, `any` usage, non-null
 assertions, console calls, ts-ignore, defn count, empty catch, blocking async, …
-If one fits, turn it on with the `metric.enable` command (through `run_command`):
+If one fits, turn it on with the `oxplow.metric.enable` command (through `run_command`):
 `{ "keys": ["oxplow.rust.unsafe_blocks"], "enabled": true }`. That writes the
 `use:` line for you:
 
@@ -52,14 +52,14 @@ metrics:
 
 ## Step 2 — a new metric: declare the trio (measure + collector + metric)
 
-The fastest path is the `metric.scaffold` command (`run_command`). It writes
+The fastest path is the `oxplow.metric.scaffold` command (`run_command`). It writes
 nothing: it returns a starter collector script (`scriptPath`, under
 `oxplow/collectors/<slug>.star`, and `script`) and the three entries
 (`projectYaml`). Write the script with your file tools, then add each entry
-with `config.set` (`run_command`): read the list with `config.get
+with `oxplow.config.set` (`run_command`): read the list with `oxplow.config.get
 { "key": "measures" }`, append, and set it back — the same for `collectors` and
 `metrics`. A collector runs a program, so `collectors` is a person-only key:
-your `config.set` on it asks the person to confirm. The trio looks like this:
+your `oxplow.config.set` on it asks the person to confirm. The trio looks like this:
 
 ```yaml
 measures:
@@ -125,7 +125,7 @@ time. A count-over-threshold is `aggregation: count` + a `filter: { minValue: N 
 | `doc` | one line on what it collects |
 | `runtime` | `starlark` \| `jaq` (sandboxed, no I/O) \| `exec` (a program; needs a person's approval) |
 | `entry` | the script or program, project-relative |
-| `trigger` | when it runs: `{ on: [snapshot.taken] }` (after a snapshot that recorded files — tree scans), `{ on: [effort.finished] }` (over the effort's end snapshot), `{ on: [<other event types>], where?: { field: value } }`, `{ every: 15m }`, or `manual` (only via `collector.sync`) |
+| `trigger` | when it runs: `{ on: [snapshot.taken] }` (after a snapshot that recorded files — tree scans), `{ on: [effort.finished] }` (over the effort's end snapshot), `{ on: [<other event types>], where?: { field: value } }`, `{ every: 15m }`, or `manual` (only via `oxplow.collector.sync`) |
 | `facts` | the measure keys it may record facts on (declare-to-collect — a fact outside this list is dropped) |
 | `report` | `{ path, format }` — a tool's report file it reads (`text`\|`json`\|`xml`\|`lcov`\|`lines`), parsed into `input.report` |
 | `input` | (starlark/jaq) a SQL query whose rows arrive as `input.rows`; binds `:stream_id :snapshot_id :effort_id :thread_id :turn_id`, `:event_id` (the event's id) and `:event_seq` (its seq) |
@@ -203,7 +203,7 @@ I/O) — tagged `plugin-exec:<id>`. Only the project's own collectors may be
 `exec` (an extension's fact collector is starlark or jaq), and it gets no
 `env` / `credentials` / `network`. Use it only when no in-process tier can
 compute it: **it won't run until the user approves it** in Settings → Data →
-Programs (you can't approve it; `collector.sync` tells you when it's waiting),
+Programs (you can't approve it; `oxplow.collector.sync` tells you when it's waiting),
 and any change to the program needs approving again.
 
 The bundled collector scripts in
@@ -225,9 +225,9 @@ Precedence is **project > global > built-in** by key.
 
 ## Step 5 — verify
 
-1. **Run the collector now:** the `collector.sync` command,
+1. **Run the collector now:** the `oxplow.collector.sync` command,
    `{ "owner": "project", "id": "repo.todo" }` — runs it against the latest
-   snapshot and records its facts; returns the `facts` count. `metric.rebuild`
+   snapshot and records its facts; returns the `facts` count. `oxplow.metric.rebuild`
    (`{ "force": true }` to redo everything) runs every snapshot collector's
    whole-tree baseline.
 2. **Read the metric back** with `query_sql` and the metric function:
@@ -267,7 +267,7 @@ on), `v_measure`, `v_dimension`, `v_capture` and `v_fact` (every fact ever
 recorded — history, including items since fixed).
 
 For a CI-imported or agent-asserted number oxplow can't compute itself, use
-the `metric.record` command, `{ key, value, subject?, dims? }` (stored
+the `oxplow.metric.record` command, `{ key, value, subject?, dims? }` (stored
 `asserted`, lower-trust).
 
 ## Metrics over data (entity metrics)
@@ -320,4 +320,4 @@ dimensions:
   inherent to the definition.
 - If a fact doesn't appear, check the run: every run logs a `collector.synced`
   event and a `collector_run` row (a failed one with its error) — or re-run
-  `collector.sync` and read the return.
+  `oxplow.collector.sync` and read the return.

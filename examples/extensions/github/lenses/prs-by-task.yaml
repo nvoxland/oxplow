@@ -18,4 +18,4 @@ columns:
   - { key: item, label: Work item, link: { kind: page, from: item_ref } }
 empty: No pull requests synced yet. Approve & run the `github/prs` source in Settings → Data.
 actions:
-  - { id: sync, label: Sync PRs, command: collector.sync, input: { owner: github, id: prs } }
+  - { id: sync, label: Sync PRs, command: oxplow.collector.sync, input: { owner: github, id: prs } }

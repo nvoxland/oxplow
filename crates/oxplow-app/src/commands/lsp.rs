@@ -1,5 +1,5 @@
-//! Language servers (P8.A9): `lsp.install_server` downloads a Mason package
-//! and registers its binary; `lsp.remove_server` deletes it. `External`
+//! Language servers (P8.A9): `oxplow.lsp.install_server` downloads a Mason package
+//! and registers its binary; `oxplow.lsp.remove_server` deletes it. `External`
 //! (the network and `.oxplow/lsp/`) and `Confirm::Always`: what binaries
 //! oxplow downloads and runs is a person's call — an agent's run becomes a
 //! proposal. Each pushes `LspServersChanged` so the settings list
@@ -19,8 +19,8 @@ use crate::background_task::{BackgroundTaskKind, BackgroundTaskStore, StartInput
 use crate::events::{EventBus, OxplowEvent};
 use crate::lsp_installer::LspInstallerService;
 
-pub const INSTALL_SERVER: &str = "lsp.install_server";
-pub const REMOVE_SERVER: &str = "lsp.remove_server";
+pub const INSTALL_SERVER: &str = "oxplow.lsp.install_server";
+pub const REMOVE_SERVER: &str = "oxplow.lsp.remove_server";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -106,7 +106,7 @@ pub fn install_command(deps: LspDeps) -> Command {
             })
         })),
     )
-    .expect("lsp.install_server is a valid command")
+    .expect("oxplow.lsp.install_server is a valid command")
 }
 
 /// `lsp.remove_server { package }`.
@@ -130,7 +130,7 @@ pub fn remove_command(deps: LspDeps) -> Command {
             })
         })),
     )
-    .expect("lsp.remove_server is a valid command")
+    .expect("oxplow.lsp.remove_server is a valid command")
 }
 
 pub fn commands(deps: LspDeps) -> Vec<Command> {

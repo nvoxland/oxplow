@@ -106,7 +106,7 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
     svc.commands
         .run(
             &oxplow_domain::Actor::Human,
-            "collector.sync",
+            "oxplow.collector.sync",
             serde_json::json!({ "owner": "open-items", "id": collector.id }),
             true,
         )
@@ -145,7 +145,7 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
         .commands
         .run(
             &human,
-            "work_item.create",
+            "oxplow.work_item.create",
             serde_json::json!({ "title": "Look" }),
             true,
         )
@@ -163,7 +163,7 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
         .await
         .unwrap();
     assert_eq!(
-        ran.result["children"][0]["name"], "work_item.comment",
+        ran.result["children"][0]["name"], "oxplow.work_item.comment",
         "{}",
         ran.result
     );
@@ -202,7 +202,7 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
         .commands
         .run(
             &human,
-            "work_item.create",
+            "oxplow.work_item.create",
             serde_json::json!({ "title": "Look" }),
             true,
         )
@@ -212,7 +212,7 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
     svc.commands
         .run(
             &human,
-            "work_item.transition",
+            "oxplow.work_item.transition",
             serde_json::json!({ "ref": item, "to": "done" }),
             true,
         )

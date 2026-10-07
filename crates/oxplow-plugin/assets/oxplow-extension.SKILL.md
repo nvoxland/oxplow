@@ -164,7 +164,7 @@ empty: Nothing is waiting on you.
   launcher, for lenses only a slot shows.
 - **Launcher entries that aren't lenses** go in `extension.yaml`:
   `launcher: [{ label, category, target }]`, where `target` is one of
-  `{ ref: commit:abc123 }` (opens that page), `{ command: work_item.create,
+  `{ ref: commit:abc123 }` (opens that page), `{ command: oxplow.work_item.create,
   input: { … } }` (runs it as the person who picks it, asking first when
   the command asks) or `{ prompt: "…" }` (puts the prompt in the agent's
   input for them to send). `validate_extension` checks that a command
@@ -266,9 +266,9 @@ empty: Nothing is waiting on you.
   right-click action), `"{{row.col}}"` binds that row's column — which
   the query must return even when `columns:` doesn't show it (select a
   ref for the action and leave it out of `columns:`) —
-  e.g. `{ id: finish, label: Finish, command: work_item.transition,
+  e.g. `{ id: finish, label: Finish, command: oxplow.work_item.transition,
   row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }`,
-  or `{ id: sync, label: Sync PRs, command: collector.sync, input:
+  or `{ id: sync, label: Sync PRs, command: oxplow.collector.sync, input:
   { owner: github, id: prs } }`. With `group: <value>` (on a lens with
   `group`), the action is a button in that group's heading instead — it
   shows in a compact panel too; it can't be a row action. Copy and Add
@@ -596,7 +596,7 @@ oxplow keeps each provider's and collector's health on this machine in
 (`status`, `last_run_at`, `error`).
 
 - **Three failures in a row disable it.** A disabled collector doesn't
-  run, `collector.sync` refuses naming the reason, and a lens over its
+  run, `oxplow.collector.sync` refuses naming the reason, and a lens over its
   view carries the reason as a warning.
 - **A disable files a repair work item** (`repair_item`). Its body is the
   whole repair brief: what the extension is for, the declaration, the
@@ -604,9 +604,9 @@ oxplow keeps each provider's and collector's health on this machine in
   failure comments on the open item. When the user asks you to repair an
   extension, read that item first.
 - **Fix it, then prove it.** Change the script or declaration, run
-  `oxplow plugin check` and `oxplow plugin test`, then `collector.sync`
+  `oxplow plugin check` and `oxplow plugin test`, then `oxplow.collector.sync`
   (`run_collector`) — a refusal while it's disabled is expected.
-- **You can't enable it again.** `plugin.enable` is the user's: tell them
+- **You can't enable it again.** `oxplow.plugin.enable` is the user's: tell them
   to press **Enable Again** in Settings → Extensions once your fix is in.
 - **Undelivered events** (a consumer that failed on an event) are in
   `v_event_dead_letter` (`state = 'pending'`); the user retries or
@@ -621,10 +621,10 @@ oxplow keeps each provider's and collector's health on this machine in
   user asks**: call `review_extension(git_url, git_ref?, stream_id)`, show
   the user what it declares (the programs its collectors run, the hosts they
   reach, the credentials they read, advisories) and any `errors` /
-  `problems`, and when they say go, run `extension.install { git_url,
+  `problems`, and when they say go, run `oxplow.extension.install { git_url,
   git_ref?, reviewed_sha: <its sha> }` (`mcp__oxplow__run_command`) — it
   comes back as a proposal the user approves. It records the source in
   `source.yaml`. Updating is the same: `review_extension(name)`, then
-  `extension.update { name, reviewed_sha }`. Never
+  `oxplow.extension.update { name, reviewed_sha }`. Never
   hand-edit an installed extension's files; they're overwritten on update.
   Copy it into a new extension instead.

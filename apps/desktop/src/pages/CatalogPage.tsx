@@ -1,7 +1,7 @@
 /// The catalog (P6.D2, target §13.2): what oxplow knows and can do, so the
 /// person knows what to ask — the questions each capability and extension
 /// answers (each with Ask), the data behind them (`v_model` by owner), and
-/// what can be configured (`config.list_keys`, changed in Settings).
+/// what can be configured (`oxplow.config.list_keys`, changed in Settings).
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
@@ -38,7 +38,7 @@ export function CatalogPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
       .catch(() => setData([]));
   useEffect(() => {
     void loadData();
-    runCommand("config.list_keys", {})
+    runCommand("oxplow.config.list_keys", {})
       .then((o) => setKeys(Array.isArray(o.result) ? (o.result as ConfigKeyRow[]) : []))
       .catch(() => setKeys([]));
   }, []);

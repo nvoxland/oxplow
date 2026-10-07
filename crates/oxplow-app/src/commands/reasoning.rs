@@ -1,5 +1,5 @@
-//! The agent's reasoning as records (P8.A7): `effort.record_decision` (a
-//! fork it took without asking) and `effort.record_claim` (what it says
+//! The agent's reasoning as records (P8.A7): `oxplow.effort.record_decision` (a
+//! fork it took without asking) and `oxplow.effort.record_claim` (what it says
 //! about its work — "tests pass"). `Tx` over `oxplow_db::reasoning_store::
 //! {record_decision_tx, record_claim_tx}`; they land in `v_decision` /
 //! `v_claim` for the review. Both are `Record` and never ask. An agent's
@@ -24,8 +24,8 @@ use serde_json::{json, Value};
 use super::thread::acting_thread;
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
-pub const RECORD_DECISION: &str = "effort.record_decision";
-pub const RECORD_CLAIM: &str = "effort.record_claim";
+pub const RECORD_DECISION: &str = "oxplow.effort.record_decision";
+pub const RECORD_CLAIM: &str = "oxplow.effort.record_claim";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -210,7 +210,7 @@ pub fn record_decision_command() -> Command {
             })
         })),
     )
-    .expect("effort.record_decision is a valid command")
+    .expect("oxplow.effort.record_decision is a valid command")
 }
 
 /// `effort.record_claim { thread?, work_item?, statement, kind, evidence_ref? }`.
@@ -245,7 +245,7 @@ pub fn record_claim_command() -> Command {
             })
         })),
     )
-    .expect("effort.record_claim is a valid command")
+    .expect("oxplow.effort.record_claim is a valid command")
 }
 
 /// The reasoning commands, for the bus.

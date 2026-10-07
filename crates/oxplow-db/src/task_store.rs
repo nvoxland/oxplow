@@ -310,7 +310,7 @@ pub fn next_sort_index_tx(
 }
 
 /// Soft-delete task `id` at `now` in the caller's transaction — the core
-/// of `work_item.delete`: the row's `deleted_at`, its `work_item` row, its
+/// of `oxplow.work_item.delete`: the row's `deleted_at`, its `work_item` row, its
 /// body's `page_ref` edges dropped, and
 /// `work_item.deleted@1` logged. `NotFound` when it's missing or already
 /// deleted.
@@ -392,8 +392,8 @@ fn list_ids_tx(
 }
 
 /// Put task `id` in `dest`'s list (`None` = the backlog) at `place`,
-/// renumbering that list's `sort_index` — the core of `work_item.reorder`
-/// (the same list) and `work_item.move` (another). Logs `work_item.edited` (`thread` for a
+/// renumbering that list's `sort_index` — the core of `oxplow.work_item.reorder`
+/// (the same list) and `oxplow.work_item.move` (another). Logs `work_item.edited` (`thread` for a
 /// move, `position` within a list). `place` must name a task in that list.
 pub fn place_task_tx(
     conn: &rusqlite::Connection,
@@ -462,7 +462,7 @@ pub fn place_task_tx(
 }
 
 /// Move task `id` to `to` at `now`, reading the row in the same
-/// transaction — the core of `work_item.transition`.
+/// transaction — the core of `oxplow.work_item.transition`.
 pub fn set_status_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,

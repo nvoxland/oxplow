@@ -222,7 +222,7 @@ macro_rules! oxplow_command_table {
                 list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> } -> Vec<::oxplow_db::EffortAtSnapshot>,
                 list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 } -> Vec<::oxplow_db::Effort>,
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
-                // switches them, through the `metric.enable` command (P4.7)
+                // switches them, through the `oxplow.metric.enable` command (P4.7)
                 enable_metrics => $crate::commands::metrics::enable_metrics { keys: Vec<String>, enabled: bool } -> (),
                 // the command bus, as the person
                 get_command => $crate::commands::bus::get_command { name: String } -> ::oxplow_domain::CommandSpec,

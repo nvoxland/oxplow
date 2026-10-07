@@ -34,7 +34,7 @@ impl ThreadStatus {
 }
 
 /// A note on a thread: the per-thread capture pad an agent writes as it
-/// works (`knowledge.add_note`). Its ref is `thread_note:not<n>`.
+/// works (`oxplow.knowledge.add_note`). Its ref is `thread_note:not<n>`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct ThreadNote {
     pub id: NoteId,

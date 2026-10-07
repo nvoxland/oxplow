@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`effort.claim_verified@1` (P7.C4): a reviewer verified one of an\neffort's claims (`effort.verify_claim`), naming what backs it — or\ntook that back (`effort.unverify_claim`, `evidence` absent).",
+  "description": "`effort.claim_verified@1` (P7.C4): a reviewer verified one of an\neffort's claims (`oxplow.effort.verify_claim`), naming what backs it — or\ntook that back (`oxplow.effort.unverify_claim`, `evidence` absent).",
   "properties": {
     "claim": {
       "description": "`claim:<id>`.",

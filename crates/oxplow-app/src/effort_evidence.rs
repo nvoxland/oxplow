@@ -166,7 +166,7 @@ mod tests {
                 Some(0),
                 Some(1),
                 "asserted",
-                "test.record_run",
+                "oxplow.test.record_run",
                 None,
                 None,
             )

@@ -126,17 +126,17 @@ test("programRow shows a component with the commands it may run", () => {
     env: [],
     credentials: [],
     network: [],
-    commands: ["collector.sync"],
+    commands: ["oxplow.collector.sync"],
     tree: "oxplow/extensions/github",
     remote: false,
     approved: false,
     version: "abc",
   });
   expect(m.label).toBe("Component github/pr-lifetimes");
-  expect(m.command).toBe("oxplow/extensions/github/components/pr-lifetimes\nmay run: collector.sync");
+  expect(m.command).toBe("oxplow/extensions/github/components/pr-lifetimes\nmay run: oxplow.collector.sync");
   expect(m.status).toBe("Not approved: it shows and reads, but can't act");
   expect(m.approveTitle).toContain("with your rights");
-  expect(m.approveTitle).toContain("collector.sync");
+  expect(m.approveTitle).toContain("oxplow.collector.sync");
   expect(m.approveTitle).toContain("every file of its bundle");
 });
 

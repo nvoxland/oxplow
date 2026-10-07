@@ -36,4 +36,4 @@ It targets oxplow `>=0.7`; this is oxplow 0.7.0.
 1. Find why it fails: read the failures and its source, and reproduce one (`oxplow plugin test work`).
 2. Fix it, keeping its purpose and examples.
 3. Check it: `oxplow plugin check work` and `oxplow plugin test work` must be clean.
-4. Say what you changed on this item. A person enables it again (`plugin.enable`, Settings → Extensions); you can't.
+4. Say what you changed on this item. A person enables it again (`oxplow.plugin.enable`, Settings → Extensions); you can't.

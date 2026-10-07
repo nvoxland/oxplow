@@ -163,7 +163,7 @@ export function canApprove(p: ProjectProgram, effects: ProviderEffectState | und
 /** A provider's declaration diff as the Data section holds it. */
 export type ProviderEffectState = ProviderEffect | "loading" | { error: string };
 
-/** What `effect.backfill` answers (P9.D5). */
+/** What `oxplow.effect.backfill` answers (P9.D5). */
 export interface BackfillResult {
   planned: number;
   ran: number;
@@ -175,7 +175,7 @@ export interface BackfillResult {
 }
 
 /** What a person is told before a backfill runs: how many past events the
- *  effect never reacted to (`effect.backfill_plan`), and what running it
+ *  effect never reacted to (`oxplow.effect.backfill_plan`), and what running it
  *  means. */
 export function backfillAsk(effect: string, planned: number): string {
   if (planned === 0) return `${effect} has reacted to every matching event: nothing to backfill.`;

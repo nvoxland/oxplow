@@ -58,14 +58,14 @@ store's async methods only read (P8.A5).
 dashboard.rs`, P8.A5), for the desktop (`runCommand`), an agent
 (`run_command`) and a lens alike:
 
-- `Tx`: `dashboard.create { title }` (not undoable), `dashboard.rename
-  { dashboard, title }`, `dashboard.remove_item { item }` (undone by adding
-  it back at its position), `dashboard.reorder_items { dashboard, order }`,
-  `dashboard.delete { dashboard }` (a person's or a lens's,
+- `Tx`: `oxplow.dashboard.create { title }` (not undoable), `oxplow.dashboard.rename
+  { dashboard, title }`, `oxplow.dashboard.remove_item { item }` (undone by adding
+  it back at its position), `oxplow.dashboard.reorder_items { dashboard, order }`,
+  `oxplow.dashboard.delete { dashboard }` (a person's or a lens's,
   `Confirm::Destructive`; the page's Delete `InlineConfirm` is the
   confirmation, so the desktop runs it confirmed; not undoable).
-- `External`: `dashboard.add_item { dashboard, kind, sql?, display?,
-  lens_id?, options_json?, position? }` and `dashboard.update_item { item,
+- `External`: `oxplow.dashboard.add_item { dashboard, kind, sql?, display?,
+  lens_id?, options_json?, position? }` and `oxplow.dashboard.update_item { item,
   options_json? }` — a query tile's SQL is checked by the semantic engine
   first (`dashboard_tiles::new_tile` / `SqlGateway::check`: the read
   contract, `MEASURE()` resolved), which is async and can't run inside the
@@ -87,8 +87,8 @@ correctly; frontend field access is snake_case.
 ## Agent authoring (tsk140)
 
 An agent builds a dashboard on request ("make me a dashboard of the
-coverage metrics") with `run_command dashboard.create` then
-`dashboard.add_item` (P8.A5: the `create_dashboard` / `add_dashboard_item`
+coverage metrics") with `run_command oxplow.dashboard.create` then
+`oxplow.dashboard.add_item` (P8.A5: the `create_dashboard` / `add_dashboard_item`
 MCP tools are gone). It reads with the `list_dashboards` / `get_dashboard`
 MCP tools. A query tile's `sql` is checked before it is stored, so a tile
 that saves runs; deleting a dashboard is a person's.

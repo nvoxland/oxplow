@@ -39,5 +39,5 @@ columns:
   - { key: tokens, label: Tokens }
   - { key: at, label: When }
 actions:
-  - { id: close, label: Close Effort, command: effort.close, input: { effort: "{{row.effort}}" }, row: true }
+  - { id: close, label: Close Effort, command: oxplow.effort.close, input: { effort: "{{row.effort}}" }, row: true }
 empty: No turns on this thread yet.

@@ -1,4 +1,4 @@
-//! Reading `Services::config`. Changing it is `config.set` / `config.unset`
+//! Reading `Services::config`. Changing it is `oxplow.config.set` / `oxplow.config.unset`
 //! (`commands::config_commands`), the one writer of `.oxplow/project.yaml`.
 
 use std::sync::{Arc, RwLock};

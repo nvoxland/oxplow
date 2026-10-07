@@ -1,6 +1,6 @@
 {
   "proposal": "proposal:12",
-  "command": "config.set",
+  "command": "oxplow.config.set",
   "actor_kind": "agent",
   "actor_id": "thr3",
   "destructive": false,

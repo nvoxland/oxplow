@@ -59,8 +59,8 @@ test("a project choice writes activeProviders; just-for-me writes the personal l
   await waitFor(() => expect(view.getByTestId("pieces-work_items")).toBeTruthy());
   fireEvent.click(view.getByTestId("pieces-work_items-project-oxplow"));
   await waitFor(() =>
-    expect(ran).toEqual([["config.set", { key: "activeProviders", value: { work_items: "oxplow" } }]]),
+    expect(ran).toEqual([["oxplow.config.set", { key: "activeProviders", value: { work_items: "oxplow" } }]]),
   );
   fireEvent.change(view.getByTestId("pieces-work_items-personal"), { target: { value: "" } });
-  await waitFor(() => expect(ran[1]).toEqual(["config.unset", { key: "activeProviders", layer: "personal" }]));
+  await waitFor(() => expect(ran[1]).toEqual(["oxplow.config.unset", { key: "activeProviders", layer: "personal" }]));
 });

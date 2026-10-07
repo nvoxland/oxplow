@@ -36,7 +36,7 @@ export function SpecConfirm({
   testIdPrefix,
   children,
 }: {
-  /** The command the button runs (`vcs.push`). */
+  /** The command the button runs (`oxplow.vcs.push`). */
   command: string;
   onConfirm(): void;
   confirmLabel: string;

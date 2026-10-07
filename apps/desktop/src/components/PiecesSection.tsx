@@ -3,7 +3,7 @@
 /// choices as `v_capability_provider` lists them, which is active and
 /// why, the project's default, and a person's own choice ("Just for me",
 /// `.oxplow/personal.yaml`). `activeProviders` is a person-only key, so the
-/// click is the confirmation `config.set` asks for. Choosing "none" says
+/// click is the confirmation `oxplow.config.set` asks for. Choosing "none" says
 /// what it turns off. See `.context/work-tracking.md` "Swappable pieces".
 ///
 /// Usability contract (.context/usability.md): a choice applies at once,
@@ -64,9 +64,9 @@ export function PiecesSection() {
     const where = layer === "personal" ? { layer: "personal" } : {};
     try {
       if (next === null) {
-        await runCommand("config.unset", { key: "activeProviders", ...where }, true);
+        await runCommand("oxplow.config.unset", { key: "activeProviders", ...where }, true);
       } else {
-        await runCommand("config.set", { key: "activeProviders", value: next, ...where }, true);
+        await runCommand("oxplow.config.set", { key: "activeProviders", value: next, ...where }, true);
       }
       setChosen({ ...chosen, [layer]: next ?? {} });
     } catch (e) {

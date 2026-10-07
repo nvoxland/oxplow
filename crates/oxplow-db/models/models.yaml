@@ -251,7 +251,7 @@
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
     - { name: "statement", type: "TEXT", doc: "The claim in words." }
     - { name: "kind", type: "TEXT", doc: "`tests_pass`, `no_behavior_change`, `handles_case` or `other`." }
-    - { name: "evidence_ref", type: "TEXT", doc: "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `effort.verify_claim`); NULL if nothing was cited." }
+    - { name: "evidence_ref", type: "TEXT", doc: "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited." }
     - { name: "verified", type: "", doc: "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: code_quality_finding
@@ -384,7 +384,7 @@
     - { name: "alternatives", type: "TEXT", doc: "Options not taken, as a JSON array of strings." }
     - { name: "confidence", type: "TEXT", doc: "`low`, `medium` or `high`." }
     - { name: "why", type: "TEXT", doc: "The reasoning." }
-    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)." }
+    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
     - { not_null: id }
@@ -417,7 +417,7 @@
     - { name: "ended_at", type: "TEXT", doc: "RFC 3339 timestamp; NULL while the effort is open." }
     - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot at the start (v_snapshot.id)." }
     - { name: "end_snapshot_id", type: "INTEGER", doc: "Snapshot at the end; NULL while open." }
-    - { name: "summary", type: "", doc: "What shipped: the summary `effort.report` recorded, else the final message of the last agent turn in the effort." }
+    - { name: "summary", type: "", doc: "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort." }
     - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of its first prompt. (v2)" }
     - { name: "closed_by", type: "TEXT", doc: "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)" }
 - name: effort_file
@@ -714,7 +714,7 @@
     - { not_null: kind }
 - name: plugin_health
   version: 1
-  description: "Each plugin contribution's health on this machine: a provider instance or a collector, under one failure policy — three failures in a row disable it until a person runs `plugin.enable`."
+  description: "Each plugin contribution's health on this machine: a provider instance or a collector, under one failure policy — three failures in a row disable it until a person runs `oxplow.plugin.enable`."
   columns:
     - { name: "plugin", type: "TEXT", doc: "The extension it belongs to." }
     - { name: "contribution", type: "TEXT", doc: "The provider's or collector's id within it." }
@@ -877,7 +877,7 @@
     - { unique: id }
 - name: task_note
   version: 2
-  description: "Comments on oxplow's tasks (`task_note:<id>`; a `work_item.comment`). A thread's notes are `v_thread_note`."
+  description: "Comments on oxplow's tasks (`task_note:<id>`; a `oxplow.work_item.comment`). A thread's notes are `v_thread_note`."
   columns:
     - { name: "id", type: "INTEGER", doc: "Comment id." }
     - { name: "task_id", type: "INTEGER", doc: "The task it's on." }
@@ -1029,7 +1029,7 @@
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
     - { name: "ref", type: "TEXT", doc: "`proposal:<id>`." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "command", type: "TEXT", doc: "The command (`config.set`, `work_item.delete`)." }
+    - { name: "command", type: "TEXT", doc: "The command (`oxplow.config.set`, `oxplow.work_item.delete`)." }
     - { name: "input", type: "TEXT", doc: "Its input (JSON)." }
     - { name: "actor_kind", type: "TEXT", doc: "Who proposed it: `agent` or `lens`." }
     - { name: "actor_id", type: "TEXT", doc: "The proposing thread (`thr3`) or lens, when known." }
@@ -1060,7 +1060,7 @@
     - { name: "spec", type: "TEXT", doc: "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens." }
     - { name: "params", type: "TEXT", doc: "The params it ran with (JSON object)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "kept_lens", type: "TEXT", doc: "The lens it was kept as (`lens.keep`), if it was." }
+    - { name: "kept_lens", type: "TEXT", doc: "The lens it was kept as (`oxplow.lens.keep`), if it was." }
   tests:
     - { not_null: id }
     - { unique: ref }
@@ -1088,7 +1088,7 @@
     - { unique: id }
 - name: thread_note
   version: 1
-  description: "A thread's notes: the capture pad an agent writes as it works (`knowledge.add_note`; ref `thread_note:not<n>`)."
+  description: "A thread's notes: the capture pad an agent writes as it works (`oxplow.knowledge.add_note`; ref `thread_note:not<n>`)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Note id (`not<n>`)." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it's on." }
@@ -1150,7 +1150,7 @@
     - { relationships: { column: parent_ref, to: work_item, field: ref } }
 - name: work_item_link
   version: 1
-  description: "Links between the active work list's items (`work_item.link`)."
+  description: "Links between the active work list's items (`oxplow.work_item.link`)."
   columns:
     - { name: "from_ref", type: "TEXT", doc: "The item the link is from." }
     - { name: "to_ref", type: "TEXT", doc: "The item it points at." }
@@ -1162,7 +1162,7 @@
     - { relationships: { column: to_ref, to: work_item, field: ref } }
 - name: work_item_comment
   version: 1
-  description: "Comments on the active work list's items (`work_item.comment`)."
+  description: "Comments on the active work list's items (`oxplow.work_item.comment`)."
   columns:
     - { name: "id", type: "TEXT", doc: "The list's own id for the comment (oxplow: `task_note:<id>`)." }
     - { name: "ref", type: "TEXT", doc: "The item it's on." }
@@ -1286,7 +1286,7 @@
     - { unique: key }
 - name: metric_catalog
   version: 1
-  description: "The metric catalog: every metric this project can use — bundled gauges, always-on producers, entity metrics, plugin and project metrics — with whether it's enabled here. Read a metric's values with `MEASURE('<key>')` over `metric_grid()`; enable one with the `metric.enable` command."
+  description: "The metric catalog: every metric this project can use — bundled gauges, always-on producers, entity metrics, plugin and project metrics — with whether it's enabled here. Read a metric's values with `MEASURE('<key>')` over `metric_grid()`; enable one with the `oxplow.metric.enable` command."
   columns:
     - { name: key, type: TEXT, doc: "The metric key." }
     - { name: title, type: TEXT, doc: "Display name." }
@@ -1296,7 +1296,7 @@
     - { name: enabled, type: INTEGER, doc: "1 when it's on in this project." }
     - { name: target, type: REAL, doc: "The target value, when set." }
     - { name: trigger, type: TEXT, doc: "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer." }
-    - { name: toggleable, type: INTEGER, doc: "1 when `metric.enable` can switch it." }
+    - { name: toggleable, type: INTEGER, doc: "1 when `oxplow.metric.enable` can switch it." }
     - { name: category, type: TEXT, doc: "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it." }
   tests:
     - { not_null: key }

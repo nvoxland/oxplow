@@ -128,7 +128,7 @@ pub fn render(c: &RepairContext) -> String {
          2. Fix it, keeping its purpose and examples.\n\
          3. Check it: `oxplow plugin check {plugin}` and `oxplow plugin test {plugin}` must be clean.\n\
          4. Say what you changed on this item. A person enables it again \
-         (`plugin.enable`, Settings → Extensions); you can't.\n",
+         (`oxplow.plugin.enable`, Settings → Extensions); you can't.\n",
         plugin = c.plugin
     ));
     out

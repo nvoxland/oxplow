@@ -94,7 +94,7 @@ mod tests {
                 crate::dispatch(
                     "run_command",
                     json!({
-                        "name": "config.set",
+                        "name": "oxplow.config.set",
                         "input": { "key": "agentPromptAppend", "value": "Be brief." },
                         "confirmed": confirmed,
                     }),
@@ -158,7 +158,7 @@ mod tests {
                     .commands
                     .run(
                         &agent,
-                        "config.set",
+                        "oxplow.config.set",
                         json!({ "key": "agentPromptAppend", "value": value }),
                         false,
                     )

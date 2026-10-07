@@ -12,14 +12,14 @@ const proposal: Proposal = {
   id: 7,
   ref: "proposal:7",
   createdAt: "2026-10-01T00:00:00Z",
-  command: "config.set",
+  command: "oxplow.config.set",
   input: { key: "agentPromptAppend", value: "be brief" },
   actorKind: "agent",
   actorId: "thr3",
   threadId: 3,
   threadTitle: "Fix the cart",
   key: "config:agentPromptAppend",
-  preview: { command: "config.set", summary: "Set one key.", input: {}, destructive: false },
+  preview: { command: "oxplow.config.set", summary: "Set one key.", input: {}, destructive: false },
   dryRun: { key: "agentPromptAppend", before: null, after: "be brief", changed: true },
 };
 

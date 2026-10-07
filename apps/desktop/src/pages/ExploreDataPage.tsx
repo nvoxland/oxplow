@@ -389,7 +389,7 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
 }
 
 /** Inline "Save as Lens" strip: extension + title → a lens kept in this
- *  stream's worktree (`lens.keep` with a spec), then opens it. Enter saves, Escape cancels. */
+ *  stream's worktree (`oxplow.lens.keep` with a spec), then opens it. Enter saves, Escape cancels. */
 export function SaveAsLens({
   query,
   viz,

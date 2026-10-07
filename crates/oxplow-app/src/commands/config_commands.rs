@@ -1,7 +1,7 @@
 //! `config.*`: `.oxplow/project.yaml` as commands (`.context/commands.md`).
 //!
-//! `config.list_keys` / `config.get` describe the file through the key
-//! registry (`oxplow_config::keys`); `config.set` / `config.unset` change
+//! `oxplow.config.list_keys` / `oxplow.config.get` describe the file through the key
+//! registry (`oxplow_config::keys`); `oxplow.config.set` / `oxplow.config.unset` change
 //! one key, taking the new document through the loader's own validation,
 //! writing the file, updating the in-memory config, and logging
 //! `config.changed@2 { key, before, after, layer }` with an inverse that restores
@@ -39,10 +39,10 @@ use super::{Command, Handler, HandlerOutput};
 use crate::events::EventBus;
 use crate::OxplowEvent;
 
-pub const LIST_KEYS: &str = "config.list_keys";
-pub const GET: &str = "config.get";
-pub const SET: &str = "config.set";
-pub const UNSET: &str = "config.unset";
+pub const LIST_KEYS: &str = "oxplow.config.list_keys";
+pub const GET: &str = "oxplow.config.get";
+pub const SET: &str = "oxplow.config.set";
+pub const UNSET: &str = "oxplow.config.unset";
 
 /// What the config commands act on.
 #[derive(Clone)]
@@ -70,7 +70,7 @@ pub struct KeyInput {
 pub struct SetInput {
     /// A `.oxplow/project.yaml` key.
     pub key: String,
-    /// The new value, in the key's own shape (see `config.list_keys`).
+    /// The new value, in the key's own shape (see `oxplow.config.list_keys`).
     pub value: Value,
     /// `project` (the default: `.oxplow/project.yaml`, shared) or
     /// `personal` (`.oxplow/personal.yaml`, a person's own; only
@@ -84,7 +84,7 @@ pub struct SetInput {
 pub struct UnsetInput {
     /// A `.oxplow/project.yaml` key.
     pub key: String,
-    /// The layer to unset it in (see `config.set`).
+    /// The layer to unset it in (see `oxplow.config.set`).
     #[serde(default)]
     pub layer: Layer,
 }
@@ -146,7 +146,7 @@ impl Layer {
     }
 }
 
-/// One key as `config.list_keys` / `config.get` report it.
+/// One key as `oxplow.config.list_keys` / `oxplow.config.get` report it.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KeyReport {
     #[serde(flatten)]
@@ -187,7 +187,7 @@ fn parse<T: for<'de> Deserialize<'de>>(input: Value) -> Result<T, CommandError> 
 fn known_key(key: &str) -> Result<ConfigKey, CommandError> {
     config_key(key).ok_or_else(|| CommandError::Invalid {
         field: Some("/key".into()),
-        message: format!("`{key}` is not a project.yaml key; see config.list_keys"),
+        message: format!("`{key}` is not a project.yaml key; see oxplow.config.list_keys"),
     })
 }
 
@@ -235,7 +235,7 @@ pub(crate) fn change(
         if v.is_null() {
             return Err(CommandError::Invalid {
                 field: Some("/value".into()),
-                message: format!("`{key}` cannot be set to null; use config.unset"),
+                message: format!("`{key}` cannot be set to null; use oxplow.config.unset"),
             });
         }
         InputValidator::compile(&spec.schema)?
@@ -781,7 +781,7 @@ mod tests {
             .run(&agent(), SET, json!({"key": "zones", "value": null}), false)
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("config.unset"), "{err}");
+        assert!(err.to_string().contains("oxplow.config.unset"), "{err}");
         assert!(file(&dir).is_empty());
     }
 

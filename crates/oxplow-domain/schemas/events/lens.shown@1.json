@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`lens.shown@1`: an agent showed the person an answer in a thread —\nan existing lens or its own lens spec (`lens.show`, P6.C1).",
+  "description": "`lens.shown@1`: an agent showed the person an answer in a thread —\nan existing lens or its own lens spec (`oxplow.lens.show`, P6.C1).",
   "properties": {
     "answer": {
       "description": "`answer:<id>`.",

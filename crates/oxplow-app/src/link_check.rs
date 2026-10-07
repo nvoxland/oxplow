@@ -10,7 +10,7 @@
 //! Classification (recognized-or-not) lives in
 //! [`oxplow_domain::refs::classify_wikilinks`]; this module adds only the
 //! existence probes — the database, the project's files and the VCS's
-//! revision graph — synchronously, so `knowledge.write_page` refuses a
+//! revision graph — synchronously, so `oxplow.knowledge.write_page` refuses a
 //! dangling link inside its transaction.
 
 use serde::{Deserialize, Serialize};
@@ -153,7 +153,7 @@ pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
 }
 
 /// [`check_links_in`] against a project's database and VCS, for a command
-/// run outside the bus's transaction (`effort.report`).
+/// run outside the bus's transaction (`oxplow.effort.report`).
 pub async fn check_links_at(
     db: &oxplow_db::Database,
     vocabulary: &oxplow_domain::vocabulary::VocabularyHandle,

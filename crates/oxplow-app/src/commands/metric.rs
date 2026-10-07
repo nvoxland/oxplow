@@ -2,14 +2,14 @@
 //! Metric *reads* are SQL (`v_metric_spec`, `v_fact`, `metric_grid()`);
 //! everything that changes metrics or computes them is here.
 //!
-//! - `metric.record` asserts a number oxplow didn't compute (a CI import,
+//! - `oxplow.metric.record` asserts a number oxplow didn't compute (a CI import,
 //!   an agent's report) as a fact on the metric's measure, in the bus's
 //!   transaction with its audit.
-//! - `metric.rebuild` runs every fact collector's whole-tree baseline. It
+//! - `oxplow.metric.rebuild` runs every fact collector's whole-tree baseline. It
 //!   drives snapshot captures and collector scripts — systems the bus
 //!   doesn't own — so it is `External`. One collector runs now through
-//!   `collector.sync`.
-//! - `metric.scaffold` returns a starter collector and the config entries
+//!   `oxplow.collector.sync`.
+//! - `oxplow.metric.scaffold` returns a starter collector and the config entries
 //!   for a new metric; it writes nothing.
 //!
 //! `metric.enable { keys, enabled }` switches metrics on or off in this
@@ -17,7 +17,7 @@
 //! metric — a bundled code metric is off until a `use:` names it, a producer or
 //! plugin metric is on until an `enabled: false` marker turns it off — so
 //! the command computes the new `metrics:` list with the metrics service's
-//! rule and hands it to `config.set`'s core: validated, written after
+//! rule and hands it to `oxplow.config.set`'s core: validated, written after
 //! commit, logged as `config.changed`, undone by restoring the old list. The
 //! reseed (and `v_metric_catalog`) follows `ConfigChanged` as for any
 //! config edit.
@@ -40,10 +40,10 @@ use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
 use crate::metric_engine::FactFilter;
 use crate::metrics_service::MetricsService;
 
-pub const ENABLE: &str = "metric.enable";
-pub const RECORD: &str = "metric.record";
-pub const REBUILD: &str = "metric.rebuild";
-pub const SCAFFOLD: &str = "metric.scaffold";
+pub const ENABLE: &str = "oxplow.metric.enable";
+pub const RECORD: &str = "oxplow.metric.record";
+pub const REBUILD: &str = "oxplow.metric.rebuild";
+pub const SCAFFOLD: &str = "oxplow.metric.scaffold";
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -200,7 +200,7 @@ fn record_tx(
         return Err(invalid(
             "/key",
             "a `count` metric counts fact rows, so one asserted value can't represent it; \
-             run its collector instead (`collector.sync`, or `test.record_run` for a test run)",
+             run its collector instead (`oxplow.collector.sync`, or `oxplow.test.record_run` for a test run)",
         ));
     }
     // Stamp the fact so the spec's own filter matches it (severity /
@@ -344,7 +344,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                 SCAFFOLD,
                 "A starter for a new metric; writes nothing. Returns `scriptPath` + `script` (a \
                  Starlark gauge) and `projectYaml` (the measure, gauge and metric entries). \
-                 Write the script, then add the entries with `config.set` on `measures`, \
+                 Write the script, then add the entries with `oxplow.config.set` on `measures`, \
                  `gauges` and `metrics` (a gauge runs a program, so a person confirms it).",
                 serde_json::to_value(schemars::schema_for!(ScaffoldInput))
                     .expect("schema serializes"),
@@ -503,7 +503,7 @@ mod tests {
             .read(|tx| {
                 tx.query_row(
                     "SELECT count(*) FROM command_audit
-                     WHERE command = 'metric.record' AND actor_kind = 'agent' AND outcome = 'ok'",
+                     WHERE command = 'oxplow.metric.record' AND actor_kind = 'agent' AND outcome = 'ok'",
                     [],
                     |r| r.get(0),
                 )
@@ -675,7 +675,7 @@ mod tests {
         assert_eq!(facts, 0);
     }
 
-    /// `collector.sync` runs one of the project's fact collectors now and
+    /// `oxplow.collector.sync` runs one of the project's fact collectors now and
     /// records its facts and its run.
     #[tokio::test]
     async fn collector_sync_runs_a_project_fact_collector() {
@@ -726,7 +726,7 @@ mod tests {
     }
 
     /// P7.C2: a fact collector failing three runs in a row is disabled;
-    /// `collector.sync` then refuses it, naming why.
+    /// `oxplow.collector.sync` then refuses it, naming why.
     #[tokio::test]
     async fn a_failing_fact_collector_is_disabled() {
         let (svc, dir) = services().await;
@@ -760,7 +760,7 @@ mod tests {
         );
     }
 
-    /// `metric.scaffold` is a read: a template, and nothing written; the
+    /// `oxplow.metric.scaffold` is a read: a template, and nothing written; the
     /// reserved namespace is refused.
     #[tokio::test]
     async fn scaffold_returns_a_template_and_writes_nothing() {

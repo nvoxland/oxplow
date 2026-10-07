@@ -15,5 +15,5 @@ depth: depth
 columns:
   - { key: title, label: Item, icon: icon, link: { kind: page, from: ref } }
 actions:
-  - { id: clear, label: clear, command: oxplow_bundled.clear_finished, group: Finished, input: { thread_id: '{{param.thread_id}}' } }
+  - { id: clear, label: clear, command: oxplow.work.clear_finished, group: Finished, input: { thread_id: '{{param.thread_id}}' } }
 empty: No active work

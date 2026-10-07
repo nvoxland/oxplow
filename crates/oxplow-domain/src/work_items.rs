@@ -73,7 +73,7 @@ pub struct FieldDecl {
     #[serde(default)]
     pub values: Vec<String>,
     /// Set by the list itself (who filed it, when it synced): shown, never
-    /// edited — a `work_item.update` that names it is refused.
+    /// edited — a `oxplow.work_item.update` that names it is refused.
     #[serde(default)]
     pub read_only: bool,
 }
@@ -125,7 +125,7 @@ pub struct WorkItemsFeatures {
     pub hierarchy: bool,
     pub comments: bool,
     pub links: bool,
-    /// Items can be deleted (`work_item.delete`).
+    /// Items can be deleted (`oxplow.work_item.delete`).
     #[serde(default)]
     pub delete: bool,
     /// A write sent twice with one idempotency key is done once, the
@@ -134,12 +134,12 @@ pub struct WorkItemsFeatures {
     /// when its reply was lost.
     #[serde(default)]
     pub idempotent_writes: bool,
-    /// Items have an order on their list (`work_item.reorder`; read as
+    /// Items have an order on their list (`oxplow.work_item.reorder`; read as
     /// `v_work_item.rank`).
     #[serde(default)]
     pub ordering: bool,
     /// Items are on a thread's list or the backlog, and move between them
-    /// (`work_item.move`; read as `v_work_item.thread_id`).
+    /// (`oxplow.work_item.move`; read as `v_work_item.thread_id`).
     #[serde(default)]
     pub lists: bool,
 }

@@ -278,7 +278,7 @@ fn last_run_ms(l: &CollectorListing) -> Option<i64> {
 }
 
 /// Run every due collector (see [`due_collectors`]) from the primary
-/// worktree, each as the `collector.sync` command run by the system — so a
+/// worktree, each as the `oxplow.collector.sync` command run by the system — so a
 /// scheduled run is audited and logs `command.executed` like one from the
 /// UI, a lens action or MCP. Unapproved collectors never run here: the
 /// command refuses them. Returns what it ran; a failed run
@@ -749,7 +749,7 @@ pub enum RunCollectorError {
     /// It ran (or tried to) and failed; recorded as its run.
     Failed(String),
     /// Failures disabled it on this machine (P7.C2) until a person runs
-    /// `plugin.enable`. Nothing ran.
+    /// `oxplow.plugin.enable`. Nothing ran.
     Disabled(String),
     /// Oxplow's own storage failed.
     Storage(DomainError),
@@ -767,7 +767,7 @@ impl From<RunCollectorError> for DomainError {
     }
 }
 
-/// What ran a collector: `collector.sync` by hand, its `every:` schedule,
+/// What ran a collector: `oxplow.collector.sync` by hand, its `every:` schedule,
 /// or an event its `on:` names.
 #[derive(Debug, Clone)]
 pub enum RunTrigger {
@@ -930,7 +930,7 @@ pub async fn run_collector(
     {
         return Err(RunCollectorError::Disabled(format!(
             "collector `{owner}/{id}` is disabled: {reason}. A person can enable it again \
-             (`plugin.enable`, Settings → Extensions)."
+             (`oxplow.plugin.enable`, Settings → Extensions)."
         )));
     }
     let started = std::time::Instant::now();
@@ -1546,7 +1546,7 @@ pub fn approve_reviewed(
 
 /// Find a collector in `ctx.root` and run it, stopping at its output. The
 /// outer error means it didn't run (unknown, not approved, or a `read`
-/// collector, which `provider.sync` runs); the inner one that it ran and
+/// collector, which `oxplow.provider.sync` runs); the inner one that it ran and
 /// failed.
 async fn produce(
     ctx: &Collectors<'_>,
@@ -1560,7 +1560,7 @@ async fn produce(
     let ext_dir = root.join(&ext.path);
     if spec.runtime == CollectorRuntime::Read {
         return Err(RunCollectorError::Failed(format!(
-            "collector `{owner}/{id}` reads a provider; run `provider.sync` for it"
+            "collector `{owner}/{id}` reads a provider; run `oxplow.provider.sync` for it"
         )));
     }
     if spec.runtime.is_derived() {
@@ -1625,7 +1625,7 @@ async fn produce(
     Ok((spec, output))
 }
 
-/// What running a collector needs, owned: the `collector.sync` command
+/// What running a collector needs, owned: the `oxplow.collector.sync` command
 /// holds one (it's registered while `Services` is built).
 #[derive(Clone)]
 pub struct CollectorRunner {
@@ -1689,7 +1689,7 @@ impl CollectorRunner {
             {
                 return Err(RunCollectorError::Disabled(format!(
                     "collector `{owner}/{id}` is disabled: {reason}. A person can enable it \
-                     again (`plugin.enable`, Settings → Extensions)."
+                     again (`oxplow.plugin.enable`, Settings → Extensions)."
                 )));
             }
             let facts = self
@@ -1715,7 +1715,7 @@ impl CollectorRunner {
 /// → Data. Run by the system it's the `every:` schedule's run. A project
 /// report collector (`records:`, tsk863) records what it parses in a
 /// thread: an agent's own, or the one a person names.
-pub const SYNC: &str = "collector.sync";
+pub const SYNC: &str = "oxplow.collector.sync";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -2495,8 +2495,8 @@ pub(crate) mod tests {
     }
 
     /// P7.C2: three failed runs in a row disable a collector; then
-    /// `collector.sync` refuses it naming the reason, and a person's
-    /// `plugin.enable` lets it run again. An agent can't enable it.
+    /// `oxplow.collector.sync` refuses it naming the reason, and a person's
+    /// `oxplow.plugin.enable` lets it run again. An agent can't enable it.
     #[tokio::test]
     async fn a_collector_failing_three_runs_is_disabled_until_a_person_enables_it() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -2561,7 +2561,7 @@ pub(crate) mod tests {
         assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
     }
 
-    /// A scheduled run is the `collector.sync` command like every other run
+    /// A scheduled run is the `oxplow.collector.sync` command like every other run
     /// (the UI's, a lens action's, MCP's), so it's audited as the system's
     /// and logs `command.executed` — one mechanism, not a second path
     /// around the bus.

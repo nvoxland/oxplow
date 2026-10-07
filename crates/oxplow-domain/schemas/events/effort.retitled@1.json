@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`effort.retitled@1`: an effort's own title was set or cleared\n(`effort.update`); cleared, it shows its default again.",
+  "description": "`effort.retitled@1`: an effort's own title was set or cleared\n(`oxplow.effort.update`); cleared, it shows its default again.",
   "properties": {
     "effort": {
       "description": "`effort:eff12`.",

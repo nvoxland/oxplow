@@ -24,10 +24,10 @@ Steps:
    look. Note any themes, then address each: read the anchored
    `quote` in its `target` (open the file/page), do the work the
    comment asks for, and reply with
-   `run_command knowledge.reply_comment { comment, body }` summarizing
+   `run_command oxplow.knowledge.reply_comment { comment, body }` summarizing
    what you did or answering the question.
 4. When a comment is fully addressed, run
-   `knowledge.update_comment { comment, status: "resolved" }`. Leave it open if
+   `oxplow.knowledge.update_comment { comment, status: "resolved" }`. Leave it open if
    you've replied but the user still needs to weigh in.
 
 File a work item for any follow-up that turns into real shippable

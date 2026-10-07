@@ -38,7 +38,7 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await page.getByTestId("pieces-work_items-project-fake").click();
   await expect(page.getByTestId("pieces-work_items-project-fake")).toBeChecked();
   // Made with no provider named: the active one, which Pieces chose.
-  await run(daemon, "work_item.create", { title: "Kiwi from oxplow" });
+  await run(daemon, "oxplow.work_item.create", { title: "Kiwi from oxplow" });
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from oxplow");
   // An external item reaches oxplow's models through its collector's read.
   await page.getByTestId("integration-sync-e2e/fake-work_items").click();
@@ -55,7 +55,7 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await page.getByTestId("tasks-title").fill("Kiwi from the page");
   await page.keyboard.press("Enter");
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from the page");
-  await run(daemon, "provider.sync", { instance: "e2e/fake", collector: "work_items" });
+  await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
   await openFromLauncher(page, "Board");
   await page.getByTestId("board-scope").selectOption("thread");
   await expect(page.getByTestId("work-board")).toContainText("Kiwi from the page");

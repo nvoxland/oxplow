@@ -1,5 +1,5 @@
 //! Composition: a command made of other commands' calls (P6b.A1) — the
-//! one mechanism `command.sequence` and an extension's own commands
+//! one mechanism `oxplow.command.sequence` and an extension's own commands
 //! (P6b.B2) are built on. A composite is a [`Compose`] handler: given its
 //! input it says which calls to run; the bus decides where they run.
 //!
@@ -79,9 +79,9 @@ impl Compose {
     }
 }
 
-pub const SEQUENCE: &str = "command.sequence";
+pub const SEQUENCE: &str = "oxplow.command.sequence";
 
-/// `command.sequence`: the commands to run, in order.
+/// `oxplow.command.sequence`: the commands to run, in order.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SequenceInput {
@@ -97,7 +97,7 @@ pub struct SequenceCall {
     pub input: Value,
 }
 
-/// `command.sequence`'s spec: also what an extension effect's run is
+/// `oxplow.command.sequence`'s spec: also what an extension effect's run is
 /// audited as (`effect_triggers`).
 pub fn sequence_spec() -> CommandSpec {
     CommandSpec {
@@ -173,8 +173,8 @@ mod tests {
                 &agent,
                 SEQUENCE,
                 json!({ "calls": [
-                    { "name": "work_item.update", "input": { "ref": task, "title": "Renamed" } },
-                    { "name": "work_item.transition", "input": { "ref": task, "to": "done" } },
+                    { "name": "oxplow.work_item.update", "input": { "ref": task, "title": "Renamed" } },
+                    { "name": "oxplow.work_item.transition", "input": { "ref": task, "to": "done" } },
                 ] }),
                 false,
             )
@@ -184,7 +184,10 @@ mod tests {
         assert_eq!(after.title, "Renamed");
         assert_eq!(after.status, oxplow_domain::TaskStatus::Done);
         assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
-        assert_eq!(out.result["children"][1]["name"], "work_item.transition");
+        assert_eq!(
+            out.result["children"][1]["name"],
+            "oxplow.work_item.transition"
+        );
 
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
             .list_recent(20)

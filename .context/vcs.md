@@ -199,11 +199,11 @@ flat list; it now reads `readRefOptions`).
 ## Mutations are commands (P5.B6)
 
 Every change to a repository is a bus command (`commands/vcs.rs`,
-table in [commands.md](./commands.md)): `vcs.commit`, `vcs.stage`,
-`vcs.discard`, `vcs.fetch`, `vcs.pull`, `vcs.push`, `vcs.merge`,
-`vcs.checkout_branch`, `vcs.rename_branch`, `vcs.delete_branch`,
-`vcs.resolve_conflict`, and git's own `git.rebase`, `git.cherry_pick`,
-`git.revert`, `git.ignore` (inherent methods on `GitProvider`). They are
+table in [commands.md](./commands.md)): `oxplow.vcs.commit`, `oxplow.vcs.stage`,
+`oxplow.vcs.discard`, `oxplow.vcs.fetch`, `oxplow.vcs.pull`, `oxplow.vcs.push`, `oxplow.vcs.merge`,
+`oxplow.vcs.checkout_branch`, `oxplow.vcs.rename_branch`, `oxplow.vcs.delete_branch`,
+`oxplow.vcs.resolve_conflict`, and git's own `oxplow.git.rebase`, `oxplow.git.cherry_pick`,
+`oxplow.git.revert`, `oxplow.git.ignore` (inherent methods on `GitProvider`). They are
 `External` (the VCS isn't the bus's to roll back), a person's only,
 not undoable, and name their `stream` (`WorktreeRouter::resolve_strict`).
 Discard, merge, branch delete, rebase and revert are `Destructive`. The

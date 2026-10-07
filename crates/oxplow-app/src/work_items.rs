@@ -96,7 +96,7 @@ impl oxplow_domain::work_items::ExternalVerbs for Sink {
     async fn restart(&self) {}
 }
 
-/// A new item, as `work_item.create` takes it.
+/// A new item, as `oxplow.work_item.create` takes it.
 #[derive(Debug, Clone, Default)]
 pub struct NewItem {
     pub title: String,
@@ -155,7 +155,7 @@ impl WorkItems {
             .as_str()
             .map(|r| Some(r.to_string()))
             .ok_or_else(|| CommandError::Failed {
-                message: "work_item.create returned no ref".into(),
+                message: "oxplow.work_item.create returned no ref".into(),
             })
     }
 

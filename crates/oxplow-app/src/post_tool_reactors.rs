@@ -14,7 +14,7 @@
 //! - `advisories.post_tool` — the enabled extensions' post-tool-use
 //!   advisories for the effort the tool ran in.
 //! - `collection.run_reports` — a run reported any other way
-//!   (`test.record_run`, a by-hand sync) has its coverage read from its
+//!   (`oxplow.test.record_run`, a by-hand sync) has its coverage read from its
 //!   `test.run.recorded` (`CollectionService::on_test_run_recorded`,
 //!   tsk1015).
 

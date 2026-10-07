@@ -1,7 +1,7 @@
 SELECT e.id, e.work_item,
        e.thread_id, th.stream_id, e.started_at, e.ended_at,
        e.start_snapshot_id, e.end_snapshot_id,
-       -- Its own summary (`effort.report`), else the final message of the
+       -- Its own summary (`oxplow.effort.report`), else the final message of the
        -- last turn in it.
        coalesce(
          nullif(trim(e.summary), ''),

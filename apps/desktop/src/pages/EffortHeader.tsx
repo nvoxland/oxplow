@@ -71,10 +71,10 @@ export function closedByLabel(closedBy: string | null): string {
 }
 
 /**
- * The effort page's header: its title, editable in place (`effort.update`;
- * clearing it restores the default), what it's linked to (`effort.link`,
+ * The effort page's header: its title, editable in place (`oxplow.effort.update`;
+ * clearing it restores the default), what it's linked to (`oxplow.effort.link`,
  * from a typed `tsk42` or work-item ref; Unlink clears it), and — while it's
- * open — Close (`effort.close`), else how it closed. Re-reads `v_effort`
+ * open — Close (`oxplow.effort.close`), else how it closed. Re-reads `v_effort`
  * when it changes.
  */
 export function EffortHeader({
@@ -134,7 +134,7 @@ export function EffortHeader({
           testId="effort-title"
           ariaLabel="Effort title"
           onCommit={(next) =>
-            void run("Rename the effort", "effort.update", {
+            void run("Rename the effort", "oxplow.effort.update", {
               effort: ref,
               title: next.trim() === "" ? null : next.trim(),
             })
@@ -158,7 +158,7 @@ export function EffortHeader({
               data-testid="effort-unlink"
               style={buttonStyle}
               disabled={busy}
-              onClick={() => void run("Unlink the effort", "effort.link", { effort: ref, work_item: null })}
+              onClick={() => void run("Unlink the effort", "oxplow.effort.link", { effort: ref, work_item: null })}
             >
               Unlink
             </button>
@@ -186,7 +186,7 @@ export function EffortHeader({
             data-testid="effort-close"
             style={buttonStyle}
             disabled={busy}
-            onClick={() => void run("Close the effort", "effort.close", { effort: ref })}
+            onClick={() => void run("Close the effort", "oxplow.effort.close", { effort: ref })}
           >
             Close effort
           </button>
@@ -210,7 +210,7 @@ export function EffortHeader({
               recordOpError({ label: "Link the effort", message: `\`${item}\` isn't a work item's id or ref` });
               return;
             }
-            if (await run("Link the effort", "effort.link", { effort: ref, work_item: workItem })) {
+            if (await run("Link the effort", "oxplow.effort.link", { effort: ref, work_item: workItem })) {
               setLinking(false);
             }
           }}

@@ -407,7 +407,7 @@ mod tests {
                 svc.commands
                     .run(
                         &oxplow_domain::Actor::Human,
-                        "work_item.create",
+                        "oxplow.work_item.create",
                         input,
                         false,
                     )

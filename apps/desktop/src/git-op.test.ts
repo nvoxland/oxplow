@@ -118,10 +118,10 @@ describe("settleGitOp", () => {
 
   test("a refused or failed command becomes an unsuccessful outcome with the reason", async () => {
     const r = await settleGitOp(async () => {
-      throw new Error("`vcs.discard` needs confirmation");
+      throw new Error("`oxplow.vcs.discard` needs confirmation");
     });
     expect(r.success).toBe(false);
-    expect(r.log).toBe("`vcs.discard` needs confirmation");
+    expect(r.log).toBe("`oxplow.vcs.discard` needs confirmation");
   });
 });
 

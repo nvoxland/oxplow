@@ -123,12 +123,12 @@ mod tests {
         };
         let stream_ref = format!("stream:{}", stream.id);
         run(
-            "thread.create",
+            "oxplow.thread.create",
             serde_json::json!({ "stream": stream_ref, "title": "Writer" }),
         )
         .await;
         let other = run(
-            "thread.create",
+            "oxplow.thread.create",
             serde_json::json!({ "stream": stream_ref, "title": "Other" }),
         )
         .await;
@@ -141,7 +141,7 @@ mod tests {
         .await
         .unwrap();
         run(
-            "thread.close",
+            "oxplow.thread.close",
             serde_json::json!({ "thread": format!("thread:{other_id}") }),
         )
         .await;

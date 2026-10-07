@@ -103,7 +103,7 @@ impl SqliteReasoningStore {
 }
 
 /// Record a decision the agent made, in the caller's transaction (the
-/// `effort.record_decision` command). Made in the thread's open turn, when
+/// `oxplow.effort.record_decision` command). Made in the thread's open turn, when
 /// one is open.
 pub fn record_decision_tx(
     conn: &rusqlite::Connection,
@@ -136,7 +136,7 @@ pub fn record_decision_tx(
 }
 
 /// Record a claim about the agent's work, in the caller's transaction (the
-/// `effort.record_claim` command).
+/// `oxplow.effort.record_claim` command).
 pub fn record_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64, DomainError> {
     if !["tests_pass", "no_behavior_change", "handles_case", "other"].contains(&c.kind.as_str()) {
         return Err(DomainError::Invalid(format!(

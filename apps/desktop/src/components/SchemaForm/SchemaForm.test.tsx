@@ -58,7 +58,7 @@ test("Escape in the form, or in a confirmation, stays inside it", async () => {
   const { getByTestId } = render(
     <div onKeyDown={(e) => e.key === "Escape" && outer++}>
       <SchemaForm schema={schema} onSubmit={() => {}} testIdPrefix="f" />
-      <CommandConfirm label="Finish" command="work_item.transition" onConfirm={() => {}} onCancel={() => {}} testIdPrefix="c" />
+      <CommandConfirm label="Finish" command="oxplow.work_item.transition" onConfirm={() => {}} onCancel={() => {}} testIdPrefix="c" />
     </div>,
   );
   fireEvent.keyDown(getByTestId("f-title"), { key: "Escape" });

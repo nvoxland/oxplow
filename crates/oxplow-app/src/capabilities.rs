@@ -1073,12 +1073,12 @@ mod tests {
             .map(|c| c.name)
             .collect();
         for name in [
-            "work_item.create",
-            "work_item.transition",
-            "work_item.comment",
-            "work_item.link",
-            "work_item.reorder",
-            "work_item.move",
+            "oxplow.work_item.create",
+            "oxplow.work_item.transition",
+            "oxplow.work_item.comment",
+            "oxplow.work_item.link",
+            "oxplow.work_item.reorder",
+            "oxplow.work_item.move",
         ] {
             assert!(offered.iter().any(|n| n == name), "{name} offered");
         }
@@ -1161,11 +1161,11 @@ mod tests {
             .into_iter()
             .map(|c| c.name)
             .collect();
-        assert!(offered.iter().any(|n| n == "work_item.link"));
-        assert!(!offered.iter().any(|n| n == "work_item.comment"));
+        assert!(offered.iter().any(|n| n == "oxplow.work_item.link"));
+        assert!(!offered.iter().any(|n| n == "oxplow.work_item.comment"));
         // Ordering and lists are features like the rest.
-        assert!(offered.iter().any(|n| n == "work_item.reorder"));
-        assert!(!offered.iter().any(|n| n == "work_item.move"));
+        assert!(offered.iter().any(|n| n == "oxplow.work_item.reorder"));
+        assert!(!offered.iter().any(|n| n == "oxplow.work_item.move"));
     }
 
     /// A provider instance's own commands are offered only while it's the

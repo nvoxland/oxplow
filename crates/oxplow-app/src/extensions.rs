@@ -590,7 +590,7 @@ pub struct LensAction {
     /// Unique within the lens; `run_lens_action` names it.
     pub id: String,
     pub label: String,
-    /// The command it runs (`work_item.transition`).
+    /// The command it runs (`oxplow.work_item.transition`).
     pub command: String,
     /// The command's input. A string that is exactly `{{param.<name>}}`
     /// or `{{row.<column>}}` becomes that value (a number stays a number);
@@ -701,7 +701,7 @@ fn parse_actions(
         if out.iter().any(|a| a.id == f.id) {
             return Err(format!("actions: `{}` is declared twice", f.id));
         }
-        oxplow_domain::CommandSpec::validate_name(&f.command)
+        oxplow_domain::CommandSpec::validate_id(&f.command)
             .map_err(|e| format!("actions: `{}`: {e}", f.id))?;
         if let Some(g) = &f.group {
             if !grouped {
@@ -1034,6 +1034,9 @@ pub struct Lens {
 #[serde(rename_all = "camelCase")]
 pub struct Extension {
     pub name: String,
+    /// The namespace its commands' ids are under: the manifest's
+    /// `namespace:`, else the name with `-` → `_`.
+    pub namespace: String,
     pub description: String,
     /// Repo-relative path of the extension folder.
     pub path: String,
@@ -1682,6 +1685,7 @@ fn subscribes(
 pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
     Extension {
         name: name.to_string(),
+        namespace: crate::extension_commands::command_namespace(name),
         description: String::new(),
         path: path.to_string(),
         errors: Vec::new(),
@@ -1762,6 +1766,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     };
     ext.manifest_version = m.manifest;
+    if let Some(ns) = &m.namespace {
+        match crate::extension_commands::check_namespace(ns, origin == "bundled") {
+            Ok(()) => ext.namespace = ns.clone(),
+            Err(e) => ext
+                .errors
+                .push(at(&file, key_line(&manifest, "namespace"), e)),
+        }
+    }
     ext.sharing = m.sharing;
     ext.intent = m.intent.clone();
     ext.description = m.description.clone();
@@ -1922,10 +1934,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             );
         }
         if let Some(v) = &m.commands {
-            let (commands, errors) =
-                crate::extension_commands::parse_commands(name, v, &file, &manifest, &|rel| {
-                    files.read(rel)
-                });
+            let (commands, errors) = crate::extension_commands::parse_commands(
+                &ext.namespace,
+                v,
+                &file,
+                &manifest,
+                &|rel| files.read(rel),
+            );
             ext.commands = commands;
             ext.errors.extend(errors);
         }
@@ -2552,7 +2567,7 @@ fn shape_problem(
             let f = lens.form.clone().unwrap_or_default();
             need("form", &[("command", &f.command)]).or_else(|| {
                 let command = f.command.as_deref().unwrap_or_default();
-                oxplow_domain::CommandSpec::validate_name(command)
+                oxplow_domain::CommandSpec::validate_id(command)
                     .err()
                     .map(|e| format!("form: {e}"))
             })
@@ -3187,8 +3202,13 @@ fn provider_command_schema(
     root: &Path,
     command: &str,
 ) -> Option<serde_json::Value> {
-    let (namespace, verb) = command.split_once('.')?;
-    let spec = ext.providers.iter().find(|p| p.id == namespace)?;
+    // `<instance>.<capability>.<name>` (`crate::providers::command_id`).
+    let mut parts = command.splitn(3, '.');
+    let (namespace, capability, verb) = (parts.next()?, parts.next()?, parts.next()?);
+    let spec = ext
+        .providers
+        .iter()
+        .find(|p| p.id == namespace && p.capability == capability)?;
     if spec.capability == crate::providers::spec::WORK_ITEMS
         && oxplow_domain::work_items::VERBS.contains(&verb)
     {
@@ -3942,7 +3962,7 @@ pub struct LensOrigin<'a> {
 /// The directory of extension `name` under `root`, if oxplow may write
 /// lens files into it: a valid name, not a bundled (read-only) extension,
 /// not an installed one (its files are replaced on update). The one check
-/// every writer of an extension's files — `save_lens`, `lens.share` —
+/// every writer of an extension's files — `save_lens`, `oxplow.lens.share` —
 /// runs first, so a path or a reserved name never reaches the filesystem.
 pub fn writable_extension_dir(root: &Path, name: &str) -> Result<PathBuf, DomainError> {
     if !is_valid_name(name) {
@@ -3991,10 +4011,10 @@ pub fn save_lens(
     }
     let manifest = dir.join("extension.yaml");
     // A kept lens goes to a private extension; moving one into a shared
-    // extension is `lens.share`, a person's (tsk988).
+    // extension is `oxplow.lens.share`, a person's (tsk988).
     if manifest.exists() && load_fresh(root, project, extension)?.sharing == Sharing::Shared {
         return Err(invalid(format!(
-            "`{extension}` is shared: keep the lens in a private extension, then a person moves it with `lens.share`"
+            "`{extension}` is shared: keep the lens in a private extension, then a person moves it with `oxplow.lens.share`"
         )));
     }
     std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
@@ -5085,7 +5105,7 @@ empty: No items.
             title: "New Task".into(),
             viz: LensViz::Form,
             form: Some(LensForm {
-                command: Some("work_item.create".into()),
+                command: Some("oxplow.work_item.create".into()),
                 defaults: Some(serde_json::json!({ "title": "x", "n": 3, "tags": ["a"] })),
             }),
             ..spec_base()
@@ -5523,7 +5543,7 @@ models:
       - { name: id, type: INTEGER, doc: The thing. }
       - { name: label, type: TEXT, doc: Its label. }
 commands:
-  - name: note
+  - name: thing.note
     summary: Note a thing.
     input_schema: { type: object, required: [id], properties: { id: { type: integer } } }
     entry: handlers/note.star
@@ -5643,9 +5663,9 @@ commands:
         assert_eq!(
             commands,
             [
-                "oxplow_bundled.accept",
-                "oxplow_bundled.request_changes",
-                "oxplow_bundled.clear_finished"
+                "oxplow.review.accept",
+                "oxplow.review.request_changes",
+                "oxplow.work.clear_finished"
             ]
         );
         let advisories: Vec<&str> = b.advisories.iter().map(|a| a.id.as_str()).collect();
@@ -6558,14 +6578,14 @@ commands:
             &[
                 (
                     "a",
-                    "title: A\nviz: list\nquery: SELECT 1 AS id, 'Ready' AS bucket, 'page:tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue\nparams: [{ name: stream_id, default: '' }]\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
+                    "title: A\nviz: list\nquery: SELECT 1 AS id, 'Ready' AS bucket, 'page:tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue\nparams: [{ name: stream_id, default: '' }]\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
                 ),
                 ("t", "title: T\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n"),
                 ("b", "title: B\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l\ntree: { id: id, parent: p, label: l }\ngroup: { by: l }\n"),
                 ("c", "title: C\nviz: list\nquery: SELECT 1\ngroup: { link: { kind: page } }\n"),
                 ("d", "title: D\nviz: number\nquery: SELECT 1\ndepth: n\n"),
-                ("e", "title: E\nviz: list\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b, group: Ready }]\n"),
-                ("f", "title: F\nviz: list\nquery: SELECT 1\ngroup: { by: g }\nactions: [{ id: x, label: X, command: a.b, group: Ready, row: true }]\n"),
+                ("e", "title: E\nviz: list\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b.c, group: Ready }]\n"),
+                ("f", "title: F\nviz: list\nquery: SELECT 1\ngroup: { by: g }\nactions: [{ id: x, label: X, command: a.b.c, group: Ready, row: true }]\n"),
                 ("g", "title: G\nviz: bar\nquery: SELECT 1 AS x, 2 AS y\nchart: { x: x, y: y }\nemphasis: x\n"),
             ],
             "",
@@ -6647,14 +6667,14 @@ commands:
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: work_item.transition, input: { ref: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: work_item.transition, row: true, input: { ref: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
+                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { ref: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
                 ),
                 ("b", "title: B\nquery: SELECT 1\nactions: [copy]\n"),
                 ("c", "title: C\nquery: SELECT 1\nactions: [{ action: run-source, source: a/b }]\n"),
-                ("d", "title: D\nquery: SELECT 1\nactions: [{ id: x, label: X, command: work_item.create, input: { title: '{{param.nope}}' } }]\n"),
-                ("e", "title: E\nquery: SELECT 1\nactions: [{ id: x, label: X, command: work_item.create, input: { title: '{{row.id}}' } }]\n"),
+                ("d", "title: D\nquery: SELECT 1\nactions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{param.nope}}' } }]\n"),
+                ("e", "title: E\nquery: SELECT 1\nactions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{row.id}}' } }]\n"),
                 ("f", "title: F\nquery: SELECT 1\nactions: [{ id: x, label: X, command: Not-A-Name }]\n"),
-                ("g", "title: G\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b }, { id: x, label: Y, command: a.c }]\n"),
+                ("g", "title: G\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b.c }, { id: x, label: Y, command: a.b.d }]\n"),
             ],
             "",
         );
@@ -6669,8 +6689,8 @@ commands:
                 .map(|x| (x.id.as_str(), x.command.as_str(), x.row))
                 .collect::<Vec<_>>(),
             vec![
-                ("finish", "work_item.transition", false),
-                ("row", "work_item.transition", true)
+                ("finish", "oxplow.work_item.transition", false),
+                ("row", "oxplow.work_item.transition", true)
             ]
         );
         for (slug, needle) in [
@@ -6678,7 +6698,7 @@ commands:
             ("c", "unknown field `action`"),
             ("d", "names no param"),
             ("e", "needs `row: true`"),
-            ("f", "command name"),
+            ("f", "command id"),
             ("g", "twice"),
         ] {
             assert!(
@@ -6701,7 +6721,7 @@ commands:
         let (d, _) = load_x(
             &[(
                 "a",
-                "title: A\nquery: SELECT 1 AS id\nactions: [{ id: x, label: X, command: a.b, row: true, input: { v: '{{row.gone}}' } }]\n",
+                "title: A\nquery: SELECT 1 AS id\nactions: [{ id: x, label: X, command: a.b.c, row: true, input: { v: '{{row.gone}}' } }]\n",
             )],
             "",
         );
@@ -6868,7 +6888,7 @@ commands:
         let (_d, ext) = load_x(
             &[],
             &format!(
-                "{LAUNCHER_MANIFEST}  - {{ label: Settings, category: System, target: {{ ref: 'page:settings' }} }}\n  - {{ label: New Task, category: Work, target: {{ command: work_item.create, input: {{ title: x }} }} }}\n  - {{ label: Why slow, category: Code, target: {{ prompt: 'Why is the build slow?' }} }}\n"
+                "{LAUNCHER_MANIFEST}  - {{ label: Settings, category: System, target: {{ ref: 'page:settings' }} }}\n  - {{ label: New Task, category: Work, target: {{ command: oxplow.work_item.create, input: {{ title: x }} }} }}\n  - {{ label: Why slow, category: Code, target: {{ prompt: 'Why is the build slow?' }} }}\n"
             ),
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -6882,7 +6902,7 @@ commands:
                     r#ref: "page:settings".into()
                 },
                 LauncherTarget::Command {
-                    command: "work_item.create".into(),
+                    command: "oxplow.work_item.create".into(),
                     input: serde_json::json!({ "title": "x" }),
                 },
                 LauncherTarget::Prompt {
@@ -6899,7 +6919,7 @@ commands:
             ("{ ref: 'commit:not-hex' }", "not a valid `commit` id"),
             ("{ ref: 'thread:thr1' }", "doesn't open as a page"),
             ("{ command: Not-A-Name }", "`Not-A-Name`"),
-            ("{ command: a.b, input: [1] }", "`input` must be a map"),
+            ("{ command: a.b.c, input: [1] }", "`input` must be a map"),
             ("{ prompt: '  ' }", "an empty prompt"),
             // A line break pasted into a terminal is Enter: it would send.
             ("{ prompt: \"Why?\\nAnd how?\" }", "one line"),
@@ -6931,11 +6951,11 @@ commands:
         let (d, _) = load_x(
             &[],
             &format!(
-                "{LAUNCHER_MANIFEST}  - {{ label: A, category: Work, target: {{ command: no.such }} }}\n  - {{ label: B, category: Work, target: {{ command: work_item.create, input: {{ nope: 1 }} }} }}\n  - {{ label: C, category: Work, target: {{ command: work_item.create, input: {{ title: ok }} }} }}\n"
+                "{LAUNCHER_MANIFEST}  - {{ label: A, category: Work, target: {{ command: no.such.cmd }} }}\n  - {{ label: B, category: Work, target: {{ command: oxplow.work_item.create, input: {{ nope: 1 }} }} }}\n  - {{ label: C, category: Work, target: {{ command: oxplow.work_item.create, input: {{ title: ok }} }} }}\n"
             ),
         );
         let schema = |name: &str| {
-            (name == "work_item.create").then(|| {
+            (name == "oxplow.work_item.create").then(|| {
                 serde_json::json!({
                     "type": "object",
                     "properties": { "title": { "type": "string" } },
@@ -6949,11 +6969,11 @@ commands:
             .unwrap();
         let errs = v.errors.join("\n");
         assert!(
-            errs.contains("launcher entry `A`: no command `no.such`"),
+            errs.contains("launcher entry `A`: no command `no.such.cmd`"),
             "{errs}"
         );
         assert!(
-            errs.contains("launcher entry `B`: the input doesn't fit `work_item.create`"),
+            errs.contains("launcher entry `B`: the input doesn't fit `oxplow.work_item.create`"),
             "{errs}"
         );
         assert!(!errs.contains("entry `C`"), "{errs}");

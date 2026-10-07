@@ -2,11 +2,11 @@ import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 
 test("a written page renders, and a task link in it opens the task", async ({ page, daemon }) => {
-  const created = await run<{ result: { id: string } }>(daemon, "work_item.create", {
+  const created = await run<{ result: { id: string } }>(daemon, "oxplow.work_item.create", {
     title: "Wombat follow-up",
     thread: daemon.thread,
   });
-  await run(daemon, "knowledge.write_page", {
+  await run(daemon, "oxplow.knowledge.write_page", {
     slug: "wombat-plan",
     title: "Wombat plan",
     body: `# Wombat plan\n\nFirst do [[${created.result.id}]].\n`,

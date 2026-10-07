@@ -10,7 +10,7 @@ import type { OpOutcome } from "./api.js";
 // no-op — using string `bg-` ids throughout (the flow never touches
 // `get_task`).
 //
-// The merge is the `vcs.merge` bus command (P5.B6), so `runCommand` is
+// The merge is the `oxplow.vcs.merge` bus command (P5.B6), so `runCommand` is
 // what the op calls. We override only `listen` on the transport module
 // and only the background-task commands and `runCommand` on the bindings
 // module, spreading the
@@ -132,7 +132,7 @@ describe("vcsMerge — UI-initiated background VCS op", () => {
     const result = await awaitGitOp(await api.vcsMerge("str1", "feature", true));
 
     // The op actually ran (not silently dropped) with the right input.
-    expect(runs).toEqual([["vcs.merge", { stream: "str1", rev: "feature" }, true]]);
+    expect(runs).toEqual([["oxplow.vcs.merge", { stream: "str1", rev: "feature" }, true]]);
     // …and its outcome propagated back through the background-task row.
     expect(result.success).toBe(true);
     expect(result.log).toContain("Merge made");

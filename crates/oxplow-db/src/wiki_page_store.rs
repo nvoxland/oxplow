@@ -26,7 +26,7 @@ pub struct WikiPage {
 }
 
 /// Write `page`'s row — with its `body` and that body's hash. The one writer of `wiki_page` — composes inside
-/// `knowledge.write_page`'s transaction and the watcher's.
+/// `oxplow.knowledge.write_page`'s transaction and the watcher's.
 pub fn upsert_tx(
     conn: &rusqlite::Connection,
     page: &WikiPage,

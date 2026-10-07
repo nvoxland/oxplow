@@ -1,5 +1,5 @@
 //! Thread notes: the per-thread capture pad an agent writes as it works
-//! (`knowledge.add_note` / `update_note`). Each note's `[[…]]` links are
+//! (`oxplow.knowledge.add_note` / `update_note`). Each note's `[[…]]` links are
 //! its `page_ref` edges (source kind `thread_note`), and each change logs
 //! `knowledge.note.written` / `deleted`.
 
@@ -66,7 +66,7 @@ fn thread_note_event(
 }
 
 /// A note on `thread`, with its `page_ref` edges, on `conn` — a command's
-/// transaction (`knowledge.add_note`, P8.A6). Returns it and the
+/// transaction (`oxplow.knowledge.add_note`, P8.A6). Returns it and the
 /// `knowledge.note.written` to log.
 pub fn add_thread_note_tx(
     conn: &rusqlite::Connection,

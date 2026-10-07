@@ -60,7 +60,7 @@ export function buildActivityTimeline(efforts: EffortDetail[]): ActivityRow[] {
 }
 
 /** One edit to an item, from any surface: its text, parent (`null`
- *  clears), state (a `work_item.transition`) or own fields. */
+ *  clears), state (a `oxplow.work_item.transition`) or own fields. */
 export type TaskDetailChanges = ItemChange;
 
 /**
@@ -326,7 +326,7 @@ export function TaskDetailRail({
 }
 
 /** An item's state as a pill picker: every canonical state, through a
- *  `work_item.transition`. */
+ *  `oxplow.work_item.transition`. */
 function StatePill({
   item,
   onUpdateTask,

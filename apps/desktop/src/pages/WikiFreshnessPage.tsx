@@ -19,7 +19,7 @@ export interface WikiFreshnessPageProps {
  * the snapshot it was captured against, the latest snapshot of the
  * target file, and a "stale" flag. Two affordances: per-ref "Mark
  * verified" and page-level "Mark all verified" re-write the page with
- * those refs in `verified_refs` (knowledge.write_page), moving their
+ * those refs in `verified_refs` (oxplow.knowledge.write_page), moving their
  * pins to the current snapshot.
  *
  * The wiki sync preserves unchanged ref pins on save, so this list
@@ -54,7 +54,7 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
   useRerunOnChange(reads, () => void refresh());
 
   // Marking refs verified is re-writing the page with them in
-  // `verified_refs` (knowledge.write_page moves their pins to now).
+  // `verified_refs` (oxplow.knowledge.write_page moves their pins to now).
   async function markVerified(paths: string[]) {
     setBusy(true);
     try {

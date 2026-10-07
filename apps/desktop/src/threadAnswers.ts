@@ -14,7 +14,7 @@ export interface AnswerRow {
   title: string;
   /** The existing lens it shows, if it shows one. */
   lens: string | null;
-  /** The lens it was kept as (`lens.keep`), once it was. */
+  /** The lens it was kept as (`oxplow.lens.keep`), once it was. */
   keptLens: string | null;
 }
 
@@ -36,13 +36,13 @@ export async function readAnswers(threadId: string): Promise<{ answers: AnswerRo
   return { answers: answersFromRows(res.rows), reads: res.reads };
 }
 
-/** Keep This: the answer becomes a private lens (`lens.keep`) in its
+/** Keep This: the answer becomes a private lens (`oxplow.lens.keep`) in its
  *  thread's worktree; an empty slug lets the command take one from the
  *  title. Returns the lens id and whether the app shows it now. */
 export async function keepAnswer(answer: string, slug: string): Promise<KeptLens> {
   const input: Record<string, string> = { answer };
   if (slug.trim() !== "") input.slug = slug.trim();
-  const outcome = await runCommand("lens.keep", input);
+  const outcome = await runCommand("oxplow.lens.keep", input);
   return keptLens(outcome.result);
 }
 

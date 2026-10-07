@@ -92,7 +92,7 @@ a built `work_item:oxplow:` ref or `tsk` id parsing in desktop code.
   list named — it files on the active one; `native` carries the list's
   own fields), `updateWorkItem`, `transitionWorkItem`, `applyItemChange`
   (an edit from any surface: fields and/or state), `deleteWorkItem`,
-  `reorderWorkItems` (a drag's new order becomes one `work_item.reorder`
+  `reorderWorkItems` (a drag's new order becomes one `oxplow.work_item.reorder`
   by neighbour, `placementFromOrder`) and `moveWorkItem`.
 - **The active list's profile** — `readWorkListProfile` /
   `useWorkListProfile` (one shared read, re-read on a switch): its
@@ -223,11 +223,11 @@ oxplow's mapping: its status is its `native_state` (`ready` is `todo`;
 `archived` rides on `done` or `canceled` — archiving as `done` a task that
 wasn't completed passes through `done` first, so the row reads as
 asked); `native` holds `{ priority? }` (`deny_unknown_fields`; a task
-changes lists with `work_item.move`).
+changes lists with `oxplow.work_item.move`).
 A `native_state` alone (no `state`) is a valid update or create: that is
 how the task writes send a status. A person's link (no thread of their
 own) belongs to the linked task's thread, else the target's.
-`work_item.comment` and `work_item.link` refuse a deleted task (tsk572).
+`oxplow.work_item.comment` and `oxplow.work_item.link` refuse a deleted task (tsk572).
 A comment's `task_note.author` names who made it (`note_author`, tsk1000):
 `user`, `agent` (a lens acting for one included), `effect:<extension>/<id>`
 or `oxplow` — as a task's `author` is left empty for an effect or oxplow
@@ -280,8 +280,8 @@ A work-item field (`ref`, `parent_ref`, `target`, `work_item`, and
 `reorder` / `move`'s refs) holding a loose id that matches the active
 list's is that list's item — `tsk12` is `work_item:oxplow:tsk12` while
 oxplow's tasks are active (`commands/work_item.rs` `with_loose_refs`, on
-every path: routing, the transaction, the provider; also `effort.link` /
-`effort.open`). One that doesn't match is `Invalid` at its field, naming
+every path: routing, the transaction, the provider; also `oxplow.effort.link` /
+`oxplow.effort.open`). One that doesn't match is `Invalid` at its field, naming
 both shapes. Free-text recognition (wikilinks, commit bodies) is still
 core's. The
 conformance suite runs with the provider under test active, and checks it. The desktop reads it with
@@ -296,7 +296,7 @@ generated from `v_capability_provider`: for each choosable capability
 `CapabilitySpec`, on every row since v4) the active implementation and
 why (`chosenNote`: personal, project, default, or which chosen one fell
 back), the project's choice as radios ("The default" unsets the
-capability's entry) and "Just for me" (`config.set` / `config.unset` with
+capability's entry) and "Just for me" (`oxplow.config.set` / `oxplow.config.unset` with
 `layer: personal`). An optional capability's `none` names what it turns
 off: the enabled extensions' lenses and hints that declare a `needs:` on
 it (`offWithout`). A click is the confirmation (`activeProviders` is

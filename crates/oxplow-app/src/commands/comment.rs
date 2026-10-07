@@ -5,7 +5,7 @@
 //! by the run. The author is the actor — a person `user`, an agent
 //! `agent` — never something a caller names. An agent comments on its own
 //! stream, its comments in its own thread. The renderer re-locating a
-//! comment's anchor is `knowledge.relocate_comment`: recorded when the
+//! comment's anchor is `oxplow.knowledge.relocate_comment`: recorded when the
 //! anchor moved, nothing when it is where it was.
 
 use std::sync::Arc;
@@ -27,11 +27,11 @@ use serde_json::{json, Value};
 use super::thread::agent_scope;
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
-pub const ADD: &str = "knowledge.add_comment";
-pub const REPLY: &str = "knowledge.reply_comment";
-pub const UPDATE: &str = "knowledge.update_comment";
-pub const DELETE: &str = "knowledge.delete_comment";
-pub const RELOCATE: &str = "knowledge.relocate_comment";
+pub const ADD: &str = "oxplow.knowledge.add_comment";
+pub const REPLY: &str = "oxplow.knowledge.reply_comment";
+pub const UPDATE: &str = "oxplow.knowledge.update_comment";
+pub const DELETE: &str = "oxplow.knowledge.delete_comment";
+pub const RELOCATE: &str = "oxplow.knowledge.relocate_comment";
 
 /// A person, or a lens acting for one.
 const PEOPLE: Invokers = Invokers {
@@ -214,7 +214,7 @@ fn spec(
     }
 }
 
-/// `knowledge.add_comment`: a comment with its first message.
+/// `oxplow.knowledge.add_comment`: a comment with its first message.
 pub fn add_command() -> Command {
     Command::new(
         spec(
@@ -269,7 +269,7 @@ pub fn add_command() -> Command {
             })
         })),
     )
-    .expect("knowledge.add_comment is a valid command")
+    .expect("oxplow.knowledge.add_comment is a valid command")
 }
 
 /// `knowledge.reply_comment { comment, body }`.
@@ -296,7 +296,7 @@ pub fn reply_command() -> Command {
             })
         })),
     )
-    .expect("knowledge.reply_comment is a valid command")
+    .expect("oxplow.knowledge.reply_comment is a valid command")
 }
 
 /// `knowledge.update_comment { comment, intent?, status?, quote? +
@@ -360,7 +360,7 @@ pub fn update_command() -> Command {
             })
         })),
     )
-    .expect("knowledge.update_comment is a valid command")
+    .expect("oxplow.knowledge.update_comment is a valid command")
 }
 
 /// `knowledge.delete_comment { comment }`: it and its messages. A
@@ -387,7 +387,7 @@ pub fn delete_command() -> Command {
             })
         })),
     )
-    .expect("knowledge.delete_comment is a valid command")
+    .expect("oxplow.knowledge.delete_comment is a valid command")
 }
 
 /// `knowledge.relocate_comment { comment, selectors_json, orphaned }`:
@@ -426,7 +426,7 @@ pub fn relocate_command() -> Command {
             })
         })),
     )
-    .expect("knowledge.relocate_comment is a valid command")
+    .expect("oxplow.knowledge.relocate_comment is a valid command")
 }
 
 /// The comment commands, for the bus.

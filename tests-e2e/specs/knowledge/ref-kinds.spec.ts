@@ -2,13 +2,13 @@ import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 
 test("an extension's ref renders as a link and opens its page", async ({ page, daemon }) => {
-  const created = await run<{ result: { id: string } }>(daemon, "work_item.create", {
+  const created = await run<{ result: { id: string } }>(daemon, "oxplow.work_item.create", {
     title: "Platypus item",
     thread: daemon.thread,
   });
   const n = created.result.id.replace(/^tsk/, "");
   // `[[item:<n>]]` is the test extension's wikilink for `e2e_item:<n>`.
-  await run(daemon, "knowledge.write_page", {
+  await run(daemon, "oxplow.knowledge.write_page", {
     slug: "platypus-notes",
     title: "Platypus notes",
     body: `# Platypus notes\n\nThe item is [[item:${n}]].\n`,

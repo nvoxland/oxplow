@@ -230,7 +230,7 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new("metric", r"^[a-z0-9_.-]+$"),
         KindSpec::new("model", r"^v_[a-z0-9_]+$"),
         KindSpec::new("plugin", r"^[a-z0-9-]+$"),
-        // Two or more dot segments, as `CommandSpec::validate_name` allows.
+        // Two or more dot segments, as `CommandSpec::validate_id` allows.
         KindSpec::new("command", r"^[a-z0-9_]+(\.[a-z0-9_]+)+$"),
         // A `.oxplow/project.yaml` key (`config.changed`'s subject).
         KindSpec::new("config", r"^[A-Za-z][A-Za-z0-9]*$"),

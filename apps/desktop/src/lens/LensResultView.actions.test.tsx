@@ -79,7 +79,7 @@ const lens: Lens = {
   children: [],
   launcherCategory: null,
   hidden: false,
-  actions: [{ id: "finish", label: "Finish", command: "work_item.transition", input: {}, row: true }],
+  actions: [{ id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: true }],
   alert: null,
   path: "",
 };

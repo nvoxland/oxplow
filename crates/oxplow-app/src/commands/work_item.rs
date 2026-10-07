@@ -18,7 +18,7 @@
 //! ([`filing_thread`]). `reorder` and `move` stay
 //! oxplow's own (`Tx`): they place an item in oxplow's lists.
 //!
-//! oxplow's cores: `work_item.transition` is `task_store::set_status_tx`
+//! oxplow's cores: `oxplow.work_item.transition` is `task_store::set_status_tx`
 //! — the row and `work_item.transitioned` commit in the bus's transaction
 //! with the audit row, caused by the run's `command.executed`.
 //!
@@ -509,7 +509,7 @@ pub(crate) fn provider_for(
     name: &str,
     input: &Value,
 ) -> Option<WorkItemsProvider> {
-    let target: Target = match name.strip_prefix("work_item.")? {
+    let target: Target = match name.strip_prefix("oxplow.work_item.")? {
         "create" => create_target,
         "update" => update_target,
         "transition" => ref_target,
@@ -526,7 +526,7 @@ pub(crate) fn provider_for(
 /// A `work_item.<verb>` command: routed by `target` to oxplow's `tx` core
 /// or to the provider's process. A `create`'s `thread` is resolved here
 /// ([`filing_thread`]) for the host to anchor the item to, and the
-/// provider's inverse (a verb) is renamed back to `work_item.<verb>`, so
+/// provider's inverse (a verb) is renamed back to `oxplow.work_item.<verb>`, so
 /// an undo dispatches again.
 fn dispatching(
     spec: CommandSpec,
@@ -714,7 +714,7 @@ fn external_state_change(
 }
 
 fn spec_name(verb: &str) -> String {
-    format!("work_item.{verb}")
+    format!("oxplow.work_item.{verb}")
 }
 
 fn spec(
@@ -753,9 +753,9 @@ fn schema_of<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-// ---- work_item.transition ----
+// ---- oxplow.work_item.transition ----
 
-pub const NAME: &str = "work_item.transition";
+pub const NAME: &str = "oxplow.work_item.transition";
 
 /// Move an item to a canonical state, and optionally to one of its
 /// provider's own states that maps to it.
@@ -863,9 +863,9 @@ pub fn command(registry: WorkItemsRegistry) -> Command {
     )
 }
 
-// ---- work_item.create ----
+// ---- oxplow.work_item.create ----
 
-pub const CREATE: &str = "work_item.create";
+pub const CREATE: &str = "oxplow.work_item.create";
 
 /// A new item on the active tracker (tsk1058), optionally straight into
 /// a state.
@@ -1004,9 +1004,9 @@ pub fn create_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
     )
 }
 
-// ---- work_item.update ----
+// ---- oxplow.work_item.update ----
 
-pub const UPDATE: &str = "work_item.update";
+pub const UPDATE: &str = "oxplow.work_item.update";
 
 /// Edit an item's fields and, optionally, its state — one run. Absent
 /// fields are left alone.
@@ -1035,7 +1035,7 @@ pub fn update_spec() -> CommandSpec {
     spec(
         UPDATE,
         "Edit a work item's title, body, parent or native fields and, optionally, move it to \
-         a state — all in one run (see work_item.transition for the state's effects). On \
+         a state — all in one run (see oxplow.work_item.transition for the state's effects). On \
          oxplow the result carries `link_warnings` for the body's `[[…]]` links.",
         schema_of::<WorkItemUpdateInput>(),
         Confirm::Never,
@@ -1125,9 +1125,9 @@ pub fn update_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
     )
 }
 
-// ---- work_item.link ----
+// ---- oxplow.work_item.link ----
 
-pub const LINK: &str = "work_item.link";
+pub const LINK: &str = "oxplow.work_item.link";
 
 /// A typed link from one item to another of the same provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1219,9 +1219,9 @@ pub fn link_command(registry: WorkItemsRegistry) -> Command {
     )
 }
 
-// ---- work_item.comment ----
+// ---- oxplow.work_item.comment ----
 
-pub const COMMENT: &str = "work_item.comment";
+pub const COMMENT: &str = "oxplow.work_item.comment";
 
 /// A comment on an item (oxplow: a task note).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1285,9 +1285,9 @@ pub fn comment_command(registry: WorkItemsRegistry) -> Command {
     )
 }
 
-// ---- work_item.delete ----
+// ---- oxplow.work_item.delete ----
 
-pub const DELETE: &str = "work_item.delete";
+pub const DELETE: &str = "oxplow.work_item.delete";
 
 /// Remove an item (oxplow: soft — the row stays, marked deleted).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1339,12 +1339,12 @@ pub fn delete_command(registry: WorkItemsRegistry) -> Command {
     )
 }
 
-// ---- work_item.reorder / work_item.move: oxplow's lists ----
+// ---- oxplow.work_item.reorder / oxplow.work_item.move: oxplow's lists ----
 
-pub const REORDER: &str = "work_item.reorder";
-pub const MOVE: &str = "work_item.move";
+pub const REORDER: &str = "oxplow.work_item.reorder";
+pub const MOVE: &str = "oxplow.work_item.move";
 
-/// `work_item.reorder`: put an item before or after another in its own
+/// `oxplow.work_item.reorder`: put an item before or after another in its own
 /// list (neither: at its end).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1360,7 +1360,7 @@ pub struct WorkItemReorderInput {
     pub after: Option<String>,
 }
 
-/// Which list `work_item.move` takes an item to.
+/// Which list `oxplow.work_item.move` takes an item to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MoveTo {
@@ -1383,7 +1383,7 @@ impl MoveTo {
     }
 }
 
-/// `work_item.move`: take an item to another list — its end, or next to
+/// `oxplow.work_item.move`: take an item to another list — its end, or next to
 /// an item there.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -2084,7 +2084,7 @@ mod tests {
         }
     }
 
-    /// `work_item.link` and `work_item.comment` write the link and the
+    /// `oxplow.work_item.link` and `oxplow.work_item.comment` write the link and the
     /// note, each with its event, caused by the run.
     #[tokio::test]
     async fn links_and_comments_are_commands_with_their_events() {
@@ -2210,7 +2210,7 @@ mod tests {
         assert!(effort.ended_at.is_some());
     }
 
-    /// `work_item.update`: fields and state commit together, audited and
+    /// `oxplow.work_item.update`: fields and state commit together, audited and
     /// undoable — an undo restores both.
     #[tokio::test]
     async fn an_update_edits_fields_and_state_atomically_and_undoes() {
@@ -2268,7 +2268,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        // A task changes lists with `work_item.move`; the thread isn't a
+        // A task changes lists with `oxplow.work_item.move`; the thread isn't a
         // native field.
         assert!(
             matches!(&err, CommandError::Invalid { field, .. } if field.as_deref() == Some("/native")),
@@ -2333,7 +2333,7 @@ mod tests {
         assert_eq!(out.result["status"], "in_progress");
     }
 
-    /// `work_item.create`: filing a task is audited to the actor; filed
+    /// `oxplow.work_item.create`: filing a task is audited to the actor; filed
     /// straight into `in_progress`, the effort policy then switches the
     /// thread's effort to it; the body's mentions are projected by the pump.
     #[tokio::test]
@@ -2528,7 +2528,7 @@ mod tests {
             .to_string()
     }
 
-    /// P6.E1a: `work_item.reorder` places an item before or after another
+    /// P6.E1a: `oxplow.work_item.reorder` places an item before or after another
     /// in its own list; undo puts it back where it was.
     #[tokio::test]
     async fn reorder_places_an_item_and_undo_puts_it_back() {
@@ -2605,7 +2605,7 @@ mod tests {
         }
     }
 
-    /// `work_item.move` takes an item to another list (its end, or next to
+    /// `oxplow.work_item.move` takes an item to another list (its end, or next to
     /// an item there); undo brings it back to its place.
     #[tokio::test]
     async fn move_takes_an_item_to_another_list_and_undo_brings_it_back() {
@@ -2680,7 +2680,7 @@ mod tests {
         assert!(err.to_string().contains("thr999"), "{err}");
     }
 
-    /// `work_item.delete` asks first, then removes the task, logged as
+    /// `oxplow.work_item.delete` asks first, then removes the task, logged as
     /// caused by the run.
     #[tokio::test]
     async fn delete_asks_first_then_removes_the_task() {

@@ -1718,6 +1718,62 @@ mod tests {
     /// V19: the code-quality scans piled up before a scan replaced its
     /// scope's older ones are pruned to each scope's latest, with their
     /// findings and file edges; a running scan and other scopes stay.
+    /// V26: history names commands by their three-part ids — the id
+    /// columns and every quoted old id in stored calls, previews and
+    /// `command.*` payloads; an event type that isn't a command stays.
+    #[test]
+    fn v26_rewrites_history_to_three_part_command_ids() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(24))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO command_audit (at, command, actor_kind, input_json, outcome, inverse_json)
+                 VALUES ('2026-10-01T00:00:00Z', 'thread.close', 'human', '{"thread":"thread:thr1"}', 'ok',
+                         '{"name":"thread.reopen","input":{"thread":"thread:thr1"}}'),
+                        ('2026-10-01T00:00:01Z', 'oxplow_bundled.accept', 'human', '{"ref":"effort:eff1"}', 'ok', NULL);
+               INSERT INTO command_proposal (created_at, command, input_json, actor_kind, key, preview_json, decision)
+                 VALUES ('2026-10-01T00:00:00Z', 'command.sequence',
+                         '{"steps":[{"name":"work_item.transition","input":{}}]}', 'agent', 'k',
+                         '{"command":"command.sequence"}', 'pending');
+               INSERT INTO event_log (id, type, v, at, source, subject, payload) VALUES
+                 ('e1', 'command.executed', 2, '2026-10-01T00:00:00Z', 'human', '[]',
+                  '{"command":"thread.close","audit_id":1}'),
+                 ('e2', 'work_item.recorded', 2, '2026-10-01T00:00:00Z', 'human', '[]',
+                  '{"note":"thread.close"}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let one = |sql: &str| -> String { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(
+            one("SELECT group_concat(command, ',') FROM (SELECT command FROM command_audit ORDER BY id)"),
+            "oxplow.thread.close,oxplow.review.accept"
+        );
+        assert_eq!(
+            one("SELECT inverse_json FROM command_audit WHERE id = 1"),
+            r#"{"name":"oxplow.thread.reopen","input":{"thread":"thread:thr1"}}"#
+        );
+        assert_eq!(
+            one("SELECT command FROM command_proposal"),
+            "oxplow.command.sequence"
+        );
+        assert_eq!(
+            one("SELECT input_json FROM command_proposal"),
+            r#"{"steps":[{"name":"oxplow.work_item.transition","input":{}}]}"#
+        );
+        assert_eq!(
+            one("SELECT payload FROM event_log WHERE id = 'e1'"),
+            r#"{"command":"oxplow.thread.close","audit_id":1}"#
+        );
+        // Not a command event: left as it was.
+        assert_eq!(
+            one("SELECT payload FROM event_log WHERE id = 'e2'"),
+            r#"{"note":"thread.close"}"#
+        );
+    }
+
     #[test]
     fn v19_prunes_superseded_scans() {
         let mut conn = Connection::open_in_memory().unwrap();

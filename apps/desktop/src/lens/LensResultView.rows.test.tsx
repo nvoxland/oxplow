@@ -66,7 +66,7 @@ const grouped: Partial<Lens> = {
   emphasis: "on",
   depth: "d",
   columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null, icon: "status", tone: "hue" }],
-  actions: [{ id: "add", label: "+", command: "work_item.create", input: {}, row: false, group: "Ready" }],
+  actions: [{ id: "add", label: "+", command: "oxplow.work_item.create", input: {}, row: false, group: "Ready" }],
 };
 
 test("a grouped list puts its rows under a heading per value, in order, and the heading links", () => {

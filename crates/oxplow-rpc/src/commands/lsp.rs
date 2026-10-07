@@ -178,7 +178,7 @@ mod tests {
             err.message
         );
         assert!(
-            err.message.contains("lsp.install_server"),
+            err.message.contains("oxplow.lsp.install_server"),
             "got: {}",
             err.message
         );

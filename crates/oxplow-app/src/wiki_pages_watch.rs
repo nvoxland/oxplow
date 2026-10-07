@@ -1,7 +1,7 @@
 //! fs watcher that keeps the `wiki_page` rows in sync with the
 //! `.oxplow/wiki/` markdown files: an initial scan on start, then
 //! debounced per-slug re-syncs ([`wiki_pages::sync_page`], logged as
-//! `system:wiki_watch`) on file change. A page `knowledge.write_page`
+//! `system:wiki_watch`) on file change. A page `oxplow.knowledge.write_page`
 //! just wrote syncs to a no-op (its body hash matches). Wraps
 //! [`oxplow_fs_watch::FsWatcher`] for the debouncing.
 

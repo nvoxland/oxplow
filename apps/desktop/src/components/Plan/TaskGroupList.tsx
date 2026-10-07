@@ -28,7 +28,7 @@ import type { MenuItem } from "../../menu.js";
  * In progress → Ready → Blocked → Done — with dividers between non-empty
  * sections.
  *
- * Drag-reorder places the dragged item on its list (`work_item.reorder`,
+ * Drag-reorder places the dragged item on its list (`oxplow.work_item.reorder`,
  * offered only with the list's `ordering`). Dragging an item across
  * section boundaries also moves it to that section's state (ready → todo,
  * done → done) so the person can triage straight from the list.

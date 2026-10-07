@@ -1039,7 +1039,7 @@
         {
           "name": "evidence_ref",
           "type": "TEXT",
-          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `effort.verify_claim`); NULL if nothing was cited."
+          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited."
         },
         {
           "name": "verified",
@@ -1094,7 +1094,7 @@
         {
           "name": "evidence_ref",
           "type": "TEXT",
-          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `effort.verify_claim`); NULL if nothing was cited."
+          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited."
         },
         {
           "name": "verified",
@@ -1559,7 +1559,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -1624,7 +1624,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -1873,7 +1873,7 @@
         {
           "name": "summary",
           "type": "",
-          "doc": "What shipped: the summary `effort.report` recorded, else the final message of the last agent turn in the effort."
+          "doc": "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort."
         },
         {
           "name": "title",
@@ -1933,7 +1933,7 @@
         {
           "name": "summary",
           "type": "",
-          "doc": "What shipped: the summary `effort.report` recorded, else the final message of the last agent turn in the effort."
+          "doc": "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort."
         },
         {
           "name": "title",
@@ -4596,7 +4596,7 @@
         {
           "name": "command",
           "type": "TEXT",
-          "doc": "The command (`config.set`, `work_item.delete`)."
+          "doc": "The command (`oxplow.config.set`, `oxplow.work_item.delete`)."
         },
         {
           "name": "input",
@@ -4718,7 +4718,7 @@
         {
           "name": "kept_lens",
           "type": "TEXT",
-          "doc": "The lens it was kept as (`lens.keep`), if it was."
+          "doc": "The lens it was kept as (`oxplow.lens.keep`), if it was."
         }
       ],
       "key": []
@@ -5471,7 +5471,7 @@
         {
           "name": "toggleable",
           "type": "INTEGER",
-          "doc": "1 when `metric.enable` can switch it."
+          "doc": "1 when `oxplow.metric.enable` can switch it."
         },
         {
           "name": "category",

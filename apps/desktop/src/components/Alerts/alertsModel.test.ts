@@ -28,14 +28,14 @@ test("new alerts are the items not seen before, once each", () => {
     ...none,
     proposals: [
       { id: "proposal:1", title: "a" },
-      { id: "proposal:2", title: "Your agent wants to run config.set" },
+      { id: "proposal:2", title: "Your agent wants to run oxplow.config.set" },
     ],
     opErrors: [{ id: "oe-1", label: "Push failed" }],
     undelivered: 5,
     badges: [{ id: "x/b", title: "Waiting on You", message: "2 items" }],
   };
   expect(newAlerts(before, now).map((a) => a.message)).toEqual([
-    "Your agent wants to run config.set",
+    "Your agent wants to run oxplow.config.set",
     "Push failed",
     "Waiting on You: 2 items",
   ]);

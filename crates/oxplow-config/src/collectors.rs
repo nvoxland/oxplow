@@ -90,7 +90,7 @@ pub struct EntityDecl {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum Trigger {
-    /// Only when someone runs it (`collector.sync`).
+    /// Only when someone runs it (`oxplow.collector.sync`).
     Manual,
     /// Every `minutes` minutes (an exec collector once approved).
     Every { minutes: u32 },
@@ -239,7 +239,7 @@ pub enum CollectorRuntime {
     Starlark,
     /// A sandboxed jq program: no I/O, so no approval.
     Jaq,
-    /// A provider instance's collector (`provider.sync`): its records
+    /// A provider instance's collector (`oxplow.provider.sync`): its records
     /// land in the capability's model (`v_work_item`).
     Read,
 }

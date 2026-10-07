@@ -242,7 +242,7 @@ mod tests {
                     let id = insert_tx(
                         tx,
                         &NewCommandAudit {
-                            command: "work_item.transition".into(),
+                            command: "oxplow.work_item.transition".into(),
                             actor_kind: ActorKind::Agent,
                             actor_id: Some("thr3".into()),
                             thread_id: Some(ThreadId::new(3)),
@@ -251,7 +251,7 @@ mod tests {
                             error: None,
                             result: Some(json!({"id": "tsk1"})),
                             inverse: Some(CommandCall {
-                                name: "work_item.transition".into(),
+                                name: "oxplow.work_item.transition".into(),
                                 input: json!({"id": "tsk1", "to": "ready"}),
                             }),
                         },
@@ -260,7 +260,7 @@ mod tests {
                     let undo_id = insert_tx(
                         tx,
                         &NewCommandAudit {
-                            command: "work_item.transition".into(),
+                            command: "oxplow.work_item.transition".into(),
                             actor_kind: ActorKind::Human,
                             actor_id: None,
                             thread_id: None,
@@ -278,7 +278,7 @@ mod tests {
             .await
             .unwrap();
         let row = store.get(id).await.unwrap().unwrap();
-        assert_eq!(row.command, "work_item.transition");
+        assert_eq!(row.command, "oxplow.work_item.transition");
         assert_eq!(row.actor_kind, ActorKind::Agent);
         assert_eq!(row.thread_id, Some(ThreadId::new(3)));
         assert_eq!(row.outcome, Outcome::Ok);
@@ -302,13 +302,13 @@ mod tests {
             insert_tx(
                 tx,
                 &NewCommandAudit {
-                    command: "config.set".into(),
+                    command: "oxplow.config.set".into(),
                     actor_kind: ActorKind::Lens,
                     actor_id: Some("acme/x".into()),
                     thread_id: None,
                     input: json!({}),
                     outcome: Outcome::Denied,
-                    error: Some("lenses may not run config.set".into()),
+                    error: Some("lenses may not run oxplow.config.set".into()),
                     result: None,
                     inverse: None,
                 },

@@ -906,7 +906,7 @@ mod tests {
         let thread = format!("thr{}", f.thread.value());
         for (title, state) in [("Next up", "todo"), ("Shipped", "done")] {
             run(
-                "work_item.create",
+                "oxplow.work_item.create",
                 serde_json::json!({ "title": title, "state": state, "thread": thread }),
             )
             .await;
@@ -945,7 +945,7 @@ mod tests {
         );
         // Clearing hides what finished before it.
         run(
-            "oxplow_bundled.clear_finished",
+            "oxplow.work.clear_finished",
             serde_json::json!({ "thread_id": f.thread.value() }),
         )
         .await;
@@ -960,7 +960,7 @@ mod tests {
         // An effort no item names shows too: in progress while open, then
         // finished.
         let opened = run(
-            "effort.open",
+            "oxplow.effort.open",
             serde_json::json!({ "thread": thread, "title": "Tidy the shell scripts" }),
         )
         .await;
@@ -970,7 +970,11 @@ mod tests {
             work.contains(&("In progress".into(), "Tidy the shell scripts".into())),
             "{work:?}"
         );
-        run("effort.close", serde_json::json!({ "effort": effort })).await;
+        run(
+            "oxplow.effort.close",
+            serde_json::json!({ "effort": effort }),
+        )
+        .await;
         let work = lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
         assert!(
             work.contains(&("Finished".into(), "Tidy the shell scripts".into())),
@@ -990,7 +994,7 @@ mod tests {
                 .commands
                 .run(
                     &oxplow_domain::Actor::Human,
-                    "work_item.create",
+                    "oxplow.work_item.create",
                     serde_json::json!({ "title": title, "state": state, "thread": thread }),
                     false,
                 )
@@ -1001,7 +1005,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "work_item.create",
+                "oxplow.work_item.create",
                 serde_json::json!({ "title": "Someday" }),
                 false,
             )
@@ -1498,7 +1502,7 @@ mod tests {
         .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
         assert!(v.warnings.is_empty(), "{:?}", v.warnings);
-        for name in ["oxplow_bundled.accept", "oxplow_bundled.request_changes"] {
+        for name in ["oxplow.review.accept", "oxplow.review.request_changes"] {
             let spec = f
                 .svc
                 .commands
@@ -1526,7 +1530,7 @@ mod tests {
             let err = review(
                 &f,
                 actor,
-                "oxplow_bundled.accept",
+                "oxplow.review.accept",
                 serde_json::json!({ "ref": effort_ref(&f), "force": true }),
             )
             .await
@@ -1549,7 +1553,7 @@ mod tests {
         let err = review(
             &f,
             &human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": effort_ref(&f) }),
         )
         .await
@@ -1567,7 +1571,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -1601,7 +1605,7 @@ mod tests {
         review(
             &f,
             &human,
-            "effort.verify_claim",
+            "oxplow.effort.verify_claim",
             serde_json::json!({ "claim": format!("claim:{}", ids.0) }),
         )
         .await
@@ -1609,7 +1613,7 @@ mod tests {
         review(
             &f,
             &human,
-            "effort.confirm_decision",
+            "oxplow.effort.confirm_decision",
             serde_json::json!({ "decision": format!("decision:{}", ids.1) }),
         )
         .await
@@ -1617,7 +1621,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": effort_ref(&f) }),
         )
         .await
@@ -1727,7 +1731,7 @@ mod tests {
         review(
             &f,
             &oxplow_domain::Actor::Human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -1748,7 +1752,7 @@ mod tests {
             review(
                 &f,
                 &oxplow_domain::Actor::Human,
-                "oxplow_bundled.accept",
+                "oxplow.review.accept",
                 serde_json::json!({ "ref": effort_ref(&f), "force": true }),
             )
         };
@@ -1805,7 +1809,7 @@ mod tests {
             review(
                 &f,
                 &oxplow_domain::Actor::Human,
-                "oxplow_bundled.accept",
+                "oxplow.review.accept",
                 serde_json::json!({ "ref": effort_ref(&f), "force": true }),
             )
         };
@@ -1846,7 +1850,7 @@ mod tests {
         review(
             &f,
             &oxplow_domain::Actor::Human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -1882,7 +1886,7 @@ mod tests {
         review(
             &f,
             &human,
-            "effort.verify_claim",
+            "oxplow.effort.verify_claim",
             serde_json::json!({ "claim": format!("claim:{}", ids.0) }),
         )
         .await
@@ -1890,7 +1894,7 @@ mod tests {
         review(
             &f,
             &human,
-            "effort.confirm_decision",
+            "oxplow.effort.confirm_decision",
             serde_json::json!({ "decision": format!("decision:{}", ids.1) }),
         )
         .await
@@ -1898,7 +1902,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": effort_ref(&f) }),
         )
         .await
@@ -1926,7 +1930,7 @@ mod tests {
         review(
             &f,
             &oxplow_domain::Actor::Human,
-            "oxplow_bundled.request_changes",
+            "oxplow.review.request_changes",
             serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
         )
         .await
@@ -1968,14 +1972,20 @@ mod tests {
             actions("unverified-claims"),
             vec![(
                 "Mark Verified".to_string(),
-                "effort.verify_claim".to_string()
+                "oxplow.effort.verify_claim".to_string()
             )]
         );
         assert_eq!(
             actions("inferred-decisions"),
             vec![
-                ("Confirm".to_string(), "effort.confirm_decision".to_string()),
-                ("Dismiss".to_string(), "effort.dismiss_decision".to_string()),
+                (
+                    "Confirm".to_string(),
+                    "oxplow.effort.confirm_decision".to_string()
+                ),
+                (
+                    "Dismiss".to_string(),
+                    "oxplow.effort.dismiss_decision".to_string()
+                ),
             ]
         );
         assert!(ext
@@ -1986,7 +1996,7 @@ mod tests {
             .ui
             .commands
             .iter()
-            .any(|c| c.command == "oxplow_bundled.accept" && c.label == "Accept Review"));
+            .any(|c| c.command == "oxplow.review.accept" && c.label == "Accept Review"));
     }
 
     /// P7.B5: the "look here first" score is oxplow-bundled's model over
@@ -2253,7 +2263,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_bundled.request_changes",
+            "oxplow.review.request_changes",
             serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
         )
         .await
@@ -2270,7 +2280,7 @@ mod tests {
         assert_eq!(logged[0][4], "oxplow_bundled.changes_requested");
         assert_eq!(
             logged[0][1],
-            "extension:oxplow-bundled/oxplow_bundled.request_changes"
+            "extension:oxplow-bundled/oxplow.review.request_changes"
         );
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[0][2].as_str().unwrap()).unwrap(),
@@ -2281,7 +2291,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await
@@ -2294,7 +2304,7 @@ mod tests {
         );
         assert_eq!(
             logged[1][1],
-            "extension:oxplow-bundled/oxplow_bundled.accept"
+            "extension:oxplow-bundled/oxplow.review.accept"
         );
         assert_eq!(logged[1][4], "oxplow_bundled.accepted");
         let subject: Vec<String> = serde_json::from_str(logged[1][2].as_str().unwrap()).unwrap();
@@ -2308,7 +2318,7 @@ mod tests {
         let again = review(
             &f,
             &human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": "effort:eff999" }),
         )
         .await;
@@ -2392,7 +2402,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_bundled.request_changes",
+            "oxplow.review.request_changes",
             serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
         )
         .await
@@ -2406,7 +2416,7 @@ mod tests {
         review(
             &f,
             &human,
-            "oxplow_bundled.accept",
+            "oxplow.review.accept",
             serde_json::json!({ "ref": effort_ref(&f), "force": true }),
         )
         .await

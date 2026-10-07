@@ -259,7 +259,7 @@ fn sdk_error(e: oxplow_sdk::SdkError) -> IpcError {
 
 /// Turn an extension on or off for the project (`extensions.disabled` in
 /// `.oxplow/project.yaml`, so it's team-wide once committed). Returns the
-/// primary stream's extensions. UI only: an agent's `config.set` on the
+/// primary stream's extensions. UI only: an agent's `oxplow.config.set` on the
 /// person-only `extensions` key asks the person instead.
 pub async fn set_extension_enabled(
     svc: &Services,
@@ -388,7 +388,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "stream.adopt_worktree",
+                "oxplow.stream.adopt_worktree",
                 json!({ "path": dir.to_string_lossy(), "title": "Side" }),
                 true,
             )
@@ -503,7 +503,7 @@ mod tests {
             .unwrap();
         assert_eq!(review["extension"]["name"], "shared");
         let sha = review["sha"].clone();
-        // The install itself is the person's confirmed `extension.install`.
+        // The install itself is the person's confirmed `oxplow.extension.install`.
         let run = |name: &'static str, input: serde_json::Value| {
             let svc = svc.clone();
             async move {
@@ -513,7 +513,7 @@ mod tests {
             }
         };
         let ext = run(
-            "extension.install",
+            "oxplow.extension.install",
             json!({ "git_url": url, "reviewed_sha": sha }),
         )
         .await
@@ -523,7 +523,7 @@ mod tests {
         assert_eq!(ext["source"]["git"], json!(url));
 
         let err = run(
-            "extension.install",
+            "oxplow.extension.install",
             json!({ "git_url": url, "reviewed_sha": sha }),
         )
         .await
@@ -540,7 +540,7 @@ mod tests {
             .await
             .unwrap();
         let ext = run(
-            "extension.update",
+            "oxplow.extension.update",
             json!({ "name": "shared", "reviewed_sha": review["sha"] }),
         )
         .await

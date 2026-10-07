@@ -127,10 +127,10 @@ pub const MANIFEST: &[Capability] = &[
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).
     ui(
         "enable_metrics",
-        "the Catalog toggle, a person's typed call into `metric.enable`; an agent runs the command itself",
+        "the Catalog toggle, a person's typed call into `oxplow.metric.enable`; an agent runs the command itself",
     ),
     // Architectural zones (tsk251) — agent-only: the agent reads the table
-    // here and writes it with `config.set` (tsk411); the renderer only reads
+    // here and writes it with `oxplow.config.set` (tsk411); the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
     agent("list_zones"),
     both("add_followup"),
@@ -176,7 +176,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "effective_config",
-        "the Settings view of every setting and its origin; an agent reads `config.list_keys`",
+        "the Settings view of every setting and its origin; an agent reads `oxplow.config.list_keys`",
     ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
@@ -189,7 +189,7 @@ pub const MANIFEST: &[Capability] = &[
         "lens_text",
         "Copy's text on every lens; an agent reads the same text through `run_lens`",
     ),
-    // An agent's answers: it shows one (the `lens.show` command).
+    // An agent's answers: it shows one (the `oxplow.lens.show` command).
     agent("show_lens"),
     ui(
         "run_answer",
@@ -226,7 +226,7 @@ pub const MANIFEST: &[Capability] = &[
         "turning extensions on or off is a person's call",
     ),
     both("list_collectors"),
-    // The `collector.sync` command: the UI runs it through `run_command`,
+    // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
     agent("run_collector"),
     ui(
@@ -485,19 +485,19 @@ pub const MANIFEST: &[Capability] = &[
     // ---- config ----
     ui(
         "get_config",
-        "the renderer's whole config; an agent reads keys with `config.list_keys`",
+        "the renderer's whole config; an agent reads keys with `oxplow.config.list_keys`",
     ),
     ui(
         "set_agent_prompt_append",
-        "the Settings form for a person-only key: an agent's `config.set` of it is a proposal the person decides",
+        "the Settings form for a person-only key: an agent's `oxplow.config.set` of it is a proposal the person decides",
     ),
     ui(
         "set_generated",
-        "the Settings form; an agent sets config with `config.set`",
+        "the Settings form; an agent sets config with `oxplow.config.set`",
     ),
     ui(
         "set_agent_model",
-        "the Settings form for a person-only key (`agentModels`): an agent's `config.set` of it is a proposal the person decides",
+        "the Settings form for a person-only key (`agentModels`): an agent's `oxplow.config.set` of it is a proposal the person decides",
     ),
     ui(
         "get_workspace_context",

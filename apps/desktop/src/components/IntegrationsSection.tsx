@@ -114,7 +114,7 @@ export function IntegrationsSection() {
 
 /** The core components an extension replaces, each with a switch back to
  *  oxplow's own: `replacementsOff`, a person-only key like
- *  `activeProviders`, so the click is the confirmation `config.set` asks
+ *  `activeProviders`, so the click is the confirmation `oxplow.config.set` asks
  *  for. A replacement shows only while its extension's provider is the
  *  active one. */
 function Replacements({
@@ -132,9 +132,9 @@ function Replacements({
     const next = keepOxplows ? [...new Set([...off, target])].sort() : off.filter((t) => t !== target);
     try {
       if (next.length === 0) {
-        await runCommand("config.unset", { key: "replacementsOff" }, true);
+        await runCommand("oxplow.config.unset", { key: "replacementsOff" }, true);
       } else {
-        await runCommand("config.set", { key: "replacementsOff", value: next }, true);
+        await runCommand("oxplow.config.set", { key: "replacementsOff", value: next }, true);
       }
       onChanged(next);
     } catch (e) {
@@ -455,12 +455,12 @@ function IntegrationRow({
     }
   }
 
-  // Read a collector now, as the person (`provider.sync`), then show
+  // Read a collector now, as the person (`oxplow.provider.sync`), then show
   // where its reads stand.
   async function sync(collector: string) {
     setBusy("sync");
     try {
-      const out = await runCommand("provider.sync", { instance: view.instance, collector });
+      const out = await runCommand("oxplow.provider.sync", { instance: view.instance, collector });
       const records = (out.result as { reads?: Array<{ records: number }> } | null)?.reads?.[0]?.records ?? 0;
       showToast({ message: `Synced ${collector}: ${records} ${records === 1 ? "record" : "records"}.` });
     } catch (e) {

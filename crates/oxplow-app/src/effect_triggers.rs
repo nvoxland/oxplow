@@ -17,7 +17,7 @@
 //!    and a chain of more than [`MAX_CHAIN`] effect runs stops (`skipped`).
 //! 4. Its script composes, over the event and its `input` rows:
 //!    `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs as
-//!    `command.sequence` by `Actor::Effect` (`CommandBus::run_effect`),
+//!    `oxplow.command.sequence` by `Actor::Effect` (`CommandBus::run_effect`),
 //!    whose `effect_run` row and `effect.result@4` land with the run, its
 //!    proposal, or — when it failed before anything ran — here.
 //!
@@ -26,7 +26,7 @@
 //! the pump that runs it is part of it.
 //!
 //! [`run_reaction`] is that reaction, and it is also what a person's
-//! `effect.retry` of a failed one runs (P9.D4): the next **attempt**, the
+//! `oxplow.effect.retry` of a failed one runs (P9.D4): the next **attempt**, the
 //! same steps from 3 on, with what started it (`ReactionOrigin`) recorded.
 //!
 //! **Sent again by itself** (P10, [`auto_retry_due`]): an attempt that
@@ -37,7 +37,7 @@
 //! ([`RETRY_DELAYS`]); waiting, it doesn't count against the effect's
 //! health, and the attempt that exhausts the retries counts once.
 //! The retry sends exactly what the failed attempt composed, kept with it
-//! while the retry is scheduled ([`Resend`]); a `work_item.create` in it
+//! while the retry is scheduled ([`Resend`]); a `oxplow.work_item.create` in it
 //! files on the tracker active when it's sent, as every create does
 //! (tsk1058). An
 //! attempt cut off by oxplow stopping is retried the same way, timed from
@@ -129,8 +129,8 @@ impl EffectTriggers {
 }
 
 /// Register the consumer on `svc`'s pump (boot, before it spawns), and
-/// the commands a person runs effects with (`effect.retry`,
-/// `effect.backfill` and its plan): they hold `Services` as the consumer
+/// the commands a person runs effects with (`oxplow.effect.retry`,
+/// `oxplow.effect.backfill` and its plan): they hold `Services` as the consumer
 /// does.
 pub fn register(svc: &Arc<Services>) {
     svc.event_pump
@@ -472,7 +472,7 @@ pub(crate) const NOT_REACTED: &str = "hasn't reacted";
 ///   a redelivery finds the reaction and runs nothing (an attempt left
 ///   `started` is recorded `failed`: interrupted) — and only for an event
 ///   logged after the effect's approval;
-/// - `Retry` (a person's `effect.retry`): the next attempt at a reaction
+/// - `Retry` (a person's `oxplow.effect.retry`): the next attempt at a reaction
 ///   whose latest **failed**; `Invalid` otherwise. The person named the
 ///   event, so when it was logged doesn't matter;
 /// - `Backfill`: the first attempt at an event the effect never reacted
@@ -776,7 +776,7 @@ async fn retry_one(
     let late = oxplow_domain::Timestamp::parse(due_at).map_or(true, |at| {
         now_ms - at.unix_ms() > MAX_RETRY_LATENESS.as_millis() as i64
     });
-    // At its newest version, as the pump, `effect.retry` and backfill
+    // At its newest version, as the pump, `oxplow.effect.retry` and backfill
     // hand it over (tsk911). The attempt sends what the failed one
     // composed (tsk887), so an expired payload doesn't stop it.
     let event = match svc
@@ -869,7 +869,7 @@ pub(crate) fn find_effect(svc: &Services, name: &str) -> Option<(Extension, Effe
     effects(svc).into_iter().find(|(_, d)| d.name() == name)
 }
 
-/// The run of an effect's reaction: the registered `command.sequence` —
+/// The run of an effect's reaction: the registered `oxplow.command.sequence` —
 /// its spec and compiled schema — over what its script composed: `calls`,
 /// and its own `events` beside them.
 fn effect_command(
@@ -942,7 +942,7 @@ mod tests {
 
     /// Marks a finished item's title.
     const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.transitioned]\n    where: { to: done }\n    input: \"SELECT title FROM v_work_item WHERE ref = :work_item\"\n    entry: mark.star\n";
-    const MARK: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": ref, \"title\": x[\"rows\"][0][\"title\"] + \" (done)\"}}]}\n";
+    const MARK: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": x[\"rows\"][0][\"title\"] + \" (done)\"}}]}\n";
 
     fn extension(root: &Path, effects: &str, files: &[(&str, &str)]) {
         let dir = root.join("oxplow/extensions/acme");
@@ -1045,7 +1045,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.transitioned]\n    where: { to: done }\n    input: \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\"\n    entry: stamp.star\n";
-        let script = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": ref, \"title\": x[\"rows\"][0][\"type\"] + \" #\" + str(x[\"rows\"][0][\"seq\"])}}]}\n";
+        let script = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": x[\"rows\"][0][\"type\"] + \" #\" + str(x[\"rows\"][0][\"seq\"])}}]}\n";
         extension(&svc.layout.project_dir, stamp, &[("stamp.star", script)]);
         approve(svc).await;
         let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
@@ -1126,7 +1126,7 @@ mod tests {
         assert_eq!(consumer.unknown_after_warnings(), 1);
     }
 
-    /// tsk798: a reaction's command shares `command.sequence`'s compiled
+    /// tsk798: a reaction's command shares `oxplow.command.sequence`'s compiled
     /// input schema rather than compiling its own.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_reactions_command_shares_the_sequences_validator() {
@@ -1250,10 +1250,10 @@ mod tests {
     }
 
     /// A reaction of two steps: the item marked inside oxplow, then a
-    /// write outside it (`probe.write`).
-    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": ref, \"title\": \"probed\"}}, {\"name\": \"probe.write\", \"input\": {\"n\": 1}}]}\n";
+    /// write outside it (`oxplow.probe.write`).
+    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
 
-    /// `probe.write`: a write outside oxplow that keeps each idempotency
+    /// `oxplow.probe.write`: a write outside oxplow that keeps each idempotency
     /// key it is sent, and fails while `fail` is set.
     fn register_probe(
         svc: &Services,
@@ -1264,7 +1264,7 @@ mod tests {
         use oxplow_domain::{Atomicity, CommandEffect, CommandSpec, Confirm, Invokers, Lifecycle};
         let command = Command::new(
             CommandSpec {
-                name: "probe.write".into(),
+                name: "oxplow.probe.write".into(),
                 summary: "Write outside oxplow (a test probe).".into(),
                 input_schema: json!({ "type": "object" }),
                 invokers: Invokers::ALL,
@@ -1329,7 +1329,7 @@ mod tests {
             "{key}"
         );
         svc.commands
-            .run(&human, "probe.write", json!({ "n": 1 }), false)
+            .run(&human, "oxplow.probe.write", json!({ "n": 1 }), false)
             .await
             .unwrap();
         assert_eq!(keys.lock().last(), Some(&None));
@@ -1345,7 +1345,7 @@ mod tests {
         use oxplow_domain::{Atomicity, CommandEffect, CommandSpec, Confirm, Invokers, Lifecycle};
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"probe.write\", \"input\": {\"n\": 2}}]}\n";
+        const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 2}}]}\n";
         extension(
             &svc.layout.project_dir,
             MARK_DONE,
@@ -1359,7 +1359,7 @@ mod tests {
         // A write outside oxplow that always lands, answering with an event.
         let note = Command::new(
             CommandSpec {
-                name: "probe.note".into(),
+                name: "oxplow.probe.note".into(),
                 summary: "Note something outside oxplow (a test probe).".into(),
                 input_schema: json!({ "type": "object" }),
                 invokers: Invokers::ALL,
@@ -1567,7 +1567,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    input: \"SELECT title FROM v_work_item WHERE ref = :work_item\"\n    entry: bang.star\n";
-        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": x[\"rows\"][0][\"title\"] + \"!\"}}]}\n";
+        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": x[\"rows\"][0][\"title\"] + \"!\"}}]}\n";
         extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
@@ -1575,7 +1575,7 @@ mod tests {
         svc.commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "work_item.update",
+                "oxplow.work_item.update",
                 json!({ "ref": r, "title": "renamed" }),
                 false,
             )
@@ -1599,7 +1599,7 @@ mod tests {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:other/e{i}"),
                 &CommandExecutedV2 {
-                    command: "command.sequence".into(),
+                    command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("other/e{i}")),
                     outcome: CommandOutcome::Ok,
@@ -1639,7 +1639,7 @@ mod tests {
     async fn a_command_that_asks_leaves_a_proposal() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n";
+        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n";
         extension(
             &svc.layout.project_dir,
             &MARK_DONE.replace("entry: mark.star", "entry: drop.star"),
@@ -1737,7 +1737,7 @@ mod tests {
                 ("skip.star", "def transform(x):\n    return {\"skip\": \"not today\"}\n"),
                 (
                     "drop.star",
-                    "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n",
+                    "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n",
                 ),
             ],
         );
@@ -1816,7 +1816,7 @@ mod tests {
             &root,
             "oxplow/extensions/acme/note.star",
             &format!(
-                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"work_item.update\", \"input\": {{\"ref\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
+                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"ref\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
             ),
         );
         svc.vocabulary_service.sync().await.unwrap();
@@ -1870,7 +1870,7 @@ mod tests {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:acme-pr/e{i}"),
                 &CommandExecutedV2 {
-                    command: "command.sequence".into(),
+                    command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("acme-pr/e{i}")),
                     outcome: CommandOutcome::Ok,
@@ -2033,7 +2033,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    input: \"SELECT title FROM v_work_item WHERE ref = :work_item\"\n    entry: bang.star\n";
-        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": x[\"rows\"][0][\"title\"] + \"!\"}}]}\n";
+        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": x[\"rows\"][0][\"title\"] + \"!\"}}]}\n";
         extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
         register(svc);
         let r = oxplow_domain::refs::build::work_item_ref(fx.task);

@@ -117,8 +117,8 @@ const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (n
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunCommandParams {
-    /// The command's name, as `list_commands` reports it (`config.set`,
-    /// `work_item.transition`).
+    /// The command's name, as `list_commands` reports it (`oxplow.config.set`,
+    /// `oxplow.work_item.transition`).
     pub name: String,
     /// The command's input, matching its `input_schema`.
     #[serde(default)]
@@ -818,7 +818,7 @@ impl OxplowMcp {
         params: Parameters<RunCollectorParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        // The `collector.sync` command, as the caller: it never approves.
+        // The `oxplow.collector.sync` command, as the caller: it never approves.
         let actor = self.verified_actor(&caller_of(&extensions)).await?;
         let out = self
             .services
@@ -1028,7 +1028,7 @@ impl OxplowMcp {
                        reach and the credentials they read, advisories, collectors; `errors` block \
                        the install), the commit `sha`, and `problems` a dry run of its lenses \
                        found. Show the person what it declares and get their go-ahead, then \
-                       pass `sha` as `reviewed_sha` to the `extension.install` / `extension.update` commands \
+                       pass `sha` as `reviewed_sha` to the `oxplow.extension.install` / `oxplow.extension.update` commands \
                        (a person approves them)."
     )]
     async fn review_extension(
@@ -1163,7 +1163,7 @@ impl OxplowMcp {
         let id: i64 = answer
             .strip_prefix("answer:")
             .and_then(|n| n.parse().ok())
-            .ok_or_else(|| internal("lens.show returned no answer"))?;
+            .ok_or_else(|| internal("oxplow.lens.show returned no answer"))?;
         let (run, text) = oxplow_app::commands::lens::text_answer(&self.services, id)
             .await
             .map_err(domain_err)?;
@@ -1705,7 +1705,7 @@ impl OxplowMcp {
     // ---------- code quality (duplication) ----------
     //
     // The per-function metrics scan was retired (tsk229) — those signals live in
-    // the metric substrate now (`v_metric_spec` via query_sql; `collector.sync`).
+    // the metric substrate now (`v_metric_spec` via query_sql; `oxplow.collector.sync`).
     // Duplicate-block detection remains an inherent feature; read its findings
     // here.
 
@@ -1919,8 +1919,8 @@ impl OxplowMcp {
     #[tool(
         description = "Discover the thread's currently-open effort. Returns `{ open, effortId, \
             workItem, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
-            is open. Use this to confirm an effort is open before `collector.sync` on a report \
-            collector or `test.record_run`, and to see whether its diff coverage has a baseline \
+            is open. Use this to confirm an effort is open before `oxplow.collector.sync` on a report \
+            collector or `oxplow.test.record_run`, and to see whether its diff coverage has a baseline \
             (`hasStartSnapshot:false` ⇒ none)."
     )]
     async fn get_open_effort(
@@ -2018,7 +2018,7 @@ impl OxplowMcp {
             built-in table — an empty `rules` means this project hasn't declared its zones yet \
             and every file reads as `other`. A large `other` count or an unmatched sample full \
             of real source is the signal the table has gone stale as the repo grew. To change \
-            the table, set the `zones` key with the `config.set` command (`run_command`)."
+            the table, set the `zones` key with the `oxplow.config.set` command (`run_command`)."
     )]
     async fn list_zones(&self) -> Result<CallToolResult, McpError> {
         let report = oxplow_app::zones_service::zone_report(&self.services)
@@ -2037,8 +2037,8 @@ impl OxplowMcp {
                        \"needs_response\" (open follow-ups whose latest message isn't yours — what \
                        the user wants you to act on). Each result carries the anchored `quote`, \
                        the message thread, and `intent` (note vs followup). Reply with \
-                       `run_command knowledge.reply_comment { comment, body }`; resolve with \
-                       `run_command knowledge.update_comment { comment, status: \"resolved\" }`."
+                       `run_command oxplow.knowledge.reply_comment { comment, body }`; resolve with \
+                       `run_command oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
     )]
     async fn list_comments(
         &self,
@@ -2506,7 +2506,7 @@ impl OxplowMcp {
         description = "List every configured language server (.oxplow/project.yaml + Mason-installed): \
                        languageId, command, source, binary presence, running streams. Use to \
                        check what LSP coverage exists before code_hover/definition/references, \
-                       and to verify an `lsp.install_server` took effect."
+                       and to verify an `oxplow.lsp.install_server` took effect."
     )]
     async fn lsp_list_servers(&self) -> Result<CallToolResult, McpError> {
         let listings = self.services.lsp_sessions.list_servers().await;
@@ -2629,9 +2629,9 @@ const WRITE_TOOLS: &[&str] = &[
     "run_command",
     // A lens's action runs its command, as the lens acting for the caller.
     "run_lens_action",
-    // The `lens.show` command (records the answer in the caller's thread).
+    // The `oxplow.lens.show` command (records the answer in the caller's thread).
     "show_lens",
-    // The `collector.sync` command.
+    // The `oxplow.collector.sync` command.
     "run_collector",
     // A derived cache: the change's analysis, recomputed from the VCS on
     // demand (ipc-and-stores.md, "what stays off the bus").
@@ -3089,8 +3089,8 @@ impl OxplowMcp {
             }
             Err(err) => return Err(command_error(err)),
         };
-        // A write may have opened or closed an effort (`effort.open`,
-        // `work_item.transition`): let its snapshot pin land before the
+        // A write may have opened or closed an effort (`oxplow.effort.open`,
+        // `oxplow.work_item.transition`): let its snapshot pin land before the
         // agent's next step.
         if outcome.audit_id.is_some() {
             self.services.efforts.settle_lifecycle().await;
@@ -3665,7 +3665,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "knowledge.add_comment",
+                "oxplow.knowledge.add_comment",
                 serde_json::json!({
                     "stream": format!("stream:{stream}"),
                     "target": { "kind": "work_item", "id": format!("oxplow:{primary_task}") },
@@ -3731,7 +3731,7 @@ mod tests {
             .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("rust-analyzer"), "got: {msg}");
-        assert!(msg.contains("lsp.install_server"), "got: {msg}");
+        assert!(msg.contains("oxplow.lsp.install_server"), "got: {msg}");
         assert!(msg.contains("project.yaml"), "got: {msg}");
     }
 
@@ -4026,7 +4026,7 @@ mod tests {
             .run_command_as(
                 &McpCaller::default(),
                 RunCommandParams {
-                    name: "config.set".into(),
+                    name: "oxplow.config.set".into(),
                     input: serde_json::json!({"key": "zones", "value": []}),
                 },
             )
@@ -4039,7 +4039,7 @@ mod tests {
             .run_command_as(
                 &McpCaller::default(),
                 RunCommandParams {
-                    name: "metric.record".into(),
+                    name: "oxplow.metric.record".into(),
                     input: serde_json::json!({"key": "oxplow.rust.unsafe_blocks", "value": 1.0}),
                 },
             )
@@ -4055,13 +4055,13 @@ mod tests {
         let specs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
         let names: Vec<&str> = specs.iter().map(|s| s["name"].as_str().unwrap()).collect();
         for expected in [
-            "config.set",
-            "config.list_keys",
-            "work_item.transition",
-            "metric.record",
-            "collector.sync",
-            "metric.rebuild",
-            "metric.scaffold",
+            "oxplow.config.set",
+            "oxplow.config.list_keys",
+            "oxplow.work_item.transition",
+            "oxplow.metric.record",
+            "oxplow.collector.sync",
+            "oxplow.metric.rebuild",
+            "oxplow.metric.scaffold",
         ] {
             assert!(names.contains(&expected), "{names:?}");
         }
@@ -4087,7 +4087,7 @@ mod tests {
             .next()
             .unwrap();
         let list = || RunCommandParams {
-            name: "config.list_keys".into(),
+            name: "oxplow.config.list_keys".into(),
             input: serde_json::json!({}),
         };
         let err = server
@@ -4136,7 +4136,7 @@ mod tests {
     }
 
     /// The zones write path after `set_zones` (tsk392): the agent runs
-    /// `config.set` through `run_command`, and the run is audited to the
+    /// `oxplow.config.set` through `run_command`, and the run is audited to the
     /// calling thread.
     #[tokio::test]
     async fn run_command_sets_zones_as_the_calling_thread() {
@@ -4162,7 +4162,7 @@ mod tests {
             .run_command(
                 extensions_for(parts),
                 Parameters(RunCommandParams {
-                    name: "config.set".into(),
+                    name: "oxplow.config.set".into(),
                     input: serde_json::json!({
                         "key": "zones",
                         "value": [{"match": "src/**", "zone": "core"}]
@@ -4185,7 +4185,7 @@ mod tests {
             .expect("command.executed logged");
         assert_eq!(executed.envelope.source, format!("agent:{}", thread.id));
         assert_eq!(executed.envelope.anchors.thread_id, Some(thread.id));
-        assert_eq!(executed.envelope.payload["command"], "config.set");
+        assert_eq!(executed.envelope.payload["command"], "oxplow.config.set");
         // A human-only key is not the agent's to set: the run is kept as a
         // proposal for a person, and the agent is told so — a success,
         // since the request is recorded and needs nothing more from it.
@@ -4196,7 +4196,7 @@ mod tests {
                     stream_id: Some(stream.id),
                 },
                 RunCommandParams {
-                    name: "config.set".into(),
+                    name: "oxplow.config.set".into(),
                     input: serde_json::json!({"key": "agentPromptAppend", "value": "be brief"}),
                 },
             )
@@ -4225,7 +4225,7 @@ mod tests {
         assert!(!yaml.contains("be brief"), "nothing written: {yaml}");
     }
 
-    /// A thread on `stream`, made as a person through `thread.create`.
+    /// A thread on `stream`, made as a person through `oxplow.thread.create`.
     async fn new_thread(
         services: &oxplow_app::Services,
         stream: oxplow_domain::StreamId,

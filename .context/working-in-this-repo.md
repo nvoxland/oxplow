@@ -187,7 +187,7 @@ or model needs nothing: a rebuilt test binary is a new template key.
 
 **An effort needs no task, and neither does its fixture.**
 `test_fixtures::services_with_effort()` opens an effort linked to nothing
-(through `effort.open`, so its event is logged like a real one); a test
+(through `oxplow.effort.open`, so its event is logged like a real one); a test
 about oxplow's tasks takes `services_with_task_effort()` instead (an
 in-progress task, the effort linked to it; it derefs to the plain
 fixture, so helpers take either). Reach for the task one only when the

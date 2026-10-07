@@ -17,7 +17,7 @@ pub async fn get_config(svc: &Services) -> Result<OxplowConfig, IpcError> {
 }
 
 /// Set `key` (or unset it, with `None`) as the person, through
-/// `config.set` / `config.unset`: validated, audited, logged as
+/// `oxplow.config.set` / `oxplow.config.unset`: validated, audited, logged as
 /// `config.changed` and undoable, like any config change. The person's
 /// own action is their confirmation for a human-only key. Returns the
 /// config as it is afterwards.
@@ -130,7 +130,7 @@ mod tests {
         assert!(out.is_object(), "expected a config object, got {out}");
     }
 
-    /// `(actor, key)` of each successful `config.set` / `config.unset`, oldest first.
+    /// `(actor, key)` of each successful `oxplow.config.set` / `oxplow.config.unset`, oldest first.
     async fn audited_config_sets(svc: &crate::RpcContext) -> Vec<(String, String)> {
         let mut rows: Vec<(String, String)> =
             oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
@@ -139,7 +139,8 @@ mod tests {
                 .unwrap()
                 .into_iter()
                 .filter(|a| {
-                    (a.command == "config.set" || a.command == "config.unset") && a.error.is_none()
+                    (a.command == "oxplow.config.set" || a.command == "oxplow.config.unset")
+                        && a.error.is_none()
                 })
                 .map(|a| {
                     (
@@ -156,7 +157,7 @@ mod tests {
         rows
     }
 
-    /// tsk515: every settings write is the person's `config.set` — audited,
+    /// tsk515: every settings write is the person's `oxplow.config.set` — audited,
     /// logged as `config.changed`, undoable — and the file says what the
     /// returned config says.
     #[tokio::test]

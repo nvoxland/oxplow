@@ -1,5 +1,5 @@
 //! Cores for the `notes` command module: the read of a thread's notes
-//! (writes are `knowledge.add_note` / `knowledge.update_note`).
+//! (writes are `oxplow.knowledge.add_note` / `oxplow.knowledge.update_note`).
 //!
 //! Thread-scoped notes (the per-thread capture pad backing the
 //! Explore-subagent findings flow). Per-task notes were retired

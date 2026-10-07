@@ -1,12 +1,12 @@
 //! Knowledge — the wiki — as commands (P5.C3, `.context/knowledge.md`).
 //!
-//! `knowledge.write_page` is the one way a page is written: in the bus's
+//! `oxplow.knowledge.write_page` is the one way a page is written: in the bus's
 //! transaction it validates the slug and every `[[link]]`, restates the
 //! `wiki_page` row and its `page_ref` edges (new file refs pinned to the
 //! primary stream's latest snapshot) and logs `knowledge.page.written`;
 //! once committed it writes `.oxplow/wiki/<slug>.md`. Beside it:
-//! `knowledge.delete_page`, `knowledge.link` (add a link to a page) and
-//! `knowledge.resync` (restate a page from its file — the repair op).
+//! `oxplow.knowledge.delete_page`, `oxplow.knowledge.link` (add a link to a page) and
+//! `oxplow.knowledge.resync` (restate a page from its file — the repair op).
 //! A hand edit of the file converges through the same core
 //! ([`crate::wiki_pages::sync_page`], logged as `system:wiki_watch`).
 
@@ -38,10 +38,10 @@ use crate::wiki_pages::{
     extract_title, parse_refs, path_under_any_dir, strip_body_version_literals, wiki_pages_dir,
 };
 
-pub const WRITE_PAGE: &str = "knowledge.write_page";
-pub const DELETE_PAGE: &str = "knowledge.delete_page";
-pub const LINK: &str = "knowledge.link";
-pub const RESYNC: &str = "knowledge.resync";
+pub const WRITE_PAGE: &str = "oxplow.knowledge.write_page";
+pub const DELETE_PAGE: &str = "oxplow.knowledge.delete_page";
+pub const LINK: &str = "oxplow.knowledge.link";
+pub const RESYNC: &str = "oxplow.knowledge.resync";
 
 /// A page's ref: `wiki:<slug>`.
 pub fn page_ref(slug: &str) -> String {
@@ -1024,7 +1024,7 @@ mod tests {
         assert!(events_of(&fx, "knowledge.page.written").await.is_empty());
     }
 
-    /// tsk572: `knowledge.link` adds under `## Related` — even when a
+    /// tsk572: `oxplow.knowledge.link` adds under `## Related` — even when a
     /// section follows it — and the body it writes has no `@version`.
     #[tokio::test]
     async fn link_adds_under_related_and_strips_versions() {

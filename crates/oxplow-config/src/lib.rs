@@ -164,7 +164,7 @@ pub fn acp_presets() -> Vec<AcpAgentConfig> {
 
 /// Presets, then the project's entries (a project entry replaces a
 /// preset of the same name), in that order.
-/// The agent a new thread runs when it names none (`thread.create`, a
+/// The agent a new thread runs when it names none (`oxplow.thread.create`, a
 /// stream's seeded thread; tsk970): the project's first enabled agent
 /// (Claude when `agents:` is empty), and for `acp` the project's own first
 /// `acpAgents:` entry, else the first preset.
@@ -1655,7 +1655,7 @@ pub struct ExtensionInstanceConfig {
     pub config: serde_json::Value,
     /// How often its collectors are read, in minutes (absent:
     /// [`DEFAULT_SYNC_MINUTES`]; `0`: only when someone runs
-    /// `provider.sync`).
+    /// `oxplow.provider.sync`).
     // No `skip_serializing_if` (specta's unified mode can't express it):
     // `render_project_config` leaves an absent one out of the file.
     #[serde(rename = "syncMinutes", default)]

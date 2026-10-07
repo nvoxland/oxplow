@@ -153,7 +153,7 @@ impl TaskService {
         // effort's snapshot pin, reconciliation and lifecycle metrics are
         // the effort-lifecycle consumer's; settle so they're done when this
         // returns. Changes made for someone (MCP, RPC) run the
-        // `work_item.update` command instead, which audits the actor.
+        // `oxplow.work_item.update` command instead, which audits the actor.
         let prior_status = item.status;
         let after = self.store.update_with_status(&item, changes.status).await?;
         if after.status != prior_status {

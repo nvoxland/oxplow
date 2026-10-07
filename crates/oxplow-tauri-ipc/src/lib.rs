@@ -93,9 +93,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<oxplow_domain::vcs::OpOutcome>()
         // A provider's work-item flags (`v_capability_provider.features`).
         .typ::<oxplow_domain::work_items::WorkItemsFeatures>()
-        // `collector.sync`'s result, read through `run_command`.
+        // `oxplow.collector.sync`'s result, read through `run_command`.
         .typ::<oxplow_app::collector_runner::CollectorRunReport>()
-        // What `lens.keep` keeps from Explore Data's Save as Lens.
+        // What `oxplow.lens.keep` keeps from Explore Data's Save as Lens.
         .typ::<oxplow_app::extensions::LensSpec>()
         .commands(collect_commands![
             // app

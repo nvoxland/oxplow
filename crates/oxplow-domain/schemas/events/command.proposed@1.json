@@ -25,7 +25,7 @@
       "$ref": "#/$defs/ActorKind"
     },
     "command": {
-      "description": "The command's name (`config.set`).",
+      "description": "The command's name (`oxplow.config.set`).",
       "type": "string"
     },
     "destructive": {

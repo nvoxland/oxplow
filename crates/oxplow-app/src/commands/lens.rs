@@ -1,8 +1,8 @@
 //! Answers in a thread (P6.C1, target §11.4's lens lifecycle): an agent
 //! shows the person something — an existing lens or its own lens spec —
-//! with `lens.show`; `lens.keep` writes an answer — or a spec, as Explore
+//! with `oxplow.lens.show`; `oxplow.lens.keep` writes an answer — or a spec, as Explore
 //! Data's Save as Lens does — as a private lens;
-//! `lens.share` moves a private lens into a shared extension once it
+//! `oxplow.lens.share` moves a private lens into a shared extension once it
 //! passes the shared checks (committing it is the person's git commit).
 //! The rows live in `thread_answer` (`v_thread_answer`); `run_answer`
 //! runs one for the Answers strip and for `show_lens`'s text.
@@ -29,9 +29,9 @@ use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
 
-pub const SHOW: &str = "lens.show";
-pub const KEEP: &str = "lens.keep";
-pub const SHARE: &str = "lens.share";
+pub const SHOW: &str = "oxplow.lens.show";
+pub const KEEP: &str = "oxplow.lens.keep";
+pub const SHARE: &str = "oxplow.lens.share";
 
 /// Where the lens commands find lenses and write them, and the database
 /// the `External` ones (`keep`, `share`) read and write in transactions
@@ -46,7 +46,7 @@ pub struct LensTarget {
     pub sql: crate::sql_gateway::SqlGateway,
 }
 
-/// `lens.show`: show the person an answer in a thread.
+/// `oxplow.lens.show`: show the person an answer in a thread.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShowInput {
@@ -60,14 +60,14 @@ pub struct ShowInput {
     pub thread: Option<String>,
 }
 
-/// `lens.keep`: write an answer, or a spec, as a private lens.
+/// `oxplow.lens.keep`: write an answer, or a spec, as a private lens.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KeepInput {
     /// The answer to keep (`answer:12`). Give this or `spec`.
     pub answer: Option<String>,
     /// A lens of its own to keep (title, query, viz and what its viz
-    /// needs), checked as `lens.show` checks one.
+    /// needs), checked as `oxplow.lens.show` checks one.
     pub spec: Option<LensSpec>,
     /// The stream whose worktree a `spec` goes in (`str2`): the caller's
     /// thread's when omitted, else the primary's. An answer goes in its
@@ -79,7 +79,7 @@ pub struct KeepInput {
     pub slug: Option<String>,
 }
 
-/// `lens.share`: move a private lens into a shared extension.
+/// `oxplow.lens.share`: move a private lens into a shared extension.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShareInput {
@@ -176,9 +176,9 @@ fn stream_root_tx(
 
 /// A lens spec's query, checked as `query_sql` checks it — one read-only
 /// statement over the published models, metric functions resolved through
-/// the metric engine (`SqlGateway::check`). `lens.show` runs it before its
+/// the metric engine (`SqlGateway::check`). `oxplow.lens.show` runs it before its
 /// transaction (its [`Precheck`](crate::commands::Precheck), tsk1010),
-/// `lens.keep` in its run.
+/// `oxplow.lens.keep` in its run.
 async fn check_spec_query(
     sql: &crate::sql_gateway::SqlGateway,
     spec: &LensSpec,
@@ -332,7 +332,7 @@ fn show(target: LensTarget) -> Command {
     .with_precheck(precheck)
 }
 
-/// What `lens.keep` writes for answer `id`: its spec with the shown
+/// What `oxplow.lens.keep` writes for answer `id`: its spec with the shown
 /// params as defaults, the worktree it goes in, and its thread. Read in
 /// one transaction; refuses an answer that's kept already.
 fn kept_lens_tx(
@@ -367,7 +367,7 @@ fn kept_lens_tx(
     Ok((spec, root, answer.thread_id))
 }
 
-/// What `lens.keep` writes, where, and what it keeps.
+/// What `oxplow.lens.keep` writes, where, and what it keeps.
 struct Keeping {
     spec: LensSpec,
     root: PathBuf,
@@ -397,7 +397,7 @@ async fn keeping_answer(target: &LensTarget, raw: &str) -> Result<Keeping, Comma
     })
 }
 
-/// What keeping `spec` writes: checked as `lens.show` checks it, in the
+/// What keeping `spec` writes: checked as `oxplow.lens.show` checks it, in the
 /// worktree of `stream` — else of the caller's thread's stream, else the
 /// primary's.
 async fn keeping_spec(
@@ -459,7 +459,7 @@ async fn keeping_spec(
     Ok(keeping)
 }
 
-/// `lens.keep` writes a file, so it's an `External` command: a `Tx`
+/// `oxplow.lens.keep` writes a file, so it's an `External` command: a `Tx`
 /// handler may run more than once (the bus retries on a busy database)
 /// and a retried file write strands the first. What it keeps is read and
 /// checked in one transaction, the lens file written, and a kept answer's
@@ -574,7 +574,7 @@ fn keep(target: LensTarget) -> Command {
     .expect("lens.keep registers")
 }
 
-/// `lens.share` writes, load-checks, then removes the private copy —
+/// `oxplow.lens.share` writes, load-checks, then removes the private copy —
 /// filesystem work that must happen before the check can run, so it's an
 /// `External` command (see `keep`).
 fn share(target: LensTarget) -> Command {
@@ -1032,7 +1032,7 @@ mod tests {
         assert!(again.to_string().contains("kept already"), "{again}");
     }
 
-    /// tsk943: Explore Data's Save as Lens is `lens.keep` with a spec — the
+    /// tsk943: Explore Data's Save as Lens is `oxplow.lens.keep` with a spec — the
     /// lens file it writes is the one keeping an answer that showed the
     /// same spec writes, and its `lens.kept` names no answer.
     #[tokio::test]
@@ -1087,7 +1087,7 @@ mod tests {
         assert_eq!(kept[1], json!({ "lens": "lens:saved/busy-tasks" }));
     }
 
-    /// A kept spec gets `lens.show`'s check: a query over a physical table
+    /// A kept spec gets `oxplow.lens.show`'s check: a query over a physical table
     /// is refused, and nothing is written.
     #[tokio::test]
     async fn keep_refuses_a_spec_over_a_physical_table() {
@@ -1295,7 +1295,7 @@ mod tests {
     }
 
     /// tsk988: a kept lens goes to a private extension — moving one into a
-    /// shared extension is `lens.share`, a person's.
+    /// shared extension is `oxplow.lens.share`, a person's.
     #[tokio::test]
     async fn a_lens_isnt_kept_into_a_shared_extension() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1318,13 +1318,14 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            err.to_string().contains("`team` is shared") && err.to_string().contains("lens.share"),
+            err.to_string().contains("`team` is shared")
+                && err.to_string().contains("oxplow.lens.share"),
             "{err}"
         );
         assert!(!team.join("lenses").exists());
     }
 
-    /// `lens.keep` keeps an answer or a spec: neither, or both, is refused;
+    /// `oxplow.lens.keep` keeps an answer or a spec: neither, or both, is refused;
     /// so is a stream beside an answer, which is kept in its own thread's
     /// worktree.
     #[tokio::test]

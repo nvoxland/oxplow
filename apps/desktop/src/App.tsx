@@ -886,7 +886,7 @@ export function App() {
   }
 
   /** A drag's new order on a list: the item it moved, placed by its
-   *  neighbour (`work_item.reorder`). */
+   *  neighbour (`oxplow.work_item.reorder`). */
   async function reorderList(list: WorkList | null | undefined, orderedRefs: string[]) {
     const before = (list?.all ?? []).map((i) => i.ref).filter((ref) => orderedRefs.includes(ref));
     await runTaskWrite(() => reorderWorkItems(before, orderedRefs));

@@ -75,7 +75,7 @@ collectors:
 parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`, `eslint`.
 `trigger: { on_run: test }` reads the report after each test run oxplow
 sees, when that run wrote it (an analyzer's report: `on_run: analysis`);
-without a trigger it runs only by hand (`collector.sync`). So a frontend
+without a trigger it runs only by hand (`oxplow.collector.sync`). So a frontend
 run uses the frontend reports, a Rust run the Rust reports, JUnit
 merging into the per-test tree and coverage into diff coverage. You
 never parse or report any of these numbers yourself — oxplow does, so

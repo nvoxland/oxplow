@@ -128,7 +128,7 @@ subdir listing happens once, so a top-level directory created *afterwards*
 is covered by nothing: the root reports the `mkdir` itself and then never
 reports a single write inside it. Everything under it went unsnapshotted
 until restart — absent from Local History, unrecoverable by
-`snapshot.restore_file`, invisible to effort attribution (this repo's own
+`oxplow.snapshot.restore_file`, invisible to effort attribution (this repo's own
 `tests-e2e/` had **0** `file_snapshot` rows while every pre-existing
 directory had hundreds). And the workspace watcher, which had no fix of
 its own, never saw a project's first `oxplow/` — the extension catalog
@@ -372,8 +372,8 @@ merge, a rebase and a cherry-pick, and that a true overlap stays
 conflicted. The cherry-pick / revert UI entry point lives on the
 **commit page** (`GitCommitPage`): two `InlineConfirm` action buttons in
 the commit metadata card (`data-testid` `commit-actions`, triggers
-`commit-cherry-pick` / `commit-revert`) run `git.cherry_pick` /
-`git.revert` against the active stream and fold the `auto_resolved`
+`commit-cherry-pick` / `commit-revert`) run `oxplow.git.cherry_pick` /
+`oxplow.git.revert` against the active stream and fold the `auto_resolved`
 count into the success toast via `gitOpOutcomeMessage`
 (`apps/desktop/src/git-op.ts`); failures record an op-error and offer a
 "Show details" toast.
@@ -428,7 +428,7 @@ invoked as a separate binary, never linked as a library.
   only for `sha.len() == 40`; route everything shorter through
   `repo.revparse_single`, which expands against the object DB. Same rule
   applies anywhere else a sha is turned into an OID.
-- `vcs.commit` runs `git add -u` (or `git add -A` with
+- `oxplow.vcs.commit` runs `git add -u` (or `git add -A` with
   `include_untracked`) then `git commit -m`. Only the Files panel and the
   uncommitted-changes page run it; no MCP tool commits.
 - Push, pull, fetch, merge and rebase are long: the desktop runs each
@@ -460,7 +460,7 @@ invoked as a separate binary, never linked as a library.
 - `recent_remote_branches` wraps `git for-each-ref
   --sort=-committerdate refs/remotes` (filters out `<remote>/HEAD`) for
   the dashboard's recent-remote-branches card.
-- `vcs.push` / `vcs.pull` with `remote` + `branch` push the current
+- `oxplow.vcs.push` / `oxplow.vcs.pull` with `remote` + `branch` push the current
   branch to `<remote>/<branch>` (`git push <remote> HEAD:refs/heads/<branch>`,
   a refspec push that never touches another working dir) and pull
   `<remote>/<branch>` into it (fetch, then merge; a failed fetch
@@ -505,7 +505,7 @@ another tool's checkout.
 The Files panel (`ProjectPanel`) shows a **Commit (N)** button in its
 header toolbar whenever `vcsEnabled && uncommittedPaths.length > 0`.
 Clicking it opens a small `CommitDialog` with a commit-message
-textarea; submitting runs the `vcs.commit` command (`vcsCommit`). This
+textarea; submitting runs the `oxplow.vcs.commit` command (`vcsCommit`). This
 is the UI entry point for
 user-driven commits. oxplow never steers the agent to commit.
 

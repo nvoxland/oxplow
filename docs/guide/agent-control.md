@@ -38,9 +38,9 @@ priority order:
 3. **In-progress audit.** If the writer thread has any
    `in_progress` tasks, the runtime blocks with an audit
    directive: reconcile each item — still active → leave alone;
-   change shipped → close it (a `work_item.transition` to `done`
-   plus an `effort.report`, run together as one
-   `command.sequence`); stuck → mark
+   change shipped → close it (a `oxplow.work_item.transition` to `done`
+   plus an `oxplow.effort.report`, run together as one
+   `oxplow.command.sequence`); stuck → mark
    `blocked`; obsolete → mark `canceled`. A signature dedup
    prevents the same audit firing repeatedly when nothing
    changed.

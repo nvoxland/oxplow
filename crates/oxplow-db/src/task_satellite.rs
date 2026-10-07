@@ -45,7 +45,7 @@ fn str_to_link_type(s: &str) -> Result<TaskLinkType, DomainError> {
 }
 
 /// A note on task `item`, with its `page_ref` edges — the core of
-/// `work_item.comment`, composing inside the bus's transaction.
+/// `oxplow.work_item.comment`, composing inside the bus's transaction.
 pub fn add_task_note_tx(
     conn: &rusqlite::Connection,
     kinds: &oxplow_domain::refs::kind::KindRegistry,
@@ -76,7 +76,7 @@ pub fn add_task_note_tx(
 }
 
 /// A typed link from `from` to `to`, made in `thread`, restating `from`'s
-/// link edges — the core of `work_item.link`.
+/// link edges — the core of `oxplow.work_item.link`.
 pub fn create_link_tx(
     conn: &rusqlite::Connection,
     thread: ThreadId,

@@ -13,12 +13,12 @@
 - question: Mark a work item done.
   skill: work-items
   reaches:
-    command: work_item.transition
+    command: oxplow.work_item.transition
     input: { ref: "work_item:oxplow:tsk1", to: done }
 - question: Record that one work item blocks another.
   skill: work-items
   reaches:
-    command: work_item.link
+    command: oxplow.work_item.link
     input: { ref: "work_item:oxplow:tsk1", target: "work_item:oxplow:tsk2", link_type: blocks }
 - question: Which files did this effort touch?
   about: effort

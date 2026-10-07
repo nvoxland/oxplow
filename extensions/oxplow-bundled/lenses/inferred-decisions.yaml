@@ -18,6 +18,6 @@ columns:
   - { key: confidence, label: How Sure }
   - { key: why, label: Why }
 actions:
-  - { id: confirm, label: Confirm, command: effort.confirm_decision, input: { decision: "{{row.decision}}" }, row: true }
-  - { id: dismiss, label: Dismiss, command: effort.dismiss_decision, input: { decision: "{{row.decision}}" }, row: true }
+  - { id: confirm, label: Confirm, command: oxplow.effort.confirm_decision, input: { decision: "{{row.decision}}" }, row: true }
+  - { id: dismiss, label: Dismiss, command: oxplow.effort.dismiss_decision, input: { decision: "{{row.decision}}" }, row: true }
 empty: Nothing inferred. Either the agent recorded its decisions, or no summarize model is assigned (Settings → AI).

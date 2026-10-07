@@ -18,7 +18,7 @@ File one when it helps the person follow the work:
 - a follow-up you noticed but can't do now.
 
 ```json
-{ "name": "work_item.create",
+{ "name": "oxplow.work_item.create",
   "input": { "title": "Fix login redirect loop", "body": "…", "state": "todo" } }
 ```
 
@@ -29,7 +29,7 @@ concern per item. An epic is an item with children: file one when the
 change has three or more steps a reviewer would inspect separately;
 otherwise file a single item.
 
-Starting an item (`work_item.transition { ref, to: "in_progress" }`)
+Starting an item (`oxplow.work_item.transition { ref, to: "in_progress" }`)
 links your effort to it; starting an unrelated one begins a new effort.
 oxplow never marks an item done. If you're tracking one, move it to
 `done` when it ships.
@@ -45,10 +45,10 @@ rather than filing a new one.
 ## Changing items
 
 The same commands change any list's items, by canonical ref
-(`work_item:<provider>:<id>`): `work_item.transition { ref, to,
-native_state? }`, `work_item.update { ref, title?, body?, parent_ref?,
-state?, native? }`, `work_item.link { ref, target, link_type }`,
-`work_item.comment { ref, body }`. The active list's own ids work as
+(`work_item:<provider>:<id>`): `oxplow.work_item.transition { ref, to,
+native_state? }`, `oxplow.work_item.update { ref, title?, body?, parent_ref?,
+state?, native? }`, `oxplow.work_item.link { ref, target, link_type }`,
+`oxplow.work_item.comment { ref, body }`. The active list's own ids work as
 refs too (oxplow's tasks: `tsk12`). `list_commands` shows only what the
 active list supports.
 
