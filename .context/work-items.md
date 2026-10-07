@@ -13,20 +13,32 @@ provider** (P7.A1), which the bus dispatches to the item's provider.
 
 ## The model
 
-`v_work_item` (table `work_item`, V115) holds every provider's items by
-ref, `work_item:<provider>:<id>`: `title`, `body`, a canonical `state`
-(`todo`, `in_progress`, `blocked`, `done`, `canceled`), the provider's own
-`native_state` and `native` JSON, and `parent_ref` (NULL when the
-parent is deleted: a deleted item isn't a live one, so the model's
-parent relationship holds; tsk572). `v_task` stays
-oxplow's native view. How the rows are written, the state mapping and the
+**The interface.** Everything — the UI, core, extensions, the agent's
+tools — reads work items through `v_work_item`, `v_work_item_link` and
+`v_work_item_comment`, and writes them with the `work_item.*` commands;
+nothing outside a work list's implementation reads that list's own
+tables (`v_task` is oxplow's tasks'; `oxplow-dev` is the one development
+exception). The views show **the active work list's items only**: one
+list at a time, whichever implementation it is, and nothing with none.
+
+`v_work_item` (table `work_item`, V115) holds the items by ref,
+`work_item:<provider>:<id>`: `title`, `body`, a canonical `state`
+(`todo`, `in_progress`, `blocked`, `done`, `canceled`), the list's own
+`native_state` and `native` JSON, `parent_ref` (NULL when the parent is
+deleted: a deleted item isn't a live one, so the model's parent
+relationship holds; tsk572), and (V17) `thread_id` — the list it's on, a
+thread's or the backlog (NULL) — `rank` on that list and `closed_at`.
+`v_work_item_link` is its links (`blocks`, `discovered_from`,
+`relates_to`, `duplicates`, `supersedes`, `replies_to`),
+`v_work_item_comment` its comments. How the rows are written, the state mapping and the
 cascade trigger are in [data-model.md](./data-model.md) "`work_item`".
 
 There are two writers, one schema:
 
 - **oxplow's rows** are restated from the task row by the task cores in
   the same transaction (`task_store::project_work_item_tx`), so they
-  never disagree with `v_task`; `v_work_item`'s own `sql` test checks it.
+  never disagree with `v_task`; their links and comments follow
+  `task_link` / `task_note` by trigger.
   That includes every row a core touches on the side: `place_task_tx`
   renumbers the moved item's neighbours and restates each one it changed
   (`native.sort_index`), checked by the reorder test's `stale_native_rows`.

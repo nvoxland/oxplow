@@ -427,24 +427,40 @@ One row per work item, keyed by its ref (`work_item:<provider>:<id>`):
 `provider`, `title`, `body`, canonical `state` (`todo`, `in_progress`,
 `blocked`, `done`, `canceled`), the provider's own `native_state`, its
 other fields as `native` JSON, `parent_ref`, timestamps and
-`deleted_at`. Published as `v_work_item` (live rows); `v_task` stays
-oxplow's native model.
+`deleted_at`; since V17 the interface's own `thread_id` (the list it's
+on, NULL = backlog), `rank` (order on the list) and `closed_at` (when it
+first reached done or canceled; reopened, NULL). Published as
+`v_work_item`: live rows **of the active work list only** (a join on the
+active `work_items` row of `capability_provider`, so with none it's
+empty). `v_task` stays oxplow's native model — read only by oxplow's
+implementation (and `oxplow-dev`).
+
+**`work_item_link`** `(from_ref, to_ref, link_type, created_at)` and
+**`work_item_comment`** `(id, ref, body, author, created_at)` (V17) are
+the interface's links and comments, published as `v_work_item_link` /
+`v_work_item_comment` over the active list's items. oxplow's follow
+`task_link` / `task_note` (a task's notes) by triggers, however those are
+written (V17 backfilled them; a comment's id is `task_note:<id>`).
+Capability rows are published when services are built
+(`CapabilityRegistry::publish_now`), so the first read sees the active
+list.
 
 The oxplow provider's rows (`work_item:oxplow:tsk<n>`) are restated from
 the `task` row by `task_store::project_work_item_tx`, which every task
 write calls in its own transaction (insert, field update, status,
 soft delete) — the two never disagree. Mapping: `ready` → `todo`;
 `archived` → `done` when `completed_at` is set, else `canceled`; the rest
-by name. (Archiving keeps `completed_at`; before V115 it cleared it, so
+by name. The interface columns: `thread_id` is the task's thread, `rank`
+its `sort_index`, `closed_at` its `completed_at` (else when it closed). (Archiving keeps `completed_at`; before V115 it cleared it, so
 V122 restored it — and `done` — for every task whose last archive the
 event log shows came `from: done`. Tasks archived before the event log
 existed have no record and stay `canceled`.) `native` carries priority, thread, sort index, author and
 `completed_at`. A task deleted by a cascade (its thread or stream
 deleted outright) never passes through the store, so a trigger
-(`work_item_follows_task_delete`) deletes its row. `v_work_item`'s own
-`sql` test checks every live `v_task` has its row and every oxplow row
-its task. An external provider's rows arrive by projection from its
-events (P5.C2).
+(`work_item_follows_task_delete`) deletes its row. An external
+provider's rows arrive by projection from its events (P5.C2); its
+`thread_id` is the thread that filed it (first record), `closed_at` when
+a record first closed it.
 
 ### `symbol` + `symbol_capture` — code symbols (migration `V117__symbol.sql`, P5.C6)
 

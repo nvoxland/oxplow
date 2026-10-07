@@ -505,6 +505,31 @@ impl CapabilityRegistry {
         config: &OxplowConfig,
         db: &oxplow_db::Database,
     ) -> Result<(), DomainError> {
+        let (rows, now) = self.rows(config);
+        let vocabulary = self.vocabulary.current();
+        db.transaction(move |tx| restate(tx, &vocabulary, &rows, &now))
+            .await
+    }
+
+    /// [`Self::publish`] at construction, before there's a runtime: so the
+    /// first read of `v_capability_provider` (and of `v_work_item`, which
+    /// shows the active list's items) sees what's active.
+    pub fn publish_now(
+        &self,
+        config: &OxplowConfig,
+        db: &oxplow_db::Database,
+    ) -> Result<(), DomainError> {
+        let (rows, now) = self.rows(config);
+        let vocabulary = self.vocabulary.current();
+        db.transaction_now(|tx| restate(tx, &vocabulary, &rows, &now))
+    }
+
+    /// The rows `v_capability_provider` holds under `config`, and each
+    /// capability's resolved implementation.
+    fn rows(
+        &self,
+        config: &OxplowConfig,
+    ) -> (Vec<CapabilityProvider>, Vec<(&'static str, Resolved)>) {
         let all = self.implementations();
         let mut rows: Vec<CapabilityProvider> = Vec::new();
         let mut now = Vec::new();
@@ -550,24 +575,31 @@ impl CapabilityRegistry {
             }
             now.push((spec.id, resolved));
         }
-        let vocabulary = self.vocabulary.current();
-        db.transaction(move |tx| {
-            let before = list_tx(tx)?;
-            reset_tx(tx, &rows)?;
-            for switch in switches(&before, &now) {
-                let envelope = Envelope::new(
-                    CapabilitySwitched::TYPE,
-                    CapabilitySwitched::V,
-                    "system",
-                    serde_json::to_value(&switch)
-                        .map_err(|e| DomainError::Invalid(format!("capability.switched: {e}")))?,
-                )?;
-                oxplow_db::event_log_store::append_tx(tx, &vocabulary, &envelope)?;
-            }
-            Ok(())
-        })
-        .await
+        (rows, now)
     }
+}
+
+/// Restate the rows and log each switch (`capability.switched@1`), in one
+/// transaction.
+fn restate(
+    tx: &rusqlite::Transaction<'_>,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    rows: &[CapabilityProvider],
+    now: &[(&str, Resolved)],
+) -> Result<(), DomainError> {
+    let before = list_tx(tx)?;
+    reset_tx(tx, rows)?;
+    for switch in switches(&before, now) {
+        let envelope = Envelope::new(
+            CapabilitySwitched::TYPE,
+            CapabilitySwitched::V,
+            "system",
+            serde_json::to_value(&switch)
+                .map_err(|e| DomainError::Invalid(format!("capability.switched: {e}")))?,
+        )?;
+        oxplow_db::event_log_store::append_tx(tx, vocabulary, &envelope)?;
+    }
+    Ok(())
 }
 
 /// The capabilities whose active implementation in `before` (the rows as

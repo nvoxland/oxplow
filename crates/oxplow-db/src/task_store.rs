@@ -481,16 +481,19 @@ pub fn set_status_tx(
 /// every task write calls it in its own transaction, so the two never
 /// disagree. Canonical state: `ready` → `todo`; `archived` → `done` when
 /// it was completed, else `canceled`; the rest map by name. The native
-/// status stays in `native_state`, the oxplow-only fields in `native`. A
-/// hard delete (a cascade from the thread or stream) is the `task`
-/// table's trigger's (V115).
+/// status stays in `native_state`, the oxplow-only fields in `native`; the
+/// interface's own columns (`thread_id`, `rank`, `closed_at`) are the
+/// task's list, sort index and close. A hard delete (a cascade from the
+/// thread or stream) is the `task` table's trigger's (V115); links and
+/// comments follow `task_link` / `task_note` by trigger (V17).
 pub(crate) fn project_work_item_tx(
     conn: &rusqlite::Connection,
     id: TaskId,
 ) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO work_item (ref, provider, title, body, state, native_state, native,
-                                parent_ref, created_at, updated_at, deleted_at)
+                                parent_ref, thread_id, rank, closed_at,
+                                created_at, updated_at, deleted_at)
          SELECT 'work_item:oxplow:tsk' || t.id, 'oxplow', t.title, t.description,
                 CASE t.status
                     WHEN 'ready' THEN 'todo'
@@ -504,13 +507,20 @@ pub(crate) fn project_work_item_tx(
                             'completed_at', t.completed_at),
                 CASE WHEN t.parent_id IS NULL THEN NULL
                      ELSE 'work_item:oxplow:tsk' || t.parent_id END,
+                t.thread_id, t.sort_index,
+                CASE WHEN t.status = 'done' OR t.status = 'canceled' OR t.status = 'archived'
+                     THEN coalesce(t.completed_at, t.updated_at) END,
                 t.created_at, t.updated_at, t.deleted_at
          FROM task t WHERE t.id = ?1
          ON CONFLICT(ref) DO UPDATE SET
             title = excluded.title, body = excluded.body, state = excluded.state,
             native_state = excluded.native_state, native = excluded.native,
-            parent_ref = excluded.parent_ref, updated_at = excluded.updated_at,
-            deleted_at = excluded.deleted_at",
+            parent_ref = excluded.parent_ref, thread_id = excluded.thread_id,
+            rank = excluded.rank,
+            -- When it first closed; reopened, it's open again.
+            closed_at = CASE WHEN excluded.closed_at IS NULL THEN NULL
+                             ELSE coalesce(work_item.closed_at, excluded.closed_at) END,
+            updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
         params![id.value()],
     )?;
     Ok(())

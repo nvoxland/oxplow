@@ -204,6 +204,8 @@ pub enum AppInitError {
     Session(#[from] oxplow_session::SessionError),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("capabilities: {0}")]
+    Capabilities(String),
 }
 
 /// Layout of the on-disk state for one project. Lives under
@@ -1079,6 +1081,11 @@ impl Services {
         capabilities.set_declared(capabilities::declared_by(
             &extension_catalog.get(&layout.project_dir),
         ));
+        // What's active, published before anything reads it: the work-item
+        // interface shows the active list's items.
+        capabilities
+            .publish_now(&config_service::read_config(&config_arc), &db)
+            .map_err(|e| AppInitError::Capabilities(e.to_string()))?;
         let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(

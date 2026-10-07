@@ -1325,6 +1325,13 @@ async fn suite(
                     .map_err(|e| e.to_string())?
                     .active_providers
                     .insert("work_items".into(), provider.id.clone());
+                // …and published, as a `config.set` would: the interface
+                // reads the active list's items.
+                let config = oxplow_app::config_service::read_config(&svc.config);
+                svc.capabilities
+                    .publish(&config, &svc.db)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 oxplow_app::work_items_conformance::suite(
                     &svc.work_items_client(),
                     &provider.id,

@@ -564,6 +564,25 @@ impl Database {
         self.write_transaction(f, true).await
     }
 
+    /// [`Self::transaction`] on the calling thread, once: for construction
+    /// before there's a runtime to await on (services publishing what they
+    /// hold so the first read sees it). Never call it from async code.
+    pub fn transaction_now<R>(
+        &self,
+        f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError>,
+    ) -> Result<R, oxplow_domain::DomainError> {
+        let mut conn = self
+            .conn()
+            .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(map_sql_err)?;
+        let value = f(&tx)?;
+        tx.commit().map_err(map_sql_err)?;
+        self.changes.flush();
+        Ok(value)
+    }
+
     /// [`Self::transaction`], always rolled back: what `f` would do, with
     /// the write lock and the busy retry of a real run, and nothing kept.
     /// A command's dry run (a proposal's preview) runs its handler here.

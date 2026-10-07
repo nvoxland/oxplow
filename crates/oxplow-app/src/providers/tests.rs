@@ -141,6 +141,8 @@ fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
 
 /// Make `provider` the active work-items tracker: where every create
 /// files (tsk1058).
+/// `provider` the active work list, as a `config.set` would leave it:
+/// the config, and the capability rows the interface reads.
 fn make_active(fx: &EffortFixture, provider: &str) {
     fx.svc
         .config
@@ -148,6 +150,15 @@ fn make_active(fx: &EffortFixture, provider: &str) {
         .unwrap()
         .active_providers
         .insert("work_items".into(), provider.into());
+    republish(fx);
+}
+
+fn republish(fx: &EffortFixture) {
+    let config = crate::config_service::read_config(&fx.svc.config);
+    fx.svc
+        .capabilities
+        .publish_now(&config, &fx.svc.db)
+        .unwrap();
 }
 
 async fn logged(fx: &EffortFixture, event_type: &str) -> Vec<serde_json::Value> {
@@ -4696,7 +4707,9 @@ async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
     let titled_from_the_task = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"title\": \"after \" + x[\"rows\"][0][\"title\"]}}]}\n";
     let fx = with_effect_reading(
         "lose-reply",
-        Some("SELECT title FROM v_work_item WHERE ref = :work_item"),
+        // The oxplow task that moved (the fake is the active list, so the
+        // interface doesn't show it): its own view.
+        Some("SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = :work_item"),
         titled_from_the_task,
     )
     .await;
@@ -4705,7 +4718,7 @@ async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
         .svc
         .sql
         .query_sql(
-            &format!("SELECT title FROM v_work_item WHERE ref = '{task}'"),
+            &format!("SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = '{task}'"),
             vec![],
             None,
         )
@@ -5173,13 +5186,16 @@ async fn a_retry_files_on_the_tracker_active_when_sent() {
     let fx = with_effect("lose-reply", unnamed).await;
     crate::effect_triggers::register(&fx.svc);
     let set_active = |provider: Option<&str>| {
-        let mut config = fx.svc.config.write().unwrap();
-        match provider {
-            Some(p) => config
-                .active_providers
-                .insert("work_items".into(), p.into()),
-            None => config.active_providers.remove("work_items"),
-        };
+        {
+            let mut config = fx.svc.config.write().unwrap();
+            match provider {
+                Some(p) => config
+                    .active_providers
+                    .insert("work_items".into(), p.into()),
+                None => config.active_providers.remove("work_items"),
+            };
+        }
+        republish(&fx);
     };
     set_active(Some("fake"));
     let ev = react(&fx).await;

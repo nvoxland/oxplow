@@ -210,12 +210,16 @@ impl EventConsumer for WorkItemsProjection {
         conn.execute(
             "INSERT INTO work_item (ref, provider, title, body, state, native_state, native,
                                     parent_ref, created_at, updated_at, deleted_at,
-                                    filed_in_thread)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, CASE WHEN ?10 THEN ?9 END, ?11)
+                                    thread_id, closed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, CASE WHEN ?10 THEN ?9 END, ?11,
+                     CASE WHEN ?5 IN ('done', 'canceled') THEN ?9 END)
              ON CONFLICT(ref) DO UPDATE SET
                 title = excluded.title, body = excluded.body, state = excluded.state,
                 native_state = excluded.native_state, native = excluded.native,
                 parent_ref = excluded.parent_ref, updated_at = excluded.updated_at,
+                -- When it first closed (as recorded); reopened, open again.
+                closed_at = CASE WHEN excluded.closed_at IS NULL THEN NULL
+                                 ELSE coalesce(work_item.closed_at, excluded.closed_at) END,
                 deleted_at = CASE WHEN ?10 THEN coalesce(work_item.deleted_at, ?9) END",
             rusqlite::params![
                 item.item_ref,
@@ -228,8 +232,8 @@ impl EventConsumer for WorkItemsProjection {
                 item.parent_ref,
                 at,
                 item.deleted,
-                // The thread that filed it, at its first record only
-                // (tsk1041): a restatement keeps it.
+                // The list it's on: the thread that filed it, at its
+                // first record only (tsk1041); a restatement keeps it.
                 event.envelope.anchors.thread_id.map(|t| t.value()),
             ],
         )
@@ -243,6 +247,89 @@ mod tests {
     use super::*;
     use oxplow_domain::work_items::WorkItemRecord;
     use oxplow_domain::Envelope;
+
+    /// `sql`'s rows as JSON, over the published models.
+    async fn rows(svc: &crate::Services, sql: &str) -> serde_json::Value {
+        let out = svc.sql.query_sql(sql, vec![], None).await.unwrap();
+        serde_json::to_value(out.rows).unwrap()
+    }
+
+    /// The interface carries what any list's screens need — the list an
+    /// item is on, its rank, when it closed, its links and comments — and
+    /// shows only the active list's items: with none, nothing.
+    #[tokio::test]
+    async fn the_interface_reads_the_active_lists_items() {
+        use crate::commands::work_item as w;
+        use oxplow_domain::Actor;
+        use serde_json::json;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let run = |name: &'static str, input: serde_json::Value| {
+            let svc = svc.clone();
+            async move {
+                svc.commands
+                    .run(&Actor::Human, name, input, false)
+                    .await
+                    .unwrap()
+            }
+        };
+        let child = run(
+            w::CREATE,
+            json!({ "title": "child", "parent_ref": task, "thread": fx.thread.to_string() }),
+        )
+        .await
+        .result["ref"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        run(
+            w::LINK,
+            json!({ "ref": child, "target": task, "link_type": "blocks" }),
+        )
+        .await;
+        run(w::COMMENT, json!({ "ref": task, "body": "Looks right." })).await;
+        run(w::NAME, json!({ "ref": child, "to": "done" })).await;
+        assert_eq!(
+            rows(
+                svc,
+                &format!(
+                "SELECT ref, thread_id, rank IS NOT NULL, closed_at IS NOT NULL FROM v_work_item
+                  WHERE ref IN ('{task}', '{child}') ORDER BY ref"
+            )
+            )
+            .await,
+            json!([
+                [task, fx.thread.value(), 1, 0],
+                [child, fx.thread.value(), 1, 1]
+            ])
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT from_ref, to_ref, link_type FROM v_work_item_link"
+            )
+            .await,
+            json!([[child, task, "blocks"]])
+        );
+        assert_eq!(
+            rows(svc, "SELECT ref, body FROM v_work_item_comment").await,
+            json!([[task, "Looks right."]])
+        );
+        svc.config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), oxplow_domain::capability::NONE.into());
+        crate::capabilities::refresh(svc).await.unwrap();
+        for view in ["v_work_item", "v_work_item_link", "v_work_item_comment"] {
+            assert_eq!(
+                rows(svc, &format!("SELECT count(*) FROM {view}")).await,
+                json!([[0]]),
+                "{view}"
+            );
+        }
+    }
 
     fn recorded(item_ref: &str, title: &str, deleted: bool) -> Envelope {
         Envelope::typed::<WorkItemRecorded>(
@@ -338,19 +425,19 @@ mod tests {
             .await
             .unwrap();
         svc.event_pump.run_once().await.unwrap();
-        let out = svc
-            .sql
-            .query_sql(
-                "SELECT thread_id FROM v_work_item WHERE ref = ?1",
-                vec![oxplow_db::SqlCell::Text(r.into())],
-                None,
-            )
+        // The projection's row (the provider isn't running, so the
+        // interface, which shows the active list, doesn't list it).
+        let thread: Option<i64> = svc
+            .db
+            .read(move |c| {
+                c.query_row("SELECT thread_id FROM work_item WHERE ref = ?1", [r], |r| {
+                    r.get(0)
+                })
+                .map_err(oxplow_db::map_sql_err)
+            })
             .await
             .unwrap();
-        assert_eq!(
-            serde_json::to_value(out.rows).unwrap(),
-            json!([[fx.thread.value()]])
-        );
+        assert_eq!(thread, Some(fx.thread.value()));
         // An oxplow task's thread is the task's own.
         let own = oxplow_domain::refs::build::work_item_ref(fx.task);
         let out = svc

@@ -1113,18 +1113,20 @@
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: work_item
-  version: 1
-  description: "Work items from every provider, excluding deleted ones: oxplow's tasks (`work_item:oxplow:tsk<n>`, written with the task) and, later, a provider's issues. `state` is the canonical state every provider maps to; `v_task` stays oxplow's native view."
+  version: 2
+  description: "The active work list's items — the work-item interface everything reads, whichever implementation is active (oxplow's tasks, a provider's tracker; none: nothing). Deleted items excluded. `state` is the canonical state every list maps to; a list's own fields are in `native` (described by its declared fields). Links are `v_work_item_link`, comments `v_work_item_comment`."
   columns:
     - { name: "ref", type: "TEXT", doc: "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)." }
-    - { name: "provider", type: "TEXT", doc: "The provider it comes from (`oxplow`)." }
+    - { name: "provider", type: "TEXT", doc: "The implementation it comes from: the active work list (`oxplow`, a provider instance)." }
     - { name: "title", type: "TEXT", doc: "Title." }
     - { name: "body", type: "TEXT", doc: "Markdown body." }
-    - { name: "state", type: "TEXT", doc: "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`. oxplow: `ready` is `todo`; `archived` is `done` when it was completed, else `canceled`." }
-    - { name: "native_state", type: "TEXT", doc: "The provider's own state (oxplow: the task status, `archived` included)." }
-    - { name: "native", type: "TEXT", doc: "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at)." }
+    - { name: "state", type: "TEXT", doc: "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`." }
+    - { name: "native_state", type: "TEXT", doc: "The list's own state (oxplow: the task status, `archived` included)." }
+    - { name: "native", type: "TEXT", doc: "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)." }
     - { name: "parent_ref", type: "TEXT", doc: "The parent work item's ref (an epic); NULL at top level or when the parent is deleted." }
-    - { name: "thread_id", type: "INT", doc: "The thread it belongs to: an oxplow task's own thread; an outside tracker's item, the thread that filed it. NULL for the backlog / filed by a person." }
+    - { name: "thread_id", type: "INTEGER", doc: "The list it's on: a thread's, or NULL for the backlog." }
+    - { name: "rank", type: "REAL", doc: "Its order on its list (ascending); NULL orders by `created_at`." }
+    - { name: "closed_at", type: "TEXT", doc: "When it first reached `done` or `canceled` (RFC 3339); NULL while open." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
@@ -1132,7 +1134,30 @@
     - { unique: ref }
     - { accepted_values: { column: state, values: [todo, in_progress, blocked, done, canceled] } }
     - { relationships: { column: parent_ref, to: work_item, field: ref } }
-    - { sql: "SELECT t.id FROM v_task t WHERE NOT EXISTS (SELECT 1 FROM v_work_item w WHERE w.ref = 'work_item:oxplow:tsk' || t.id) UNION ALL SELECT w.ref FROM v_work_item w WHERE w.provider = 'oxplow' AND NOT EXISTS (SELECT 1 FROM v_task t WHERE 'work_item:oxplow:tsk' || t.id = w.ref)" }
+- name: work_item_link
+  version: 1
+  description: "Links between the active work list's items (`work_item.link`)."
+  columns:
+    - { name: "from_ref", type: "TEXT", doc: "The item the link is from." }
+    - { name: "to_ref", type: "TEXT", doc: "The item it points at." }
+    - { name: "link_type", type: "TEXT", doc: "`blocks` (from must finish before to starts), `discovered_from`, `relates_to`, `duplicates`, `supersedes` or `replies_to`." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { accepted_values: { column: link_type, values: [blocks, relates_to, discovered_from, duplicates, supersedes, replies_to] } }
+    - { relationships: { column: from_ref, to: work_item, field: ref } }
+    - { relationships: { column: to_ref, to: work_item, field: ref } }
+- name: work_item_comment
+  version: 1
+  description: "Comments on the active work list's items (`work_item.comment`)."
+  columns:
+    - { name: "id", type: "TEXT", doc: "The list's own id for the comment (oxplow: `task_note:<id>`)." }
+    - { name: "ref", type: "TEXT", doc: "The item it's on." }
+    - { name: "body", type: "TEXT", doc: "Markdown body." }
+    - { name: "author", type: "TEXT", doc: "Who wrote it, as the list records it." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { unique: id }
+    - { relationships: { column: ref, to: work_item, field: ref } }
 - name: knowledge_page
   version: 1
   description: "Knowledge pages (the wiki): one row per page with what it links to and how many of its file refs have drifted since they were pinned. A page's full text is `v_knowledge_body`; search them with the `search` tool."
