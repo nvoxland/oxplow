@@ -387,6 +387,21 @@ lens is invisible, and worktrees the watcher doesn't cover behave the
 same. Write paths (install, update, `lens.keep`) read the disk directly, and
 consent hashing (`approval_hash`) always reads the bytes it approves.
 
+## Metric visibility: ancestry in bulk (2026-10-06)
+
+Every boot pegged one thread for 8–12 minutes in
+`metric_visibility::resolve`: it asked git about each (absorbing commit,
+base commit) pair with its own `graph_descendant_of` walk, and this
+repo's captures have ~860 distinct anchors on each side — hundreds of
+thousands of walks, under the oracle mutex every other metric reader
+waits on. `RevisionGraph::ancestry` now answers the whole cross product
+from one parents-first revwalk that ORs each commit's parents' bitsets
+of anchors (`vcs/git.rs`), and `GraphOracle` asks the graph once per
+resolve for the pairs it hasn't cached. Measured on this repo: 1,078
+anchors × 1,078, 1.16 M pairs over 2,156 commits, in 1.2 s in a debug
+build. Don't go back to per-pair questions; the cross product is not
+"tiny by construction".
+
 ## The dev loop: build and test time (tsk678, 2026-10-01)
 
 Measured on the 14-core dev Mac (under background load ~11, so expect

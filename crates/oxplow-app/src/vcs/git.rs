@@ -141,15 +141,85 @@ impl RevisionGraph for GitGraph {
         Some(commit.id().to_string())
     }
 
-    fn is_ancestor_or_equal(&self, ancestor: &str, descendant: &str) -> Option<bool> {
-        if ancestor == descendant {
-            return Some(true);
+    /// One walk over every commit the descendants reach, parents first,
+    /// carrying each commit's set of `ancestors` (a bitset) down to its
+    /// children — instead of a graph walk per pair, which hundreds of
+    /// anchors turn into hundreds of thousands.
+    fn ancestry(
+        &self,
+        ancestors: &[&str],
+        descendants: &[&str],
+    ) -> std::collections::HashMap<(String, String), bool> {
+        use std::collections::HashMap;
+        let mut out = HashMap::new();
+        let Some(repo) = self.0.as_ref() else {
+            return out;
+        };
+        let oid = |sha: &str| {
+            git2::Oid::from_str(sha)
+                .ok()
+                .filter(|o| repo.find_commit(*o).is_ok())
+        };
+        // The ancestors the repository has, by bit.
+        let anc: Vec<(&str, git2::Oid)> = ancestors
+            .iter()
+            .filter_map(|a| oid(a).map(|o| (*a, o)))
+            .collect();
+        let desc: Vec<(&str, git2::Oid)> = descendants
+            .iter()
+            .filter_map(|d| oid(d).map(|o| (*d, o)))
+            .collect();
+        if anc.is_empty() || desc.is_empty() {
+            return out;
         }
-        let repo = self.0.as_ref()?;
-        let anc = git2::Oid::from_str(ancestor).ok()?;
-        let desc = git2::Oid::from_str(descendant).ok()?;
-        // graph_descendant_of takes (descendant, ancestor).
-        repo.graph_descendant_of(desc, anc).ok()
+        let bit_of: HashMap<git2::Oid, usize> =
+            anc.iter().enumerate().map(|(i, (_, o))| (*o, i)).collect();
+        let words = anc.len().div_ceil(64);
+        let Ok(mut walk) = repo.revwalk() else {
+            return out;
+        };
+        if walk
+            .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+            .is_err()
+        {
+            return out;
+        }
+        for (_, o) in &desc {
+            if walk.push(*o).is_err() {
+                return out;
+            }
+        }
+        let mut sets: HashMap<git2::Oid, Vec<u64>> = HashMap::new();
+        for id in walk.flatten() {
+            let mut set = vec![0u64; words];
+            if let Ok(commit) = repo.find_commit(id) {
+                // A parent outside the walk (a shallow clone's edge)
+                // contributes nothing.
+                for p in commit.parent_ids() {
+                    if let Some(ps) = sets.get(&p) {
+                        for (w, pw) in set.iter_mut().zip(ps) {
+                            *w |= pw;
+                        }
+                    }
+                }
+            }
+            if let Some(i) = bit_of.get(&id) {
+                set[i / 64] |= 1 << (i % 64);
+            }
+            sets.insert(id, set);
+        }
+        for (d, d_oid) in &desc {
+            let Some(set) = sets.get(d_oid) else {
+                continue;
+            };
+            for (i, (a, _)) in anc.iter().enumerate() {
+                out.insert(
+                    (a.to_string(), d.to_string()),
+                    set[i / 64] & (1 << (i % 64)) != 0,
+                );
+            }
+        }
+        out
     }
 
     fn time_of(&self, rev: &str) -> Option<oxplow_domain::Timestamp> {

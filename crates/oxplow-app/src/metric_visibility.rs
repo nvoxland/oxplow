@@ -42,8 +42,14 @@ use crate::metric_engine::Visibility;
 /// Answers the two git questions [`resolve`] needs. `None` = cannot say —
 /// which the resolver degrades to VISIBLE, never stricter.
 pub trait AncestryOracle {
-    /// Is `ancestor` an ancestor of (or equal to) `descendant`?
-    fn is_ancestor_or_equal(&mut self, ancestor: &str, descendant: &str) -> Option<bool>;
+    /// For every (ancestor, descendant) pair of the two lists: is the
+    /// ancestor an ancestor of (or equal to) the descendant? A pair it
+    /// can't answer is left out.
+    fn ancestry(
+        &mut self,
+        ancestors: &[&str],
+        descendants: &[&str],
+    ) -> HashMap<(String, String), bool>;
     /// The commit's own (committer) time — when its existence became true.
     fn commit_time(&mut self, sha: &str) -> Option<Timestamp>;
 }
@@ -122,23 +128,19 @@ pub fn resolve(
         }
     }
 
-    // Ancestry between every distinct (effective, base) anchor pair — the
-    // cross product is #commits × #commits, tiny by construction, and the
-    // oracle caches each answer for its lifetime anyway. `None` (couldn't
-    // resolve) stays ABSENT, which `sees` reads as visible.
+    // Ancestry between every distinct (effective, base) anchor pair, asked
+    // as ONE question: hundreds of anchors make a cross product of hundreds
+    // of thousands of pairs, which per-pair graph walks can't afford. A pair
+    // the oracle couldn't answer stays ABSENT, which `sees` reads as visible.
     let effs: BTreeSet<&str> = vis.effective.values().map(|(s, _)| s.as_str()).collect();
     let bases: BTreeSet<&str> = vis.base.values().map(String::as_str).collect();
-    for e in &effs {
-        for b in &bases {
-            if e == b {
-                continue;
-            }
-            if let Some(answer) = oracle.is_ancestor_or_equal(e, b) {
-                vis.ancestor_of
-                    .insert((e.to_string(), b.to_string()), answer);
-            }
-        }
-    }
+    let effs: Vec<&str> = effs.into_iter().collect();
+    let bases: Vec<&str> = bases.into_iter().collect();
+    vis.ancestor_of = oracle
+        .ancestry(&effs, &bases)
+        .into_iter()
+        .filter(|((e, b), _)| e != b)
+        .collect();
     vis
 }
 
@@ -149,6 +151,8 @@ pub fn resolve(
 /// an error surfaced to a metrics read.
 pub struct GraphOracle {
     graph: Box<dyn RevisionGraph>,
+    /// Every pair asked so far, with its answer (`None`: the graph couldn't
+    /// say, which is remembered too).
     ancestors: HashMap<(String, String), Option<bool>>,
     times: HashMap<String, Option<Timestamp>>,
 }
@@ -164,14 +168,44 @@ impl GraphOracle {
 }
 
 impl AncestryOracle for GraphOracle {
-    fn is_ancestor_or_equal(&mut self, ancestor: &str, descendant: &str) -> Option<bool> {
-        let key = (ancestor.to_string(), descendant.to_string());
-        if let Some(cached) = self.ancestors.get(&key) {
-            return *cached;
+    fn ancestry(
+        &mut self,
+        ancestors: &[&str],
+        descendants: &[&str],
+    ) -> HashMap<(String, String), bool> {
+        // Ask the graph once, about the revisions in pairs not yet asked.
+        let mut new_anc = BTreeSet::new();
+        let mut new_desc = BTreeSet::new();
+        for a in ancestors {
+            for d in descendants {
+                if !self.ancestors.contains_key(&(a.to_string(), d.to_string())) {
+                    new_anc.insert(*a);
+                    new_desc.insert(*d);
+                }
+            }
         }
-        let answer = self.graph.is_ancestor_or_equal(ancestor, descendant);
-        self.ancestors.insert(key, answer);
-        answer
+        if !new_anc.is_empty() {
+            let new_anc: Vec<&str> = new_anc.into_iter().collect();
+            let new_desc: Vec<&str> = new_desc.into_iter().collect();
+            let mut answers = self.graph.ancestry(&new_anc, &new_desc);
+            for a in &new_anc {
+                for d in &new_desc {
+                    let key = (a.to_string(), d.to_string());
+                    let answer = answers.remove(&key);
+                    self.ancestors.entry(key).or_insert(answer);
+                }
+            }
+        }
+        let mut out = HashMap::new();
+        for a in ancestors {
+            for d in descendants {
+                let key = (a.to_string(), d.to_string());
+                if let Some(Some(answer)) = self.ancestors.get(&key) {
+                    out.insert(key, *answer);
+                }
+            }
+        }
+        out
     }
 
     fn commit_time(&mut self, sha: &str) -> Option<Timestamp> {
@@ -215,9 +249,9 @@ impl VisibilityResolver {
         let Ok(stamped) = self.snapshots.commit_stamped_snapshots().await else {
             return Visibility::blind();
         };
-        // Ancestry walks are synchronous, disk-touching git work, and the
-        // first read after boot resolves the whole effective×base cross
-        // product — run it off the async workers so a cold cache can't stall
+        // Ancestry is synchronous, disk-touching git work (one walk over
+        // the commits the bases reach, on the first read after boot) — run
+        // it off the async workers so a cold cache can't stall
         // the runtime, and so readers queueing on the oracle Mutex park a
         // blocking thread, not a worker (tsk103 review). The lock is never
         // held across an await either way.
@@ -275,11 +309,23 @@ mod tests {
     }
 
     impl AncestryOracle for FakeDag {
-        fn is_ancestor_or_equal(&mut self, ancestor: &str, descendant: &str) -> Option<bool> {
-            if !self.times.contains_key(ancestor) || !self.times.contains_key(descendant) {
-                return None;
+        fn ancestry(
+            &mut self,
+            ancestors: &[&str],
+            descendants: &[&str],
+        ) -> HashMap<(String, String), bool> {
+            let mut out = HashMap::new();
+            for a in ancestors {
+                for d in descendants {
+                    if self.times.contains_key(a) && self.times.contains_key(d) {
+                        out.insert(
+                            (a.to_string(), d.to_string()),
+                            a == d || self.ancestors.iter().any(|(x, y)| x == a && y == d),
+                        );
+                    }
+                }
             }
-            Some(ancestor == descendant || self.ancestors.contains(&(ancestor, descendant)))
+            out
         }
 
         fn commit_time(&mut self, sha: &str) -> Option<Timestamp> {
@@ -531,30 +577,95 @@ mod tests {
         use oxplow_domain::vcs::Vcs as _;
         let mut oracle = GraphOracle::new(crate::vcs::GitProvider.revision_graph(dir.path()));
         let (a, b, fa, m) = (a.to_string(), b.to_string(), fa.to_string(), m.to_string());
-        assert_eq!(oracle.is_ancestor_or_equal(&a, &b), Some(true));
+        let answers = oracle.ancestry(
+            &[a.as_str(), b.as_str(), fa.as_str(), "deadbeef"],
+            &[a.as_str(), b.as_str(), m.as_str()],
+        );
+        let ask = |x: &str, y: &str| answers.get(&(x.to_string(), y.to_string())).copied();
+        assert_eq!(ask(&a, &b), Some(true));
         assert_eq!(
-            oracle.is_ancestor_or_equal(&b, &a),
+            ask(&b, &a),
             Some(false),
-            "direction matters — a swapped graph_descendant_of inverts this"
+            "direction matters — a swapped walk inverts this"
         );
-        assert_eq!(oracle.is_ancestor_or_equal(&a, &a), Some(true), "or-equal");
+        assert_eq!(ask(&a, &a), Some(true), "or-equal");
+        assert_eq!(ask(&fa, &m), Some(true), "merged in");
+        assert_eq!(ask(&fa, &b), Some(false), "sibling");
         assert_eq!(
-            oracle.is_ancestor_or_equal(&fa, &m),
-            Some(true),
-            "merged in"
-        );
-        assert_eq!(oracle.is_ancestor_or_equal(&fa, &b), Some(false), "sibling");
-        assert_eq!(
-            oracle.is_ancestor_or_equal("deadbeef", &a),
+            ask("deadbeef", &a),
             None,
-            "unknown sha ⇒ None, which the resolver reads as visible"
+            "unknown sha ⇒ unanswered, which the resolver reads as visible"
         );
         assert!(oracle.commit_time(&a).is_some());
         assert_eq!(oracle.commit_time("deadbeef"), None);
         // And a directory that isn't a repo degrades, never errors.
         let not_repo = tempfile::tempdir().unwrap();
         let mut blind = GraphOracle::new(crate::vcs::GitProvider.revision_graph(not_repo.path()));
-        assert_eq!(blind.is_ancestor_or_equal(&a, &b), None);
+        assert!(blind.ancestry(&[a.as_str()], &[b.as_str()]).is_empty());
+    }
+
+    /// A graph that counts the bulk ancestry questions it's asked.
+    struct CountingGraph {
+        asked: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl RevisionGraph for CountingGraph {
+        fn resolve(&self, rev: &str) -> Option<String> {
+            Some(rev.into())
+        }
+        fn ancestry(
+            &self,
+            ancestors: &[&str],
+            descendants: &[&str],
+        ) -> HashMap<(String, String), bool> {
+            self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let dag = dag();
+            let mut out = HashMap::new();
+            for a in ancestors {
+                for d in descendants {
+                    let known =
+                        dag.times.keys().any(|k| k == a) && dag.times.keys().any(|k| k == d);
+                    if known {
+                        out.insert(
+                            (a.to_string(), d.to_string()),
+                            a == d || dag.ancestors.iter().any(|(x, y)| x == a && y == d),
+                        );
+                    }
+                }
+            }
+            out
+        }
+        fn time_of(&self, rev: &str) -> Option<Timestamp> {
+            dag().times.get(rev).copied()
+        }
+        fn has_file(&self, _: &str, _: &str) -> Option<bool> {
+            None
+        }
+    }
+
+    /// A resolve asks the graph about every anchor pair in one question,
+    /// not one per pair, and a later resolve over the same anchors asks
+    /// nothing: ancestry between fixed commits never changes.
+    #[test]
+    fn a_resolve_asks_the_graph_once_and_remembers() {
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut oracle = GraphOracle::new(Box::new(CountingGraph {
+            asked: asked.clone(),
+        }));
+        let caps = [
+            cap(1, Some("feat-a"), 20, Some("A")),
+            cap(2, Some("feat-b"), 55, Some("A")),
+            cap(3, Some("main"), 65, Some("M")),
+        ];
+        let first = resolve(&caps, &stamps(), &mut oracle);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let again = resolve(&caps, &stamps(), &mut oracle);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1, "cached");
+        assert_eq!(first.ancestor_of, again.ancestor_of);
+        assert_eq!(
+            first.ancestor_of,
+            resolve(&caps, &stamps(), &mut dag()).ancestor_of
+        );
     }
 
     #[test]

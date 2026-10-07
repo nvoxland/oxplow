@@ -1536,8 +1536,21 @@ mod tests {
             fa: Timestamp,
         }
         impl crate::metric_visibility::AncestryOracle for TwoBranchDag {
-            fn is_ancestor_or_equal(&mut self, anc: &str, desc: &str) -> Option<bool> {
-                Some(anc == desc || (anc == "A" && desc == "FA"))
+            fn ancestry(
+                &mut self,
+                ancestors: &[&str],
+                descendants: &[&str],
+            ) -> std::collections::HashMap<(String, String), bool> {
+                let mut out = std::collections::HashMap::new();
+                for anc in ancestors {
+                    for desc in descendants {
+                        out.insert(
+                            (anc.to_string(), desc.to_string()),
+                            anc == desc || (*anc == "A" && *desc == "FA"),
+                        );
+                    }
+                }
+                out
             }
             fn commit_time(&mut self, sha: &str) -> Option<Timestamp> {
                 match sha {

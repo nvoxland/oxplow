@@ -49,8 +49,10 @@ provider stays testable against a tempdir.
   git-refs take takes, the reconciler reconciles every stream, the commit
   indexer refreshes; tsk724). `revision_graph(ws)` is a
   synchronous `RevisionGraph` (ancestry, a revision's time, whether a file
-  is at a revision — the link check's `has_file`, tsk895) that metric
-  visibility caches over.
+  is at a revision — the link check's `has_file`) that metric
+  visibility caches over. Ancestry is asked in bulk — `ancestry(ancestors,
+  descendants)` answers every pair from one parents-first walk carrying
+  a bitset of the ancestors — never per pair.
 
 `rev_kind()` names the provider's revisions in a ref's `@<kind>:<rev>`
 slot (`git`); `features()` says what it supports beyond the floor. The

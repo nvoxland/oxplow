@@ -297,8 +297,15 @@ pub trait CleanBaseline: Send + Sync {
 pub trait RevisionGraph: Send {
     /// The full id `rev` names (a short id, a branch), if it names one.
     fn resolve(&self, rev: &str) -> Option<String>;
-    /// Whether `ancestor` is `descendant` or in its history.
-    fn is_ancestor_or_equal(&self, ancestor: &str, descendant: &str) -> Option<bool>;
+    /// For every (ancestor, descendant) pair of the two lists, whether the
+    /// ancestor is the descendant or in its history — answered together,
+    /// in one pass over the graph. A pair naming a revision the graph
+    /// doesn't have is left out.
+    fn ancestry(
+        &self,
+        ancestors: &[&str],
+        descendants: &[&str],
+    ) -> std::collections::HashMap<(String, String), bool>;
     /// When `rev` was made.
     fn time_of(&self, rev: &str) -> Option<crate::Timestamp>;
     /// Whether `path` (repo-relative) is a file at `rev`; `None` when `rev`
