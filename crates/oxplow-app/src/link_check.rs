@@ -227,9 +227,10 @@ fn unresolved_plugin_ref(
 /// `None` when it resolves.
 fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
     match reference {
+        // Through the interface: the active list's items.
         Reference::Task(id) => (!exists(
             world.conn,
-            "SELECT 1 FROM task WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT 1 FROM v_work_item WHERE ref = 'work_item:oxplow:tsk' || ?1",
             id,
         ))
         .then(|| format!("task tsk{id} does not exist")),
@@ -319,6 +320,43 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].target, "tsk999");
         assert!(warnings[0].reason.contains("tsk999 does not exist"));
+    }
+
+    /// A work-item link checks the interface: with no list, an existing
+    /// oxplow task is nothing it can point at.
+    #[tokio::test]
+    async fn a_task_link_checks_the_active_list() {
+        let dir = git_repo();
+        let services = Services::in_memory(dir.path()).unwrap();
+        let task = services
+            .tasks
+            .create(
+                None,
+                CreateTaskInput {
+                    title: "Real task".into(),
+                    description: None,
+                    parent_id: None,
+                    status: None,
+                    priority: None,
+                    author: None,
+                },
+            )
+            .await
+            .unwrap();
+        services
+            .config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), "none".into());
+        let config = crate::config_service::read_config(&services.config);
+        services
+            .capabilities
+            .publish(&config, &services.db)
+            .await
+            .unwrap();
+        let warnings = check_links(&services, &format!("See [[{}]].", task.id)).await;
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
     }
 
     #[tokio::test]

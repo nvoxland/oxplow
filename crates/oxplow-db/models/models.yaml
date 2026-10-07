@@ -625,14 +625,14 @@
   tests:
     - { not_null: ref }
     - { unique: ref }
-- name: search_task
+- name: search_work_item
   version: 1
-  description: "What site search indexes for each task (tsk864): the `task` kind's index is restated from these rows when they change. Deleted tasks aren't in it."
+  description: "What site search indexes for each of the active work list's items (the `work_item` kind's index is restated from these rows when they change), through the work-item interface. Deleted items, and items on archived threads or streams, aren't in it."
   columns:
-    - { name: "ref", type: "TEXT", doc: "The task's canonical ref (`work_item:oxplow:tsk<n>`): what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "The task's title." }
-    - { name: "body", type: "TEXT", doc: "Its id (so typing `tsk42` finds it), then its description." }
-    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`); NULL for a backlog task." }
+    - { name: "ref", type: "TEXT", doc: "The item's canonical ref (`work_item:<provider>:<id>`): what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The item's title." }
+    - { name: "body", type: "TEXT", doc: "Its own id (so typing `tsk42` finds it), then its body." }
+    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`); NULL for a backlog item." }
   tests:
     - { not_null: ref }
     - { unique: ref }

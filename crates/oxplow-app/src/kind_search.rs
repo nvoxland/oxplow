@@ -47,7 +47,12 @@ pub const MAX_BODY: usize = 16 * 1024;
 /// `ref` is a canonical ref, the one a hit opens), and the id. The view's
 /// rows carry a `stream_id`.
 pub const CORE_KINDS: &[(&str, &str, &str, &str)] = &[
-    ("task", "v_search_task", "work_item:oxplow:", r"^tsk\d+$"),
+    (
+        "work_item",
+        "v_search_work_item",
+        "work_item:",
+        r"^[a-z][a-z0-9_]*:.+$",
+    ),
     ("comment", "v_search_comment", "comment:", r"^cmt\d+$"),
     ("note", "v_search_note", "task_note:", r"^not\d+$"),
     ("wiki", "v_search_wiki", "wiki:", r"^.+$"),
@@ -659,7 +664,11 @@ ref_kinds:
     async fn a_gone_kinds_orphaned_entries_and_failures_leave() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
-        for (kind, id) in [("acme_pr", "12"), ("wiki", "widgets"), ("task", "7")] {
+        for (kind, id) in [
+            ("acme_pr", "12"),
+            ("wiki", "widgets"),
+            ("work_item", "oxplow:tsk7"),
+        ] {
             svc.search_store
                 .upsert(kind, id, None, "Widget", "")
                 .await
@@ -690,7 +699,11 @@ ref_kinds:
             .map(|h| h.kind)
             .collect();
         left.sort();
-        assert_eq!(left, vec!["task", "wiki"], "core's entries are untouched");
+        assert_eq!(
+            left,
+            vec!["wiki", "work_item"],
+            "core's entries are untouched"
+        );
         let failures = svc
             .db
             .read(|tx| {
@@ -839,7 +852,7 @@ mod core_tests {
             .unwrap()
     }
 
-    /// tsk864: a task is indexed from `v_search_task` — written, edited,
+    /// tsk864: a work item is indexed from `v_search_work_item` — written, edited,
     /// found by its id, gone when deleted — its kind restated as a whole.
     #[tokio::test]
     async fn a_task_edit_restates_its_kind() {
@@ -849,12 +862,12 @@ mod core_tests {
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         eventually("the new task is found", || {
-            found(&svc, "sprocket", Some(stream.id), "task")
+            found(&svc, "sprocket", Some(stream.id), "work_item")
         })
         .await;
         let id = t.id.to_string();
         assert!(
-            found(&svc, &id, Some(stream.id), "task").await,
+            found(&svc, &id, Some(stream.id), "work_item").await,
             "its id finds it"
         );
 
@@ -862,14 +875,39 @@ mod core_tests {
         edited.title = "Quux the flange".into();
         svc.task_store.update(&edited).await.unwrap();
         eventually("the edit is found", || {
-            found(&svc, "flange", Some(stream.id), "task")
+            found(&svc, "flange", Some(stream.id), "work_item")
         })
         .await;
-        assert!(!found(&svc, "sprocket", Some(stream.id), "task").await);
+        assert!(!found(&svc, "sprocket", Some(stream.id), "work_item").await);
 
         svc.task_store.soft_delete(t.id).await.unwrap();
         eventually("the deleted task leaves", || async {
-            entries(&svc, "task").await.is_empty()
+            entries(&svc, "work_item").await.is_empty()
+        })
+        .await;
+    }
+
+    /// Search finds the active list's items: with none, nothing.
+    #[tokio::test]
+    async fn search_finds_the_active_lists_items_only() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        task(&svc, thread.id, "Quux the sprocket").await;
+        eventually("the task is found", || {
+            found(&svc, "sprocket", Some(stream.id), "work_item")
+        })
+        .await;
+        svc.config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), "none".into());
+        let config = crate::config_service::read_config(&svc.config);
+        svc.capabilities.publish(&config, &svc.db).await.unwrap();
+        eventually("with no list it leaves", || async {
+            entries(&svc, "work_item").await.is_empty()
         })
         .await;
     }
@@ -886,12 +924,13 @@ mod core_tests {
         let stays = task(&svc, kept.id, "Stays put").await;
         task(&svc, gone.id, "Goes with its thread").await;
         eventually("both are indexed", || async {
-            entries(&svc, "task").await.len() == 2
+            entries(&svc, "work_item").await.len() == 2
         })
         .await;
         svc.thread_store.delete(&gone.id).await.unwrap();
         eventually("only the kept thread's task is left", || async {
-            entries(&svc, "task").await == vec![(stays.id.to_string(), Some(stream.id.to_string()))]
+            entries(&svc, "work_item").await
+                == vec![(format!("oxplow:{}", stays.id), Some(stream.id.to_string()))]
         })
         .await;
     }
@@ -907,14 +946,14 @@ mod core_tests {
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         eventually("indexed", || async {
-            entries(&svc, "task").await.len() == 1
+            entries(&svc, "work_item").await.len() == 1
         })
         .await;
         let refs: Vec<String> = svc
             .db
             .read(|c| {
                 let mut s = c
-                    .prepare("SELECT ref FROM v_search_task")
+                    .prepare("SELECT ref FROM v_search_work_item")
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = s
                     .query_map([], |r| r.get(0))
@@ -931,8 +970,8 @@ mod core_tests {
             oxplow_domain::refs::validate_ref(&kinds, r).unwrap();
         }
         assert_eq!(
-            entries(&svc, "task").await,
-            vec![(t.id.to_string(), Some(stream.id.to_string()))]
+            entries(&svc, "work_item").await,
+            vec![(format!("oxplow:{}", t.id), Some(stream.id.to_string()))]
         );
     }
 
@@ -959,17 +998,17 @@ mod core_tests {
             .await
             .unwrap();
         eventually("all three are indexed", || async {
-            entries(&svc, "task").await.len() == 3
+            entries(&svc, "work_item").await.len() == 3
         })
         .await;
         oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &shelved.id)
             .await
             .unwrap();
         eventually("the archived thread's task leaves", || async {
-            entries(&svc, "task").await
+            entries(&svc, "work_item").await
                 == vec![
-                    (stays.id.to_string(), Some(stream.id.to_string())),
-                    (backlog.id.to_string(), None),
+                    (format!("oxplow:{}", stays.id), Some(stream.id.to_string())),
+                    (format!("oxplow:{}", backlog.id), None),
                 ]
         })
         .await;
@@ -978,7 +1017,9 @@ mod core_tests {
             .unwrap();
         eventually(
             "the archived stream's tasks leave; the backlog stays",
-            || async { entries(&svc, "task").await == vec![(backlog.id.to_string(), None)] },
+            || async {
+                entries(&svc, "work_item").await == vec![(format!("oxplow:{}", backlog.id), None)]
+            },
         )
         .await;
     }
@@ -992,14 +1033,14 @@ mod core_tests {
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
-        let id = t.id.to_string();
+        let id = format!("oxplow:{}", t.id);
         eventually("in its thread's stream", || async {
-            entries(&svc, "task").await == vec![(id.clone(), Some(stream.id.to_string()))]
+            entries(&svc, "work_item").await == vec![(id.clone(), Some(stream.id.to_string()))]
         })
         .await;
         svc.task_store.move_task(t.id, None).await.unwrap();
         eventually("in the backlog", || async {
-            entries(&svc, "task").await == vec![(id.clone(), None)]
+            entries(&svc, "work_item").await == vec![(id.clone(), None)]
         })
         .await;
     }
@@ -1015,14 +1056,14 @@ mod core_tests {
         task(&svc, thread.id, "Quux the sprocket").await;
         change_loop(&svc);
         eventually("indexed", || {
-            found(&svc, "sprocket", Some(stream.id), "task")
+            found(&svc, "sprocket", Some(stream.id), "work_item")
         })
         .await;
         let computed = |svc: Arc<Services>| async move {
             svc.db
                 .read(|c| {
                     c.query_row(
-                        "SELECT computed_at FROM asset_state WHERE asset = 'search:task'",
+                        "SELECT computed_at FROM asset_state WHERE asset = 'search:work_item'",
                         [],
                         |r| r.get::<_, String>(0),
                     )

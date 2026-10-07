@@ -328,7 +328,8 @@ test("searchHitTarget routes core kinds and an extension's kind", async () => {
     { kind: "acme_pr", extension: "acme", label: "Pull request", idPattern: "^\\d+$", wikilinks: ["pr"], resolve: "v_acme_prs", page: "page:ext.acme.pr", icon: "git-pull-request" },
   ]);
   try {
-    expect(searchHitTarget({ kind: "task", ref_id: "tsk1" })).toEqual({ page: taskRef("tsk1") });
+    // A work item's hit carries its ref after `work_item:`.
+    expect(searchHitTarget({ kind: "work_item", ref_id: "oxplow:tsk1" })).toEqual({ page: taskRef("tsk1") });
     expect(searchHitTarget({ kind: "wiki", ref_id: "home" })).toEqual({ page: wikiPageRef("home") });
     expect(searchHitTarget({ kind: "comment", ref_id: "7" })).toEqual({ page: commentsRef() });
     expect(searchHitTarget({ kind: "file", ref_id: "src/a.ts" })).toEqual({ file: "src/a.ts" });

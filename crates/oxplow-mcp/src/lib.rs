@@ -1937,7 +1937,7 @@ impl OxplowMcp {
 
     #[tool(
         description = "Discover the thread's currently-open effort. Returns `{ open, effortId, \
-            taskId, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
+            workItem, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
             is open. Use this to confirm an effort is open before `collector.sync` on a report \
             collector or `test.record_run`, and to see whether its diff coverage has a baseline \
             (`hasStartSnapshot:false` ⇒ none)."
@@ -1965,14 +1965,13 @@ impl OxplowMcp {
                 "open": true,
                 "effortId": e.id.to_string(),
                 "workItem": e.work_item,
-                "taskId": e.task_id().map(|t| t.to_string()),
                 "startedAt": e.started_at,
                 "hasStartSnapshot": e.start_snapshot_id.is_some(),
             }),
             None => serde_json::json!({
                 "open": false,
                 "effortId": serde_json::Value::Null,
-                "taskId": serde_json::Value::Null,
+                "workItem": serde_json::Value::Null,
             }),
         };
         json_result(&payload)
@@ -2202,12 +2201,33 @@ impl OxplowMcp {
             .get(&id)
             .await
             .map_err(internal)?;
+        // Its work items, through the interface: the active list's (none:
+        // none).
         let items = self
             .services
-            .task_store
-            .list_for_thread(&id)
+            .sql
+            .query_sql(
+                "SELECT ref, title, state, native_state, parent_ref FROM v_work_item
+                  WHERE thread_id = ?1 ORDER BY rank, created_at",
+                vec![oxplow_db::SqlCell::Int(id.value())],
+                None,
+            )
             .await
             .map_err(internal)?;
+        let items: Vec<serde_json::Value> = items
+            .rows
+            .into_iter()
+            .map(|r| {
+                let cell = |i: usize| serde_json::to_value(&r[i]).unwrap_or_default();
+                serde_json::json!({
+                    "ref": cell(0),
+                    "title": cell(1),
+                    "state": cell(2),
+                    "native_state": cell(3),
+                    "parent_ref": cell(4),
+                })
+            })
+            .collect();
         let bundle = serde_json::json!({
             "thread": thread,
             "items": items,
@@ -3936,6 +3956,52 @@ mod tests {
         assert!(body.contains("do the thing"), "title missing: {body}");
     }
 
+    async fn thread_context(server: &OxplowMcp, thread: ThreadId) -> serde_json::Value {
+        let r = server
+            .get_thread_context(Parameters(GetThreadContextParams {
+                thread_id: thread.to_string(),
+            }))
+            .await
+            .unwrap();
+        serde_json::from_str(&text_payload(r)).unwrap()
+    }
+
+    /// A thread's context carries its work items through the interface:
+    /// the active list's, and none with no list.
+    #[tokio::test]
+    async fn a_threads_context_reads_the_work_item_interface() {
+        let (_proj, services, server) = boot();
+        services.streams.ensure_primary().await.unwrap();
+        let thread = ThreadId::new(1);
+        services
+            .task_store
+            .insert(&make_task(Some(thread), "on the thread"))
+            .await
+            .unwrap();
+        let items = thread_context(&server, thread).await["items"].clone();
+        assert_eq!(items[0]["title"], "on the thread", "{items}");
+        assert!(items[0]["ref"]
+            .as_str()
+            .unwrap()
+            .starts_with("work_item:oxplow:"));
+        services
+            .config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), "none".into());
+        let config = oxplow_app::config_service::read_config(&services.config);
+        services
+            .capabilities
+            .publish(&config, &services.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            thread_context(&server, thread).await["items"],
+            serde_json::json!([])
+        );
+    }
+
     /// oxplow's tasks' own tools are offered, and run, only while they're
     /// the work list.
     #[tokio::test]
@@ -4519,7 +4585,12 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
         assert_eq!(parsed["open"], true);
         assert_eq!(parsed["effortId"], effort.id.to_string());
-        assert_eq!(parsed["taskId"], task_id.to_string());
+        // The effort's work item, as a ref: no oxplow task id.
+        assert_eq!(
+            parsed["workItem"],
+            oxplow_domain::refs::build::work_item_ref(task_id)
+        );
+        assert!(parsed.get("taskId").is_none());
         assert!(parsed["startedAt"].is_string());
         // start() with None records no start snapshot.
         assert_eq!(parsed["hasStartSnapshot"], false);

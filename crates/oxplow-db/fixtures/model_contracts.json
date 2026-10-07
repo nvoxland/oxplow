@@ -5552,5 +5552,32 @@
       ],
       "key": []
     }
+  },
+  "search_work_item": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The item's canonical ref (`work_item:<provider>:<id>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The item's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its own id (so typing `tsk42` finds it), then its body."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`); NULL for a backlog item."
+        }
+      ],
+      "key": []
+    }
   }
 }

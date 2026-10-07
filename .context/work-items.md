@@ -30,7 +30,10 @@ relationship holds; tsk572), and (V17) `thread_id` — the list it's on, a
 thread's or the backlog (NULL) — `rank` on that list and `closed_at`.
 `v_work_item_link` is its links (`blocks`, `discovered_from`,
 `relates_to`, `duplicates`, `supersedes`, `replies_to`),
-`v_work_item_comment` its comments.
+`v_work_item_comment` its comments. Core reads work items only through
+these: `get_thread_context`'s items, a work item's ref summary
+(`ref_resolver`), a `[[…]]` link's check (`link_check`) and search
+(`v_search_work_item`).
 
 **Declared fields.** What a list keeps in `native` beyond those columns
 is declared, so screens render and edit it without knowing which list is
