@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ids::{StreamId, ThreadId};
+use crate::ids::{NoteId, StreamId, ThreadId};
 use crate::time::Timestamp;
 use crate::AgentKind;
 
@@ -31,6 +31,17 @@ impl ThreadStatus {
     pub fn is_writer(&self) -> bool {
         matches!(self, ThreadStatus::Active)
     }
+}
+
+/// A note on a thread: the per-thread capture pad an agent writes as it
+/// works (`knowledge.add_note`). Its ref is `thread_note:not<n>`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct ThreadNote {
+    pub id: NoteId,
+    pub thread_id: ThreadId,
+    pub body: String,
+    pub author: String,
+    pub created_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

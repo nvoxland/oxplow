@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.note.written@2`: a thread note was added or its body\nchanged.",
+  "properties": {
+    "note": {
+      "description": "`thread_note:not<n>`.",
+      "type": "string"
+    },
+    "thread": {
+      "description": "The thread it's on (`thread:thr<n>`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "note",
+    "thread"
+  ],
+  "title": "KnowledgeNoteWrittenV2",
+  "type": "object"
+}

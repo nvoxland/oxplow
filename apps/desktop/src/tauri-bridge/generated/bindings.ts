@@ -390,7 +390,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
+	listThreadNotes: (threadId: ThreadId) => typedError<ThreadNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -5275,21 +5275,6 @@ export type StreamId = string;
 // Whether a stream is the project's primary stream or a worktree.
 export type StreamKind = "primary" | "worktree";
 
-export type TaskId = string;
-
-/**
- *  A note attached to either a task or a thread (mutually exclusive —
- *  enforced at the DB CHECK constraint).
- */
-export type TaskNote = {
-	id: NoteId,
-	task_id: TaskId | null,
-	thread_id: ThreadId | null,
-	body: string,
-	author: string,
-	created_at: Timestamp,
-};
-
 /**
  *  One declared test, written as a one-key map: `{ not_null: id }`,
  *  `{ unique: id }`, `{ accepted_values: { column, values } }`,
@@ -5396,6 +5381,18 @@ export type Thread = {
 };
 
 export type ThreadId = string;
+
+/**
+ *  A note on a thread: the per-thread capture pad an agent writes as it
+ *  works (`knowledge.add_note`). Its ref is `thread_note:not<n>`.
+ */
+export type ThreadNote = {
+	id: NoteId,
+	thread_id: ThreadId,
+	body: string,
+	author: string,
+	created_at: Timestamp,
+};
 
 export type ThreadState = {
 	selectedThreadId: ThreadId | null,

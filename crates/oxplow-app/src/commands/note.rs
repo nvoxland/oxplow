@@ -1,6 +1,6 @@
 //! Thread note commands (P8.A6): the per-thread capture pad — what an
 //! agent records as it works (a finding, why it paused) and what an
-//! Explore subagent fills in. `Tx` over `oxplow_db::task_satellite::
+//! Explore subagent fills in. `Tx` over `oxplow_db::thread_note_store::
 //! {add_thread_note_tx, update_note_tx}`, logging `knowledge.note.*`
 //! caused by the run, with the note's `page_ref` edges. An agent writes
 //! only on its own thread, whatever thread it names; the author is the
@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use oxplow_db::task_satellite::{add_thread_note_tx, note_tx, update_note_tx};
+use oxplow_db::thread_note_store::{add_thread_note_tx, note_tx, update_note_tx};
 use oxplow_domain::refs::build::thread_ref;
 use oxplow_domain::{
     Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
@@ -142,10 +142,9 @@ pub fn update_command(deps: LinkDeps) -> Command {
                 invalid("/note", format!("`{}` isn't a note id (not…)", input.note))
             })?;
             let before = note_tx(ctx.conn, id)?
-                .filter(|n| n.task_id.is_none())
                 .ok_or_else(|| invalid("/note", format!("no thread note `{id}`")))?;
             if let Some((own, _)) = agent_scope(ctx)? {
-                if before.thread_id != Some(own) {
+                if before.thread_id != own {
                     return Err(CommandError::Denied {
                         reason: format!(
                             "an agent updates only its own thread's notes (`{}`)",
@@ -157,7 +156,7 @@ pub fn update_command(deps: LinkDeps) -> Command {
             let event = update_note_tx(ctx.conn, &ctx.events.vocabulary.kinds, id, &input.body)?;
             let note = serde_json::to_value(note_tx(ctx.conn, id)?).expect("a note serializes");
             Ok(HandlerOutput {
-                result: with_warnings(&deps, ctx, note, &input.body, before.thread_id),
+                result: with_warnings(&deps, ctx, note, &input.body, Some(before.thread_id)),
                 inverse: Some(CommandCall {
                     name: UPDATE.into(),
                     input: json!({ "note": input.note, "body": before.body }),
@@ -179,7 +178,7 @@ pub fn commands(deps: LinkDeps) -> Vec<Command> {
 mod tests {
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
-    use oxplow_domain::stores::TaskNoteStore as _;
+    use oxplow_domain::stores::ThreadNoteStore as _;
     use oxplow_domain::Actor;
 
     fn agent(fx: &EffortFixture) -> Actor {
@@ -317,7 +316,7 @@ mod tests {
             .unwrap();
         let notes = fx
             .svc
-            .work_note_store
+            .thread_note_store
             .list_for_thread(&fx.thread)
             .await
             .unwrap();

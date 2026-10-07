@@ -64,12 +64,11 @@ pub fn add_task_note_tx(
         conn,
         KIND_TASK_NOTE,
         &id.to_string(),
-        note_edges(kinds, &id.to_string(), body),
+        note_edges(kinds, KIND_TASK_NOTE, &id.to_string(), body),
     )?;
     Ok(TaskNote {
         id,
-        task_id: Some(item),
-        thread_id: None,
+        task_id: item,
         body: body.to_string(),
         author: author.to_string(),
         created_at: now,
@@ -126,142 +125,11 @@ pub fn create_link_tx(
     Ok(link)
 }
 
-// ---------------- Work notes ----------------
+// ---------------- Task comments ----------------
 
 #[derive(Clone)]
 pub struct SqliteTaskNoteStore {
     db: Database,
-}
-
-/// A thread note's `knowledge.note.written@1` / `deleted@1` (P7.B6: how
-/// the search index hears of it). Task notes are `work_item.commented`.
-fn note_event(id: i64, thread: i64, deleted: bool) -> oxplow_domain::Envelope {
-    use oxplow_domain::events::schema::{
-        KnowledgeNoteDeleted, KnowledgeNoteDeletedV1, KnowledgeNoteWritten, KnowledgeNoteWrittenV1,
-    };
-    let note = format!("task_note:{}", NoteId::new(id));
-    let thread = oxplow_domain::refs::build::thread_ref(ThreadId::new(thread));
-    const SOURCE: &str = "system:notes";
-    let env = if deleted {
-        oxplow_domain::Envelope::typed::<KnowledgeNoteDeleted>(
-            SOURCE,
-            &KnowledgeNoteDeletedV1 {
-                note: note.clone(),
-                thread: thread.clone(),
-            },
-        )
-    } else {
-        oxplow_domain::Envelope::typed::<KnowledgeNoteWritten>(
-            SOURCE,
-            &KnowledgeNoteWrittenV1 {
-                note: note.clone(),
-                thread: thread.clone(),
-            },
-        )
-    };
-    env.with_subject([note, thread])
-}
-
-/// The event for a change to note `id` when it's a thread note.
-fn thread_note_event(
-    conn: &rusqlite::Connection,
-    id: i64,
-    deleted: bool,
-) -> rusqlite::Result<Option<oxplow_domain::Envelope>> {
-    use rusqlite::OptionalExtension;
-    let thread: Option<i64> = conn
-        .query_row(
-            "SELECT thread_id FROM task_note WHERE id = ?1 AND task_id IS NULL",
-            params![id],
-            |r| r.get(0),
-        )
-        .optional()?
-        .flatten();
-    Ok(thread.map(|t| note_event(id, t, deleted)))
-}
-
-/// A note on `thread`, with its `page_ref` edges, on `conn` — a command's
-/// transaction (`knowledge.add_note`, P8.A6). Returns it and the
-/// `knowledge.note.written` to log.
-pub fn add_thread_note_tx(
-    conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
-    thread: ThreadId,
-    body: &str,
-    author: &str,
-) -> Result<(TaskNote, oxplow_domain::Envelope), DomainError> {
-    let now = Timestamp::now();
-    conn.execute(
-        "INSERT INTO task_note (thread_id, body, author, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![thread.value(), body, author, ts_to_string(now)],
-    )
-    .map_err(crate::database::map_sql_err)?;
-    let id = conn.last_insert_rowid();
-    let note_id = NoteId::new(id);
-    replace_source_tx(
-        conn,
-        KIND_TASK_NOTE,
-        &note_id.to_string(),
-        note_edges(kinds, &note_id.to_string(), body),
-    )?;
-    Ok((
-        TaskNote {
-            id: note_id,
-            task_id: None,
-            thread_id: Some(thread),
-            body: body.to_string(),
-            author: author.to_string(),
-            created_at: now,
-        },
-        note_event(id, thread.value(), false),
-    ))
-}
-
-/// Note `id`, on `conn`.
-pub fn note_tx(conn: &rusqlite::Connection, id: NoteId) -> Result<Option<TaskNote>, DomainError> {
-    use rusqlite::OptionalExtension;
-    conn.query_row(
-        "SELECT * FROM task_note WHERE id = ?1",
-        params![id.value()],
-        row_to_note,
-    )
-    .optional()
-    .map_err(crate::database::map_sql_err)
-}
-
-/// Replace a note's body and its `page_ref` edges; the event to log when
-/// it's a thread note.
-pub fn update_note_tx(
-    conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
-    id: NoteId,
-    body: &str,
-) -> Result<Option<oxplow_domain::Envelope>, DomainError> {
-    conn.execute(
-        "UPDATE task_note SET body = ?2 WHERE id = ?1",
-        params![id.value(), body],
-    )
-    .map_err(crate::database::map_sql_err)?;
-    replace_source_tx(
-        conn,
-        KIND_TASK_NOTE,
-        &id.to_string(),
-        note_edges(kinds, &id.to_string(), body),
-    )?;
-    thread_note_event(conn, id.value(), false).map_err(crate::database::map_sql_err)
-}
-
-/// Delete a note and its `page_ref` edges; the event to log when it's a
-/// thread note (read before it goes).
-pub fn delete_note_tx(
-    conn: &rusqlite::Connection,
-    id: NoteId,
-) -> Result<Option<oxplow_domain::Envelope>, DomainError> {
-    let event = thread_note_event(conn, id.value(), true).map_err(crate::database::map_sql_err)?;
-    conn.execute("DELETE FROM task_note WHERE id = ?1", params![id.value()])
-        .map_err(crate::database::map_sql_err)?;
-    replace_source_tx(conn, KIND_TASK_NOTE, &id.to_string(), vec![])?;
-    Ok(event)
 }
 
 impl SqliteTaskNoteStore {
@@ -269,7 +137,7 @@ impl SqliteTaskNoteStore {
         Self { db }
     }
 
-    /// Iterate every note id + body for the boot-time backfill.
+    /// Iterate every comment's id + body for the boot-time backfill.
     pub async fn list_all_for_backfill(&self) -> Result<Vec<(String, String)>, DomainError> {
         self.db
             .call(move |conn| {
@@ -288,8 +156,7 @@ impl SqliteTaskNoteStore {
 
 fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskNote> {
     let id: i64 = row.get("id")?;
-    let task_id: Option<i64> = row.get("task_id")?;
-    let thread_id: Option<i64> = row.get("thread_id")?;
+    let task_id: i64 = row.get("task_id")?;
     let body: String = row.get("body")?;
     let author: String = row.get("author")?;
     let created_at: String = row.get("created_at")?;
@@ -298,8 +165,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskNote> {
     };
     Ok(TaskNote {
         id: NoteId::new(id),
-        task_id: task_id.map(TaskId::new),
-        thread_id: thread_id.map(ThreadId::new),
+        task_id: TaskId::new(task_id),
         body,
         author,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
@@ -315,19 +181,6 @@ impl TaskNoteStore for SqliteTaskNoteStore {
                     "SELECT * FROM task_note WHERE task_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![item.value()], row_to_note)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskNote>, DomainError> {
-        let thread = *thread;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_note WHERE thread_id = ?1 ORDER BY created_at ASC",
-                )?;
-                let rows = stmt.query_map(params![thread.value()], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -547,28 +400,6 @@ mod tests {
         (db, t.id, item_id)
     }
 
-    async fn thread_note(db: &Database, thread: ThreadId, body: &str, author: &str) -> TaskNote {
-        let (body, author) = (body.to_string(), author.to_string());
-        db.transaction(move |tx| {
-            add_thread_note_tx(tx, &tasks_kinds(), thread, &body, &author).map(|(n, _)| n)
-        })
-        .await
-        .unwrap()
-    }
-
-    async fn update_note(db: &Database, id: NoteId, body: &str) {
-        let body = body.to_string();
-        db.transaction(move |tx| update_note_tx(tx, &tasks_kinds(), id, &body).map(|_| ()))
-            .await
-            .unwrap()
-    }
-
-    async fn delete_note(db: &Database, id: NoteId) {
-        db.transaction(move |tx| delete_note_tx(tx, id).map(|_| ()))
-            .await
-            .unwrap()
-    }
-
     async fn add_note(db: &Database, item: TaskId, body: &str, author: &str) -> TaskNote {
         let (body, author) = (body.to_string(), author.to_string());
         db.transaction(move |tx| add_task_note_tx(tx, &tasks_kinds(), item, &body, &author))
@@ -581,37 +412,16 @@ mod tests {
         let (db, _tid, item_id) = fixture().await;
         let store = SqliteTaskNoteStore::new(db.clone());
         let note = add_note(&db, item_id, "looking good", "user").await;
-        assert_eq!(note.task_id, Some(item_id));
-        assert!(note.thread_id.is_none());
+        assert_eq!(note.task_id, item_id);
         let listed = store.list_for_item(item_id).await.unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].body, "looking good");
     }
 
     #[tokio::test]
-    async fn note_for_thread_round_trips() {
-        let (db, tid, _item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(db.clone());
-        let note = thread_note(&db, tid, "thread-level finding", "agent").await;
-        assert!(note.task_id.is_none());
-        assert_eq!(note.thread_id.as_ref(), Some(&tid));
-        let listed = store.list_for_thread(&tid).await.unwrap();
-        assert_eq!(listed.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn note_delete_removes() {
-        let (db, _tid, item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(db.clone());
-        let note = add_note(&db, item_id, "x", "u").await;
-        delete_note(&db, note.id).await;
-        assert!(store.list_for_item(item_id).await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn note_with_page_refs_projects_body() {
+    async fn a_task_comment_projects_its_body() {
         use crate::page_ref_store::SqlitePageRefStore;
-        let (db, tid, item_id) = fixture().await;
+        let (db, _tid, item_id) = fixture().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
 
         let note = add_note(&db, item_id, "blocked by tsk99 see [[src/app.rs]]", "u").await;
@@ -632,33 +442,6 @@ mod tests {
         assert!(inbound_file
             .iter()
             .any(|e| e.source_id == note.id.to_string()));
-
-        update_note(&db, note.id, "no refs").await;
-        let inbound_file = page_refs
-            .list_backlinks("file", "src/app.rs", None)
-            .await
-            .unwrap();
-        assert!(inbound_file
-            .iter()
-            .all(|e| e.source_id != note.id.to_string()));
-
-        delete_note(&db, note.id).await;
-        let inbound_task = page_refs
-            .list_backlinks("work_item", "oxplow:tsk99", None)
-            .await
-            .unwrap();
-        assert!(inbound_task
-            .iter()
-            .all(|e| e.source_id != note.id.to_string()));
-
-        let tnote = thread_note(&db, tid, "see [[src/lib.rs]]", "u").await;
-        let inbound_lib = page_refs
-            .list_backlinks("file", "src/lib.rs", None)
-            .await
-            .unwrap();
-        assert!(inbound_lib
-            .iter()
-            .any(|e| e.source_id == tnote.id.to_string()));
     }
 
     #[tokio::test]

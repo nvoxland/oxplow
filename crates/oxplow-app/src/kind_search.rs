@@ -54,7 +54,7 @@ pub const CORE_KINDS: &[(&str, &str, &str, &str)] = &[
         r"^[a-z][a-z0-9_]*:.+$",
     ),
     ("comment", "v_search_comment", "comment:", r"^cmt\d+$"),
-    ("note", "v_search_note", "task_note:", r"^not\d+$"),
+    ("note", "v_search_note", "thread_note:", r"^not\d+$"),
     ("wiki", "v_search_wiki", "wiki:", r"^.+$"),
 ];
 
@@ -1164,7 +1164,7 @@ mod core_tests {
         let vocabulary = svc.vocabulary.clone();
         svc.db
             .transaction(move |tx| {
-                if let Some(e) = oxplow_db::task_satellite::delete_note_tx(tx, note)? {
+                if let Some(e) = oxplow_db::thread_note_store::delete_note_tx(tx, note)? {
                     oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &e)?;
                 }
                 Ok(())

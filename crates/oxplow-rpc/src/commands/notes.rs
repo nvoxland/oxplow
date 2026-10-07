@@ -7,16 +7,16 @@
 //! task, so a separate note table for the same purpose was duplicative.
 
 use oxplow_app::Services;
-use oxplow_domain::stores::TaskNoteStore;
-use oxplow_domain::{TaskNote, ThreadId};
+use oxplow_domain::stores::ThreadNoteStore;
+use oxplow_domain::{ThreadId, ThreadNote};
 
 use crate::error::IpcError;
 
 pub async fn list_thread_notes(
     svc: &Services,
     thread_id: ThreadId,
-) -> Result<Vec<TaskNote>, IpcError> {
-    Ok(svc.work_note_store.list_for_thread(&thread_id).await?)
+) -> Result<Vec<ThreadNote>, IpcError> {
+    Ok(svc.thread_note_store.list_for_thread(&thread_id).await?)
 }
 
 #[cfg(test)]

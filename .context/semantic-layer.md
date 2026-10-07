@@ -116,7 +116,7 @@ What core publishes, by where it comes from. Each row names its models
 
 | Source | Models | Facts |
 |---|---|---|
-| work | `stream`, `thread`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read`, `struggle` | cycle time, steering, lifecycle |
+| work | `stream`, `thread`, `thread_note`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read`, `struggle` | cycle time, steering, lifecycle |
 | knowledge | `wiki_page`, `comment` | freshness |
 | git | `commit`, `commit_file`, `commit_work_item`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |
@@ -558,7 +558,8 @@ and `v_model_test` are the catalog of all of them:
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
 | `v_effort_file` | files each effort changed, with change kind, `source` (`claimed` by an edit tool or `observed` changing in one of its thread's turns, v2) and the effort's `work_item` |
-| `v_task_note` | task / thread notes (V74) |
+| `v_task_note` | comments on oxplow's tasks |
+| `v_thread_note` | a thread's notes (`knowledge.add_note`; V24) |
 | `v_task_link` | typed links between tasks (V74) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |

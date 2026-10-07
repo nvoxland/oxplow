@@ -615,10 +615,10 @@
     - { not_null: ref }
     - { unique: ref }
 - name: search_note
-  version: 1
-  description: "What site search indexes for each thread note (tsk864): the `note` kind's index is restated from these rows when they change."
+  version: 2
+  description: "What site search indexes for each thread note: the `note` kind's index is restated from these rows when they change."
   columns:
-    - { name: "ref", type: "TEXT", doc: "The note's canonical ref (`task_note:not<n>`): what a hit opens." }
+    - { name: "ref", type: "TEXT", doc: "The note's canonical ref (`thread_note:not<n>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "Empty: a note has no title." }
     - { name: "body", type: "TEXT", doc: "The note's markdown." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
@@ -876,12 +876,11 @@
     - { not_null: id }
     - { unique: id }
 - name: task_note
-  version: 1
-  description: "Notes: progress notes attached to a task, or thread-level notes (exactly one of task_id / thread_id is set)."
+  version: 2
+  description: "Comments on oxplow's tasks (`task_note:<id>`; a `work_item.comment`). A thread's notes are `v_thread_note`."
   columns:
-    - { name: "id", type: "INTEGER", doc: "Note id." }
-    - { name: "task_id", type: "INTEGER", doc: "Task it's attached to, if a task note." }
-    - { name: "thread_id", type: "INTEGER", doc: "Thread it's attached to, if a thread note." }
+    - { name: "id", type: "INTEGER", doc: "Comment id." }
+    - { name: "task_id", type: "INTEGER", doc: "The task it's on." }
     - { name: "body", type: "TEXT", doc: "Markdown body." }
     - { name: "author", type: "TEXT", doc: "Who wrote it (`agent`, `user`, …)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
@@ -1086,6 +1085,19 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: thread_note
+  version: 1
+  description: "A thread's notes: the capture pad an agent writes as it works (`knowledge.add_note`; ref `thread_note:not<n>`)."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Note id (`not<n>`)." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread it's on." }
+    - { name: "body", type: "TEXT", doc: "Markdown body." }
+    - { name: "author", type: "TEXT", doc: "Who wrote it (`agent`, `user`, …)." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+    - { relationships: { column: thread_id, to: thread, field: id } }
 - name: tool_call
   version: 2
   description: "Every tool call the agent made (from the PostToolUse hook): reads, edits, commands."

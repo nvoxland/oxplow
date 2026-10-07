@@ -58,7 +58,8 @@ never change an existing case's expectation without changing both parsers.
 revisioned, provider_scoped, wikilink_prefixes }` and
 `KindRegistry` (`register` refuses a collision; `validate` checks a ref's
 kind, id shape and whether it may carry `@rev`). `core_kinds()` registers
-the §4.2 vocabulary plus `finding`, `task_note` and `run`. Only
+the §4.2 vocabulary plus `finding`, `task_note` (a comment on an oxplow
+task), `thread_note` and `run`. Only
 `work_item` is provider-scoped in P1 (`oxplow:tsk42`,
 `issues:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
 capability's active provider.
@@ -135,7 +136,7 @@ thread notes and wiki pages are indexed the same way (tsk864): each an
 asset over its `v_search_<kind>` model (`kind_search::CORE_KINDS`),
 whose rows also carry their stream and aren't bounded. Like every
 published model, a feed's `ref` is the canonical ref a hit opens
-(`work_item:oxplow:tsk7`, `task_note:not5`, `comment:cmt3`,
+(`work_item:oxplow:tsk7`, `thread_note:not5`, `comment:cmt3`,
 `wiki:<slug>`; tsk922) — `CORE_KINDS` names the prefix each search kind's
 rows carry before the id — and a refused read of a table names its own
 model first (`read v_task or …`). Only files stay
@@ -202,7 +203,7 @@ and the link checker never drift.
 
 `crates/oxplow-db/src/page_ref_projections.rs` writes `(kind, id)` pairs
 that are exactly a canonical ref's: kinds `work_item`, `commit`, `dir`,
-`task_note`, `wiki`, `file`, `finding`; a work item's id is
+`task_note`, `thread_note`, `wiki`, `file`, `finding`; a work item's id is
 `<provider>:<id>` (`oxplow:tsk<n>`). An effort's impacts name their kind
 in the agent tools' vocabulary (`IMPACT_KINDS`: `wiki | work_item | file
 | directory | git_commit | finding`; `effort.report` refuses any other,

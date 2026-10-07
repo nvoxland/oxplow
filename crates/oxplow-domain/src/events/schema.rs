@@ -202,7 +202,11 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageDeleted>()
             .expect("core type registers");
+        r.register::<KnowledgeNoteWrittenAtV1>()
+            .expect("core type registers");
         r.register::<KnowledgeNoteWritten>()
+            .expect("core type registers");
+        r.register::<KnowledgeNoteDeletedAtV1>()
             .expect("core type registers");
         r.register::<KnowledgeNoteDeleted>()
             .expect("core type registers");
@@ -2112,6 +2116,8 @@ impl EventType for KnowledgePageDeleted {
     type Payload = KnowledgePageDeletedV1;
 }
 
+// v1 as published: its note was a `task_note` ref, when thread notes
+// shared the task comments' table. Upcast renames the kind.
 /// `knowledge.note.written@1`: a thread note was added or its body
 /// changed (P7.B6).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2123,11 +2129,35 @@ pub struct KnowledgeNoteWrittenV1 {
     pub thread: String,
 }
 
-pub struct KnowledgeNoteWritten;
-impl EventType for KnowledgeNoteWritten {
+/// The v1 shape of `knowledge.note.written`, as a registry entry.
+pub struct KnowledgeNoteWrittenAtV1;
+impl EventType for KnowledgeNoteWrittenAtV1 {
     const TYPE: &'static str = "knowledge.note.written";
     const V: u32 = 1;
     type Payload = KnowledgeNoteWrittenV1;
+}
+
+/// `knowledge.note.written@2`: a thread note was added or its body
+/// changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgeNoteWrittenV2 {
+    /// `thread_note:not<n>`.
+    pub note: String,
+    /// The thread it's on (`thread:thr<n>`).
+    pub thread: String,
+}
+
+pub struct KnowledgeNoteWritten;
+impl EventType for KnowledgeNoteWritten {
+    const TYPE: &'static str = "knowledge.note.written";
+    const V: u32 = 2;
+    type Payload = KnowledgeNoteWrittenV2;
+
+    /// v1 named the note as a `task_note`; it's a `thread_note`.
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        upcast_note_v1(Self::TYPE, from_v, payload)
+    }
 }
 
 /// `knowledge.note.deleted@1`: a thread note is gone.
@@ -2140,11 +2170,49 @@ pub struct KnowledgeNoteDeletedV1 {
     pub thread: String,
 }
 
-pub struct KnowledgeNoteDeleted;
-impl EventType for KnowledgeNoteDeleted {
+/// The v1 shape of `knowledge.note.deleted`, as a registry entry.
+pub struct KnowledgeNoteDeletedAtV1;
+impl EventType for KnowledgeNoteDeletedAtV1 {
     const TYPE: &'static str = "knowledge.note.deleted";
     const V: u32 = 1;
     type Payload = KnowledgeNoteDeletedV1;
+}
+
+/// `knowledge.note.deleted@2`: a thread note is gone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgeNoteDeletedV2 {
+    /// `thread_note:not<n>`.
+    pub note: String,
+    /// The thread it was on (`thread:thr<n>`).
+    pub thread: String,
+}
+
+pub struct KnowledgeNoteDeleted;
+impl EventType for KnowledgeNoteDeleted {
+    const TYPE: &'static str = "knowledge.note.deleted";
+    const V: u32 = 2;
+    type Payload = KnowledgeNoteDeletedV2;
+
+    /// v1 named the note as a `task_note`; it's a `thread_note`.
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        upcast_note_v1(Self::TYPE, from_v, payload)
+    }
+}
+
+/// A `knowledge.note.*@1` payload as v2: the note's kind renamed.
+fn upcast_note_v1(ty: &str, from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
+    if from_v != 1 {
+        return Err(DomainError::Invalid(format!(
+            "{ty}@{from_v} cannot be upcast to v2"
+        )));
+    }
+    if let Some(note) = payload.get_mut("note") {
+        if let Some(id) = note.as_str().and_then(|n| n.strip_prefix("task_note:")) {
+            *note = Value::String(format!("thread_note:{id}"));
+        }
+    }
+    Ok(payload)
 }
 
 /// `knowledge.comment.written@1`: a comment (a threaded annotation on a
@@ -2272,7 +2340,9 @@ mod tests {
                 ("knowledge.comment.deleted", 1),
                 ("knowledge.comment.written", 1),
                 ("knowledge.note.deleted", 1),
+                ("knowledge.note.deleted", 2),
                 ("knowledge.note.written", 1),
+                ("knowledge.note.written", 2),
                 ("knowledge.page.deleted", 1),
                 ("knowledge.page.written", 1),
                 ("lens.kept", 1),
@@ -2355,6 +2425,22 @@ mod tests {
     }
 
     /// P3.1 (tsk471): the first versioned type. A `turn.ended` written at
+    /// A v1 note event named the note as a `task_note` (thread notes shared
+    /// the task comments' table); it reads at v2 as the `thread_note` it is.
+    #[test]
+    fn a_v1_note_event_reads_as_a_thread_note() {
+        let r = crate::vocabulary::Vocabulary::core();
+        for ty in ["knowledge.note.written", "knowledge.note.deleted"] {
+            let v1 = json!({ "note": "task_note:not7", "thread": "thread:thr3" });
+            let (v, up) = r.upcast_to_latest(ty, 1, v1).unwrap();
+            assert_eq!(v, 2);
+            assert_eq!(
+                up,
+                json!({ "note": "thread_note:not7", "thread": "thread:thr3" })
+            );
+        }
+    }
+
     /// v1 reads at v2 with no transcript and no usage; the v2 producer's
     /// shape is what `Envelope::typed` emits.
     #[test]

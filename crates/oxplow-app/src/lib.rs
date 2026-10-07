@@ -188,7 +188,7 @@ use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
     SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore, SqliteFactStore,
     SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
-    SqliteStreamStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
+    SqliteStreamStore, SqliteTaskLinkStore, SqliteTaskStore, SqliteThreadNoteStore,
     SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
     SqliteWikiPageThreadUpdateStore,
 };
@@ -472,7 +472,7 @@ pub struct Services {
     pub stream_store: Arc<SqliteStreamStore>,
     pub thread_store: Arc<SqliteThreadStore>,
     pub task_store: Arc<SqliteTaskStore>,
-    pub work_note_store: Arc<SqliteTaskNoteStore>,
+    pub thread_note_store: Arc<SqliteThreadNoteStore>,
     pub task_link_store: Arc<SqliteTaskLinkStore>,
     /// The event log (`.context/data-model.md` "event_log"). Producers
     /// append inside their own transaction via `event_log_store::append_tx`;
@@ -761,7 +761,7 @@ impl Services {
             db.clone(),
             vocabulary.clone(),
         ));
-        let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
+        let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let sql = sql_gateway::SqlGateway::new(db.clone());
@@ -1441,7 +1441,7 @@ impl Services {
             stream_store,
             thread_store,
             task_store,
-            work_note_store,
+            thread_note_store,
             task_link_store,
             event_log_store,
             sql,

@@ -14,7 +14,7 @@ use crate::hook::{AgentStatus, AgentTurn};
 use crate::ids::{AgentTurnId, CommentId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
 use crate::task::{Task, TaskLink, TaskNote, TaskStatus};
-use crate::thread::Thread;
+use crate::thread::{Thread, ThreadNote};
 use crate::DomainError;
 
 #[async_trait]
@@ -87,11 +87,15 @@ pub trait TaskStore: Send + Sync {
 #[async_trait]
 pub trait TaskNoteStore: Send + Sync {
     // A note on a task is a work-item comment: the `work_item.comment`
-    // command (`oxplow_db::task_satellite::add_task_note_tx`). A thread
-    // note is `knowledge.add_note` / `update_note` (P8.A6,
-    // `add_thread_note_tx`, `update_note_tx`).
+    // command (`oxplow_db::task_satellite::add_task_note_tx`).
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError>;
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskNote>, DomainError>;
+}
+
+#[async_trait]
+pub trait ThreadNoteStore: Send + Sync {
+    // Written by `knowledge.add_note` / `update_note`
+    // (`oxplow_db::thread_note_store`).
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<ThreadNote>, DomainError>;
 }
 
 #[async_trait]

@@ -483,20 +483,22 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         let db = state.db.clone();
         let vocabulary = state.vocabulary.clone();
         let page_refs = state.page_ref_store.clone();
-        let tasks = state.task_store.clone();
-        let links = state.task_link_store.clone();
-        let efforts = state.effort_store.clone();
-        let findings = state.code_quality_store.clone();
-        let notes = state.work_note_store.clone();
+        let sources = crate::page_ref_backfill::Sources {
+            tasks: state.task_store.clone(),
+            links: state.task_link_store.clone(),
+            efforts: state.effort_store.clone(),
+            findings: state.code_quality_store.clone(),
+            task_comments: std::sync::Arc::new(oxplow_db::SqliteTaskNoteStore::new(
+                state.db.clone(),
+            )),
+            thread_notes: state.thread_note_store.clone(),
+        };
         tokio::spawn(async move {
             if !crate::page_ref_backfill::needs_repair(&db).await {
                 return;
             }
             let started = std::time::Instant::now();
-            let counts = crate::page_ref_backfill::run(
-                vocabulary, page_refs, tasks, links, efforts, findings, notes,
-            )
-            .await;
+            let counts = crate::page_ref_backfill::run(vocabulary, page_refs, sources).await;
             crate::page_ref_backfill::record_repair(&db, started.elapsed().as_millis() as i64)
                 .await;
             tracing::info!(?counts, "page-ref backfill done");

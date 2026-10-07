@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::Services;
 use oxplow_domain::comment::CommentThread;
-use oxplow_domain::stores::{CommentStore, TaskNoteStore, TaskStore, ThreadStore};
+use oxplow_domain::stores::{CommentStore, TaskStore, ThreadNoteStore, ThreadStore};
 use oxplow_domain::{CommentStatus, StreamId, Task, TaskPriority, TaskStatus, ThreadId};
 
 mod lenient_params;
@@ -274,7 +274,7 @@ pub struct FindNotesForNoteParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PageRefParams {
     /// Ref kind: `wiki`, `work_item`, `file`, `dir`, `commit`,
-    /// `finding`, `task_note` (see .context/refs.md).
+    /// `finding`, `task_note`, `thread_note` (see .context/refs.md).
     pub kind: String,
     /// The ref's id within the kind: a repo-relative path for files and
     /// dirs, `oxplow:tsk42` for a task, the sha for a commit, the slug
@@ -1926,7 +1926,7 @@ impl OxplowMcp {
         let id = parse_thread_id(&params.0.thread_id)?;
         let notes = self
             .services
-            .work_note_store
+            .thread_note_store
             .list_for_thread(&id)
             .await
             .map_err(internal)?;

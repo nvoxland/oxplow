@@ -17,7 +17,8 @@
 //! - dir:       `"<repo-relative path, no trailing slash>"`
 //! - finding:   `"<finding id>"`
 //! - commit:    `"<sha>"`
-//! - task_note: `"not<n>"`
+//! - task_note: `"not<n>"` (a comment on an oxplow task)
+//! - thread_note: `"not<n>"`
 
 use oxplow_domain::refs::kind::KindRegistry;
 use oxplow_domain::refs::{extract, RefVersion};
@@ -29,6 +30,7 @@ use crate::page_ref_store::PageRefEdge;
 pub const KIND_WIKI: &str = "wiki";
 pub const KIND_WORK_ITEM: &str = "work_item";
 pub const KIND_TASK_NOTE: &str = "task_note";
+pub const KIND_THREAD_NOTE: &str = "thread_note";
 pub const KIND_FILE: &str = "file";
 pub const KIND_DIR: &str = "dir";
 pub const KIND_FINDING: &str = "finding";
@@ -265,12 +267,17 @@ pub fn wiki_edges(kinds: &KindRegistry, slug: &str, body: &str) -> Vec<PageRefEd
 }
 
 /// Edges contributed by a task-note body. Single-owner source.
-pub fn note_edges(kinds: &KindRegistry, note_id: &str, body: &str) -> Vec<PageRefEdge> {
+pub fn note_edges(
+    kinds: &KindRegistry,
+    note_kind: &str,
+    note_id: &str,
+    body: &str,
+) -> Vec<PageRefEdge> {
     let refs = extract(kinds, body);
     let mut out = Vec::new();
     for fd in refs.files_detail {
         out.push(PageRefEdge::new(
-            KIND_TASK_NOTE,
+            note_kind,
             note_id,
             KIND_FILE,
             fd.path,
@@ -279,7 +286,7 @@ pub fn note_edges(kinds: &KindRegistry, note_id: &str, body: &str) -> Vec<PageRe
     }
     for d in refs.dirs {
         out.push(PageRefEdge::new(
-            KIND_TASK_NOTE,
+            note_kind,
             note_id,
             KIND_DIR,
             d,
@@ -288,7 +295,7 @@ pub fn note_edges(kinds: &KindRegistry, note_id: &str, body: &str) -> Vec<PageRe
     }
     for w in refs.wikis {
         out.push(PageRefEdge::new(
-            KIND_TASK_NOTE,
+            note_kind,
             note_id,
             KIND_WIKI,
             w,
@@ -297,7 +304,7 @@ pub fn note_edges(kinds: &KindRegistry, note_id: &str, body: &str) -> Vec<PageRe
     }
     for t in refs.work_items {
         out.push(PageRefEdge::new(
-            KIND_TASK_NOTE,
+            note_kind,
             note_id,
             KIND_WORK_ITEM,
             t,
@@ -306,7 +313,7 @@ pub fn note_edges(kinds: &KindRegistry, note_id: &str, body: &str) -> Vec<PageRe
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
-            KIND_TASK_NOTE,
+            note_kind,
             note_id,
             KIND_FINDING,
             f,
@@ -315,7 +322,7 @@ pub fn note_edges(kinds: &KindRegistry, note_id: &str, body: &str) -> Vec<PageRe
     }
     for c in refs.commits {
         out.push(PageRefEdge::new(
-            KIND_TASK_NOTE,
+            note_kind,
             note_id,
             KIND_COMMIT,
             c,

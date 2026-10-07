@@ -2849,6 +2849,31 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The note's canonical ref (`thread_note:not<n>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Empty: a note has no title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The note's markdown."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        }
+      ],
+      "key": []
     }
   },
   "search_task": {
@@ -3706,6 +3731,36 @@
           "name": "thread_id",
           "type": "INTEGER",
           "doc": "Thread it's attached to, if a thread note."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Who wrote it (`agent`, `user`, …)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Comment id."
+        },
+        {
+          "name": "task_id",
+          "type": "INTEGER",
+          "doc": "The task it's on."
         },
         {
           "name": "body",
@@ -5807,6 +5862,38 @@
           "name": "work_item",
           "type": "TEXT",
           "doc": "The work item (v_work_item.ref)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "thread_note": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Note id (`not<n>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Who wrote it (`agent`, `user`, …)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []

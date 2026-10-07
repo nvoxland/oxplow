@@ -290,14 +290,6 @@ export interface ThreadState {
 // (`workItems.ts`, P6.E1b), which owns their shape.
 export type { Task, TaskStatus, TaskPriority, ThreadWorkState, BacklogState } from "./workItems.js";
 
-export interface TaskNote {
-  id: string;
-  task_id: string;
-  body: string;
-  author: string;
-  created_at: string;
-}
-
 
 /** Why a snapshot take ran (`snapshot_op.trigger`). */
 export type SnapshotSource = SnapshotTrigger;

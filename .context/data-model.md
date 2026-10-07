@@ -483,26 +483,24 @@ concurrent duplicate keeps the first (`ON CONFLICT DO NOTHING`). The
 same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
 [ai-providers.md](./ai-providers.md) "Recorded computations".
 
-### `work_note` — thread-scoped notes only (`crates/oxplow-db/src/work_satellite.rs`)
+### `thread_note` and `task_note` (`thread_note_store.rs`, `task_satellite.rs`)
 
-Structured per-thread notes. Each row has `id`, nullable
-`task_id` (kept for legacy rows), nullable `thread_id`, `body`,
-`author` (free-form string, e.g. "agent", "user",
-"explore-subagent"), and `created_at`. A CHECK still enforces that
-**exactly one** of `task_id` / `thread_id` is non-NULL.
+**`thread_note`** is a thread's capture pad: what an agent records as it
+works (a finding, why it paused) and what an Explore subagent fills in
+(`knowledge.add_note` / `update_note`, `.context/agent-model.md`). Each
+row has `id`, `thread_id`, `body`, `author` (free-form: `agent`, `user`,
+`explore-subagent`) and `created_at`. Its ref is `thread_note:not<n>`;
+its `[[…]]` links are `page_ref` edges from `thread_note`, and each
+change logs `knowledge.note.written@2` / `deleted@2` (v1 named the note
+`task_note:not<n>`; the upcast renames it). `v_thread_note` reads it,
+`v_search_note` indexes it.
 
-**Item-scoped writes were retired** — `effort.summary` is
-the canonical record of what shipped on a task, so a parallel
-per-item note table for the same purpose was duplicative. The
-`add_work_note` MCP tool, the `add_work_note` / `list_work_notes`
-IPC commands, and the task modal's "Notes" timeline section
-were removed alongside this. The (since-deleted) MCP `complete_task` previously still
-shadow-wrote the summary into `task_note` to get its body
-projected into `page_ref`; that orphan write was removed once
-the effort store learned to project `effort.summary`
-directly (see the `summary_*` ref_types in the `page_ref` section
-below). Pre-existing item-scoped rows stay in the table but no
-surface reads or writes them.
+**`task_note`** holds only the comments on oxplow's tasks
+(`work_item.comment`; `task_id` NOT NULL, id `task_note:<id>`), which
+reach `work_item_comment` by trigger. The two shared one table, one of
+`task_id` / `thread_id` set, until V24 moved thread notes out, keeping
+their ids and re-kinding their `page_ref` edges; both tables continue
+past every id the shared one gave out.
 
 Thread-scoped rows (`thread_id` set, `task_id` NULL) are the per-thread
 capture pad, written by `knowledge.add_note` / `knowledge.update_note`
@@ -1041,7 +1039,8 @@ scheme:
 - `dir` — the repo-relative path, no trailing slash
 - `commit` — the full sha
 - `finding` — the rowid as a string
-- `task_note` — `not<n>`
+- `task_note` — `not<n>` (a comment on an oxplow task)
+- `thread_note` — `not<n>`
 
 V92 wiped the pre-canonical rows; the boot backfill regenerates them.
 

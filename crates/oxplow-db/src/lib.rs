@@ -48,6 +48,7 @@ pub mod table_generations;
 pub mod task_satellite;
 pub mod task_store;
 pub mod thread_answer_store;
+pub mod thread_note_store;
 pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
@@ -114,6 +115,7 @@ pub use symbol_store::{FileSymbols, SqliteSymbolStore, SymbolCapture, SymbolRow}
 pub use task_satellite::{SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::SqliteTaskStore;
 pub use thread_answer_store::{AnswerShows, SqliteThreadAnswerStore, ThreadAnswer};
+pub use thread_note_store::SqliteThreadNoteStore;
 pub use thread_store::SqliteThreadStore;
 pub use token_usage_store::{
     AgentTokenUsage, NewAgentTokenUsage, SqliteTokenUsageStore, TokenUsageTotals,

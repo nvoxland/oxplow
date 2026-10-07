@@ -34,11 +34,11 @@ use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{
     finding_edges, link_edge, note_edges, task_body_ref_types, task_edges, task_link_ref_types,
-    work_item_id, KIND_FINDING, KIND_TASK_NOTE, KIND_WORK_ITEM,
+    work_item_id, KIND_FINDING, KIND_TASK_NOTE, KIND_THREAD_NOTE, KIND_WORK_ITEM,
 };
 use oxplow_db::{
     SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqlitePageRefStore,
-    SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
+    SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore, SqliteThreadNoteStore,
 };
 use oxplow_domain::stores::TaskLinkStore as _;
 use oxplow_domain::vocabulary::VocabularyHandle;
@@ -166,16 +166,30 @@ pub async fn record_repair(db: &oxplow_db::Database, elapsed_ms: i64) {
     }
 }
 
+/// The stores whose rows the backfill projects.
+pub struct Sources {
+    pub tasks: Arc<SqliteTaskStore>,
+    pub links: Arc<SqliteTaskLinkStore>,
+    pub efforts: Arc<SqliteEffortStore>,
+    pub findings: Arc<SqliteCodeQualityStore>,
+    pub task_comments: Arc<SqliteTaskNoteStore>,
+    pub thread_notes: Arc<SqliteThreadNoteStore>,
+}
+
 /// Project every existing row into `page_ref`. Idempotent.
 pub async fn run(
     vocabulary: VocabularyHandle,
     page_refs: Arc<SqlitePageRefStore>,
-    tasks: Arc<SqliteTaskStore>,
-    links: Arc<SqliteTaskLinkStore>,
-    efforts: Arc<SqliteEffortStore>,
-    findings_store: Arc<SqliteCodeQualityStore>,
-    task_note: Arc<SqliteTaskNoteStore>,
+    sources: Sources,
 ) -> BackfillCounts {
+    let Sources {
+        tasks,
+        links,
+        efforts,
+        findings: findings_store,
+        task_comments,
+        thread_notes,
+    } = sources;
     let mut counts = BackfillCounts::default();
     let vocabulary = vocabulary.current();
     let kinds = &vocabulary.kinds;
@@ -228,17 +242,20 @@ pub async fn run(
         counts.links = write_batched(&page_refs, "links", slices).await;
     }
 
-    // 3. Work notes — one source per note row, parsed from body.
-    if let Ok(rows) = task_note.list_all_for_backfill().await {
-        let slices = rows
-            .into_iter()
-            .map(|(id, body)| {
-                let edges = note_edges(kinds, &id, &body);
-                slice(KIND_TASK_NOTE, id, None, edges)
-            })
-            .collect();
-        counts.notes = write_batched(&page_refs, "notes", slices).await;
+    // 3. Task comments and thread notes — one source per row, parsed
+    //    from its body.
+    let mut slices = Vec::new();
+    for (kind, rows) in [
+        (KIND_TASK_NOTE, task_comments.list_all_for_backfill().await),
+        (KIND_THREAD_NOTE, thread_notes.list_all_for_backfill().await),
+    ] {
+        let Ok(rows) = rows else { continue };
+        slices.extend(rows.into_iter().map(|(id, body)| {
+            let edges = note_edges(kinds, kind, &id, &body);
+            slice(kind, id, None, edges)
+        }));
     }
+    counts.notes = write_batched(&page_refs, "notes", slices).await;
 
     // 4. Findings — one edge per row.
     if let Ok(rows) = findings_store.list_all_findings_for_backfill().await {
@@ -330,11 +347,14 @@ mod tests {
         let counts = run(
             VocabularyHandle::core(),
             page_refs.clone(),
-            Arc::new(SqliteTaskStore::new(db.clone())),
-            Arc::new(SqliteTaskLinkStore::new(db.clone())),
-            Arc::new(SqliteEffortStore::new(db.clone())),
-            findings_store,
-            Arc::new(SqliteTaskNoteStore::new(db.clone())),
+            Sources {
+                tasks: Arc::new(SqliteTaskStore::new(db.clone())),
+                links: Arc::new(SqliteTaskLinkStore::new(db.clone())),
+                efforts: Arc::new(SqliteEffortStore::new(db.clone())),
+                findings: findings_store,
+                task_comments: Arc::new(SqliteTaskNoteStore::new(db.clone())),
+                thread_notes: Arc::new(SqliteThreadNoteStore::new(db.clone())),
+            },
         )
         .await;
         assert_eq!(counts.findings, 2500);
@@ -492,11 +512,14 @@ mod tests {
         let counts = run(
             VocabularyHandle::core(),
             page_refs.clone(),
-            items_attached,
-            links,
-            efforts,
-            findings_store,
-            notes,
+            Sources {
+                tasks: items_attached,
+                links,
+                efforts,
+                findings: findings_store,
+                task_comments: notes,
+                thread_notes: Arc::new(SqliteThreadNoteStore::new(db.clone())),
+            },
         )
         .await;
         assert!(counts.tasks >= 1);

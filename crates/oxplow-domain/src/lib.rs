@@ -52,6 +52,6 @@ pub use task::{
     Task, TaskActorKind, TaskAuthor, TaskImpact, TaskLink, TaskLinkType, TaskNote, TaskPriority,
     TaskStatus,
 };
-pub use thread::{Thread, ThreadStatus};
+pub use thread::{Thread, ThreadNote, ThreadStatus};
 pub use time::Timestamp;
 pub use tree_diff::{diff_trees, ChangeStatus, FileChange};
