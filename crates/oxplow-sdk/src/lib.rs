@@ -146,9 +146,9 @@ pub fn scaffold(
             Some("{ ref: $any }".to_string()),
         ),
         Kind::Collector => (
-            "{ collector: items, rows: [{ id: 1, title: First, status: ready }, { id: 2, title: Second, status: done }] }"
+            "{ collector: items, rows: [{ ref: \"work_item:demo:1\", title: First, state: todo }, { ref: \"work_item:demo:2\", title: Second, state: done }] }"
                 .to_string(),
-            "one item per task that isn't done",
+            "one item per work item that isn't done",
             Some("{ entities: { item: 1 } }".to_string()),
         ),
         Kind::Command => (
@@ -185,16 +185,16 @@ pub fn scaffold(
              \x20 - id: items\n\
              \x20   runtime: starlark\n\
              \x20   entry: collectors/items.star\n\
-             \x20   input: \"SELECT id, title, status FROM v_task\"\n\
+             \x20   input: \"SELECT ref, title, state FROM v_work_item\"\n\
              \x20   entities:\n\
-             \x20     - {{ name: item, key: id, columns: {{ id: int, title: text }} }}\n\
+             \x20     - {{ name: item, key: ref, columns: {{ ref: text, title: text }} }}\n\
              models:\n\
              \x20 # v_{ns}_open_items: SQL over the entity (`ref('item')`), checked at load.\n\
              \x20 - name: open_items\n\
              \x20   version: 1\n\
              \x20   description: \"TODO: what these rows are.\"\n\
              \x20   columns:\n\
-             \x20     - {{ name: id, type: INTEGER, doc: \"The task.\" }}\n\
+             \x20     - {{ name: ref, type: TEXT, doc: \"The work item (work_item:<provider>:<id>).\" }}\n\
              \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
         )),
         Kind::Command => manifest.push_str(&format!(
@@ -285,19 +285,19 @@ pub fn scaffold(
                  \x20 # Filled in with the viewer's stream unless a value is given.\n\
                  \x20 - {{ name: stream_id, label: Stream }}\n\
                  query: |\n\
-                 \x20 SELECT id, 'work_item:oxplow:tsk' || id AS ref, title, status, updated_at\n\
-                 \x20 FROM v_task\n\
-                 \x20 WHERE stream_id = :stream_id AND status IN ('ready', 'in_progress', 'blocked')\n\
-                 \x20 ORDER BY updated_at DESC\n\
+                 \x20 SELECT w.ref, w.title, w.state, w.updated_at\n\
+                 \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                 \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
+                 \x20 ORDER BY w.updated_at DESC\n\
                  viz: table\n\
                  columns:\n\
-                 \x20 - {{ key: title, label: Task, link: {{ kind: task, from: id }} }}\n\
-                 \x20 - {{ key: status }}\n\
+                 \x20 - {{ key: title, label: Item, link: {{ kind: page, from: ref }} }}\n\
+                 \x20 - {{ key: state }}\n\
                  actions:\n\
                  \x20 # In each row's right-click menu: a command run as the person, the\n\
                  \x20 # row's values bound in (`{{{{row.<column>}}}}`).\n\
                  \x20 - {{ id: start, label: Start, command: work_item.transition, input: {{ ref: \"{{{{row.ref}}}}\", to: in_progress }}, row: true }}\n\
-                 empty: No open tasks in this stream.\n\
+                 empty: No open work items in this stream.\n\
                  launcher: {{ category: Work }}\n",
                 title = title_case(name)
             ),
@@ -309,25 +309,25 @@ pub fn scaffold(
                  # declares. Sandboxed: no files, network or clock.\n\
                  def transform(x):\n\
                  \x20   return {\"entities\": {\"item\": [\n\
-                 \x20       {\"id\": r[\"id\"], \"title\": r[\"title\"]}\n\
+                 \x20       {\"ref\": r[\"ref\"], \"title\": r[\"title\"]}\n\
                  \x20       for r in x[\"rows\"]\n\
-                 \x20       if r[\"status\"] != \"done\"\n\
+                 \x20       if r[\"state\"] != \"done\"\n\
                  \x20   ]}}\n"
                     .to_string(),
             )?;
             write(
                 &format!("{rel_dir}/models/open_items.sql"),
-                "SELECT id, title FROM ref('item')\n".to_string(),
+                "SELECT ref, title FROM ref('item')\n".to_string(),
             )?;
             write(
                 &format!("{rel_dir}/lenses/{name}.yaml"),
                 format!(
                     "title: {title}\n\
                      description: \"TODO: what this lens answers.\"\n\
-                     query: SELECT id, title FROM v_{ns}_open_items ORDER BY id\n\
+                     query: SELECT ref, title FROM v_{ns}_open_items ORDER BY title\n\
                      viz: table\n\
                      columns:\n\
-                     \x20 - {{ key: title, label: Item, link: {{ kind: task, from: id }} }}\n\
+                     \x20 - {{ key: title, label: Item, link: {{ kind: page, from: ref }} }}\n\
                      empty: Nothing collected yet — sync the collector (Settings → Data).\n\
                      launcher: {{ category: Work }}\n",
                     title = title_case(name)
@@ -367,10 +367,10 @@ pub fn scaffold(
                      # The rows the component gets (`component.run`), and what an agent reads:\n\
                      # agents always see the table, never the frame.\n\
                      query: |\n\
-                     \x20 SELECT id, title, status\n\
-                     \x20 FROM v_task\n\
-                     \x20 WHERE stream_id = :stream_id AND status IN ('ready', 'in_progress', 'blocked')\n\
-                     \x20 ORDER BY updated_at DESC\n\
+                     \x20 SELECT w.ref, w.title, w.state\n\
+                     \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                     \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
+                     \x20 ORDER BY w.updated_at DESC\n\
                      viz: custom\n\
                      custom: {{ component: {name} }}\n\
                      launcher: {{ category: Work }}\n",
@@ -787,7 +787,11 @@ mod tests {
         assert!(text.contains("dry-run on an empty database"), "{text}");
         let lens = dir.path().join("oxplow/extensions/demo/lenses/demo.yaml");
         let body = std::fs::read_to_string(&lens).unwrap();
-        std::fs::write(&lens, body.replace("FROM v_task", "FROM v_no_such_view")).unwrap();
+        std::fs::write(
+            &lens,
+            body.replace("FROM v_work_item", "FROM v_no_such_view"),
+        )
+        .unwrap();
         let report = check(
             dir.path(),
             "demo",

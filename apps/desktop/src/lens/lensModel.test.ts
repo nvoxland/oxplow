@@ -38,13 +38,13 @@ describe("displayColumns", () => {
   test("declared columns set order, labels, links and units, and skip keys the result lacks", () => {
     const l = lens({
       columns: [
-        { key: "title", label: "Task", link: { kind: "task", from: "id", line: null, base: null, head: null }, unit: null },
+        { key: "title", label: "Task", link: { kind: "page", from: "id", line: null, base: null, head: null }, unit: null },
         { key: "missing", label: null, link: null, unit: null },
         { key: "id", label: null, link: null, unit: "u" },
       ],
     });
     expect(displayColumns(l, ["id", "title", "u"])).toEqual([
-      { key: "title", label: "Task", index: 1, link: { kind: "task", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null },
+      { key: "title", label: "Task", index: 1, link: { kind: "page", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null },
       { key: "id", label: "id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null },
     ]);
   });
@@ -101,11 +101,9 @@ describe("row groups and styling", () => {
   });
 
   test("a row that links somewhere drags into the agent's context", () => {
-    const link = (kind: "task" | "wiki" | "file" | "page", from: string) => ({ kind, from, line: null, base: null, head: null });
-    const at = (kind: "task" | "wiki" | "file" | "page", value: string | number) =>
+    const link = (kind: "wiki" | "file" | "page", from: string) => ({ kind, from, line: null, base: null, head: null });
+    const at = (kind: "wiki" | "file" | "page", value: string | number) =>
       rowContextRef(lens({ columns: [{ key: "title", label: null, link: link(kind, "v"), unit: null }] }), ["title", "v"], ["T", value]);
-    // A bare id names nothing without its list: a `task` link is no link.
-    expect(at("task", 12)).toBeNull();
     expect(at("page", "page:comments")).toEqual({ kind: "ref", ref: "page:comments" });
     expect(at("wiki", "auth-flow")).toEqual({ kind: "wiki", slug: "auth-flow" });
     expect(at("file", "src/a.ts")).toEqual({ kind: "file", path: "src/a.ts" });
@@ -117,9 +115,8 @@ describe("cellLinkRef", () => {
   const cols = ["id", "title", "path", "slug", "effort"];
   const row = [42, "Fix it", "src/a.ts", "auth-flow", 7];
 
-  // A work item links by its ref (`kind: page`); a bare id is no link.
-  test("a task link is no link", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "title", row, cols)).toBeNull();
+  test("a page link reads its ref from `from`", () => {
+    expect(cellLinkRef({ kind: "page", from: "ref", line: null, base: null, head: null }, "title", [...row, "work_item:issues:E-1"], [...cols, "ref"])?.id).toBe("work_item:issues:E-1");
   });
   test("file / wiki / effort-diff links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("file:src/a.ts");
@@ -127,8 +124,8 @@ describe("cellLinkRef", () => {
     expect(cellLinkRef({ kind: "effort-diff", from: null, line: null, base: null, head: null }, "effort", row, cols)?.id).toBe("effort:eff7");
   });
   test("null or missing target gives no link", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "title", [null, "x", null, null, null], cols)).toBeNull();
-    expect(cellLinkRef({ kind: "task", from: "nope", line: null, base: null, head: null }, "title", row, cols)).toBeNull();
+    expect(cellLinkRef({ kind: "file", from: "path", line: null, base: null, head: null }, "title", [null, "x", null, null, null], cols)).toBeNull();
+    expect(cellLinkRef({ kind: "file", from: "nope", line: null, base: null, head: null }, "title", row, cols)).toBeNull();
   });
 });
 

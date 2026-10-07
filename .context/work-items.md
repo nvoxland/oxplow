@@ -138,6 +138,19 @@ agent terminal reads as context refs. **New Item** files on the active
 list: title, body, a canonical starting state (todo or blocked), the
 list's editable fields and — with `hierarchy` — a parent.
 
+## Reading them for the agent
+
+The agent's work-item tools read the interface too
+(`crates/oxplow-app/src/work_item_reads.rs`, MCP `list_work_items`,
+`get_work_item`, `next_work_item`): a list's items in order, one item
+with its links and comments, and what to pick up next (an epic with its
+ready descendants, or every ready non-epic item; open `blocks` links
+hold an item). None of them belongs to an implementation, so the tool
+list never changes with a switch; with none they read empty. A source
+guard (`source_guards::only_oxplows_implementation_names_its_task_list`)
+pins the few production files that may name oxplow's task store,
+service or models.
+
 ## The capability
 
 `oxplow_domain::work_items`:

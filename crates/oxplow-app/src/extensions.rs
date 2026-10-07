@@ -376,8 +376,6 @@ struct LauncherFile {
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum LensLinkKind {
-    /// `task:<id>`; the value is a task id.
-    Task,
     /// `file:<path>`; the value is a repo-relative path.
     File,
     /// `wiki:<slug>`.
@@ -4168,16 +4166,16 @@ mod tests {
     const EXT: &str =
         "manifest: 2\nname: review\nintent:\n  purpose: test\ndescription: Review helpers\n";
     const LENS: &str = r#"
-title: Tasks by status
-description: Every task with a given status.
+title: Items by state
+description: Every work item in a given state.
 params:
-  - { name: status, label: Status, default: in_progress }
+  - { name: state, label: State, default: in_progress }
 query: |
-  SELECT id, title FROM v_task WHERE status = :status ORDER BY id
+  SELECT ref, title FROM v_work_item WHERE state = :state ORDER BY title
 viz: table
 columns:
-  - { key: title, label: Task, link: { kind: task, from: id } }
-empty: No tasks.
+  - { key: title, label: Item, link: { kind: page, from: ref } }
+empty: No items.
 "#;
 
     async fn layer() -> crate::sql_gateway::SqlGateway {
@@ -4219,7 +4217,7 @@ empty: No tasks.
         let l = &e.lenses[0];
         assert_eq!(l.id, "review/by-status");
         assert_eq!(l.slug, "by-status");
-        assert_eq!(l.title, "Tasks by status");
+        assert_eq!(l.title, "Items by state");
         assert_eq!(l.viz, LensViz::Table);
         assert_eq!(l.path, "oxplow/extensions/review/lenses/by-status.yaml");
         assert_eq!(
@@ -4229,8 +4227,8 @@ empty: No tasks.
         assert_eq!(
             l.columns[0].link,
             Some(LensLink {
-                kind: LensLinkKind::Task,
-                from: Some("id".into()),
+                kind: LensLinkKind::Page,
+                from: Some("ref".into()),
                 line: None,
                 base: None,
                 head: None,
@@ -4311,7 +4309,7 @@ empty: No tasks.
             find_lens(&cat(), dir.path(), "review/by-status")
                 .unwrap()
                 .title,
-            "Tasks by status"
+            "Items by state"
         );
         assert!(matches!(
             find_lens(&cat(), dir.path(), "review/nope"),
@@ -6564,7 +6562,7 @@ commands:
                 ),
                 ("t", "title: T\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n"),
                 ("b", "title: B\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l\ntree: { id: id, parent: p, label: l }\ngroup: { by: l }\n"),
-                ("c", "title: C\nviz: list\nquery: SELECT 1\ngroup: { link: { kind: task } }\n"),
+                ("c", "title: C\nviz: list\nquery: SELECT 1\ngroup: { link: { kind: page } }\n"),
                 ("d", "title: D\nviz: number\nquery: SELECT 1\ndepth: n\n"),
                 ("e", "title: E\nviz: list\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b, group: Ready }]\n"),
                 ("f", "title: F\nviz: list\nquery: SELECT 1\ngroup: { by: g }\nactions: [{ id: x, label: X, command: a.b, group: Ready, row: true }]\n"),
@@ -6628,7 +6626,7 @@ commands:
         let (d, _) = load_x(
             &[(
                 "a",
-                "title: A\nviz: table\nquery: SELECT 1 AS id\ngroup: { by: g1, link: { kind: task, from: g2 } }\nemphasis: e1\ndepth: d1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
+                "title: A\nviz: table\nquery: SELECT 1 AS id\ngroup: { by: g1, link: { kind: page, from: g2 } }\nemphasis: e1\ndepth: d1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
             )],
             "",
         );

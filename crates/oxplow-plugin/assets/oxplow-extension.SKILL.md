@@ -46,11 +46,14 @@ a lens file (below) only when they ask for a lasting page.
 
 ## 1. Find the data
 
-- `v_model` lists every queryable view (`v_stream`, `v_thread`, `v_task`,
+- `v_model` lists every queryable view (`v_stream`, `v_thread`, `v_work_item`,
   `v_effort`, `v_comment`, `v_wiki_page`, `v_snapshot`, `v_measure`,
   `v_capture`, `v_fact`, …) with its doc, and `v_model_column` documents
   every column: `SELECT view, name, sql_type, doc FROM v_model_column WHERE
-  view = 'v_task'`. **Read them first**; don't guess column names.
+  view = 'v_work_item'`. **Read them first**; don't guess column names.
+- Work items are `v_work_item` (with `v_work_item_link` and
+  `v_work_item_comment`): the active work list's, whichever it is — never
+  a particular list's own tables.
 - `query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
   here until the rows are what the user wants, before writing any files.
 - Only `v_*` views can be read; a physical table is refused, naming the
@@ -101,19 +104,19 @@ A manifest without `manifest: 2` doesn't load. Unknown keys are errors, and `che
 
 ```yaml
 title: Waiting on me
-description: Blocked tasks and open follow-up comments in this stream.
+description: Blocked work items on this stream's threads.
 params:                         # optional; bound as :name in the query
   - { name: stream_id, label: Stream }   # filled in: the viewer's stream
-  # task_id / effort_id / thread_id / stream_id are pickers on the lens page
+  # ref / effort_id / thread_id / stream_id are pickers on the lens page
 query: |
-  SELECT id, title, status, thread_id
-  FROM v_task
-  WHERE status = 'blocked' AND stream_id = :stream_id
-  ORDER BY updated_at DESC
+  SELECT w.ref, w.title, w.state, t.title AS thread
+  FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id
+  WHERE w.state = 'blocked' AND t.stream_id = :stream_id
+  ORDER BY w.updated_at DESC
 viz: table                      # table | list | number | markdown | bar | line | treemap | grid | custom
 columns:                        # optional; controls headers, order and links
-  - { key: title, label: Task, link: { kind: task, from: id } }
-  - { key: status }
+  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: thread }
   # - { key: took, unit: unit }  # a number shown in another column's unit (ms, %, lines)
 empty: Nothing is waiting on you.
 ```
@@ -144,7 +147,8 @@ empty: Nothing is waiting on you.
     are what the component gets and what an agent reads (as a table).
     Reach for it only when no built-in viz fits.
 - **`link.kind`** makes cells clickable:
-  - `task` takes a task id (a bare `v_task.id` number works).
+  - `page` takes any page's ref — a work item's (`v_work_item.ref`),
+    `commit:<sha>`, `page:git-dashboard`, ….
   - `file` takes a repo-relative path; add `line: <column>` to open at a
     line.
   - `wiki` takes a slug.
@@ -174,8 +178,7 @@ empty: Nothing is waiting on you.
   - `vcs.status.header` (a strip above the uncommitted changes) and
     `vcs.history.sidebar` (beside Git History) → `stream_id`;
   - `work_item.detail.body` and `work_item.detail.sidebar` (a work item's
-    page, any provider's) → `ref`, `task_id` (null for an item that isn't
-    an oxplow task);
+    page, whichever list) → `ref`;
   - `thread.plan.header` (the Work panel, compact) → `thread_id`;
   - `settings.section` → no params; Settings shows a section named after
     the extension with its mounted lenses (its status or setup views).
@@ -427,12 +430,12 @@ models:
 
 ```sql
 -- models/blocked.sql
-SELECT id, title FROM ref('task') WHERE status = 'blocked'
+SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'
 ```
 
 - It publishes as `v_<extension>_<name>` (dashes as underscores):
   `v_late_work_blocked` for extension `late-work`.
-- Read through `ref()` only: `ref('task')` is a core model (`v_task`),
+- Read through `ref()` only: `ref('work_item')` is a core model (`v_work_item`),
   `ref('blocked')` your own model or synced entity, and
   `ref('other-ext/name')` another extension's. `source('<table>')` is only
   for your own source tables (`ext__<ext>__<entity>`).

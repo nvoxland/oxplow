@@ -272,23 +272,23 @@ the `metric.record` command, `{ key, value, subject?, dims? }` (stored
 
 ## Metrics over data (entity metrics)
 
-When the number is about records oxplow already has (tasks, commits, test
-runs, an extension's synced entities), skip the collector. Aggregate the view
+When the number is about records oxplow already has (work items, commits,
+test runs, an extension's synced entities), skip the collector. Aggregate the view
 directly (the views and their columns are in `v_model` / `v_model_column`):
 
 ```yaml
 metrics:
-  - key: repo.tasks_done
-    title: Tasks completed
-    entity: v_task
-    where: "status = 'done'"
-    time: completed_at        # optional: an event metric, bucketed by this time
+  - key: repo.items_done
+    title: Work items completed
+    entity: v_work_item
+    where: "state = 'done'"
+    time: closed_at           # optional: an event metric, bucketed by this time
     aggregation: count        # count | count_distinct | sum | avg | min | max | median | p90
-    # value: "e.sort_index"   # the expression aggregated (not needed for count)
+    # value: "e.rank"         # the expression aggregated (not needed for count)
 dimensions:
   - key: repo.priority
-    entity: v_task
-    expr: "e.priority"
+    entity: v_work_item
+    expr: "json_extract(e.native, '$.priority')"   # a field the list declares
     # join: "LEFT JOIN v_thread t ON t.id = e.thread_id"
 ```
 

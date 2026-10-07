@@ -378,8 +378,8 @@ the default Work panel view — archived rows fold into the Done
 section's bucketing but aren't rendered unless the user flips the "Show
 archived (N)" toggle in the Done section header. The same header carries
 an "Archive all" action that bulk-archives every visible Done/Canceled
-row. The orchestrator's `read_task_options` blocker check treats
-archived the same as done/canceled. `parent_id` chains items under
+row. `next_work_item`'s blocker check reads the interface, where
+archived is done or canceled. `parent_id` chains items under
 epics. The `description` (markdown) is the single prose field, structured
 however the author sees fit — the model is not prompted toward any
 template, and is meant to be human-readable, wiki-formatted for
@@ -1949,13 +1949,14 @@ Insert publishes `page-visit.changed` for renderer-side invalidation.
 
 ### The rail's Finished section
 
-Read from the models (`workItems.readRecentlyFinished`, P6.E1b): done
-tasks (`v_task.completed_at`) and the knowledge pages the thread wrote
-(`v_knowledge_touch`, over `wiki_page_thread_update`; the project view
-reads `v_knowledge_page.updated_at`), newest first. "Clear" is the
-viewer's own gesture: a per-thread cursor in this browser
-(`oxplow.finished.clearedAt`), and entries at or before it are hidden
-until something newer lands. No table, no RPC.
+The Work panel's "Finished" group is the bundled extension's
+`thread_work` model: the thread's done work items (`v_work_item.closed_at`,
+whichever list is active), the knowledge pages it wrote
+(`v_knowledge_touch`, over `wiki_page_thread_update`) and its closed
+unlinked efforts, newest first. "Clear" runs
+`oxplow_bundled.clear_finished`, which logs an event the
+`finished_cleared` model reads, so entries closed before it are hidden
+until something newer lands.
 
 ### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migrations `V22__comments.sql`, `V23__comment_resolved_at.sql`)
 

@@ -346,10 +346,10 @@ mod tests {
         assert_eq!(canonical_name(&call(ToolKind::Think)), None);
         assert_eq!(canonical_name(&call(ToolKind::SwitchMode)), None);
         let mut mcp = call(ToolKind::Other);
-        mcp.title = "mcp__oxplow__list_tasks (MCP)".into();
+        mcp.title = "mcp__oxplow__list_work_items (MCP)".into();
         assert_eq!(
             canonical_name(&mcp).as_deref(),
-            Some("mcp__oxplow__list_tasks")
+            Some("mcp__oxplow__list_work_items")
         );
         let mut named = call(ToolKind::Other);
         named.name = Some("custom".into());

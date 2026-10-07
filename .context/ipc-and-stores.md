@@ -416,8 +416,8 @@ Surfaces:
   exclusively via the MCP tool surface; the UI never adds.
 - `useBackendSubscriptions` re-reads the affected thread's work on
   `followup.changed`, and every loaded thread's (and the backlog's) when
-  a task model changes (`modelsChanged` naming `v_task`, `v_task_note`,
-  `v_work_item`, `v_effort` or `v_effort_file` — `workItems.tasksChanged`).
+  a model its reads read changes (`readsChanged` over the lists' `reads`:
+  `v_work_item`, `v_work_item_comment`, …).
 
 Rendering: `WorkGroupList.tsx` renders each follow-up as an italic
 muted "↳ follow-up: <note>" line at the very top of the To Do section

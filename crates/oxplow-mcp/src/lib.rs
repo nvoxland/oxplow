@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::Services;
 use oxplow_domain::comment::CommentThread;
-use oxplow_domain::stores::{CommentStore, TaskStore, ThreadNoteStore, ThreadStore};
-use oxplow_domain::{CommentStatus, StreamId, Task, TaskPriority, TaskStatus, ThreadId};
+use oxplow_domain::stores::{CommentStore, ThreadNoteStore, ThreadStore};
+use oxplow_domain::{CommentStatus, StreamId, ThreadId};
 
 mod lenient_params;
 // Drop-in for rmcp's `Parameters` that tolerates camelCase/kebab aliases
@@ -136,52 +136,22 @@ pub struct ThreadIdParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct ListTasksParams {
-    /// Task status to filter by — one of "ready", "in_progress", "blocked",
-    /// "done", "canceled", "archived", or "backlog" (thread-detached tasks).
-    /// Optional in the wire shape so a missing value yields a readable
-    /// error naming the choices rather than a raw transport -32602.
-    status: Option<String>,
-    /// Required for all status values except "backlog".
-    thread_id: Option<String>,
-}
-
-/// Slim task row returned by `list_tasks`. Carries only the fields an
-/// agent needs to scan and pick work. Description is truncated to 500
-/// chars.
-#[derive(Debug, Serialize)]
-struct TaskListRow {
-    id: String,
-    parent_id: Option<String>,
-    title: String,
-    description: String,
-    status: TaskStatus,
-    priority: TaskPriority,
-    sort_index: i64,
-}
-
-fn task_list_row(t: Task) -> TaskListRow {
-    let raw = t.description.as_str();
-    let description = if raw.chars().count() > 500 {
-        let truncated: String = raw.chars().take(500).collect();
-        format!("{}…", truncated)
-    } else {
-        raw.to_string()
-    };
-    TaskListRow {
-        id: t.id.to_string(),
-        parent_id: t.parent_id.map(|id| id.to_string()),
-        title: t.title,
-        description,
-        status: t.status,
-        priority: t.priority,
-        sort_index: t.sort_index,
-    }
+struct ListWorkItemsParams {
+    /// The list to read: a thread's (`thr3`) or `"backlog"` (items on no
+    /// thread).
+    list: String,
+    /// The canonical states to keep — any of "todo", "in_progress",
+    /// "blocked", "done", "canceled". Omit for the open ones (todo,
+    /// in_progress, blocked).
+    #[serde(default)]
+    states: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct TaskIdParams {
-    pub id: String,
+pub struct WorkItemRefParams {
+    /// The item's ref, `work_item:<provider>:<id>`.
+    #[serde(rename = "ref")]
+    pub item_ref: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1825,83 +1795,94 @@ impl OxplowMcp {
         json_result(&list)
     }
 
-    // ---------- tasks ----------
+    // ---------- work items ----------
+    //
+    // Read through the work-item interface, whichever list is active
+    // (`oxplow_app::work_item_reads`); with none, they're empty. Writes
+    // are the `work_item.*` commands, through `run_command`.
 
     #[tool(
-        description = "List tasks filtered by status. Pass status = \"backlog\" for thread-detached \
-                       backlog items (no thread_id needed). Any other status (\"ready\", \
-                       \"in_progress\", \"blocked\", \"done\", \"canceled\", \"archived\") requires \
-                       thread_id. Returns a slim representation — description truncated to 500 \
-                       chars. Use get_task for the full record."
+        description = "List the work items on a list: a thread's (`list: \"thr3\"`) or the \
+                       backlog (`list: \"backlog\"`), in list order. `states` keeps the given \
+                       canonical states (todo, in_progress, blocked, done, canceled); omitted, \
+                       the open ones. Each body is cut to 500 chars — get_work_item has the whole \
+                       item. Items come from the active work list, whichever it is."
     )]
-    async fn list_tasks(
+    async fn list_work_items(
         &self,
-        params: Parameters<ListTasksParams>,
+        params: Parameters<ListWorkItemsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let ListTasksParams { status, thread_id } = params.0;
-        let status = status.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let status = status.ok_or_else(|| {
-            McpError::invalid_params(
-                "list_tasks: pass `status` — one of \"ready\", \"in_progress\", \"blocked\", \
-                 \"done\", \"canceled\", \"archived\", or \"backlog\"",
-                None,
-            )
-        })?;
-        let list = if status == "backlog" {
-            self.services
-                .task_store
-                .list_backlog()
-                .await
-                .map_err(internal)?
+        use oxplow_app::work_item_reads::{list, Scope};
+        let ListWorkItemsParams {
+            list: which,
+            states,
+        } = params.0;
+        let scope = if which == "backlog" {
+            Scope::Backlog
         } else {
-            let task_status = str_to_task_status(status)?;
-            let tid = thread_id.ok_or_else(|| {
-                McpError::invalid_params("thread_id is required for non-backlog status", None)
-            })?;
-            expect_id_kind("list_tasks", "thread_id", &tid, ID_THREAD)?;
-            let tid = parse_thread_id(&tid)?;
-            self.services
-                .task_store
-                .list_by_status_for_thread(&tid, task_status)
-                .await
-                .map_err(internal)?
+            expect_id_kind("list_work_items", "list", &which, ID_THREAD)?;
+            Scope::Thread(parse_thread_id(&which)?)
         };
-        let rows: Vec<TaskListRow> = list.into_iter().map(task_list_row).collect();
+        let states = states.unwrap_or_else(|| {
+            ["todo", "in_progress", "blocked"]
+                .map(str::to_string)
+                .to_vec()
+        });
+        if let Some(bad) = states
+            .iter()
+            .find(|s| !["todo", "in_progress", "blocked", "done", "canceled"].contains(&s.as_str()))
+        {
+            return Err(McpError::invalid_params(
+                format!(
+                    "list_work_items: unknown state \"{bad}\"; valid: todo, in_progress, blocked, \
+                     done, canceled"
+                ),
+                None,
+            ));
+        }
+        let rows = list(&self.services.sql, &scope, &states)
+            .await
+            .map_err(internal)?;
         json_result(&rows)
     }
 
     #[tool(
-        description = "Return what to work on next on a thread. If the highest-priority ready item \
-                       is an epic, returns the epic and all its ready descendants as one unit. \
-                       Otherwise returns all ready non-epic items so you can pick one or a related \
-                       cluster. Honors `blocks` links — items waiting on a non-done blocker are \
-                       skipped. Returns { mode: \"empty\" } when nothing is ready."
+        description = "Get one work item by ref (`work_item:<provider>:<id>`): the whole item, its \
+                       links (both ways) and its comments. Null when it isn't on the active list."
     )]
-    async fn read_task_options(
+    async fn get_work_item(
+        &self,
+        params: Parameters<WorkItemRefParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let item = oxplow_app::work_item_reads::get(&self.services.sql, &params.0.item_ref)
+            .await
+            .map_err(internal)?;
+        json_result(&item)
+    }
+
+    #[tool(
+        description = "What to work on next on a thread's list. If the first ready (`todo`) item \
+                       is an epic (an item with children), returns it and its ready descendants \
+                       as one unit (`mode: \"epic\"`); otherwise every ready item that isn't an \
+                       epic, to pick one or a related cluster (`mode: \"standalone\"`). Items an \
+                       open `blocks` link holds are skipped. `mode: \"empty\"` when nothing is \
+                       ready."
+    )]
+    async fn next_work_item(
         &self,
         params: Parameters<ThreadIdParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind(
-            "read_task_options",
+            "next_work_item",
             "thread_id",
             &params.0.thread_id,
             ID_THREAD,
         )?;
         let thread_id = parse_thread_id(&params.0.thread_id)?;
-        let result = self
-            .services
-            .tasks
-            .read_task_options(&thread_id, &*self.services.task_link_store)
+        let next = oxplow_app::work_item_reads::next(&self.services.sql, &thread_id)
             .await
             .map_err(internal)?;
-        json_result(&result)
-    }
-
-    #[tool(description = "Get a single task by id.")]
-    async fn get_task(&self, params: Parameters<TaskIdParams>) -> Result<CallToolResult, McpError> {
-        let id = parse_task_id("get_task", "id", &params.0.id)?;
-        let item = self.services.task_store.get(id).await.map_err(internal)?;
-        json_result(&item)
+        json_result(&next)
     }
 
     // ---------- thread notes ----------
@@ -2610,9 +2591,9 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "read_event_content",
     "list_code_quality_findings",
     "list_thread_work",
-    "list_tasks",
-    "read_task_options",
-    "get_task",
+    "list_work_items",
+    "get_work_item",
+    "next_work_item",
     "list_thread_notes",
     "get_open_effort",
     "list_effort_observations",
@@ -2704,33 +2685,6 @@ impl OxplowMcp {
     }
 }
 
-impl OxplowMcp {
-    /// The tools offered now: an implementation's own (`list_tasks` is
-    /// oxplow's tasks') only while it's the active one
-    /// (`oxplow_app::capabilities::Active`).
-    fn offered_tools(&self) -> Vec<Tool> {
-        let active = self.active();
-        self.tool_router
-            .list_all()
-            .into_iter()
-            .filter(|t| active.offers_tool(&t.name))
-            .collect()
-    }
-
-    /// Why the tool `name` isn't offered now, or `None` when it is.
-    fn tool_refusal(&self, name: &str) -> Option<String> {
-        self.active().tool_refusal(name)
-    }
-
-    fn active(&self) -> oxplow_app::capabilities::Active {
-        self.services
-            .capabilities
-            .snapshot(&oxplow_app::config_service::read_config(
-                &self.services.config,
-            ))
-    }
-}
-
 impl ServerHandler for OxplowMcp {
     fn get_info(&self) -> ServerConfig {
         // `ServerConfig` (née `ServerInfo`, renamed in rmcp 3) is
@@ -2771,7 +2725,7 @@ impl ServerHandler for OxplowMcp {
             .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
-            tools: stamp_read_only_hints(self.offered_tools()),
+            tools: stamp_read_only_hints(self.tool_router.list_all()),
             meta: None,
             next_cursor: None,
             ttl_ms: supports_cache_hints.then_some(0),
@@ -2784,9 +2738,6 @@ impl ServerHandler for OxplowMcp {
         request: CallToolRequestParams,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
-        if let Some(message) = self.tool_refusal(&request.name) {
-            return Err(McpError::invalid_params(message, None));
-        }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
     }
@@ -2956,26 +2907,6 @@ fn resolve_comment_scope(scope: Option<&str>, id: Option<&str>) -> Result<Commen
 /// passed, the kind it was inferred to be, and the kind expected. This
 /// converts opaque downstream FK-violation errors into actionable
 /// guidance at the protocol boundary.
-/// Parse a task id from its string form. Returns an error suitable for
-/// returning straight from a tool handler when the input is not a
-/// non-negative integer.
-fn parse_task_id(tool: &str, param: &str, value: &str) -> Result<oxplow_domain::TaskId, McpError> {
-    let v = value.trim();
-    // Accept the prefixed form (`tsk42`) or a bare positive integer (`42`).
-    if let Some(id) = oxplow_domain::TaskId::try_from_str(v) {
-        return Ok(id);
-    }
-    if let Ok(n) = v.parse::<i64>() {
-        if n > 0 {
-            return Ok(oxplow_domain::TaskId::new(n));
-        }
-    }
-    Err(McpError::invalid_params(
-        format!("{tool}: `{param}` expects a task id (e.g. `tsk42` or `42`), got `{value}`"),
-        None,
-    ))
-}
-
 fn parse_stream_id(value: &str) -> Result<StreamId, McpError> {
     StreamId::try_from_str(value)
         .ok_or_else(|| McpError::invalid_params(format!("invalid stream id `{value}`"), None))
@@ -2988,8 +2919,6 @@ fn parse_thread_id(value: &str) -> Result<ThreadId, McpError> {
 /// String-id prefix validator. Every external id is now a
 /// `<3-letter-prefix><int>` string (e.g. `thr21`); this helper confirms
 /// a caller-supplied value parses to the [`EntityKind`] the tool wants.
-/// Task ids additionally accept the bare-integer form via
-/// [`parse_task_id`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct IdPrefix {
     pub prefix: &'static str,
@@ -3008,24 +2937,6 @@ pub(crate) const ID_FOLLOWUP: IdPrefix = IdPrefix {
     prefix: "fup",
     label: "follow-up id (fup…)",
 };
-
-fn str_to_task_status(s: &str) -> Result<TaskStatus, McpError> {
-    match s {
-        "ready" => Ok(TaskStatus::Ready),
-        "in_progress" => Ok(TaskStatus::InProgress),
-        "blocked" => Ok(TaskStatus::Blocked),
-        "done" => Ok(TaskStatus::Done),
-        "canceled" => Ok(TaskStatus::Canceled),
-        "archived" => Ok(TaskStatus::Archived),
-        other => Err(McpError::invalid_params(
-            format!(
-                "unknown status \"{other}\"; valid values: ready, in_progress, blocked, done, \
-                 canceled, archived, backlog"
-            ),
-            None,
-        )),
-    }
-}
 
 fn expect_id_kind(
     tool: &str,
@@ -3936,24 +3847,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_backlog_includes_unassigned_items() {
+    async fn the_backlog_lists_the_items_on_no_thread() {
         let (_proj, services, server) = boot();
-        let backlog_item = make_task(None, "do the thing");
-        let id = services.task_store.insert(&backlog_item).await.unwrap();
-
+        let id = services
+            .task_store
+            .insert(&make_task(None, "do the thing"))
+            .await
+            .unwrap();
         let r = server
-            .list_tasks(Parameters(ListTasksParams {
-                status: Some("backlog".to_string()),
-                thread_id: None,
+            .list_work_items(Parameters(ListWorkItemsParams {
+                list: "backlog".into(),
+                states: None,
             }))
             .await
             .unwrap();
-        let body = text_payload(r);
-        assert!(
-            body.contains(&id.to_string()),
-            "backlog item missing from result: {body}",
-        );
-        assert!(body.contains("do the thing"), "title missing: {body}");
+        let rows: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
+        assert_eq!(rows[0]["ref"], format!("work_item:oxplow:{id}"), "{rows}");
+        assert_eq!(rows[0]["title"], "do the thing");
+        let bad = server
+            .list_work_items(Parameters(ListWorkItemsParams {
+                list: "backlog".into(),
+                states: Some(vec!["ready".into()]),
+            }))
+            .await
+            .unwrap_err();
+        assert!(bad.message.contains("unknown state"), "{bad:?}");
     }
 
     async fn thread_context(server: &OxplowMcp, thread: ThreadId) -> serde_json::Value {
@@ -4002,48 +3920,43 @@ mod tests {
         );
     }
 
-    /// oxplow's tasks' own tools are offered, and run, only while they're
-    /// the work list.
+    /// The work-item tools read the active list, whichever it is: an item
+    /// round-trips while oxplow's tasks are the list, and nothing is there
+    /// with none.
     #[tokio::test]
-    async fn the_task_tools_follow_the_active_work_list() {
+    async fn the_work_item_tools_read_the_active_list() {
         let (_proj, services, server) = boot();
-        let names = |server: &OxplowMcp| -> Vec<String> {
-            server
-                .offered_tools()
-                .into_iter()
-                .map(|t| t.name.into_owned())
-                .collect()
+        let id = services
+            .task_store
+            .insert(&make_task(None, "round trip"))
+            .await
+            .unwrap();
+        let item_ref = format!("work_item:oxplow:{id}");
+        let get = |server: &OxplowMcp| {
+            let item_ref = item_ref.clone();
+            let server = server.clone();
+            async move {
+                let r = server
+                    .get_work_item(Parameters(WorkItemRefParams { item_ref }))
+                    .await
+                    .unwrap();
+                serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap()
+            }
         };
-        assert!(names(&server).iter().any(|n| n == "list_tasks"));
-        assert_eq!(server.tool_refusal("get_task"), None);
+        assert_eq!(get(&server).await["title"], "round trip");
         services
             .config
             .write()
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), "none".into());
-        let offered = names(&server);
-        for tool in ["list_tasks", "get_task", "read_task_options"] {
-            assert!(!offered.iter().any(|n| n == tool), "{tool} hidden");
-        }
-        assert!(offered.iter().any(|n| n == "query_sql"));
-        assert!(server
-            .tool_refusal("get_task")
-            .is_some_and(|m| m.contains("isn't the active work list")));
-    }
-
-    #[tokio::test]
-    async fn get_task_round_trips() {
-        let (_proj, services, server) = boot();
-        let item = make_task(None, "round trip");
-        let id = services.task_store.insert(&item).await.unwrap();
-
-        let r = server
-            .get_task(Parameters(TaskIdParams { id: id.to_string() }))
+        let config = oxplow_app::config_service::read_config(&services.config);
+        services
+            .capabilities
+            .publish(&config, &services.db)
             .await
             .unwrap();
-        let body = text_payload(r);
-        assert!(body.contains("round trip"), "unexpected body: {body}");
+        assert_eq!(get(&server).await, serde_json::Value::Null);
     }
 
     fn parts_with(headers: &[(&str, &str)], uri: &str) -> http::request::Parts {

@@ -113,7 +113,9 @@ pub const MANIFEST: &[Capability] = &[
     // A dry run for an agent writing a source in its worktree.
     agent("preview_collector"),
     both("list_streams"),
-    agent("get_task"),
+    // The work-item interface, read for the agent; the UI reads the
+    // models (`v_work_item`).
+    agent("get_work_item"),
     both("list_thread_notes"),
     agent("list_effort_observations"),
     // Per-effort metric roll-up for the task-page panel (tsk250): the
@@ -328,10 +330,10 @@ pub const MANIFEST: &[Capability] = &[
     agent("list_lenses"),
     // ---- both (names diverge across surfaces) ----
     both_named("thread.list", "list_threads", "list_thread_work"),
-    agent("list_tasks"),
+    agent("list_work_items"),
     both_named("comment.list", "list_comments_for_stream", "list_comments"),
     // ---- agent-only (orchestration / agent affordances) ----
-    agent("read_task_options"),
+    agent("next_work_item"),
     agent("get_thread_context"),
     agent("wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----

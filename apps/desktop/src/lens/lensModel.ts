@@ -152,10 +152,6 @@ export function cellLinkRef(
   if (v === null || v === undefined || v === "") return null;
   const s = String(v);
   switch (link.kind) {
-    case "task":
-      // A bare id names nothing without its list: a lens links a work
-      // item by its ref (`kind: page`). The kind leaves the lens format.
-      return null;
     case "file": {
       const ref = fileRef(s);
       const lineIdx = link.line ? resultColumns.indexOf(link.line) : -1;

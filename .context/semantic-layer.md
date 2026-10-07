@@ -98,7 +98,7 @@ entity that has the columns.
 A **metric** is an aggregation over an entity **or** a fact set, sliced by
 dimensions:
 
-- `count(v_task) where status = 'done'`
+- `count(v_work_item) where state = 'done'`
 - `median(v_github_pr.merged_at - opened_at)`
 - `avg(fact oxplow.coverage)`
 
@@ -544,7 +544,7 @@ and `v_model_test` are the catalog of all of them:
 |---|---|
 | `v_stream` | streams (worktrees) |
 | `v_thread` | threads within a stream |
-| `v_task` | tasks, excluding deleted; carries the thread's `stream_id` |
+| `v_task` | oxplow's own tasks (one work-list implementation; everything else reads `v_work_item`), excluding deleted; carries the thread's `stream_id` |
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
 | `v_work_item` | work items from every provider (`ref`, `provider`, canonical `state`, `native_state`, `native` JSON, `parent_ref`), excluding deleted; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
@@ -849,7 +849,7 @@ entities from data already in the semantic layer:
   - id: hot
     runtime: starlark          # def transform(input): return {"entities": {...}}
     entry: sources/hot.star
-    input: "SELECT id, title FROM v_task WHERE priority = 'high'"
+    input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
     entities: [...]
 ```
 

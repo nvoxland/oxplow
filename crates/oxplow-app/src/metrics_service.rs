@@ -2715,7 +2715,9 @@ async fn primary_stream(layer: &crate::sql_gateway::SqlGateway) -> Option<i64> {
 /// Built-in entity dimensions (tsk322).
 fn builtin_entity_dimensions() -> Vec<NewDimension> {
     let mut priority = NewDimension::categorical("work.priority", "Priority");
-    priority.entity_json = Some(r#"{"view":"v_task","expr":"e.priority"}"#.into());
+    // A field a work list declares (`native`); null for a list without it.
+    priority.entity_json =
+        Some(r#"{"view":"v_work_item","expr":"json_extract(e.native, '$.priority')"}"#.into());
     vec![priority]
 }
 
@@ -2732,11 +2734,11 @@ fn builtin_entity_specs() -> Vec<NewMetricSpec> {
         make(
             "work.tasks_completed",
             "Tasks completed",
-            "Tasks marked done, by the day they were completed.",
+            "Work items done, by the day they were closed.",
             oxplow_config::EntitySpec {
-                view: "v_task".into(),
-                where_: Some("status = 'done'".into()),
-                time: Some("completed_at".into()),
+                view: "v_work_item".into(),
+                where_: Some("state = 'done'".into()),
+                time: Some("closed_at".into()),
                 value: None,
                 aggregation: "count".into(),
             },
@@ -2744,10 +2746,10 @@ fn builtin_entity_specs() -> Vec<NewMetricSpec> {
         make(
             "work.open_tasks",
             "Open tasks",
-            "Tasks ready, in progress or blocked, captured over time.",
+            "Work items ready, in progress or blocked, captured over time.",
             oxplow_config::EntitySpec {
-                view: "v_task".into(),
-                where_: Some("status IN ('ready', 'in_progress', 'blocked')".into()),
+                view: "v_work_item".into(),
+                where_: Some("state IN ('todo', 'in_progress', 'blocked')".into()),
                 time: None,
                 value: None,
                 aggregation: "count".into(),
@@ -5489,12 +5491,13 @@ def transform(input):
         svc.db
             .transaction(|c| {
                 c.execute_batch(
-                    "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at, completed_at) VALUES
-                       ((SELECT min(id) FROM threads), 'a', 'done', 'high', 'agent', '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
-                       ((SELECT min(id) FROM threads), 'b', 'done', 'low', 'agent', '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
-                       ((SELECT min(id) FROM threads), 'c', 'ready', 'high', 'agent', '2026-09-01', '2026-09-01', NULL),
-                       ((SELECT min(id) FROM threads), 'd', 'blocked', 'low', 'agent', '2026-09-01', '2026-09-01', NULL),
-                       ((SELECT min(id) FROM threads), 'e', 'ready', 'high', 'agent', '2026-09-01', '2026-09-01', NULL);",
+                    // The active list's items, as the interface holds them.
+                    "INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, created_at, updated_at, closed_at) VALUES
+                       ('work_item:oxplow:tsk1', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
+                       ('work_item:oxplow:tsk2', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
+                       ('work_item:oxplow:tsk3', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
+                       ('work_item:oxplow:tsk4', 'oxplow', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
+                       ('work_item:oxplow:tsk5', 'oxplow', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL);",
                 )
                 .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))
             })
@@ -5503,7 +5506,7 @@ def transform(input):
         // A project entity metric with a typo'd column never reaches the catalog.
         std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "metrics:\n  - key: repo.bad\n    entity: v_task\n    where: \"no_such_col = 1\"\n",
+            "metrics:\n  - key: repo.bad\n    entity: v_work_item\n    where: \"no_such_col = 1\"\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();

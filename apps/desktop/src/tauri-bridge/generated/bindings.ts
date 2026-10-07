@@ -3502,8 +3502,6 @@ export type LensLink = {
 
 // A page a column value can link to.
 export type LensLinkKind = 
-// `task:<id>`; the value is a task id.
-"task" | 
 // `file:<path>`; the value is a repo-relative path.
 "file" | 
 // `wiki:<slug>`.

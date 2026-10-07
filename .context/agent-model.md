@@ -731,18 +731,17 @@ subagent can still write its finding to a thread note allocated for it
 (`knowledge.add_note`, then `knowledge.update_note`), read back with
 `list_thread_notes`.
 
-`read_task_options` (`crates/oxplow-mcp/src/lib.rs`, backed by
-`taskstore.readWorkOptions`) suggests what to work on next on a thread,
-in one of three shapes:
-- `{ mode: "epic", epic, children }` — the highest-priority ready item is
-  an epic; all ready descendants (filtered for blocks links, transitively)
-  are included as children.
-- `{ mode: "standalone", items }` — the head is not an epic; all ready
-  non-epic items are returned with link edges inline so the agent can
-  pick one or a link-related cluster. Epics are excluded from this list.
-- `{ mode: "empty" }` — nothing ready.
+`next_work_item` (`crates/oxplow-mcp/src/lib.rs`, backed by
+`oxplow_app::work_item_reads::next`) suggests what to work on next on a
+thread's list, whichever list is active, in one of three shapes:
+- `{ mode: "epic", epic, children }` — the first ready (`todo`) item, in
+  list order, is an epic (an item with children); its ready descendants
+  no open `blocks` link holds are its children.
+- `{ mode: "standalone", items }` — the head is not an epic; every ready
+  non-epic item no open blocker holds, to pick one or a cluster.
+- `{ mode: "empty" }` — nothing ready (always, with none).
 
-`/work-next` (the bundled extension's command, offered while oxplow's tasks are the work list) calls it and works the item it picks, moving it to
+`/work-next` (the bundled extension's command) calls it and works the item it picks, moving it to
 `in_progress` so the effort links to it. Claude Code's built-in
 `TaskCreate` is a within-turn micro-planner and never mirrors oxplow
 items.
@@ -769,13 +768,12 @@ namespace on top, the agent calls `mcp__oxplow__run_command` —
 not the legacy `mcp__oxplow__oxplow__run_command`. The long form
 still resolves on `tools/call` for back-compat.
 
-**Tools follow the active implementation.** A tool an implementation
-owns — `list_tasks`, `get_task`, `read_task_options` are oxplow's tasks'
-(`capabilities::BUILT_INS` `tools`) — is listed by `list_tools` and run by
-`call_tool` only while that implementation is active (`offered_tools`,
-`tool_refusal`); otherwise `call_tool` refuses saying whose it is. A
-client that cached the list before a switch sees the refusal: no
-`tools/list_changed` is sent.
+**Tools read the interface.** No MCP tool belongs to one implementation:
+the work-item tools (`list_work_items`, `get_work_item`,
+`next_work_item`) read whichever list is active (empty with none), so
+the tool list never changes with a switch. What an implementation owns
+is commands — a provider instance's namespace — offered only while it's
+active (`capabilities::Active::refusal`).
 
 **The server's instructions** (`get_info`) are the one text every
 harness — Claude Code, Codex, opencode, ACP agents — shows its agent. They
@@ -911,9 +909,9 @@ between canonical states directly — `blocked → in_progress` (unblock)
 and `done → in_progress` (reopen) need no hop through `todo`; archive
 is `{ to: done|canceled, native_state: archived }`.
 
-- Task reads are MCP tools (`list_thread_work`, `list_tasks`,
-  `read_task_options`, `get_task`, `get_open_effort`, …); every task
-  write is `run_command` (P8.A10 deleted the MCP task-write tools —
+- Work-item reads are MCP tools (`list_work_items`, `get_work_item`,
+  `next_work_item`, `get_open_effort`, …) over the work-item interface;
+  every write is `run_command` (P8.A10 deleted the MCP task-write tools —
   `create_task`, `update_task`, `complete_task`, `upsert_task`,
   `transition_tasks`, `reorder_tasks`, `file_epic_with_children`):
   `work_item.create { title, body?, parent_ref?, state?, native?,
