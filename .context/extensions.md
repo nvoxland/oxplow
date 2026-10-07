@@ -2395,10 +2395,13 @@ implementations:
   `oxplow:snapshots`), the way a collector names `oxplow:junit`. A
   built-in's features are core's table's — it's core's code — never the
   manifest's.
-- `oxplow-bundled` declares the three defaults. Disabled, nothing declares
-  them: the work list and the effort policy resolve to none, snapshots
-  (required) to core's default (`capabilities::CapabilityRegistry::
-  resolve`, `.context/work-tracking.md`).
+- A required capability's default is core's own: `CapabilityRegistry::new`
+  registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
+  whatever is disabled, and a manifest declaring that id is an error.
+- `oxplow-bundled` declares the optional defaults (the work list and the
+  effort policy). Disabled, nothing declares them and both resolve to
+  none (`capabilities::CapabilityRegistry::resolve`,
+  `.context/work-tracking.md`).
 
 **Declared needs.** A lens or an advisory may declare `needs:
 [work_items, snapshots.contents]` — capabilities, or one of a

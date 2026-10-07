@@ -79,6 +79,16 @@ pub struct BuiltIn {
     pub tools: &'static [&'static str],
 }
 
+/// A built-in's features, as an implementation declares them.
+fn built_in_features(b: &BuiltIn) -> Value {
+    Value::Object(
+        b.features
+            .iter()
+            .map(|f| (f.to_string(), Value::Bool(true)))
+            .collect(),
+    )
+}
+
 /// The built-in `entry` names, if core has it.
 pub fn built_in(entry: &str) -> Option<&'static BuiltIn> {
     BUILT_INS.iter().find(|b| b.entry == entry)
@@ -291,6 +301,24 @@ impl CapabilityRegistry {
                 .iter()
                 .filter(|c| c.optional)
                 .map(|c| Implementation::none(c.id)),
+        );
+        // A required capability's default is core's own, always there —
+        // what it falls back to whatever is disabled.
+        core.extend(
+            capability::CAPABILITIES
+                .iter()
+                .filter(|c| c.choosable && !c.optional)
+                .filter_map(|c| {
+                    let b = BUILT_INS.iter().find(|b| b.capability == c.id)?;
+                    Some(Implementation {
+                        capability: c.id.into(),
+                        id: c.default.into(),
+                        title: b.title.into(),
+                        extension: None,
+                        source: Source::BuiltIn(b.entry),
+                        features: built_in_features(b),
+                    })
+                }),
         );
         Self {
             core: RwLock::new(core),
@@ -575,12 +603,7 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
                     title: d.title.clone().unwrap_or_else(|| b.title.to_string()),
                     extension: Some(e.name.clone()),
                     source: Source::BuiltIn(b.entry),
-                    features: Value::Object(
-                        b.features
-                            .iter()
-                            .map(|f| (f.to_string(), Value::Bool(true)))
-                            .collect(),
-                    ),
+                    features: built_in_features(b),
                 })
             })
         })
@@ -716,7 +739,6 @@ mod tests {
             r.set_declared(vec![
                 builtin("work_items", "oxplow", "oxplow:tasks"),
                 builtin("effort_policy", "oxplow", "oxplow:commit-or-switch"),
-                builtin("snapshots", "oxplow", "oxplow:snapshots"),
             ]);
         }
         r
@@ -783,6 +805,11 @@ mod tests {
         let snapshots = disabled.resolve(&none, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
+            ("oxplow", ChosenBy::Default)
+        );
+        let hashes = disabled.resolve(&config(&[("snapshots", "hashes")], &[]), "snapshots");
+        assert_eq!(
+            (hashes.id.as_str(), hashes.chosen_by),
             ("oxplow", ChosenBy::Fallback)
         );
         assert_eq!(disabled.active(&none, "vcs"), "git");
@@ -826,9 +853,10 @@ mod tests {
         assert_eq!(declared, on);
     }
 
-    /// With `oxplow-bundled` disabled, nothing declares the defaults: the
-    /// work list and the effort policy fall to none, snapshots to core's
-    /// default — and filing says no work list is active.
+    /// With `oxplow-bundled` disabled, nothing declares the optional
+    /// defaults: the work list and the effort policy fall to none, while
+    /// snapshots — required — keep core's own default, published as the
+    /// active row; filing says what it needs.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -848,7 +876,21 @@ mod tests {
         let snapshots = svc.capabilities.resolve(&config, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
-            ("oxplow", ChosenBy::Fallback)
+            ("oxplow", ChosenBy::Default)
+        );
+        let rows = svc
+            .sql
+            .query_sql(
+                "SELECT provider, active, available, source FROM v_capability_provider
+                  WHERE capability = 'snapshots'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&rows.rows).unwrap(),
+            serde_json::json!([["oxplow", 1, 1, "builtin"]])
         );
         let err = svc
             .commands

@@ -184,7 +184,8 @@ own — heavier ones included (beads as a work list).
   patterns in prompts, commands and commit messages). Only the active
   one's surface is offered.
 - **Disabling `oxplow-bundled`:** optional capabilities fall to none;
-  required ones fall back to the capability's default.
+  a required one keeps its default, which is core's own (registered by
+  the registry, never declared by an extension).
 - **Switching.** When the registry restates `v_capability_provider` and a
   capability's active implementation differs from the one the rows had,
   it logs `capability.switched@1 { capability, from, to, chosen_by }` in

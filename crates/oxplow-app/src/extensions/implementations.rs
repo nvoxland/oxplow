@@ -106,6 +106,13 @@ fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
                 .join(", ")
         ));
     };
+    if !spec.optional && f.id == spec.default {
+        return Err(format!(
+            "`{}` implementation `{}` is core's own (a required capability's default); \
+             declare another id",
+            spec.id, f.id
+        ));
+    }
     if f.id == capability::NONE
         || f.id.is_empty()
         || !f
@@ -189,6 +196,10 @@ mod tests {
         assert!(
             errors("  - { capability: work_items, id: none, entry: oxplow:tasks }\n")
                 .contains("not `none`")
+        );
+        assert!(
+            errors("  - { capability: snapshots, id: oxplow, entry: oxplow:snapshots }\n")
+                .contains("core's own")
         );
         assert!(errors(
             "  - { capability: work_items, id: x, entry: oxplow:tasks, features: [a] }\n"

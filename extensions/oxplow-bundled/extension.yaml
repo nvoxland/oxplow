@@ -25,14 +25,12 @@ intent:
     - name: a metric pushed past its warn threshold during an effort
       input: { advisory: threshold-crossed, effort_id: 1 }
       expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
-# oxplow's default implementations: built-ins of core's, declared here so
-# they are an extension's like any other. Disabled, the work list and the
-# effort policy fall to none; snapshots, which can't be none, fall back to
-# core's default.
+# oxplow's default work list and effort policy: built-ins of core's,
+# declared here so they are an extension's like any other. Disabled, both
+# fall to none. Snapshots can't be none: their default is core's own.
 implementations:
   - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next] }
   - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch" }
-  - { capability: snapshots, id: oxplow, entry: "oxplow:snapshots" }
 # What the coding agent reads about the work list: any list's commands
 # while one is active, and oxplow's tasks' ready queue while they are it.
 skills:
