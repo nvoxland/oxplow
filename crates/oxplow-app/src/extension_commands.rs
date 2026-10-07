@@ -526,7 +526,7 @@ pub fn extension_command(
     use crate::commands::Command;
     use oxplow_domain::{Atomicity, CommandError, Lifecycle};
     let spec = CommandSpec {
-        name: decl.name.clone(),
+        id: decl.name.clone(),
         summary: format!("{} (extension `{extension}`)", decl.summary),
         input_schema: decl.input_schema.clone(),
         invokers: decl.invokers,
@@ -1086,7 +1086,7 @@ mod tests {
                 "provider:held",
                 vec![crate::commands::Command::new(
                     oxplow_domain::CommandSpec {
-                        name: "held.review.held".into(),
+                        id: "held.review.held".into(),
                         summary: "A provider's.".into(),
                         input_schema: json!({ "type": "object" }),
                         invokers: Invokers::ALL,
@@ -1620,7 +1620,7 @@ mod tests {
             "provider:held",
             vec![crate::commands::Command::new(
                 oxplow_domain::CommandSpec {
-                    name: "my_review.review.held".into(),
+                    id: "my_review.review.held".into(),
                     summary: "A provider's.".into(),
                     input_schema: json!({ "type": "object" }),
                     invokers: Invokers::ALL,

@@ -293,7 +293,7 @@ impl Command {
     }
 
     pub fn new(spec: CommandSpec, handler: Handler) -> Result<Self, CommandError> {
-        CommandSpec::validate_id(&spec.name)?;
+        CommandSpec::validate_id(&spec.id)?;
         if spec.confirm.required() {
             Self::may_ask(&spec)?;
         }
@@ -321,7 +321,7 @@ impl Command {
                 field: Some("/atomicity".into()),
                 message: format!(
                     "`{}` declares {:?} but its handler is {:?}",
-                    self.spec.name, self.spec.atomicity, declared
+                    self.spec.id, self.spec.atomicity, declared
                 ),
             });
         }
@@ -349,10 +349,7 @@ impl Command {
         if spec.effect == oxplow_domain::CommandEffect::Read {
             return Err(CommandError::Invalid {
                 field: Some("/confirm".into()),
-                message: format!(
-                    "`{}` only reads, so it can't need a confirmation",
-                    spec.name
-                ),
+                message: format!("`{}` only reads, so it can't need a confirmation", spec.id),
             });
         }
         Ok(())
@@ -457,7 +454,7 @@ impl Registry {
             _ => {}
         }
         for command in &commands {
-            let id = &command.spec.name;
+            let id = &command.spec.id;
             CommandSpec::validate_id(id).map_err(|e| invalid(Some("/name"), e.to_string()))?;
             if oxplow_domain::namespace_of(id) != namespace {
                 return Err(invalid(
@@ -481,9 +478,9 @@ impl Registry {
             .insert(namespace.to_string(), holder.to_string());
         for command in commands {
             self.sources
-                .insert(command.spec.name.clone(), source.to_string());
+                .insert(command.spec.id.clone(), source.to_string());
             self.commands
-                .insert(command.spec.name.clone(), Arc::new(command));
+                .insert(command.spec.id.clone(), Arc::new(command));
         }
         Ok(())
     }
@@ -605,7 +602,7 @@ impl CommandBus {
     /// with the same id is refused: two handlers for one id is a bug, not
     /// an override.
     pub fn register(&self, command: Command) -> Result<(), CommandError> {
-        let namespace = oxplow_domain::namespace_of(&command.spec.name).to_string();
+        let namespace = oxplow_domain::namespace_of(&command.spec.id).to_string();
         self.commands
             .write()
             .add(&namespace, CORE_SOURCE, vec![command])
@@ -720,7 +717,7 @@ impl CommandBus {
             .commands
             .values()
             .filter(|c| matches!(c.handler, Handler::External(_)))
-            .map(|c| c.spec.name.clone())
+            .map(|c| c.spec.id.clone())
             .collect();
         names.sort();
         names
@@ -737,7 +734,7 @@ impl CommandBus {
             .commands
             .values()
             .filter(|c| matches!(c.handler, Handler::Dispatch(_) | Handler::Compose(_)))
-            .map(|c| c.spec.name.clone())
+            .map(|c| c.spec.id.clone())
             .collect();
         names.sort();
         names
@@ -851,11 +848,7 @@ impl CommandBus {
         // 2. The invoker must be admitted…
         if !spec.invokers.allows(actor.invoker()) {
             let err = CommandError::Denied {
-                reason: format!(
-                    "`{}` is not open to {:?} callers",
-                    spec.name,
-                    actor.invoker()
-                ),
+                reason: format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
             };
             self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
                 .await;
@@ -924,7 +917,7 @@ impl CommandBus {
         let confirm = command.confirm(&input);
         if confirm.required() && !confirmed {
             let preview = Preview {
-                command: spec.name.clone(),
+                command: spec.id.clone(),
                 summary: spec.summary.clone(),
                 input: input.clone(),
                 destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
@@ -1011,7 +1004,7 @@ impl CommandBus {
                                         message: format!(
                                             "`{}` said it changed nothing but returned events \
                                              or an inverse",
-                                            spec_c.name
+                                            spec_c.id
                                         ),
                                     });
                                 } else {
@@ -1100,7 +1093,7 @@ impl CommandBus {
             Resolved::Steps(_) => unreachable!("composite steps ran above"),
             Resolved::External(handler) => {
                 self.claim(&origin).await?;
-                let invocation = origin.invocation(actor, 0, &spec.name, &input);
+                let invocation = origin.invocation(actor, 0, &spec.id, &input);
                 match handler(invocation, input.clone()).await {
                     Ok(out) => Ok(self
                         .record_external(actor, spec, &input, out, origin.clone())
@@ -1199,7 +1192,7 @@ impl CommandBus {
             return CommandError::Denied {
                 reason: format!(
                     "`{}` needs a person's confirmation; ask them to undo it",
-                    command.spec.name
+                    command.spec.id
                 ),
             };
         }
@@ -1223,7 +1216,7 @@ impl CommandBus {
             Resolved::External(_) | Resolved::Steps(_) => None,
         };
         let row = NewProposal {
-            command: spec.name.clone(),
+            command: spec.id.clone(),
             input,
             actor_kind: actor.kind(),
             actor_id: actor.id(),
@@ -1443,7 +1436,7 @@ impl CommandBus {
                 message: format!(
                     "`{}` is nested more than {MAX_NESTING} composites deep — does a command \
                      compose itself?",
-                    parent.name
+                    parent.id
                 ),
             });
         }
@@ -1481,7 +1474,7 @@ impl CommandBus {
                 field: name_field(),
                 message: format!(
                     "`{}` {what}, outside the transaction `{}` runs in",
-                    spec.name, parent.name
+                    spec.id, parent.id
                 ),
             };
             if spec.effect == oxplow_domain::CommandEffect::Read {
@@ -1489,7 +1482,7 @@ impl CommandBus {
                     field: name_field(),
                     message: format!(
                         "`{}` only reads; a composite composes commands that write",
-                        spec.name
+                        spec.id
                     ),
                 });
             }
@@ -1512,7 +1505,7 @@ impl CommandBus {
                 return Err(CommandError::Denied {
                     reason: format!(
                         "`{}` is not open to {:?} callers",
-                        spec.name,
+                        spec.id,
                         ctx.actor.invoker()
                     ),
                 });
@@ -1536,7 +1529,7 @@ impl CommandBus {
         if asks && !ctx.confirmed {
             return Err(CommandError::NeedsConfirmation {
                 preview: Box::new(Preview {
-                    command: parent.name.clone(),
+                    command: parent.id.clone(),
                     summary: parent.summary.clone(),
                     input: serde_json::json!({ "calls": calls }),
                     destructive,
@@ -1675,7 +1668,7 @@ impl CommandBus {
         error: Option<String>,
     ) {
         let row = NewCommandAudit {
-            command: spec.name.clone(),
+            command: spec.id.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),
             thread_id: actor.thread_id(),
@@ -1690,7 +1683,7 @@ impl CommandBus {
             .transaction(move |tx| insert_tx(tx, &row).map(|_| ()))
             .await
         {
-            tracing::warn!(error = %e, command = %spec.name, "command audit write failed");
+            tracing::warn!(error = %e, command = %spec.id, "command audit write failed");
         }
     }
 
@@ -1760,7 +1753,7 @@ impl CommandBus {
             Ok(recorded) => finish(out, recorded),
             Err(e) => {
                 tracing::error!(
-                    command = %spec.name,
+                    command = %spec.id,
                     error = %e,
                     "command ran but recording it failed; the change stands unrecorded"
                 );
@@ -1981,7 +1974,7 @@ fn record_tx(
     let audit_id = insert_tx(
         tx,
         &NewCommandAudit {
-            command: spec.name.clone(),
+            command: spec.id.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),
             thread_id: actor.thread_id(),
@@ -1995,7 +1988,7 @@ fn record_tx(
     let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),
         &CommandExecutedV2 {
-            command: spec.name.clone(),
+            command: spec.id.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),
             outcome,
@@ -2004,7 +1997,7 @@ fn record_tx(
         },
     )
     .with_anchors(actor.anchors())
-    .with_subject([command_ref(&spec.name)]);
+    .with_subject([command_ref(&spec.id)]);
     executed.id = executed_id;
     executed.cause = cause;
     append_tx(tx, vocabulary, &executed)?;
@@ -2039,11 +2032,11 @@ fn log_approved_tx(
         actor.source(),
         &CommandApprovedV1 {
             proposal: proposal_ref(id),
-            command: spec.name.clone(),
+            command: spec.id.clone(),
             audit_id: recorded.audit_id,
         },
     )
-    .with_subject([proposal_ref(id), command_ref(&spec.name)])
+    .with_subject([proposal_ref(id), command_ref(&spec.id)])
     .with_cause(recorded.event_id.clone());
     append_tx(tx, vocabulary, &approved)?;
     Ok(())
@@ -2169,7 +2162,7 @@ mod tests {
 
     fn kv_spec(name: &str, invokers: Invokers, confirm: Confirm) -> CommandSpec {
         CommandSpec {
-            name: name.into(),
+            id: name.into(),
             summary: "Set a key in the test table.".into(),
             input_schema: json!({
                 "type": "object",
@@ -3423,7 +3416,7 @@ mod tests {
         use super::compose::{Compose, Composer, Composition};
         let (db, bus) = composing_bus();
         let spec = CommandSpec {
-            name: "oxplow.kv.announce".into(),
+            id: "oxplow.kv.announce".into(),
             summary: "Set over an external step and announce it.".into(),
             input_schema: json!({ "type": "object" }),
             invokers: Invokers::ALL,

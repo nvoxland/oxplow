@@ -141,7 +141,7 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
 pub fn commands() -> Vec<Command> {
     vec![Command::new(
         CommandSpec {
-            name: REPORT_ERROR.into(),
+            id: REPORT_ERROR.into(),
             summary: "Record an operation that failed in front of the person in the app, as \
                       the app showed it, so the agent can read it in `v_op_error`. The app's \
                       own: a person's only."
@@ -407,7 +407,7 @@ mod tests {
                 stream_id: None,
             })
             .into_iter()
-            .any(|spec| spec.name == REPORT_ERROR);
+            .any(|spec| spec.id == REPORT_ERROR);
         assert!(!agent_can_list, "not offered to an agent");
     }
 }

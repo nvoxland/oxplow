@@ -155,7 +155,7 @@ fn restore(before: Option<Bookmark>, page_ref: &str, at: &Value) -> CommandCall 
 
 fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers: PEOPLE,

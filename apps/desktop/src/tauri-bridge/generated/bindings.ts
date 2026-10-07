@@ -709,7 +709,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runCommand: (name: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_command", { name, input, confirmed })),
+	runCommand: (id: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_command", { id, input, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1800,9 +1800,10 @@ export type CommandSpec = {
 	 *  `oxplow.work_item.transition`, `acme_pr.issue.close`. The namespace
 	 *  is its owner's (`oxplow` for core and oxplow's own extensions, an
 	 *  extension's declared `namespace:` otherwise), so two extensions'
-	 *  areas never collide.
+	 *  areas never collide. (A person reads the command's label, not its
+	 *  id.)
 	 */
-	name: string,
+	id: string,
 	// One sentence for `list_commands` and the launcher.
 	summary: string,
 	// JSON Schema for the input.

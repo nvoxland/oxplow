@@ -184,7 +184,7 @@ export async function ipc<T = unknown>(daemon: Daemon, name: string, args: Recor
 
 /** Run a bus command as the person, confirmed. */
 export function run<T = unknown>(daemon: Daemon, name: string, input: Record<string, unknown>): Promise<T> {
-  return ipc<T>(daemon, "run_command", { name, input, confirmed: true });
+  return ipc<T>(daemon, "run_command", { id: name, input, confirmed: true });
 }
 
 /** Poll `check` every 200 ms until it holds; throw `what` after `ms`. A

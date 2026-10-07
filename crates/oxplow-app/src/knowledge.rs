@@ -646,7 +646,7 @@ fn write_file(path: &Path, body: &str) -> Result<(), CommandError> {
 
 fn spec(name: &str, summary: &str, schema: serde_json::Value, confirm: Confirm) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers: Invokers::ALL,

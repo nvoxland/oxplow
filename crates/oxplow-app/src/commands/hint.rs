@@ -28,7 +28,7 @@ pub struct DismissInput {
 pub fn dismiss_command() -> Command {
     Command::new(
         CommandSpec {
-            name: DISMISS.into(),
+            id: DISMISS.into(),
             summary: "Dismiss a hint raised to the person (a `v_agent_nudge` row with audience `person`)."
                 .into(),
             input_schema: serde_json::to_value(schemars::schema_for!(DismissInput))

@@ -63,7 +63,7 @@ impl AgentPolicy {
         if !spec.invokers.agent {
             return PolicyDecision::Deny {
                 layer: oxplow_runtime::policy::DenyLayer::Command,
-                reason: format!("`{}` is not open to agents", spec.name),
+                reason: format!("`{}` is not open to agents", spec.id),
             };
         }
         if may_write == Some(false) {
@@ -71,7 +71,7 @@ impl AgentPolicy {
                 layer: oxplow_runtime::policy::DenyLayer::Command,
                 reason: format!(
                     "`{}` changes state, and thread {} may not write (only the stream's writer thread can)",
-                    spec.name,
+                    spec.id,
                     thread_id.map(|t| t.to_string()).unwrap_or_default()
                 ),
             };

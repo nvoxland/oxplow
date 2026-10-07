@@ -544,7 +544,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
       {pending ? (
         <CommandConfirm
           label={run.lens.title}
-          command={start.command.name}
+          command={start.command.id}
           onConfirm={() => void submit(pending, true)}
           onCancel={() => setPending(null)}
           testIdPrefix="lens-form-confirm"

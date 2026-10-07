@@ -28,7 +28,7 @@ pub struct RestoreInput {
 pub fn restore_file_command(files: SnapshotFiles) -> Command {
     Command::new(
         CommandSpec {
-            name: RESTORE_FILE.into(),
+            id: RESTORE_FILE.into(),
             summary: "Restore a captured file (a `file_snapshot` id) into its stream's \
                       worktree, overwriting what's at its path now. A person confirms it."
                 .into(),

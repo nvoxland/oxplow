@@ -736,7 +736,7 @@ fn spec(
         _ => Vec::new(),
     };
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers: Invokers::ALL,

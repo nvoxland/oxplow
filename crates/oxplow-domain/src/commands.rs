@@ -113,8 +113,9 @@ pub struct CommandSpec {
     /// `oxplow.work_item.transition`, `acme_pr.issue.close`. The namespace
     /// is its owner's (`oxplow` for core and oxplow's own extensions, an
     /// extension's declared `namespace:` otherwise), so two extensions'
-    /// areas never collide.
-    pub name: String,
+    /// areas never collide. (A person reads the command's label, not its
+    /// id.)
+    pub id: String,
     /// One sentence for `list_commands` and the launcher.
     pub summary: String,
     /// JSON Schema for the input.

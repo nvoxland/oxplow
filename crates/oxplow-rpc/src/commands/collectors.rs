@@ -267,7 +267,7 @@ mod tests {
             crate::dispatch(
                 "run_command",
                 json!({
-                    "name": "oxplow.collector.sync",
+                    "id": "oxplow.collector.sync",
                     "input": { "owner": "my-gh", "id": "gh" },
                     "confirmed": false,
                 }),

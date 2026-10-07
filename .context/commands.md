@@ -518,7 +518,7 @@ event on the pump, reading the value from the event's `after` (the pump
 can see the event before the after-commit swap): `generated` →
 `config_reactors::WorkspaceFilterConsumer` updates the snapshot captures'
 filter, so an agent's change applies like the person's.
-**The person's way onto the bus** (P5.A1): RPC `run_command { name,
+**The person's way onto the bus** (P5.A1): RPC `run_command { id,
 input, confirmed }` and `undo_command { audit_id, confirmed }`
 (`oxplow_rpc::commands::bus`, `Actor::Human`; desktop `runCommand` /
 `undoCommand` in `api.ts`). A call that needs confirmation comes back
@@ -550,7 +550,7 @@ waits for a person (`run_command` returns it as a success instead),
 
 Agents reach every command through two generic tools — `list_commands`
 (the specs the calling agent may run and that are offered now (step 0), with `input_schema`, `summary`,
-`confirm`, `undoable`) and `run_command { name, input }` (the outcome:
+`confirm`, `undoable`) and `run_command { id, input }` (the outcome:
 `result`, `audit_id`, `event_id`, `inverse?` — or, for a run that needs
 a person's confirmation, `{ kind: "proposed", proposal, message }`). Extensions never add MCP
 tools. `run_command` is an agent's only write path for records — the

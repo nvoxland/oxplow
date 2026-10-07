@@ -264,7 +264,7 @@ pub fn enable_command(
 ) -> Command {
     Command::new(
         CommandSpec {
-            name: ENABLE.into(),
+            id: ENABLE.into(),
             summary: "Enable a disabled extension provider, collector or effect on this machine \
                       again, clearing an automatic disable (a provider's process restarts, a \
                       system the bus doesn't own)."

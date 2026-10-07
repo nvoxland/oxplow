@@ -95,7 +95,7 @@ where
     Fut: Future<Output = Result<Value, CommandError>> + Send + 'static,
 {
     let spec = CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: serde_json::to_value(schemars::schema_for!(I)).expect("schema serializes"),
         invokers: PERSON_ONLY,

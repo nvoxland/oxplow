@@ -79,7 +79,7 @@ Read it back with `list_thread_notes`.
 # Commands (the one write path)
 
 State changes are **commands**: `list_commands` shows what you may run,
-with input schemas, and `run_command { name, input }` runs one. Every
+with input schemas, and `run_command { id, input }` runs one. Every
 run is validated, policy-checked and audited; undoable runs return an
 `inverse`.
 

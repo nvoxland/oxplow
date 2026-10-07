@@ -39,7 +39,7 @@ pub struct LspDeps {
 
 fn spec(name: &str, summary: &str) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: serde_json::to_value(schemars::schema_for!(PackageInput))
             .expect("schema serializes"),

@@ -1737,7 +1737,7 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
     };
     Command::new(
         CommandSpec {
-            name: SYNC.into(),
+            id: SYNC.into(),
             summary: "Run an approved collector now, refreshing what it collects (runs the \
                       collector's program or script, which the bus doesn't own). It never \
                       approves: an unapproved exec collector is refused. A project report \

@@ -324,7 +324,7 @@ impl CommandBus {
             let refused = if !child.invokers.allows(actor.invoker()) {
                 Some(format!(
                     "`{}` is not open to {:?} callers",
-                    child.name,
+                    child.id,
                     actor.invoker()
                 ))
             } else if let Some(thread_id) = actor.agent_thread() {
@@ -352,7 +352,7 @@ impl CommandBus {
         if asks && !confirmed {
             return Err(CommandError::NeedsConfirmation {
                 preview: Box::new(Preview {
-                    command: spec.name.clone(),
+                    command: spec.id.clone(),
                     summary: spec.summary.clone(),
                     input: json!({ "calls": calls }),
                     destructive,
@@ -498,7 +498,7 @@ impl CommandBus {
             Ok(recorded) => Some(recorded),
             Err(e) => {
                 tracing::error!(
-                    command = %spec.name,
+                    command = %spec.id,
                     error = %e,
                     "a composite's steps ran but recording them failed; they stand unrecorded"
                 );

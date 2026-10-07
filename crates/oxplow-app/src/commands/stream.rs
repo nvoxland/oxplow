@@ -165,7 +165,7 @@ fn person_external(
     confirm: Confirm,
 ) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers: Invokers::HUMAN_ONLY,
@@ -185,7 +185,7 @@ fn row_spec(
     invokers: Invokers,
 ) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema: schema,
         invokers,

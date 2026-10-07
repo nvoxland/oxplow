@@ -132,7 +132,7 @@ fn spec(
     effect: CommandEffect,
 ) -> CommandSpec {
     CommandSpec {
-        name: name.into(),
+        id: name.into(),
         summary: summary.into(),
         input_schema,
         invokers: Invokers::ALL,
@@ -367,7 +367,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
     let target = config_target;
     let enable = Command::new(
         CommandSpec {
-            name: ENABLE.into(),
+            id: ENABLE.into(),
             summary: "Turn metrics on or off in this project (.oxplow/project.yaml `metrics:`); \
                       logged as config.changed, undo restores the previous list."
                 .into(),

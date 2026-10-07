@@ -9,19 +9,19 @@ use oxplow_domain::{Actor, CommandOutcome, CommandSpec, Json};
 
 use crate::error::IpcError;
 
-/// Run `name` with `input` as the person. `confirmed` says the person
+/// Run command `id` with `input` as the person. `confirmed` says the person
 /// confirmed this exact call (a destructive command, a human-only config
 /// key); an unconfirmed call that needs one comes back
 /// `NEEDS_CONFIRMATION`, so the UI asks and calls again.
 pub async fn run_command(
     svc: &Services,
-    name: String,
+    id: String,
     input: Json,
     confirmed: bool,
 ) -> Result<CommandOutcome, IpcError> {
     let outcome = svc
         .commands
-        .run(&Actor::Human, &name, input.0, confirmed)
+        .run(&Actor::Human, &id, input.0, confirmed)
         .await?;
     // A write may have opened or closed an effort: let its snapshot pin
     // land before the UI reads what follows.
@@ -94,7 +94,7 @@ mod tests {
                 crate::dispatch(
                     "run_command",
                     json!({
-                        "name": "oxplow.config.set",
+                        "id": "oxplow.config.set",
                         "input": { "key": "agentPromptAppend", "value": "Be brief." },
                         "confirmed": confirmed,
                     }),
