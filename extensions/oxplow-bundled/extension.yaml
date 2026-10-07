@@ -74,6 +74,21 @@ advisories:
       FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id
       WHERE e.id = :effort_id AND e.ended_at IS NULL
       HAVING count(DISTINCT f.path) >= 15
+  # An item still in progress though a commit landed its work (closing its
+  # effort), with nothing open on it now: the person may want to mark it
+  # done. Once per item; oxplow never marks anything done itself.
+  - id: landed-in-progress
+    on: turn-end
+    audience: person
+    once_per: row
+    query: |
+      SELECT w.ref AS key,
+             '“' || w.title || '” is still in progress, but a commit landed its work. '
+             || 'Mark it done if it is.' AS message
+      FROM v_effort e JOIN v_work_item w ON w.ref = e.work_item
+      WHERE e.thread_id = :thread_id AND e.closed_by = 'commit' AND w.state = 'in_progress'
+        AND NOT EXISTS (SELECT 1 FROM v_effort o WHERE o.work_item = w.ref AND o.ended_at IS NULL)
+      GROUP BY w.ref
   # Steer the agent to add tests when this effort's changed lines are poorly
   # covered. Reads the stored observation, so it fires on the tool call after
   # the coverage lands.
@@ -129,7 +144,7 @@ advisories:
     once_per: row
     heading: "# Metric thresholds"
     query: |
-      SELECT key,
+      SELECT :effort_id || ':' || key AS key,
              '⚠ ' || title || ' crossed its ' || crossing || ' threshold'
              || coalesce(' (' || (CASE WHEN t = CAST(t AS INTEGER) THEN printf('%d', CAST(t AS INTEGER))
                                        ELSE printf('%.1f', t) END) || ')', '')

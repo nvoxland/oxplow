@@ -235,13 +235,17 @@ impl AgentContext {
     }
 }
 
-/// The thread's undelivered nudges as one block, marked delivered: each
-/// reaches the agent once, on whichever hook comes first. oxplow's own
-/// come before advisories (`<extension>/<id>` kinds).
+/// Characters of nudges one hook carries to the agent; the rest wait for
+/// its next.
+pub const NUDGE_BUDGET: usize = 2_000;
+
+/// The agent's undelivered nudges on the thread as one block, up to
+/// [`NUDGE_BUDGET`], marked delivered: each reaches the agent once, on
+/// whichever hook comes first, oxplow's own before advisories.
 async fn undelivered(svc: &Services, thread_id: &ThreadId) -> Option<String> {
-    let mut nudges = match svc
+    let nudges = match svc
         .nudge_store
-        .take_undelivered(&thread_id.to_string())
+        .take_for_agent(&thread_id.to_string(), NUDGE_BUDGET)
         .await
     {
         Ok(n) => n,
@@ -250,7 +254,6 @@ async fn undelivered(svc: &Services, thread_id: &ThreadId) -> Option<String> {
             return None;
         }
     };
-    nudges.sort_by_key(|n| (n.kind.contains('/'), n.id));
     let text: Vec<String> = nudges.into_iter().map(|n| n.message).collect();
     (!text.is_empty()).then(|| text.join("\n\n"))
 }

@@ -16,6 +16,33 @@ use oxplow_domain::{DomainError, EffortId, ThreadId, Timestamp};
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
 
+/// Who a nudge is for: the coding agent (taken by its next hook) or a
+/// person (raised in Alerts until they dismiss it).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum Audience {
+    #[default]
+    Agent,
+    Person,
+}
+
+impl Audience {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Audience::Agent => "agent",
+            Audience::Person => "person",
+        }
+    }
+
+    fn parse(s: &str) -> Self {
+        if s == "person" {
+            Audience::Person
+        } else {
+            Audience::Agent
+        }
+    }
+}
+
 /// One persisted nudge row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct AgentNudge {
@@ -33,8 +60,10 @@ pub struct AgentNudge {
     pub created_at: Timestamp,
     /// The turn it fired in (`agent_turn.id`), when known.
     pub turn_id: Option<i64>,
-    /// When a hook response carried it to the agent; `None` until then.
+    /// When a hook response carried it to the agent, or the person
+    /// dismissed it; `None` until then.
     pub delivered_at: Option<Timestamp>,
+    pub audience: Audience,
 }
 
 /// Write-side input — `id` and `created_at` are assigned by the store.
@@ -49,6 +78,7 @@ pub struct NewAgentNudge {
     /// The event that fired it; a second nudge of the same kind for the
     /// same cause (a redelivered event) is not written.
     pub cause: Option<String>,
+    pub audience: Audience,
 }
 
 fn row_to_nudge(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentNudge> {
@@ -73,11 +103,12 @@ fn row_to_nudge(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentNudge> {
             .map(string_to_ts)
             .transpose()
             .map_err(map_err)?,
+        audience: Audience::parse(&row.get::<_, String>(9)?),
     })
 }
 
 const SELECT_COLS: &str =
-    "id, thread_id, effort_id, kind, message, trigger, created_at, turn_id, delivered_at";
+    "id, thread_id, effort_id, kind, message, trigger, created_at, turn_id, delivered_at, audience";
 
 /// Where a one-shot mark is kept: a thread, or one of its efforts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,31 +149,92 @@ impl SqliteAgentNudgeStore {
         self.db.transaction(move |tx| record_tx(tx, &nudge)).await
     }
 
-    /// The thread's nudges no hook response has carried yet, oldest first,
-    /// marked delivered in the same transaction — so each reaches the agent
-    /// once, on whichever of the thread's hooks comes first.
-    pub async fn take_undelivered(&self, thread_id: &str) -> Result<Vec<AgentNudge>, DomainError> {
+    /// The agent's undelivered nudges on the thread, oxplow's own before
+    /// advisories (`<extension>/<id>` kinds) and oldest first within each,
+    /// up to `budget` characters of message (always at least one), marked
+    /// delivered in the same transaction — so each reaches the agent once,
+    /// on whichever of the thread's hooks comes first, and what the budget
+    /// held waits for the next.
+    pub async fn take_for_agent(
+        &self,
+        thread_id: &str,
+        budget: usize,
+    ) -> Result<Vec<AgentNudge>, DomainError> {
         let thread_val = ThreadId::try_from_str(thread_id)
             .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {thread_id}")))?
             .value();
         self.db
             .transaction(move |tx| {
-                let now = ts_to_string(Timestamp::now());
-                let mut stmt = tx
+                let sql_err = crate::database::map_sql_err;
+                let mut waiting = tx
                     .prepare(&format!(
-                        "UPDATE agent_nudge SET delivered_at = ?2
-                          WHERE thread_id = ?1 AND delivered_at IS NULL
-                          RETURNING {SELECT_COLS}"
+                        "SELECT {SELECT_COLS} FROM agent_nudge
+                          WHERE thread_id = ?1 AND delivered_at IS NULL AND audience = 'agent'
+                          ORDER BY instr(kind, '/') > 0, id"
                     ))
-                    .map_err(crate::database::map_sql_err)?;
-                let mut rows = stmt
-                    .query_map(params![thread_val, now], row_to_nudge)
-                    .map_err(crate::database::map_sql_err)?
+                    .map_err(sql_err)?
+                    .query_map(params![thread_val], row_to_nudge)
+                    .map_err(sql_err)?
                     .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(sql_err)?;
+                let mut used = 0;
+                let mut taken = 0;
+                for n in &waiting {
+                    let len = n.message.chars().count();
+                    if taken > 0 && used + len > budget {
+                        break;
+                    }
+                    used += len;
+                    taken += 1;
+                }
+                waiting.truncate(taken);
+                let now = Timestamp::now();
+                for n in &mut waiting {
+                    tx.execute(
+                        "UPDATE agent_nudge SET delivered_at = ?2 WHERE id = ?1",
+                        params![n.id, ts_to_string(now)],
+                    )
+                    .map_err(sql_err)?;
+                    n.delivered_at = Some(now);
+                }
+                Ok(waiting)
+            })
+            .await
+    }
+
+    /// How many `kind` nudges reached the agent in `scope`: within the
+    /// effort, or anywhere on the thread.
+    pub async fn delivered(&self, scope: OnceScope, kind: &str) -> Result<i64, DomainError> {
+        let kind = kind.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT count(*) FROM agent_nudge
+                      WHERE thread_id = ?1 AND (?2 IS NULL OR effort_id = ?2) AND kind = ?3
+                        AND audience = 'agent' AND delivered_at IS NOT NULL",
+                    params![scope.thread, scope.effort, kind],
+                    |r| r.get(0),
+                )
+            })
+            .await
+    }
+
+    /// Count one evaluation of each of `hints` on `thread`.
+    pub async fn evaluated(&self, thread: i64, hints: Vec<String>) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| {
+                let now = ts_to_string(Timestamp::now());
+                for hint in &hints {
+                    tx.execute(
+                        "INSERT INTO hint_stat (thread_id, hint, evaluated, last_evaluated_at)
+                         VALUES (?1, ?2, 1, ?3)
+                         ON CONFLICT (thread_id, hint)
+                         DO UPDATE SET evaluated = evaluated + 1, last_evaluated_at = ?3",
+                        params![thread, hint, now],
+                    )
                     .map_err(crate::database::map_sql_err)?;
-                // RETURNING's order is unspecified.
-                rows.sort_by_key(|n| n.id);
-                Ok(rows)
+                }
+                Ok(())
             })
             .await
     }
@@ -229,8 +321,8 @@ pub fn record_tx(
     let now = ts_to_string(Timestamp::now());
     conn.query_row(
         "INSERT INTO agent_nudge
-           (thread_id, effort_id, kind, message, trigger, created_at, turn_id, cause)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+           (thread_id, effort_id, kind, message, trigger, created_at, turn_id, cause, audience)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (cause, kind, coalesce(effort_id, 0)) WHERE cause IS NOT NULL DO NOTHING
          RETURNING id",
         params![
@@ -242,11 +334,25 @@ pub fn record_tx(
             now,
             nudge.turn_id,
             nudge.cause,
+            nudge.audience.as_str(),
         ],
         |r| r.get(0),
     )
     .optional()
     .map_err(sql_err)
+}
+
+/// A person dismisses a hint raised to them: `true` when it was theirs and
+/// still raised.
+pub fn dismiss_tx(conn: &rusqlite::Connection, id: i64) -> Result<bool, DomainError> {
+    let n = conn
+        .execute(
+            "UPDATE agent_nudge SET delivered_at = ?2
+              WHERE id = ?1 AND audience = 'person' AND delivered_at IS NULL",
+            params![id, ts_to_string(Timestamp::now())],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    Ok(n == 1)
 }
 
 /// Claim `mark` in `scope` in the caller's transaction: `true` the first
@@ -362,14 +468,18 @@ mod tests {
             .await
             .unwrap()
             .is_some());
-        let taken = store.take_undelivered(&thread).await.unwrap();
+        let taken = store.take_for_agent(&thread, usize::MAX).await.unwrap();
         assert_eq!(
             taken.iter().map(|n| n.kind.as_str()).collect::<Vec<_>>(),
             vec!["report-less-run", "coverage-target", "report-less-run"],
             "oldest first"
         );
         assert!(taken.iter().all(|n| n.delivered_at.is_some()));
-        assert!(store.take_undelivered(&thread).await.unwrap().is_empty());
+        assert!(store
+            .take_for_agent(&thread, usize::MAX)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     /// A one-shot mark is durable: a new store over the same database (a
@@ -394,6 +504,125 @@ mod tests {
             .await
             .unwrap());
         assert!(!restarted.has_fired(effort, "acme/other").await.unwrap());
+    }
+
+    /// The agent takes its undelivered nudges oldest first, oxplow's own
+    /// before advisories, up to a character budget (always at least one);
+    /// the rest are held for its next hook. A person's are never its.
+    #[tokio::test]
+    async fn the_agent_takes_its_nudges_within_a_budget() {
+        let (store, thread, _effort) = fixture().await;
+        let nudge = |kind: &str, message: &str, audience: Audience| NewAgentNudge {
+            thread_id: "thr1".into(),
+            kind: kind.into(),
+            message: message.into(),
+            audience,
+            ..Default::default()
+        };
+        store
+            .record(nudge("x/a", &"a".repeat(30), Audience::Agent))
+            .await
+            .unwrap();
+        store
+            .record(nudge("x/p", "for you", Audience::Person))
+            .await
+            .unwrap();
+        store
+            .record(nudge("report-less-run", &"r".repeat(10), Audience::Agent))
+            .await
+            .unwrap();
+        store
+            .record(nudge("x/b", &"b".repeat(30), Audience::Agent))
+            .await
+            .unwrap();
+        let kinds = |ns: Vec<AgentNudge>| ns.into_iter().map(|n| n.kind).collect::<Vec<_>>();
+        assert_eq!(
+            kinds(store.take_for_agent(&thread, 45).await.unwrap()),
+            vec!["report-less-run", "x/a"]
+        );
+        assert_eq!(
+            kinds(store.take_for_agent(&thread, 5).await.unwrap()),
+            vec!["x/b"],
+            "at least one"
+        );
+        assert!(store.take_for_agent(&thread, 45).await.unwrap().is_empty());
+    }
+
+    /// A person dismisses a hint raised to them, once; an agent's nudge
+    /// isn't theirs to dismiss.
+    #[tokio::test]
+    async fn a_person_dismisses_their_hint() {
+        let (store, _thread, _effort) = fixture().await;
+        let raise = |audience: Audience| NewAgentNudge {
+            thread_id: "thr1".into(),
+            kind: "x/p".into(),
+            message: "m".into(),
+            audience,
+            ..Default::default()
+        };
+        let mine = store
+            .record(raise(Audience::Person))
+            .await
+            .unwrap()
+            .unwrap();
+        let agents = store.record(raise(Audience::Agent)).await.unwrap().unwrap();
+        let dismiss = |id: i64| store.db.transaction(move |tx| dismiss_tx(tx, id));
+        assert!(dismiss(mine).await.unwrap());
+        assert!(!dismiss(mine).await.unwrap(), "once");
+        assert!(!dismiss(agents).await.unwrap(), "not a person's");
+    }
+
+    /// How often a kind reached the agent in a scope, and how often each
+    /// hint was evaluated on a thread.
+    #[tokio::test]
+    async fn deliveries_and_evaluations_are_counted() {
+        let (store, thread, _effort) = fixture().await;
+        for effort in [Some("eff1"), Some("eff1"), None] {
+            store
+                .record(NewAgentNudge {
+                    thread_id: "thr1".into(),
+                    effort_id: effort.map(str::to_string),
+                    kind: "x/a".into(),
+                    message: "m".into(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            store
+                .delivered(OnceScope::effort(1, 1), "x/a")
+                .await
+                .unwrap(),
+            0
+        );
+        store.take_for_agent(&thread, 1_000).await.unwrap();
+        assert_eq!(
+            store
+                .delivered(OnceScope::effort(1, 1), "x/a")
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            store.delivered(OnceScope::thread(1), "x/a").await.unwrap(),
+            3
+        );
+        store
+            .evaluated(1, vec!["x/a".into(), "x/b".into()])
+            .await
+            .unwrap();
+        store.evaluated(1, vec!["x/a".into()]).await.unwrap();
+        let counts: Vec<(String, i64)> = store
+            .db
+            .call(|c| {
+                c.prepare("SELECT hint, evaluated FROM hint_stat ORDER BY hint")?
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect()
+            })
+            .await
+            .unwrap();
+        assert_eq!(counts, vec![("x/a".into(), 2), ("x/b".into(), 1)]);
     }
 
     #[tokio::test]

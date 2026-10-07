@@ -2353,7 +2353,8 @@ mechanism; what to say, and when, is SQL in the extension.
 advisories:
   - id: coverage-target
     on: post-tool-use        # or prompt, or turn-end
-    once_per: effort         # effort (default) | thread | row (needs a `key` column) | turn
+    once_per: effort         # effort (default) | thread | session | day | row (needs a `key` column) | turn
+    audience: agent          # agent (default) | person
     heading: "# Optional heading line"
     query: |                 # :thread_id, :stream_id, :turn_id, :effort_id
       SELECT '...' AS message FROM v_effort_observation WHERE effort_id = :effort_id ...
@@ -2370,14 +2371,30 @@ advisories:
   — for an event, the effort it was anchored to; at a turn's end, the one
   holding the turn's end; at a prompt, the open one).
 - **Repeat rules.** `once_per: effort` fires once per effort and doesn't
-  run without one; `thread` once per thread; `row` once per `key` within
-  the effort, or the thread when there's none; `turn` whenever it has
-  rows. Marks live in `once_mark`, per effort or thread.
+  run without one; `thread` once per thread; `session` once per agent
+  session on the thread (the latest turn's harness session; doesn't run
+  without one); `day` once per thread per UTC day; `row` once per `key`
+  on the thread (a query wanting once per effort per row puts
+  `:effort_id` in its key, as `threshold-crossed` does); `turn` whenever
+  it has rows. Marks live in `once_mark`, per effort or thread.
+- **Audience.** `agent` hints go to the coding agent; `person` hints are
+  raised in Alerts ("Hints for you", `apps/desktop/src/hints.ts`) until
+  the person dismisses one (`hint.dismiss`, which an agent can't run).
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
-  `<extension>/<id>`), undelivered. The thread's next prompt
-  (`AgentContext::prompt_context`) or tool call (`post_tool_context`)
-  takes its undelivered nudges and stamps `delivered_at`: the ledger says
-  what was raised and what the agent actually received.
+  `<extension>/<id>`, with its `audience`), undelivered. The thread's
+  next prompt (`AgentContext::prompt_context`) or tool call
+  (`post_tool_context`) takes the agent's undelivered nudges — oxplow's
+  own first, oldest first, up to `NUDGE_BUDGET` (2,000) characters, at
+  least one — and stamps `delivered_at`; what the budget held waits for
+  the next hook. A person's nudge is stamped when they dismiss it. The
+  ledger says what was raised and what actually reached its audience.
+- **Effectiveness.** Each evaluation is counted (`hint_stat`), and
+  `v_hint_stat` puts the counts together per hint and thread: evaluated,
+  fired, delivered, held, muted. An agent hint that still fires after
+  reaching the agent `MUTE_AFTER` (3) times in its effort (or its thread,
+  with none) is muted there — not evaluated again — and the person is
+  told once (a `hint-muted` nudge with what it said). A new effort starts
+  it fresh.
 - `crates/oxplow-app/src/advisories.rs`: `AdvisoryRunner` runs the enabled
   extensions' advisories for one trigger and scope and applies
   `once_per`. Marks are recorded only after every query ran. A failing
@@ -2394,9 +2411,12 @@ advisories:
   extensions from its stream worktree.
 - `validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxplow-bundled ships `large-uncommitted` (turn-end, once per effort:
-  an open effort holding 15 or more files — a commit landing its work
-  would have closed it) and three metric ones, `coverage-target`,
+- oxplow-bundled ships hints on outcomes: `large-uncommitted` (turn-end,
+  once per effort: an open effort holding 15 or more files — a commit
+  landing its work would have closed it) and `landed-in-progress`
+  (turn-end, to the person, once per item: an item still in progress
+  though a commit landed its work and nothing is open on it); and three
+  metric ones, `coverage-target`,
   `metric-deltas`, `threshold-crossed` (see [metrics.md](./metrics.md)). Advisories read
   stored views (`v_effort_metric_delta`, `v_effort_observation`), never the
   engine directly.

@@ -14,7 +14,7 @@ use oxplow_domain::events::schema::{EventType as _, ThreadCheckpoint};
 use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::event_pump::AsyncEventConsumer;
-use crate::extensions::{AdvisoryOn, AdvisoryOncePer, Extension};
+use crate::extensions::{AdvisoryAudience, AdvisoryOn, AdvisoryOncePer, Extension};
 
 /// The params every advisory query may use.
 pub const PARAMS: &[&str] = &["thread_id", "stream_id", "turn_id", "effort_id"];
@@ -22,21 +22,32 @@ pub const PARAMS: &[&str] = &["thread_id", "stream_id", "turn_id", "effort_id"];
 /// The turn-end consumer's name (its checkpoint key; what callers settle on).
 pub const TURN_END: &str = "advisories.turn_end";
 
-/// One advisory that fired: its id (`<extension>/<advisory>`) and the text
-/// for the agent (heading, then one message per line).
+/// Deliveries in a scope after which a hint that still fires is muted
+/// there and raised to the person: it isn't working.
+pub const MUTE_AFTER: i64 = 3;
+
+/// The kind of the person's notice that a hint was muted.
+pub const MUTED_KIND: &str = "hint-muted";
+
+/// One advisory that fired: its id (`<extension>/<advisory>`, or
+/// [`MUTED_KIND`]), the text (heading, then one message per line) and who
+/// it's for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdvisoryHit {
     pub id: String,
     pub text: String,
+    pub audience: AdvisoryAudience,
 }
 
-/// What an advisory runs for: the values its params take.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What an advisory runs for: the values its params take, and the agent
+/// session (for `once_per: session`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdvisoryScope {
     pub thread: i64,
     pub stream: Option<i64>,
     pub turn: Option<i64>,
     pub effort: Option<i64>,
+    pub session: Option<String>,
 }
 
 impl AdvisoryScope {
@@ -50,25 +61,50 @@ impl AdvisoryScope {
         ]
     }
 
-    /// Where a `once_per` mark is kept: the effort for `effort`, the
-    /// thread for `thread`, and a row's key within the effort when there
-    /// is one, else the thread. `None`: the rule can't hold here (once per
-    /// effort with no effort), so the advisory doesn't run.
-    fn mark_scope(&self, once_per: AdvisoryOncePer) -> Option<OnceScope> {
-        match (once_per, self.effort) {
-            (AdvisoryOncePer::Effort, Some(e)) | (AdvisoryOncePer::Row, Some(e)) => {
-                Some(OnceScope::effort(self.thread, e))
-            }
-            (AdvisoryOncePer::Effort, None) => None,
-            (AdvisoryOncePer::Row, None)
-            | (AdvisoryOncePer::Thread, _)
-            | (AdvisoryOncePer::Turn, _) => Some(OnceScope::thread(self.thread)),
+    fn thread_scope(&self) -> OnceScope {
+        OnceScope::thread(self.thread)
+    }
+
+    /// The effort, else the thread: where deliveries are counted for
+    /// muting, and a muted hint stays muted.
+    fn work_scope(&self) -> OnceScope {
+        match self.effort {
+            Some(e) => OnceScope::effort(self.thread, e),
+            None => self.thread_scope(),
         }
+    }
+
+    /// The one-shot mark `id` claims under `once_per`, and where: `None`
+    /// for the rules that repeat (`row` marks each key, `turn` nothing);
+    /// `Err` when the rule can't hold here (once per effort with no effort,
+    /// once per session with none), so the advisory doesn't run.
+    fn once_mark(
+        &self,
+        id: &str,
+        once_per: AdvisoryOncePer,
+    ) -> Result<Option<(OnceScope, String)>, ()> {
+        Ok(match once_per {
+            AdvisoryOncePer::Effort => match self.effort {
+                Some(e) => Some((OnceScope::effort(self.thread, e), id.to_string())),
+                None => return Err(()),
+            },
+            AdvisoryOncePer::Thread => Some((self.thread_scope(), id.to_string())),
+            AdvisoryOncePer::Session => match &self.session {
+                Some(s) => Some((self.thread_scope(), format!("{id}@session:{s}"))),
+                None => return Err(()),
+            },
+            AdvisoryOncePer::Day => Some((
+                self.thread_scope(),
+                format!("{id}@day:{}", time::OffsetDateTime::now_utc().date()),
+            )),
+            AdvisoryOncePer::Row | AdvisoryOncePer::Turn => None,
+        })
     }
 }
 
-/// Runs advisories and remembers which have fired — durably, in
-/// `once_mark`, so a restart doesn't repeat one.
+/// Runs advisories, remembers which have fired (durably, in `once_mark`,
+/// so a restart doesn't repeat one), counts their evaluations and mutes
+/// the ones that don't work.
 pub struct AdvisoryRunner {
     marks: SqliteAgentNudgeStore,
 }
@@ -88,22 +124,28 @@ impl AdvisoryRunner {
         scope: &AdvisoryScope,
     ) -> Vec<AdvisoryHit> {
         let mut hits = Vec::new();
+        let mut evaluated = Vec::new();
         // Marks to record once every query has run, so a failure partway
         // can't consume a one-shot the agent never saw.
         let mut marks: Vec<(OnceScope, String)> = Vec::new();
         for ext in extensions.iter().filter(|e| e.enabled) {
             for a in ext.advisories.iter().filter(|a| a.on == on) {
                 let id = format!("{}/{}", ext.name, a.id);
-                let Some(at) = scope.mark_scope(a.once_per) else {
+                let Ok(once) = scope.once_mark(&id, a.once_per) else {
                     continue;
                 };
-                let once = matches!(
-                    a.once_per,
-                    AdvisoryOncePer::Effort | AdvisoryOncePer::Thread
-                );
-                if once && self.has_fired(at, &id).await {
+                if let Some((at, mark)) = &once {
+                    if self.has_fired(*at, mark).await {
+                        continue;
+                    }
+                }
+                let mute = format!("mute:{id}");
+                if a.audience == AdvisoryAudience::Agent
+                    && self.has_fired(scope.work_scope(), &mute).await
+                {
                     continue;
                 }
+                evaluated.push(id.clone());
                 let result = match layer
                     .run(
                         oxplow_db::SqlQuery::new(&a.query)
@@ -125,6 +167,7 @@ impl AdvisoryRunner {
                 };
                 let key_i = col("key");
                 let mut lines = Vec::new();
+                let mut row_marks = Vec::new();
                 for row in &result.rows {
                     let text = cell_text(&row[msg_i]);
                     if text.is_empty() {
@@ -133,32 +176,61 @@ impl AdvisoryRunner {
                     if a.once_per == AdvisoryOncePer::Row {
                         let key = key_i.map(|i| cell_text(&row[i])).unwrap_or_default();
                         let mark = format!("{id}#{key}");
-                        if self.has_fired(at, &mark).await
-                            || marks.iter().any(|(s, m)| *s == at && *m == mark)
+                        if self.has_fired(scope.thread_scope(), &mark).await
+                            || row_marks.contains(&mark)
                         {
                             continue;
                         }
-                        marks.push((at, mark));
+                        row_marks.push(mark);
                     }
                     lines.push(text);
                 }
                 if lines.is_empty() {
                     continue;
                 }
-                if once {
-                    marks.push((at, id.clone()));
-                }
                 let mut text = a.heading.clone().map(|h| vec![h]).unwrap_or_default();
                 text.extend(lines);
+                let text = text.join("\n");
+                if a.audience == AdvisoryAudience::Agent {
+                    let delivered = self
+                        .marks
+                        .delivered(scope.work_scope(), &id)
+                        .await
+                        .unwrap_or(0);
+                    if delivered >= MUTE_AFTER {
+                        marks.push((scope.work_scope(), mute));
+                        let place = if scope.effort.is_some() {
+                            "this effort"
+                        } else {
+                            "this thread"
+                        };
+                        hits.push(AdvisoryHit {
+                            id: MUTED_KIND.into(),
+                            text: format!(
+                                "The hint {id} still fired after reaching the agent {delivered} times in {place}, so it's muted there. It said:\n{text}"
+                            ),
+                            audience: AdvisoryAudience::Person,
+                        });
+                        continue;
+                    }
+                }
+                marks.extend(once);
+                marks.extend(row_marks.into_iter().map(|m| (scope.thread_scope(), m)));
                 hits.push(AdvisoryHit {
                     id,
-                    text: text.join("\n"),
+                    text,
+                    audience: a.audience,
                 });
             }
         }
         for (at, m) in marks {
             if let Err(error) = self.marks.claim_once(at, &m).await {
                 tracing::warn!(mark = %m, %error, "recording an advisory mark failed");
+            }
+        }
+        if !evaluated.is_empty() {
+            if let Err(error) = self.marks.evaluated(scope.thread, evaluated).await {
+                tracing::warn!(%error, "counting advisory evaluations failed");
             }
         }
         hits
@@ -221,6 +293,7 @@ pub async fn for_thread(
         stream: stream.map(|s| s.value()),
         turn: cause.and_then(|c| c.anchors.turn_id),
         effort: effort.as_ref().map(|e| e.id.value()),
+        session: session_of(&svc.sql, thread).await,
     };
     let hits = svc.advisories.run(&svc.sql, &extensions, on, &scope).await;
     for hit in &hits {
@@ -228,9 +301,15 @@ pub async fn for_thread(
             .persist_nudge(
                 thread,
                 effort.as_ref(),
-                &hit.id,
-                &hit.text,
-                "advisory",
+                crate::collection::Raised {
+                    kind: &hit.id,
+                    message: &hit.text,
+                    trigger: "advisory",
+                    audience: match hit.audience {
+                        AdvisoryAudience::Agent => oxplow_db::Audience::Agent,
+                        AdvisoryAudience::Person => oxplow_db::Audience::Person,
+                    },
+                },
                 cause.map_or(
                     crate::collection::RunOrigin::Command { turn: None },
                     crate::collection::RunOrigin::Event,
@@ -239,6 +318,26 @@ pub async fn for_thread(
             .await;
     }
     hits
+}
+
+/// The harness session of the thread's latest turn, if it reported one.
+async fn session_of(
+    sql: &crate::sql_gateway::SqlGateway,
+    thread: &oxplow_domain::ThreadId,
+) -> Option<String> {
+    let rows = sql
+        .query_sql(
+            "SELECT session_id FROM v_agent_turn WHERE thread_id = ?1 ORDER BY id DESC LIMIT 1",
+            vec![SqlCell::Int(thread.value())],
+            None,
+        )
+        .await
+        .ok()?
+        .rows;
+    match rows.first().and_then(|r| r.first()) {
+        Some(SqlCell::Text(s)) => Some(s.clone()),
+        _ => None,
+    }
 }
 
 /// Runs the `turn-end` advisories on each `thread.checkpoint`, after the
@@ -338,6 +437,7 @@ mod tests {
             query: query.into(),
             once_per,
             heading: None,
+            audience: crate::extensions::AdvisoryAudience::Agent,
         }
     }
 
@@ -348,6 +448,7 @@ mod tests {
             stream: Some(1),
             turn: None,
             effort: Some(effort),
+            session: None,
         }
     }
 
@@ -393,7 +494,8 @@ mod tests {
             run(1).await,
             vec![AdvisoryHit {
                 id: "x/low".into(),
-                text: "add tests (1)".into()
+                text: "add tests (1)".into(),
+                audience: AdvisoryAudience::Agent,
             }]
         );
         assert!(run(1).await.is_empty(), "once per effort");
@@ -437,11 +539,13 @@ mod tests {
             vec![
                 AdvisoryHit {
                     id: "x/cross".into(),
-                    text: "# Thresholds\na crossed\nb crossed".into()
+                    text: "# Thresholds\na crossed\nb crossed".into(),
+                    audience: AdvisoryAudience::Agent,
                 },
                 AdvisoryHit {
                     id: "x/deltas".into(),
-                    text: "- x: 1 → 2".into()
+                    text: "- x: 1 → 2".into(),
+                    audience: AdvisoryAudience::Agent,
                 },
             ]
         );
@@ -450,7 +554,8 @@ mod tests {
             second,
             vec![AdvisoryHit {
                 id: "x/deltas".into(),
-                text: "- x: 1 → 2".into()
+                text: "- x: 1 → 2".into(),
+                audience: AdvisoryAudience::Agent,
             }]
         );
     }
@@ -515,7 +620,8 @@ mod tests {
             hits,
             vec![AdvisoryHit {
                 id: "guide/hello".into(),
-                text: format!("effort {}", f.effort.value())
+                text: format!("effort {}", f.effort.value()),
+                audience: AdvisoryAudience::Agent,
             }]
         );
         let out = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
@@ -695,6 +801,220 @@ mod tests {
         assert!(hint().await.is_empty(), "once per effort");
     }
 
+    /// (kind, audience, delivered) of the thread's nudges, oldest first.
+    async fn nudges(svc: &crate::Services) -> serde_json::Value {
+        let out = crate::sql_gateway::SqlGateway::new(svc.db.clone())
+            .query_sql(
+                "SELECT kind, audience, delivered_at IS NOT NULL FROM v_agent_nudge ORDER BY id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        serde_json::to_value(&out.rows).unwrap()
+    }
+
+    async fn prompt(f: &crate::test_fixtures::EffortFixture) -> String {
+        f.svc
+            .agent_context
+            .prompt_context(&f.svc, &f.thread, Some("s"))
+            .await
+            .unwrap_or_default()
+    }
+
+    /// A hint that keeps firing after three deliveries in a scope stops
+    /// reaching the agent there and is raised, once, to the person; its
+    /// counts say so.
+    #[tokio::test]
+    async fn a_hint_that_keeps_firing_is_muted_and_raised_to_the_person() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        approved(
+            &f.svc,
+            "guide",
+            "  - id: nag\n    on: prompt\n    once_per: turn\n    query: SELECT 'please nag' AS message\n",
+        );
+        for _ in 0..3 {
+            assert!(prompt(&f).await.contains("please nag"));
+        }
+        let fourth = prompt(&f).await;
+        assert!(!fourth.contains("please nag"), "{fourth}");
+        assert!(!prompt(&f).await.contains("please nag"));
+        assert_eq!(
+            nudges(&f.svc).await,
+            serde_json::json!([
+                ["guide/nag", "agent", 1],
+                ["guide/nag", "agent", 1],
+                ["guide/nag", "agent", 1],
+                ["hint-muted", "person", 0],
+            ])
+        );
+        let stat = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
+            .query_sql(
+                "SELECT evaluated, fired, delivered, held, muted FROM v_hint_stat WHERE hint = 'guide/nag'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&stat.rows).unwrap(),
+            serde_json::json!([[4, 3, 3, 0, 1]])
+        );
+    }
+
+    /// A person's hint never reaches the agent: it waits in the ledger
+    /// until the person dismisses it (`hint.dismiss`), which an agent can't.
+    #[tokio::test]
+    async fn a_person_hint_waits_for_the_person() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        approved(
+            &f.svc,
+            "guide",
+            "  - id: tell\n    on: prompt\n    audience: person\n    once_per: thread\n    query: SELECT 'look at this' AS message\n",
+        );
+        assert!(!prompt(&f).await.contains("look at this"));
+        assert_eq!(
+            nudges(&f.svc).await,
+            serde_json::json!([["guide/tell", "person", 0]])
+        );
+        let id: i64 = {
+            let out = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
+                .query_sql("SELECT id FROM v_agent_nudge", vec![], None)
+                .await
+                .unwrap();
+            serde_json::to_value(&out.rows).unwrap()[0][0]
+                .as_i64()
+                .unwrap()
+        };
+        let agent = oxplow_domain::Actor::Agent {
+            thread_id: Some(f.thread),
+            stream_id: Some(f.svc.streams.list_streams().await.unwrap()[0].id),
+        };
+        assert!(f
+            .svc
+            .commands
+            .run(
+                &agent,
+                crate::commands::hint::DISMISS,
+                serde_json::json!({ "nudge": id }),
+                false
+            )
+            .await
+            .is_err());
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::hint::DISMISS,
+                serde_json::json!({ "nudge": id }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            nudges(&f.svc).await,
+            serde_json::json!([["guide/tell", "person", 1]])
+        );
+    }
+
+    /// `once_per: session` fires once per agent session on the thread;
+    /// `day` once per day.
+    #[tokio::test]
+    async fn once_per_session_and_day() {
+        let (l, runner) = setup().await;
+        let e = vec![ext(vec![
+            adv(
+                "s",
+                AdvisoryOn::Prompt,
+                AdvisoryOncePer::Session,
+                "SELECT 's' AS message",
+            ),
+            adv(
+                "d",
+                AdvisoryOn::Prompt,
+                AdvisoryOncePer::Day,
+                "SELECT 'd' AS message",
+            ),
+        ])];
+        let in_session = |id: Option<&str>| AdvisoryScope {
+            session: id.map(str::to_string),
+            ..on(1)
+        };
+        let ids = |hits: Vec<AdvisoryHit>| hits.into_iter().map(|h| h.id).collect::<Vec<_>>();
+        assert_eq!(
+            ids(runner
+                .run(&l, &e, AdvisoryOn::Prompt, &in_session(Some("a")))
+                .await),
+            vec!["x/s", "x/d"]
+        );
+        assert!(runner
+            .run(&l, &e, AdvisoryOn::Prompt, &in_session(Some("a")))
+            .await
+            .is_empty());
+        assert_eq!(
+            ids(runner
+                .run(&l, &e, AdvisoryOn::Prompt, &in_session(Some("b")))
+                .await),
+            vec!["x/s"],
+            "a new session, the same day"
+        );
+        assert!(
+            runner
+                .run(&l, &e, AdvisoryOn::Prompt, &in_session(None))
+                .await
+                .is_empty(),
+            "no session: a session hint can't hold"
+        );
+    }
+
+    /// The bundled `landed-in-progress` hint tells the person, once per
+    /// item, that an item a commit landed is still in progress.
+    #[tokio::test]
+    async fn bundled_landed_hint_tells_the_person_once() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::effort::CLOSE,
+                serde_json::json!({ "effort": f.effort.to_string(), "reason": "commit" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let cause = crate::collection::RunCause {
+            event_id: "evt".into(),
+            seq: 1,
+            anchors: oxplow_domain::Anchors {
+                thread_id: Some(f.thread),
+                ..Default::default()
+            },
+            at: oxplow_domain::Timestamp::now(),
+            started: None,
+        };
+        let landed = || async {
+            for_thread(
+                &svc.advisory_deps(),
+                &f.thread,
+                AdvisoryOn::TurnEnd,
+                Some(&cause),
+            )
+            .await
+            .into_iter()
+            .filter(|h| h.id == "oxplow-bundled/landed-in-progress")
+            .collect::<Vec<_>>()
+        };
+        let first = landed().await;
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].audience, AdvisoryAudience::Person);
+        assert!(
+            first[0].text.contains("“t” is still in progress"),
+            "{}",
+            first[0].text
+        );
+        assert!(landed().await.is_empty(), "once per item");
+    }
+
     fn delta(
         key: &str,
         title: &str,
@@ -757,10 +1077,12 @@ mod tests {
                 AdvisoryHit {
                     id: "oxplow-bundled/metric-deltas".into(),
                     text: "# Metric deltas (this effort)\n- ratio: 1.5 → 1 (Δ -0.5)\n- unsafe blocks: 3 → 12 (Δ +9)\n(Advisory — for awareness, not gating.)".into(),
+                    audience: AdvisoryAudience::Agent,
                 },
                 AdvisoryHit {
                     id: "oxplow-bundled/threshold-crossed".into(),
                     text: "# Metric thresholds\n⚠ unsafe blocks crossed its fail threshold (10)".into(),
+                    audience: AdvisoryAudience::Agent,
                 },
             ]
         );
@@ -815,6 +1137,7 @@ mod tests {
             vec![AdvisoryHit {
                 id: "oxplow-bundled/coverage-target".into(),
                 text: "Diff coverage on this effort's changed lines is 42%, below the 80% target. Add tests for the uncovered changed lines before closing (advisory — oxplow won't block you). See the effort's coverage panel for which lines are uncovered.".into(),
+                audience: AdvisoryAudience::Agent,
             }]
         );
         assert!(

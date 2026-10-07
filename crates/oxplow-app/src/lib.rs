@@ -1143,6 +1143,7 @@ impl Services {
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
         .chain(commands::effort::commands())
         .chain(commands::bookmark::commands())
+        .chain(commands::hint::commands())
         .chain(commands::dashboard::commands(db.clone(), sql.clone()))
         .chain(commands::comment::commands())
         .chain(commands::reasoning::commands())

@@ -5,6 +5,8 @@
 ///   where a person consents);
 /// - Problems — failed operations, each opening to its output, and the
 ///   events and reactions that couldn't be delivered, with Retry / Discard;
+/// - Hints for you — what a hint raised to the person said (or that oxplow
+///   muted one that kept firing at the agent), each with Dismiss;
 /// - From extensions — panel badges that fire, each opening its lens.
 
 import type { CSSProperties, ReactNode } from "react";
@@ -14,15 +16,16 @@ import { useAlerts } from "../components/Alerts/useAlerts.js";
 import { OpErrorDetail } from "../components/Alerts/OpErrorDetail.js";
 import { alertsSummary } from "../components/Alerts/alertsModel.js";
 import { DeliveryList } from "../components/DeliveryList.js";
-import { getOpErrorsStore } from "../components/opErrorsStore.js";
+import { getOpErrorsStore, recordOpError } from "../components/opErrorsStore.js";
 import { ProposalCard } from "../components/Proposals/ProposalCard.js";
+import { dismissHint } from "../hints.js";
 import { decide } from "../proposals.js";
 import { Page } from "../tabs/Page.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
-  const { items, proposals, opErrors, badges } = useAlerts();
+  const { items, proposals, opErrors, badges, hints } = useAlerts();
   const store = getOpErrorsStore();
   const [open, setOpen] = useState<string | null>(null);
   const problems = items.opErrors.length + items.undelivered + items.failedReactions;
@@ -42,6 +45,29 @@ export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
                 <ProposalCard key={p.id} proposal={p} onDecide={decide} />
               ))}
             </div>
+          </Section>
+        ) : null}
+        {hints.length > 0 ? (
+          <Section title="Hints for you" testId="alerts-hints">
+            {hints.map((h) => (
+              <div key={h.id} data-testid={`alerts-hint-${h.id}`} style={{ ...rowStyle, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <span style={{ flex: 1, whiteSpace: "pre-wrap" }}>{h.message}</span>
+                {h.threadTitle ? <span style={mutedStyle}>{h.threadTitle}</span> : null}
+                <button
+                  type="button"
+                  data-testid={`alerts-hint-dismiss-${h.id}`}
+                  title="Dismiss"
+                  onClick={() => {
+                    void dismissHint(h.id).catch((e: unknown) =>
+                      recordOpError({ label: "Dismiss hint", message: e instanceof Error ? e.message : String(e) }),
+                    );
+                  }}
+                  style={linkButtonStyle}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
           </Section>
         ) : null}
         {problems > 0 ? (

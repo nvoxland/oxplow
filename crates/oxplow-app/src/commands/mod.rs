@@ -23,6 +23,7 @@ pub mod effect;
 pub mod effort;
 pub mod effort_report;
 pub mod extension_install;
+pub mod hint;
 pub mod lens;
 pub mod lsp;
 pub mod metric;

@@ -10,6 +10,7 @@ const realApi = await import("../../api.js");
  *  where another file's mock answered first (tsk1012). */
 const noRows = { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
 const saved: unknown[] = [];
+const ran: [string, unknown][] = [];
 mock.module("../../api.js", () => ({
   ...realApi,
   getPanelLayout: async () => [],
@@ -20,7 +21,20 @@ mock.module("../../api.js", () => ({
   listCommentsForStream: async () => [],
   subscribeCommentEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},
+  runCommand: async (name: string, input: unknown) => {
+    ran.push([name, input]);
+    return { result: null, audit_id: 1, event_id: "e", inverse: null };
+  },
   querySql: async (sql: string) => {
+    if (sql.includes("FROM v_agent_nudge")) {
+      return {
+        columns: ["id", "kind", "message", "thread_title"],
+        rows: [[4, "oxplow-bundled/landed-in-progress", "“t” is still in progress, but a commit landed its work.", "Main"]],
+        truncated: false,
+        reads: { models: ["v_agent_nudge"], tables: [], measures: [] },
+        freshness: {},
+      };
+    }
     if (sql.includes("FROM v_command_proposal")) {
       return {
         columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run"],
@@ -62,6 +76,7 @@ const withRuns = (node: React.ReactNode) => (
 
 afterEach(() => {
   saved.length = 0;
+  ran.length = 0;
   getOpErrorsStore().clear();
   cleanup();
 });
@@ -81,12 +96,21 @@ test("the page lists a waiting proposal as its card, failed operations and undel
   expect(view.getByTestId(`op-error-detail-${op.id}`).textContent).toContain("rejected");
 });
 
+test("a hint raised to the person is listed with its thread, and Dismiss dismisses it", async () => {
+  const view = render(withRuns(<AlertsPage onOpenPage={() => {}} />));
+  const hints = await waitFor(() => view.getByTestId("alerts-hints"));
+  expect(within(hints).getByTestId("alerts-hint-4").textContent).toContain("“t” is still in progress");
+  expect(within(hints).getByTestId("alerts-hint-4").textContent).toContain("Main");
+  fireEvent.click(within(hints).getByTestId("alerts-hint-dismiss-4"));
+  await waitFor(() => expect(ran).toEqual([["hint.dismiss", { nudge: 4 }]]));
+});
+
 test("the bell counts everything, red for a problem, and opens Alerts", async () => {
   recordOpError({ label: "Push to origin", stderr: "rejected" });
   const opened: unknown[] = [];
   const view = render(withRuns(<AlertsIndicator onOpenPage={(r) => opened.push(r)} />));
-  // One proposal, two undelivered events, one failed operation.
-  await waitFor(() => expect(view.getByTestId("alerts-count").textContent).toBe("4"));
+  // One proposal, one hint, two undelivered events, one failed operation.
+  await waitFor(() => expect(view.getByTestId("alerts-count").textContent).toBe("5"));
   expect(view.getByTestId("alerts-indicator").getAttribute("data-tone")).toBe("danger");
   fireEvent.click(view.getByTestId("alerts-indicator"));
   expect(opened).toEqual([alertsRef()]);
@@ -94,7 +118,7 @@ test("the bell counts everything, red for a problem, and opens Alerts", async ()
 
 test("a toast once per new item, after the start-up settle, offering only Review", () => {
   let clock = 0;
-  const none = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, badges: [] };
+  const none = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, badges: [], hints: [] };
   const reviewed: number[] = [];
   const { rerender } = renderHook(
     ({ items }) => useAlertToasts(items, () => reviewed.push(1), () => clock),

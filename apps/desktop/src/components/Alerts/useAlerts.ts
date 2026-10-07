@@ -1,10 +1,11 @@
 /// Everything that needs the person, live: proposals, failed
-/// operations, undelivered events and failed reactions, and firing panel
-/// badges. The bell, the Alerts page and the toasts all read it.
+/// operations, undelivered events and failed reactions, firing panel
+/// badges, and hints raised to the person. The bell, the Alerts page and the toasts all read it.
 
 import { useMemo, useSyncExternalStore } from "react";
 
 import { useFailedReactions, useUndelivered } from "../../delivery.js";
+import { usePersonHints } from "../../hints.js";
 import { useProposals } from "../../proposals.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { getOpErrorsStore } from "../opErrorsStore.js";
@@ -17,6 +18,7 @@ export function useAlerts() {
   const undelivered = useUndelivered();
   const failedReactions = useFailedReactions();
   const { alerts: badges } = usePanelRuns();
+  const hints = usePersonHints();
   const items: AlertItems = useMemo(
     () => ({
       proposals: proposals.map((p) => ({
@@ -27,8 +29,9 @@ export function useAlerts() {
       undelivered: undelivered.length,
       failedReactions: failedReactions.length,
       badges: badges.map((b) => ({ id: b.id, title: b.title, message: b.message })),
+      hints: hints.map((h) => ({ id: h.id, message: h.message })),
     }),
-    [proposals, opErrors, undelivered, failedReactions, badges],
+    [proposals, opErrors, undelivered, failedReactions, badges, hints],
   );
-  return { items, proposals, opErrors, badges };
+  return { items, proposals, opErrors, badges, hints };
 }

@@ -1661,14 +1661,21 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   their rows: `commit-hygiene` no longer fires (tsk250) but old rows still
   read back.
 - **`trigger`** is the bash command (or commit sha) that caused the nudge.
-- **V102 (P3.2, tsk472)** adds `turn_id` (FK agent_turn SET NULL), `cause`
+- **V10** adds `audience` (`agent` | `person`, default `agent`): a
+  person's nudge is a hint raised in Alerts, stamped `delivered_at` when
+  they dismiss it (`dismiss_tx`), never taken by the agent. It also adds
+  `hint_stat(thread_id FK threads CASCADE, hint, evaluated,
+  last_evaluated_at, PK(thread_id, hint))`, each hint's evaluation count
+  (`evaluated()`); `v_hint_stat` joins it with the nudges and mute marks.
+- **V102** adds `turn_id` (FK agent_turn SET NULL), `cause`
   (the event that fired it) and `delivered_at`. `UNIQUE(cause, kind,
   coalesce(effort_id, 0)) WHERE cause IS NOT NULL` (V104, tsk510; V102 keyed
   it without the effort and dropped a second effort's nudge) makes a
   redelivered event unable to fire the same nudge twice for one effort
   (`record_tx` → `None`). **Delivery is by thread, not by
-  cause:** `take_undelivered(thread)` returns the thread's nudges with no
-  `delivered_at`, oldest first, and stamps them in the same transaction —
+  cause:** `take_for_agent(thread, budget)` returns the thread's agent
+  nudges with no `delivered_at` (oxplow's own first, oldest first, up to
+  a character budget), and stamps them in the same transaction —
   so a nudge whose reactor finishes after its hook's response went out
   reaches the agent on the thread's next hook instead of being lost. Rows
   from before V102 were stamped delivered.

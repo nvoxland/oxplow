@@ -577,7 +577,7 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
 
 /// Whether a project ACP agent may start: approved as it is now.
 /// A shared extension's advisories as a program to approve: each
-/// advisory (its id, trigger, repeat rule, heading and query) is an arg,
+/// advisory (its id, trigger, repeat rule, audience, heading and query) is an arg,
 /// so the person reads exactly what may speak into the agent's context
 /// and any change needs approving again.
 pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
@@ -591,10 +591,14 @@ pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
             .iter()
             .map(|a| {
                 format!(
-                    "{} (on {}, once per {}{}): {}",
+                    "{} (on {}, once per {}{}{}): {}",
                     a.id,
                     text(serde_json::to_value(a.on).unwrap_or_default()),
                     text(serde_json::to_value(a.once_per).unwrap_or_default()),
+                    match a.audience {
+                        crate::extensions::AdvisoryAudience::Agent => "",
+                        crate::extensions::AdvisoryAudience::Person => ", to the person",
+                    },
                     a.heading
                         .as_deref()
                         .map(|h| format!(", heading {h:?}"))

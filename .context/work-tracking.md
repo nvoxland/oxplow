@@ -207,6 +207,9 @@ The three in progress:
   (`:thread_id`, `:stream_id`, `:turn_id`, nullable `:effort_id`),
   `once_per: thread`, and one delivery path — every hit is a nudge the
   next prompt or tool call takes and stamps; bundled `large-uncommitted`.
-- Next, in order: hints' second cut (audience, pacing, effectiveness);
-  skills and repo rules.
+  Second cut: `audience: person` (Alerts, `hint.dismiss`), `once_per:
+  session | day`, a per-hook character budget, evaluation counts
+  (`v_hint_stat`) and muting after three deliveries; bundled
+  `landed-in-progress` to the person.
+- Next: skills and repo rules.
   Then the capability framework and the three swappable pieces.

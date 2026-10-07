@@ -1470,6 +1470,37 @@ mod tests {
         );
     }
 
+    /// V10: a nudge has an audience, the agent's for every nudge so far;
+    /// each hint's evaluations are counted per thread.
+    #[test]
+    fn v10_gives_nudges_an_audience_and_counts_evaluations() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(9))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'p', 'main', 'r', 'r', '/r', '2026-01-01', '2026-01-01');
+             INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+               VALUES (7, 1, 't', 'active', '2026-01-01', '2026-01-01');
+             INSERT INTO agent_nudge (thread_id, kind, message, created_at)
+               VALUES (7, 'report-less-run', 'm', '2026-01-02');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let audience: String = conn
+            .query_row("SELECT audience FROM agent_nudge", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(audience, "agent");
+        conn.execute(
+            "INSERT INTO hint_stat (thread_id, hint, evaluated, last_evaluated_at) VALUES (7, 'x/a', 1, 'n')",
+            [],
+        )
+        .unwrap();
+    }
+
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every

@@ -451,6 +451,27 @@ pub struct RunCause {
     pub started: Option<oxplow_domain::Timestamp>,
 }
 
+/// A nudge to record: its kind, its text, what caused it, who it's for.
+#[derive(Debug, Clone, Copy)]
+pub struct Raised<'a> {
+    pub kind: &'a str,
+    pub message: &'a str,
+    pub trigger: &'a str,
+    pub audience: oxplow_db::Audience,
+}
+
+impl<'a> Raised<'a> {
+    /// A nudge for the agent.
+    pub fn agent(kind: &'a str, message: &'a str, trigger: &'a str) -> Self {
+        Self {
+            kind,
+            message,
+            trigger,
+            audience: oxplow_db::Audience::Agent,
+        }
+    }
+}
+
 /// Where a run's report came from: an event a reactor saw, or a command
 /// (tsk923). What it records is stamped with what that origin knows, never
 /// a guess.
@@ -2348,9 +2369,7 @@ impl CollectionService {
             self.persist_nudge(
                 thread,
                 Some(&effort),
-                "report-less-run",
-                &msg,
-                &bash.command,
+                Raised::agent("report-less-run", &msg, &bash.command),
                 origin,
             )
             .await;
@@ -2368,18 +2387,18 @@ impl CollectionService {
         &self,
         thread: &ThreadId,
         effort: Option<&Effort>,
-        kind: &str,
-        message: &str,
-        trigger: &str,
+        nudge: Raised<'_>,
         origin: RunOrigin<'_>,
     ) {
         let cause = origin.cause();
+        let kind = nudge.kind;
         let new = NewAgentNudge {
+            audience: nudge.audience,
             thread_id: thread.to_string(),
             effort_id: effort.map(|e| e.id.to_string()),
             kind: kind.to_string(),
-            message: message.to_string(),
-            trigger: Some(trigger.to_string()),
+            message: nudge.message.to_string(),
+            trigger: Some(nudge.trigger.to_string()),
             turn_id: origin.turn(),
             cause: cause.map(|c| c.event_id.clone()),
         };
@@ -4558,9 +4577,7 @@ mod tests {
                 .persist_nudge(
                     &h.thread,
                     None,
-                    "report-less-run",
-                    "m",
-                    "cmd",
+                    crate::collection::Raised::agent("report-less-run", "m", "cmd"),
                     crate::collection::RunOrigin::Event(&cause),
                 )
                 .await;
@@ -6321,9 +6338,7 @@ mod tests {
                 .persist_nudge(
                     &h.thread,
                     None,
-                    "report-less-run",
-                    "m",
-                    "cmd",
+                    crate::collection::Raised::agent("report-less-run", "m", "cmd"),
                     crate::collection::RunOrigin::Event(&cause),
                 )
                 .await;

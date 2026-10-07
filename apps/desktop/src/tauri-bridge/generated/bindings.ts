@@ -1164,7 +1164,15 @@ export type Advisory = {
 	oncePer: AdvisoryOncePer,
 	// Line put above the messages (e.g. `# Metric deltas (this effort)`).
 	heading: string | null,
+	audience: AdvisoryAudience,
 };
+
+// Who a hint is for.
+export type AdvisoryAudience = 
+// The coding agent: delivered on its next prompt or tool call.
+"agent" | 
+// A person: raised in Alerts until they dismiss it.
+"person";
 
 // When core runs an advisory.
 export type AdvisoryOn = 
@@ -1186,12 +1194,19 @@ export type AdvisoryOn =
 export type AdvisoryOncePer = 
 // Once per effort, the first time the query returns rows.
 "effort" | 
-// Once per effort per `key` value: each row's `key` column fires once.
+/**
+ *  Once per thread per `key` value: each row's `key` column fires
+ *  once (put `:effort_id` in the key for once per effort per row).
+ */
 "row" | 
 // Every time, whenever the query returns rows.
 "turn" | 
 // Once per thread, the first time the query returns rows.
-"thread";
+"thread" | 
+// Once per agent session on the thread (the harness's session id).
+"session" | 
+// Once per thread per day (UTC).
+"day";
 
 export type AgentKind = "claude" | "codex" | "opencode" | 
 /**

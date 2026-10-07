@@ -4,8 +4,8 @@
 # change to it needs a new `version`. See `.context/semantic-layer.md`
 # "Models".
 - name: agent_nudge
-  version: 1
-  description: "Guidance oxplow sent the coding agent mid-effort (e.g. coverage below target, a test run with no report)."
+  version: 2
+  description: "Guidance oxplow raised — a hint (`<extension>/<id>`) or its own nudge (`report-less-run`) — for the coding agent, taken by its next prompt or tool call, or for a person, shown in Alerts until they dismiss it."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread." }
@@ -15,10 +15,26 @@
     - { name: "message", type: "TEXT", doc: "The text the agent was given." }
     - { name: "trigger", type: "TEXT", doc: "What prompted it, if recorded." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "delivered_at", type: "TEXT", doc: "When a hook response carried it to the agent; NULL while it waits for the thread's next hook." }
+    - { name: "delivered_at", type: "TEXT", doc: "When a hook response carried it to the agent, or the person dismissed it; NULL while it waits." }
+    - { name: "audience", type: "TEXT", doc: "`agent` or `person`. (v2)" }
   tests:
     - { not_null: id }
     - { unique: id }
+    - { accepted_values: { column: audience, values: [agent, person] } }
+- name: hint_stat
+  version: 1
+  description: "How each hint (an extension advisory, `<extension>/<id>`) did on each thread: how often it was evaluated, how often it fired, how much of that reached its audience or waits, and whether it was muted for firing on after being delivered."
+  columns:
+    - { name: "thread_id", type: "INTEGER", doc: "Thread (v_thread.id)." }
+    - { name: "hint", type: "TEXT", doc: "The hint, `<extension>/<id>`." }
+    - { name: "evaluated", type: "INTEGER", doc: "Times its query ran on the thread." }
+    - { name: "last_evaluated_at", type: "TEXT", doc: "When it last ran (RFC 3339)." }
+    - { name: "fired", type: "", doc: "Nudges it raised on the thread (v_agent_nudge rows of its kind)." }
+    - { name: "delivered", type: "", doc: "Of those, the ones that reached their audience: taken by the agent, or dismissed by a person." }
+    - { name: "held", type: "", doc: "Of those, the ones still waiting." }
+    - { name: "muted", type: "", doc: "Scopes (efforts, or the thread) where it was muted for firing on after three deliveries." }
+  tests:
+    - { not_null: hint }
 - name: agent_status
   version: 1
   description: "Each thread's agent status as last logged: `running`, `idle`, `awaiting_user` (waiting on the person — a question it put to them, a plan to approve, a permission prompt, or a final message ending in a question), `stopped`, `error`. A dead turn's `stalled` is derived live, never logged."

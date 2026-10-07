@@ -782,12 +782,28 @@ pub enum AdvisoryOn {
 pub enum AdvisoryOncePer {
     /// Once per effort, the first time the query returns rows.
     Effort,
-    /// Once per effort per `key` value: each row's `key` column fires once.
+    /// Once per thread per `key` value: each row's `key` column fires
+    /// once (put `:effort_id` in the key for once per effort per row).
     Row,
     /// Every time, whenever the query returns rows.
     Turn,
     /// Once per thread, the first time the query returns rows.
     Thread,
+    /// Once per agent session on the thread (the harness's session id).
+    Session,
+    /// Once per thread per day (UTC).
+    Day,
+}
+
+/// Who a hint is for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum AdvisoryAudience {
+    /// The coding agent: delivered on its next prompt or tool call.
+    #[default]
+    Agent,
+    /// A person: raised in Alerts until they dismiss it.
+    Person,
 }
 
 fn default_once_per() -> AdvisoryOncePer {
@@ -808,6 +824,7 @@ pub struct Advisory {
     pub once_per: AdvisoryOncePer,
     /// Line put above the messages (e.g. `# Metric deltas (this effort)`).
     pub heading: Option<String>,
+    pub audience: AdvisoryAudience,
 }
 
 /// An advisory as written in `extension.yaml`.
@@ -821,6 +838,8 @@ struct AdvisoryFile {
     once_per: AdvisoryOncePer,
     #[serde(default)]
     heading: Option<String>,
+    #[serde(default)]
+    audience: AdvisoryAudience,
 }
 
 /// Places in core pages an extension can mount a lens, and the params each
@@ -1859,6 +1878,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 query: a.query,
                 once_per: a.once_per,
                 heading: a.heading,
+                audience: a.audience,
             }) {
                 Ok(a) if !is_advisory_id(&a.id) => ext.errors.push(at(
                     &file,
@@ -5362,6 +5382,7 @@ commands:
             advisories,
             [
                 "large-uncommitted",
+                "landed-in-progress",
                 "coverage-target",
                 "metric-deltas",
                 "threshold-crossed"

@@ -350,9 +350,7 @@ mod tests {
             .persist_nudge(
                 &f.thread,
                 None,
-                "late",
-                "a late nudge",
-                "cmd",
+                crate::collection::Raised::agent("late", "a late nudge", "cmd"),
                 crate::collection::RunOrigin::Command { turn: None },
             )
             .await;

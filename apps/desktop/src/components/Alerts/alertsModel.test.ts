@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { alertsSummary, alertKeys, newAlerts, type AlertItems } from "./alertsModel.js";
 
-const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, badges: [] };
+const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, badges: [], hints: [] };
 
 // One bell for everything that needs the person.
 test("the bell counts every item, red for a problem, accent for a decision", () => {
@@ -44,4 +44,13 @@ test("new alerts are the items not seen before, once each", () => {
   expect(newAlerts(alertKeys(none), { ...none, undelivered: 1 }).map((a) => a.message)).toEqual([
     "1 event couldn't be delivered",
   ]);
+});
+
+// A hint raised to the person is a notice: it counts, toasts once, and
+// isn't a problem.
+test("a hint for the person counts and toasts once", () => {
+  const hint = { id: 4, kind: "oxplow-bundled/landed-in-progress", message: "“t” is still in progress", threadTitle: "Main" };
+  expect(alertsSummary({ ...none, hints: [hint] })).toEqual({ count: 1, tone: "accent" });
+  expect(newAlerts(alertKeys(none), { ...none, hints: [hint] }).map((a) => a.message)).toEqual(["“t” is still in progress"]);
+  expect(newAlerts(alertKeys({ ...none, hints: [hint] }), { ...none, hints: [hint] })).toEqual([]);
 });
