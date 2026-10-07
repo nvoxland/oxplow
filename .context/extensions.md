@@ -603,7 +603,13 @@ out of the main checkout), and `lens.keep` / `lens.share` /
 worktree. The app shows that work once it's merged into the main
 worktree, like any other code change. Until then the MCP authoring tools
 (`validate_extension`, `run_lens`, `get_lens`, …) read the agent's own
-working copy so it can check what it wrote. If per-stream config is ever
+working copy so it can check what it wrote — its files, under the main
+worktree's config: the daemon's catalog is
+`ExtensionCatalog::for_project(main)`, so every load (`load_extensions_in`,
+the write paths' `load_fresh`, the SDK check's workspace filter) takes
+`extensions.disabled` from the main worktree whatever root it reads.
+Standalone (`ExtensionCatalog::new()`, the CLI) a root is its own
+project. If per-stream config is ever
 needed, it goes in a separate file, not a per-worktree read of
 `project.yaml`.
 

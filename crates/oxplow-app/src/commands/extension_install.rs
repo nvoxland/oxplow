@@ -127,9 +127,11 @@ pub fn install_command(deps: InstallDeps) -> Command {
                     .worktrees
                     .resolve(stream.map(|s| s.to_string()).as_deref())
                     .await;
+                let project = deps.worktrees.project_dir().to_path_buf();
                 let ext = tokio::task::spawn_blocking(move || {
                     crate::extensions::install_extension(
                         &root,
+                        &project,
                         &input.git_url,
                         input.git_ref.as_deref(),
                         &input.reviewed_sha,
@@ -166,8 +168,9 @@ pub fn update_command(deps: InstallDeps) -> Command {
                     .resolve(stream.map(|s| s.to_string()).as_deref())
                     .await;
                 let name = input.name.clone();
+                let project = deps.worktrees.project_dir().to_path_buf();
                 let ext = tokio::task::spawn_blocking(move || {
-                    crate::extensions::update_extension(&root, &name, &input.reviewed_sha)
+                    crate::extensions::update_extension(&root, &project, &name, &input.reviewed_sha)
                 })
                 .await
                 .map_err(|e| CommandError::Failed {

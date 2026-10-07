@@ -378,7 +378,8 @@ calls averaged):
 
 `crates/oxplow-app/src/extension_catalog.rs` caches the loaded `Vec<Extension>`
 per worktree root behind a **stat-only fingerprint** of
-`root/oxplow/extensions/**` and `root/.oxplow/project.yaml` (path, size,
+`root/oxplow/extensions/**` and the project's `.oxplow/project.yaml` (the
+main worktree's in the daemon, whatever the root; path, size,
 mtime of every file). A hit walks the tree with `stat` and parses nothing;
 any edit, add or delete — or a config change that disables an extension —
 misses and reloads on the next call. No watcher and no explicit

@@ -626,9 +626,10 @@ async fn effects_against(
             oxplow_db::Database::in_memory(),
         )),
         oxplow_app::blob_store::BlobStore::new(std::env::temp_dir()),
-        // The project's workspace filter decides what a revision holds.
+        // The project's workspace filter decides what a revision holds
+        // (the main worktree's, for a stream's working copy).
         std::sync::Arc::new(std::sync::RwLock::new(
-            oxplow_config::load_project_config(root)
+            oxplow_config::load_project_config(catalog.project_of(root))
                 .map_err(|e| SdkError::Invalid(format!(".oxplow/project.yaml: {e}")))?,
         )),
     );

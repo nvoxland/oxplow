@@ -1013,7 +1013,9 @@ impl Services {
         // The metric runner (fact collectors → substrate). Holds leaf Arcs
         // only (never `Arc<Services>`); the `collector.triggers` consumer
         // hands it events, and its catalog loop is spawned in `boot.rs`.
-        let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::new());
+        let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::for_project(
+            &layout.project_dir,
+        ));
         let extension_models = Arc::new(extension_models::ExtensionModelsService::new(
             db.clone(),
             extension_catalog.clone(),

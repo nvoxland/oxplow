@@ -499,6 +499,7 @@ fn keep(target: LensTarget) -> Command {
             let origin = thread.map(|t| thread_ref(ThreadId::new(t)));
             let lens = extensions::save_lens(
                 &root,
+                &target.project_dir,
                 &extension,
                 &slug,
                 &spec,
@@ -632,7 +633,7 @@ async fn share_lens(
     to: &str,
 ) -> Result<String, CommandError> {
     let lens = target.catalog.find_lens(root, id).map_err(domain)?;
-    let source = extensions::load_extensions(root)
+    let source = extensions::load_extensions_in(root, &target.project_dir)
         .into_iter()
         .find(|e| e.name == lens.extension)
         .ok_or_else(|| invalid("/lens", format!("no extension `{}`", lens.extension)))?;
@@ -643,7 +644,7 @@ async fn share_lens(
     let manifest = dir.join("extension.yaml");
     let created = !manifest.exists();
     if !created {
-        let existing = extensions::load_extensions(root)
+        let existing = extensions::load_extensions_in(root, &target.project_dir)
             .into_iter()
             .find(|e| e.name == to)
             .ok_or_else(|| invalid("/extension", format!("`{to}` doesn't load")))?;
@@ -695,7 +696,7 @@ async fn share_lens(
         }
     };
     write().map_err(|e| CommandError::from(DomainError::Storage(format!("write {to}: {e}"))))?;
-    let loaded = extensions::load_extensions(root)
+    let loaded = extensions::load_extensions_in(root, &target.project_dir)
         .into_iter()
         .find(|e| e.name == to);
     let problems: Vec<String> = match &loaded {
