@@ -94,13 +94,6 @@ pub fn work_item_ref(task: TaskId) -> String {
     format!("work_item:{}", work_item_id(task))
 }
 
-/// The task behind a `work_item` **id** when it's one of ours: `oxplow:tsk<n>`,
-/// or — as an agent's impact declaration may write it — a bare `tsk<n>` / `<n>`.
-pub fn task_from_work_item_id(id: &str) -> Option<TaskId> {
-    let native = id.strip_prefix("oxplow:").unwrap_or(id);
-    TaskId::try_from_str(native).or_else(|| native.parse::<i64>().ok().map(TaskId::new))
-}
-
 /// The task behind a canonical `work_item:` **ref**: `Some` for
 /// `work_item:oxplow:tsk<n>`, `None` for another provider's item or any
 /// other kind (strict: this is what event consumers read).
@@ -129,8 +122,8 @@ pub fn work_item_label(r: &str) -> String {
 /// A `work_item` ref in its one canonical spelling, or `Invalid` naming
 /// what's wrong with it. Efforts key on the string (one open effort per
 /// work item is a unique index), so an alias — a revision, a fragment,
-/// an escaped spelling, `oxplow:tsk01` for `oxplow:tsk1` — is refused
-/// rather than treated as a different item.
+/// an escaped spelling — is refused rather than treated as a different
+/// item. What a list's own ids look like is that list's to say.
 pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
     let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{r}` {why}")));
     // `work_item` is core's kind, the same in every vocabulary: its shape
@@ -156,12 +149,6 @@ pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
     }
     if parsed.to_string() != r {
         return invalid(&format!("is not canonical; write `{parsed}`"));
-    }
-    if let Some(native) = parsed.id.strip_prefix(&format!("{OXPLOW_PROVIDER}:")) {
-        match TaskId::try_from_str(native) {
-            Some(t) if work_item_ref(t) == r => {}
-            _ => return invalid("is not an oxplow task (`work_item:oxplow:tsk<n>`)"),
-        }
     }
     Ok(())
 }
@@ -221,12 +208,6 @@ mod tests {
         assert_eq!(task_of_work_item_ref("work_item:issues:ENG-1"), None);
         assert_eq!(task_of_work_item_ref("effort:eff1"), None);
         assert_eq!(task_of_work_item_ref("work_item:oxplow:42"), None, "strict");
-        assert_eq!(
-            task_from_work_item_id("oxplow:tsk42"),
-            Some(TaskId::new(42))
-        );
-        assert_eq!(task_from_work_item_id("tsk42"), Some(TaskId::new(42)));
-        assert_eq!(task_from_work_item_id("42"), Some(TaskId::new(42)));
         assert_eq!(system_source("hook_ingest"), "system:hook_ingest");
         assert_eq!(
             work_item_id_of_ref("work_item:issues:ENG-1"),
@@ -242,11 +223,10 @@ mod tests {
             assert!(validate_work_item_ref(bad).is_err(), "{bad}");
         }
         // Only the canonical spelling is a key: the open-effort index
-        // compares strings, so `tsk01`, a fragment, a revision or an
-        // escaped spelling would slip a second open effort past it.
+        // compares strings, so a fragment, a revision or an escaped
+        // spelling would slip a second open effort past it. (What a list's
+        // own ids look like is that list's to say, not core's.)
         for alias in [
-            "work_item:oxplow:tsk01",
-            "work_item:oxplow:nope",
             "work_item:oxplow:tsk1#x",
             "work_item:oxplow:tsk1@v2",
             "work_item:issues:ENG%2D1",

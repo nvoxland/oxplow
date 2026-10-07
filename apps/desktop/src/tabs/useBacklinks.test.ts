@@ -57,8 +57,8 @@ describe("humanRefType", () => {
       "summary_wikilink",
       "summary_file_ref",
       "summary_dir_ref",
-      "task_body_mention",
-      "summary_task_mention",
+      "work_item_mention",
+      "summary_work_item_mention",
       "finding_mention",
       "summary_finding_mention",
       "commit_mention",
@@ -86,9 +86,9 @@ describe("humanRefType", () => {
   });
 
   test("typed task links humanize the sub-type", () => {
-    expect(humanRefTypeForTest("task_link:blocks", null)).toBe("blocks");
-    expect(humanRefTypeForTest("task_link:relates_to", null)).toBe("relates to");
-    expect(humanRefTypeForTest("task_link:discovered_from", null)).toBe("discovered from");
+    expect(humanRefTypeForTest("work_item_link:blocks", null)).toBe("blocks");
+    expect(humanRefTypeForTest("work_item_link:relates_to", null)).toBe("relates to");
+    expect(humanRefTypeForTest("work_item_link:discovered_from", null)).toBe("discovered from");
   });
 
   test("finding_path stays as 'found in'", () => {

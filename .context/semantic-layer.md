@@ -548,7 +548,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
 | `v_work_item` | work items from every provider (`ref`, `provider`, canonical `state`, `native_state`, `native` JSON, `parent_ref`), excluding deleted; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
-| `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` ref; `task_id` derived for oxplow tasks); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
+| `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` ref; join `v_work_item` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
 | `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |

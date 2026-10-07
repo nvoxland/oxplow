@@ -18,7 +18,6 @@
 use serde::{Deserialize, Serialize};
 
 use oxplow_domain::comment::CommentTarget;
-use oxplow_domain::task::TaskStatus;
 
 use crate::Services;
 
@@ -85,21 +84,28 @@ pub async fn resolve_refs(services: &Services, refs: &[CommentTarget]) -> Vec<Re
     out
 }
 
-/// An oxplow task (`oxplow:tsk<n>`); another provider's item stays bare
-/// until its provider resolves it (P5).
+/// A work item (`<provider>:<id>`), through the interface: the active
+/// list's items only, whichever list it is; another stays bare.
 async fn resolve_work_item(services: &Services, id: &str) -> RefSummary {
-    use oxplow_domain::stores::TaskStore as _;
     let mut summary = RefSummary::bare("work_item", id);
-    let Some(tid) = id
-        .strip_prefix("oxplow:")
-        .and_then(oxplow_domain::TaskId::try_from_str)
-    else {
-        return summary;
-    };
-    if let Ok(Some(task)) = services.task_store.get(tid).await {
-        summary.title = Some(task.title);
-        summary.detail = Some(status_label(task.status).to_string());
-        summary.body_excerpt = excerpt(&task.description);
+    let row = services
+        .sql
+        .query_sql(
+            "SELECT title, state, body FROM v_work_item WHERE ref = ?1",
+            vec![oxplow_db::SqlCell::Text(format!("work_item:{id}"))],
+            None,
+        )
+        .await
+        .ok()
+        .and_then(|out| out.rows.into_iter().next());
+    if let Some(row) = row {
+        let text = |i: usize| match &row[i] {
+            oxplow_db::SqlCell::Text(t) => Some(t.clone()),
+            _ => None,
+        };
+        summary.title = text(0);
+        summary.detail = text(1);
+        summary.body_excerpt = text(2).as_deref().and_then(excerpt);
     }
     summary
 }
@@ -220,18 +226,6 @@ fn human_size(bytes: u64) -> String {
     }
 }
 
-/// Snake-case status label matching the wire form (`in_progress`, …).
-fn status_label(status: TaskStatus) -> &'static str {
-    match status {
-        TaskStatus::Ready => "ready",
-        TaskStatus::InProgress => "in_progress",
-        TaskStatus::Blocked => "blocked",
-        TaskStatus::Done => "done",
-        TaskStatus::Canceled => "canceled",
-        TaskStatus::Archived => "archived",
-    }
-}
-
 /// First non-empty trimmed lead of `body`, capped at [`EXCERPT_LEN`]
 /// chars (with an ellipsis when truncated). `None` for an empty body.
 fn excerpt(body: &str) -> Option<String> {
@@ -314,6 +308,43 @@ mod tests {
             .as_deref()
             .unwrap()
             .starts_with("It fails on CI only."));
+    }
+
+    /// A work item resolves through the interface: the active list's
+    /// items only — with none, even oxplow's task is bare.
+    #[tokio::test]
+    async fn a_work_item_resolves_from_the_active_list_only() {
+        let dir = git_repo_with_commit("init", "");
+        let services = Services::in_memory(dir.path()).unwrap();
+        let task = services
+            .tasks
+            .create(
+                None,
+                CreateTaskInput {
+                    title: "Fix the flaky test".into(),
+                    description: None,
+                    parent_id: None,
+                    status: None,
+                    priority: None,
+                    author: None,
+                },
+            )
+            .await
+            .unwrap();
+        services
+            .config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), "none".into());
+        let config = crate::config_service::read_config(&services.config);
+        services
+            .capabilities
+            .publish(&config, &services.db)
+            .await
+            .unwrap();
+        let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task.id)).await;
+        assert_eq!(summary.title, None);
     }
 
     #[tokio::test]

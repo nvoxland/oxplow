@@ -1840,7 +1840,7 @@ mod tests {
         // effort row survives alongside its parent.
         let n: i64 = conn
             .query_row(
-                "SELECT count(*) FROM v_effort WHERE task_id = ?1",
+                "SELECT count(*) FROM v_effort WHERE work_item = 'work_item:oxplow:tsk' || ?1",
                 [task_id],
                 |row| row.get(0),
             )

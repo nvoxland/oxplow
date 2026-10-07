@@ -4,7 +4,7 @@
 //! - The diff against parent#0 produces `(git-commit:<sha>) --
 //!   touched_file --> (file:<path>)` edges.
 //! - The commit message (subject + body) is run through the shared
-//!   ref extractor so `(git-commit:<sha>) --task_body_mention/
+//!   ref extractor so `(git-commit:<sha>) --work_item_mention/
 //!   wikilink/finding_mention--> (target)` edges appear too.
 //!
 //! Idempotent. The indexer uses [`SqlitePageRefStore::replace_source`]
@@ -23,8 +23,8 @@
 use std::path::Path;
 
 use oxplow_db::page_ref_projections::{
-    work_item_id, KIND_COMMIT, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM, RT_BODY_COMMIT,
-    RT_BODY_FINDING, RT_BODY_TASK, RT_TOUCHED_FILE, RT_WIKILINK,
+    KIND_COMMIT, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM, RT_BODY_COMMIT,
+    RT_BODY_FINDING, RT_BODY_WORK_ITEM, RT_TOUCHED_FILE, RT_WIKILINK,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::refs::extract;
@@ -81,13 +81,13 @@ pub fn commit_edges(kinds: &KindRegistry, detail: &RevisionDetail) -> Vec<PageRe
         combined.push_str(&detail.body);
     }
     let refs = extract(kinds, &combined);
-    for task_id in refs.tasks {
+    for item in refs.work_items {
         out.push(PageRefEdge::new(
             KIND_COMMIT,
             sha,
             KIND_WORK_ITEM,
-            work_item_id(oxplow_domain::TaskId::new(task_id)),
-            RT_BODY_TASK,
+            item,
+            RT_BODY_WORK_ITEM,
         ));
     }
     for w in refs.wikis {
@@ -375,7 +375,13 @@ fn branch_rows(branches: &[Branch], streams: &[(i64, String)]) -> Vec<oxplow_db:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::refs::kind::core_kinds;
+
+    /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
+    fn tasks_kinds() -> oxplow_domain::refs::kind::KindRegistry {
+        oxplow_domain::refs::kind::core_kinds()
+            .with_work_item_ids("oxplow", r"tsk\d+")
+            .unwrap()
+    }
     use oxplow_domain::vcs::{FileStatus, RevisionFile, RevisionInfo};
 
     fn commit(sha: &str, subject: &str, body: &str, paths: &[&str]) -> RevisionDetail {
@@ -410,7 +416,7 @@ mod tests {
             "",
             &["src/app.rs", "src/lib.rs"],
         );
-        let edges = commit_edges(&core_kinds(), &c);
+        let edges = commit_edges(&tasks_kinds(), &c);
         let files: std::collections::BTreeSet<_> = edges
             .iter()
             .filter(|e| e.ref_type == "touched_file")
@@ -428,7 +434,7 @@ mod tests {
             "see finding:fnd-7 for details",
             &[],
         );
-        let edges = commit_edges(&core_kinds(), &c);
+        let edges = commit_edges(&tasks_kinds(), &c);
         let targets: Vec<_> = edges
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
@@ -443,7 +449,7 @@ mod tests {
         // If a commit message accidentally contains its own short
         // sha (e.g. "revert abc1234"), don't emit a self-loop.
         let c = commit("abc1234567890def", "revert abc1234", "", &[]);
-        let edges = commit_edges(&core_kinds(), &c);
+        let edges = commit_edges(&tasks_kinds(), &c);
         assert!(
             !edges
                 .iter()
@@ -578,7 +584,7 @@ mod tests {
         let page_refs = SqlitePageRefStore::new(db.clone());
         let git = oxplow_db::SqliteGitStore::new(db.clone());
         let n = index_recent(
-            &core_kinds(),
+            &tasks_kinds(),
             &crate::vcs::GitProvider,
             dir.path(),
             &page_refs,
@@ -628,7 +634,7 @@ mod tests {
 
         // Re-index — nothing new.
         let n2 = index_recent(
-            &core_kinds(),
+            &tasks_kinds(),
             &crate::vcs::GitProvider,
             dir.path(),
             &page_refs,
@@ -665,7 +671,7 @@ mod tests {
             let ws = dir.path().to_path_buf();
             async move {
                 index_recent(
-                    &core_kinds(),
+                    &tasks_kinds(),
                     &crate::vcs::GitProvider,
                     &ws,
                     &page_refs,

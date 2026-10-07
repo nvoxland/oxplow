@@ -146,11 +146,11 @@ pub struct TaskNote {
 /// directories, and files alike.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct TaskImpact {
-    /// Page kind being impacted — `wiki | task | file | directory
+    /// Page kind being impacted — `wiki | work_item | file | directory
     /// | git_commit | finding`, and no other (`effort.report` refuses
     /// one). Projected to the canonical `page_ref` kinds (`git_commit`
-    /// → `commit`, `directory` → `dir`, `task` → `work_item`; see
-    /// `impact_kind`).
+    /// → `commit`, `directory` → `dir`; see `impact_kind`). A
+    /// `work_item`'s id is its ref or one of the active list's own ids.
     pub kind: String,
     /// Canonical id for that page kind (slug, integer string, repo
     /// path, sha — see `page_ref_projections` docs).

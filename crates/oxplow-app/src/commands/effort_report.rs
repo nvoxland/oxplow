@@ -41,7 +41,7 @@ pub struct ReportInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     /// Outcomes beyond the edits: `{ kind, id, action? }` — a wiki page,
-    /// a task, a commit, a finding.
+    /// a work item, a commit, a finding.
     #[serde(default)]
     pub impacts: Vec<TaskImpact>,
 }
@@ -209,7 +209,7 @@ pub fn report_command(deps: EffortDeps) -> Command {
         spec(
             REPORT,
             "Optional: describe the thread's current (else latest) effort — a `summary` of \
-             what shipped, and any `impacts` beyond the edits (a wiki page, a task, a commit, \
+             what shipped, and any `impacts` beyond the edits (a wiki page, a work item, a commit, \
              a finding). Without one, the summary is your last turn's final message; files \
              and test runs are observed. Returns `{ effort, link_warnings }`.",
             schema::<ReportInput>(),
@@ -384,12 +384,12 @@ mod tests {
     }
 
     /// An impact names its target in the one documented vocabulary
-    /// (`wiki | task | file | directory | git_commit | finding`); any other
-    /// kind is refused at its index, not dropped.
+    /// (`wiki | work_item | file | directory | git_commit | finding`); any
+    /// other kind is refused at its index, not dropped.
     #[tokio::test]
     async fn an_impact_of_another_kind_is_refused() {
         let fx = services_with_effort().await;
-        for kind in ["commit", "work_item", "dir", "git-commit", "page"] {
+        for kind in ["commit", "task", "dir", "git-commit", "page"] {
             let err = fx
                 .svc
                 .commands

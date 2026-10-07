@@ -673,7 +673,7 @@ cross-page-reference graph (`page_ref` table; see
 [data-model.md](./data-model.md)) is the exception: a single
 `(source_kind, source_id)` like `(task, wi-42)` accumulates
 rows from three different writers (the task store's body
-mentions, the link store's `task_link:*` edges, the effort
+mentions, the link store's `work_item_link:*` edges, the effort
 store's `touched_file` edges), each owning a slice keyed by
 `ref_type`.
 

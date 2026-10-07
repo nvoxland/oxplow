@@ -1,11 +1,11 @@
 title: Turns
-description: One row per agent turn across the task's efforts, newest first.
-params: [{ name: task_id }]
+description: One row per agent turn across the work item's efforts, newest first.
+params: [{ name: ref }]
 query: |
   SELECT u.recorded_at AS at, u.prompt, u.model,
          u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens AS tokens
   FROM v_token_usage u JOIN v_effort e ON e.id = u.effort_id
-  WHERE e.task_id = :task_id
+  WHERE e.work_item = :ref
   ORDER BY u.recorded_at DESC
 columns:
   - { key: at, label: When }

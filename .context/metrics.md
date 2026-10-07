@@ -834,10 +834,11 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
 ### Spine dimensions and time buckets (tsk321)
 
 - **Spine dimensions.** `oxplow.stream`, `oxplow.thread`, `oxplow.effort`,
-  `oxplow.task` and `oxplow.vcs_rev` read the fact's capture (arms in
+  `oxplow.work_item` and `oxplow.vcs_rev` read the fact's capture (arms in
   `dim_value_cached`; excluded in `dim_is_slice_key`, listed in `SPINE_DIMS`).
-  `task_id` is on `FactRow`: `fact_row_mapper(conn)` loads `effort`'s
-  effort→task map once per read and stamps each row. A per-row join would cost
+  `work_item` (the effort's work-item ref) is on `FactRow`:
+  `fact_row_mapper(conn)` loads `effort`'s effort→work-item map once per
+  read and stamps each row. A per-row join would cost
   a lookup on every fact. They slice and filter (`dim_eq`) on the **fact path
   only**. The cube drops them from the promoted set: a capture's `effort_id`
   is stamped when the effort closes, after the cube may have folded it.

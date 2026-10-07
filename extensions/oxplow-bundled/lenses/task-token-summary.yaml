@@ -1,5 +1,5 @@
 title: Token Total
-params: [{ name: task_id }]
+params: [{ name: ref }]
 query: |
   SELECT printf('**%,d** tokens · %d turn%s · in %,d · out %,d · cache-write %,d · cache-read %,d',
                 sum(u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens),
@@ -7,7 +7,7 @@ query: |
                 sum(u.input_tokens), sum(u.output_tokens),
                 sum(u.cache_creation_input_tokens), sum(u.cache_read_input_tokens)) AS summary
   FROM v_token_usage u JOIN v_effort e ON e.id = u.effort_id
-  WHERE e.task_id = :task_id
+  WHERE e.work_item = :ref
   HAVING count(*) > 0
 viz: markdown
 empty: No token data collected.

@@ -1179,8 +1179,9 @@ detector, the report collectors a detected run reads, `collector.sync` for
 one run by hand, `test.record_run`, and the `list_effort_observations` /
 `get_open_effort` MCP reads) is documented in `.context/collection.md`.
 `get_open_effort({ thread_id })` answers "what is this thread's
-currently-open effort?" — returns `{ open, effortId, taskId, startedAt,
-hasStartSnapshot }` (`open:false` with null ids when none): whether an
+currently-open effort?" — returns `{ open, effortId, workItem,
+startedAt, hasStartSnapshot }` (`workItem` its linked work-item ref;
+`open:false` with null ids when none): whether an
 effort is open before a run is recorded, and whether its diff coverage has
 a baseline (`hasStartSnapshot`).
 Report parsing is **pluggable**: a report collector names a bundled parser

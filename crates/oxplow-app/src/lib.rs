@@ -1021,12 +1021,6 @@ impl Services {
             extension_catalog.clone(),
             layout.project_dir.clone(),
         ));
-        let vocabulary_service = Arc::new(vocabulary_reactor::VocabularyService::new(
-            db.clone(),
-            extension_catalog.clone(),
-            layout.project_dir.clone(),
-            vocabulary.clone(),
-        ));
         let metrics = metrics_service::MetricsService::new(
             snapshot_store.clone(),
             thread_store.clone(),
@@ -1076,6 +1070,7 @@ impl Services {
                 source: capabilities::Source::Core,
                 features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
                 fields: serde_json::Value::Array(Vec::new()),
+                id_pattern: None,
             }],
             vocabulary.clone(),
         ));
@@ -1087,6 +1082,27 @@ impl Services {
         capabilities
             .publish_now(&config_service::read_config(&config_arc), &db)
             .map_err(|e| AppInitError::Capabilities(e.to_string()))?;
+        // The vocabulary reads the active work list's own ids in text
+        // (`tsk42`), as that list declares them; from the first read, and
+        // at every rebuild (a switch rebuilds it).
+        let work_item_ids: vocabulary_reactor::WorkItemIds = {
+            let (capabilities, config) = (capabilities.clone(), config_arc.clone());
+            Arc::new(move || capabilities.work_item_ids(&config_service::read_config(&config)))
+        };
+        {
+            // Core's still (the service adds extensions' at its first pass).
+            let mut core = oxplow_domain::vocabulary::Vocabulary::core();
+            core.kinds =
+                vocabulary_reactor::with_work_item_ids(core.kinds, work_item_ids().as_ref());
+            vocabulary.swap(core);
+        }
+        let vocabulary_service = Arc::new(vocabulary_reactor::VocabularyService::new(
+            db.clone(),
+            extension_catalog.clone(),
+            layout.project_dir.clone(),
+            vocabulary.clone(),
+            work_item_ids,
+        ));
         let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(
@@ -1299,6 +1315,7 @@ impl Services {
             source: capabilities::Source::Core,
             features: serde_json::json!({}),
             fields: serde_json::Value::Array(Vec::new()),
+            id_pattern: None,
         });
         for command in knowledge::commands(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),

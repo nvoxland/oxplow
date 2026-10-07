@@ -861,11 +861,10 @@ struct AdvisoryFile {
 pub const SLOTS: &[(&str, &[&str])] = &[
     // An effort's review (its diff view).
     ("effort.review.details", &["effort_id", "change_id"]),
-    // A work item's page, below its body; `task_id` is null for an item
-    // that isn't an oxplow task.
-    ("work_item.detail.body", &["ref", "task_id"]),
+    // A work item's page, below its body: the item's ref, whichever list.
+    ("work_item.detail.body", &["ref"]),
     // The same page's side rail.
-    ("work_item.detail.sidebar", &["ref", "task_id"]),
+    ("work_item.detail.sidebar", &["ref"]),
     // A thread's plan, as a compact strip.
     ("thread.plan.header", &["thread_id"]),
     ("vcs.commit.details", &["change_id"]),
@@ -6056,7 +6055,7 @@ commands:
 
     #[test]
     fn slots_bind_params_the_lens_must_declare() {
-        let task_lens = "title: T\nparams: [{ name: task_id }]\nquery: SELECT :task_id\n";
+        let task_lens = "title: T\nparams: [{ name: ref }]\nquery: SELECT :ref\n";
         let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
@@ -6076,7 +6075,7 @@ commands:
             ]
         );
         let errs = ext.errors.join("\n");
-        assert!(errs.contains("task_id") && errs.contains("plain"), "{errs}");
+        assert!(errs.contains("`ref`") && errs.contains("plain"), "{errs}");
     }
 
     /// P9.A2: a file diff's header strip takes lenses about the file — its

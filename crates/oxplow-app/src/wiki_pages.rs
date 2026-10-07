@@ -569,8 +569,15 @@ fn find_inline_paths(body: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// Core's vocabulary with oxplow's tasks as the work list (`tsk<n>`).
+    fn tasks_vocabulary() -> oxplow_domain::vocabulary::VocabularyHandle {
+        let mut v = oxplow_domain::vocabulary::Vocabulary::core();
+        v.kinds = v.kinds.with_work_item_ids("oxplow", r"tsk\d+").unwrap();
+        oxplow_domain::vocabulary::VocabularyHandle::new(v)
+    }
+
     fn vocabulary() -> VocabularyHandle {
-        VocabularyHandle::core()
+        tasks_vocabulary()
     }
 
     /// Re-syncing an unchanged file (e.g. the boot-time full scan on

@@ -364,7 +364,7 @@ impl SqliteTaskLinkStore {
             .await
     }
 
-    /// Re-emit `task_link:*` edges for all currently-stored outgoing
+    /// Re-emit `work_item_link:*` edges for all currently-stored outgoing
     /// links of `from_item`. Called after create/delete when
     /// `page_refs` is attached.
     async fn project_outgoing_links(&self, from_item: TaskId) -> Result<(), DomainError> {
@@ -461,10 +461,16 @@ impl TaskLinkStore for SqliteTaskLinkStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
+    fn tasks_kinds() -> oxplow_domain::refs::kind::KindRegistry {
+        oxplow_domain::refs::kind::core_kinds()
+            .with_work_item_ids("oxplow", r"tsk\d+")
+            .unwrap()
+    }
     use crate::stream_store::SqliteStreamStore;
     use crate::task_store::SqliteTaskStore;
     use crate::thread_store::SqliteThreadStore;
-    use oxplow_domain::refs::kind::core_kinds;
     use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
     use oxplow_domain::{
         Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus,
@@ -544,7 +550,7 @@ mod tests {
     async fn thread_note(db: &Database, thread: ThreadId, body: &str, author: &str) -> TaskNote {
         let (body, author) = (body.to_string(), author.to_string());
         db.transaction(move |tx| {
-            add_thread_note_tx(tx, &core_kinds(), thread, &body, &author).map(|(n, _)| n)
+            add_thread_note_tx(tx, &tasks_kinds(), thread, &body, &author).map(|(n, _)| n)
         })
         .await
         .unwrap()
@@ -552,7 +558,7 @@ mod tests {
 
     async fn update_note(db: &Database, id: NoteId, body: &str) {
         let body = body.to_string();
-        db.transaction(move |tx| update_note_tx(tx, &core_kinds(), id, &body).map(|_| ()))
+        db.transaction(move |tx| update_note_tx(tx, &tasks_kinds(), id, &body).map(|_| ()))
             .await
             .unwrap()
     }
@@ -565,7 +571,7 @@ mod tests {
 
     async fn add_note(db: &Database, item: TaskId, body: &str, author: &str) -> TaskNote {
         let (body, author) = (body.to_string(), author.to_string());
-        db.transaction(move |tx| add_task_note_tx(tx, &core_kinds(), item, &body, &author))
+        db.transaction(move |tx| add_task_note_tx(tx, &tasks_kinds(), item, &body, &author))
             .await
             .unwrap()
     }
@@ -693,9 +699,10 @@ mod tests {
             .list_backlinks("work_item", &format!("oxplow:{to_id}"), None)
             .await
             .unwrap();
-        assert!(inbound_to.iter().any(
-            |e| e.source_id == format!("oxplow:{from_id}") && e.ref_type == "task_link:blocks"
-        ));
+        assert!(inbound_to
+            .iter()
+            .any(|e| e.source_id == format!("oxplow:{from_id}")
+                && e.ref_type == "work_item_link:blocks"));
 
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)

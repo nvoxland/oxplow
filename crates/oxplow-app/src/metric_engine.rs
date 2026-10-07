@@ -330,7 +330,7 @@ fn apply_window(points: Vec<SeriesPoint>, window: Option<TimeWindow>) -> Vec<Ser
 #[derive(Debug, Clone, Default)]
 pub struct SeriesRead {
     /// Slice by a dimension (conformed, `dims_json`, or a spine dim such as
-    /// `oxplow.task`).
+    /// `oxplow.work_item`).
     pub group_by: Option<String>,
     /// Scope to one stream; `None` reads all.
     pub stream: Option<i64>,
@@ -423,13 +423,13 @@ pub(crate) fn dim_value_cached(
         "oxplow.stream" => Some(f.stream_id.to_string()),
         "oxplow.thread" => f.thread_id.map(|v| v.to_string()),
         "oxplow.effort" => f.effort_id.map(|v| v.to_string()),
-        "oxplow.task" => f.task_id.map(|v| v.to_string()),
+        "oxplow.work_item" => f.work_item.clone(),
         "oxplow.vcs_rev" => f.closest_vcs_rev.clone(),
         key => dims.get(f).and_then(|d| dim_from_map(d, key)),
     }
 }
 
-/// Dimensions read off the capture spine (stream, thread, effort, task, git
+/// Dimensions read off the capture spine (stream, thread, effort, work item, git
 /// version). Sliceable on the fact path only: the cube never buckets by them,
 /// because a capture's effort is stamped when the effort closes, after the
 /// cube may already have folded it.
@@ -437,7 +437,7 @@ pub(crate) const SPINE_DIMS: &[&str] = &[
     "oxplow.stream",
     "oxplow.thread",
     "oxplow.effort",
-    "oxplow.task",
+    "oxplow.work_item",
     "oxplow.vcs_rev",
 ];
 
@@ -2194,7 +2194,7 @@ mod tests {
             stream_id: 1,
             thread_id: None,
             effort_id: None,
-            task_id: None,
+            work_item: None,
             provenance: "observed".into(),
             source: "test".into(),
             producer: "test.gauge".into(),
@@ -2533,7 +2533,7 @@ mod tests {
             branch: Some("feature/x".into()),
             thread_id: Some(4),
             effort_id: Some(9),
-            task_id: Some(12),
+            work_item: Some("work_item:issues:ENG-12".into()),
             closest_vcs_rev: Some("abc123".into()),
             severity: Some("error".into()),
             rule: Some("E1".into()),
@@ -2575,7 +2575,7 @@ mod tests {
             "oxplow.stream",
             "oxplow.thread",
             "oxplow.effort",
-            "oxplow.task",
+            "oxplow.work_item",
             "oxplow.vcs_rev",
         ] {
             assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
@@ -2592,7 +2592,7 @@ mod tests {
         let f = FactRow {
             thread_id: Some(4),
             effort_id: Some(9),
-            task_id: Some(12),
+            work_item: Some("work_item:oxplow:tsk12".into()),
             closest_vcs_rev: Some("abc123".into()),
             ..fact(1, "2026-06-30T00:00:00Z", 1.0)
         };
@@ -2600,7 +2600,7 @@ mod tests {
             "oxplow.stream",
             "oxplow.thread",
             "oxplow.effort",
-            "oxplow.task",
+            "oxplow.work_item",
             "oxplow.vcs_rev",
         ]
         .iter()
@@ -2612,13 +2612,13 @@ mod tests {
                 Some(f.stream_id.to_string()),
                 Some("4".into()),
                 Some("9".into()),
-                Some("12".into()),
+                Some("work_item:oxplow:tsk12".into()),
                 Some("abc123".into())
             ]
         );
-        // Unattributed facts have no effort/task group rather than a blank one.
+        // Unattributed facts have no effort/work-item group rather than a blank one.
         let bare = fact(1, "2026-06-30T00:00:00Z", 1.0);
-        assert_eq!(dim_value(&bare, "oxplow.task"), None);
+        assert_eq!(dim_value(&bare, "oxplow.work_item"), None);
         // The cube never buckets by these: an effort is stamped on its
         // captures at close, after the cube may have folded them.
         assert!(SPINE_DIMS.iter().all(|d| is_spine_dim(d)));
@@ -3026,7 +3026,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_spec_series_groups_by_task_filters_by_it_and_buckets_by_day() {
+    async fn a_spec_series_groups_by_work_item_filters_by_it_and_buckets_by_day() {
         let db = Database::in_memory();
         db.transaction(|c| {
             c.execute_batch(
@@ -3085,10 +3085,10 @@ mod tests {
                     .collect::<Vec<_>>()
             }
         };
-        let task = |t: &str| Some(t.to_string());
+        let task = |t: &str| Some(format!("work_item:oxplow:tsk{t}"));
         assert_eq!(
             read(SeriesRead {
-                group_by: Some("oxplow.task".into()),
+                group_by: Some("oxplow.work_item".into()),
                 ..SeriesRead::default()
             })
             .await,
@@ -3101,7 +3101,7 @@ mod tests {
         );
         assert_eq!(
             read(SeriesRead {
-                group_by: Some("oxplow.task".into()),
+                group_by: Some("oxplow.work_item".into()),
                 bucket: Some(crate::metric_bucket::TimeBucket::Day),
                 ..SeriesRead::default()
             })
@@ -3110,7 +3110,7 @@ mod tests {
         );
         assert_eq!(
             read(SeriesRead {
-                dim_eq: Some(("oxplow.task".into(), "2".into())),
+                dim_eq: Some(("oxplow.work_item".into(), "work_item:oxplow:tsk2".into())),
                 ..SeriesRead::default()
             })
             .await,

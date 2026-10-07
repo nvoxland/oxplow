@@ -384,14 +384,24 @@ mod tests {
             .unwrap();
         store.record(turn(None, "chat", 9)).await.unwrap();
 
-        let task = f.task.value();
+        let item = oxplow_domain::refs::build::work_item_ref(f.task);
         assert_eq!(
-            run_analytics_lens(&f, "task-token-summary", "task_id", task).await,
+            run_bundled_lens_with(
+                &f,
+                "oxplow-bundled/task-token-summary",
+                &[("ref", oxplow_db::SqlCell::Text(item.clone()))],
+            )
+            .await,
             serde_json::json!([[
                 "**2,100** tokens · 2 turns · in 2,098 · out 2 · cache-write 0 · cache-read 0"
             ]])
         );
-        let turns = run_analytics_lens(&f, "task-turns", "task_id", task).await;
+        let turns = run_bundled_lens_with(
+            &f,
+            "oxplow-bundled/task-turns",
+            &[("ref", oxplow_db::SqlCell::Text(item.clone()))],
+        )
+        .await;
         assert_eq!(turns.as_array().unwrap().len(), 2);
         assert_eq!(
             run_analytics_lens(&f, "thread-tokens", "thread_id", f.thread.value()).await,
@@ -693,7 +703,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewDecision {
                         thread_id: thread,
-                        task_id: Some(task.value()),
+                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         question: "Where does export live?".into(),
                         choice: "src/export".into(),
@@ -712,7 +722,7 @@ mod tests {
                         tx,
                         &oxplow_db::NewClaim {
                             thread_id: thread,
-                            task_id: Some(task.value()),
+                            work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
                             effort_id: Some(effort.value()),
                             statement: statement.into(),
                             kind: "tests_pass".into(),
@@ -1309,7 +1319,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
-                        task_id: Some(task.value()),
+                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
@@ -1325,7 +1335,7 @@ mod tests {
                 f.effort.value(),
                 vec![oxplow_db::NewDecision {
                     thread_id: f.thread.value(),
-                    task_id: Some(f.task.value()),
+                    work_item: Some(oxplow_domain::refs::build::work_item_ref(f.task)),
                     effort_id: Some(f.effort.value()),
                     question: "Which store?".into(),
                     choice: "SQLite".into(),
@@ -1732,7 +1742,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
-                        task_id: Some(task.value()),
+                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         statement: format!(
                             "first line\n- [x] forged item [link](https://evil.example) {}",

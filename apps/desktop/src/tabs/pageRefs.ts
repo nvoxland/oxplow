@@ -301,8 +301,8 @@ function pluginRefPage(ref: string, kind: string): TabRef | null {
  *  `[[…]]` of it does. */
 export function searchHitTarget(hit: { kind: string; ref_id: string }): { page: TabRef } | { file: string } | null {
   switch (hit.kind) {
-    case "task":
-      return { page: taskRef(hit.ref_id) };
+    case "work_item":
+      return { page: workItemTabRef(`work_item:${hit.ref_id}`) };
     case "wiki":
       return { page: wikiPageRef(hit.ref_id) };
     case "comment":

@@ -29,8 +29,9 @@ finish.
   split work oxplow grouped together.
 - `effort.report { summary?, impacts? }`: other words than your last
   answer, or outcomes beyond edits. Each impact is
-  `{ kind, id, action? }`, where `kind` is `wiki`, `task` (`tsk42`),
-  `git_commit`, `file` or `directory`. The result's `link_warnings`
+  `{ kind, id, action? }`, where `kind` is `wiki`, `work_item` (its
+  ref, or its id as the work list writes it), `git_commit`, `file` or
+  `directory`. The result's `link_warnings`
   flags `[[…]]` links that don't resolve.
 
 ## Generated files

@@ -13,6 +13,13 @@ fn canon(s: &str) -> CanonicalRef {
     CanonicalRef::parse(s).unwrap_or_else(|e| panic!("{s}: {e}"))
 }
 
+/// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
+fn tasks_kinds() -> oxplow_domain::refs::kind::KindRegistry {
+    oxplow_domain::refs::kind::core_kinds()
+        .with_work_item_ids("oxplow", r"tsk\d+")
+        .expect("the pattern compiles")
+}
+
 #[test]
 fn the_core_kinds_are_registered_and_validate_ids() {
     let reg = core_kinds();
@@ -135,13 +142,13 @@ fn wikilink_sugar_translates_to_canonical_refs() {
         ("effort:eff3", "effort:eff3"),
     ];
     for (interior, expected) in cases {
-        let got = canonical_wikilink(&oxplow_domain::refs::kind::core_kinds(), interior)
+        let got = canonical_wikilink(&tasks_kinds(), interior)
             .unwrap_or_else(|| panic!("[[{interior}]] should translate"));
         assert_eq!(got.to_string(), expected, "[[{interior}]]");
     }
     for bad in ["", "#13", "not a ref!", "tskfoo/x", "Unknown_Kind:1"] {
         assert!(
-            canonical_wikilink(&oxplow_domain::refs::kind::core_kinds(), bad).is_none(),
+            canonical_wikilink(&tasks_kinds(), bad).is_none(),
             "[[{bad}]] should not translate"
         );
     }
@@ -150,7 +157,7 @@ fn wikilink_sugar_translates_to_canonical_refs() {
 #[test]
 fn classify_wikilinks_reports_the_canonical_ref_beside_the_typed_view() {
     let body = "See [[tsk42]], [[git:abc1234]], [[abc1234]], [[dir:src]] and [[missing thing]].";
-    let links = classify_wikilinks(&oxplow_domain::refs::kind::core_kinds(), body);
+    let links = classify_wikilinks(&tasks_kinds(), body);
     let refs: Vec<Option<String>> = links
         .iter()
         .map(|l| l.canonical.as_ref().map(ToString::to_string))
@@ -166,7 +173,10 @@ fn classify_wikilinks_reports_the_canonical_ref_beside_the_typed_view() {
         ]
     );
     // The typed view is derived from the canonical ref, never parsed twice.
-    assert_eq!(links[0].reference, Some(Reference::Task(42)));
+    assert_eq!(
+        links[0].reference,
+        Some(Reference::WorkItem("oxplow:tsk42".into()))
+    );
     assert_eq!(
         Reference::try_from(&canon("commit:abc1234")).unwrap(),
         Reference::Commit("abc1234".into())

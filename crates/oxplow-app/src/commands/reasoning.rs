@@ -11,9 +11,8 @@ use std::sync::Arc;
 
 use oxplow_db::effort_store::find_open_for_work_item_tx;
 use oxplow_db::reasoning_store::{record_claim_tx, record_decision_tx, NewClaim, NewDecision};
-use oxplow_db::task_store::get_task_tx;
 use oxplow_db::thread_store::get_tx as thread_tx;
-use oxplow_domain::refs::build::{task_of_work_item_ref, validate_work_item_ref};
+use oxplow_domain::refs::build::validate_work_item_ref;
 use oxplow_domain::{
     Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, ThreadId,
 };
@@ -88,10 +87,10 @@ fn sql(e: rusqlite::Error) -> CommandError {
     CommandError::from(oxplow_db::map_sql_err(e))
 }
 
-/// Where a record lands: its thread, task and effort.
+/// Where a record lands: its thread, work item and effort.
 struct Place {
     thread: ThreadId,
-    task: Option<i64>,
+    work_item: Option<String>,
     effort: Option<i64>,
 }
 
@@ -121,24 +120,27 @@ fn place(
             .map_err(sql)?;
         return Ok(Place {
             thread,
-            task: effort
-                .as_ref()
-                .and_then(|(_, item)| item.as_deref())
-                .and_then(task_of_work_item_ref)
-                .map(|t| t.value()),
+            work_item: effort.as_ref().and_then(|(_, item)| item.clone()),
             effort: effort.map(|(id, _)| id),
         });
     };
     validate_work_item_ref(work_item).map_err(|e| invalid("/work_item", e.to_string()))?;
     let open = find_open_for_work_item_tx(ctx.conn, work_item).map_err(sql)?;
-    let task = task_of_work_item_ref(work_item);
-    // Whose work it is: the thread of its open effort, else its task's.
-    let owner = match (&open, task) {
-        (Some(e), _) => Some(e.thread_id),
-        (None, Some(task)) => get_task_tx(ctx.conn, task)
-            .map_err(CommandError::from)?
-            .and_then(|t| t.thread_id),
-        (None, None) => None,
+    // Whose work it is: the thread of its open effort, else the list it's
+    // on (the work-item interface's `thread_id`).
+    let owner = match &open {
+        Some(e) => Some(e.thread_id),
+        None => ctx
+            .conn
+            .query_row(
+                "SELECT thread_id FROM v_work_item WHERE ref = ?1",
+                [work_item],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map_err(sql)?
+            .flatten()
+            .map(ThreadId::new),
     };
     if let Some(owner) = owner {
         if stream_of(owner)? != stream_of(thread)? {
@@ -149,7 +151,7 @@ fn place(
     }
     Ok(Place {
         thread,
-        task: task.map(|t| t.value()),
+        work_item: Some(work_item.to_string()),
         effort: open.map(|e| e.id.value()),
     })
 }
@@ -192,7 +194,7 @@ pub fn record_decision_command() -> Command {
                 ctx.conn,
                 &NewDecision {
                     thread_id: at.thread.value(),
-                    task_id: at.task,
+                    work_item: at.work_item.clone(),
                     effort_id: at.effort,
                     question: input.question,
                     choice: input.choice,
@@ -229,7 +231,7 @@ pub fn record_claim_command() -> Command {
                 ctx.conn,
                 &NewClaim {
                     thread_id: at.thread.value(),
-                    task_id: at.task,
+                    work_item: at.work_item.clone(),
                     effort_id: at.effort,
                     statement: input.statement,
                     kind: input.kind,

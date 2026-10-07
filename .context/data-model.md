@@ -555,12 +555,15 @@ TABLE, so every child row survived; see the migration's header) and
 replaced the `task_id` FK with `work_item TEXT NOT NULL`, a canonical
 ref (`work_item:oxplow:tsk42`, or another provider's
 `work_item:issues:ENG-12`; built with `refs::build::work_item_ref`).
-`v_effort` / `v_effort_file` derive `task_id` from it (NULL for other
-providers). An effort goes with its thread (`thread_id … ON DELETE
-CASCADE`), not its task: deleting a stream cascades through its threads
-to their tasks and efforts, but an effort another stream's thread
-linked to one of those tasks survives as history about a work item that
-no longer exists — readers LEFT JOIN `v_task`.
+`v_effort` / `v_effort_file` carry the ref only (no oxplow task id: a
+reader joins `v_work_item` on it, so it sees the active list's item and
+nothing with none). An effort goes with its thread (`thread_id … ON
+DELETE CASCADE`), not its work item: an effort another stream's thread
+linked to a deleted item survives as history — readers LEFT JOIN
+`v_work_item`. Claims and decisions name the item they were made on the
+same way (`claim.work_item`, `decision.work_item`, V22, which rebuilt
+both tables from their old `task_id` foreign keys); so do metric facts'
+spine dimension `oxplow.work_item`.
 
 In Rust (P2.5b, tsk428) the row is `Effort { work_item, … }` with
 `task_id() -> Option<TaskId>`; `EffortStore` (was `TaskEffortStore`)
@@ -1053,12 +1056,16 @@ so other owners' rows survive.
 
 Writers (one per source kind / slice):
 
+The vocabulary speaks of work items, whichever list they're on (V21
+renamed the `task_…` spellings: a mention is `work_item_mention` /
+`summary_work_item_mention`, a link `work_item_link:<type>`).
+
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
 | `wiki_pages.rs` (`oxplow-app`) | `wiki:<slug>` | full source — uses `replace_source` |
-| `task_store::upsert` | `work_item:oxplow:<id>` body slice | `task_body_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
-| `work_satellite::SqliteTaskLinkStore` create/delete | `work_item:oxplow:<id>` link slice | `task_link:blocks` / `relates_to` / … |
-| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:oxplow:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_task_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
+| `task_store::upsert` | `work_item:oxplow:<id>` body slice | `work_item_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
+| `work_satellite::SqliteTaskLinkStore` create/delete | `work_item:oxplow:<id>` link slice | `work_item_link:blocks` / `relates_to` / … |
+| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:oxplow:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_work_item_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
 | `commit_indexer.rs` (`oxplow-app`) | `commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
 
@@ -2058,7 +2065,9 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   id, note id, wiki slug, repo-relative path, or the plugin ref's id.
   Every kind but `file` is derived from a model by an asset per kind
   (`kind_search.rs`, `restate_kind_tx`: only entries added, changed or
-  gone are written, by each entry's `content_hash`, V164; tsk896); core's read `v_search_task` / `_comment` / `_note` / `_wiki`
+  gone are written, by each entry's `content_hash`, V164; tsk896); core's read `v_search_work_item` (the active work list's items,
+through the interface; kind `work_item`, its id `<provider>:<id>`) /
+`_comment` / `_note` / `_wiki`
   (tsk864). Files are upserted by the `search.index` pump consumer from
   `snapshot.taken` (`indexer.rs`).
 - `stream_id` is `NULL` for project-global rows (wiki, a backlog task) and

@@ -76,7 +76,7 @@ fn refs_from_quote(
     quote: &str,
 ) -> Vec<CommentTarget> {
     use crate::page_ref_projections::{
-        work_item_id, KIND_COMMIT, KIND_DIR, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM,
+        KIND_COMMIT, KIND_DIR, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM,
     };
     let r = oxplow_domain::refs::extract(kinds, quote);
     let mut out = Vec::new();
@@ -95,8 +95,8 @@ fn refs_from_quote(
     for w in r.wikis {
         push(KIND_WIKI, w);
     }
-    for t in r.tasks {
-        push(KIND_WORK_ITEM, work_item_id(oxplow_domain::TaskId::new(t)));
+    for t in r.work_items {
+        push(KIND_WORK_ITEM, t);
     }
     for f in r.findings {
         push(KIND_FINDING, f);
@@ -666,6 +666,13 @@ impl SqliteCommentStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Core's vocabulary with oxplow's tasks as the work list (`tsk<n>`).
+    fn tasks_vocabulary() -> oxplow_domain::vocabulary::VocabularyHandle {
+        let mut v = oxplow_domain::vocabulary::Vocabulary::core();
+        v.kinds = v.kinds.with_work_item_ids("oxplow", r"tsk\d+").unwrap();
+        oxplow_domain::vocabulary::VocabularyHandle::new(v)
+    }
     use crate::stream_store::SqliteStreamStore;
     use crate::thread_store::SqliteThreadStore;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
@@ -739,8 +746,7 @@ mod tests {
     #[tokio::test]
     async fn create_round_trips_with_first_message() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         let created = store
             .create(
                 &stream,
@@ -772,8 +778,7 @@ mod tests {
     #[tokio::test]
     async fn create_round_trips_context_chain_and_referenced_refs() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         let context_chain = vec![
             CommentTarget {
                 kind: "commit".into(),
@@ -823,8 +828,7 @@ mod tests {
     #[tokio::test]
     async fn create_unions_refs_extracted_from_quote_into_referenced_refs() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         // The frontend captured one DOM-link ref; the quote *also* names
         // `tsk42` and `src/app.rs` inline (not rendered as links).
         let provided = vec![CommentTarget {
@@ -872,8 +876,7 @@ mod tests {
     #[tokio::test]
     async fn create_dedups_quote_refs_against_provided() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         // FE already supplied tsk42; the quote names it again. It must
         // appear exactly once.
         let provided = vec![CommentTarget {
@@ -911,8 +914,7 @@ mod tests {
     #[tokio::test]
     async fn resolved_at_set_on_resolve_cleared_on_reopen() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         let c = store
             .create(
                 &stream,
@@ -956,10 +958,7 @@ mod tests {
     #[tokio::test]
     async fn relink_rewrites_quote_and_clears_orphan() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db.clone(),
-            oxplow_domain::vocabulary::VocabularyHandle::core(),
-        );
+        let store = SqliteCommentStore::new(db.clone(), tasks_vocabulary());
         let c = store
             .create(
                 &stream,
@@ -1000,8 +999,7 @@ mod tests {
     #[tokio::test]
     async fn thread_grows_and_orders_oldest_first() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         let c = store
             .create(
                 &stream,
@@ -1033,8 +1031,7 @@ mod tests {
     #[tokio::test]
     async fn needs_response_tracks_authorship() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         let c = store
             .create(
                 &stream,
@@ -1095,8 +1092,7 @@ mod tests {
     #[tokio::test]
     async fn note_intent_never_needs_response() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         let c = store
             .create(
                 &stream,
@@ -1123,8 +1119,7 @@ mod tests {
     #[tokio::test]
     async fn list_for_stream_and_thread() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(db, tasks_vocabulary());
         store
             .create(
                 &stream,
@@ -1165,10 +1160,7 @@ mod tests {
     #[tokio::test]
     async fn set_anchor_marks_orphaned() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db.clone(),
-            oxplow_domain::vocabulary::VocabularyHandle::core(),
-        );
+        let store = SqliteCommentStore::new(db.clone(), tasks_vocabulary());
         let c = store
             .create(
                 &stream,
@@ -1193,10 +1185,7 @@ mod tests {
     #[tokio::test]
     async fn delete_cascades_messages() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db.clone(),
-            oxplow_domain::vocabulary::VocabularyHandle::core(),
-        );
+        let store = SqliteCommentStore::new(db.clone(), tasks_vocabulary());
         let c = store
             .create(
                 &stream,
@@ -1226,10 +1215,7 @@ mod tests {
     #[tokio::test]
     async fn cleanup_sweeps_resolved_and_orphaned_past_cutoff() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db.clone(),
-            oxplow_domain::vocabulary::VocabularyHandle::core(),
-        );
+        let store = SqliteCommentStore::new(db.clone(), tasks_vocabulary());
         // An open comment must survive cleanup.
         store
             .create(

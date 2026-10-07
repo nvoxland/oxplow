@@ -4,7 +4,7 @@ launcher: { category: Work }
 params:
   - { name: stream_id, label: Stream }
 query: |
-  SELECT d.question, d.choice, d.confidence, d.provenance, t.title AS thread, d.task_id, d.created_at
+  SELECT d.question, d.choice, d.confidence, d.provenance, t.title AS thread, d.work_item, d.created_at
   FROM v_decision d
   JOIN v_thread t ON t.id = d.thread_id
   WHERE t.stream_id = :stream_id
@@ -12,7 +12,7 @@ query: |
   LIMIT 100
 viz: table
 columns:
-  - { key: question, label: Decision, link: { kind: task, from: task_id } }
+  - { key: question, label: Decision, link: { kind: page, from: work_item } }
   - { key: choice, label: Chose }
   - { key: confidence, label: Confidence }
   - { key: provenance, label: Source }

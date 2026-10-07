@@ -713,7 +713,7 @@ mod tests {
         let store = SqlitePageRefStore::new(Database::in_memory());
         let edges = vec![
             edge("wiki", "a", "file", "x.rs", "wiki_file_ref"),
-            edge("wiki", "a", "task", "wi-1", "task_body_mention"),
+            edge("wiki", "a", "task", "wi-1", "work_item_mention"),
         ];
         store
             .replace_source("wiki", "a", edges.clone())
