@@ -122,6 +122,7 @@ fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::External,
         effect: CommandEffect::Record,
+        needs: Vec::new(),
     }
 }
 

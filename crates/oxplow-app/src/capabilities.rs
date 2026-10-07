@@ -43,18 +43,24 @@ pub const BUILT_INS: &[BuiltIn] = &[
         capability: "work_items",
         title: "oxplow's tasks",
         features: &["hierarchy", "comments", "links", "delete"],
+        commands: &["work_item.reorder", "work_item.move"],
+        tools: &["list_tasks", "get_task", "read_task_options"],
     },
     BuiltIn {
         entry: "oxplow:commit-or-switch",
         capability: "effort_policy",
         title: "A commit lands it, or the task switches",
         features: &[],
+        commands: &[],
+        tools: &[],
     },
     BuiltIn {
         entry: "oxplow:snapshots",
         capability: "snapshots",
         title: "Keep every version",
         features: &["contents"],
+        commands: &[],
+        tools: &[],
     },
 ];
 
@@ -66,6 +72,11 @@ pub struct BuiltIn {
     pub title: &'static str,
     /// The features it has — core's to say, since it's core's code.
     pub features: &'static [&'static str],
+    /// The commands only it offers (its own agent surface): offered
+    /// while it's the active implementation, hidden otherwise.
+    pub commands: &'static [&'static str],
+    /// Likewise, the MCP tools only it offers.
+    pub tools: &'static [&'static str],
 }
 
 /// The built-in `entry` names, if core has it.
@@ -112,6 +123,21 @@ pub struct Implementation {
 }
 
 impl Implementation {
+    /// What only it offers: a built-in's declared commands and tools; a
+    /// provider instance's command namespace (`<id>.*`).
+    fn surface(&self) -> (Vec<String>, Vec<String>) {
+        match &self.source {
+            Source::BuiltIn(entry) => built_in(entry).map_or_else(Default::default, |b| {
+                (
+                    b.commands.iter().map(|c| c.to_string()).collect(),
+                    b.tools.iter().map(|t| t.to_string()).collect(),
+                )
+            }),
+            Source::External => (vec![format!("{}.*", self.id)], Vec::new()),
+            Source::Core | Source::None => Default::default(),
+        }
+    }
+
     /// The "nothing implements it" of an optional capability.
     pub fn none(capability: &str) -> Self {
         Self {
@@ -139,9 +165,67 @@ pub struct Resolved {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Active {
     by_capability: std::collections::BTreeMap<String, (String, Vec<String>)>,
+    /// What implementations that aren't active own, kept from offering:
+    /// command names (or `<namespace>.*`) and tool names.
+    hidden_commands: Vec<Hidden>,
+    hidden_tools: Vec<Hidden>,
+}
+
+/// A command or tool its owner, not being active, keeps from offering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Hidden {
+    pattern: String,
+    owner: String,
+    capability: String,
+}
+
+impl Hidden {
+    fn matches(&self, name: &str) -> bool {
+        match self.pattern.strip_suffix('*') {
+            Some(prefix) => name.starts_with(prefix),
+            None => self.pattern == name,
+        }
+    }
+
+    fn message(&self, name: &str) -> String {
+        let title =
+            capability::spec(&self.capability).map_or(self.capability.as_str(), |c| c.title);
+        format!(
+            "`{name}` is {}'s, which isn't the active {} (choose one in Settings → Pieces).",
+            self.owner,
+            title.to_lowercase()
+        )
+    }
 }
 
 impl Active {
+    /// Why `spec` isn't offered — its owner isn't active, or a need is
+    /// unmet — or `None` when it is.
+    pub fn refusal(&self, spec: &oxplow_domain::CommandSpec) -> Option<String> {
+        self.command_refusal(&spec.name, &spec.needs)
+    }
+
+    /// Why the command `name` needing `needs` isn't offered, or `None`.
+    pub fn command_refusal(&self, name: &str, needs: &[String]) -> Option<String> {
+        if let Some(h) = self.hidden_commands.iter().find(|h| h.matches(name)) {
+            return Some(h.message(name));
+        }
+        let unmet = self.unmet(needs);
+        (!unmet.is_empty()).then(|| needs_message(&unmet))
+    }
+
+    /// Why the MCP tool `name` isn't offered, or `None` when it is.
+    pub fn tool_refusal(&self, name: &str) -> Option<String> {
+        self.hidden_tools
+            .iter()
+            .find(|h| h.matches(name))
+            .map(|h| h.message(name))
+    }
+
+    pub fn offers_tool(&self, name: &str) -> bool {
+        self.tool_refusal(name).is_none()
+    }
+
     /// The needs in `needs` it doesn't meet: a capability whose active
     /// implementation is none, or a feature it doesn't have.
     pub fn unmet(&self, needs: &[String]) -> Vec<String> {
@@ -321,7 +405,59 @@ impl CapabilityRegistry {
                 .unwrap_or_default();
             by_capability.insert(spec.id.to_string(), (id, features));
         }
-        Active { by_capability }
+        // What each implementation owns, kept from offering unless it's
+        // the active one: every built-in's (declared or not — the bundled
+        // extension off is the same as another one chosen) and every
+        // running instance's.
+        let mut owners: Vec<(Implementation, bool)> = BUILT_INS
+            .iter()
+            .map(|b| Implementation {
+                capability: b.capability.into(),
+                id: b.entry.into(),
+                title: b.title.into(),
+                extension: None,
+                source: Source::BuiltIn(b.entry),
+                features: Value::Null,
+            })
+            .map(|i| {
+                let active = by_capability
+                    .get(&i.capability)
+                    .and_then(|(id, _)| self.get(&i.capability, id))
+                    .is_some_and(|a| a.source == i.source);
+                (i, active)
+            })
+            .collect();
+        owners.extend(
+            self.external
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .map(|i| {
+                    (
+                        i.clone(),
+                        by_capability
+                            .get(&i.capability)
+                            .is_some_and(|(a, _)| a == &i.id),
+                    )
+                }),
+        );
+        let mut hidden_commands = Vec::new();
+        let mut hidden_tools = Vec::new();
+        for (owner, _) in owners.iter().filter(|(_, active)| !active) {
+            let (commands, tools) = owner.surface();
+            let hide = |pattern: String| Hidden {
+                pattern,
+                owner: owner.title.clone(),
+                capability: owner.capability.clone(),
+            };
+            hidden_commands.extend(commands.into_iter().map(hide));
+            hidden_tools.extend(tools.into_iter().map(hide));
+        }
+        Active {
+            by_capability,
+            hidden_commands,
+            hidden_tools,
+        }
     }
 
     /// `capability`'s active implementation id under `config`.
@@ -625,10 +761,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(
-            format!("{err:?}").contains("no work list is active"),
-            "{err:?}"
-        );
+        assert!(format!("{err:?}").contains("Needs: Work list"), "{err:?}");
     }
 
     /// The rows say which is active and why, and a choice that isn't
@@ -703,5 +836,145 @@ mod tests {
                 "chosen_by": "project",
             })]
         );
+    }
+
+    /// The agent is offered what's active: with no work list, no
+    /// `work_item.*` and none of oxplow's tasks' own, and running one says
+    /// what it needs; efforts stay.
+    #[tokio::test]
+    async fn only_what_is_active_is_offered() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let agent = oxplow_domain::Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let names = || {
+            let mut n: Vec<String> = svc
+                .commands
+                .list(&agent)
+                .into_iter()
+                .map(|c| c.name)
+                .collect();
+            n.sort();
+            n
+        };
+        let offered = names();
+        for name in [
+            "work_item.create",
+            "work_item.comment",
+            "work_item.reorder",
+            "effort.open",
+        ] {
+            assert!(
+                offered.iter().any(|n| n == name),
+                "{name} offered by default"
+            );
+        }
+        svc.config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), NONE.into());
+        let offered = names();
+        for name in [
+            "work_item.create",
+            "work_item.transition",
+            "work_item.comment",
+            "work_item.reorder",
+        ] {
+            assert!(
+                !offered.iter().any(|n| n == name),
+                "{name} hidden without a work list"
+            );
+        }
+        assert!(offered.iter().any(|n| n == "effort.open"));
+        let err = svc
+            .commands
+            .run(
+                &agent,
+                crate::commands::work_item::NAME,
+                serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(format!("{err}").contains("Needs: Work list"), "{err}");
+    }
+
+    /// A feature the active work list doesn't declare hides what needs it.
+    #[tokio::test]
+    async fn a_missing_feature_hides_what_needs_it() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        svc.capabilities.set_external(
+            Implementation {
+                capability: "work_items".into(),
+                id: "plain".into(),
+                title: "plain".into(),
+                extension: Some("tracker".into()),
+                source: Source::External,
+                features: serde_json::json!({ "comments": false, "links": true }),
+            },
+            true,
+        );
+        svc.config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert("work_items".into(), "plain".into());
+        let offered: Vec<String> = svc
+            .commands
+            .list(&oxplow_domain::Actor::Human)
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert!(offered.iter().any(|n| n == "work_item.link"));
+        assert!(!offered.iter().any(|n| n == "work_item.comment"));
+        assert!(
+            !offered.iter().any(|n| n == "work_item.reorder"),
+            "oxplow's tasks' own"
+        );
+    }
+
+    /// The tools oxplow's tasks own are offered only while they're the
+    /// work list.
+    #[test]
+    fn owned_tools_follow_the_active_list() {
+        let r = registry(true);
+        assert!(r.snapshot(&config(&[], &[])).offers_tool("list_tasks"));
+        assert!(r.snapshot(&config(&[], &[])).offers_tool("query_sql"));
+        let none = r.snapshot(&config(&[("work_items", "none")], &[]));
+        assert!(!none.offers_tool("list_tasks"));
+        assert!(none.offers_tool("query_sql"));
+        // Undeclared (the bundled extension off), it isn't offered either.
+        let bare = registry(false).snapshot(&config(&[], &[]));
+        assert!(!bare.offers_tool("get_task"));
+    }
+
+    /// A provider instance's own commands are offered only while it's the
+    /// active implementation.
+    #[test]
+    fn an_instance_namespace_follows_the_active_list() {
+        let r = registry(true);
+        r.set_external(
+            Implementation {
+                capability: "work_items".into(),
+                id: "fake".into(),
+                title: "Fake".into(),
+                extension: Some("tracker".into()),
+                source: Source::External,
+                features: Value::Null,
+            },
+            true,
+        );
+        let default = r.snapshot(&config(&[], &[]));
+        assert!(default
+            .command_refusal("fake.sync_now", &[])
+            .is_some_and(|m| m.contains("Fake's")));
+        assert_eq!(default.command_refusal("work_item.reorder", &[]), None);
+        let fake = r.snapshot(&config(&[("work_items", "fake")], &[]));
+        assert_eq!(fake.command_refusal("fake.sync_now", &[]), None);
+        assert!(fake.command_refusal("work_item.reorder", &[]).is_some());
     }
 }

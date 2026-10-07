@@ -769,6 +769,14 @@ namespace on top, the agent calls `mcp__oxplow__run_command` —
 not the legacy `mcp__oxplow__oxplow__run_command`. The long form
 still resolves on `tools/call` for back-compat.
 
+**Tools follow the active implementation.** A tool an implementation
+owns — `list_tasks`, `get_task`, `read_task_options` are oxplow's tasks'
+(`capabilities::BUILT_INS` `tools`) — is listed by `list_tools` and run by
+`call_tool` only while that implementation is active (`offered_tools`,
+`tool_refusal`); otherwise `call_tool` refuses saying whose it is. A
+client that cached the list before a switch sees the refusal: no
+`tools/list_changed` is sent.
+
 **The server's instructions** (`get_info`) are the one text every
 harness — Claude Code, Codex, opencode, ACP agents — shows its agent. They
 say what oxplow knows (`query_sql` over `v_*`), that writes are commands,

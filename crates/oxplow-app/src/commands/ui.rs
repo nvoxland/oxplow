@@ -154,6 +154,7 @@ pub fn commands() -> Vec<Command> {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Record,
+            needs: Vec::new(),
         },
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             report(ctx, parse(input)?)

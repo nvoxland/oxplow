@@ -509,6 +509,7 @@ pub fn extension_command(
         lifecycle: Lifecycle::Experimental,
         atomicity: Atomicity::Dispatch,
         effect: decl.effect,
+        needs: Vec::new(),
     };
     let (script, query) = (decl.script.clone(), decl.input.clone());
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
@@ -1557,6 +1558,7 @@ mod tests {
                     lifecycle: oxplow_domain::Lifecycle::Experimental,
                     atomicity: oxplow_domain::Atomicity::Tx,
                     effect: CommandEffect::Write,
+                    needs: Vec::new(),
                 },
                 crate::commands::Handler::Tx(std::sync::Arc::new(|_, _| {
                     Ok(crate::commands::HandlerOutput::default())

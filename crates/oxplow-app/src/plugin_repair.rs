@@ -505,7 +505,7 @@ mod tests {
         let event = disable(&fx.svc, "3 failures in a row; the last: boom").await;
         let err = consumer.handle(&event).await.unwrap_err();
         assert!(
-            err.to_string().contains("no work list is active"),
+            err.to_string().contains("Needs: Work list"),
             "says no list could take it: {err}"
         );
         assert!(repair_items(&fx.svc).await.is_empty());

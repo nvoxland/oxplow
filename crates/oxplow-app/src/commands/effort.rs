@@ -123,6 +123,7 @@ fn spec(name: &str, summary: &str, schema: serde_json::Value, undoable: bool) ->
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
         effect: oxplow_domain::CommandEffect::Record,
+        needs: Vec::new(),
     }
 }
 

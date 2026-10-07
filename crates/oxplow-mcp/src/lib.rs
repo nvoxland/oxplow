@@ -2704,6 +2704,33 @@ impl OxplowMcp {
     }
 }
 
+impl OxplowMcp {
+    /// The tools offered now: an implementation's own (`list_tasks` is
+    /// oxplow's tasks') only while it's the active one
+    /// (`oxplow_app::capabilities::Active`).
+    fn offered_tools(&self) -> Vec<Tool> {
+        let active = self.active();
+        self.tool_router
+            .list_all()
+            .into_iter()
+            .filter(|t| active.offers_tool(&t.name))
+            .collect()
+    }
+
+    /// Why the tool `name` isn't offered now, or `None` when it is.
+    fn tool_refusal(&self, name: &str) -> Option<String> {
+        self.active().tool_refusal(name)
+    }
+
+    fn active(&self) -> oxplow_app::capabilities::Active {
+        self.services
+            .capabilities
+            .snapshot(&oxplow_app::config_service::read_config(
+                &self.services.config,
+            ))
+    }
+}
+
 impl ServerHandler for OxplowMcp {
     fn get_info(&self) -> ServerConfig {
         // `ServerConfig` (née `ServerInfo`, renamed in rmcp 3) is
@@ -2744,7 +2771,7 @@ impl ServerHandler for OxplowMcp {
             .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
-            tools: stamp_read_only_hints(self.tool_router.list_all()),
+            tools: stamp_read_only_hints(self.offered_tools()),
             meta: None,
             next_cursor: None,
             ttl_ms: supports_cache_hints.then_some(0),
@@ -2757,6 +2784,9 @@ impl ServerHandler for OxplowMcp {
         request: CallToolRequestParams,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
+        if let Some(message) = self.tool_refusal(&request.name) {
+            return Err(McpError::invalid_params(message, None));
+        }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
     }
@@ -3924,6 +3954,36 @@ mod tests {
             "backlog item missing from result: {body}",
         );
         assert!(body.contains("do the thing"), "title missing: {body}");
+    }
+
+    /// oxplow's tasks' own tools are offered, and run, only while they're
+    /// the work list.
+    #[tokio::test]
+    async fn the_task_tools_follow_the_active_work_list() {
+        let (_proj, services, server) = boot();
+        let names = |server: &OxplowMcp| -> Vec<String> {
+            server
+                .offered_tools()
+                .into_iter()
+                .map(|t| t.name.into_owned())
+                .collect()
+        };
+        assert!(names(&server).iter().any(|n| n == "list_tasks"));
+        assert_eq!(server.tool_refusal("get_task"), None);
+        services
+            .config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), "none".into());
+        let offered = names(&server);
+        for tool in ["list_tasks", "get_task", "read_task_options"] {
+            assert!(!offered.iter().any(|n| n == tool), "{tool} hidden");
+        }
+        assert!(offered.iter().any(|n| n == "query_sql"));
+        assert!(server
+            .tool_refusal("get_task")
+            .is_some_and(|m| m.contains("isn't the active work list")));
     }
 
     #[tokio::test]

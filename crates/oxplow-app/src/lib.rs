@@ -1064,6 +1064,23 @@ impl Services {
             db.clone(),
             layout.project_dir.clone(),
         )));
+        // Every capability's implementations (`capabilities`): core's (the
+        // VCS here, knowledge once it's built), what the project's
+        // extensions declare, and running provider instances'.
+        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(
+            vec![capabilities::Implementation {
+                capability: "vcs".into(),
+                id: vcs.rev_kind().into(),
+                title: vcs.rev_kind().into(),
+                extension: None,
+                source: capabilities::Source::Core,
+                features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
+            }],
+            vocabulary.clone(),
+        ));
+        capabilities.set_declared(capabilities::declared_by(
+            &extension_catalog.get(&layout.project_dir),
+        ));
         let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(
@@ -1083,29 +1100,14 @@ impl Services {
                         matches!(threads.get(&thread).await, Ok(Some(t)) if t.status.is_writer())
                     })
                 })
-            }),
+            })
+            // Offered and run only while what it needs is active.
+            .with_capabilities(capabilities.clone(), config_arc.clone()),
         );
         // Composition (P6b.A1): several Tx commands as one run.
         commands
             .register(commands::compose::sequence_command(&commands))
             .expect("command.sequence registers");
-        // Every capability's implementations (`capabilities`): core's (the
-        // VCS here, knowledge once it's built), what the project's
-        // extensions declare, and running provider instances'.
-        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(
-            vec![capabilities::Implementation {
-                capability: "vcs".into(),
-                id: vcs.rev_kind().into(),
-                title: vcs.rev_kind().into(),
-                extension: None,
-                source: capabilities::Source::Core,
-                features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
-            }],
-            vocabulary.clone(),
-        ));
-        capabilities.set_declared(capabilities::declared_by(
-            &extension_catalog.get(&layout.project_dir),
-        ));
         // The work-items providers (`.context/work-items.md`); oxplow's
         // own, over this bus. Its active one is resolved from the config as
         // it is now.

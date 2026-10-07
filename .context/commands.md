@@ -21,6 +21,7 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction), `External`, or `Dispatch` — one or the other, decided per input (see below) |
 | `effect` | `Write` (the default), `Read` or `Record`. A read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`config.list_keys`, `config.get`). A `Write` is refused to an agent thread that may not write. A `Record` changes oxplow's own records (`work_item.*`, `effort.*`): audited like a write, open to any thread |
+| `needs` | the capabilities, or their features (`work_items.comments`), it needs active — the grammar lenses use. Unmet, it isn't offered and doesn't run (pipeline step 0). `work_item.create` / `update` / `transition` need `work_items`; `link`, `comment` and `delete` need their feature |
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
@@ -30,6 +31,14 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 
 `CommandBus::run(actor, name, input, confirmed)`:
 
+0. **Offered** — what's active now (`with_capabilities`: the capability
+   registry and the config, `capabilities::Active::refusal`) must meet the
+   spec's `needs`, and a command an implementation owns runs only while
+   that one is active: a built-in's declared `commands`
+   (`capabilities::BUILT_INS`: `work_item.reorder` / `move` are oxplow's
+   tasks') and a provider instance's namespace (`<instance>.*`). Refused
+   → `Invalid` naming what it needs (audited), before validation, for
+   every actor; `list` leaves it out the same way.
 1. **Validate** the input against the schema → `Invalid { field, message }`
    (audited as `invalid`).
 2. **Invoker check** — the spec's `invokers` must admit the actor's surface
@@ -519,7 +528,7 @@ waits for a person (`run_command` returns it as a success instead),
 ## Exposure to agents (MCP)
 
 Agents reach every command through two generic tools — `list_commands`
-(the specs the calling agent may run, with `input_schema`, `summary`,
+(the specs the calling agent may run and that are offered now (step 0), with `input_schema`, `summary`,
 `confirm`, `undoable`) and `run_command { name, input }` (the outcome:
 `result`, `audit_id`, `event_id`, `inverse?` — or, for a run that needs
 a person's confirmation, `{ kind: "proposed", proposal, message }`). Extensions never add MCP

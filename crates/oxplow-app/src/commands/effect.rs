@@ -382,6 +382,7 @@ pub fn backfill_command(services: Weak<Services>) -> Command {
             lifecycle: Lifecycle::Experimental,
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
+            needs: Vec::new(),
         },
         Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();
@@ -438,6 +439,7 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
             lifecycle: Lifecycle::Experimental,
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Read,
+            needs: Vec::new(),
         },
         Handler::Tx(Arc::new(move |ctx, input| {
             let input: BackfillInput =
@@ -492,6 +494,7 @@ pub fn retry_command(services: Weak<Services>) -> Command {
             lifecycle: Lifecycle::Experimental,
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
+            needs: Vec::new(),
         },
         Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();

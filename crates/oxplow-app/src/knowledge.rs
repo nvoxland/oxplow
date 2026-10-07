@@ -657,6 +657,7 @@ fn spec(name: &str, summary: &str, schema: serde_json::Value, confirm: Confirm) 
         // oxplow's own records, like work items: a read-only thread
         // captures what it explored, too.
         effect: CommandEffect::Record,
+        needs: Vec::new(),
     }
 }
 

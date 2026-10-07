@@ -1811,6 +1811,12 @@ export type CommandSpec = {
 	lifecycle: Lifecycle,
 	atomicity: Atomicity,
 	effect: CommandEffect,
+	/**
+	 *  The capabilities (or their features: `work_items.comments`) it
+	 *  needs active; unmet, it isn't offered and doesn't run
+	 *  (`.context/commands.md`).
+	 */
+	needs: string[],
 };
 
 /**

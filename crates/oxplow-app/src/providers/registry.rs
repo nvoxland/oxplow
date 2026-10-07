@@ -3026,6 +3026,7 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
                 lifecycle: Lifecycle::Experimental,
                 atomicity: Atomicity::External,
                 effect: host::effect_of(&decl.effect)?,
+                needs: Vec::new(),
             };
             let (instance, verb, id) = (instance.clone(), decl.name.clone(), id.clone());
             Command::new(

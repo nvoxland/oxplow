@@ -307,14 +307,13 @@ fn create_target(
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemCreateInput = parse(input.clone())?;
     // Always the work list the person and project chose. One that isn't
-    // available resolves to none, and filing says so — never another list.
+    // available resolves to none, and filing says what it needs (as the bus
+    // does before routing) — never another list.
     let active = registry.active();
     if active == oxplow_domain::capability::NONE {
         return Err(CommandError::Invalid {
             field: None,
-            message: "no work list is active (none was chosen, or the chosen one isn't \
-                      available); choose one in Settings → Pieces"
-                .into(),
+            message: crate::capabilities::needs_message(&["work_items".into()]),
         });
     }
     let provider = provider_named(registry, &active, "").map_err(|e| match e {
@@ -610,6 +609,13 @@ fn spec(
     undoable: bool,
     atomicity: Atomicity,
 ) -> CommandSpec {
+    // Each needs a work list, and the feature its verb is.
+    let needs = match name {
+        LINK => vec!["work_items.links".to_string()],
+        COMMENT => vec!["work_items.comments".to_string()],
+        DELETE => vec!["work_items.delete".to_string()],
+        _ => vec!["work_items".to_string()],
+    };
     CommandSpec {
         name: name.into(),
         summary: summary.into(),
@@ -620,6 +626,7 @@ fn spec(
         lifecycle: Lifecycle::Stable,
         atomicity,
         effect: oxplow_domain::CommandEffect::Record,
+        needs,
     }
 }
 
@@ -1694,7 +1701,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { message, .. } if message.contains("no work list is active")),
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("Needs: Work list")),
             "{err:?}"
         );
         assert_eq!(fx.svc.work_items.active(), oxplow_domain::capability::NONE);
@@ -1745,7 +1752,7 @@ mod tests {
         match err {
             CommandError::Invalid { field, message } => {
                 assert_eq!(field, None);
-                assert!(message.contains("no work list is active"), "{message}");
+                assert!(message.contains("Needs: Work list"), "{message}");
             }
             other => panic!("{other:?}"),
         }

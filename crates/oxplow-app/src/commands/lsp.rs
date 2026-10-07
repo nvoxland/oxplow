@@ -49,6 +49,7 @@ fn spec(name: &str, summary: &str) -> CommandSpec {
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::External,
         effect: CommandEffect::Write,
+        needs: Vec::new(),
     }
 }
 

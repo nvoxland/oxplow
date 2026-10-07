@@ -104,6 +104,7 @@ where
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::External,
         effect: CommandEffect::Write,
+        needs: Vec::new(),
     };
     let target = target.clone();
     let op = Arc::new(op);

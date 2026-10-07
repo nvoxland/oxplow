@@ -1270,6 +1270,7 @@ mod tests {
                 lifecycle: Lifecycle::Stable,
                 atomicity: Atomicity::External,
                 effect: CommandEffect::Write,
+                needs: Vec::new(),
             },
             Handler::External(Arc::new(move |invocation: Invocation, _input| {
                 keys.lock().push(invocation.idempotency_key);
@@ -1364,6 +1365,7 @@ mod tests {
                 lifecycle: Lifecycle::Stable,
                 atomicity: Atomicity::External,
                 effect: CommandEffect::Write,
+                needs: Vec::new(),
             },
             Handler::External(Arc::new(move |_invocation: Invocation, _input| {
                 Box::pin(async move {

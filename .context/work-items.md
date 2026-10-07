@@ -230,7 +230,8 @@ available falls to `none` (the work list is optional), listed with
 registry's `active()` resolves from the config as it is now, so a
 person's choice applies to the very next `create`. Every
 `work_item.create` files on the active work list; with none active it is
-`Invalid` ("no work list is active …"), never another list. The
+`Invalid` ("Needs: Work list …", the bus's refusal for an unmet need),
+never another list. The
 conformance suite runs with the provider under test active, and checks it. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and
 `featuresFor(providers, provider)` → `WorkItemsFeatures` (the Rust type,

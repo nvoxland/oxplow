@@ -560,6 +560,7 @@ pub fn sync_command(registry: &Arc<ProviderRegistry>) -> Command {
             lifecycle: Lifecycle::Experimental,
             atomicity: Atomicity::External,
             effect: CommandEffect::Record,
+            needs: Vec::new(),
         },
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let registry = registry.clone();

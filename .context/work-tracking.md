@@ -249,6 +249,10 @@ The three in progress:
   work-items radio. A switch is logged (`capability.switched@1`) and
   closes open efforts when it's the policy's; a source guard pins core's
   remaining special cases.
+  The agent's surface follows the active implementation: commands
+  declare `needs:`, built-ins declare the commands and tools only they
+  offer, an instance owns its namespace, and the bus and MCP offer and run
+  only what's active.
 - Next: the three
   swappable pieces. Loose
   refs (`tsk12` for a work item) wait for it: recognising an id is the

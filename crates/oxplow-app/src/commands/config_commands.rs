@@ -173,6 +173,7 @@ fn spec(name: &str, summary: &str, input_schema: Value, effect: CommandEffect) -
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
         effect,
+        needs: Vec::new(),
     }
 }
 

@@ -117,6 +117,7 @@ pub fn sequence_spec() -> CommandSpec {
         // In the transaction, or as steps outside it: its calls decide.
         atomicity: Atomicity::Dispatch,
         effect: CommandEffect::Write,
+        needs: Vec::new(),
     }
 }
 
