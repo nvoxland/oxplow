@@ -1441,6 +1441,11 @@ export type ChangeRow = {
 	snapshotId: number | null,
 	// The event log's highest seq when the analysis began.
 	eventsTo: number | null,
+	/**
+	 *  What the analysis was computed from (the build, its trees, an
+	 *  effort's own files); a rerun from the same needn't recompute.
+	 */
+	analyzedFrom: string | null,
 };
 
 /**

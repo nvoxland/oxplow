@@ -623,6 +623,8 @@ async fn analyze(
         .change_store
         .get_or_create(stream_val, kind, &key, base.as_ref(), &head)
         .await?;
+    let only = own_files(svc, kind, &key).await?;
+    let from = analyzed_from(svc, stream, base.as_ref(), &head, only.as_ref()).await?;
     {
         let mut st = svc
             .change_analyzer
@@ -639,9 +641,12 @@ async fn analyze(
                 Ok(row)
             };
         }
-        // Results of another head (an effort analyzed while open, now
-        // closed) are stale however they were computed.
-        if row.status == "done" && !head_moved && !force {
+        // Computed from these very inputs: current, however it was asked
+        // for (a forced rerun, an effort's head now its end snapshot of the
+        // same tree). Otherwise results of another head (an effort analyzed
+        // while open, now closed) are stale however they were computed.
+        let same_inputs = from.is_some() && row.analyzed_from == from;
+        if row.status == "done" && (same_inputs || (!head_moved && !force)) {
             return Ok(row);
         }
         st.running.insert(row.id);
@@ -665,7 +670,6 @@ async fn analyze(
     };
     let dup_head = head.clone();
     let started = std::time::Instant::now();
-    let only = own_files(svc, kind, &key).await?;
     let result = compute(svc, &root, base, head, only).await;
     let elapsed_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
     drop(running);
@@ -673,7 +677,7 @@ async fn analyze(
         Ok(results) => {
             let changed: Vec<String> = results.files.iter().map(|f| f.path.clone()).collect();
             svc.change_store
-                .store_results(row.id, results, snapshot_id, events_to, elapsed_ms)
+                .store_results(row.id, results, snapshot_id, events_to, elapsed_ms, from)
                 .await?;
             spawn_duplicates(svc, row.id, events_to, &root, &dup_head, changed);
         }
@@ -688,6 +692,57 @@ async fn analyze(
         .get(row.id)
         .await?
         .ok_or(DomainError::NotFound)
+}
+
+/// What analyzing `base` → `head` (limited to `only`) is computed from:
+/// this build, each side's tree (a snapshot by its `tree_hash`, a working
+/// tree by its stream's latest snapshot's, a VCS revision by itself) and
+/// the own files. `None` when a side's tree can't be named — it's then
+/// never taken as unchanged.
+async fn analyzed_from(
+    svc: &crate::Services,
+    stream: oxplow_domain::StreamId,
+    base: Option<&Revision>,
+    head: &Revision,
+    only: Option<&std::collections::HashSet<String>>,
+) -> Result<Option<String>, oxplow_domain::DomainError> {
+    let tree = |rev: Option<Revision>| async move {
+        let snapshot = match rev {
+            None => return Ok::<_, oxplow_domain::DomainError>(Some("none".to_string())),
+            Some(Revision::Vcs { rev, .. }) => return Ok(Some(format!("vcs:{rev}"))),
+            Some(Revision::Snapshot(id)) => Some(id),
+            Some(Revision::Working) => {
+                svc.snapshot_store
+                    .latest_snapshot_id_for_stream(stream)
+                    .await?
+            }
+        };
+        let Some(id) = snapshot else {
+            return Ok(None);
+        };
+        Ok(svc
+            .snapshot_store
+            .tree_hash(id)
+            .await?
+            .map(|h| format!("tree:{h}")))
+    };
+    let (Some(base), Some(head)) = (tree(base.cloned()).await?, tree(Some(head.clone())).await?)
+    else {
+        return Ok(None);
+    };
+    let mut own: Option<Vec<&String>> = only.map(|o| o.iter().collect());
+    if let Some(o) = own.as_mut() {
+        o.sort();
+    }
+    Ok(Some(
+        serde_json::json!({
+            "build": oxplow_db::table_generations::build_identity(),
+            "base": base,
+            "head": head,
+            "own": own,
+        })
+        .to_string(),
+    ))
 }
 
 /// The event log's highest seq now.
@@ -873,6 +928,42 @@ async fn compute(
 mod tests {
     use super::*;
     use crate::code_analysis::{AnalyzedFileChurn, AnalyzedFileSide, AnalyzedFunctionChurn};
+
+    /// A forced rerun of a change whose inputs haven't moved — the same
+    /// tree, base and own files, by the same build — keeps what's stored
+    /// instead of recomputing; a changed tree recomputes.
+    #[tokio::test]
+    async fn a_forced_rerun_of_an_unchanged_tree_is_skipped() {
+        let f = crate::thread_checkpoint::tests::with_baseline().await;
+        let svc = &f.svc;
+        std::fs::write(svc.layout.project_dir.join("a.rs"), "fn a() {}\n").unwrap();
+        let stream = svc.streams.list_streams().await.unwrap()[0].id;
+        let capture = svc.snapshot_captures.get(&stream).unwrap();
+        capture.enqueue_startup_diff().await.unwrap();
+        capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
+            .await
+            .unwrap();
+        let working = || ChangeTarget::Working {
+            stream_id: stream.to_string(),
+        };
+        let first = refresh_change(svc, working()).await.unwrap();
+        assert_eq!(first.status, "done");
+        let again = refresh_change(svc, working()).await.unwrap();
+        assert_eq!(again.computed_at, first.computed_at, "skipped");
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        std::fs::write(svc.layout.project_dir.join("a.rs"), "fn a() { 1; }\n").unwrap();
+        capture.enqueue_startup_diff().await.unwrap();
+        capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
+            .await
+            .unwrap();
+        let moved = refresh_change(svc, working()).await.unwrap();
+        assert_ne!(
+            moved.computed_at, first.computed_at,
+            "a new tree recomputes"
+        );
+    }
 
     #[test]
     fn test_paths_by_convention() {

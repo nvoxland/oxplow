@@ -150,15 +150,23 @@ its changed files. There is no manual "Scan now" any more.
 
 **Scans are coalesced.**
 - `change_analysis::DupQueue` runs one scan at a time across every
-  change (a HEAD move or a turn's end analyzes the working tree and each
-  open effort together); a newer request for a change replaces its
-  queued one, so rapid agent edits don't pile up whole-tree parses.
+  change (a HEAD move or a turn's end take that recorded files analyzes
+  the working tree and each open effort together); a newer request for a
+  change replaces its queued one, so rapid agent edits don't pile up
+  whole-tree parses.
+- **An analysis whose inputs haven't moved isn't redone**, forced or
+  not. `change.analyzed_from` (V12) records the build, each side's tree
+  (a snapshot's `tree_hash`; a working tree's latest snapshot's) and an
+  effort's own files; a rerun from the same keeps what's stored, and no
+  duplicate scan is queued. A turn's end no longer forces a rerun: its
+  take does, and only when it recorded files.
 - A scan stores its rows only if its analysis generation is still the
   change's latest.
 - A failure while storing marks the scan and its task failed rather than
   leaving them "running".
 - An effort analyzed while open is recomputed once it closes: the change
-  store reports a moved head (working tree → end snapshot).
+  store reports a moved head (working tree → end snapshot) — unless the
+  end snapshot holds the tree it was analyzed against.
 
 ## Function analysis for a change
 

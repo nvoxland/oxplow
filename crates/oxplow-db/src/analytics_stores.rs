@@ -1951,6 +1951,22 @@ impl SqliteSnapshotStore {
         Ok(diff_trees(&identities(&before), &identities(&after)))
     }
 
+    /// `snapshot_id`'s `tree_hash`: two snapshots with the same one hold
+    /// the same files. `None` when it has none recorded.
+    pub async fn tree_hash(&self, snapshot_id: i64) -> Result<Option<String>, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT tree_hash FROM snapshot WHERE id = ?1",
+                    params![snapshot_id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map(Option::flatten)
+            })
+            .await
+    }
+
     /// Compute and store `snapshot.tree_hash` for `snapshot_id` from its
     /// reconstructed tree. Returns the hash.
     pub async fn set_tree_hash(&self, snapshot_id: i64) -> Result<String, DomainError> {

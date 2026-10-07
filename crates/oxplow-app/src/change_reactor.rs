@@ -11,6 +11,10 @@
 //! ([`change_analysis::refresh_change`](crate::change_analysis::refresh_change)).
 //! A burst analyzes once: an event is skipped when a newer one that would
 //! trigger it for the same stream is already logged — that one recomputes.
+//! A turn's end take that recorded files runs the deep analysis at once
+//! (the turn's end itself doesn't: its take says whether anything changed),
+//! and an analysis whose inputs haven't moved since it last ran keeps what's
+//! stored (`change.analyzed_from`).
 //! On `effort.finished` it recomputes that effort's change, now against its
 //! end snapshot: the effort closed before its end take, so no take event
 //! reached it while it was open (tsk710; what `effort_churn`, `after:
@@ -36,19 +40,28 @@ pub const NAME: &str = "change.analyze";
 const SNAPSHOT_TAKEN: &str = "snapshot.taken";
 const HEAD_MOVED: &str = "vcs.head.moved";
 const EFFORT_FINISHED: &str = "effort.finished";
-const TURN_ENDED: &str = "agent.turn.ended";
-
 /// When a mutable change's deep analysis runs: its file list is
 /// listed on every move (stage one); the deep analysis once a burst of
 /// takes settles (20 s), at most every 2 minutes, and at once when HEAD
-/// moves or an agent's turn ends. A finishing effort's runs at once.
+/// moves or an agent's turn ends with changes (its end take recorded
+/// files: [`forces`]). A finishing effort's runs at once.
 pub fn deep_pacing() -> oxplow_config::collectors::Pacing {
     oxplow_config::collectors::Pacing {
         settle_secs: Some(20),
         at_most_secs: Some(120),
         idle_secs: None,
-        force: vec![HEAD_MOVED.into(), TURN_ENDED.into()],
+        force: vec![HEAD_MOVED.into()],
     }
+}
+
+/// Whether `event` runs the deep analysis at once rather than paced: HEAD
+/// moving, or a turn's end take — the moment a person looks at what the
+/// turn did. The turn's end itself doesn't: whether anything changed is
+/// its take's to say.
+fn forces(event: &StoredEvent) -> bool {
+    !deep_pacing().defers(&event.envelope.event_type)
+        || (event.envelope.event_type == SNAPSHOT_TAKEN
+            && event.envelope.payload["trigger"].as_str() == Some("turn_end"))
 }
 
 /// The paced job of `target`'s deep analysis in `pending_run`: owner
@@ -135,10 +148,7 @@ impl AsyncEventConsumer for ChangeReactor {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        matches!(
-            event_type,
-            SNAPSHOT_TAKEN | HEAD_MOVED | EFFORT_FINISHED | TURN_ENDED
-        )
+        matches!(event_type, SNAPSHOT_TAKEN | HEAD_MOVED | EFFORT_FINISHED)
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
@@ -163,10 +173,7 @@ impl AsyncEventConsumer for ChangeReactor {
         let Some(stream) = event.envelope.anchors.stream_id else {
             return Ok(());
         };
-        let turn_ended = event.envelope.event_type == TURN_ENDED;
-        if !turn_ended
-            && (!moves_the_stream(event) || superseded(&svc, stream.value(), event.seq).await?)
-        {
+        if !moves_the_stream(event) || superseded(&svc, stream.value(), event.seq).await? {
             return Ok(());
         }
         let failed = |e: DomainError| match e {
@@ -194,18 +201,14 @@ impl AsyncEventConsumer for ChangeReactor {
             effort_id: e.id.to_string(),
         }))
         .collect();
-        // A turn's end doesn't move the tree (its take does): its lists
-        // are as current as the last take left them.
-        if !turn_ended {
-            for target in &targets {
-                crate::change_analysis::refresh_files(&svc, target.clone())
-                    .await
-                    .map_err(failed)?;
-            }
+        for target in &targets {
+            crate::change_analysis::refresh_files(&svc, target.clone())
+                .await
+                .map_err(failed)?;
         }
         // The deep analysis: at once when this event forces it, else
         // paced (`crate::pacing` runs it once due).
-        let forced = !deep_pacing().defers(&event.envelope.event_type);
+        let forced = forces(event);
         let now = oxplow_domain::Timestamp::now().to_text();
         for target in targets {
             if forced {
@@ -252,13 +255,25 @@ mod tests {
     }
 
     fn taken(unchanged: bool, file_count: u32) -> Envelope {
+        taken_by(
+            oxplow_domain::snapshot::SnapshotTrigger::Quiet,
+            unchanged,
+            file_count,
+        )
+    }
+
+    fn taken_by(
+        trigger: oxplow_domain::snapshot::SnapshotTrigger,
+        unchanged: bool,
+        file_count: u32,
+    ) -> Envelope {
         Envelope::typed::<SnapshotTaken>(
             "system",
             &SnapshotTakenV2 {
                 stream: "stream:str1".into(),
                 snapshot: "snapshot:1".into(),
                 parent: None,
-                trigger: oxplow_domain::snapshot::SnapshotTrigger::TurnEnd,
+                trigger,
                 unchanged,
                 file_count,
                 elapsed_ms: 1,
@@ -456,33 +471,26 @@ mod tests {
         );
     }
 
-    /// An agent's turn ending analyzes at once — the moment a
-    /// person looks at what it did — and clears the paced job.
+    /// A turn's end take that recorded files analyzes at once — the
+    /// moment a person looks at what the turn did — and clears the paced
+    /// job. The turn's end itself analyzes nothing: its take says whether
+    /// anything changed.
     #[tokio::test]
-    async fn a_turn_ending_analyzes_at_once() {
+    async fn a_turn_end_take_analyzes_at_once() {
         let f = crate::test_fixtures::services_with_effort().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        assert!(!reactor.handles("agent.turn.ended"));
         reactor
-            .handle(&log(&f.svc, taken(false, 1)).await)
+            .handle(
+                &log(
+                    &f.svc,
+                    taken_by(oxplow_domain::snapshot::SnapshotTrigger::TurnEnd, false, 1),
+                )
+                .await,
+            )
             .await
             .unwrap();
-        let ended = log(
-            &f.svc,
-            Envelope::typed::<oxplow_domain::events::schema::AgentTurnEnded>(
-                "system",
-                &oxplow_domain::events::schema::AgentTurnEndedV2 {
-                    turn: "agent_turn:1".into(),
-                    thread: "thread:thr1".into(),
-                    outcome: oxplow_domain::hook::TurnOutcome::Completed,
-                    transcript_path: None,
-                    usage: None,
-                },
-            ),
-        )
-        .await;
-        assert!(reactor.handles(&ended.envelope.event_type));
-        reactor.handle(&ended).await.unwrap();
         let out = f
             .svc
             .sql

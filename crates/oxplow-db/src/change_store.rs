@@ -31,6 +31,9 @@ pub struct ChangeRow {
     pub snapshot_id: Option<i64>,
     /// The event log's highest seq when the analysis began.
     pub events_to: Option<i64>,
+    /// What the analysis was computed from (the build, its trees, an
+    /// effort's own files); a rerun from the same needn't recompute.
+    pub analyzed_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -188,7 +191,7 @@ impl SqliteChangeStore {
             .call(move |c| {
                 let mut st = c.prepare(
                     "SELECT id, stream_id, kind, target, base_revision, head_revision, status, error, computed_at,
-                            snapshot_id, events_to
+                            snapshot_id, events_to, analyzed_from
                      FROM change WHERE id = ?1",
                 )?;
                 let mut rows = st.query_map([id], |r| {
@@ -204,6 +207,7 @@ impl SqliteChangeStore {
                         computed_at: r.get(8)?,
                         snapshot_id: r.get(9)?,
                         events_to: r.get(10)?,
+                        analyzed_from: r.get(11)?,
                     })
                 })?;
                 rows.next().transpose()
@@ -238,6 +242,7 @@ impl SqliteChangeStore {
         snapshot_id: Option<i64>,
         events_to: i64,
         elapsed_ms: i64,
+        analyzed_from: Option<String>,
     ) -> Result<(), DomainError> {
         let at = serde_json::to_value(oxplow_domain::Timestamp::now())
             .ok()
@@ -290,8 +295,9 @@ impl SqliteChangeStore {
                 }
                 tx.execute(
                     "UPDATE change SET status = 'done', error = NULL, computed_at = ?2,
-                       snapshot_id = ?3, events_to = ?4, elapsed_ms = ?5 WHERE id = ?1",
-                    rusqlite::params![id, at, snapshot_id, events_to, elapsed_ms],
+                       snapshot_id = ?3, events_to = ?4, elapsed_ms = ?5, analyzed_from = ?6
+                     WHERE id = ?1",
+                    rusqlite::params![id, at, snapshot_id, events_to, elapsed_ms, analyzed_from],
                 )
                 .map_err(map_sql_err)?;
                 Ok(())
@@ -539,11 +545,11 @@ mod tests {
             test_files: Vec::new(),
         };
         store
-            .store_results(c.id, results("a.rs"), Some(3), 10, 1)
+            .store_results(c.id, results("a.rs"), Some(3), 10, 1, None)
             .await
             .unwrap();
         store
-            .store_results(c.id, results("b.rs"), Some(4), 11, 1)
+            .store_results(c.id, results("b.rs"), Some(4), 11, 1, None)
             .await
             .unwrap();
         let dup = || {
