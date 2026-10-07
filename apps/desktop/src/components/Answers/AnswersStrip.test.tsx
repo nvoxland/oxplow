@@ -74,6 +74,8 @@ mock.module("../../api.js", () => ({
           reads: { models: ["v_thread_answer"], tables: [], measures: [] },
           freshness: {},
         },
+  // A result view reads the extensions (row commands, badges).
+  listExtensions: async () => [],
   decideProposal: async (id: number, approve: boolean) => {
     decided.push([id, approve]);
     return null;
