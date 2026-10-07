@@ -1,5 +1,5 @@
 title: Work (collapsed)
-description: The thread's work in one glance — the task in progress (with its epic), or else what finished last.
+description: The thread's work in one glance — the item in progress (with its epic), or else what finished last.
 hidden: true
 params:
   - { name: thread_id, label: Thread }

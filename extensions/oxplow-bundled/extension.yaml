@@ -236,18 +236,18 @@ models:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: thread_work
-    version: 2
-    description: "Each thread's Work panel, one row per line in display order: what's in progress (the task, under its epic with the epic's other children, and an open effort no item names), up to 10 ready tasks, up to 10 open items on an outside tracker, and the last 5 finished tasks, wiki pages and unlinked efforts since the list was cleared."
+    version: 3
+    description: "Each thread's Work panel, one row per line in display order, from the active work list (`v_work_item`): what's in progress (the item, under its epic with the epic's other children, and an open effort no item names), up to 10 ready items, and the last 5 finished items, wiki pages and unlinked efforts since the list was cleared."
     columns:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
-      - { name: grp, type: TEXT, doc: "`In progress`, `Ready`, `On your tracker` or `Finished`." }
-      - { name: g, type: INT, doc: "The group's place (0–3)." }
+      - { name: grp, type: TEXT, doc: "`In progress`, `Ready` or `Finished`." }
+      - { name: g, type: INT, doc: "The group's place (0, 1, 3)." }
       - { name: ord, type: INT, doc: "The line's place in its group." }
       - { name: title, type: TEXT, doc: "What to show." }
-      - { name: icon, type: TEXT, doc: "A lens icon name: a status (`in_progress`, `ready`, `done`, …), `epic` or `wiki`." }
+      - { name: icon, type: TEXT, doc: "A lens icon name: a work-item state (`todo`, `in_progress`, `done`, …), `epic` or `wiki`." }
       - { name: ref, type: TEXT, doc: "What the line opens (`work_item:…`, `wiki:<slug>`, `effort:eff<id>`)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
-      - { name: active, type: INT, doc: "1 for the task, or the unlinked effort, in progress." }
+      - { name: active, type: INT, doc: "1 for the item, or the unlinked effort, in progress." }
 event_types:
   types:
     - type: oxplow_bundled.accepted

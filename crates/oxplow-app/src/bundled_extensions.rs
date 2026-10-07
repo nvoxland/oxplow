@@ -978,6 +978,93 @@ mod tests {
         );
     }
 
+    /// The Work panel and its sibling lenses read the work-item interface:
+    /// with the work list switched to none, oxplow's tasks are gone from
+    /// them, whatever the task tables hold.
+    #[tokio::test]
+    async fn work_lenses_show_only_the_active_work_list() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = format!("thr{}", f.thread.value());
+        for (title, state) in [("Next up", "todo"), ("Stuck", "blocked")] {
+            f.svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    "work_item.create",
+                    serde_json::json!({ "title": title, "state": state, "thread": thread }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "work_item.create",
+                serde_json::json!({ "title": "Someday" }),
+                false,
+            )
+            .await
+            .unwrap();
+        f.svc.extension_models.sync().await.unwrap();
+        let tid = f.thread.value();
+        let titles = |rows: serde_json::Value, col: usize| -> Vec<String> {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r[col].as_str().unwrap_or_default().to_string())
+                .collect()
+        };
+        assert!(titles(
+            run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await,
+            1
+        )
+        .contains(&"Next up".to_string()));
+        assert_eq!(
+            titles(
+                run_bundled_lens(&f, "oxplow-bundled/backlog-tasks", &[]).await,
+                1
+            ),
+            vec!["Someday".to_string()]
+        );
+
+        f.svc
+            .config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert("work_items".into(), "none".into());
+        let config = crate::config_service::read_config(&f.svc.config);
+        f.svc.capabilities.publish_now(&config, &f.svc.db).unwrap();
+
+        let work = titles(
+            run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await,
+            1,
+        );
+        assert_eq!(
+            work,
+            vec!["Work in progress".to_string()],
+            "only the unlinked effort"
+        );
+        assert_eq!(
+            run_bundled_lens(&f, "oxplow-bundled/work-count", &[("thread_id", tid)]).await,
+            serde_json::json!([[1]])
+        );
+        for lens in ["oxplow-bundled/backlog-tasks", "oxplow-bundled/ready-tasks"] {
+            assert_eq!(
+                run_bundled_lens(&f, lens, &[]).await,
+                serde_json::json!([]),
+                "{lens}"
+            );
+        }
+        let waiting = titles(
+            run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await,
+            1,
+        );
+        assert!(!waiting.contains(&"Stuck".to_string()), "{waiting:?}");
+    }
+
     /// Thread activity: each turn under the effort it fell in, the turns
     /// outside any effort (questions, talk) under their own heading.
     #[tokio::test]

@@ -1,5 +1,5 @@
 title: Work
-description: The thread's work — in progress (with its epic), ready next, on an outside tracker, and recently finished.
+description: The thread's work — in progress (with its epic), ready next, and recently finished.
 params:
   - { name: thread_id, label: Thread }
 query: |

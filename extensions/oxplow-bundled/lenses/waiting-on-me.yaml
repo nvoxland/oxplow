@@ -1,15 +1,15 @@
 title: Waiting on Me
-description: Questions your agents are waiting on you to answer, blocked tasks, and open notes-to-self across the project.
+description: Questions your agents are waiting on you to answer, blocked work items, and open notes-to-self across the project.
 query: |
   SELECT * FROM (
   SELECT 'Waiting for your answer' AS what, coalesce(a.detail, 'Waiting on you') AS title,
-         NULL AS task_id, t.title AS thread, a.since AS since
+         NULL AS ref, t.title AS thread, a.since AS since
   FROM v_agent_status a
   JOIN v_thread t ON t.id = a.thread_id
   WHERE a.state = 'awaiting_user' AND t.status <> 'closed'
   UNION ALL
-  SELECT 'Blocked task', title, id, NULL, updated_at
-  FROM v_task WHERE status = 'blocked'
+  SELECT 'Blocked', title, ref, NULL, updated_at
+  FROM v_work_item WHERE state = 'blocked'
   UNION ALL
   SELECT 'Open note', coalesce(body, quote), NULL, NULL, last_activity_at
   FROM v_comment WHERE status = 'open' AND intent = 'note'
@@ -18,7 +18,7 @@ query: |
 viz: table
 columns:
   - { key: what, label: What }
-  - { key: title, label: Item, link: { kind: task, from: task_id } }
+  - { key: title, label: Item, link: { kind: page, from: ref } }
   - { key: thread, label: Thread }
   - { key: since, label: Since }
 empty: Nothing is waiting on you.

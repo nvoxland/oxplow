@@ -264,17 +264,19 @@ zone grouping); each appears only when it has content:
 1. **Search trigger** — opens the launcher (`QuickOpenOverlay`), the
    single discovery surface. Always visible.
 2. **Work** — an `oxplow-bundled` panel, thread-scoped, over
-   its model `thread_work` (one row per line, per thread). The body lens
-   `work` groups the lines (`group`): "In progress" (the active task; under
-   its epic, with the epic's other children indented and the active one
-   emphasized, when it has one), "Ready" (10), "On your tracker" (an
-   outside tracker's open items, 10) and "Finished" (5 done tasks and wiki
-   pages, its heading opening the Tasks page, with a `clear` group action:
-   `oxplow_bundled.clear_finished` records an event and the `finished_cleared`
-   model hides what finished before it — per thread, no longer
-   browser-local). Status and kind show as row icons. Collapsed, the
-   `work-line` lens: the active item (with its epic), else the last finished.
-   The header count (`work-count`) is in progress + ready + outside, never
+   its model `thread_work` (one row per line, per thread), which reads the
+   work-item interface (`v_work_item`): whichever list is active, nothing
+   with none. The body lens `work` groups the lines (`group`): "In
+   progress" (the active item; under its epic, with the epic's other
+   children indented and the active one emphasized, when it has one, plus
+   an open effort no item names), "Ready" (10, by `rank` then
+   `created_at`) and "Finished" (5 done items, wiki pages and unlinked
+   efforts, its heading opening the thread's activity, with a `clear`
+   group action: `oxplow_bundled.clear_finished` records an event and the
+   `finished_cleared` model hides what finished before it — per thread,
+   no longer browser-local). Status and kind show as row icons. Collapsed,
+   the `work-line` lens: the active item (with its epic), else the last
+   finished. The header count (`work-count`) is in progress + ready, never
    an alert. Rows link (Cmd-click opens a new tab) and drag into the
    agent's context.
 3. **Uncommitted** — an `oxplow-bundled` panel, stream-scoped,

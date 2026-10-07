@@ -487,8 +487,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Review Prompt (a copyable markdown prompt for reviewing the effort
     with a second harness: the task, the agent's summary, the files it
     changed, its claims and recorded decisions, and what to report; an
-    effort on another provider's work item has no task row, so the lens
-    LEFT JOINs `v_task` and names the `work_item` ref instead, tsk458.
+    effort's item comes from the active work list (`v_work_item`), and an
+    effort on no item names itself instead.
     What Deviated stays silent there: with no task text, no area is
     stated)
   - Context Read (`v_context_read`)
@@ -2195,7 +2195,7 @@ commands:
     summary: Mark the task done and leave a note.
     input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }
     entry: handlers/finish_review.star # defines transform(x), x = { input, rows }
-    input: "SELECT ref, status FROM v_task WHERE ref = :ref"   # optional; one read; :fields of the input
+    input: "SELECT ref, state FROM v_work_item WHERE ref = :ref"   # optional; one read; :fields of the input
     confirm: never                     # never (default) | always | destructive; children only add
     effect: write                      # write (default) | record; `read` is refused (a lens reads)
     invokers: { human: true, agent: true, lens: true }   # default: all

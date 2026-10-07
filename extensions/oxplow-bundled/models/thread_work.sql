@@ -1,24 +1,27 @@
 -- Each thread's Work panel, one row per line in display order: what's in
--- progress — the task (under its epic, with the epic's other children,
+-- progress — the item (under its epic, with the epic's other children,
 -- when it has one) and an open effort no item names — the next ready
--- tasks, items on an outside tracker, and what finished since the person
--- last cleared the list (tasks, wiki pages, unlinked efforts). An epic is
--- a task with children; it's shown as context, never as the active item.
--- A linked effort shows as its item.
-WITH task AS (
-  SELECT t.*, EXISTS (SELECT 1 FROM ref('task') c WHERE c.parent_id = t.id) AS is_epic
-  FROM ref('task') t
+-- items, and what finished since the person last cleared the list (items,
+-- wiki pages, unlinked efforts). Read from the work-item interface, so
+-- it's whichever list is active. An epic is an item with children; it's
+-- shown as context, never as the active item. A linked effort shows as
+-- its item.
+WITH item AS (
+  SELECT w.*, EXISTS (SELECT 1 FROM ref('work_item') c WHERE c.parent_ref = w.ref) AS is_epic,
+         row_number() OVER (PARTITION BY w.thread_id
+                            ORDER BY w.rank IS NULL, w.rank, w.created_at) AS pos
+  FROM ref('work_item') w
 ),
 active AS (
   SELECT * FROM (
-    SELECT t.*, row_number() OVER (PARTITION BY t.thread_id ORDER BY t.sort_index, t.created_at) AS rn
-    FROM task t
-    WHERE t.status = 'in_progress' AND NOT t.is_epic AND t.thread_id IS NOT NULL
+    SELECT i.*, row_number() OVER (PARTITION BY i.thread_id ORDER BY i.pos) AS rn
+    FROM item i
+    WHERE i.state = 'in_progress' AND NOT i.is_epic AND i.thread_id IS NOT NULL
   ) WHERE rn = 1
 ),
 epic AS (
-  SELECT a.thread_id, e.id AS epic_id, e.title AS epic_title, a.id AS active_id
-  FROM active a JOIN task e ON e.id = a.parent_id AND e.is_epic
+  SELECT a.thread_id, e.ref AS epic_ref, e.title AS epic_title, a.ref AS active_ref
+  FROM active a JOIN item e ON e.ref = a.parent_ref AND e.is_epic
 ),
 unlinked AS (
   SELECT e.thread_id, e.id, coalesce(e.title, 'Work in progress') AS title, e.ended_at
@@ -26,9 +29,9 @@ unlinked AS (
   WHERE e.work_item IS NULL
 ),
 finished AS (
-  SELECT t.thread_id, t.title, 'done' AS icon, 'work_item:oxplow:tsk' || t.id AS ref, t.completed_at AS at
-  FROM task t
-  WHERE t.status = 'done' AND t.completed_at IS NOT NULL AND t.thread_id IS NOT NULL
+  SELECT i.thread_id, i.title, 'done' AS icon, i.ref, i.closed_at AS at
+  FROM item i
+  WHERE i.state = 'done' AND i.closed_at IS NOT NULL AND i.thread_id IS NOT NULL
   UNION ALL
   SELECT k.thread_id, p.title, 'wiki', 'wiki:' || p.slug, k.last_seen_at
   FROM ref('knowledge_touch') k JOIN ref('knowledge_page') p ON p.ref = k.page
@@ -37,31 +40,24 @@ finished AS (
   FROM unlinked u WHERE u.ended_at IS NOT NULL
 ),
 lines AS (
-SELECT a.thread_id, 'In progress' AS grp, 0 AS g, 0 AS ord, a.title, a.status AS icon,
-       'work_item:oxplow:tsk' || a.id AS ref, 0 AS depth, 1 AS active
+SELECT a.thread_id, 'In progress' AS grp, 0 AS g, 0 AS ord, a.title, a.state AS icon,
+       a.ref, 0 AS depth, 1 AS active
 FROM active a
 WHERE NOT EXISTS (SELECT 1 FROM epic e WHERE e.thread_id = a.thread_id)
 UNION ALL
 SELECT u.thread_id, 'In progress', 0, -2, u.title, 'in_progress', 'effort:eff' || u.id, 0, 1
 FROM unlinked u WHERE u.ended_at IS NULL
 UNION ALL
-SELECT e.thread_id, 'In progress', 0, -1, e.epic_title, 'epic', 'work_item:oxplow:tsk' || e.epic_id, 0, 0
+SELECT e.thread_id, 'In progress', 0, -1, e.epic_title, 'epic', e.epic_ref, 0, 0
 FROM epic e
 UNION ALL
-SELECT e.thread_id, 'In progress', 0, c.sort_index, c.title, c.status, 'work_item:oxplow:tsk' || c.id, 1,
-       c.id = e.active_id
-FROM epic e JOIN task c ON c.parent_id = e.epic_id AND c.status <> 'archived'
+SELECT e.thread_id, 'In progress', 0, c.pos, c.title, c.state, c.ref, 1, c.ref = e.active_ref
+FROM epic e JOIN item c ON c.parent_ref = e.epic_ref AND c.state <> 'canceled'
 UNION ALL
-SELECT thread_id, 'Ready', 1, rn, title, 'ready', 'work_item:oxplow:tsk' || id, 0, 0 FROM (
-  SELECT t.*, row_number() OVER (PARTITION BY t.thread_id ORDER BY t.sort_index, t.created_at) AS rn
-  FROM task t
-  WHERE t.status = 'ready' AND NOT t.is_epic AND t.thread_id IS NOT NULL
-) WHERE rn <= 10
-UNION ALL
-SELECT thread_id, 'On your tracker', 2, rn, title || ' · ' || provider, state, ref, 0, 0 FROM (
-  SELECT w.*, row_number() OVER (PARTITION BY w.thread_id ORDER BY w.created_at) AS rn
-  FROM ref('work_item') w
-  WHERE w.provider <> 'oxplow' AND w.state IN ('todo', 'in_progress', 'blocked') AND w.thread_id IS NOT NULL
+SELECT thread_id, 'Ready', 1, rn, title, 'todo', ref, 0, 0 FROM (
+  SELECT i.*, row_number() OVER (PARTITION BY i.thread_id ORDER BY i.pos) AS rn
+  FROM item i
+  WHERE i.state = 'todo' AND NOT i.is_epic AND i.thread_id IS NOT NULL
 ) WHERE rn <= 10
 UNION ALL
 SELECT thread_id, 'Finished', 3, rn, title, icon, ref, 0, 0 FROM (

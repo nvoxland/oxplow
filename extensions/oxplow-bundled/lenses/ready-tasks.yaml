@@ -1,13 +1,12 @@
-title: Ready Tasks
+title: Ready
 query: |
-  SELECT t.id, t.title, t.priority, th.title AS thread
-  FROM v_task t JOIN v_thread th ON th.id = t.thread_id
-  WHERE t.status = 'ready'
-  ORDER BY th.sort_index, t.sort_index
+  SELECT w.ref, w.title, th.title AS thread
+  FROM v_work_item w JOIN v_thread th ON th.id = w.thread_id
+  WHERE w.state = 'todo'
+  ORDER BY th.sort_index, w.rank IS NULL, w.rank, w.created_at
   LIMIT 50
 columns:
-  - { key: title, label: Task, link: { kind: task, from: id } }
-  - { key: priority, label: Priority }
+  - { key: title, label: Item, link: { kind: page, from: ref } }
   - { key: thread, label: Thread }
 empty: Nothing is ready.
 hidden: true
