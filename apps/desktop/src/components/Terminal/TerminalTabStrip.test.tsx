@@ -114,6 +114,7 @@ test("the panel closes when the pointer moves outside its bounds", async () => {
   const panel = openOverlay(getByTestId);
   stubPanelRect(panel);
 
+  fireEvent.pointerMove(document, { clientX: 40, clientY: 300 });
   fireEvent.pointerMove(document, { clientX: 500, clientY: 300 });
   await waitFor(() => expect(queryByTestId("terminal-tab-overlay") === null).toBe(true));
 });

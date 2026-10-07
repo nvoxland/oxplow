@@ -44,6 +44,7 @@ function renderNavigator(opts?: {
   onPromoteThread?: (threadId: string) => void;
   onSwitchStream?: (streamId: string) => void;
   onSelectThread?: (streamId: string, threadId: string) => void;
+  onRenameThread?: (threadId: string, title: string) => void;
 }) {
   return render(
     <Navigator
@@ -57,6 +58,7 @@ function renderNavigator(opts?: {
       onSelectThread={opts?.onSelectThread ?? NOOP_ASYNC}
       onCreateThread={NOOP_ASYNC}
       onPromoteThread={opts?.onPromoteThread}
+      onRenameThread={opts?.onRenameThread}
       vcsEnabled
     />,
   );
@@ -250,6 +252,24 @@ test("the panel closes when the pointer moves outside its bounds", async () => {
   // Geometric, not `mouseleave`: the panel covers the rail HUD, and
   // because it's inside the wrapper's subtree the wrapper's mouseleave
   // never fires while the pointer sits over the covered region.
+  fireEvent.pointerMove(document, { clientX: 40, clientY: 300 });
+  fireEvent.pointerMove(document, { clientX: 400, clientY: 300 });
+  await waitFor(() => expect(queryByTestId("navigator-overlay") === null).toBe(true));
+});
+
+test("opened from outside it (the title bar), the panel stays open until the pointer has been in it", async () => {
+  const { getByTestId, queryByTestId } = renderNavigator();
+  act(() => requestNavigatorOpen());
+  stubPanelRect(getByTestId("navigator-overlay"));
+
+  // The pointer is over the title bar, above the panel, and drifts there.
+  fireEvent.pointerMove(document, { clientX: 120, clientY: -10 });
+  fireEvent.pointerMove(document, { clientX: 140, clientY: -12 });
+  await settle();
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
+
+  // Once it has been in the panel, leaving it closes it as usual.
+  fireEvent.pointerMove(document, { clientX: 100, clientY: 200 });
   fireEvent.pointerMove(document, { clientX: 400, clientY: 300 });
   await waitFor(() => expect(queryByTestId("navigator-overlay") === null).toBe(true));
 });
@@ -329,4 +349,54 @@ test("clicking 'Make writer' promotes that thread via the IPC handler", () => {
 
   fireEvent.click(getByTestId("menu-item-thread.promote"));
   expect(promoted).toEqual(["thr2"]);
+});
+
+// --- Right-click on the strip's icons ---------------------------------------
+
+test("right-clicking a thread icon in the strip opens its row menu, headed by its title", () => {
+  const promoted: string[] = [];
+  const { getByTestId, queryByTestId } = renderNavigator({ onPromoteThread: (id) => promoted.push(id) });
+
+  fireEvent.contextMenu(getByTestId("navigator-strip-thread-thr2"));
+
+  // The icon shows only initials, so the menu names the thread.
+  expect(getByTestId("context-menu-header").textContent).toBe("Research");
+  // The same items as the expanded row's menu.
+  expect(getByTestId("menu-item-thread.promote")).toBeTruthy();
+  expect(getByTestId("menu-item-thread.rename")).toBeTruthy();
+  expect(getByTestId("menu-item-thread.settings")).toBeTruthy();
+  expect(getByTestId("menu-item-thread.close")).toBeTruthy();
+  fireEvent.click(getByTestId("menu-item-thread.promote"));
+  expect(promoted).toEqual(["thr2"]);
+  // Right-click opens a menu, not the panel.
+  expect(queryByTestId("navigator-overlay") === null).toBe(true);
+});
+
+test("right-clicking a stream icon in the strip opens the stream's menu, headed by its title", () => {
+  const { getByTestId } = renderNavigator();
+
+  fireEvent.contextMenu(getByTestId("navigator-strip-stream-str1"));
+
+  expect(getByTestId("context-menu-header").textContent).toBe("Main");
+  expect(getByTestId("menu-item-stream.add-thread")).toBeTruthy();
+  expect(getByTestId("menu-item-stream.rename")).toBeTruthy();
+  expect(getByTestId("menu-item-stream.settings")).toBeTruthy();
+});
+
+test("Rename from a strip icon's menu opens the panel with the rename field", () => {
+  const { getByTestId, queryByTestId } = renderNavigator({ onRenameThread: () => {} });
+
+  fireEvent.contextMenu(getByTestId("navigator-strip-thread-thr2"));
+  fireEvent.click(getByTestId("menu-item-thread.rename"));
+
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
+  expect(getByTestId("navigator-thread-row-thr2").querySelector("input")).not.toBeNull();
+});
+
+test("the expanded rows' menus are headed by the name too", () => {
+  const { getByTestId } = renderNavigator();
+  openOverlay(getByTestId);
+  fireEvent.contextMenu(getByTestId("navigator-thread-row-thr2"));
+  expect(getByTestId("menu-item-thread.rename")).toBeTruthy();
+  expect(getByTestId("context-menu-header").textContent).toBe("Research");
 });

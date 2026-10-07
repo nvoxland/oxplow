@@ -198,6 +198,93 @@ export function Navigator({
     else handleSelectThread(streamId, threadId);
   };
 
+  // One menu per stream and per thread, the same whether it's opened from
+  // the strip's icon or the panel's row. Rename and Add thread work in the
+  // panel (their inline fields live there), so they open it.
+  const streamMenu = (s: Stream): MenuItem[] => {
+    const items: MenuItem[] = [
+      {
+        id: "stream.add-thread",
+        label: "Add thread",
+        enabled: true,
+        run: () => {
+          strip.openPanel();
+          setPendingNewThreadFor(s.id);
+        },
+      },
+      {
+        id: "stream.rename",
+        label: "Rename…",
+        enabled: !!onRenameStream,
+        run: () => {
+          strip.openPanel();
+          setRenaming({ kind: "stream", id: s.id });
+        },
+      },
+      {
+        id: "stream.settings",
+        label: "Settings…",
+        enabled: !!onOpenStreamSettings,
+        run: () => onOpenStreamSettings?.(s.id),
+      },
+    ];
+    if (s.kind !== "primary") {
+      items.push({
+        id: "stream.remove",
+        label: "Remove…",
+        // Disable when an agent is currently running in any of this
+        // stream's threads — the IPC also rejects, but disabling avoids a
+        // useless prompt.
+        enabled: streamStatuses[s.id] !== "working",
+        run: () => {
+          setRemoveStream(s);
+          setRemoveWorktree(false);
+          setRemoveError(null);
+        },
+      });
+    }
+    return items;
+  };
+  const threadMenu = (thread: Thread, isWriter: boolean): MenuItem[] => {
+    const items: MenuItem[] = [];
+    // "Make writer" is the headline action for a read-only thread: only
+    // the stream's single active thread can edit files, so a queued thread
+    // is "edits blocked" until promoted. Show it FIRST, and only when this
+    // thread isn't already the writer (tsk132).
+    if (!isWriter) {
+      items.push({
+        id: "thread.promote",
+        label: "Make writer",
+        enabled: !!onPromoteThread,
+        run: () => onPromoteThread?.(thread.id),
+      });
+    }
+    items.push(
+      {
+        id: "thread.rename",
+        label: "Rename…",
+        enabled: !!onRenameThread,
+        run: () => {
+          strip.openPanel();
+          setRenaming({ kind: "thread", id: thread.id });
+        },
+      },
+      {
+        id: "thread.settings",
+        label: "Settings…",
+        enabled: !!onOpenThreadSettings,
+        run: () => onOpenThreadSettings?.(thread.id),
+      },
+      {
+        id: "thread.close",
+        label: "Close thread",
+        enabled: !!onCloseThread,
+        run: () => onCloseThread?.(thread.id),
+      },
+    );
+    return items;
+  };
+
   // Build the list of "rows" so the strip and overlay can both walk
   // the same sequence — guaranteeing matching y-positions row-by-row.
   // `add-thread` rows are flyout-only (skipped in the strip render).
@@ -265,6 +352,7 @@ export function Navigator({
                 selected={false}
                 status={undefined}
                 onClick={() => handleStripStream(g.stream.id)}
+                menu={streamMenu(g.stream)}
                 testId={`navigator-strip-stream-${g.stream.id}`}
               />
               {g.threads.map(({ thread, isWriter }) => {
@@ -282,6 +370,7 @@ export function Navigator({
                     status={agentStatuses[thread.id]}
                     question={agentQuestions?.[thread.id]}
                     onClick={() => handleStripThread(g.stream.id, thread.id, isSelected)}
+                    menu={threadMenu(thread, isWriter)}
                     testId={`navigator-strip-thread-${thread.id}`}
                   />
                 );
@@ -326,43 +415,6 @@ export function Navigator({
         >
           <div style={{ flex: 1, overflowY: "auto", paddingTop: 0 }}>
             {streamGroups.map((g) => {
-              const isPrimary = g.stream.kind === "primary";
-              const isWorking = streamStatuses[g.stream.id] === "working";
-              const streamMenu: MenuItem[] = [
-                {
-                  id: "stream.add-thread",
-                  label: "Add thread",
-                  enabled: true,
-                  run: () => setPendingNewThreadFor(g.stream.id),
-                },
-                {
-                  id: "stream.rename",
-                  label: "Rename…",
-                  enabled: !!onRenameStream,
-                  run: () => setRenaming({ kind: "stream", id: g.stream.id }),
-                },
-                {
-                  id: "stream.settings",
-                  label: "Settings…",
-                  enabled: !!onOpenStreamSettings,
-                  run: () => onOpenStreamSettings?.(g.stream.id),
-                },
-              ];
-              if (!isPrimary) {
-                streamMenu.push({
-                  id: "stream.remove",
-                  label: "Remove…",
-                  // Disable when an agent is currently running in any of
-                  // this stream's threads — the IPC also rejects, but
-                  // disabling avoids a useless prompt.
-                  enabled: !isWorking,
-                  run: () => {
-                    setRemoveStream(g.stream);
-                    setRemoveWorktree(false);
-                    setRemoveError(null);
-                  },
-                });
-              }
               return (
                 <div key={g.stream.id} style={STREAM_PANEL_STYLE}>
                   <OverlayRow
@@ -381,47 +433,13 @@ export function Navigator({
                       }
                     }}
                     onCancelRename={() => setRenaming(null)}
-                    menu={streamMenu}
+                    menu={streamMenu(g.stream)}
                     testId={`navigator-stream-row-${g.stream.id}`}
                   />
                   {g.threads.map(({ thread, isWriter }) => {
                     const isSelected =
                       g.stream.id === currentStreamId &&
                       threadStates[g.stream.id]?.selectedThreadId === thread.id;
-                    const threadMenu: MenuItem[] = [];
-                    // "Make writer" is the headline action for a read-only
-                    // thread: only the stream's single active thread can
-                    // edit files, so a queued thread is "edits blocked"
-                    // until promoted. Show it FIRST, and only when this
-                    // thread isn't already the writer (tsk132).
-                    if (!isWriter) {
-                      threadMenu.push({
-                        id: "thread.promote",
-                        label: "Make writer",
-                        enabled: !!onPromoteThread,
-                        run: () => onPromoteThread?.(thread.id),
-                      });
-                    }
-                    threadMenu.push(
-                      {
-                        id: "thread.rename",
-                        label: "Rename…",
-                        enabled: !!onRenameThread,
-                        run: () => setRenaming({ kind: "thread", id: thread.id }),
-                      },
-                      {
-                        id: "thread.settings",
-                        label: "Settings…",
-                        enabled: !!onOpenThreadSettings,
-                        run: () => onOpenThreadSettings?.(thread.id),
-                      },
-                      {
-                        id: "thread.close",
-                        label: "Close thread",
-                        enabled: !!onCloseThread,
-                        run: () => onCloseThread?.(thread.id),
-                      },
-                    );
                     return (
                       <OverlayRow
                         key={thread.id}
@@ -441,7 +459,7 @@ export function Navigator({
                           }
                         }}
                         onCancelRename={() => setRenaming(null)}
-                        menu={threadMenu}
+                        menu={threadMenu(thread, isWriter)}
                         testId={`navigator-thread-row-${thread.id}`}
                       />
                     );
@@ -567,6 +585,7 @@ function StripRow({
   status,
   question,
   onClick,
+  menu,
   testId,
 }: {
   letter: string;
@@ -577,13 +596,18 @@ function StripRow({
   status: AgentStatusDotState | undefined;
   question?: string;
   onClick?(): void;
+  /** Its right-click menu — the panel row's, headed by the full title
+   *  since the glyph shows only initials. */
+  menu?: MenuItem[];
   testId?: string;
 }) {
   const interactive = !!onClick;
+  const cm = useRowContextMenu(menu ?? [], label);
   return (
     <div
       data-testid={testId}
       title={label}
+      onContextMenu={cm.onContextMenu}
       role={interactive ? "button" : undefined}
       tabIndex={interactive ? 0 : undefined}
       onClick={
@@ -597,6 +621,7 @@ function StripRow({
       onKeyDown={
         interactive
           ? (e) => {
+              cm.onKeyDown(e);
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
                 e.stopPropagation();
@@ -621,6 +646,7 @@ function StripRow({
       }}
     >
       <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} question={question} />
+      {cm.menu}
     </div>
   );
 }
@@ -657,7 +683,7 @@ function OverlayRow({
   testId?: string;
 }) {
   const interactive = !!onClick && !renaming;
-  const cm = useRowContextMenu(menu ?? []);
+  const cm = useRowContextMenu(menu ?? [], label);
   return (
     <div
       data-testid={testId}

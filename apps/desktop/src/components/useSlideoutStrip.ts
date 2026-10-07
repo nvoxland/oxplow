@@ -32,6 +32,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  *    it's covering, swallowing clicks meant for it. Comparing the pointer
  *    against the panel's rect has no such blind spot.
  *
+ *    And the pointer has to have *been* in the panel before leaving it can
+ *    close it. A panel opened from somewhere else — the title bar's
+ *    stream name, above it — starts with the pointer outside; treating
+ *    that as "left" flashed it open and shut on the first mouse move.
+ *
  * 3. **Passive closes yield to an in-flight form; explicit ones don't.**
  *    Pointer-leave and background-click must not discard a rename or a
  *    half-typed new-item entry — pass `guard` while one is open. Escape,
@@ -95,6 +100,8 @@ export function useSlideoutStrip(options: UseSlideoutStripOptions = {}): Slideou
   // stable without going stale — the listener effects re-register on
   // `open`/`guard` only, not on every render of the host component.
   const openRef = useRef(false);
+  /** The pointer has been inside the panel since it opened (rule 2). */
+  const enteredRef = useRef(false);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
@@ -115,6 +122,7 @@ export function useSlideoutStrip(options: UseSlideoutStripOptions = {}): Slideou
 
   const openPanel = useCallback(() => {
     cancelClose();
+    if (!openRef.current) enteredRef.current = false;
     openRef.current = true;
     setOpen(true);
   }, [cancelClose]);
@@ -166,8 +174,12 @@ export function useSlideoutStrip(options: UseSlideoutStripOptions = {}): Slideou
       }
       const rect = panelElRef.current?.getBoundingClientRect();
       if (!rect) return;
-      if (isPointInRect(rect, e.clientX, e.clientY)) cancelClose();
-      else scheduleClose();
+      if (isPointInRect(rect, e.clientX, e.clientY)) {
+        enteredRef.current = true;
+        cancelClose();
+      } else if (enteredRef.current) {
+        scheduleClose();
+      }
     };
     document.addEventListener("pointermove", onMove);
     return () => {

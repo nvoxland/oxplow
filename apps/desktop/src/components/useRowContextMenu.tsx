@@ -28,33 +28,33 @@ import { ContextMenu } from "./ContextMenu.js";
  * keyboard-first users never need the mouse.
  */
 export function useContextMenu(): {
-  open(event: MouseEvent, items: MenuItem[]): void;
-  openForKey(event: KeyboardEvent, items: MenuItem[]): void;
+  open(event: MouseEvent, items: MenuItem[], header?: string): void;
+  openForKey(event: KeyboardEvent, items: MenuItem[], header?: string): void;
   menu: ReactNode;
 } {
-  const [state, setState] = useState<{ pos: { x: number; y: number }; items: MenuItem[] } | null>(null);
+  const [state, setState] = useState<{ pos: { x: number; y: number }; items: MenuItem[]; header?: string } | null>(null);
 
-  const open = useCallback((event: MouseEvent, items: MenuItem[]) => {
+  const open = useCallback((event: MouseEvent, items: MenuItem[], header?: string) => {
     // Always cancel the native menu on a surface that owns its own actions,
     // even when there are none to show, so the OS menu never leaks here.
     event.preventDefault();
     event.stopPropagation();
     if (items.length === 0) return;
-    setState({ pos: { x: event.clientX, y: event.clientY }, items });
+    setState({ pos: { x: event.clientX, y: event.clientY }, items, header });
   }, []);
 
-  const openForKey = useCallback((event: KeyboardEvent, items: MenuItem[]) => {
+  const openForKey = useCallback((event: KeyboardEvent, items: MenuItem[], header?: string) => {
     const isMenuKey = event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
     if (!isMenuKey || items.length === 0) return;
     event.preventDefault();
     event.stopPropagation();
     // Anchor under the focused row, left-aligned to it.
     const rect = event.currentTarget.getBoundingClientRect();
-    setState({ pos: { x: rect.left, y: rect.bottom + 2 }, items });
+    setState({ pos: { x: rect.left, y: rect.bottom + 2 }, items, header });
   }, []);
 
   const menu = state ? (
-    <ContextMenu items={state.items} position={state.pos} onClose={() => setState(null)} />
+    <ContextMenu items={state.items} header={state.header} position={state.pos} onClose={() => setState(null)} />
   ) : null;
 
   return { open, openForKey, menu };
@@ -67,14 +67,16 @@ export function useContextMenu(): {
  * Usage:
  *   const { onContextMenu, onKeyDown, menu } = useRowContextMenu(items);
  *   return <div onContextMenu={onContextMenu} onKeyDown={onKeyDown}>… {menu}</div>;
+ *
+ * `header` titles the menu when the row doesn't show what it acts on.
  */
-export function useRowContextMenu(items: MenuItem[]): {
+export function useRowContextMenu(items: MenuItem[], header?: string): {
   onContextMenu(event: MouseEvent): void;
   onKeyDown(event: KeyboardEvent): void;
   menu: ReactNode;
 } {
   const { open, openForKey, menu } = useContextMenu();
-  const onContextMenu = useCallback((event: MouseEvent) => open(event, items), [open, items]);
-  const onKeyDown = useCallback((event: KeyboardEvent) => openForKey(event, items), [openForKey, items]);
+  const onContextMenu = useCallback((event: MouseEvent) => open(event, items, header), [open, items, header]);
+  const onKeyDown = useCallback((event: KeyboardEvent) => openForKey(event, items, header), [openForKey, items, header]);
   return { onContextMenu, onKeyDown, menu };
 }

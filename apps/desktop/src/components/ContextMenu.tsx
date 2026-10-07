@@ -11,6 +11,9 @@ import type { MenuItem, MenuPosition } from "../menu.js";
 
 interface ContextMenuProps {
   items: MenuItem[];
+  /** A title line above the items, naming what the menu acts on — for a
+   *  trigger that doesn't show it (an icon with only initials). */
+  header?: string;
   position: MenuPosition;
   onClose(): void;
   minWidth?: number;
@@ -23,7 +26,7 @@ interface MenuListProps {
   minWidth?: number;
 }
 
-export function ContextMenu({ items, position, onClose, minWidth = 220, zIndex = 1000 }: ContextMenuProps) {
+export function ContextMenu({ items, header, position, onClose, minWidth = 220, zIndex = 1000 }: ContextMenuProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [resolvedPosition, setResolvedPosition] = useState(position);
 
@@ -80,10 +83,27 @@ export function ContextMenu({ items, position, onClose, minWidth = 220, zIndex =
       // selecting the row / closing the navigator slideout (tsk190).
       onClick={(event) => event.stopPropagation()}
     >
+      {header ? (
+        <div data-testid="context-menu-header" style={headerStyle} title={header}>
+          {header}
+        </div>
+      ) : null}
       <MenuList items={items} onAction={onClose} minWidth={minWidth} />
     </div>
   );
 }
+
+const headerStyle: CSSProperties = {
+  padding: "6px 10px 5px",
+  fontSize: "var(--text-xs)",
+  fontWeight: 600,
+  color: "var(--text-secondary)",
+  borderBottom: "1px solid var(--border-subtle)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  maxWidth: 320,
+};
 
 export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
   const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null);

@@ -10,7 +10,7 @@ afterEach(cleanup);
 const stream = { id: "str2", title: "Bugfixes", branch: "fix/scan" } as unknown as Stream;
 
 function renderBar(over: Partial<Parameters<typeof TitleBar>[0]> = {}) {
-  const calls = { search: 0, threadSettings: [] as string[] };
+  const calls = { search: 0 };
   const view = render(
     <TitleBar
       stream={stream}
@@ -18,7 +18,6 @@ function renderBar(over: Partial<Parameters<typeof TitleBar>[0]> = {}) {
       vcsEnabled
       leftInset={78}
       onOpenSearch={() => calls.search++}
-      onOpenThreadSettings={(id) => calls.threadSettings.push(id)}
       {...over}
     />,
   );
@@ -36,14 +35,14 @@ test("it names the stream and thread at the start, and the branch just before se
   expect(columns[2].getAttribute("data-testid")).toBe(SEARCH_TRIGGER_TESTID);
 });
 
-test("the stream name opens the navigator; the thread name its settings", () => {
+test("the stream and thread names both open the navigator", () => {
   let opened = 0;
   const off = subscribeNavigatorOpenRequests(() => opened++);
-  const { view, calls } = renderBar();
+  const { view } = renderBar();
   fireEvent.click(view.getByTestId("title-bar-stream"));
   expect(opened).toBe(1);
   fireEvent.click(view.getByTestId("title-bar-thread"));
-  expect(calls.threadSettings).toEqual(["thr5"]);
+  expect(opened).toBe(2);
   off();
 });
 
