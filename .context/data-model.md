@@ -1053,7 +1053,7 @@ so other owners' rows survive.
 
 Writers (one per source kind / slice):
 
-The vocabulary speaks of work items, whichever list they're on (V20
+The vocabulary speaks of work items, whichever list they're on (V21
 renamed the `task_…` spellings: a mention is `work_item_mention` /
 `summary_work_item_mention`, a link `work_item_link:<type>`).
 
