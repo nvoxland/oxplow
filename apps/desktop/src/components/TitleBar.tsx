@@ -1,8 +1,8 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import { ChevronRight, Search } from "lucide-react";
 
 import { vcsCheckoutBranch } from "../api.js";
-import { requestNavigatorOpen } from "../navigator-bus.js";
+import { requestNavigatorMenu, requestNavigatorOpen } from "../navigator-bus.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import { BranchPicker, type PickedRef } from "./BranchPicker.js";
 
@@ -24,8 +24,9 @@ interface Props {
  * The bar across the top of the window, over both the left nav and the
  * content: where you are (`stream › thread` at the start) and, at the
  * right end, the stream's branch and the global search beside it. The
- * stream and thread names open the navigator below them, the branch the
- * branch picker.
+ * stream and thread names open the navigator below them (right-click: the
+ * same menu as their navigator rows, which the Navigator opens), the branch
+ * the branch picker.
  *
  * Its empty space drags the window (`data-tauri-drag-region` — Tauri drags
  * only from elements that carry it, so the controls stay clickable).
@@ -58,6 +59,7 @@ export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch }
               data-testid="title-bar-stream"
               title={`${stream.title} — show streams and threads`}
               onClick={() => requestNavigatorOpen()}
+              onContextMenu={menuFor("stream", stream.id)}
               style={{ ...nameStyle, fontWeight: 600, color: "var(--text-primary)" }}
             >
               {stream.title}
@@ -70,6 +72,7 @@ export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch }
                   data-testid="title-bar-thread"
                   title={`${thread.title} — show streams and threads`}
                   onClick={() => requestNavigatorOpen()}
+                  onContextMenu={menuFor("thread", thread.id)}
                   style={{ ...nameStyle, color: "var(--text-secondary)" }}
                 >
                   {thread.title}
@@ -95,6 +98,15 @@ export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch }
       </button>
     </div>
   );
+}
+
+/** A name's right-click: the Navigator's menu for it, at the pointer. */
+function menuFor(kind: "stream" | "thread", id: string) {
+  return (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    requestNavigatorMenu({ kind, id, x: e.clientX, y: e.clientY });
+  };
 }
 
 /** The stream's branch, opening the branch picker (checkout, manage). */

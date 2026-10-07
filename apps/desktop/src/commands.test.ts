@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildMenuGroupSnapshots, buildMenuGroups, findCommandById } from "./commands.js";
+import { buildMenuGroupSnapshots, buildMenuGroups, buildNativeMenuSnapshots, findCommandById, menuBarGroups } from "./commands.js";
+import { flattenCommands } from "./components/quickOpenResults.js";
 
 describe("buildMenuGroups", () => {
   test("disables save and find when no file is open", () => {
@@ -18,26 +19,6 @@ describe("buildMenuGroups", () => {
     expect(findCommandById(groups, "file.quickOpen")?.enabled).toBe(true);
   });
 
-  test("exposes the tab-IA navigation View items", () => {
-    const groups = buildMenuGroups(
-      {
-        hasStream: true,
-        hasSelectedFile: true,
-        canSave: true,
-        hasThread: true,
-      },
-      noopHandlers(),
-    );
-
-    expect(findCommandById(groups, "view.files")?.enabled).toBe(true);
-    expect(findCommandById(groups, "view.uncommitted")?.enabled).toBe(true);
-    expect(findCommandById(groups, "view.comments")?.enabled).toBe(true);
-    expect(findCommandById(groups, "view.wiki")?.enabled).toBe(true);
-    expect(findCommandById(groups, "history.open")?.enabled).toBe(true);
-    // Agent was removed from View; the agent tab is the pinned center tab.
-    expect(findCommandById(groups, "view.agent" as never)).toBeUndefined();
-  });
-
   test("disables stream-scoped commands without an active stream", () => {
     const groups = buildMenuGroups(
       {
@@ -50,12 +31,10 @@ describe("buildMenuGroups", () => {
     );
 
     expect(findCommandById(groups, "file.quickOpen")?.enabled).toBe(false);
-    expect(findCommandById(groups, "view.files")?.enabled).toBe(false);
-    expect(findCommandById(groups, "view.uncommitted")?.enabled).toBe(false);
-    expect(findCommandById(groups, "view.comments")?.enabled).toBe(false);
+    expect(findCommandById(groups, "thread.new")?.enabled).toBe(false);
   });
 
-  test("exposes new-thread, new-stream, history commands", () => {
+  test("exposes new-thread and new-stream commands", () => {
     const groups = buildMenuGroups(
       {
         hasStream: true,
@@ -68,10 +47,9 @@ describe("buildMenuGroups", () => {
 
     expect(findCommandById(groups, "stream.new")?.enabled).toBe(true);
     expect(findCommandById(groups, "thread.new")?.enabled).toBe(true);
-    expect(findCommandById(groups, "history.open")?.enabled).toBe(true);
   });
 
-  test("disables thread.new/history/dashboards without a stream", () => {
+  test("disables thread.new without a stream", () => {
     const groups = buildMenuGroups(
       {
         hasStream: false,
@@ -84,9 +62,6 @@ describe("buildMenuGroups", () => {
 
     expect(findCommandById(groups, "stream.new")?.enabled).toBe(true);
     expect(findCommandById(groups, "thread.new")?.enabled).toBe(false);
-    expect(findCommandById(groups, "history.open")?.enabled).toBe(false);
-    expect(findCommandById(groups, "tasks.dashboard")?.enabled).toBe(false);
-    expect(findCommandById(groups, "git.dashboard")?.enabled).toBe(false);
   });
 
   test("New Project and Open Project run separate handlers", () => {
@@ -140,25 +115,6 @@ describe("buildMenuGroups", () => {
 });
 
 describe("buildMenuGroupSnapshots", () => {
-  test("View menu drops Agent and the relocated dashboards", () => {
-    const groups = buildMenuGroupSnapshots({
-      hasStream: true,
-      hasSelectedFile: true,
-      canSave: true,
-      hasThread: true,
-    });
-
-    const viewGroup = groups.find((group) => group.id === "view");
-    expect(viewGroup?.items.map((item) => item.id)).toEqual([
-      "view.files",
-      "view.uncommitted",
-      "view.comments",
-      "view.wiki",
-      "history.open",
-    ]);
-    expect(groups.find((group) => group.id === "file")?.items.find((item) => item.id === "file.save")?.enabled).toBe(true);
-  });
-
   test("File menu offers New Project as its own command, ahead of the Open pair", () => {
     const groups = buildMenuGroupSnapshots({
       hasStream: true,
@@ -183,48 +139,8 @@ describe("buildMenuGroupSnapshots", () => {
     });
   });
 
-  test("Git menu leads with the Dashboard, then the working-tree ops", () => {
-    const groups = buildMenuGroupSnapshots({
-      hasStream: true,
-      hasSelectedFile: false,
-      canSave: false,
-      hasThread: false,
-      canCommit: true,
-    });
-
-    const gitGroup = groups.find((group) => group.id === "git");
-    expect(gitGroup?.label).toBe("Git");
-    expect(gitGroup?.items.map((item) => item.id)).toEqual([
-      "git.dashboard",
-      "git.commit",
-      "git.pull",
-      "git.push",
-    ]);
-  });
-
-  test("Work menu is renamed to Tasks and leads with its Dashboard", () => {
-    const groups = buildMenuGroupSnapshots({
-      hasStream: true,
-      hasSelectedFile: false,
-      canSave: false,
-      hasThread: true,
-    });
-
-    const tasksGroup = groups.find((group) => group.id === "plan");
-    expect(tasksGroup?.label).toBe("Tasks");
-    expect(tasksGroup?.items[0]?.id).toBe("tasks.dashboard");
-    expect(tasksGroup?.items.map((item) => item.id)).toEqual([
-      "tasks.dashboard",
-      "plan.newTask",
-      "dashboard.new",
-      "lens.newWithAgent",
-      "thread.new",
-      "stream.new",
-    ]);
-  });
-
-  // tsk373: building a lens is one launcher/menu entry away; it needs a
-  // thread (an agent) to hand the starter prompt to.
+  // Building a lens is one search entry away; it needs a thread (an agent)
+  // to hand the starter prompt to.
   test("New Lens with Your Agent needs a thread", () => {
     const item = (hasThread: boolean) =>
       buildMenuGroupSnapshots({ hasStream: true, hasSelectedFile: false, canSave: false, hasThread })
@@ -236,23 +152,51 @@ describe("buildMenuGroupSnapshots", () => {
   });
 });
 
+describe("the menu bar and search", () => {
+  const state = { hasStream: true, hasSelectedFile: true, canSave: true, hasThread: true, canCommit: true };
+
+  test("the menu bar is File and Edit only", () => {
+    expect(menuBarGroups(buildMenuGroups(state, noopHandlers())).map((g) => g.id)).toEqual(["file", "edit"]);
+    expect(buildNativeMenuSnapshots(state, []).map((g) => g.id)).toEqual(["file", "edit"]);
+  });
+
+  test("every action off the menu bar is still a search command, under its group", () => {
+    const commands = flattenCommands(buildMenuGroups(state, noopHandlers()));
+    const byId = new Map(commands.map((c) => [c.id, c.group]));
+    expect(Object.fromEntries(
+      ["git.commit", "git.pull", "git.push", "plan.newTask", "dashboard.new", "lens.newWithAgent", "thread.new", "stream.new"].map(
+        (id) => [id, byId.get(id as never)],
+      ),
+    )).toEqual({
+      "git.commit": "Git",
+      "git.pull": "Git",
+      "git.push": "Git",
+      "plan.newTask": "Tasks",
+      "dashboard.new": "Tasks",
+      "lens.newWithAgent": "Tasks",
+      "thread.new": "Tasks",
+      "stream.new": "Tasks",
+    });
+  });
+
+  test("pages aren't commands: they're search's page rows", () => {
+    const groups = buildMenuGroups(state, noopHandlers());
+    for (const id of ["view.files", "view.uncommitted", "view.comments", "view.wiki", "history.open", "git.dashboard", "tasks.dashboard"]) {
+      expect(findCommandById(groups, id as never)).toBeUndefined();
+    }
+  });
+});
+
 function noopHandlers() {
   return {
     save() {},
     quickOpen() {},
     find() {},
-    showFiles() {},
-    showUncommitted() {},
-    showComments() {},
-    showGit() {},
-    showTasks() {},
-    showWiki() {},
     newTask() {},
     newStream() {},
     newDashboard() {},
     newLensWithAgent() {},
     newThread() {},
-    openHistory() {},
     commitFiles() {},
     pullChanges() {},
     pushChanges() {},

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
-import { subscribeNavigatorOpenRequests } from "../navigator-bus.js";
+import { subscribeNavigatorMenuRequests, subscribeNavigatorOpenRequests, type NavigatorMenuRequest } from "../navigator-bus.js";
 import { SEARCH_TRIGGER_TESTID, TitleBar } from "./TitleBar.js";
 
 afterEach(cleanup);
@@ -63,4 +63,17 @@ test("with no thread selected it shows the stream alone", () => {
   const { view } = renderBar({ thread: null });
   expect(view.getByTestId("title-bar-stream").textContent).toBe("Bugfixes");
   expect(view.queryByTestId("title-bar-thread")).toBeNull();
+});
+
+test("right-clicking the stream or thread name asks the navigator for its menu there", () => {
+  const asked: NavigatorMenuRequest[] = [];
+  const off = subscribeNavigatorMenuRequests((r) => asked.push(r));
+  const { view } = renderBar();
+  fireEvent.contextMenu(view.getByTestId("title-bar-stream"), { clientX: 120, clientY: 14 });
+  fireEvent.contextMenu(view.getByTestId("title-bar-thread"), { clientX: 200, clientY: 15 });
+  expect(asked).toEqual([
+    { kind: "stream", id: "str2", x: 120, y: 14 },
+    { kind: "thread", id: "thr5", x: 200, y: 15 },
+  ]);
+  off();
 });

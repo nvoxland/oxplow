@@ -368,7 +368,10 @@ another branch.
   - **An item has one menu wherever it shows.** The Navigator builds each
     stream's and thread's menu once (`streamMenu` / `threadMenu`) and
     binds it to both the strip glyph and the panel row; an action whose
-    inline field lives in the panel (Rename, Add thread) opens it.
+    inline field lives in the panel (Rename, Add thread) opens it. A
+    surface outside the Navigator that names a stream or thread (the title
+    bar) asks for the menu over `navigator-bus` (`requestNavigatorMenu`,
+    opened with `useContextMenu().openAt`) rather than building its own.
   - `useContextMenu()` — call once in a parent that renders rows in a
     `.map()` (a per-row hook can't run there); each row does
     `onContextMenu={(e) => open(e, items)}` and the parent renders
@@ -544,24 +547,18 @@ declaring *what it is* and mounting the generic layer.
   rather than silently running first-run setup. The `<Launcher>` mirrors
   the pair (`launcher-new-project` accented, `launcher-open-project`
   secondary). Don't reintroduce an "open initializes it for you" path.
-- **The View menu is tab-IA navigation**, not a view toggle: Files /
-  Uncommitted Changes / Comments Dashboard / Wiki / History each open
-  the matching page in the active thread's tab set (via `indexRef` /
-  `uncommittedChangesRef` / `commentsRef`). The old binary
-  Agent-vs-Editor `checked` toggle from the pre-IA two-pane layout is
-  gone, and Agent itself is no longer a View item — the agent tab is
-  the pinned center tab. The Git and Tasks dashboards moved out of View
-  into their own top-level menus (below).
-- **The Git menu** carries the working-tree git surface: `Dashboard`
-  (opens `gitDashboardRef`, gated on a stream) plus `Commit Changes…`,
-  `Pull Changes`, and `Push Changes` (gated on `canCommit` — stream +
-  git enabled). Pull/Push run via `gitPull` / `gitPush` as background
-  tasks; failures record an op-error and surface a "Show details" toast
-  (same pattern as the Git Dashboard's `runOp`). Commit opens the Files
-  page and triggers the commit slideover.
-- **The Tasks menu** (group id is still `plan` for keybinding/command-id
-  stability; label is "Tasks") leads with `Dashboard` (opens the tasks
-  index) followed by `New Task…` / `New Thread…` / `New Stream…`.
+- **The menu bar is File and Edit only** (decided 2026-10-07). Every
+  other command is a **search command**: its group (`inMenuBar: false` in
+  `commands.ts` — Git: `Commit Changes…` / `Pull Changes` / `Push
+  Changes`; Tasks, group id still `plan`: `New Task…` / `New Dashboard…`
+  / `New Lens with Your Agent…` / `New Thread…` / `New Stream…`) is
+  listed by the launcher under its label, and its keybinding still runs
+  (`commandMap` holds every group; `menuBarGroups` picks the bar's for
+  the native menu and the in-window `Menubar`). **Pages aren't
+  commands:** the View / Git / Tasks "Dashboard" items that only opened
+  a page are gone — the launcher lists every page as a page row. Pull /
+  Push run as background tasks (failures record an op-error and a "Show
+  details" toast); Commit opens the Files page and its commit slideover.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
   Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.

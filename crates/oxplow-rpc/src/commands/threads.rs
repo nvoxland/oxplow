@@ -56,12 +56,25 @@ pub async fn get_thread_state(
     svc: &Services,
     stream_id: StreamId,
 ) -> Result<ThreadState, IpcError> {
-    let threads = svc.thread_store.list_for_stream(&stream_id).await?;
+    // The stream's open threads: a closed one is history, listed on the
+    // Closed Threads page (`list_closed_threads`), not in the nav.
+    let threads: Vec<Thread> = svc
+        .thread_store
+        .list_for_stream(&stream_id)
+        .await?
+        .into_iter()
+        .filter(|t| t.status != oxplow_domain::ThreadStatus::Closed)
+        .collect();
     let active = threads
         .iter()
         .find(|t| t.status == oxplow_domain::ThreadStatus::Active)
         .map(|t| t.id);
-    let selected = svc.threads.selected(&stream_id).await?;
+    // A selection that was closed falls back to the writer.
+    let selected = svc
+        .threads
+        .selected(&stream_id)
+        .await?
+        .filter(|id| threads.iter().any(|t| t.id == *id));
     Ok(ThreadState {
         selected_thread_id: selected.or(active),
         active_thread_id: active,
@@ -89,6 +102,66 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_array());
+    }
+
+    /// A closed thread leaves the stream's thread state (the nav lists open
+    /// threads; closed ones are on the Closed Threads page), and a stream
+    /// whose selected thread was closed falls back to its writer.
+    #[tokio::test]
+    async fn a_closed_thread_leaves_the_thread_state() {
+        let (svc, _dir) = crate::test_support::services();
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let run = |name: &'static str, input: serde_json::Value| {
+            let svc = svc.clone();
+            async move {
+                svc.commands
+                    .run(&oxplow_domain::Actor::Human, name, input, false)
+                    .await
+                    .unwrap()
+                    .result
+            }
+        };
+        let stream_ref = format!("stream:{}", stream.id);
+        run(
+            "thread.create",
+            serde_json::json!({ "stream": stream_ref, "title": "Writer" }),
+        )
+        .await;
+        let other = run(
+            "thread.create",
+            serde_json::json!({ "stream": stream_ref, "title": "Other" }),
+        )
+        .await;
+        let other_id = other["id"].as_str().unwrap().to_string();
+        crate::dispatch(
+            "select_thread",
+            serde_json::json!({ "req": { "streamId": stream.id.to_string(), "threadId": other_id } }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        run(
+            "thread.close",
+            serde_json::json!({ "thread": format!("thread:{other_id}") }),
+        )
+        .await;
+
+        let state = crate::dispatch(
+            "get_thread_state",
+            serde_json::json!({ "streamId": stream.id.to_string() }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let ids: Vec<&str> = state["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert!(!ids.contains(&other_id.as_str()), "{ids:?}");
+        assert!(state["activeThreadId"].is_string());
+        assert_eq!(state["selectedThreadId"], state["activeThreadId"]);
     }
 
     #[tokio::test]

@@ -28,18 +28,14 @@ export type QuickOpenResult =
 /// Flatten enabled, runnable menu commands into searchable entries.
 /// Disabled commands (and the native responder-chain placeholders with
 /// no `run`) are skipped so the launcher never advertises an action the
-/// user can't take right now. **Page-navigation commands (`item.opensPage`)
-/// are also skipped** — they exist in `commands.ts` only so the native
-/// menu bar has File/View/Git/Tasks entries, but in the launcher they'd
-/// duplicate the canonical `page` row for the same destination (and
-/// mislabel it as "command"). The marker lives on the command definition
-/// (declarative, can't drift), so a new nav command is excluded
-/// automatically — no denylist to keep in sync.
+/// user can't take right now. Every group counts, on the menu bar or not:
+/// every command is a search command. Pages aren't commands — they're the
+/// launcher's page rows.
 export function flattenCommands(menuGroups: MenuGroup[]): CommandEntry[] {
   const out: CommandEntry[] = [];
   for (const group of menuGroups) {
     for (const item of group.items) {
-      if (!item.enabled || !item.run || item.opensPage) continue;
+      if (!item.enabled || !item.run) continue;
       out.push({
         id: item.id,
         group: group.label,

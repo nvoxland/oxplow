@@ -102,8 +102,9 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     })
 }
 
-/// `stream`'s live threads in their order, on `conn` — a command's
-/// transaction.
+/// `stream`'s threads that aren't archived — closed ones included — in
+/// their order, on `conn` (a command's transaction). The nav's thread state
+/// (`get_thread_state`) keeps only the open ones.
 pub fn list_for_stream_tx(
     conn: &rusqlite::Connection,
     stream: StreamId,

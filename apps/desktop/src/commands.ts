@@ -8,16 +8,9 @@ export type CommandId =
   | "file.save"
   | "file.quickOpen"
   | "edit.find"
-  | "view.files"
-  | "view.uncommitted"
-  | "view.comments"
-  | "view.wiki"
-  | "history.open"
-  | "git.dashboard"
   | "git.commit"
   | "git.pull"
   | "git.push"
-  | "tasks.dashboard"
   | "plan.newTask"
   | "dashboard.new"
   | "lens.newWithAgent"
@@ -39,10 +32,10 @@ export type CommandId =
   | "native.separator.1"
   | "native.separator.2";
 
-// `plan` is the historical id of the Tasks menu group (label "Tasks");
-// the id is internal-only and kept stable so `plan.newTask` and its
-// keybinding don't churn.
-export type MenuId = "file" | "edit" | "view" | "git" | "plan";
+// `plan` is the historical id of the Tasks group (label "Tasks"); the id
+// is internal-only and kept stable so `plan.newTask` and its keybinding
+// don't churn.
+export type MenuId = "file" | "edit" | "git" | "plan";
 
 export interface MenuCommand extends MenuItem {
   id: CommandId;
@@ -55,21 +48,29 @@ export interface MenuCommandSnapshot {
   enabled: boolean;
   separator?: boolean;
   checked?: boolean;
-  /** Navigates to a pages-directory page → kept in the native menu but
-   *  excluded from the launcher (see `MenuItem.opensPage`). */
-  opensPage?: boolean;
 }
 
+/** A group of commands. Every command is a search command (the
+ *  launcher lists them under the group's label); only the groups
+ *  `inMenuBar` also show in the OS / in-window menu bar — File and Edit.
+ *  Pages aren't commands: the launcher lists them as pages. */
 export interface MenuGroup extends SharedMenuGroup {
   id: MenuId;
   label: string;
+  inMenuBar: boolean;
   items: MenuCommand[];
 }
 
 export interface MenuGroupSnapshot {
   id: MenuId;
   label: string;
+  inMenuBar: boolean;
   items: MenuCommandSnapshot[];
+}
+
+/** The groups the menu bar shows (the native menu, the in-window Menubar). */
+export function menuBarGroups<G extends { inMenuBar: boolean }>(groups: G[]): G[] {
+  return groups.filter((g) => g.inMenuBar);
 }
 
 export interface CommandState {
@@ -84,19 +85,12 @@ export interface CommandHandlers {
   save(): void;
   quickOpen(): void;
   find(): void;
-  showFiles(): void;
-  showUncommitted(): void;
-  showComments(): void;
-  showGit(): void;
-  showTasks(): void;
-  showWiki(): void;
   newTask(): void;
   newStream(): void;
   newDashboard(): void;
   /** Put a starter "build me a lens" prompt in the agent's input (never sent). */
   newLensWithAgent(): void;
   newThread(): void;
-  openHistory(): void;
   commitFiles(): void;
   pullChanges(): void;
   pushChanges(): void;
@@ -110,6 +104,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
     {
       id: "file",
       label: "File",
+      inMenuBar: true,
       items: [
         // Creating and opening are separate doors: New Project… is the
         // only command that initializes a folder, and the Open pair only
@@ -124,6 +119,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
     {
       id: "edit",
       label: "Edit",
+      inMenuBar: true,
       items: [
         // Native (responder-chain) Cut/Copy/Paste/SelectAll. Required on
         // macOS so WKWebView delivers Cmd+V/Cmd+C/etc. to the focused
@@ -143,27 +139,12 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       ],
     },
     {
-      id: "view",
-      label: "View",
-      items: [
-        // Tab-IA navigation: each item opens the matching page in the
-        // active thread's tab set. Agent is no longer here (the agent
-        // tab is the pinned center tab); the Git and Tasks dashboards
-        // moved to the Git and Tasks menus respectively.
-        { id: "view.files", label: "Files", enabled: state.hasStream, opensPage: true },
-        { id: "view.uncommitted", label: "Uncommitted Changes", enabled: state.hasStream, opensPage: true },
-        { id: "view.comments", label: "Comments Dashboard", enabled: state.hasStream, opensPage: true },
-        { id: "view.wiki", label: "Wiki", enabled: state.hasStream, opensPage: true },
-        { id: "history.open", label: "History", enabled: state.hasStream, opensPage: true },
-      ],
-    },
-    {
       id: "git",
       label: "Git",
+      // Search only: the Git page is a page row, these its actions.
+      inMenuBar: false,
       items: [
-        // Dashboard navigates (gated on a stream); commit/pull/push are
-        // mutations gated on git actually being available (`canCommit`).
-        { id: "git.dashboard", label: "Dashboard", enabled: state.hasStream, opensPage: true },
+        // Mutations, gated on git actually being available (`canCommit`).
         { id: "git.commit", label: "Commit Changes…", enabled: !!state.canCommit },
         { id: "git.pull", label: "Pull Changes", enabled: !!state.canCommit },
         { id: "git.push", label: "Push Changes", enabled: !!state.canCommit },
@@ -173,8 +154,9 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       // Group id stays "plan" (see MenuId) though the label is "Tasks".
       id: "plan",
       label: "Tasks",
+      // Search only.
+      inMenuBar: false,
       items: [
-        { id: "tasks.dashboard", label: "Dashboard", enabled: state.hasStream, opensPage: true },
         { id: "plan.newTask", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
         { id: "dashboard.new", label: "New Dashboard…", enabled: state.hasStream },
         { id: "lens.newWithAgent", label: "New Lens with Your Agent…", enabled: state.hasThread },
@@ -191,16 +173,9 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "file.save": handlers.save,
     "file.quickOpen": handlers.quickOpen,
     "edit.find": handlers.find,
-    "view.files": handlers.showFiles,
-    "view.uncommitted": handlers.showUncommitted,
-    "view.comments": handlers.showComments,
-    "view.wiki": handlers.showWiki,
-    "history.open": handlers.openHistory,
-    "git.dashboard": handlers.showGit,
     "git.commit": handlers.commitFiles,
     "git.pull": handlers.pullChanges,
     "git.push": handlers.pushChanges,
-    "tasks.dashboard": handlers.showTasks,
     "plan.newTask": handlers.newTask,
     "dashboard.new": handlers.newDashboard,
     "lens.newWithAgent": handlers.newLensWithAgent,
@@ -230,15 +205,15 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
 /// trailing path in a new window.
 export const OPEN_RECENT_PREFIX = "project.openRecent:";
 
-/// The native-menu snapshot: the static groups plus a dynamic
-/// File ▸ Open Recent ▸ <project> submenu built from the recents list.
-/// Only the native menu carries this — the in-window Menubar uses the
-/// plain `buildMenuGroups`.
+/// The native-menu snapshot: the menu-bar groups (`inMenuBar`) plus a
+/// dynamic File ▸ Open Recent ▸ <project> submenu built from the recents
+/// list. Only the native menu carries this — the in-window Menubar uses
+/// `menuBarGroups(buildMenuGroups(…))`.
 export function buildNativeMenuSnapshots(
   state: CommandState,
   recents: { path: string; title: string; exists: boolean }[],
 ): NativeMenuGroupSnapshot[] {
-  return buildMenuGroupSnapshots(state).map((group) => {
+  return menuBarGroups(buildMenuGroupSnapshots(state)).map((group) => {
     const items = group.items.map(nativeItem);
     if (group.id === "file") {
       const openRecent: NativeMenuItemSnapshot = {

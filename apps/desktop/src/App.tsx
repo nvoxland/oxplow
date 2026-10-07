@@ -68,7 +68,7 @@ import {
   updateFileDraft,
   type FileSessionState,
 } from "./editor-session.js";
-import { buildMenuGroupSnapshots, buildMenuGroups, buildNativeMenuSnapshots, OPEN_RECENT_PREFIX } from "./commands.js";
+import { buildMenuGroupSnapshots, buildMenuGroups, buildNativeMenuSnapshots, menuBarGroups, OPEN_RECENT_PREFIX } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
@@ -1255,24 +1255,6 @@ export function App() {
       setCenterActive(fileRef(selectedFilePath).id);
       setEditorFindRequest((current) => current + 1);
     },
-    showFiles() {
-      handleOpenPageRef.current?.(indexRef("files"));
-    },
-    showUncommitted() {
-      handleOpenPageRef.current?.(uncommittedChangesRef());
-    },
-    showComments() {
-      handleOpenPageRef.current?.(commentsRef());
-    },
-    showGit() {
-      handleOpenPageRef.current?.(gitDashboardRef());
-    },
-    showTasks() {
-      handleOpenPageRef.current?.(indexRef("tasks"));
-    },
-    showWiki() {
-      handleOpenPageRef.current?.(indexRef("wiki-index"));
-    },
     newTask() {
       // handleOpenPage is declared further down; forward through the ref
       // so the menu/keyboard handler routes to a NewTaskPage tab.
@@ -1297,9 +1279,6 @@ export function App() {
       // The Navigator owns thread creation (inline title + agent
       // picker); route there via the bus instead of a local counter.
       requestNewThread(stream.id);
-    },
-    openHistory() {
-      handleOpenPageRef.current?.(indexRef("git-history"));
     },
     commitFiles() {
       if (!stream || !workspaceContext.vcsEnabled) return;
@@ -3185,7 +3164,7 @@ export function App() {
           webview reaches the top edge: the title bar is the window's top,
           its empty space drags it and its start leaves room for the
           floating traffic lights. Elsewhere it sits under the menu bar. */}
-      {!isMac ? <Menubar groups={menuGroups} /> : null}
+      {!isMac ? <Menubar groups={menuBarGroups(menuGroups)} /> : null}
       <TitleBar
         stream={stream}
         thread={selectedThread ? { id: selectedThread.id, title: selectedThread.title } : null}

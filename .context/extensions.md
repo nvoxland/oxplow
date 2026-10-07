@@ -2680,7 +2680,7 @@ query_sql → write files → validate_extension → run_lens". "Improve with Ag
 `[oxplow lens <ext>/<slug>]` plus its params into the agent's context.
 
 **Getting newcomers there (tsk373).** "New Lens with Your Agent…"
-(`lens.newWithAgent`, Tasks menu, so also in the launcher; needs a
+(`lens.newWithAgent`, a Tasks search command in the launcher; needs a
 thread) puts `NEW_LENS_PROMPT` (`lens/lensModel.ts`) into the agent's
 input via `insertIntoAgent`. It never sends; the person finishes the
 sentence. The Extensions empty state and Explore Data's intro offer the

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Stream, Thread, ThreadState } from "../api.js";
-import { requestNavigatorOpen } from "../navigator-bus.js";
+import { requestNavigatorMenu, requestNavigatorOpen } from "../navigator-bus.js";
 import { Navigator } from "./Navigator.js";
 
 afterEach(cleanup);
@@ -399,4 +399,20 @@ test("the expanded rows' menus are headed by the name too", () => {
   fireEvent.contextMenu(getByTestId("navigator-thread-row-thr2"));
   expect(getByTestId("menu-item-thread.rename")).toBeTruthy();
   expect(getByTestId("context-menu-header").textContent).toBe("Research");
+});
+
+test("a menu request from elsewhere (the title bar) opens that row's menu, headed by its name", () => {
+  const promoted: string[] = [];
+  const { getByTestId, queryByTestId } = renderNavigator({ onPromoteThread: (id) => promoted.push(id) });
+
+  act(() => requestNavigatorMenu({ kind: "thread", id: "thr2", x: 200, y: 15 }));
+  expect(getByTestId("context-menu-header").textContent).toBe("Research");
+  fireEvent.click(getByTestId("menu-item-thread.promote"));
+  expect(promoted).toEqual(["thr2"]);
+
+  act(() => requestNavigatorMenu({ kind: "stream", id: "str1", x: 120, y: 14 }));
+  expect(getByTestId("context-menu-header").textContent).toBe("Main");
+  expect(getByTestId("menu-item-stream.add-thread")).toBeTruthy();
+  // A menu, not the panel.
+  expect(queryByTestId("navigator-overlay") === null).toBe(true);
 });
