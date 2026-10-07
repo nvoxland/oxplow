@@ -330,9 +330,9 @@ analytics pages move out of core into the `oxplow-bundled` extension as
 ## The title bar
 
 `components/TitleBar.tsx` spans the top of the window, over both the left
-nav and the content (decided 2026-10-07): where you are — `stream ›
-thread` and the stream's branch (`BranchPicker`) — and the global search
-field, centered. The stream name opens the navigator panel
+nav and the content (decided 2026-10-07): `stream › thread` at the
+start, and at the right end the stream's branch (`BranchPicker`) with the
+global search field just after it. The stream name opens the navigator panel
 (`navigator-bus.ts`, `requestNavigatorOpen`), the thread name its settings
 page, the branch the branch picker. On macOS it *is* the window's top (an
 Overlay titlebar): its start leaves 78 px for the floating traffic lights,

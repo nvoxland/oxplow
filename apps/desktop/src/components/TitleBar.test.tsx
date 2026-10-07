@@ -25,11 +25,15 @@ function renderBar(over: Partial<Parameters<typeof TitleBar>[0]> = {}) {
   return { view, calls };
 }
 
-test("it names the stream, the thread and the branch, above the nav and the content", () => {
+test("it names the stream and thread at the start, and the branch just before search", () => {
   const { view } = renderBar();
   expect(view.getByTestId("title-bar-stream").textContent).toBe("Bugfixes");
   expect(view.getByTestId("title-bar-thread").textContent).toBe("Thread");
-  expect(view.getByTestId("title-bar").textContent).toContain("fix/scan");
+  const columns = [...view.getByTestId("title-bar").children];
+  expect(columns.length).toBe(3);
+  expect(columns[0].textContent).not.toContain("fix/scan");
+  expect(columns[1].textContent).toContain("fix/scan");
+  expect(columns[2].getAttribute("data-testid")).toBe(SEARCH_TRIGGER_TESTID);
 });
 
 test("the stream name opens the navigator; the thread name its settings", () => {
