@@ -683,6 +683,8 @@ impl Services {
             db: self.db.clone(),
             sql: self.sql.clone(),
             collection: self.collection.clone(),
+            capabilities: self.capabilities.clone(),
+            config: self.config.clone(),
         }
     }
 
@@ -1383,6 +1385,8 @@ impl Services {
             db: db.clone(),
             sql: sql.clone(),
             collection: collection.clone(),
+            capabilities: capabilities.clone(),
+            config: config_arc.clone(),
         };
         event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
             deps: advisory_deps.clone(),

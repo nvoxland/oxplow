@@ -93,6 +93,38 @@ pub fn choosable() -> impl Iterator<Item = &'static CapabilitySpec> {
     CAPABILITIES.iter().filter(|c| c.choosable)
 }
 
+/// Check one declared need: a capability (`work_items`), or one of its
+/// features (`snapshots.contents`), as core declares them.
+pub fn check_need(need: &str) -> Result<(), String> {
+    let (id, feature) = match need.split_once('.') {
+        Some((id, feature)) => (id, Some(feature)),
+        None => (need, None),
+    };
+    let Some(spec) = spec(id) else {
+        return Err(format!(
+            "needs `{need}`: `{id}` isn't a capability ({})",
+            CAPABILITIES
+                .iter()
+                .map(|c| c.id)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    };
+    if let Some(f) = feature {
+        if !spec.features.contains(&f) {
+            return Err(format!(
+                "needs `{need}`: `{f}` isn't a feature of `{id}` ({})",
+                if spec.features.is_empty() {
+                    "it has none".to_string()
+                } else {
+                    spec.features.join(", ")
+                }
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +149,17 @@ mod tests {
         );
         assert_eq!(spec("snapshots").map(|c| c.optional), Some(false));
         assert!(spec("nope").is_none());
+    }
+
+    #[test]
+    fn a_need_names_a_capability_or_one_of_its_features() {
+        assert!(check_need("work_items").is_ok());
+        assert!(check_need("snapshots.contents").is_ok());
+        assert!(check_need("teleport")
+            .unwrap_err()
+            .contains("isn't a capability"));
+        assert!(check_need("work_items.flying")
+            .unwrap_err()
+            .contains("isn't a feature"));
     }
 }

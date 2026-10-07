@@ -709,6 +709,7 @@ mod tests {
                 hidden: false,
                 actions: Vec::new(),
                 alert: None,
+                needs: Vec::new(),
                 path: String::new(),
             },
             params: BTreeMap::new(),
@@ -721,6 +722,7 @@ mod tests {
             },
             alert: None,
             warnings: Vec::new(),
+            inactive: None,
         }
     }
 

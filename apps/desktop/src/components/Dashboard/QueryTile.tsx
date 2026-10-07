@@ -45,7 +45,7 @@ export function QueryTile({
     try {
       const result = await querySql(sql, [], null);
       if (!current()) return;
-      setRun({ lens: adHocLens(sql, display, JSON.parse(chartKey) as typeof chart), params: {}, result, alert: null, warnings: [] });
+      setRun({ lens: adHocLens(sql, display, JSON.parse(chartKey) as typeof chart), params: {}, result, alert: null, warnings: [], inactive: null });
       setError(null);
     } catch (e) {
       if (current()) setError(e instanceof Error ? e.message : String(e));

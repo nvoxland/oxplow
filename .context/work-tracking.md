@@ -228,8 +228,10 @@ The three in progress:
   `CapabilityRegistry` resolves the active one (personal → project →
   default; an unavailable choice falls to none, or a required
   capability's default) and restates `v_capability_provider` (v3).
-- Next: declared needs, Settings → Pieces, `capability.switched`, then
-  the three swappable pieces. Loose
+  Lenses and advisories declare `needs:`; unmet, a lens says what it
+  needs instead of showing empty, and an advisory doesn't run.
+- Next: Settings → Pieces, `capability.switched`, then the three
+  swappable pieces. Loose
   refs (`tsk12` for a work item) wait for it: recognising an id is the
   active work list's declaration, not core's.
 

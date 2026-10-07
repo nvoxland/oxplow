@@ -89,6 +89,7 @@ advisories:
     on: turn-end
     audience: person
     once_per: row
+    needs: [work_items]
     query: |
       SELECT w.ref AS key,
              '“' || w.title || '” is still in progress, but a commit landed its work. '

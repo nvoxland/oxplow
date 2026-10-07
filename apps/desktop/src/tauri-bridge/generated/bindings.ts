@@ -1165,6 +1165,11 @@ export type Advisory = {
 	// Line put above the messages (e.g. `# Metric deltas (this effort)`).
 	heading: string | null,
 	audience: AdvisoryAudience,
+	/**
+	 *  The capabilities (or features) it needs; without them it doesn't
+	 *  run.
+	 */
+	needs: string[],
 };
 
 // Who a hint is for.
@@ -3425,6 +3430,14 @@ export type LensHunks = {
 	to: string | null,
 };
 
+// A lens that didn't run for want of a capability.
+export type LensInactive = {
+	// The needs that aren't met (`work_items`, `snapshots.contents`).
+	needs: string[],
+	// What a person reads.
+	message: string,
+};
+
 // Makes a column's cells link to a page.
 export type LensLink = {
 	kind: LensLinkKind,
@@ -3511,6 +3524,11 @@ export type LensRun_Deserialize = {
 	 *  collector failures disabled (P7.C2), so it isn't being refreshed.
 	 */
 	warnings: string[],
+	/**
+	 *  Set when the lens needs a capability that isn't active: it didn't
+	 *  run, and says what it needs instead of showing nothing.
+	 */
+	inactive: LensInactive | null,
 };
 
 // The result of running a lens.
@@ -3526,6 +3544,11 @@ export type LensRun_Serialize = {
 	 *  collector failures disabled (P7.C2), so it isn't being refreshed.
 	 */
 	warnings: string[],
+	/**
+	 *  Set when the lens needs a capability that isn't active: it didn't
+	 *  run, and says what it needs instead of showing nothing.
+	 */
+	inactive: LensInactive | null,
 };
 
 // A lens an extension mounts into a core page.
@@ -3740,6 +3763,11 @@ export type Lens_Deserialize = {
 	actions: LensAction[],
 	// When the lens needs attention (its panel's badge).
 	alert: LensAlert | null,
+	/**
+	 *  The capabilities (or their features) it needs (`needs:
+	 *  [work_items]`): without them its run says so instead of running.
+	 */
+	needs: string[],
 	// Repo-relative path of the lens file.
 	path: string,
 };
@@ -3788,6 +3816,11 @@ export type Lens_Serialize = {
 	actions: LensAction[],
 	// When the lens needs attention (its panel's badge).
 	alert: LensAlert | null,
+	/**
+	 *  The capabilities (or their features) it needs (`needs:
+	 *  [work_items]`): without them its run says so instead of running.
+	 */
+	needs: string[],
 	// Repo-relative path of the lens file.
 	path: string,
 };

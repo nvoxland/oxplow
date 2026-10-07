@@ -269,6 +269,7 @@ fn show(target: LensTarget) -> Command {
         let lens_ctx = LensContext {
             stream_id: thread_stream_tx(ctx.conn, thread),
             thread_id: Some(thread),
+            active: None,
         };
         let (title, shows, lens) = match (input.lens, input.spec) {
             (Some(id), None) => {
@@ -438,6 +439,7 @@ async fn keeping_spec(
             let lens_ctx = LensContext {
                 stream_id,
                 thread_id: thread,
+                active: None,
             };
             Ok(
                 check_spec_shape(&spec, &BTreeMap::new(), &lens_ctx).map(|_| Keeping {

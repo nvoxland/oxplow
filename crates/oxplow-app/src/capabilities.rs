@@ -154,6 +154,59 @@ pub struct Resolved {
     pub wanted: Option<String>,
 }
 
+/// What's active, per capability: its implementation and features — what
+/// a declared need is checked against (a lens, an advisory).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Active {
+    by_capability: std::collections::BTreeMap<String, (String, Vec<String>)>,
+}
+
+impl Active {
+    /// The needs in `needs` it doesn't meet: a capability whose active
+    /// implementation is none, or a feature it doesn't have.
+    pub fn unmet(&self, needs: &[String]) -> Vec<String> {
+        needs
+            .iter()
+            .filter(|need| {
+                let (id, feature) = match need.split_once('.') {
+                    Some((id, f)) => (id, Some(f)),
+                    None => (need.as_str(), None),
+                };
+                match self.by_capability.get(id) {
+                    None => true,
+                    Some((active, _)) if active == NONE => true,
+                    Some((_, features)) => {
+                        feature.is_some_and(|f| !features.iter().any(|x| x == f))
+                    }
+                }
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+/// What a person reads when `unmet` needs keep something from showing.
+pub fn needs_message(unmet: &[String]) -> String {
+    let named: Vec<String> = unmet
+        .iter()
+        .map(|need| {
+            let (id, feature) = match need.split_once('.') {
+                Some((id, f)) => (id, Some(f)),
+                None => (need.as_str(), None),
+            };
+            let title = capability::spec(id).map_or(id, |c| c.title);
+            match feature {
+                Some(f) => format!("{title} with {f}"),
+                None => title.to_string(),
+            }
+        })
+        .collect();
+    format!(
+        "Needs: {} (choose one in Settings → Pieces).",
+        named.join(", ")
+    )
+}
+
 /// Every implementation oxplow has now: core's, the ones extensions
 /// declare, and running provider instances'.
 #[derive(Default)]
@@ -266,6 +319,26 @@ impl CapabilityRegistry {
             chosen_by: ChosenBy::Fallback,
             wanted: Some(wanted),
         }
+    }
+
+    /// What's active under `config`, for checking needs.
+    pub fn snapshot(&self, config: &OxplowConfig) -> Active {
+        let mut by_capability = std::collections::BTreeMap::new();
+        for spec in capability::CAPABILITIES {
+            let id = self.active(config, spec.id);
+            let features = self
+                .get(spec.id, &id)
+                .and_then(|i| i.features.as_object().cloned())
+                .map(|m| {
+                    m.into_iter()
+                        .filter(|(_, v)| v.as_bool() == Some(true))
+                        .map(|(k, _)| k)
+                        .collect()
+                })
+                .unwrap_or_default();
+            by_capability.insert(spec.id.to_string(), (id, features));
+        }
+        Active { by_capability }
     }
 
     /// `capability`'s active implementation id under `config`.

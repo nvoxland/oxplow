@@ -144,7 +144,7 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
       const kept = withChart !== undefined ? withChart : chart;
       const next = kept && chartFits(kept, result) ? kept : chartDefaults(as, result);
       setChart(next);
-      setRun({ lens: adHocLens(query, as, next), params: {}, result, alert: null, warnings: [] });
+      setRun({ lens: adHocLens(query, as, next), params: {}, result, alert: null, warnings: [], inactive: null });
       setRanRaw(rawRead);
     } catch (e) {
       if (!current()) return;

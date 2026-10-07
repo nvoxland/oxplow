@@ -740,7 +740,7 @@ mod tests {
                 serde_json::to_value(&run.result.rows).unwrap()
             }
         };
-        let decisions = first("oxplow-bundled/recent-decisions", ctx).await;
+        let decisions = first("oxplow-bundled/recent-decisions", ctx.clone()).await;
         assert_eq!(decisions[0][0], "Where does export live?");
         let claims = first("oxplow-bundled/unbacked-claims", ctx).await;
         assert_eq!(claims.as_array().unwrap().len(), 1);
@@ -748,6 +748,7 @@ mod tests {
         let elsewhere = crate::extensions::LensContext {
             stream_id: Some(999),
             thread_id: None,
+            active: None,
         };
         assert_eq!(
             first("oxplow-bundled/unbacked-claims", elsewhere).await,
@@ -825,6 +826,40 @@ mod tests {
     /// cleared it (an extension command recording an event), grouped
     /// under headings; collapsed, just the active item; counted without
     /// an alert.
+    /// A lens that needs a work list says so when none is active, instead
+    /// of running: the ready tasks with the work list chosen as none.
+    #[tokio::test]
+    async fn a_lens_needing_a_work_list_says_so_without_one() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let run = |svc: std::sync::Arc<crate::Services>| async move {
+            let ctx = crate::extensions::lens_context(&svc, None, None).await;
+            crate::extensions::run_lens(
+                &svc.sql,
+                &svc.extension_catalog,
+                &svc.layout.project_dir,
+                "oxplow-bundled/ready-tasks",
+                Default::default(),
+                &ctx,
+            )
+            .await
+            .unwrap()
+        };
+        assert!(run(f.svc.clone()).await.inactive.is_none());
+        f.svc
+            .config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), "none".into());
+        let inactive = run(f.svc.clone()).await.inactive.expect("inactive");
+        assert_eq!(inactive.needs, vec!["work_items".to_string()]);
+        assert!(
+            inactive.message.contains("Work list"),
+            "{}",
+            inactive.message
+        );
+    }
+
     #[tokio::test]
     async fn work_is_a_panel_grouping_a_threads_work() {
         let f = crate::test_fixtures::services_with_effort().await;

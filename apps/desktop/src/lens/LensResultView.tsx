@@ -195,6 +195,15 @@ function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: strin
 
 function LensBody(props: LensResultViewProps & { actions?: LensActionsState }) {
   const { run, onOpenPage, streamId = null } = props;
+  // It needs a capability that isn't active: it didn't run, and says what
+  // it needs rather than showing nothing.
+  if (run.inactive) {
+    return (
+      <p data-testid="lens-inactive" style={{ color: "var(--text-secondary)" }}>
+        {run.inactive.message}
+      </p>
+    );
+  }
   // A grid composes child lenses and has no rows of its own; it's its own
   // component so the row views' hooks always run in the same order.
   if (run.lens.viz === "grid") {

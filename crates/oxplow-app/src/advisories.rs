@@ -255,6 +255,9 @@ pub struct AdvisoryDeps {
     pub db: oxplow_db::Database,
     pub sql: crate::sql_gateway::SqlGateway,
     pub collection: crate::collection::CollectionService,
+    /// What's active, for an advisory's needs.
+    pub capabilities: std::sync::Arc<crate::capabilities::CapabilityRegistry>,
+    pub config: std::sync::Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
 }
 
 /// Run the `on` advisories for `thread`, reading extensions from the
@@ -287,7 +290,17 @@ pub async fn for_thread(
         .worktrees
         .resolve(stream.map(|s| s.to_string()).as_deref())
         .await;
-    let extensions = consented(&svc.approvals, &svc.extension_catalog.get(&root));
+    // An advisory whose needs aren't met (no work list active) doesn't run.
+    let active = svc
+        .capabilities
+        .snapshot(&crate::config_service::read_config(&svc.config));
+    let extensions: Vec<Extension> = consented(&svc.approvals, &svc.extension_catalog.get(&root))
+        .into_iter()
+        .map(|mut e| {
+            e.advisories.retain(|a| active.unmet(&a.needs).is_empty());
+            e
+        })
+        .collect();
     let scope = AdvisoryScope {
         thread: thread.value(),
         stream: stream.map(|s| s.value()),
@@ -438,6 +451,7 @@ mod tests {
             once_per,
             heading: None,
             audience: crate::extensions::AdvisoryAudience::Agent,
+            needs: Vec::new(),
         }
     }
 

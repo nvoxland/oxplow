@@ -2365,6 +2365,19 @@ implementations:
   (required) to core's default (`capabilities::CapabilityRegistry::
   resolve`, `.context/work-tracking.md`).
 
+**Declared needs.** A lens or an advisory may declare `needs:
+[work_items, snapshots.contents]` — capabilities, or one of a
+capability's features (`oxplow_domain::capability::check_need`; an
+unknown one is a load error). A lens run checks them against what's
+active (`LensContext.active`, a `capabilities::Active` snapshot that
+`lens_context` fills): unmet, it doesn't run and returns `inactive: {
+needs, message }` ("Needs: Work list (choose one in Settings → Pieces)."),
+which the lens view shows instead of its empty state. An advisory whose
+needs aren't met doesn't run. A context built without `Services` (param
+checks) checks nothing. In `oxplow-bundled`, the ready and backlog task
+lenses and the `landed-in-progress` hint need `work_items`; the Work
+panel doesn't — its efforts exist without a work list.
+
 ## Advisories
 
 An extension gives the coding agent guidance — **hints** — with
