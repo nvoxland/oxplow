@@ -4,7 +4,7 @@
 //! - The diff against parent#0 produces `(git-commit:<sha>) --
 //!   touched_file --> (file:<path>)` edges.
 //! - The commit message (subject + body) is run through the shared
-//!   ref extractor so `(git-commit:<sha>) --task_body_mention/
+//!   ref extractor so `(git-commit:<sha>) --work_item_mention/
 //!   wikilink/finding_mention--> (target)` edges appear too.
 //!
 //! Idempotent. The indexer uses [`SqlitePageRefStore::replace_source`]
@@ -24,7 +24,7 @@ use std::path::Path;
 
 use oxplow_db::page_ref_projections::{
     KIND_COMMIT, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM, RT_BODY_COMMIT,
-    RT_BODY_FINDING, RT_BODY_TASK, RT_TOUCHED_FILE, RT_WIKILINK,
+    RT_BODY_FINDING, RT_BODY_WORK_ITEM, RT_TOUCHED_FILE, RT_WIKILINK,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::refs::extract;
@@ -87,7 +87,7 @@ pub fn commit_edges(kinds: &KindRegistry, detail: &RevisionDetail) -> Vec<PageRe
             sha,
             KIND_WORK_ITEM,
             item,
-            RT_BODY_TASK,
+            RT_BODY_WORK_ITEM,
         ));
     }
     for w in refs.wikis {

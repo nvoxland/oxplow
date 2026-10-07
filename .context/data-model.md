@@ -1053,12 +1053,16 @@ so other owners' rows survive.
 
 Writers (one per source kind / slice):
 
+The vocabulary speaks of work items, whichever list they're on (V20
+renamed the `task_…` spellings: a mention is `work_item_mention` /
+`summary_work_item_mention`, a link `work_item_link:<type>`).
+
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
 | `wiki_pages.rs` (`oxplow-app`) | `wiki:<slug>` | full source — uses `replace_source` |
-| `task_store::upsert` | `work_item:oxplow:<id>` body slice | `task_body_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
-| `work_satellite::SqliteTaskLinkStore` create/delete | `work_item:oxplow:<id>` link slice | `task_link:blocks` / `relates_to` / … |
-| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:oxplow:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_task_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
+| `task_store::upsert` | `work_item:oxplow:<id>` body slice | `work_item_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
+| `work_satellite::SqliteTaskLinkStore` create/delete | `work_item:oxplow:<id>` link slice | `work_item_link:blocks` / `relates_to` / … |
+| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:oxplow:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_work_item_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
 | `commit_indexer.rs` (`oxplow-app`) | `commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
 

@@ -268,7 +268,7 @@ function refFor(kind: string, id: string): TabRef | null {
  *    action through `source_extra.action`. Both paths normalize
  *    `updated` to `modified` for display.
  *
- *  - **typed link** — `task_link:<sub>` becomes the sub-type with
+ *  - **typed link** — `work_item_link:<sub>` becomes the sub-type with
  *    underscores swapped for spaces (e.g. `blocks`, `relates to`).
  *
  *  Plus a `found in` fallback for `finding_path`, and the raw
@@ -276,8 +276,8 @@ function refFor(kind: string, id: string): TabRef | null {
  *  crashes the renderer.
  */
 function humanRefType(refType: string, sourceExtra: string | null): string {
-  if (refType.startsWith("task_link:")) {
-    const sub = refType.slice("task_link:".length);
+  if (refType.startsWith("work_item_link:")) {
+    const sub = refType.slice("work_item_link:".length);
     return sub.replace(/_/g, " ");
   }
   switch (refType) {
@@ -287,8 +287,8 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
     case "summary_wikilink":
     case "summary_file_ref":
     case "summary_dir_ref":
-    case "task_body_mention":
-    case "summary_task_mention":
+    case "work_item_mention":
+    case "summary_work_item_mention":
     case "finding_mention":
     case "summary_finding_mention":
     case "commit_mention":

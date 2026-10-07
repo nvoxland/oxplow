@@ -2184,7 +2184,7 @@ mod tests {
         assert!(
             task_back
                 .iter()
-                .any(|e| e.ref_type == "summary_task_mention"
+                .any(|e| e.ref_type == "summary_work_item_mention"
                     && e.source_id == format!("oxplow:{tid}")),
             "task backlink missing; got {task_back:?}"
         );

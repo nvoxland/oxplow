@@ -364,7 +364,7 @@ impl SqliteTaskLinkStore {
             .await
     }
 
-    /// Re-emit `task_link:*` edges for all currently-stored outgoing
+    /// Re-emit `work_item_link:*` edges for all currently-stored outgoing
     /// links of `from_item`. Called after create/delete when
     /// `page_refs` is attached.
     async fn project_outgoing_links(&self, from_item: TaskId) -> Result<(), DomainError> {
@@ -699,9 +699,10 @@ mod tests {
             .list_backlinks("work_item", &format!("oxplow:{to_id}"), None)
             .await
             .unwrap();
-        assert!(inbound_to.iter().any(
-            |e| e.source_id == format!("oxplow:{from_id}") && e.ref_type == "task_link:blocks"
-        ));
+        assert!(inbound_to
+            .iter()
+            .any(|e| e.source_id == format!("oxplow:{from_id}")
+                && e.ref_type == "work_item_link:blocks"));
 
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)
