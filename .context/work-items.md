@@ -167,14 +167,17 @@ routes by the item's provider — the ref's segment, or for `create` the
 active one — to oxplow's `Tx` core in the bus's
 transaction, or to the provider's `ExternalVerbs` through its process,
 with **one audit row** `work_item.<verb>` either way. The route also
-refuses, before anything runs: an unregistered provider (`/ref`, naming
-the registered), a parent or link target of another provider
-(`/parent_ref`, `/target`), and a feature the provider doesn't declare.
+refuses, before anything runs: a ref of another list's item (`/ref`,
+naming the active list), a parent, link target or place of another list
+(`/parent_ref`, `/target`, `/before`, `/after`), and a feature the list
+doesn't declare.
 An external `create` hands the provider the input less `thread` (the host
 anchors the item to it) and renames its inverse to `work_item.<verb>`, so
 an undo dispatches again.
-`reorder` and `move` stay oxplow's own `Tx` (they place a task in
-oxplow's lists). A Rust client, **`work_items::WorkItems`**
+`reorder` (feature `ordering`: an item's place on its list, read as
+`rank`) and `move` (feature `lists`: to a thread's list or the backlog,
+read as `thread_id`) are interface verbs like the rest; a provider that
+declares the feature must declare the verb. A Rust client, **`work_items::WorkItems`**
 (`Services::work_items_client()`), types the calls; the conformance
 suite uses it. Extension commands compose the same verbs:
 oxplow-bundled's Accept Review / Request Changes (P7.C5) comment on and

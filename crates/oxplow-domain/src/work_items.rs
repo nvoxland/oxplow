@@ -47,15 +47,19 @@ impl CanonicalState {
     }
 }
 
-/// The capability's verbs: the `work_item.<verb>` commands every provider
-/// answers (`reorder` and `move` are oxplow's lists, not the capability's).
-pub const VERBS: [&str; 6] = [
+/// The capability's verbs: the `work_item.<verb>` commands a work list
+/// answers — create, update and transition always; the rest as its
+/// features say (`links`, `comments`, `delete`, `ordering`: reorder,
+/// `lists`: move).
+pub const VERBS: [&str; 8] = [
     "create",
     "update",
     "transition",
     "link",
     "comment",
     "delete",
+    "reorder",
+    "move",
 ];
 
 /// What a provider supports beyond create, update and transition.
@@ -76,6 +80,14 @@ pub struct WorkItemsFeatures {
     /// when its reply was lost.
     #[serde(default)]
     pub idempotent_writes: bool,
+    /// Items have an order on their list (`work_item.reorder`; read as
+    /// `v_work_item.rank`).
+    #[serde(default)]
+    pub ordering: bool,
+    /// Items are on a thread's list or the backlog, and move between them
+    /// (`work_item.move`; read as `v_work_item.thread_id`).
+    #[serde(default)]
+    pub lists: bool,
 }
 
 /// An item as its provider now has it — what `v_work_item` holds, and

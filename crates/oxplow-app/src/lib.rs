@@ -1820,6 +1820,8 @@ mod tests {
                 "work_item.create",
                 "work_item.delete",
                 "work_item.link",
+                "work_item.move",
+                "work_item.reorder",
                 "work_item.transition",
                 "work_item.update",
             ]

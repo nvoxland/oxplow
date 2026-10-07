@@ -34,9 +34,8 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 0. **Offered** — what's active now (`with_capabilities`: the capability
    registry and the config, `capabilities::Active::refusal`) must meet the
    spec's `needs`, and a command an implementation owns runs only while
-   that one is active: a built-in's declared `commands`
-   (`capabilities::BUILT_INS`: `work_item.reorder` / `move` are oxplow's
-   tasks') and a provider instance's namespace (`<instance>.*`). Refused
+   that one is active: a provider instance's namespace (`<instance>.*`).
+   Refused
    → `Invalid` naming what it needs (audited), before validation, for
    every actor; `list` leaves it out the same way.
 1. **Validate** the input against the schema → `Invalid { field, message }`

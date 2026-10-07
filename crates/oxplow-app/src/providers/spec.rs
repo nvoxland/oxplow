@@ -677,6 +677,12 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
         if features.delete {
             needed.push("delete");
         }
+        if features.ordering {
+            needed.push("reorder");
+        }
+        if features.lists {
+            needed.push("move");
+        }
         for name in needed {
             if !declared.commands.iter().any(|c| c.name == name) {
                 return Err(format!(

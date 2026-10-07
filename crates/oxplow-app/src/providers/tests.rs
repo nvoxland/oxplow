@@ -1433,7 +1433,11 @@ async fn approving_updated_declarations_restarts_the_instance() {
         .into_iter()
         .find(|r| r.provider == "fake")
         .expect("republished");
-    assert_eq!(row.features, running.declared.capabilities[0].features);
+    let features = crate::providers::work_items::features_of;
+    assert_eq!(
+        features(&row.features),
+        features(&running.declared.capabilities[0].features)
+    );
 }
 
 /// Declarations on disk that don't parse fail the extension's load, so

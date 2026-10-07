@@ -76,6 +76,8 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "links",
             "delete",
             "idempotent_writes",
+            "ordering",
+            "lists",
         ],
     },
     CapabilitySpec {

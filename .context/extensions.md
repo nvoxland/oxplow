@@ -2418,9 +2418,8 @@ only a need of the capability itself (`work_items`) isn't. `oxplow-bundled`
 declares no `work_items` need: with no list its task lenses, hint and
 skill just find nothing.
 
-**What a built-in owns.** A built-in may own commands and MCP tools that
-only it offers (`BuiltIn.commands` / `tools`: `oxplow:tasks` owns
-`work_item.reorder` / `move` and `list_tasks`, `get_task`,
+**What a built-in owns.** A built-in may own MCP tools that only it
+offers (`BuiltIn.tools`: `oxplow:tasks` owns `list_tasks`, `get_task`,
 `read_task_options`); a provider instance owns its command namespace.
 They're offered and run only while their implementation is active
 (`capabilities::Active::refusal`, `.context/commands.md` step 0).

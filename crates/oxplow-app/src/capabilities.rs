@@ -42,8 +42,14 @@ pub const BUILT_INS: &[BuiltIn] = &[
         entry: "oxplow:tasks",
         capability: "work_items",
         title: "oxplow's tasks",
-        features: &["hierarchy", "comments", "links", "delete"],
-        commands: &["work_item.reorder", "work_item.move"],
+        features: &[
+            "hierarchy",
+            "comments",
+            "links",
+            "delete",
+            "ordering",
+            "lists",
+        ],
         tools: &["list_tasks", "get_task", "read_task_options"],
     },
     BuiltIn {
@@ -51,7 +57,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         capability: "effort_policy",
         title: "A commit lands it, or the task switches",
         features: &[],
-        commands: &[],
         tools: &[],
     },
     BuiltIn {
@@ -59,7 +64,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         capability: "snapshots",
         title: "Keep every version",
         features: &["contents"],
-        commands: &[],
         tools: &[],
     },
 ];
@@ -72,10 +76,8 @@ pub struct BuiltIn {
     pub title: &'static str,
     /// The features it has — core's to say, since it's core's code.
     pub features: &'static [&'static str],
-    /// The commands only it offers (its own agent surface): offered
-    /// while it's the active implementation, hidden otherwise.
-    pub commands: &'static [&'static str],
-    /// Likewise, the MCP tools only it offers.
+    /// The MCP tools only it offers (its own agent surface): offered while
+    /// it's the active implementation, hidden otherwise.
     pub tools: &'static [&'static str],
 }
 
@@ -133,15 +135,12 @@ pub struct Implementation {
 }
 
 impl Implementation {
-    /// What only it offers: a built-in's declared commands and tools; a
-    /// provider instance's command namespace (`<id>.*`).
+    /// What only it offers: a built-in's declared tools; a provider
+    /// instance's command namespace (`<id>.*`).
     fn surface(&self) -> (Vec<String>, Vec<String>) {
         match &self.source {
             Source::BuiltIn(entry) => built_in(entry).map_or_else(Default::default, |b| {
-                (
-                    b.commands.iter().map(|c| c.to_string()).collect(),
-                    b.tools.iter().map(|t| t.to_string()).collect(),
-                )
+                (Vec::new(), b.tools.iter().map(|t| t.to_string()).collect())
             }),
             Source::External => (vec![format!("{}.*", self.id)], Vec::new()),
             Source::Core | Source::None => Default::default(),
@@ -1048,6 +1047,8 @@ mod tests {
             "work_item.transition",
             "work_item.comment",
             "work_item.link",
+            "work_item.reorder",
+            "work_item.move",
         ] {
             assert!(offered.iter().any(|n| n == name), "{name} offered");
         }
@@ -1073,6 +1074,11 @@ mod tests {
             (
                 crate::commands::work_item::COMMENT,
                 json!({ "ref": task, "body": "kept nowhere" }),
+            ),
+            (crate::commands::work_item::REORDER, json!({ "ref": task })),
+            (
+                crate::commands::work_item::MOVE,
+                json!({ "ref": task, "to": "backlog" }),
             ),
         ] {
             assert_eq!(
@@ -1108,7 +1114,7 @@ mod tests {
                 title: "plain".into(),
                 extension: Some("tracker".into()),
                 source: Source::External,
-                features: serde_json::json!({ "comments": false, "links": true }),
+                features: serde_json::json!({ "comments": false, "links": true, "ordering": true }),
             },
             true,
         );
@@ -1125,10 +1131,9 @@ mod tests {
             .collect();
         assert!(offered.iter().any(|n| n == "work_item.link"));
         assert!(!offered.iter().any(|n| n == "work_item.comment"));
-        assert!(
-            !offered.iter().any(|n| n == "work_item.reorder"),
-            "oxplow's tasks' own"
-        );
+        // Ordering and lists are features like the rest.
+        assert!(offered.iter().any(|n| n == "work_item.reorder"));
+        assert!(!offered.iter().any(|n| n == "work_item.move"));
     }
 
     /// The tools oxplow's tasks own are offered only while they're the
@@ -1166,10 +1171,8 @@ mod tests {
         assert!(default
             .command_refusal("fake.sync_now", &[])
             .is_some_and(|m| m.contains("Fake's")));
-        assert_eq!(default.command_refusal("work_item.reorder", &[]), None);
         let fake = r.snapshot(&config(&[("work_items", "fake")], &[]));
         assert_eq!(fake.command_refusal("fake.sync_now", &[]), None);
-        assert!(fake.command_refusal("work_item.reorder", &[]).is_some());
     }
 
     /// A runtime already on disk gets what's offered (boot refreshes it

@@ -244,7 +244,14 @@ fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError
 }
 
 /// The fields that name a work item, in any command's input.
-const REF_FIELDS: [&str; 4] = ["ref", "parent_ref", "target", "work_item"];
+const REF_FIELDS: [&str; 6] = [
+    "ref",
+    "parent_ref",
+    "target",
+    "work_item",
+    "before",
+    "after",
+];
 
 /// `input` with each work-item field that holds a loose id (`tsk12`)
 /// made canonical against the active work list, which declares what its
@@ -457,6 +464,43 @@ fn delete_target(
     Ok(provider)
 }
 
+/// `before` / `after` (a place among the list's items) must be the
+/// provider's own items too.
+fn place_belongs(
+    provider: &WorkItemsProvider,
+    before: &Option<String>,
+    after: &Option<String>,
+) -> Result<(), CommandError> {
+    for (field, item) in [("/before", before), ("/after", after)] {
+        if let Some(item) = item {
+            belongs(provider, item, field)?;
+        }
+    }
+    Ok(())
+}
+
+fn reorder_target(
+    registry: &WorkItemsRegistry,
+    input: &Value,
+) -> Result<WorkItemsProvider, CommandError> {
+    let input: WorkItemReorderInput = parse(input.clone())?;
+    let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
+    supports(&provider, provider.features.ordering, "ordering", "/ref")?;
+    place_belongs(&provider, &input.before, &input.after)?;
+    Ok(provider)
+}
+
+fn move_target(
+    registry: &WorkItemsRegistry,
+    input: &Value,
+) -> Result<WorkItemsProvider, CommandError> {
+    let input: WorkItemMoveInput = parse(input.clone())?;
+    let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
+    supports(&provider, provider.features.lists, "lists", "/ref")?;
+    place_belongs(&provider, &input.before, &input.after)?;
+    Ok(provider)
+}
+
 /// The provider a `work_item.<verb>` call goes to, as its command routes
 /// it — what an effect's automatic retry asks of each step (P10). `None`
 /// for a name that isn't a work-items verb, or an input no provider takes.
@@ -472,6 +516,8 @@ pub(crate) fn provider_for(
         "link" => link_target,
         "comment" => comment_target,
         "delete" => delete_target,
+        "reorder" => reorder_target,
+        "move" => move_target,
         _ => return None,
     };
     target(registry, input).ok()
@@ -685,6 +731,8 @@ fn spec(
         LINK => vec!["work_items.links".to_string()],
         COMMENT => vec!["work_items.comments".to_string()],
         DELETE => vec!["work_items.delete".to_string()],
+        REORDER => vec!["work_items.ordering".to_string()],
+        MOVE => vec!["work_items.lists".to_string()],
         _ => Vec::new(),
     };
     CommandSpec {
@@ -1419,16 +1467,18 @@ fn place(
 pub fn reorder_command(registry: WorkItemsRegistry) -> Command {
     let spec = spec(
         REORDER,
-        "Put a task before or after another in its own list (neither: at its end).",
+        "Put a work item before or after another on its list (neither: at its end).",
         schema_of::<WorkItemReorderInput>(),
         Confirm::Never,
         true,
-        Atomicity::Tx,
+        Atomicity::Dispatch,
     );
-    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+    let core_registry = registry.clone();
+    let tx: Arc<TxHandler> = Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let registry = &core_registry;
         let input: WorkItemReorderInput = parse(input)?;
-        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        let at = placement(&registry, &input.before, &input.after)?;
+        let id = oxplow_task(registry, &input.item_ref, "/ref")?;
+        let at = placement(registry, &input.before, &input.after)?;
         let current = oxplow_db::task_store::get_task_tx(ctx.conn, id)
             .map_err(CommandError::from)?
             .map(|t| t.thread_id);
@@ -1455,24 +1505,26 @@ pub fn reorder_command(registry: WorkItemsRegistry) -> Command {
             after_commit: None,
             unchanged: false,
         })
-    }));
-    Command::new(spec, handler).expect("work_item.reorder registers")
+    });
+    dispatching(spec, registry, "reorder", reorder_target, tx)
 }
 
 pub fn move_command(registry: WorkItemsRegistry) -> Command {
     let spec = spec(
         MOVE,
-        "Move a task to a thread's list or the backlog (at the end, or before/after an item \
-         there).",
+        "Move a work item to a thread's list or the backlog (at the end, or before/after an \
+         item there).",
         schema_of::<WorkItemMoveInput>(),
         Confirm::Never,
         true,
-        Atomicity::Tx,
+        Atomicity::Dispatch,
     );
-    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+    let core_registry = registry.clone();
+    let tx: Arc<TxHandler> = Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let registry = &core_registry;
         let input: WorkItemMoveInput = parse(input)?;
-        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        let at = placement(&registry, &input.before, &input.after)?;
+        let id = oxplow_task(registry, &input.item_ref, "/ref")?;
+        let at = placement(registry, &input.before, &input.after)?;
         let placed = place(ctx, id, input.to.thread()?, at)?;
         let (before, after) = neighbour(placed.from_place);
         Ok(HandlerOutput {
@@ -1491,8 +1543,8 @@ pub fn move_command(registry: WorkItemsRegistry) -> Command {
             after_commit: None,
             unchanged: false,
         })
-    }));
-    Command::new(spec, handler).expect("work_item.move registers")
+    });
+    dispatching(spec, registry, "move", move_target, tx)
 }
 
 #[cfg(test)]

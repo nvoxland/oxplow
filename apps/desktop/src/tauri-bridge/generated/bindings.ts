@@ -5596,6 +5596,16 @@ export type WorkItemsFeatures = {
 	 *  when its reply was lost.
 	 */
 	idempotent_writes?: boolean,
+	/**
+	 *  Items have an order on their list (`work_item.reorder`; read as
+	 *  `v_work_item.rank`).
+	 */
+	ordering?: boolean,
+	/**
+	 *  Items are on a thread's list or the backlog, and move between them
+	 *  (`work_item.move`; read as `v_work_item.thread_id`).
+	 */
+	lists?: boolean,
 };
 
 /**

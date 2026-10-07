@@ -38,6 +38,8 @@ pub fn oxplow_provider() -> WorkItemsProvider {
             delete: true,
             // Its writes run in the bus's transaction: never sent twice.
             idempotent_writes: false,
+            ordering: true,
+            lists: true,
         },
         external: None,
         // Its ids: `tsk12`.
@@ -59,6 +61,8 @@ pub fn none_provider() -> WorkItemsProvider {
             links: true,
             delete: true,
             idempotent_writes: true,
+            ordering: true,
+            lists: true,
         },
         external: Some(Arc::new(Sink)),
         id_pattern: Some(".+".into()),
