@@ -458,9 +458,11 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
-    // Unified page-ref graph backfill: re-project every existing task,
-    // link, effort, and finding into the `page_ref` table. Idempotent.
+    // Page-ref graph repair: re-project every existing task, link, effort,
+    // finding and note into `page_ref` — only when a migration or a new
+    // build may have left it drifted (`page_ref_backfill::needs_repair`).
     {
+        let db = state.db.clone();
         let vocabulary = state.vocabulary.clone();
         let page_refs = state.page_ref_store.clone();
         let tasks = state.task_store.clone();
@@ -469,10 +471,16 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         let findings = state.code_quality_store.clone();
         let notes = state.work_note_store.clone();
         tokio::spawn(async move {
+            if !crate::page_ref_backfill::needs_repair(&db).await {
+                return;
+            }
+            let started = std::time::Instant::now();
             let counts = crate::page_ref_backfill::run(
                 vocabulary, page_refs, tasks, links, efforts, findings, notes,
             )
             .await;
+            crate::page_ref_backfill::record_repair(&db, started.elapsed().as_millis() as i64)
+                .await;
             tracing::info!(?counts, "page-ref backfill done");
         });
     }

@@ -9,6 +9,13 @@
 //! sources' again — which is why it stays (tsk920): it is the graph's
 //! one repair path.
 //!
+//! It runs only when the graph may have drifted from its sources: after a
+//! migration (one may reset it) or under a new build (a writer's bug may
+//! have been fixed). Between those, the writers keep it current, so
+//! restating every row on each boot repeated what was already there. Its
+//! last run is recorded as the `page_ref_repair` row of `asset_state`
+//! (`built_from`: the build and schema version), read as `v_asset`.
+//!
 //! Ordering doesn't matter — projections are per-source and each
 //! writer owns its own slice. The backfill is idempotent: running
 //! it again replaces the same rows it wrote last time.
@@ -41,6 +48,81 @@ pub struct BackfillCounts {
     pub efforts: usize,
     pub findings: usize,
     pub notes: usize,
+}
+
+/// The `asset_state` row recording the last repair.
+pub const REPAIR: &str = "page_ref_repair";
+
+/// What a repair is current for: this build of the program and the
+/// database's schema version.
+async fn repair_key(db: &oxplow_db::Database) -> Option<String> {
+    let schema: i64 = db
+        .read(|tx| {
+            tx.query_row(
+                "SELECT coalesce(max(version), 0) FROM refinery_schema_history",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .ok()?;
+    Some(
+        serde_json::json!({
+            "build": oxplow_db::table_generations::build_identity(),
+            "schema": schema,
+        })
+        .to_string(),
+    )
+}
+
+/// Whether the graph needs restating: no repair yet by this build at this
+/// schema version (or that can't be told).
+pub async fn needs_repair(db: &oxplow_db::Database) -> bool {
+    let Some(key) = repair_key(db).await else {
+        return true;
+    };
+    let stored: Option<String> = db
+        .read(|tx| {
+            use rusqlite::OptionalExtension;
+            tx.query_row(
+                "SELECT built_from FROM asset_state WHERE asset = ?1",
+                [REPAIR],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .ok()
+        .flatten();
+    stored.as_deref() != Some(key.as_str())
+}
+
+/// Record a repair that took `elapsed_ms`.
+pub async fn record_repair(db: &oxplow_db::Database, elapsed_ms: i64) {
+    let Some(key) = repair_key(db).await else {
+        return;
+    };
+    let at = oxplow_domain::Timestamp::now().to_string();
+    let recorded = db
+        .transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms, built_from)
+                 VALUES (?1, ?2, (SELECT coalesce(max(seq), 0) FROM event_log), ?3, ?4)
+                 ON CONFLICT (asset) DO UPDATE SET
+                    computed_at = excluded.computed_at, events_to = excluded.events_to,
+                    elapsed_ms = excluded.elapsed_ms, built_from = excluded.built_from",
+                rusqlite::params![REPAIR, at, elapsed_ms, key],
+            )
+            .map(|_| ())
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await;
+    if let Err(error) = recorded {
+        tracing::warn!(%error, "recording the page-ref repair failed");
+    }
 }
 
 /// Project every existing row into `page_ref`. Idempotent.
@@ -157,6 +239,26 @@ mod tests {
 
     fn ts() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
+    }
+
+    /// The repair is needed once per build and schema version: recorded,
+    /// it isn't again until either changes.
+    #[tokio::test]
+    async fn the_repair_runs_once_per_build_and_schema() {
+        let db = Database::in_memory();
+        assert!(needs_repair(&db).await, "never repaired");
+        record_repair(&db, 5).await;
+        assert!(!needs_repair(&db).await, "repaired by this build");
+        db.transaction(|tx| {
+            tx.execute(
+                "UPDATE asset_state SET built_from = '{\"build\":\"older\",\"schema\":1}' WHERE asset = ?1",
+                [REPAIR],
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        assert!(needs_repair(&db).await, "another build or schema");
     }
 
     #[tokio::test]
