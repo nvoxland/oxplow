@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 /**
  * The expand / collapse affordance for a slide-out glyph strip (see
@@ -17,6 +18,10 @@ import type { CSSProperties } from "react";
  *   strip-width); in the much wider panel it keeps the control at the same
  *   x-position, so it doesn't jump sideways as the panel opens and closes.
  *   Same lock-step rule the glyph rows follow for their y-positions.
+ *
+ * It shows the standard open / close-sidebar icon, outlined and with a
+ * hover state (`.oxplow-slideout-toggle` in `index.html`), so it reads as
+ * "show / hide this panel" — a bare `›` read as decoration.
  */
 export function SlideoutChevron({
   direction,
@@ -41,9 +46,10 @@ export function SlideoutChevron({
           title={title}
           aria-label={title}
           aria-expanded={direction === "collapse"}
+          className="oxplow-slideout-toggle"
           style={{ ...buttonStyle, width: stripWidth - 10 }}
         >
-          {direction === "expand" ? "›" : "‹"}
+          {direction === "expand" ? <PanelLeftOpen size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}
         </button>
       </div>
     </div>
@@ -58,17 +64,14 @@ const containerStyle: CSSProperties = {
   justifyContent: "flex-start",
 };
 
+// Background, color and border come from `.oxplow-slideout-toggle` so
+// its `:hover` can change them (an inline style would win over it).
 const buttonStyle: CSSProperties = {
-  height: 24,
+  height: 26,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  background: "transparent",
-  color: "var(--text-secondary)",
-  border: "1px solid transparent",
   borderRadius: 6,
   cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: "var(--text-sm)",
-  lineHeight: 1,
+  padding: 0,
 };

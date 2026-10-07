@@ -164,6 +164,16 @@ test("the bottom-pinned chevron expands the panel", () => {
   expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 });
 
+test("the expand and collapse toggles show the open/close-sidebar icons", () => {
+  const { getByTestId } = renderNavigator();
+
+  // A lone "›" didn't read as "show the streams panel"; the standard
+  // sidebar icons do.
+  expect(getByTestId("navigator-expand").querySelector("svg.lucide-panel-left-open")).not.toBeNull();
+  fireEvent.click(getByTestId("navigator-expand"));
+  expect(getByTestId("navigator-collapse").querySelector("svg.lucide-panel-left-close")).not.toBeNull();
+});
+
 test("clicking empty space in the strip expands the panel", () => {
   const { getByTestId, queryByTestId } = renderNavigator();
 
