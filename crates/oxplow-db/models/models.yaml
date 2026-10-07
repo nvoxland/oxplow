@@ -241,7 +241,7 @@
     - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
     - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
 - name: claim
-  version: 2
+  version: 3
   description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and whether anything backs them."
   columns:
     - { name: "id", type: "INTEGER", doc: "Claim id." }
@@ -371,7 +371,7 @@
     - { not_null: id }
     - { unique: id }
 - name: decision
-  version: 2
+  version: 3
   description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
   columns:
     - { name: "id", type: "INTEGER", doc: "Decision id." }
@@ -406,7 +406,7 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: effort
-  version: 4
+  version: 5
   description: "Efforts: one span of a thread's work between a start and an end snapshot, opened and closed by oxplow and linked to a work item when there is one (.context/work-tracking.md). At most one is open per thread."
   columns:
     - { name: "id", type: "INTEGER", doc: "Effort id." }
@@ -1023,7 +1023,7 @@
     - { not_null: capability }
     - { not_null: provider }
 - name: command_proposal
-  version: 1
+  version: 2
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."
   columns:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
@@ -1047,7 +1047,7 @@
     - { unique: ref }
     - { accepted_values: { column: decision, values: [pending, approved, declined, superseded] } }
 - name: thread_answer
-  version: 1
+  version: 2
   description: "An agent's answers in a thread: what `show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
   columns:
     - { name: "id", type: "INTEGER", doc: "Answer id." }
@@ -1285,7 +1285,7 @@
     - { not_null: key }
     - { unique: key }
 - name: metric_catalog
-  version: 1
+  version: 2
   description: "The metric catalog: every metric this project can use — bundled gauges, always-on producers, entity metrics, plugin and project metrics — with whether it's enabled here. Read a metric's values with `MEASURE('<key>')` over `metric_grid()`; enable one with the `oxplow.metric.enable` command."
   columns:
     - { name: key, type: TEXT, doc: "The metric key." }

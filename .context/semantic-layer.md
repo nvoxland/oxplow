@@ -172,7 +172,9 @@ one transaction:
   `crates/oxplow-db/fixtures/model_contracts.json` (`{ name: { version:
   columns } }`, every version published): `every_core_model_contract_is_
   pinned_at_its_version` fails in CI on a change at a pinned version, and
-  `OXPLOW_BLESS=1` pins a new one (earlier versions stay);
+  `OXPLOW_BLESS=1` pins a new one (earlier versions stay). A sweeping
+  rename never edits the golden: a published version's docs stay as they
+  were, and the models whose docs the rename rewords take a bump;
 - records `model` (view, name, owner, version, description, compiled
   SQL), `model_input` (`ref` | `source`) — V105.
 

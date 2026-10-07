@@ -1039,7 +1039,7 @@
         {
           "name": "evidence_ref",
           "type": "TEXT",
-          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited."
+          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `effort.verify_claim`); NULL if nothing was cited."
         },
         {
           "name": "verified",
@@ -1055,6 +1055,61 @@
       "key": []
     },
     "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Claim id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it was made on (`work_item:<provider>:<id>`), if any."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort, if one was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "statement",
+          "type": "TEXT",
+          "doc": "The claim in words."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `effort.verify_claim`); NULL if nothing was cited."
+        },
+        {
+          "name": "verified",
+          "type": "",
+          "doc": "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    },
+    "3": {
       "columns": [
         {
           "name": "id",
@@ -1559,7 +1614,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -1570,6 +1625,71 @@
       "key": []
     },
     "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Decision id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item being worked on (`work_item:<provider>:<id>`), if any."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort it was made during, if one was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "question",
+          "type": "TEXT",
+          "doc": "What had to be decided."
+        },
+        {
+          "name": "choice",
+          "type": "TEXT",
+          "doc": "What was chosen."
+        },
+        {
+          "name": "alternatives",
+          "type": "TEXT",
+          "doc": "Options not taken, as a JSON array of strings."
+        },
+        {
+          "name": "confidence",
+          "type": "TEXT",
+          "doc": "`low`, `medium` or `high`."
+        },
+        {
+          "name": "why",
+          "type": "TEXT",
+          "doc": "The reasoning."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    },
+    "3": {
       "columns": [
         {
           "name": "id",
@@ -1873,7 +1993,7 @@
         {
           "name": "summary",
           "type": "",
-          "doc": "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort."
+          "doc": "What shipped: the summary `effort.report` recorded, else the final message of the last agent turn in the effort."
         },
         {
           "name": "title",
@@ -1889,6 +2009,66 @@
       "key": []
     },
     "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Effort id."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it's linked to, as a canonical ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`); NULL while unlinked. (v2: nullable)"
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread that did the work."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "That thread's stream."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while the effort is open."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the start (v_snapshot.id)."
+        },
+        {
+          "name": "end_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the end; NULL while open."
+        },
+        {
+          "name": "summary",
+          "type": "",
+          "doc": "What shipped: the summary `effort.report` recorded, else the final message of the last agent turn in the effort."
+        },
+        {
+          "name": "title",
+          "type": "",
+          "doc": "Its own title, else its work item's, else the first line of its first prompt. (v2)"
+        },
+        {
+          "name": "closed_by",
+          "type": "TEXT",
+          "doc": "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)"
+        }
+      ],
+      "key": []
+    },
+    "5": {
       "columns": [
         {
           "name": "id",
@@ -4596,6 +4776,91 @@
         {
           "name": "command",
           "type": "TEXT",
+          "doc": "The command (`config.set`, `work_item.delete`)."
+        },
+        {
+          "name": "input",
+          "type": "TEXT",
+          "doc": "Its input (JSON)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who proposed it: `agent` or `lens`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The proposing thread (`thr3`) or lens, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was proposed in (v_thread.id), if any."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it was proposed in, if any."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What it supersedes on: `config:<key>` for a config change, else the command and its input."
+        },
+        {
+          "name": "preview",
+          "type": "TEXT",
+          "doc": "The confirmation preview (JSON: command, summary, input, destructive)."
+        },
+        {
+          "name": "dry_run",
+          "type": "TEXT",
+          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run."
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "doc": "`pending`, `approved`, `declined` or `superseded`."
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "doc": "When it was decided or superseded."
+        },
+        {
+          "name": "audit_id",
+          "type": "INTEGER",
+          "doc": "The approving run's command audit row."
+        },
+        {
+          "name": "superseded_by",
+          "type": "INTEGER",
+          "doc": "The proposal that replaced it."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Proposal id."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`proposal:<id>`."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
           "doc": "The command (`oxplow.config.set`, `oxplow.work_item.delete`)."
         },
         {
@@ -4664,6 +4929,66 @@
   },
   "thread_answer": {
     "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Answer id."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`answer:<id>`."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was shown in (v_thread.id)."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The turn it was shown in (v_agent_turn.id), when one was open."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort open in the thread at the time, if any."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What it's called."
+        },
+        {
+          "name": "lens",
+          "type": "TEXT",
+          "doc": "An existing lens shown (`<extension>/<slug>`); NULL when the answer has its own spec."
+        },
+        {
+          "name": "spec",
+          "type": "TEXT",
+          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens."
+        },
+        {
+          "name": "params",
+          "type": "TEXT",
+          "doc": "The params it ran with (JSON object)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "kept_lens",
+          "type": "TEXT",
+          "doc": "The lens it was kept as (`lens.keep`), if it was."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "id",
@@ -5427,6 +5752,61 @@
   },
   "metric_catalog": {
     "1": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "The metric key."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "How it displays (`gauge`, …)."
+        },
+        {
+          "name": "language",
+          "type": "TEXT",
+          "doc": "The language a code gauge reads; NULL for the rest."
+        },
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`built-in`, `global` or `project`."
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "doc": "1 when it's on in this project."
+        },
+        {
+          "name": "target",
+          "type": "REAL",
+          "doc": "The target value, when set."
+        },
+        {
+          "name": "trigger",
+          "type": "TEXT",
+          "doc": "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer."
+        },
+        {
+          "name": "toggleable",
+          "type": "INTEGER",
+          "doc": "1 when `metric.enable` can switch it."
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "doc": "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "key",

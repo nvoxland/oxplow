@@ -24,6 +24,14 @@ baseline's (materialized `m_v_*` tables aside) and rewrote
 squash like that is the sanctioned way to drop history; editing a
 migration in place is not.
 
+A sweeping rename (an id, a column, a command) skips the applied
+migrations and the published model golden (`fixtures/model_contracts.json`,
+semantic-layer.md "contract"): an applied migration is checksummed by
+refinery, so editing even its comment stops every database that ran it
+from opening. Rewrite what the old name left in the data with a new
+migration (`V26__command_ids.sql` is the example), and reword a model's
+docs with a version bump.
+
 > ⚠️ Migrations are **embedded at compile time** (`refinery::embed_migrations!`,
 > a proc macro cargo knows nothing about). `crates/oxplow-db/build.rs` declares
 > `rerun-if-changed=migrations` so a migration-only change (pure SQL, no `.rs`
