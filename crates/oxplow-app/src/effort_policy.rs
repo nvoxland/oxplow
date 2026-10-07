@@ -28,7 +28,8 @@
 //!
 //! The project chooses it like a work list: `activeProviders.effort_policy`
 //! is `oxplow` (the default) or `none`, which leaves efforts to people and
-//! agents.
+//! agents. Switching it (`capability.switched`) closes the open efforts
+//! (`switch`): the policy they were opened under is no longer the one.
 
 use std::sync::{Arc, RwLock, Weak};
 
@@ -36,9 +37,9 @@ use async_trait::async_trait;
 use oxplow_config::OxplowConfig;
 use oxplow_db::SqlCell;
 use oxplow_domain::events::schema::{
-    EffortLanded, EffortLandedV1, EffortLinked, EffortLinkedV1, EffortOpened, EffortOpenedV2,
-    EventType as _, ThreadCheckpoint, ThreadCheckpointV1, WorkItemStateChanged,
-    WorkItemStateChangedV1,
+    CapabilitySwitched, CapabilitySwitchedV1, EffortLanded, EffortLandedV1, EffortLinked,
+    EffortLinkedV1, EffortOpened, EffortOpenedV2, EventType as _, ThreadCheckpoint,
+    ThreadCheckpointV1, WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::work_items::CanonicalState;
 use oxplow_domain::{Actor, DomainError, EffortId, StoredEvent, ThreadId};
@@ -228,13 +229,16 @@ impl EffortPolicyConsumer {
     }
 
     async fn finished(&self, item_ref: &str) -> Result<(), DomainError> {
-        let rows = self
-            .rows(
-                "SELECT id FROM v_effort WHERE work_item = ?1 AND ended_at IS NULL",
-                vec![SqlCell::Text(item_ref.into())],
-            )
-            .await?;
-        for row in rows {
+        self.close_open(
+            "SELECT id FROM v_effort WHERE work_item = ?1 AND ended_at IS NULL",
+            vec![SqlCell::Text(item_ref.into())],
+        )
+        .await
+    }
+
+    /// Close the open efforts `sql` selects the ids of (`switch`).
+    async fn close_open(&self, sql: &str, params: Vec<SqlCell>) -> Result<(), DomainError> {
+        for row in self.rows(sql, params).await? {
             if let Some(SqlCell::Int(id)) = row.first() {
                 self.run(
                     crate::commands::effort::CLOSE,
@@ -296,6 +300,7 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
 
     fn handles(&self, event_type: &str) -> bool {
         event_type == WorkItemStateChanged::TYPE
+            || event_type == CapabilitySwitched::TYPE
             || event_type == EffortLinked::TYPE
             || event_type == EffortOpened::TYPE
             || event_type == ThreadCheckpoint::TYPE
@@ -303,6 +308,19 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
+        // A switch of the effort policy, to or from this one, closes what
+        // the policy before it opened — whichever is active now.
+        if event.envelope.event_type == CapabilitySwitched::TYPE {
+            let switched: CapabilitySwitchedV1 =
+                serde_json::from_value(event.envelope.payload.clone()).map_err(storage)?;
+            return match switched.capability.as_str() {
+                CAPABILITY => {
+                    self.close_open("SELECT id FROM v_effort WHERE ended_at IS NULL", vec![])
+                        .await
+                }
+                _ => Ok(()),
+            };
+        }
         // Its own runs are its own doing: reacting to them would loop.
         if !self.active() || event.envelope.source == actor().source() {
             return Ok(());
@@ -586,6 +604,36 @@ mod tests {
                 fx.effort.value(),
                 Some(work_item_ref(fx.task)),
                 Some("open".into())
+            )]
+        );
+    }
+
+    /// Switching the effort policy closes the open efforts (`switch`): the
+    /// policy they were opened under is no longer the one.
+    #[tokio::test]
+    async fn switching_the_policy_closes_the_open_efforts() {
+        let fx = services_with_effort().await;
+        let mut config = crate::config_service::read_config(&fx.svc.config);
+        fx.svc
+            .capabilities
+            .publish(&config, &fx.svc.db)
+            .await
+            .unwrap();
+        config
+            .active_providers
+            .insert(CAPABILITY.into(), NONE.into());
+        fx.svc
+            .capabilities
+            .publish(&config, &fx.svc.db)
+            .await
+            .unwrap();
+        settle(&fx).await;
+        assert_eq!(
+            efforts(&fx).await,
+            vec![(
+                fx.effort.value(),
+                Some(work_item_ref(fx.task)),
+                Some("switch".into())
             )]
         );
     }

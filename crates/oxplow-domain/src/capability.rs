@@ -8,6 +8,35 @@
 //! a provider instance); which one is active is resolved from the
 //! person's and the project's choices (`oxplow_app::capabilities`).
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+/// Why a capability's active implementation is the one it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChosenBy {
+    /// The person's own layer.
+    Personal,
+    /// The project's `activeProviders`.
+    Project,
+    /// Nothing chose: the capability's default.
+    Default,
+    /// The choice isn't available (its extension is disabled, its
+    /// instance stopped, its id unknown).
+    Fallback,
+}
+
+impl ChosenBy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChosenBy::Personal => "personal",
+            ChosenBy::Project => "project",
+            ChosenBy::Default => "default",
+            ChosenBy::Fallback => "fallback",
+        }
+    }
+}
+
 /// One capability, as core declares it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilitySpec {

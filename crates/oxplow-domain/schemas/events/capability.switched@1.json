@@ -1,0 +1,58 @@
+{
+  "$defs": {
+    "ChosenBy": {
+      "description": "Why a capability's active implementation is the one it is.",
+      "oneOf": [
+        {
+          "const": "personal",
+          "description": "The person's own layer.",
+          "type": "string"
+        },
+        {
+          "const": "project",
+          "description": "The project's `activeProviders`.",
+          "type": "string"
+        },
+        {
+          "const": "default",
+          "description": "Nothing chose: the capability's default.",
+          "type": "string"
+        },
+        {
+          "const": "fallback",
+          "description": "The choice isn't available (its extension is disabled, its\ninstance stopped, its id unknown).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`capability.switched@1`: a capability's active implementation changed\n— a person's or the project's choice, or the chosen one coming or\ngoing (`.context/work-tracking.md` \"Swappable pieces\").",
+  "properties": {
+    "capability": {
+      "description": "`work_items`, `effort_policy`, `snapshots`.",
+      "type": "string"
+    },
+    "chosen_by": {
+      "$ref": "#/$defs/ChosenBy",
+      "description": "Why it's the one now."
+    },
+    "from": {
+      "description": "The implementation id that was active (`none` for nothing).",
+      "type": "string"
+    },
+    "to": {
+      "description": "The one active now.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "capability",
+    "from",
+    "to",
+    "chosen_by"
+  ],
+  "title": "CapabilitySwitchedV1",
+  "type": "object"
+}

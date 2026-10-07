@@ -1092,16 +1092,17 @@ impl Services {
         // Every capability's implementations (`capabilities`): core's (the
         // VCS here, knowledge once it's built), what the project's
         // extensions declare, and running provider instances'.
-        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(vec![
-            capabilities::Implementation {
+        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(
+            vec![capabilities::Implementation {
                 capability: "vcs".into(),
                 id: vcs.rev_kind().into(),
                 title: vcs.rev_kind().into(),
                 extension: None,
                 source: capabilities::Source::Core,
                 features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
-            },
-        ]));
+            }],
+            vocabulary.clone(),
+        ));
         capabilities.set_declared(capabilities::declared_by(
             &extension_catalog.get(&layout.project_dir),
         ));

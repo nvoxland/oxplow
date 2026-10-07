@@ -32,6 +32,7 @@ use crate::DomainError;
 /// The namespaces core owns (§5.3). Plugin types may not use them.
 pub const CORE_NAMESPACES: &[&str] = &[
     "agent",
+    "capability",
     "thread",
     "snapshot",
     "vcs",
@@ -129,6 +130,8 @@ impl EventSchemaRegistry {
         r.register::<CommandExecutedAtV1>()
             .expect("core type registers");
         r.register::<CommandExecuted>()
+            .expect("core type registers");
+        r.register::<CapabilitySwitched>()
             .expect("core type registers");
         r.register::<ConfigChanged>().expect("core type registers");
         r.register::<EffectResultAtV1>()
@@ -681,6 +684,29 @@ impl EventType for ConfigChanged {
     const TYPE: &'static str = "config.changed";
     const V: u32 = 2;
     type Payload = ConfigChangedV2;
+}
+
+/// `capability.switched@1`: a capability's active implementation changed
+/// — a person's or the project's choice, or the chosen one coming or
+/// going (`.context/work-tracking.md` "Swappable pieces").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CapabilitySwitchedV1 {
+    /// `work_items`, `effort_policy`, `snapshots`.
+    pub capability: String,
+    /// The implementation id that was active (`none` for nothing).
+    pub from: String,
+    /// The one active now.
+    pub to: String,
+    /// Why it's the one now.
+    pub chosen_by: crate::capability::ChosenBy,
+}
+
+pub struct CapabilitySwitched;
+impl EventType for CapabilitySwitched {
+    const TYPE: &'static str = "capability.switched";
+    const V: u32 = 1;
+    type Payload = CapabilitySwitchedV1;
 }
 
 /// `effect.result@1`: the recorded outcome of a side effect (§5.3).
@@ -2187,6 +2213,7 @@ mod tests {
                 ("agent.turn.ended", 1),
                 ("agent.turn.ended", 2),
                 ("agent.turn.started", 1),
+                ("capability.switched", 1),
                 ("code.diagnostics.changed", 1),
                 ("collector.synced", 1),
                 ("command.approved", 1),

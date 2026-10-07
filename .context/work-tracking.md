@@ -171,6 +171,11 @@ own — heavier ones included (beads as a work list).
   public commands and events, and pass the same conformance suite.
   Core's own records (turns, efforts, the event log) stay transactional
   in core.
+  `source_guards::core_never_special_cases_its_own_pieces` fails on a
+  literal `"oxplow-bundled"` outside `bundled_extensions.rs` or a
+  provider id compared with oxplow's; what's left is pinned with its
+  reason (oxplow's tasks' own commands and `dispatching`'s
+  in-transaction route, until the tasks sit behind the interface).
 - **The agent's tools follow the active implementation.** An interface is
   what oxplow needs to show, link and act; it is not a funnel the agent
   must work through. Each implementation declares its agent surface (its
@@ -180,6 +185,14 @@ own — heavier ones included (beads as a work list).
   one's surface is offered.
 - **Disabling `oxplow-bundled`:** optional capabilities fall to none;
   required ones fall back to the capability's default.
+- **Switching.** When the registry restates `v_capability_provider` and a
+  capability's active implementation differs from the one the rows had,
+  it logs `capability.switched@1 { capability, from, to, chosen_by }` in
+  the same transaction: once per change, across restarts too, and never
+  for the first statement. A chosen external instance that hasn't started
+  yet is a real switch to none and back. Switching the effort policy
+  closes every open effort (`switch`), whichever policy is active after;
+  nothing is deleted.
 
 The three in progress:
 
@@ -233,8 +246,10 @@ The three in progress:
   Settings → Pieces, generated from `v_capability_provider` (v4 carries
   each capability's title and whether it's choosable and optional),
   chooses for the project and just for me, and replaces Integrations'
-  work-items radio.
-- Next: `capability.switched`, then the three
+  work-items radio. A switch is logged (`capability.switched@1`) and
+  closes open efforts when it's the policy's; a source guard pins core's
+  remaining special cases.
+- Next: the three
   swappable pieces. Loose
   refs (`tsk12` for a work item) wait for it: recognising an id is the
   active work list's declaration, not core's.

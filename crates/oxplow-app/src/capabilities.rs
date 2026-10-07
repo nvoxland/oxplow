@@ -24,8 +24,13 @@
 use std::sync::RwLock;
 
 use oxplow_config::OxplowConfig;
-use oxplow_db::{CapabilityProvider, SqliteCapabilityStore};
+use oxplow_db::capability_store::{list_tx, reset_tx};
+use oxplow_db::CapabilityProvider;
+pub use oxplow_domain::capability::ChosenBy;
 use oxplow_domain::capability::{self, NONE};
+use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV1, EventType as _};
+use oxplow_domain::events::Envelope;
+use oxplow_domain::vocabulary::VocabularyHandle;
 use oxplow_domain::DomainError;
 use serde_json::Value;
 
@@ -120,31 +125,6 @@ impl Implementation {
     }
 }
 
-/// Why the active implementation is the one it is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChosenBy {
-    /// The person's own layer.
-    Personal,
-    /// The project's `activeProviders`.
-    Project,
-    /// Nothing chose: the capability's default.
-    Default,
-    /// The choice isn't available (its extension is disabled, its
-    /// instance stopped, its id unknown).
-    Fallback,
-}
-
-impl ChosenBy {
-    fn as_str(self) -> &'static str {
-        match self {
-            ChosenBy::Personal => "personal",
-            ChosenBy::Project => "project",
-            ChosenBy::Default => "default",
-            ChosenBy::Fallback => "fallback",
-        }
-    }
-}
-
 /// A capability's active implementation and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
@@ -209,17 +189,18 @@ pub fn needs_message(unmet: &[String]) -> String {
 
 /// Every implementation oxplow has now: core's, the ones extensions
 /// declare, and running provider instances'.
-#[derive(Default)]
 pub struct CapabilityRegistry {
     core: RwLock<Vec<Implementation>>,
     declared: RwLock<Vec<Implementation>>,
     external: RwLock<Vec<Implementation>>,
+    /// What `capability.switched` is validated against.
+    vocabulary: VocabularyHandle,
 }
 
 impl CapabilityRegistry {
     /// A registry with core's fixed implementations (`vcs`, `knowledge`)
     /// and [`NONE`] for each optional capability.
-    pub fn new(fixed: Vec<Implementation>) -> Self {
+    pub fn new(fixed: Vec<Implementation>, vocabulary: VocabularyHandle) -> Self {
         let mut core = fixed;
         core.extend(
             capability::CAPABILITIES
@@ -229,7 +210,9 @@ impl CapabilityRegistry {
         );
         Self {
             core: RwLock::new(core),
-            ..Self::default()
+            declared: RwLock::default(),
+            external: RwLock::default(),
+            vocabulary,
         }
     }
 
@@ -348,7 +331,11 @@ impl CapabilityRegistry {
 
     /// Restate `v_capability_provider` from what the registry holds: every
     /// implementation, the active one marked with why, and a choice that
-    /// isn't available as its own row (`available = 0`).
+    /// isn't available as its own row (`available = 0`). A capability whose
+    /// active implementation differs from the one the rows had logs
+    /// `capability.switched@1`, in the same transaction — so a change is
+    /// logged once, across restarts too; the very first statement, with
+    /// nothing active before, logs nothing.
     pub async fn publish(
         &self,
         config: &OxplowConfig,
@@ -356,6 +343,7 @@ impl CapabilityRegistry {
     ) -> Result<(), DomainError> {
         let all = self.implementations();
         let mut rows: Vec<CapabilityProvider> = Vec::new();
+        let mut now = Vec::new();
         for spec in capability::CAPABILITIES {
             let resolved = self.resolve(config, spec.id);
             for i in all.iter().filter(|i| i.capability == spec.id) {
@@ -396,9 +384,45 @@ impl CapabilityRegistry {
                     });
                 }
             }
+            now.push((spec.id, resolved));
         }
-        SqliteCapabilityStore::new(db.clone()).reset(rows).await
+        let vocabulary = self.vocabulary.current();
+        db.transaction(move |tx| {
+            let before = list_tx(tx)?;
+            reset_tx(tx, &rows)?;
+            for switch in switches(&before, &now) {
+                let envelope = Envelope::new(
+                    CapabilitySwitched::TYPE,
+                    CapabilitySwitched::V,
+                    "system",
+                    serde_json::to_value(&switch)
+                        .map_err(|e| DomainError::Invalid(format!("capability.switched: {e}")))?,
+                )?;
+                oxplow_db::event_log_store::append_tx(tx, &vocabulary, &envelope)?;
+            }
+            Ok(())
+        })
+        .await
     }
+}
+
+/// The capabilities whose active implementation in `before` (the rows as
+/// they were) isn't the one `now` resolves; one with no active row before
+/// (the first statement) isn't a switch.
+fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<CapabilitySwitchedV1> {
+    now.iter()
+        .filter_map(|(capability, resolved)| {
+            let from = before
+                .iter()
+                .find(|r| r.active && r.capability == *capability)?;
+            (from.provider != resolved.id).then(|| CapabilitySwitchedV1 {
+                capability: capability.to_string(),
+                from: from.provider.clone(),
+                to: resolved.id.clone(),
+                chosen_by: resolved.chosen_by,
+            })
+        })
+        .collect()
 }
 
 /// The implementations `extensions` declare, as the registry holds them.
@@ -452,7 +476,7 @@ mod tests {
     }
 
     fn registry(declared: bool) -> CapabilityRegistry {
-        let r = CapabilityRegistry::new(Vec::new());
+        let r = CapabilityRegistry::new(Vec::new(), VocabularyHandle::core());
         if declared {
             r.set_declared(vec![
                 builtin("work_items", "oxplow", "oxplow:tasks"),
@@ -634,6 +658,50 @@ mod tests {
                 ["work_items", "none", 1, "fallback", 1],
                 ["work_items", "oxplow", 0, null, 1],
             ])
+        );
+    }
+
+    /// A change of what's active is logged once, as
+    /// `capability.switched`: not the first statement, nor an unchanged
+    /// one.
+    #[tokio::test]
+    async fn a_change_of_the_active_one_is_logged() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let default = config(&[], &[]);
+        let off = config(&[("effort_policy", "none")], &[]);
+        for c in [&default, &default, &off, &off] {
+            svc.capabilities.publish(c, &svc.db).await.unwrap();
+        }
+        let switches: Vec<String> = svc
+            .db
+            .read(|tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT payload FROM event_log WHERE type = 'capability.switched'
+                          ORDER BY seq",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let switches: Vec<Value> = switches
+            .iter()
+            .map(|p| serde_json::from_str(p).unwrap())
+            .collect();
+        assert_eq!(
+            switches,
+            vec![serde_json::json!({
+                "capability": "effort_policy",
+                "from": "oxplow",
+                "to": "none",
+                "chosen_by": "project",
+            })]
         );
     }
 }
