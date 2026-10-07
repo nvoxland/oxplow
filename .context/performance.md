@@ -502,3 +502,16 @@ still one foreground command, so collection sees both. Read
   counters (`epoch` fences writers, `version` invalidates the read cache), the
   event-scoping and debounce stack, and the retention/compaction knobs.
 - [data-model.md](./data-model.md) — the DB pool and `spawn_blocking` cap.
+
+## Change events reach the webview in bursts
+
+A burst of commits is one re-read in the UI: every reader of change events
+goes through `coalesce` (`apps/desktop/src/lens/lensRerun.ts`, 100 ms after
+the last event) — `useRerunOnChange`, the wiki title cache
+(`wikiTitleCache.ts`, which also re-reads once after an in-flight read
+that missed a change) and `useChange`. A new reader of events adopts it
+rather than re-reading per event. Writers help from their side by
+committing a unit of work once (a duplicate scan stores its findings in
+one transaction). Typing in the ACP prompt box re-renders only the box:
+its draft is its own state, and the transcript and each message are
+memoized (`AcpAgentView.tsx`).

@@ -72,7 +72,10 @@ impl DuplicationRecorder {
             detail: Some(format!("scope: {scope}")),
             progress: None,
         });
-        let scanned_corpus = match svc.trees.corpus(&ws, &revision, |_| true).await {
+        // Read only what the detector can parse: the rest (binaries,
+        // assets, docs) would be read whole and then dropped.
+        let parseable = |p: &str| oxplow_code_metrics::is_supported_path(std::path::Path::new(p));
+        let scanned_corpus = match svc.trees.corpus(&ws, &revision, parseable).await {
             Ok(corpus) => scan_duplicates(corpus, scope_paths, RunOptions::default())
                 .await
                 .map_err(|e| e.to_string()),
@@ -91,29 +94,26 @@ impl DuplicationRecorder {
 
         // Storing can fail too; the scan and its task must not be left
         // "running" when it does (tsk364).
-        let stored: Result<(), DomainError> = async {
-            for f in &findings {
-                svc.code_quality_store
-                    .append_finding(
-                        scan_id,
-                        oxplow_db::CodeQualityFinding {
-                            id: 0,
-                            scan_id,
-                            path: f.path.clone(),
-                            start_line: f.start_line as i32,
-                            end_line: f.end_line as i32,
-                            kind: f.kind.clone(),
-                            metric_value: f.metric_value,
-                            extra_json: f.extra_json.clone(),
-                        },
-                    )
-                    .await?;
-            }
-            svc.code_quality_store
-                .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
-                .await
-        }
-        .await;
+        // One write for the whole scan: its findings, their edges and
+        // the older scans of this scope it replaces — so a scan announces
+        // one change, not one per finding.
+        let rows = findings
+            .iter()
+            .map(|f| oxplow_db::CodeQualityFinding {
+                id: 0,
+                scan_id,
+                path: f.path.clone(),
+                start_line: f.start_line as i32,
+                end_line: f.end_line as i32,
+                kind: f.kind.clone(),
+                metric_value: f.metric_value,
+                extra_json: f.extra_json.clone(),
+            })
+            .collect();
+        let stored = svc
+            .code_quality_store
+            .finish_scan_with_findings(scan_id, rows)
+            .await;
         if let Err(e) = stored {
             let _ = svc
                 .code_quality_store

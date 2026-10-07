@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   acpCancel,
@@ -56,7 +56,6 @@ interface Props {
 export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage }: Props) {
   const threadId = thread.id;
   const [state, setState] = useState<AcpViewState>(initialState);
-  const [draft, setDraft] = useState("");
   const [openError, setOpenError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -120,13 +119,19 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
   const live = state.status !== "stopped" && state.status !== "starting";
   const pct = contextPercent(state.usage);
 
-  const report = (err: unknown) => setActionError(err instanceof Error ? err.message : String(err));
-  const cancel = () => void acpCancel(threadId).catch(report);
+  // Stable, so the memoized transcript re-renders only when what it
+  // shows changes.
+  const report = useCallback((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)), []);
+  const cancel = useCallback(() => void acpCancel(threadId).catch(report), [threadId, report]);
+  const reportMessage = useCallback((m: string) => setActionError(m), []);
 
-  const relPath = (p: string) => {
-    const wt = worktreePath?.replace(/\/$/, "");
-    return wt && p.startsWith(wt + "/") ? p.slice(wt.length + 1) : p;
-  };
+  const relPath = useCallback(
+    (p: string) => {
+      const wt = worktreePath?.replace(/\/$/, "");
+      return wt && p.startsWith(wt + "/") ? p.slice(wt.length + 1) : p;
+    },
+    [worktreePath],
+  );
 
   return (
     <div
@@ -217,19 +222,19 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
 
       <AcpPromptBox
         threadId={threadId}
-        draft={draft}
-        setDraft={setDraft}
         busy={busy}
         disabled={!live}
         visible={visible}
         onCancel={cancel}
-        onError={(m) => setActionError(m)}
+        onError={reportMessage}
       />
     </div>
   );
 }
 
-function Transcript({
+/** Memoized: it re-renders when its items or answers change, not when
+ *  anything else in the view does. */
+const Transcript = memo(function Transcript({
   items,
   threadId,
   relPath,
@@ -253,8 +258,9 @@ function Transcript({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinned = useRef(true);
   const answerList = useThreadAnswers(threadId);
-  const answers = new Map(answerList.map((a) => [a.ref, a]));
-  const proposals = new Map(useThreadProposals(threadId).map((p) => [p.ref, p]));
+  const answers = useMemo(() => new Map(answerList.map((a) => [a.ref, a])), [answerList]);
+  const proposalList = useThreadProposals(threadId);
+  const proposals = useMemo(() => new Map(proposalList.map((p) => [p.ref, p])), [proposalList]);
   const last = items[items.length - 1];
   // Follow the conversation while the person is at the bottom.
   useEffect(() => {
@@ -299,7 +305,7 @@ function Transcript({
       )}
     </div>
   );
-}
+});
 
 /** What became of a proposal, as the transcript keeps it. An approved
  *  one ran once its run is recorded (`auditId`); until then it is still
@@ -317,7 +323,9 @@ function decidedLine(p: Proposal): string {
   }
 }
 
-function Item({
+/** Memoized: a message already shown isn't rendered (its markdown parsed)
+ *  again while the next one streams in. */
+const Item = memo(function Item({
   item,
   threadId,
   answers,
@@ -450,7 +458,7 @@ function Item({
     case "error":
       return <div style={notice("var(--severity-critical)")}>{item.message}</div>;
   }
-}
+});
 
 function ToolCard({
   call,

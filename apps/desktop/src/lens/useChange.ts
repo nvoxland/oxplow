@@ -2,12 +2,13 @@
  * A page's stored change analysis (`v_change*`): ensures the change on
  * mount and asks again whenever `v_change` changes — the analysis landed,
  * or the `change.analyze` consumer recomputed a working tree or open
- * effort as its stream moved. Slots pass the returned `changeId` to their
+ * effort as its stream moved — once a burst of such commits goes quiet
+ * (`coalesce`). Slots pass the returned `changeId` to their
  * lenses. See `.context/semantic-layer.md` → "Change analysis".
  */
 import { useEffect, useState } from "react";
 import { ensureChange, subscribeOxplowEvents } from "../api.js";
-import { readsChanged } from "./lensRerun.js";
+import { coalesce, readsChanged } from "./lensRerun.js";
 import type { ChangeRow, ChangeTarget } from "../tauri-bridge/generated/bindings.js";
 
 /** Whether `event` means the page should ask for its change again: a
@@ -40,11 +41,13 @@ export function useChange(target: ChangeTarget | null): { change: ChangeRow | nu
           if (live) setError(e instanceof Error ? e.message : String(e));
         });
     ensure();
+    const again = coalesce(ensure);
     const off = subscribeOxplowEvents((event) => {
-      if (shouldReensure(event, current)) ensure();
+      if (shouldReensure(event, current)) again.schedule();
     });
     return () => {
       live = false;
+      again.cancel();
       off();
     };
     // `key` stands in for `target` (a fresh object each render).

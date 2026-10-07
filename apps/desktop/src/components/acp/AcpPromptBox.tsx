@@ -5,8 +5,6 @@ import { subscribeAgentInput } from "../../agent-input-bus.js";
 
 interface Props {
   threadId: string;
-  draft: string;
-  setDraft: React.Dispatch<React.SetStateAction<string>>;
   /** A turn is in flight: Enter does nothing (prompts are never queued). */
   busy: boolean;
   /** No live session (starting, stopped, failed to open). */
@@ -24,17 +22,19 @@ interface Props {
  * Enter sends, Shift+Enter adds a newline, Escape stops a running turn.
  * "Add to agent context" gestures (agent-input-bus) append to the draft
  * while this box is visible; they never send.
+ *
+ * The draft is this box's own state, so a keystroke re-renders the box
+ * and nothing else — never the transcript above it.
  */
 export function AcpPromptBox({
   threadId,
-  draft,
-  setDraft,
   busy,
   disabled,
   visible,
   onCancel,
   onError,
 }: Props) {
+  const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -44,7 +44,7 @@ export function AcpPromptBox({
       setDraft((d) => (d && !d.endsWith(" ") && !d.endsWith("\n") ? `${d} ${text}` : `${d}${text}`));
       inputRef.current?.focus();
     });
-  }, [visible, setDraft]);
+  }, [visible]);
 
   const canSend = !busy && !disabled && !sending && draft.trim().length > 0;
 

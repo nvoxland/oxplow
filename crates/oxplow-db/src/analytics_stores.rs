@@ -18,7 +18,6 @@ use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
 use crate::event_log_store::append_tx;
 use crate::page_ref_projections::finding_edges;
-use crate::page_ref_store::SqlitePageRefStore;
 use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
 use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2, VcsHeadMoved, VcsHeadMovedV1};
 use oxplow_domain::events::{Anchors, Envelope};
@@ -550,15 +549,11 @@ fn row_to_scan(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeQualityScan> {
 #[derive(Clone)]
 pub struct SqliteCodeQualityStore {
     db: Database,
-    page_refs: SqlitePageRefStore,
 }
 
 impl SqliteCodeQualityStore {
     pub fn new(db: Database) -> Self {
-        Self {
-            page_refs: SqlitePageRefStore::new(db.clone()),
-            db,
-        }
+        Self { db }
     }
 
     /// Start a scan of `revision` (`oxplow_domain::vcs::Revision`'s
@@ -613,39 +608,73 @@ impl SqliteCodeQualityStore {
             .await
     }
 
-    pub async fn append_finding(
+    /// Finish scan `scan_id` as done with its `findings`, in one write
+    /// transaction (so one commit, one `ModelsChanged`): each finding, its
+    /// file edge in `page_ref`, the scan's status — and the older finished
+    /// scans of the same tool and scope it replaces, with their findings
+    /// and edges. Readers only ever want a scope's latest scan; a running
+    /// one is left alone.
+    pub async fn finish_scan_with_findings(
         &self,
         scan_id: i64,
-        finding: CodeQualityFinding,
+        findings: Vec<CodeQualityFinding>,
     ) -> Result<(), DomainError> {
-        let finding_clone = finding.clone();
-        let finding_id: i64 = self
-            .db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT INTO code_quality_finding
-                       (scan_id, path, start_line, end_line, kind, metric_value, extra_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        scan_id,
-                        finding_clone.path,
-                        finding_clone.start_line,
-                        finding_clone.end_line,
-                        finding_clone.kind,
-                        finding_clone.metric_value,
-                        finding_clone.extra_json,
-                    ],
-                )?;
-                Ok(conn.last_insert_rowid())
+        self.db
+            .transaction(move |tx| {
+                let sql = crate::database::map_sql_err;
+                for f in &findings {
+                    tx.execute(
+                        "INSERT INTO code_quality_finding
+                           (scan_id, path, start_line, end_line, kind, metric_value, extra_json)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![
+                            scan_id,
+                            f.path,
+                            f.start_line,
+                            f.end_line,
+                            f.kind,
+                            f.metric_value,
+                            f.extra_json,
+                        ],
+                    )
+                    .map_err(sql)?;
+                    let id = tx.last_insert_rowid().to_string();
+                    crate::page_ref_store::replace_source_tx(
+                        tx,
+                        "finding",
+                        &id,
+                        finding_edges(&id, &f.path),
+                    )?;
+                }
+                tx.execute(
+                    "UPDATE code_quality_scan SET status = 'done', ended_at = ?2, error = NULL
+                     WHERE id = ?1",
+                    params![scan_id, ts_to_string(Timestamp::now())],
+                )
+                .map_err(sql)?;
+                // The scans this one replaces: same tool and scope, older,
+                // finished. Their findings cascade; their edges don't.
+                let superseded = "SELECT o.id FROM code_quality_scan o
+                     JOIN code_quality_scan n ON n.id = ?1
+                     WHERE o.tool = n.tool AND o.scope = n.scope AND o.id < n.id
+                       AND o.status <> 'running'";
+                tx.execute(
+                    &format!(
+                        "DELETE FROM page_ref WHERE source_kind = 'finding' AND source_id IN (
+                           SELECT CAST(f.id AS TEXT) FROM code_quality_finding f
+                           WHERE f.scan_id IN ({superseded}))"
+                    ),
+                    params![scan_id],
+                )
+                .map_err(sql)?;
+                tx.execute(
+                    &format!("DELETE FROM code_quality_scan WHERE id IN ({superseded})"),
+                    params![scan_id],
+                )
+                .map_err(sql)?;
+                Ok(())
             })
-            .await?;
-        {
-            let refs = &self.page_refs;
-            let edges = finding_edges(&finding_id.to_string(), &finding.path);
-            refs.replace_source("finding", &finding_id.to_string(), edges)
-                .await?;
-        }
-        Ok(())
+            .await
     }
 
     /// All findings across every scan as `(rowid, path)`. Used by
@@ -3528,9 +3557,9 @@ mod tests {
             .await
             .unwrap();
         store
-            .append_finding(
+            .finish_scan_with_findings(
                 id,
-                CodeQualityFinding {
+                vec![CodeQualityFinding {
                     id: 0,
                     scan_id: id,
                     path: "src/main.rs".into(),
@@ -3539,12 +3568,8 @@ mod tests {
                     kind: "complexity".into(),
                     metric_value: 14.0,
                     extra_json: None,
-                },
+                }],
             )
-            .await
-            .unwrap();
-        store
-            .finish_scan(id, CodeQualityScanStatus::Done, None)
             .await
             .unwrap();
         let scans = store.list_scans(10).await.unwrap();
@@ -3553,6 +3578,79 @@ mod tests {
         let findings = store.list_findings(id).await.unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].metric_value, 14.0);
+    }
+
+    /// A scan's findings land with it in one write, and a newer finished
+    /// scan of the same tool and scope replaces the older ones — their
+    /// findings and file edges with them — while other scopes stay.
+    #[tokio::test]
+    async fn a_finished_scan_replaces_its_scopes_older_scans() {
+        let db = Database::in_memory();
+        let store = SqliteCodeQualityStore::new(db.clone());
+        let finding = |path: &str| CodeQualityFinding {
+            id: 0,
+            scan_id: 0,
+            path: path.into(),
+            start_line: 1,
+            end_line: 12,
+            kind: "duplicate-block".into(),
+            metric_value: 12.0,
+            extra_json: None,
+        };
+        let scan = |scope: &'static str| {
+            let store = &store;
+            async move {
+                store
+                    .create_scan("duplication", scope, "working", "x")
+                    .await
+                    .unwrap()
+            }
+        };
+        let old = scan("change 1").await;
+        store
+            .finish_scan_with_findings(old, vec![finding("a.rs"), finding("b.rs")])
+            .await
+            .unwrap();
+        let other = scan("change 2").await;
+        store
+            .finish_scan_with_findings(other, vec![finding("c.rs")])
+            .await
+            .unwrap();
+        let new = scan("change 1").await;
+        store
+            .finish_scan_with_findings(new, vec![finding("a.rs")])
+            .await
+            .unwrap();
+
+        let mut ids: Vec<i64> = store
+            .list_scans(10)
+            .await
+            .unwrap()
+            .iter()
+            .map(|s| s.id)
+            .collect();
+        ids.sort();
+        assert_eq!(ids, vec![other, new]);
+        assert_eq!(
+            store.list_scans(10).await.unwrap()[0].status,
+            CodeQualityScanStatus::Done
+        );
+        assert_eq!(store.list_findings(new).await.unwrap().len(), 1);
+        assert!(store.list_findings(old).await.unwrap().is_empty());
+        let edges: i64 = db
+            .call(|c| {
+                c.query_row(
+                    "SELECT count(*) FROM page_ref WHERE source_kind = 'finding'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            edges, 2,
+            "one edge each for the new scan's and change 2's findings"
+        );
     }
 
     #[tokio::test]

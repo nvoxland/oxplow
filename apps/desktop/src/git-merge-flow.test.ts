@@ -115,7 +115,12 @@ describe("vcsMerge — UI-initiated background VCS op", () => {
       },
     }));
 
-    api = await import("./api.js");
+    // A fresh `api.js` over the mocks above, installed as the one every
+    // importer (`git-op.js` too) sees: another test file may have mocked
+    // `api.js` already, and that copy is wired to the real transport.
+    api = await import("./api.js?merge-flow");
+    const fresh = api;
+    mock.module("./api.js", () => fresh);
   });
 
   afterEach(() => {

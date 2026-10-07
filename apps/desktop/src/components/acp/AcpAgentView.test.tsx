@@ -72,6 +72,19 @@ mock.module("../../api.js", () => ({
   }),
 }));
 
+// Counts the transcript's message renders; renders the real thing.
+// Held before mocking: Bun patches the module's exports in place.
+const realMarkdown = { ...(await import("../Wiki/MarkdownView.js")) };
+const RealMarkdownView = realMarkdown.MarkdownView;
+let markdownRenders = 0;
+mock.module("../Wiki/MarkdownView.js", () => ({
+  ...realMarkdown,
+  MarkdownView: (props: Parameters<typeof RealMarkdownView>[0]) => {
+    markdownRenders++;
+    return <RealMarkdownView {...props} />;
+  },
+}));
+
 const { AcpAgentView } = await import("./AcpAgentView.js");
 
 const thread = { id: "thr1", acp_agent: "fake", agent: "acp" } as unknown as Thread;
@@ -93,6 +106,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AcpAgentView", () => {
+  test("typing in the prompt box doesn't re-render the transcript", async () => {
+    const view = render(<AcpAgentView thread={thread} visible={true} />);
+    await waitFor(() => expect(view.getByTestId("acp-transcript").textContent).toContain("done"));
+    const before = markdownRenders;
+    const input = view.getByTestId("acp-prompt-input") as HTMLTextAreaElement;
+    for (const text of ["h", "he", "hel", "hell", "hello"]) {
+      fireEvent.change(input, { target: { value: text } });
+    }
+    expect(input.value).toBe("hello");
+    expect(markdownRenders).toBe(before);
+  });
+
   // Starting is a loading state, said plainly; only an empty transcript
   // is an EmptyState (what would be here, and prompts to start it).
   test("the starting state is plain text; an empty transcript is an EmptyState", async () => {

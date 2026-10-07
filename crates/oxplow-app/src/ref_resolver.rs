@@ -453,9 +453,9 @@ mod tests {
             .unwrap();
         services
             .code_quality_store
-            .append_finding(
+            .finish_scan_with_findings(
                 scan,
-                CodeQualityFinding {
+                vec![CodeQualityFinding {
                     id: 0,
                     scan_id: scan,
                     path: "src/app.rs".into(),
@@ -464,7 +464,7 @@ mod tests {
                     kind: "high_complexity".into(),
                     metric_value: 17.0,
                     extra_json: None,
-                },
+                }],
             )
             .await
             .unwrap();
