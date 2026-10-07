@@ -6,14 +6,14 @@ import type { LensRun } from "../tauri-bridge/generated/bindings.js";
 // tsk984: the host loads the component's bundle (its version) before it
 // shows a frame, and the frame is served that version.
 const realApi = await import("../api.js");
-const loads: Array<[string, string | null]> = [];
+const loads: string[] = [];
 let loadFails: string | null = null;
 mock.module("../api.js", () => ({
   ...realApi,
-  loadComponent: async (id: string, streamId: string | null) => {
-    loads.push([id, streamId]);
+  loadComponent: async (id: string) => {
+    loads.push(id);
     if (loadFails) throw new Error(loadFails);
-    return `v-${streamId ?? "primary"}`;
+    return "v-1";
   },
 }));
 
@@ -41,9 +41,9 @@ test("the component's frame is scripts-only, at its loaded bundle, marked custom
     <CustomComponentViz run={run({ component: "burndown", props: null })} streamId="str1" fallback={fallback} base="http://127.0.0.1:9" />,
   );
   const frame = await view.findByTestId("custom-component-frame");
-  expect(loads).toEqual([["x/burn", "str1"]]);
+  expect(loads).toEqual(["x/burn"]);
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-  expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-str1/");
+  expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-1/");
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
   expect(view.getByTestId("custom-component-badge").textContent).toBe("custom");
   expect(view.queryByTestId("the-table")).toBeNull();
@@ -120,19 +120,15 @@ test("with `onFailure`, a component that can't be shown is reported and shows no
   expect(hostless.queryByTestId("the-table")).toBeNull();
 });
 
-// A stream switch loads the bundle from the other worktree: a new version
-// and a new frame, which is not the old one navigating away.
-test("another stream's bundle is a new frame, not a navigation", async () => {
+// The bundle is the main worktree's whatever the stream: a stream switch
+// keeps the frame and loads nothing again.
+test("a stream switch keeps the same frame", async () => {
   const props = (streamId: string) => (
     <CustomComponentViz run={run({ component: "burndown", props: null })} streamId={streamId} fallback={fallback} base="http://127.0.0.1:9" />
   );
   const view = render(props("str1"));
-  fireEvent.load(await view.findByTestId("custom-component-frame"));
+  const frame = await view.findByTestId("custom-component-frame");
   view.rerender(props("str2"));
-  await waitFor(() =>
-    expect(view.getByTestId("custom-component-frame").getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-str2/"),
-  );
-  fireEvent.load(view.getByTestId("custom-component-frame"));
-  await new Promise((r) => setTimeout(r, 20));
-  expect(view.queryByTestId("custom-component-fallback")).toBeNull();
+  expect(view.getByTestId("custom-component-frame")).toBe(frame);
+  expect(loads).toEqual(["x/burn"]);
 });

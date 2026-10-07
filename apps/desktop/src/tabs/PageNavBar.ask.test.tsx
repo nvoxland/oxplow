@@ -12,7 +12,7 @@ test("Ask About This puts the page's ref in the agent's input", async () => {
   const inserted: string[] = [];
   const off = subscribeAgentInput((t) => inserted.push(t));
   const view = render(
-    <PageNavBar canBack={false} canForward={false} onBack={() => {}} onForward={() => {}} ask={{ ref: "commit:abc123", streamId: null }} />,
+    <PageNavBar canBack={false} canForward={false} onBack={() => {}} onForward={() => {}} ask={{ ref: "commit:abc123" }} />,
   );
   fireEvent.click(view.getByTestId("page-nav-ask"));
   fireEvent.click(view.getByTestId("page-nav-ask-this"));

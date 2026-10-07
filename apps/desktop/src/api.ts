@@ -559,15 +559,16 @@ export async function querySql(
   return unwrap(await commands.querySql(sql, params, limit, raw));
 }
 
-/// Project extensions (and their lenses) in the stream's worktree, with
-/// per-extension load errors. See `.context/extensions.md`.
-export async function listExtensions(streamId: string | null): Promise<Extension[]> {
-  return unwrap(await commands.listExtensions(streamId));
+/// The extensions the app shows (and their lenses) — the main worktree's,
+/// for every stream — with per-extension load errors. See
+/// `.context/extensions.md`.
+export async function listExtensions(): Promise<Extension[]> {
+  return unwrap(await commands.listExtensions());
 }
 
 /// One lens by `<extension>/<slug>`.
-export async function getLens(id: string, streamId: string | null): Promise<Lens> {
-  return unwrap(await commands.getLens(id, streamId));
+export async function getLens(id: string): Promise<Lens> {
+  return unwrap(await commands.getLens(id));
 }
 
 /// Run a lens with param overrides (the rest use defaults).
@@ -631,8 +632,8 @@ export async function runComponentQuery(
 /** Load the `custom` lens `id`'s component bundle as it is now, for its
  *  frame (tsk984): the version the daemon serves it at and the frame
  *  invokes with. */
-export async function loadComponent(id: string, streamId: string | null): Promise<string> {
-  return unwrap(await commands.loadComponent(id, streamId));
+export async function loadComponent(id: string): Promise<string> {
+  return unwrap(await commands.loadComponent(id));
 }
 
 /** A custom component's frame invokes one of its declared commands, as the
@@ -642,17 +643,16 @@ export async function invokeComponentCommand(
   id: string,
   command: string,
   input: unknown,
-  streamId: string | null,
   confirmed: boolean,
   version: string,
 ): Promise<CommandOutcome> {
-  return unwrap(await commands.invokeComponentCommand(id, command, input as never, streamId, confirmed, version));
+  return unwrap(await commands.invokeComponentCommand(id, command, input as never, confirmed, version));
 }
 
-/** What the person can ask: every capability's questions and the stream's
- *  enabled extensions' prompts (the catalog; contextual suggestions). */
-export async function promptCatalog(streamId: string | null): Promise<CatalogPrompt[]> {
-  return unwrap(await commands.promptCatalog(streamId));
+/** What the person can ask: every capability's questions and the enabled
+ *  extensions' prompts (the catalog; contextual suggestions). */
+export async function promptCatalog(): Promise<CatalogPrompt[]> {
+  return unwrap(await commands.promptCatalog());
 }
 
 /** Every setting with its value and where it comes from (P6.H1). */
@@ -758,19 +758,33 @@ export async function testAiProvider(id: string, model: string): Promise<string>
   return unwrap(await commands.testAiProvider(id, model));
 }
 
+/** What `lens.keep` kept: the lens id, and whether the app shows it now
+ *  (kept in the main worktree) or once its stream is merged. */
+export interface KeptLens {
+  lens: string;
+  live: boolean;
+}
+
+/** `lens.keep`'s result as a [`KeptLens`]. */
+export function keptLens(result: unknown): KeptLens {
+  const r = (result ?? {}) as { lens?: unknown; live?: unknown };
+  return { lens: String(r.lens ?? ""), live: r.live !== false };
+}
+
 /// Keep a lens spec as a private lens (`lens.keep`) in `extension`, in this
 /// stream's worktree (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).
-/// Returns the lens id.
+/// Returns the lens id and whether the app shows it now (`live`) or once
+/// the stream is merged.
 export async function keepLensSpec(
   spec: LensSpec,
   extension: string,
   slug: string,
   streamId: string | null,
-): Promise<string> {
+): Promise<KeptLens> {
   const input: Record<string, unknown> = { spec, extension, slug };
   if (streamId) input.stream = streamId;
   const outcome = await runCommand("lens.keep", input);
-  return String((outcome.result as { lens?: unknown } | null)?.lens ?? "");
+  return keptLens(outcome.result);
 }
 
 /// What installing (`gitUrl`) or updating (`name`) an extension would

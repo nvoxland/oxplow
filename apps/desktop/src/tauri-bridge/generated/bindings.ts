@@ -150,7 +150,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	promptCatalog: (streamId: string | null) => typedError<CatalogPrompt[], IpcError>(__TAURI_INVOKE("prompt_catalog", { streamId })),
+	promptCatalog: () => typedError<CatalogPrompt[], IpcError>(__TAURI_INVOKE("prompt_catalog")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -170,12 +170,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listExtensions: (streamId: string | null) => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("list_extensions", { streamId })),
+	listExtensions: () => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("list_extensions")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getLens: (id: string, streamId: string | null) => typedError<Lens_Serialize, IpcError>(__TAURI_INVOKE("get_lens", { id, streamId })),
+	getLens: (id: string) => typedError<Lens_Serialize, IpcError>(__TAURI_INVOKE("get_lens", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -215,12 +215,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	loadComponent: (id: string, streamId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("load_component", { id, streamId })),
+	loadComponent: (id: string) => typedError<string, IpcError>(__TAURI_INVOKE("load_component", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	invokeComponentCommand: (id: string, command: string, input: unknown, streamId: string | null, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("invoke_component_command", { id, command, input, streamId, confirmed, version })),
+	invokeComponentCommand: (id: string, command: string, input: unknown, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("invoke_component_command", { id, command, input, confirmed, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.

@@ -1,8 +1,8 @@
 /// An extension's page (`page:ext.<extension>.<page>`, P6.G2): the lens
 /// its manifest's `pages:` entry names, full-page, starting with the page
 /// id's params (`?ref=` when it opens one of the extension's refs, P8.D7).
-/// The page resolves from the stream's extensions, so a restored tab (its
-/// id alone) opens too.
+/// The page resolves from the extensions the app shows (the main
+/// worktree's), so a restored tab (its id alone) opens too.
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useExtensions } from "../extensionsStore.js";
 import { Page } from "../tabs/Page.js";
@@ -23,7 +23,7 @@ export function ExtensionPageView({
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  const exts = useExtensions(stream?.id ?? null);
+  const exts = useExtensions();
   const found: ExtensionPage | null | undefined =
     exts === null ? undefined : (exts.find((e) => e.name === extension && e.enabled)?.pages.find((p) => p.id === page) ?? null);
 

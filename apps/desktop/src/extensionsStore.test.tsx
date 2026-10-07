@@ -1,17 +1,20 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
-// One load of the extensions per stream, shared by every component that
-// reads them while any is mounted, and one reload when they change.
+// One load of the extensions (the main worktree's, for every stream),
+// shared by every component that reads them while any is mounted, and one
+// reload when they change.
 
 const realApi = await import("./api.js");
 let loads = 0;
 let names = ["a"];
+let lastArgs: unknown[] = [];
 const listeners: Array<(e: Record<string, unknown>) => void> = [];
 mock.module("./api.js", () => ({
   ...realApi,
-  listExtensions: async () => {
+  listExtensions: async (...args: unknown[]) => {
     loads++;
+    lastArgs = args;
     return names.map((name) => ({ name, enabled: true, ui: { slots: [], commands: [], decorators: [] }, lenses: [] }));
   },
   subscribeOxplowEvents: (l: (e: Record<string, unknown>) => void) => {
@@ -28,11 +31,11 @@ afterEach(() => {
 });
 
 function Names({ id }: { id: string }) {
-  const exts = useExtensions("str1");
+  const exts = useExtensions();
   return <div data-testid={id}>{exts === null ? "…" : exts.map((e) => e.name).join(",")}</div>;
 }
 
-test("readers of one stream share one load and one event subscription", async () => {
+test("every reader shares one load and one event subscription", async () => {
   const view = render(
     <>
       <Names id="one" />
@@ -43,6 +46,7 @@ test("readers of one stream share one load and one event subscription", async ()
   await waitFor(() => expect(view.getByTestId("three").textContent).toBe("a"));
   expect(view.getByTestId("one").textContent).toBe("a");
   expect(loads).toBe(1);
+  expect(lastArgs).toEqual([]);
   expect(listeners.length).toBe(1);
 });
 

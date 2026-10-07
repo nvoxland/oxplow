@@ -381,6 +381,18 @@ Specifically:
 
 This rule takes priority over convenience heuristics like "find the nearest enclosing git repo."
 
+## The main worktree is the project
+
+The project's configuration — `.oxplow/project.yaml` and the extensions
+the app shows (`oxplow/extensions/`) — is read from the **main worktree**
+(the daemon's start directory) for every stream (decided 2026-10-07).
+Streams don't get their own config by reading their worktree's copy of
+these files: a stream edits its copy like any other code, and the change
+takes effect once merged into the main worktree. Agents' authoring tools
+are the exception — they check their own working copy before it's merged
+(see [extensions.md](./extensions.md) → "The main worktree is the
+project"). If per-stream config is ever needed, it gets a separate file.
+
 ## Core recommendation
 
 Prefer a **hybrid architecture**:

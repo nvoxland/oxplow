@@ -64,7 +64,7 @@ export function PanelRunsProvider({
   threadId: string | null;
   children: ReactNode;
 }) {
-  const exts = useExtensions(streamId);
+  const exts = useExtensions();
   const panels = useMemo(() => (exts ?? []).filter((e) => e.enabled).flatMap((e) => e.panels), [exts]);
   const [choices, setChoices] = useState<PanelChoices>(loadChoices);
   const choose = useCallback((panelId: string, param: string, value: string) => {

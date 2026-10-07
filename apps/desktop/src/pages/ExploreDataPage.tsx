@@ -7,10 +7,11 @@ import { keepLensSpec, querySql, type LensRun, type LensViz } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { ModelLineage } from "./ModelLineage.js";
 import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
-import { adHocLens, NEW_LENS_PROMPT, slugify } from "../lens/lensModel.js";
+import { adHocLens, KEPT_IN_STREAM, NEW_LENS_PROMPT, slugify } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { recordOpError } from "../components/opErrorsStore.js";
+import { showToast } from "../components/toastStore.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { LensChart, Reads, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import {
@@ -413,7 +414,7 @@ export function SaveAsLens({
   async function save() {
     if (!title.trim() || !extension.trim()) return;
     try {
-      const lens = await keepLensSpec(
+      const kept = await keepLensSpec(
         { title: title.trim(), description: "", query, viz, ...(chart ? { chart } : {}) },
         extension.trim(),
         slugify(title),
@@ -421,7 +422,8 @@ export function SaveAsLens({
       );
       setOpen(false);
       setTitle("");
-      onOpenPage(lensRef(lens));
+      if (kept.live) onOpenPage(lensRef(kept.lens));
+      else showToast({ message: KEPT_IN_STREAM });
     } catch (e) {
       recordOpError({ label: "Save lens", message: e instanceof Error ? e.message : String(e) });
     }

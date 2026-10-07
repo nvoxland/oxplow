@@ -775,10 +775,10 @@ impl OxplowMcp {
             .unwrap_or(serde_json::Value::Null);
         let mut lens_text = serde_json::Value::Null;
         if page.kind == "lens" {
-            if let (Some(lens_id), Some(root)) = (
-                page.page_id.strip_prefix("lens:"),
-                worktree_for_thread(&self.services, &thread).await,
-            ) {
+            if let Some(lens_id) = page.page_id.strip_prefix("lens:") {
+                // The app shows the main worktree's lenses, whatever the
+                // thread's stream.
+                let root = self.services.worktrees.project_dir();
                 let lens_params = detail
                     .get("params")
                     .and_then(|p| p.as_object())
@@ -794,13 +794,13 @@ impl OxplowMcp {
                     let run = oxplow_app::extensions::run_lens(
                         &self.services.sql,
                         &self.services.extension_catalog,
-                        &root,
+                        root,
                         lens_id,
                         lens_params,
                         &ctx,
                     )
                     .await?;
-                    oxplow_app::lens_text::text_run(&self.services, &root, &run, &ctx).await
+                    oxplow_app::lens_text::text_run(&self.services, root, &run, &ctx).await
                 };
                 lens_text = match read.await {
                     Ok(text) => serde_json::to_value(text).map_err(internal)?,
@@ -2510,27 +2510,6 @@ impl OxplowMcp {
         let listings = self.services.lsp_sessions.list_servers().await;
         json_result(&listings)
     }
-}
-
-/// Resolve the per-(stream, language) LspProxy. Helper sitting
-/// outside the `#[tool_router]` impl so the macro doesn't try to
-/// route it as a tool.
-/// Look up the worktree path for a thread by walking
-/// thread → stream. Returns `None` when either lookup fails so
-/// `record_effort` falls back to the safe default (every touched
-/// file → `Updated`). Used to plumb the worktree into
-/// `record_effort` so it can stat each touched file and detect
-/// deletions.
-async fn worktree_for_thread(
-    services: &Services,
-    thread_id: &oxplow_domain::ThreadId,
-) -> Option<std::path::PathBuf> {
-    let thread = services.thread_store.get(thread_id).await.ok().flatten()?;
-    let streams = services.streams.list_streams().await.ok()?;
-    streams
-        .into_iter()
-        .find(|s| s.id == thread.stream_id)
-        .map(|s| std::path::PathBuf::from(s.worktree_path))
 }
 
 fn code_stream(stream_id: &str) -> Result<StreamId, McpError> {

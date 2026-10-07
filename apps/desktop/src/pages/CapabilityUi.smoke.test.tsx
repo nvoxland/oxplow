@@ -93,7 +93,7 @@ afterEach(() => {
 const STREAM = { id: "str1", kind: "primary", title: "Main", branch: "main" } as never;
 /** `page` inside a navigation context for `ref`, as `App` mounts pages. */
 function mount(ref: string, page: ReactElement) {
-  const nav = { goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, ask: { ref, streamId: "str1" } };
+  const nav = { goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, ask: { ref } };
   return render(<PageNavigationContext.Provider value={nav as never}>{page}</PageNavigationContext.Provider>);
 }
 

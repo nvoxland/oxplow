@@ -12,7 +12,9 @@ import { RouteLink } from "../../tabs/RouteLink.js";
 import { lensRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { keepAnswer, type AnswerRow } from "../../threadAnswers.js";
+import { KEPT_IN_STREAM } from "../../lens/lensModel.js";
 import { recordOpError } from "../opErrorsStore.js";
+import { showToast } from "../toastStore.js";
 
 export interface ThreadAnswerProps {
   answer: AnswerRow;
@@ -99,9 +101,10 @@ function KeepThis({ answer, onKept }: { answer: string; onKept(lens: string): vo
         if (busy) return;
         setBusy(true);
         keepAnswer(answer, slug)
-          .then((lens) => {
+          .then((kept) => {
             setEditing(false);
-            onKept(lens);
+            if (!kept.live) showToast({ message: KEPT_IN_STREAM });
+            onKept(kept.lens);
           })
           .catch((err: unknown) => recordOpError({ label: "Keep This", message: err instanceof Error ? err.message : String(err) }))
           .finally(() => setBusy(false));

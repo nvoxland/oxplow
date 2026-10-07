@@ -70,7 +70,7 @@ export function IntegrationsSection() {
       const [listed, settings, extensions] = await Promise.all([
         listProviderInstances(),
         effectiveConfig(),
-        listExtensions(null),
+        listExtensions(),
       ]);
       setViews(listed);
       setReplaced(extensions.filter((e) => e.enabled).flatMap((e) => e.ui.replacements));

@@ -15,7 +15,7 @@ export function SettingsSlotSections({
   /** The host page's section chrome (title + body). */
   section(title: string, body: ReactNode): ReactNode;
 }) {
-  const names = slotExtensions(useExtensions(null) ?? [], "settings.section");
+  const names = slotExtensions(useExtensions() ?? [], "settings.section");
   return (
     <div data-testid="settings-slot">
       {names.map((name) => (

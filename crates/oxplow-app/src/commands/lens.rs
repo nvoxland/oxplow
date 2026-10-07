@@ -261,18 +261,19 @@ fn show(target: LensTarget) -> Command {
                 .ok_or_else(|| invalid("/thread", "no thread given and the caller has none"))?
                 .value(),
         };
-        let root = thread_root_tx(ctx.conn, &target.project_dir, thread).map_err(|e| match e {
-            DomainError::Invalid(m) => invalid("/thread", m),
-            other => CommandError::from(other),
-        })?;
+        let stream = thread_stream_tx(ctx.conn, thread)
+            .ok_or_else(|| invalid("/thread", format!("no thread `thr{thread}`")))?;
         let params = input.params.unwrap_or_default();
         let lens_ctx = LensContext {
-            stream_id: thread_stream_tx(ctx.conn, thread),
+            stream_id: Some(stream),
             thread_id: Some(thread),
         };
         let (title, shows, lens) = match (input.lens, input.spec) {
             (Some(id), None) => {
-                let lens = target.catalog.find_lens(&root, &id).map_err(domain)?;
+                let lens = target
+                    .catalog
+                    .find_lens(&target.project_dir, &id)
+                    .map_err(domain)?;
                 extensions::resolve_params(&lens, &cells(&params), &lens_ctx).map_err(domain)?;
                 (lens.title.clone(), AnswerShows::Lens(id.clone()), Some(id))
             }
@@ -532,7 +533,13 @@ fn keep(target: LensTarget) -> Command {
             )
             .with_subject(subject);
             Ok(HandlerOutput {
-                result: json!({ "lens": lens.id, "path": lens.path }),
+                // `live`: written to the main worktree, so the app shows it
+                // now; in another stream's, it shows once that's merged.
+                result: json!({
+                    "lens": lens.id,
+                    "path": lens.path,
+                    "live": root == target.project_dir,
+                }),
                 inverse: None,
                 events: vec![event],
                 after_commit: None,
@@ -545,7 +552,8 @@ fn keep(target: LensTarget) -> Command {
             name: KEEP.into(),
             summary: "Keep an answer from a thread, or a lens spec of your own, as a private \
                       lens (a page the person can reopen, pin and share), recording where it \
-                      came from."
+                      came from. Kept in another stream's worktree, it shows in the app once \
+                      that stream is merged (`live: false`)."
                 .into(),
             input_schema: serde_json::to_value(schemars::schema_for!(KeepInput))
                 .expect("schema serializes"),
@@ -739,8 +747,8 @@ pub async fn run_answer(
 }
 
 /// Answer `id`'s run and its text rendering — what an agent reads back
-/// from `show_lens` — resolved in the answer's own thread's worktree and
-/// lens context, the same ones the run used.
+/// from `show_lens` — resolved in the answer's own thread's lens context
+/// against the main worktree's lenses, the same ones the run used.
 pub async fn text_answer(
     svc: &crate::Services,
     id: i64,
@@ -750,8 +758,8 @@ pub async fn text_answer(
     Ok((run, text))
 }
 
-/// The one resolution of an answer: its thread's worktree and lens
-/// context, and the run in them.
+/// The one resolution of an answer: the main worktree (where every lens
+/// the app shows lives), its thread's lens context, and the run in them.
 async fn answer_run(
     svc: &crate::Services,
     id: i64,
@@ -762,15 +770,7 @@ async fn answer_run(
         .await?
         .ok_or(DomainError::NotFound)?;
     let thread = ThreadId::new(answer.thread_id);
-    let root = {
-        use oxplow_domain::stores::ThreadStore as _;
-        let stream = svc
-            .thread_store
-            .get(&thread)
-            .await?
-            .map(|t| t.stream_id.to_string());
-        svc.worktrees.resolve(stream.as_deref()).await
-    };
+    let root = svc.worktrees.project_dir().to_path_buf();
     let ctx = extensions::lens_context(svc, None, Some(thread)).await;
     let params = match &answer.params {
         Value::Object(m) => m
@@ -859,6 +859,49 @@ mod tests {
             text.contains("Busy Tasks") || text.contains("title"),
             "{text}"
         );
+    }
+
+    /// A thread in a worktree stream shows and runs the main worktree's
+    /// lenses: what the app shows never comes from a stream's copy.
+    #[tokio::test]
+    async fn a_worktree_thread_shows_the_main_worktrees_lens() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let ext = fx.svc.layout.project_dir.join("oxplow/extensions/demo");
+        std::fs::create_dir_all(ext.join("lenses")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: demo\nintent:\n  purpose: test\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("lenses/tasks.yaml"),
+            "title: Tasks\nquery: SELECT title FROM v_task\n",
+        )
+        .unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        let wt = worktree.path().to_string_lossy().to_string();
+        fx.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "UPDATE streams SET worktree_path = ?1 WHERE id = 1",
+                    [wt.as_str()],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let out = fx
+            .svc
+            .commands
+            .run(&agent(&fx), SHOW, json!({ "lens": "demo/tasks" }), false)
+            .await
+            .unwrap();
+        let id = answer_id(out.result["answer"].as_str().unwrap()).unwrap();
+        let (run, text) = text_answer(&fx.svc, id).await.unwrap();
+        assert_eq!(run.lens.id, "demo/tasks");
+        assert!(text.contains("| title |"), "{text}");
     }
 
     /// An agent shows answers in its own thread only: naming another one
@@ -1233,8 +1276,12 @@ mod tests {
         let own = fx.svc.streams.list_streams().await.unwrap()[0]
             .id
             .to_string();
-        keep(agent(&fx), &own, "mine").await.unwrap();
-        keep(Actor::Human, "str2", "theirs").await.unwrap();
+        // Kept in the main worktree, it shows now; in another stream's,
+        // once that stream is merged.
+        let mine = keep(agent(&fx), &own, "mine").await.unwrap();
+        assert_eq!(mine.result["live"], json!(true));
+        let theirs = keep(Actor::Human, "str2", "theirs").await.unwrap();
+        assert_eq!(theirs.result["live"], json!(false));
         assert!(wt
             .path()
             .join("oxplow/extensions/kept/lenses/theirs.yaml")

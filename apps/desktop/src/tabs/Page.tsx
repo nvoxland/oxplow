@@ -163,7 +163,7 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
   // Extensions' decorations for this page's ref (P6b.C5), after the page's
   // own chips: additive, the header is complete without them.
   const pageRef = ctxNav?.ask?.ref ?? null;
-  const decorations = useDecorations("ref-chip", pageRef ? [pageRef] : [], ctxNav?.ask?.streamId ?? null);
+  const decorations = useDecorations("ref-chip", pageRef ? [pageRef] : []);
   const decorationChips = pageRef ? chipsFor(decorations, pageRef) : [];
   const chips = decorationChips.length > 0 ? [...(ownChips ?? []), ...decorationChips] : ownChips;
   // Normalize the `backlinks` prop: `{ count, body }` shape carries an

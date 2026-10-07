@@ -60,7 +60,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     wiki | effort-diff, from}`) and `empty`.
   - Unknown keys are errors, so typos surface instead of being ignored.
 - **Ids.** A lens id is `<extension>/<slug>`.
-- **Reading.** Everything is read from the **stream's worktree**, through
+- **Reading.** What the app shows is read from the **main worktree**
+  (the daemon's project dir), whichever stream is open: listings, lens
+  pages, slots and panels, custom components, prompts, advisories,
+  `lens.show` / thread answers and `get_open_page`. A stream's `stream_id`
+  only scopes the data a lens reads (`:stream_id` / `:thread_id`). See
+  "Per stream" below. Reads go through
   `Services.extension_catalog` (`crates/oxplow-app/src/extension_catalog.rs`):
   a per-root cache behind a stat-only fingerprint of `oxplow/extensions/**`
   (every file in the folder — a custom component's bundle too, so its
@@ -85,14 +90,22 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - IPC and MCP: `list_extensions`, `get_lens`, `run_lens`,
     `validate_extension`.
   - MCP only: `list_lenses`.
-  - All take an optional `stream_id`. Over MCP an omitted one is the
-    caller's own stream (its header, else its thread's; the primary only
-    for an anonymous caller), so an agent in a worktree sees the
-    extension it just wrote — the same for `preview_collector`,
-    `review_extension`, `extension.install`, `extension.update`,
-    `run_lens_action` and `ensure_change` (tsk574). `site_search` is the
-    exception by design: omitted, it searches every stream. The UI
-    (IPC) names its stream.
+  - **Over MCP these are the authoring tools** and read the caller's
+    **working copy**: an omitted `stream_id` is the caller's own stream
+    (its header, else its thread's; the primary only for an anonymous
+    caller), so an agent in a worktree can check the extension it just
+    wrote before it's merged — the same for `list_lenses`,
+    `preview_collector`, `review_extension`, `extension.install`,
+    `extension.update`, `run_lens_action` and `ensure_change`.
+    `site_search` is the exception by design: omitted, it searches every
+    stream.
+  - **Over IPC (the UI)** they show the main worktree's extensions:
+    `list_extensions`, `get_lens`, `load_component`,
+    `invoke_component_command` and `prompt_catalog` take no stream;
+    `run_lens`, `lens_text`, `lens_form`, `submit_lens_form`,
+    `run_component_query` and `run_lens_action` take one only for the
+    lens's data context. `validate_extension` and `review_extension` are
+    authoring calls and check the named stream's working copy.
   - `get_open_page` (MCP) plus `report_open_page` (UI) are current; see
     "Agents: the MCP surface".
     Agents write lens files with their normal Edit tool, under the filing
@@ -115,7 +128,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     lens host uses `useRerunOnChange` in `src/lens/lensRerun.ts`.
   - "Improve with Agent" inserts `[oxplow lens <id> k=v…]`, with only the
     changed params, through the standard add-to-context path.
-  - The Cmd+P launcher re-reads lenses from the stream's worktree every
+  - The Cmd+P launcher re-reads lenses (the main worktree's) every
     time it opens and lists them under their `launcher.category`
     (default **Lenses**; `hidden` ones not at all), merged into the
     static directory by category order (`mergeDirectory`).
@@ -305,7 +318,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       tsk943 — on the bus like Keep This, in the stream's worktree; its
       shape checked as `lens.show` checks one, its query through the SQL
       gateway as the explorer runs it, so a `metric_grid()` chart is kept,
-      tsk987), then opens the new lens.
+      tsk987), then opens the new lens — or, kept in a non-main stream's
+      worktree (`live: false`), toasts that it shows once the stream is
+      merged (`KEPT_IN_STREAM`; Keep This does the same).
       It creates the extension if missing
       (with the same v2 manifest `oxplow plugin new` writes —
       `extensions::scaffold_manifest`, so a saved lens starts as a
@@ -577,11 +592,22 @@ oxplow content already lives in `oxplow/` at the repo root (for example
 ordinary project files: visible in the file tree, diffed, reviewed and
 merged like code.
 
-**Per stream.** Extensions are read from the **stream's worktree**. An
-agent building a lens in a worktree stream sees it there immediately.
-Other streams see it once it's merged, just like any other code change.
+**The main worktree is the project** (decided 2026-10-07). What the app
+shows — and the `extensions.disabled` list in `.oxplow/project.yaml` —
+comes from the main worktree, the same in every stream. Extensions are
+mostly cross-stream concerns, so branching them per stream was the wrong
+separation. Writes still go where code goes: an agent in a worktree stream
+edits its own worktree's `oxplow/extensions/` (the write guard keeps it
+out of the main checkout), and `lens.keep` / `lens.share` /
+`extension.install` / `extension.update` write to the named stream's
+worktree. The app shows that work once it's merged into the main
+worktree, like any other code change. Until then the MCP authoring tools
+(`validate_extension`, `run_lens`, `get_lens`, …) read the agent's own
+working copy so it can check what it wrote. If per-stream config is ever
+needed, it goes in a separate file, not a per-worktree read of
+`project.yaml`.
 
-Each extension is enabled or disabled per project in
+Each extension is enabled or disabled per project in the main worktree's
 `.oxplow/project.yaml`. Loading respects the workspace isolation rule
 ([architecture.md](./architecture.md)). A malformed extension shows an
 error for that extension only; it never breaks the others or core.
@@ -1308,12 +1334,13 @@ the extensions list (`useUiCommands`) and runs each as the person
 through `personCommands` (`components/uiCommands.ts`).
 
 **The desktop reads the extensions from one store**
-(`extensionsStore.ts`, `useExtensions(streamId)`): one `listExtensions`
-per stream and one event subscription however many readers are mounted
+(`extensionsStore.ts`, `useExtensions()`): one `listExtensions` (the
+main worktree's, the same in every stream) and one event subscription
+however many readers are mounted
 (slots, `useSlotMounted`, `SettingsSlotSections`, `ui.commands` menus,
 decorators, rail panels, extension pages, the launcher), reloaded on
-`extensionsChanged`; an entry lives while something reads it, so a later
-mount loads afresh. Only Settings → Extensions lists them itself — it
+`extensionsChanged`; the listing lives while something reads it, so a
+later mount loads afresh. Only Settings → Extensions lists them itself — it
 reloads after its own installs and updates.
 
 ## Custom components
@@ -2430,7 +2457,8 @@ advisories:
   again. `advisories::consented` filters before running; bundled
   extensions aren't gated.
 - `for_thread(svc, thread, on, cause)` runs them for a thread, reading
-  extensions from its stream worktree.
+  the main worktree's extensions (whatever the thread's stream) and
+  binding the thread's stream into the scope.
 - `validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
 - oxplow-bundled ships hints on outcomes: `large-uncommitted` (turn-end,
