@@ -23,7 +23,6 @@ test("the native menu is the shell's own snapshot shape", () => {
   for (const g of groups) walk(g.items);
   expect([...keys].sort()).toEqual(["checked", "enabled", "id", "label", "shortcut", "submenu"].filter((k) => keys.has(k)).sort());
   expect(keys.has("separator")).toBe(false);
-  expect(keys.has("opensPage")).toBe(false);
   const file = groups.find((g) => g.id === "file")!;
   const recent = file.items.find((i) => i.id === "project.openRecent")!;
   expect(recent.submenu).toEqual([

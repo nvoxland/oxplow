@@ -35,7 +35,7 @@ function file(path: string): WorkspaceIndexedFile {
 }
 
 function group(
-  items: { id: string; label: string; enabled: boolean; run?: () => void; opensPage?: boolean }[],
+  items: { id: string; label: string; enabled: boolean; run?: () => void }[],
 ): MenuGroup {
   return {
     id: "git",
@@ -84,20 +84,6 @@ describe("flattenCommands", () => {
       { id: "edit", label: "Edit", items: [{ id: "native.copy", label: "Copy", enabled: true, run: undefined }] } as unknown as MenuGroup,
     ]);
     expect(out).toHaveLength(0);
-  });
-
-  test("drops page-navigation commands (opensPage marker) that duplicate the pages directory", () => {
-    const out = flattenCommands([
-      group([
-        { id: "tasks.dashboard", label: "Dashboard", enabled: true, opensPage: true },
-        { id: "git.dashboard", label: "Dashboard", enabled: true, opensPage: true },
-        { id: "view.files", label: "Files", enabled: true, opensPage: true },
-        { id: "git.commit", label: "Commit Changes…", enabled: true },
-      ]),
-    ]);
-    // Only the genuine action survives; the opensPage rows are dropped
-    // (the launcher shows their canonical "page" entry instead).
-    expect(out.map((c) => c.id)).toEqual(["git.commit"]);
   });
 });
 
