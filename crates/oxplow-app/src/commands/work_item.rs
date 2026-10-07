@@ -184,6 +184,13 @@ pub fn oxplow_task(
         field: Some(field.into()),
         message,
     };
+    let canonical;
+    let item_ref = if item_ref.starts_with("work_item:") {
+        item_ref
+    } else {
+        canonical = canonical_ref(registry, item_ref).map_err(invalid)?;
+        canonical.as_str()
+    };
     let provider = provider_of(item_ref).map_err(|e| invalid(e.to_string()))?;
     registry.get(provider).map_err(|e| invalid(e.to_string()))?;
     if provider != OXPLOW {
@@ -234,6 +241,56 @@ fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError
         field: None,
         message: e.to_string(),
     })
+}
+
+/// The fields that name a work item, in any command's input.
+const REF_FIELDS: [&str; 4] = ["ref", "parent_ref", "target", "work_item"];
+
+/// `input` with each work-item field that holds a loose id (`tsk12`)
+/// made canonical against the active work list, which declares what its
+/// ids look like (`WorkItemsProvider::id_pattern`). A canonical ref is
+/// left as it is; a loose id the active list doesn't declare is `Invalid`
+/// at its field.
+pub(crate) fn with_loose_refs(
+    registry: &WorkItemsRegistry,
+    mut input: Value,
+) -> Result<Value, CommandError> {
+    for key in REF_FIELDS {
+        let Some(raw) = input.get(key).and_then(Value::as_str) else {
+            continue;
+        };
+        if raw.starts_with("work_item:") {
+            continue;
+        }
+        let canonical =
+            canonical_ref(registry, raw).map_err(|m| invalid_at(&format!("/{key}"), m))?;
+        input[key] = Value::String(canonical);
+    }
+    Ok(input)
+}
+
+/// The canonical ref of `raw`, a loose id of the active work list's.
+fn canonical_ref(registry: &WorkItemsRegistry, raw: &str) -> Result<String, String> {
+    let active = registry.active();
+    let pattern = registry.get(&active).ok().and_then(|p| p.id_pattern);
+    match pattern {
+        Some(p) if regex::Regex::new(&format!("^(?:{p})$")).is_ok_and(|r| r.is_match(raw)) => {
+            Ok(format!("work_item:{active}:{raw}"))
+        }
+        Some(p) => Err(format!(
+            "`{raw}` isn't a work item ref (work_item:<provider>:<id>) or an id of the active \
+             work list (`{p}`)"
+        )),
+        None => Err(format!(
+            "`{raw}` isn't a work item ref (work_item:<provider>:<id>), and the active work \
+             list declares no id of its own"
+        )),
+    }
+}
+
+/// `tx` run on its input's loose ids made canonical ([`with_loose_refs`]).
+fn resolving(registry: WorkItemsRegistry, tx: Arc<TxHandler>) -> Arc<TxHandler> {
+    Arc::new(move |ctx: &TxCtx<'_>, input: Value| tx(ctx, with_loose_refs(&registry, input)?))
 }
 
 fn invalid_at(field: &str, message: String) -> CommandError {
@@ -429,9 +486,13 @@ fn dispatching(
     } else {
         tx
     };
+    // A loose id is the active list's, on every path (route, inside the
+    // transaction, through the provider).
+    let tx = resolving(registry.clone(), tx);
     let route_registry = registry.clone();
     let route = Arc::new(move |input: &Value| {
-        target(&route_registry, input).map(|p| match p.external {
+        let input = with_loose_refs(&route_registry, input.clone())?;
+        target(&route_registry, &input).map(|p| match p.external {
             None => Route::Tx,
             Some(_) => Route::External(format!("provider `{}`", p.id)),
         })
@@ -439,6 +500,7 @@ fn dispatching(
     let external = Arc::new(move |invocation: Invocation, input: Value| {
         let registry = registry.clone();
         Box::pin(async move {
+            let input = with_loose_refs(&registry, input)?;
             let provider = target(&registry, &input)?;
             let verbs = provider.external.ok_or_else(|| CommandError::Failed {
                 message: format!(
@@ -1508,7 +1570,8 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": "tsk42", "to": "done" }),
+                // Not a ref, nor an id the active list declares.
+                json!({ "ref": "ENG-12", "to": "done" }),
                 false,
             )
             .await
@@ -1685,6 +1748,67 @@ mod tests {
     /// `create` right after a person chose another files there, with no
     /// reconcile in between; one that isn't available resolves to none, and
     /// filing says so.
+    /// A loose id the active work list declares (`tsk12` for oxplow's
+    /// tasks) is that list's item, in every work-item ref field and in an
+    /// effort's link; one it doesn't declare is refused naming the shapes.
+    #[tokio::test]
+    async fn a_loose_id_resolves_against_the_active_work_list() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let loose = fx.task.to_string();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                NAME,
+                json!({ "ref": loose, "to": "blocked" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["status"], "blocked");
+        let child = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "child", "parent_ref": loose }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(child.result["parent_id"], json!(loose));
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                crate::commands::effort::LINK,
+                json!({ "effort": fx.effort.to_string(), "work_item": loose }),
+                false,
+            )
+            .await
+            .unwrap();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                NAME,
+                json!({ "ref": "ENG-1", "to": "done" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            CommandError::Invalid { field, message } => {
+                assert_eq!(field.as_deref(), Some("/ref"));
+                assert!(message.contains("tsk"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn a_create_reads_the_active_provider_the_config_names_now() {
         let fx = crate::test_fixtures::services_with_effort().await;

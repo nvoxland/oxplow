@@ -231,7 +231,17 @@ registry's `active()` resolves from the config as it is now, so a
 person's choice applies to the very next `create`. Every
 `work_item.create` files on the active work list; with none active it is
 `Invalid` ("Needs: Work list …", the bus's refusal for an unmet need),
-never another list. The
+never another list. **Loose ids.** A work list declares what its ids look
+like (`WorkItemsProvider::id_pattern`, a regex matched whole: oxplow's
+tasks `tsk\d+`, an external one its `providers:` entry's `id_pattern`).
+A work-item field (`ref`, `parent_ref`, `target`, `work_item`, and
+`reorder` / `move`'s refs) holding a loose id that matches the active
+list's is that list's item — `tsk12` is `work_item:oxplow:tsk12` while
+oxplow's tasks are active (`commands/work_item.rs` `with_loose_refs`, on
+every path: routing, the transaction, the provider; also `effort.link` /
+`effort.open`). One that doesn't match is `Invalid` at its field, naming
+both shapes. Free-text recognition (wikilinks, commit bodies) is still
+core's. The
 conformance suite runs with the provider under test active, and checks it. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and
 `featuresFor(providers, provider)` → `WorkItemsFeatures` (the Rust type,

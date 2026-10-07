@@ -301,11 +301,17 @@ providers:
                                  # `{ name, oauth }` — "Credentials and sign-in"
     network: [api.example.com]   # hosts it may reach
     declarations: provider.json  # its InitializeResult, checked in
+    id_pattern: "[A-Z]+-\\d+"     # a work list's own ids (optional)
 ```
+
+`id_pattern` (a regex matched whole) is what a work list's ids look
+like: while it's the active one, a loose id (`ENG-12`) in a work-item
+command resolves to its item (`work_item::with_loose_refs`,
+work-items.md).
 
 The loader refuses (into `errors`) an id that isn't lowercase
 snake_case, is `oxplow` or a core namespace, or repeats; an unknown
-capability; an entry or declarations path outside the folder (or the
+capability; an `id_pattern` that isn't a regex, or on another capability; an entry or declarations path outside the folder (or the
 manifest, or under `lenses/`); a bad host pattern; and declarations that
 don't parse, speak another protocol version, lack the named capability,
 or — for `work_items` — lack `create` / `update` / `transition` (and

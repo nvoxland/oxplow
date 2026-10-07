@@ -254,9 +254,9 @@ The three in progress:
   offer, an instance owns its namespace, and the bus and MCP offer and run
   only what's active. Skills and slash commands come from extensions
   too (`skills:`), offered the same way; the work-item guidance and
-  `/work-next` moved from core into `oxplow-bundled`.
-- Next: the three
-  swappable pieces. Loose
-  refs (`tsk12` for a work item) wait for it: recognising an id is the
-  active work list's declaration, not core's.
+  `/work-next` moved from core into `oxplow-bundled`. A work list
+  declares its id pattern, and a loose id in a command (`tsk12`) is the
+  active list's item.
+- Next: a test fixture without a task, then "none" as a work list end to
+  end, and the three swappable pieces.
 

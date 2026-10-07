@@ -4756,6 +4756,12 @@ export type ProviderSpec = {
 	network?: string[],
 	// The checked-in `InitializeResult` (JSON), relative to the folder.
 	declarations: string,
+	/**
+	 *  What a work list's own ids look like (a regex matched whole:
+	 *  `[A-Z]+-\d+`), so a loose id resolves to its item while it's the
+	 *  active work list.
+	 */
+	idPattern?: string | null,
 };
 
 // A provider as the UI and agents see it: never its key.

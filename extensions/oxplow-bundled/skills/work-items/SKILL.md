@@ -49,7 +49,8 @@ The same commands change any list's items, by canonical ref
 (`work_item:<provider>:<id>`): `work_item.transition { ref, to,
 native_state? }`, `work_item.update { ref, title?, body?, parent_ref?,
 state?, native? }`, `work_item.link { ref, target, link_type }`,
-`work_item.comment { ref, body }`. `list_commands` shows only what the
+`work_item.comment { ref, body }`. The active list's own ids work as
+refs too (oxplow's tasks: `tsk12`). `list_commands` shows only what the
 active list supports.
 
 Link types:

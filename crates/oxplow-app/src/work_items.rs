@@ -40,6 +40,8 @@ pub fn oxplow_provider() -> WorkItemsProvider {
             idempotent_writes: false,
         },
         external: None,
+        // Its ids: `tsk12`.
+        id_pattern: Some(r"tsk\d+".into()),
     }
 }
 
