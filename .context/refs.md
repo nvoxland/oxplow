@@ -86,17 +86,27 @@ builder per kind oxplow emits: `stream_ref`, `thread_ref`, `effort_ref`,
 `turn_ref`, `snapshot_ref`, `commit_ref`, `command_ref`, `config_ref`,
 `work_item_ref(TaskId)` (`work_item:oxplow:tsk42`) and `work_item_id`
 (the provider-scoped id alone, `oxplow:tsk42`, for `page_ref` rows).
-The inverses are `task_of_work_item_ref` (strict: a full ref naming an
-oxplow task) and `task_from_work_item_id` (lenient: also a bare `tsk42`
-or `42`, as agents write in impacts). `system_source(component)` gives
+The inverse is `task_of_work_item_ref` (strict: a full ref naming an
+oxplow task), for oxplow's own implementation. `system_source(component)` gives
 the `system:<component>` event source a system producer uses; an
 actor's runs use `Actor::source()`.
 
 `refs::build::validate_work_item_ref` is stricter: efforts key on the
 ref string (one open effort per work item is a unique index), so it
 accepts only the canonical spelling — no `@rev`, no `#frag`, no escaped
-spelling, and `oxplow:tsk<n>` exactly as `work_item_ref` writes it
-(`tsk01` is refused). `command` ids have two or more dot segments;
+spelling. What a list's own ids look like is that list's to say, not
+core's.
+
+**A work list's own ids in text.** The running `KindRegistry` carries
+the active work list's id recognizer (`with_work_item_ids(provider,
+id_pattern)`; set from the capability registry when services are built
+and at every vocabulary rebuild, a `capability.switched` included —
+`vocabulary_reactor::with_work_item_ids`). So `tsk42` in text, `[[…]]`
+or loose, is `work_item:oxplow:tsk42` while oxplow's tasks are the list,
+`ENG-12` an issue tracker's while it is, and nothing is one with none
+(`work_item_id`, `find_work_item_ids`: whole tokens of letters, digits,
+`_` and `-`). An implementation declares its `id_pattern`
+(`BuiltIn.id_pattern`, a provider's `providers:` entry). `command` ids have two or more dot segments;
 `commit` ids are 7–64 hex (SHA-256 repositories).
 
 **There is no process-wide registry (P8.D1, tsk761).** The kinds live in
@@ -177,7 +187,8 @@ type in the message.
 ## `[[…]]` sugar → canonical refs (built)
 
 `refs::canonical_wikilink(interior)` turns a wikilink interior into a
-`CanonicalRef`: `tsk42` → `work_item:oxplow:tsk42`, `git:abc1234` and a
+`CanonicalRef`: one of the active work list's ids → its work item
+(`tsk42` → `work_item:oxplow:tsk42` with oxplow's tasks), `git:abc1234` and a
 bare sha → `commit:abc1234`, `dir:src/` → `dir:src`, `src/a.rs@HEAD:42` →
 `file:src/a.rs@git:HEAD#L42` (`@disk`/`@local` add no rev), a kebab slug
 → `wiki:<slug>`, and the canonical form itself passes through when its
@@ -191,12 +202,13 @@ and the link checker never drift.
 
 `crates/oxplow-db/src/page_ref_projections.rs` writes `(kind, id)` pairs
 that are exactly a canonical ref's: kinds `work_item`, `commit`, `dir`,
-`task_note`, `wiki`, `file`, `finding`; a task's id is
-`work_item_id(TaskId)` = `oxplow:tsk<n>`. An effort's impacts name
-their kind in the agent tools' vocabulary (`IMPACT_KINDS`: `wiki | task
-| file | directory | git_commit | finding`; `effort.report` refuses any
-other, and V165 renamed stored spellings), which `impact_kind` projects
-to the canonical ones. Migration V92 wiped the old rows; the boot
+`task_note`, `wiki`, `file`, `finding`; a work item's id is
+`<provider>:<id>` (`oxplow:tsk<n>`). An effort's impacts name their kind
+in the agent tools' vocabulary (`IMPACT_KINDS`: `wiki | work_item | file
+| directory | git_commit | finding`; `effort.report` refuses any other,
+V165 renamed stored spellings and V19 made `task` `work_item`, its ids
+canonical refs), which `impact_kind` projects to the canonical ones; a
+`work_item` impact's id is its ref or one of the active list's own ids. Migration V92 wiped the old rows; the boot
 restate regenerates them. `v_commit_task` reads the new shape.
 `ref_resolver::resolve_ref` and `CommentTarget` use the same kinds.
 

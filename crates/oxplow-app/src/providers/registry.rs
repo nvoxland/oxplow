@@ -1826,6 +1826,7 @@ impl ProviderRegistry {
                 source: crate::capabilities::Source::External,
                 features,
                 fields: serde_json::to_value(&instance.spec.fields).unwrap_or_default(),
+                id_pattern: instance.spec.id_pattern.clone(),
             },
             true,
         );
@@ -1882,6 +1883,7 @@ impl ProviderRegistry {
                 source: crate::capabilities::Source::External,
                 features: Value::Null,
                 fields: serde_json::Value::Array(Vec::new()),
+                id_pattern: None,
             },
             false,
         );

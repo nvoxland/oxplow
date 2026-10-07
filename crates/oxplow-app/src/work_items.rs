@@ -24,6 +24,8 @@ use crate::event_pump::EventConsumer;
 
 /// oxplow's own provider name: `work_item:oxplow:tsk<n>`.
 pub const PROVIDER: &str = oxplow_domain::work_items::OXPLOW;
+/// oxplow's tasks' built-in entry (`capabilities::BUILT_INS`).
+pub const BUILT_IN: &str = "oxplow:tasks";
 
 /// oxplow's tasks as a work-items provider: every feature, and its
 /// effort follows its status. No external verbs — the `work_item.*`
@@ -42,8 +44,10 @@ pub fn oxplow_provider() -> WorkItemsProvider {
             lists: true,
         },
         external: None,
-        // Its ids: `tsk12`.
-        id_pattern: Some(r"tsk\d+".into()),
+        // Its ids (`tsk12`), as its built-in declares them.
+        id_pattern: crate::capabilities::built_in(BUILT_IN)
+            .and_then(|b| b.id_pattern)
+            .map(str::to_string),
         sink: false,
     }
 }

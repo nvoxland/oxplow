@@ -865,7 +865,7 @@ impl SqliteEffortStore {
         let vocabulary = self.vocabulary.current();
         let mut edges = effort_touched_file_edges(&source, &paths);
         edges.extend(effort_summary_edges(&vocabulary.kinds, &source, &summaries));
-        edges.extend(effort_impact_edges(&source, &impacts));
+        edges.extend(effort_impact_edges(&vocabulary.kinds, &source, &impacts));
         refs.replace_source_for_ref_types(KIND_WORK_ITEM, &source, effort_ref_types(), edges)
             .await
     }
@@ -2135,7 +2135,16 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteEffortStore::new(db);
+        // oxplow's tasks the work list: `tsk99` is one of its items.
+        let mut vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
+        vocabulary.kinds = vocabulary
+            .kinds
+            .with_work_item_ids("oxplow", r"tsk\d+")
+            .unwrap();
+        let store = SqliteEffortStore::with_vocabulary(
+            db,
+            oxplow_domain::vocabulary::VocabularyHandle::new(vocabulary),
+        );
         let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         store
             .finish(

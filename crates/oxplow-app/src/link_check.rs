@@ -64,8 +64,9 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
             (None, None) => out.push(LinkWarning {
                 target: link.raw.clone(),
                 reason: format!(
-                    "`[[{}]]` is not a recognized reference — use `[[tsk42]]` for a task \
-                     (never the GitHub `#42` form), `[[some-slug]]` for a wiki page, \
+                    "`[[{}]]` is not a recognized reference — use a work item's own id \
+                     as its list writes it (never the GitHub `#42` form), `[[some-slug]]` for a \
+                     wiki page, \
                      `[[path/to/file.rs]]` for a file, or `[[git:<sha>]]` for a commit",
                     link.raw
                 ),
@@ -228,12 +229,12 @@ fn unresolved_plugin_ref(
 fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
     match reference {
         // Through the interface: the active list's items.
-        Reference::Task(id) => (!exists(
+        Reference::WorkItem(id) => (!exists(
             world.conn,
-            "SELECT 1 FROM v_work_item WHERE ref = 'work_item:oxplow:tsk' || ?1",
+            "SELECT 1 FROM v_work_item WHERE ref = 'work_item:' || ?1",
             id,
         ))
-        .then(|| format!("task tsk{id} does not exist")),
+        .then(|| format!("work item `{id}` does not exist")),
         Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())
             && !exists(world.conn, "SELECT 1 FROM wiki_page WHERE slug = ?1", slug))
         .then(|| format!("wiki page `{slug}` does not exist")),
@@ -298,18 +299,17 @@ mod tests {
     }
 
     /// tsk894: a ref of any kind the vocabulary knows is a link — an
-    /// effort, another provider's work item — even with no typed view
-    /// to probe.
+    /// effort — even with no typed view to probe.
     #[tokio::test]
     async fn accepts_refs_of_kinds_with_no_probe() {
         let dir = git_repo();
         let services = Services::in_memory(dir.path()).unwrap();
-        let warnings = check_links(
-            &services,
-            "See [[effort:eff1]] and [[work_item:issues:ENG-12]].",
-        )
-        .await;
+        let warnings = check_links(&services, "See [[effort:eff1]].").await;
         assert!(warnings.is_empty(), "got {warnings:?}");
+        // A work item is checked against the active list's items: another
+        // list's isn't one.
+        let warnings = check_links(&services, "See [[work_item:issues:ENG-12]].").await;
+        assert_eq!(warnings.len(), 1, "got {warnings:?}");
     }
 
     #[tokio::test]
@@ -319,7 +319,13 @@ mod tests {
         let warnings = check_links(&services, "Blocked by [[tsk999]].").await;
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].target, "tsk999");
-        assert!(warnings[0].reason.contains("tsk999 does not exist"));
+        assert!(
+            warnings[0]
+                .reason
+                .contains("`oxplow:tsk999` does not exist"),
+            "{}",
+            warnings[0].reason
+        );
     }
 
     /// A work-item link checks the interface: with no list, an existing

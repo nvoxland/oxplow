@@ -51,6 +51,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "lists",
         ],
         tools: &["list_tasks", "get_task", "read_task_options"],
+        id_pattern: Some(r"tsk\d+"),
         fields: &[BuiltInField {
             name: "priority",
             title: "Priority",
@@ -64,6 +65,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         title: "A commit lands it, or the task switches",
         features: &[],
         tools: &[],
+        id_pattern: None,
         fields: &[],
     },
     BuiltIn {
@@ -72,6 +74,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         title: "Keep every version",
         features: &["contents"],
         tools: &[],
+        id_pattern: None,
         fields: &[],
     },
 ];
@@ -87,6 +90,9 @@ pub struct BuiltIn {
     /// The MCP tools only it offers (its own agent surface): offered while
     /// it's the active implementation, hidden otherwise.
     pub tools: &'static [&'static str],
+    /// What its items' own ids look like (a work list's; a regex matched
+    /// whole): how a loose id in text or a command is one of its items.
+    pub id_pattern: Option<&'static str>,
     /// Its own fields (a work list's, kept in `native`).
     pub fields: &'static [BuiltInField],
 }
@@ -169,6 +175,8 @@ pub struct Implementation {
     pub features: Value,
     /// Its own fields, as it declares them (a JSON array of `FieldDecl`).
     pub fields: Value,
+    /// What its items' own ids look like (a work list's), when it says.
+    pub id_pattern: Option<String>,
 }
 
 impl Implementation {
@@ -202,6 +210,8 @@ impl Implementation {
             source: Source::None,
             features: Value::Object(features),
             fields: Value::Array(Vec::new()),
+            // Nothing in text is none's: it keeps no items.
+            id_pattern: None,
         }
     }
 }
@@ -362,6 +372,7 @@ impl CapabilityRegistry {
                         source: Source::BuiltIn(b.entry),
                         features: built_in_features(b),
                         fields: built_in_fields(b),
+                        id_pattern: b.id_pattern.map(str::to_string),
                     })
                 }),
         );
@@ -492,6 +503,7 @@ impl CapabilityRegistry {
                 source: Source::BuiltIn(b.entry),
                 features: Value::Null,
                 fields: serde_json::Value::Array(Vec::new()),
+                id_pattern: None,
             })
             .map(|i| {
                 let active = by_capability
@@ -532,6 +544,14 @@ impl CapabilityRegistry {
             hidden_commands,
             hidden_tools,
         }
+    }
+
+    /// The active work list's id recognizer under `config`: its id and
+    /// declared `id_pattern`, if it declares one (none doesn't).
+    pub fn work_item_ids(&self, config: &OxplowConfig) -> Option<(String, String)> {
+        let id = self.active(config, "work_items");
+        let pattern = self.get("work_items", &id)?.id_pattern?;
+        Some((id, pattern))
     }
 
     /// `capability`'s active implementation id under `config`.
@@ -685,6 +705,7 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
                     source: Source::BuiltIn(b.entry),
                     features: built_in_features(b),
                     fields: built_in_fields(b),
+                    id_pattern: b.id_pattern.map(str::to_string),
                 })
             })
         })
@@ -714,7 +735,8 @@ pub fn refresh_agent_text(svc: &crate::Services) {
     }
 }
 
-/// [`refresh_agent_text`] on each `capability.switched`.
+/// On each `capability.switched`: [`refresh_agent_text`], and the
+/// vocabulary rebuilt (it reads the active work list's ids).
 pub struct AgentTextRefresh {
     services: std::sync::Weak<crate::Services>,
 }
@@ -740,6 +762,8 @@ impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
     async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
         if let Some(svc) = self.services.upgrade() {
             refresh_agent_text(&svc);
+            // The vocabulary reads the active list's ids.
+            svc.vocabulary_service.sync().await?;
         }
         Ok(())
     }
@@ -812,6 +836,7 @@ mod tests {
             source: Source::BuiltIn(entry),
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
+            id_pattern: None,
         }
     }
 
@@ -910,6 +935,7 @@ mod tests {
             source: Source::External,
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
+            id_pattern: None,
         };
         r.set_external(issues.clone(), true);
         assert_eq!(r.active(&c, "work_items"), "issues");
@@ -1161,6 +1187,7 @@ mod tests {
                 source: Source::External,
                 features: serde_json::json!({ "comments": false, "links": true, "ordering": true }),
                 fields: serde_json::Value::Array(Vec::new()),
+                id_pattern: None,
             },
             true,
         );
@@ -1211,6 +1238,7 @@ mod tests {
                 source: Source::External,
                 features: Value::Null,
                 fields: serde_json::Value::Array(Vec::new()),
+                id_pattern: None,
             },
             true,
         );
@@ -1290,5 +1318,29 @@ mod tests {
             }])
         );
         assert_eq!(fields(NONE), serde_json::json!([]));
+    }
+
+    /// The vocabulary reads the active work list's own ids in text, as it
+    /// declares them: `tsk42` with oxplow's tasks, nothing with none.
+    #[tokio::test]
+    async fn the_vocabulary_reads_the_active_lists_ids() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let found = || {
+            oxplow_domain::refs::extract(&svc.vocabulary.current().kinds, "see tsk42 and [[tsk7]]")
+                .work_items
+        };
+        assert_eq!(
+            found(),
+            vec!["oxplow:tsk42".to_string(), "oxplow:tsk7".to_string()]
+        );
+        svc.config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), NONE.into());
+        refresh(svc).await.unwrap();
+        svc.vocabulary_service.sync().await.unwrap();
+        assert!(found().is_empty(), "{:?}", found());
     }
 }

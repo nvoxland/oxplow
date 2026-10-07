@@ -58,8 +58,14 @@ pub struct VocabularyService {
     /// The primary worktree, whose extensions declare the vocabulary.
     root: PathBuf,
     vocabulary: VocabularyHandle,
+    /// The active work list's id recognizer (its id and `id_pattern`), if
+    /// it declares one: the vocabulary's way of reading `tsk42` in text.
+    work_item_ids: WorkItemIds,
     state: Mutex<State>,
 }
+
+/// The active work list's id recognizer, asked at each build.
+pub type WorkItemIds = Arc<dyn Fn() -> Option<(String, String)> + Send + Sync>;
 
 /// What one enabled extension brings to the vocabulary.
 #[derive(serde::Serialize)]
@@ -81,12 +87,14 @@ impl VocabularyService {
         catalog: Arc<ExtensionCatalog>,
         root: PathBuf,
         vocabulary: VocabularyHandle,
+        work_item_ids: WorkItemIds,
     ) -> Self {
         Self {
             db,
             catalog,
             root,
             vocabulary,
+            work_item_ids,
             state: Mutex::new(State::default()),
         }
     }
@@ -109,21 +117,24 @@ impl VocabularyService {
                 subscriptions: e.subscriptions.clone(),
             })
             .collect();
+        let ids = (self.work_item_ids)();
         let fingerprint = {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             serde_json::to_string(&declared)
                 .map_err(|e| DomainError::Invalid(e.to_string()))?
                 .hash(&mut h);
+            ids.hash(&mut h);
             h.finish()
         };
         if state.fingerprint == Some(fingerprint) {
             return Ok(());
         }
         let now = oxplow_domain::Timestamp::now().to_string();
-        let (vocabulary, errors) = self
+        let (mut vocabulary, errors) = self
             .db
             .transaction(move |tx| build_tx(tx, &declared, &now))
             .await?;
+        vocabulary.kinds = with_work_item_ids(vocabulary.kinds, ids.as_ref());
         for (extension, errs) in &errors {
             for e in errs {
                 tracing::warn!(extension, error = %e, "extension event type not registered");
@@ -169,6 +180,20 @@ impl VocabularyService {
                 }
             }
         });
+    }
+}
+
+/// `kinds` recognizing the active work list's ids (`ids`), or none.
+pub fn with_work_item_ids(kinds: KindRegistry, ids: Option<&(String, String)>) -> KindRegistry {
+    match ids {
+        Some((provider, pattern)) => kinds
+            .clone()
+            .with_work_item_ids(provider, pattern)
+            .unwrap_or_else(|e| {
+                tracing::warn!(provider, error = %e, "the work list's id pattern doesn't compile");
+                kinds.without_work_item_ids()
+            }),
+        None => kinds.without_work_item_ids(),
     }
 }
 

@@ -67,7 +67,9 @@ pub struct ExtractedRefs {
     pub files_detail: Vec<FileRefDetail>,
     pub dirs: Vec<String>,
     pub wikis: Vec<String>,
-    pub tasks: Vec<i64>,
+    /// The active work list's items it names, as work-item ids
+    /// (`oxplow:tsk42`): `[[…]]` or loose, as the list declares its ids.
+    pub work_items: Vec<String>,
     pub findings: Vec<String>,
     pub commits: Vec<String>,
 }
@@ -81,7 +83,8 @@ pub enum Reference {
     File(FileRefDetail),
     Dir(String),
     Wiki(String),
-    Task(i64),
+    /// A work item, by its id (`oxplow:tsk42`, `issues:ENG-12`).
+    WorkItem(String),
     Finding(String),
     Commit(String),
 }
@@ -148,11 +151,10 @@ pub fn canonical_wikilink(kinds: &KindRegistry, interior: &str) -> Option<Canoni
         let f = clean_finding(rest)?;
         return CanonicalRef::new("finding", &f, None, None).ok();
     }
-    // tsk<digits>; anything else after `tsk` falls through (a slug or path).
-    if let Some(rest) = strip_prefix_ci(interior, "tsk") {
-        if let Some(id) = parse_task_id(rest) {
-            return CanonicalRef::new("work_item", &format!("oxplow:tsk{id}"), None, None).ok();
-        }
+    // One of the active work list's own ids (`tsk42`, `ENG-12`), as it
+    // declares them; anything else falls through (a slug or path).
+    if let Some(id) = reg.work_item_id(interior) {
+        return CanonicalRef::new("work_item", &id, None, None).ok();
     }
     // The canonical form itself, for a registered kind.
     if let Ok(r) = CanonicalRef::parse(interior) {
@@ -199,12 +201,7 @@ impl TryFrom<&CanonicalRef> for Reference {
             "wiki" => Ok(Reference::Wiki(r.id.clone())),
             "finding" => Ok(Reference::Finding(r.id.clone())),
             "commit" => Ok(Reference::Commit(r.id.clone())),
-            "work_item" => {
-                let native = r.id.strip_prefix("oxplow:").ok_or(())?;
-                parse_task_id(native.strip_prefix("tsk").ok_or(())?)
-                    .map(Reference::Task)
-                    .ok_or(())
-            }
+            "work_item" => Ok(Reference::WorkItem(r.id.clone())),
             "file" => {
                 let version = match r.rev.as_deref().and_then(|v| v.strip_prefix("git:")) {
                     Some(v) => RefVersion::Ref(v.to_string()),
@@ -272,7 +269,7 @@ pub fn extract(kinds: &KindRegistry, body: &str) -> ExtractedRefs {
     let mut files: BTreeSet<String> = BTreeSet::new();
     let mut dirs: BTreeSet<String> = BTreeSet::new();
     let mut wikis: BTreeSet<String> = BTreeSet::new();
-    let mut tasks: BTreeSet<i64> = BTreeSet::new();
+    let mut work_items: BTreeSet<String> = BTreeSet::new();
     let mut findings: BTreeSet<String> = BTreeSet::new();
     let mut commits: BTreeSet<String> = BTreeSet::new();
     let mut files_detail: Vec<FileRefDetail> = Vec::new();
@@ -290,8 +287,8 @@ pub fn extract(kinds: &KindRegistry, body: &str) -> ExtractedRefs {
             Some(Reference::Finding(id)) => {
                 findings.insert(id);
             }
-            Some(Reference::Task(id)) => {
-                tasks.insert(id);
+            Some(Reference::WorkItem(id)) => {
+                work_items.insert(id);
             }
             Some(Reference::File(detail)) => {
                 if files.insert(detail.path.clone()) {
@@ -327,9 +324,7 @@ pub fn extract(kinds: &KindRegistry, body: &str) -> ExtractedRefs {
             }
         }
     }
-    for id in find_inline_tasks(&stripped) {
-        tasks.insert(id);
-    }
+    work_items.extend(kinds.find_work_item_ids(&stripped));
     for f in find_inline_findings(&stripped) {
         findings.insert(f);
     }
@@ -339,7 +334,7 @@ pub fn extract(kinds: &KindRegistry, body: &str) -> ExtractedRefs {
         files_detail,
         dirs: dirs.into_iter().collect(),
         wikis: wikis.into_iter().collect(),
-        tasks: tasks.into_iter().collect(),
+        work_items: work_items.into_iter().collect(),
         findings: findings.into_iter().collect(),
         commits: commits.into_iter().collect(),
     }
@@ -451,14 +446,6 @@ fn looks_like_slug(s: &str) -> bool {
 
 fn looks_like_commit_sha(s: &str) -> bool {
     matches!(s.len(), 7..=40) && s.chars().all(|c| c.is_ascii_hexdigit())
-}
-
-fn parse_task_id(s: &str) -> Option<i64> {
-    let t = s.trim();
-    if t.is_empty() || !t.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    t.parse::<i64>().ok()
 }
 
 fn find_wikilinks(body: &str) -> Vec<&str> {
@@ -585,38 +572,6 @@ fn is_path_join_prev(bytes: &[u8], i: usize) -> bool {
     }
     let p = bytes[i - 1];
     p.is_ascii_alphanumeric() || p == b'/'
-}
-
-fn find_inline_tasks(body: &str) -> Vec<i64> {
-    let mut out = Vec::new();
-    let prefix = b"tsk";
-    let bytes = body.as_bytes();
-    let mut i = 0;
-    while i + prefix.len() < bytes.len() {
-        if (i == 0 || !is_id_boundary_char(bytes[i - 1]))
-            && bytes[i..i + prefix.len()].eq_ignore_ascii_case(prefix)
-        {
-            let start = i + prefix.len();
-            let mut end = start;
-            while end < bytes.len() && bytes[end].is_ascii_digit() {
-                end += 1;
-            }
-            // The character after the digits must not extend an id-ish
-            // token (e.g. `tsk42abc` is not a valid task ref).
-            let next_extends = end < bytes.len() && is_id_boundary_char(bytes[end]);
-            if end > start && !next_extends {
-                if let Ok(s) = std::str::from_utf8(&bytes[start..end]) {
-                    if let Ok(n) = s.parse::<i64>() {
-                        out.push(n);
-                    }
-                }
-                i = end;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out
 }
 
 fn find_inline_findings(body: &str) -> Vec<String> {
@@ -770,17 +725,45 @@ fn mask_inline_code(out: &mut String, line: &str) {
 mod tests {
     use super::*;
 
+    /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
+    fn tasks_kinds() -> KindRegistry {
+        kind::core_kinds()
+            .with_work_item_ids("oxplow", r"tsk\d+")
+            .unwrap()
+    }
+
+    /// The registry recognizes the work list's own ids it's told of, as
+    /// whole tokens and in `[[…]]`; told of none, it recognizes none.
+    #[test]
+    fn a_work_lists_ids_are_recognized_as_it_declares_them() {
+        let issues = kind::core_kinds()
+            .with_work_item_ids("issues", r"[A-Z]+-\d+")
+            .unwrap();
+        assert_eq!(
+            issues.work_item_id("ENG-12").as_deref(),
+            Some("issues:ENG-12")
+        );
+        assert_eq!(issues.work_item_id("ENG-12x"), None);
+        let r = extract(
+            &issues,
+            "Fixes ENG-12 (see [[ENG-7]]); not XENG-7a or tsk42.",
+        );
+        assert_eq!(
+            r.work_items,
+            vec!["issues:ENG-12".to_string(), "issues:ENG-7".to_string()]
+        );
+        let none = extract(&kind::core_kinds(), "tsk42 [[tsk7]] ENG-12");
+        assert!(none.work_items.is_empty(), "{none:?}");
+    }
+
     #[test]
     fn empty_body() {
-        assert_eq!(extract(&kind::core_kinds(), ""), ExtractedRefs::default());
+        assert_eq!(extract(&tasks_kinds(), ""), ExtractedRefs::default());
     }
 
     #[test]
     fn wikilink_file_with_version_and_line() {
-        let r = extract(
-            &kind::core_kinds(),
-            "see [[src/app.rs@HEAD:42]] for context",
-        );
+        let r = extract(&tasks_kinds(), "see [[src/app.rs@HEAD:42]] for context");
         assert_eq!(r.files, vec!["src/app.rs"]);
         assert_eq!(r.files_detail.len(), 1);
         assert_eq!(r.files_detail[0].path, "src/app.rs");
@@ -791,90 +774,90 @@ mod tests {
     #[test]
     fn wikilink_dir_and_slug_and_task_and_finding_and_commit() {
         let body = "[[dir:src/components]] and [[architecture]] and [[tsk42]] and [[finding:fnd-1]] and [[git:abcdef0]]";
-        let r = extract(&kind::core_kinds(), body);
+        let r = extract(&tasks_kinds(), body);
         assert_eq!(r.dirs, vec!["src/components"]);
         assert_eq!(r.wikis, vec!["architecture"]);
-        assert_eq!(r.tasks, vec![42]);
+        assert_eq!(r.work_items, vec!["oxplow:tsk42".to_string()]);
         assert_eq!(r.findings, vec!["fnd-1"]);
         assert_eq!(r.commits, vec!["abcdef0"]);
     }
 
     #[test]
     fn bare_hex_in_wikilink_is_commit() {
-        let r = extract(&kind::core_kinds(), "[[abc1234567]]");
+        let r = extract(&tasks_kinds(), "[[abc1234567]]");
         assert_eq!(r.commits, vec!["abc1234567"]);
         assert!(r.wikis.is_empty());
     }
 
     #[test]
     fn inline_path_picked_up() {
-        let r = extract(&kind::core_kinds(), "touched src/lib.rs in this commit");
+        let r = extract(&tasks_kinds(), "touched src/lib.rs in this commit");
         assert_eq!(r.files, vec!["src/lib.rs"]);
     }
 
     #[test]
     fn url_is_not_a_file_ref() {
-        let r = extract(&kind::core_kinds(), "see https://example.com/foo.json");
+        let r = extract(&tasks_kinds(), "see https://example.com/foo.json");
         assert!(r.files.is_empty(), "got {:?}", r.files);
     }
 
     #[test]
     fn inline_task_and_finding_mention() {
-        let r = extract(&kind::core_kinds(), "blocked by tsk42 see finding:fnd-2");
-        assert_eq!(r.tasks, vec![42]);
+        let r = extract(&tasks_kinds(), "blocked by tsk42 see finding:fnd-2");
+        assert_eq!(r.work_items, vec!["oxplow:tsk42".to_string()]);
         assert_eq!(r.findings, vec!["fnd-2"]);
     }
 
     #[test]
     fn inline_task_rejects_non_digits() {
-        let r = extract(&kind::core_kinds(), "tskfoo and tsk42abc");
-        assert!(r.tasks.is_empty());
+        let r = extract(&tasks_kinds(), "tskfoo and tsk42abc");
+        assert!(r.work_items.is_empty());
     }
 
     #[test]
     fn inline_task_with_trailing_punctuation() {
-        let r = extract(&kind::core_kinds(), "tsk42 fixes issue. also tsk7, see");
-        assert_eq!(r.tasks, vec![7, 42]);
+        let r = extract(&tasks_kinds(), "tsk42 fixes issue. also tsk7, see");
+        assert_eq!(
+            r.work_items,
+            vec!["oxplow:tsk42".to_string(), "oxplow:tsk7".to_string()]
+        );
     }
 
     #[test]
     fn wikilink_task_rejects_non_digits() {
-        let r = extract(&kind::core_kinds(), "[[tsknotanumber]] [[tsk42abc]]");
-        assert!(r.tasks.is_empty());
+        let r = extract(&tasks_kinds(), "[[tsknotanumber]] [[tsk42abc]]");
+        assert!(r.work_items.is_empty());
     }
 
     #[test]
     fn dedup_across_wikilink_and_inline() {
-        let r = extract(
-            &kind::core_kinds(),
-            "see [[src/lib.rs]] and src/lib.rs again",
-        );
+        let r = extract(&tasks_kinds(), "see [[src/lib.rs]] and src/lib.rs again");
         assert_eq!(r.files, vec!["src/lib.rs"]);
         assert_eq!(r.files_detail.len(), 1);
     }
 
     #[test]
     fn pipe_alias_stripped() {
-        let r = extract(&kind::core_kinds(), "[[src/app.rs|application entry]]");
+        let r = extract(&tasks_kinds(), "[[src/app.rs|application entry]]");
         assert_eq!(r.files, vec!["src/app.rs"]);
     }
 
     #[test]
     fn wikilink_task_form_does_not_become_slug() {
-        let r = extract(&kind::core_kinds(), "[[tsk7]]");
+        let r = extract(&tasks_kinds(), "[[tsk7]]");
         assert!(r.wikis.is_empty());
-        assert_eq!(r.tasks, vec![7]);
+        assert_eq!(r.work_items, vec!["oxplow:tsk7".to_string()]);
     }
 
     #[test]
     fn classify_recognizes_each_kind() {
         let links = classify_wikilinks(
-            &kind::core_kinds(),
+            &tasks_kinds(),
             "[[tsk7]] [[architecture]] [[src/lib.rs]] [[dir:src]] \
              [[git:abc1234]] [[finding:fnd-1]]",
         );
         let refs: Vec<Option<Reference>> = links.into_iter().map(|l| l.reference).collect();
-        assert_eq!(refs[0], Some(Reference::Task(7)));
+        assert_eq!(refs[0], Some(Reference::WorkItem("oxplow:tsk7".into())));
         assert_eq!(refs[1], Some(Reference::Wiki("architecture".into())));
         assert!(matches!(refs[2], Some(Reference::File(_))));
         assert_eq!(refs[3], Some(Reference::Dir("src".into())));
@@ -886,7 +869,7 @@ mod tests {
     fn classify_flags_github_style_ref_as_unrecognized() {
         // `#13` is the exact bug: a `[[…]]` interior that matches no known
         // ref shape → `reference: None`, so the link checker flags it.
-        let links = classify_wikilinks(&kind::core_kinds(), "Follow-ups: [[#13]] and [[#14]].");
+        let links = classify_wikilinks(&tasks_kinds(), "Follow-ups: [[#13]] and [[#14]].");
         assert_eq!(links.len(), 2);
         assert_eq!(links[0].raw, "#13");
         assert!(links[0].reference.is_none());
@@ -895,11 +878,13 @@ mod tests {
 
     #[test]
     fn classify_strips_label_and_ignores_code() {
-        let links =
-            classify_wikilinks(&kind::core_kinds(), "[[tsk7|the task]] but not `[[tsk8]]`.");
+        let links = classify_wikilinks(&tasks_kinds(), "[[tsk7|the task]] but not `[[tsk8]]`.");
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].raw, "tsk7");
-        assert_eq!(links[0].reference, Some(Reference::Task(7)));
+        assert_eq!(
+            links[0].reference,
+            Some(Reference::WorkItem("oxplow:tsk7".into()))
+        );
     }
 
     #[test]
@@ -907,40 +892,38 @@ mod tests {
         // `0` is a valid integer; the renderer is free to treat it as a
         // dead link (since SQLite never assigns 0), but the extractor
         // itself does not gatekeep — that's the renderer's job.
-        let r = extract(&kind::core_kinds(), "[[tsk0]] inline tsk0");
-        assert_eq!(r.tasks, vec![0]);
+        let r = extract(&tasks_kinds(), "[[tsk0]] inline tsk0");
+        assert_eq!(r.work_items, vec!["oxplow:tsk0".to_string()]);
     }
 
     #[test]
     fn wikilink_task_negative_rejected() {
         // The wikilink grammar accepts only ASCII digits — the leading
         // `-` makes the body fail the digit check.
-        let r = extract(&kind::core_kinds(), "[[tsk-1]] inline tsk-1");
-        assert!(r.tasks.is_empty());
+        let r = extract(&tasks_kinds(), "[[tsk-1]] inline tsk-1");
+        assert!(r.work_items.is_empty());
     }
 
+    /// An id is the list's declared shape, not a number: a long one is
+    /// its id like any other (whether it exists is the link check's).
     #[test]
-    fn wikilink_task_overflow_rejected() {
-        // i64 overflows are dropped silently (parse::<i64>() returns
-        // None). We don't surface a parse error; the renderer just
-        // doesn't see the ref.
-        let r = extract(&kind::core_kinds(), "[[tsk99999999999999999999]]");
-        assert!(r.tasks.is_empty());
-    }
-
-    #[test]
-    fn inline_task_overflow_rejected() {
-        let r = extract(
-            &kind::core_kinds(),
-            "see tsk99999999999999999999 in passing",
+    fn a_long_task_id_is_an_id() {
+        let r = extract(&tasks_kinds(), "see tsk99999999999999999999 in passing");
+        assert_eq!(
+            r.work_items,
+            vec!["oxplow:tsk99999999999999999999".to_string()]
         );
-        assert!(r.tasks.is_empty());
+        let r = extract(&tasks_kinds(), "[[tsk99999999999999999999]]");
+        assert_eq!(
+            r.work_items,
+            vec!["oxplow:tsk99999999999999999999".to_string()]
+        );
     }
 
     #[test]
     fn inline_tilde_path_captured_with_leading_tilde() {
         let r = extract(
-            &kind::core_kinds(),
+            &tasks_kinds(),
             "see ~/.claude/plans/yes-plan-a-good-harmonic-floyd.md for details",
         );
         assert_eq!(
@@ -951,13 +934,13 @@ mod tests {
 
     #[test]
     fn inline_tilde_path_in_parens() {
-        let r = extract(&kind::core_kinds(), "docs (~/notes/things.md) cover that");
+        let r = extract(&tasks_kinds(), "docs (~/notes/things.md) cover that");
         assert_eq!(r.files, vec!["~/notes/things.md"]);
     }
 
     #[test]
     fn bare_tilde_without_slash_is_not_a_path() {
-        let r = extract(&kind::core_kinds(), "approximately ~5 items");
+        let r = extract(&tasks_kinds(), "approximately ~5 items");
         assert!(r.files.is_empty(), "got {:?}", r.files);
     }
 
@@ -966,7 +949,7 @@ mod tests {
         // Regression: `` `[[path]]` `` in prose is illustrative, not a
         // link. Neither the wiki slug nor a file path should extract.
         let r = extract(
-            &kind::core_kinds(),
+            &tasks_kinds(),
             "normalized to the `[[some-slug]]` form, see `[[src/foo.rs]]`",
         );
         assert!(r.wikis.is_empty(), "got wikis {:?}", r.wikis);
@@ -976,30 +959,27 @@ mod tests {
     #[test]
     fn wikilink_inside_fenced_block_is_ignored() {
         let body = "before\n```\n[[src/foo.rs]] and [[in-fence-slug]]\n```\nafter [[real-slug]]";
-        let r = extract(&kind::core_kinds(), body);
+        let r = extract(&tasks_kinds(), body);
         assert!(r.files.is_empty(), "got files {:?}", r.files);
         assert_eq!(r.wikis, vec!["real-slug"]);
     }
 
     #[test]
     fn inline_path_inside_code_span_is_ignored() {
-        let r = extract(&kind::core_kinds(), "run `cargo test src/lib.rs` to check");
+        let r = extract(&tasks_kinds(), "run `cargo test src/lib.rs` to check");
         assert!(r.files.is_empty(), "got {:?}", r.files);
     }
 
     #[test]
     fn link_outside_code_still_extracted_alongside_code() {
-        let r = extract(
-            &kind::core_kinds(),
-            "see [[src/foo.rs]] and run `cargo build`",
-        );
+        let r = extract(&tasks_kinds(), "see [[src/foo.rs]] and run `cargo build`");
         assert_eq!(r.files, vec!["src/foo.rs"]);
     }
 
     #[test]
     fn unterminated_backtick_does_not_swallow_rest() {
         // A lone backtick is not a code span — refs after it still parse.
-        let r = extract(&kind::core_kinds(), "a stray ` then [[real-slug]]");
+        let r = extract(&tasks_kinds(), "a stray ` then [[real-slug]]");
         assert_eq!(r.wikis, vec!["real-slug"]);
     }
 
@@ -1013,7 +993,7 @@ mod tests {
     fn tilde_after_alnum_is_not_a_path_start() {
         // `foo~/bar.md` shouldn't trigger — the tilde isn't at a word
         // boundary so it's not a home-relative path.
-        let r = extract(&kind::core_kinds(), "foo~/bar.md");
+        let r = extract(&tasks_kinds(), "foo~/bar.md");
         assert!(
             !r.files.iter().any(|p| p.starts_with('~')),
             "got {:?}",

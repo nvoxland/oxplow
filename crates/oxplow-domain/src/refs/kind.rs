@@ -85,9 +85,68 @@ impl KindSpec {
 #[derive(Debug, Clone, Default)]
 pub struct KindRegistry {
     kinds: BTreeMap<String, KindSpec>,
+    /// The active work list's own ids, when it declares them: what makes a
+    /// loose `tsk42` (or `ENG-12`) in text one of its items.
+    work_item_ids: Option<WorkItemIds>,
+}
+
+/// A work list's ids, as it declares them (`WorkItemsProvider::id_pattern`).
+#[derive(Debug, Clone)]
+struct WorkItemIds {
+    provider: String,
+    /// The pattern, matched whole.
+    whole: Regex,
 }
 
 impl KindRegistry {
+    /// This registry recognizing `provider`'s ids (`pattern`, a regex
+    /// matched whole): the active work list's, set by the app.
+    pub fn with_work_item_ids(mut self, provider: &str, pattern: &str) -> Result<Self, KindError> {
+        let whole = Regex::new(&format!("^(?:{pattern})$")).map_err(|e| KindError::BadRegex {
+            kind: "work_item".into(),
+            error: e.to_string(),
+        })?;
+        self.work_item_ids = Some(WorkItemIds {
+            provider: provider.into(),
+            whole,
+        });
+        Ok(self)
+    }
+
+    /// This registry recognizing no work list's ids (none is active, or the
+    /// active one declares none).
+    pub fn without_work_item_ids(mut self) -> Self {
+        self.work_item_ids = None;
+        self
+    }
+
+    /// `text`, whole, as one of the active work list's ids: its work-item
+    /// id (`oxplow:tsk42`, what follows `work_item:`).
+    pub fn work_item_id(&self, text: &str) -> Option<String> {
+        let ids = self.work_item_ids.as_ref()?;
+        ids.whole
+            .is_match(text)
+            .then(|| format!("{}:{text}", ids.provider))
+    }
+
+    /// Every token of `text` that is one of the active work list's ids —
+    /// a token being a run of letters, digits, `_` and `-` — as work-item
+    /// ids, in order, each once.
+    pub fn find_work_item_ids(&self, text: &str) -> Vec<String> {
+        if self.work_item_ids.is_none() {
+            return Vec::new();
+        }
+        let mut out: Vec<String> = Vec::new();
+        for token in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
+            if let Some(id) = self.work_item_id(token) {
+                if !out.contains(&id) {
+                    out.push(id);
+                }
+            }
+        }
+        out
+    }
+
     pub fn register(&mut self, spec: KindSpec) -> Result<(), KindError> {
         if self.kinds.contains_key(&spec.kind) {
             return Err(KindError::Collision(spec.kind));
