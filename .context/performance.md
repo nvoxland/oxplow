@@ -397,10 +397,15 @@ thousands of walks, under the oracle mutex every other metric reader
 waits on. `RevisionGraph::ancestry` now answers the whole cross product
 from one parents-first revwalk that ORs each commit's parents' bitsets
 of anchors (`vcs/git.rs`), and `GraphOracle` asks the graph once per
-resolve for the pairs it hasn't cached. Measured on this repo: 1,078
-anchors × 1,078, 1.16 M pairs over 2,156 commits, in 1.2 s in a debug
-build. Don't go back to per-pair questions; the cross product is not
-"tiny by construction".
+resolve. Its answer is the compact `Ancestry` (an index per commit and a
+bitset of its ancestors), which the oracle keeps as ONE shared copy —
+rebuilt only when a resolve brings an anchor it hasn't seen — and every
+`Visibility` holds by `Arc`. As a map of sha pairs it was ~1.16 M entries
+(~200 MB) copied into each read. Measured on this repo, debug build:
+1,079 anchors over 2,158 commits in 50 ms, 143 KB of bitsets (the pair
+map took 1.2 s, mostly allocating it). Don't go back to per-pair
+questions or pair maps; the cross product is not "tiny by construction",
+and at 50 ms it isn't worth persisting.
 
 ## Effort evidence after the cube, through the shared engine (2026-10-06)
 

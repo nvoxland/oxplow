@@ -793,12 +793,10 @@ pub struct Visibility {
     pub effective: HashMap<i64, (String, Timestamp)>,
     /// capture_id → the closest ancestor commit at-or-before that capture.
     pub base: HashMap<i64, String>,
-    /// `(ancestor, descendant) → resolved answer`, from git once per read.
-    /// ABSENT means the pair could not be resolved (commit gone, repo
-    /// unreadable) — which must degrade to VISIBLE, so it is distinct from
-    /// `Some(false)`. Equality is short-circuited in [`Self::sees`], so pairs
-    /// here are always distinct shas.
-    pub ancestor_of: HashMap<(String, String), bool>,
+    /// Ancestry among the anchors, shared by every read (one compact copy,
+    /// never a per-read one). A pair it can't answer (commit gone, repo
+    /// unreadable) must degrade to VISIBLE, so it is distinct from `false`.
+    pub ancestry: std::sync::Arc<oxplow_domain::vcs::Ancestry>,
 }
 
 impl Visibility {
@@ -830,11 +828,8 @@ impl Visibility {
         if ec == br {
             return true;
         }
-        // Absent pair = the resolver couldn't answer ⇒ visible, never stricter.
-        *self
-            .ancestor_of
-            .get(&(ec.clone(), br.clone()))
-            .unwrap_or(&true)
+        // Unanswered pair = the resolver couldn't say ⇒ visible, never stricter.
+        self.ancestry.is_ancestor_or_equal(ec, br).unwrap_or(true)
     }
 }
 

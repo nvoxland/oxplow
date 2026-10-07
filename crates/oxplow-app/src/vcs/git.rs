@@ -141,52 +141,46 @@ impl RevisionGraph for GitGraph {
         Some(commit.id().to_string())
     }
 
-    /// One walk over every commit the descendants reach, parents first,
-    /// carrying each commit's set of `ancestors` (a bitset) down to its
-    /// children — instead of a graph walk per pair, which hundreds of
+    /// One walk over every commit the revisions reach, parents first,
+    /// carrying each commit's set of known revisions (a bitset) down to
+    /// its children — instead of a graph walk per pair, which hundreds of
     /// anchors turn into hundreds of thousands.
-    fn ancestry(
-        &self,
-        ancestors: &[&str],
-        descendants: &[&str],
-    ) -> std::collections::HashMap<(String, String), bool> {
+    fn ancestry(&self, revisions: &[&str]) -> oxplow_domain::vcs::Ancestry {
+        use oxplow_domain::vcs::Ancestry;
         use std::collections::HashMap;
-        let mut out = HashMap::new();
         let Some(repo) = self.0.as_ref() else {
-            return out;
+            return Ancestry::default();
         };
-        let oid = |sha: &str| {
-            git2::Oid::from_str(sha)
-                .ok()
-                .filter(|o| repo.find_commit(*o).is_ok())
-        };
-        // The ancestors the repository has, by bit.
-        let anc: Vec<(&str, git2::Oid)> = ancestors
+        let known: Vec<(&str, git2::Oid)> = revisions
             .iter()
-            .filter_map(|a| oid(a).map(|o| (*a, o)))
+            .filter_map(|r| {
+                git2::Oid::from_str(r)
+                    .ok()
+                    .filter(|o| repo.find_commit(*o).is_ok())
+                    .map(|o| (*r, o))
+            })
             .collect();
-        let desc: Vec<(&str, git2::Oid)> = descendants
-            .iter()
-            .filter_map(|d| oid(d).map(|o| (*d, o)))
-            .collect();
-        if anc.is_empty() || desc.is_empty() {
+        let mut out = Ancestry::with_revisions(known.iter().map(|(r, _)| *r));
+        if out.is_empty() {
             return out;
         }
-        let bit_of: HashMap<git2::Oid, usize> =
-            anc.iter().enumerate().map(|(i, (_, o))| (*o, i)).collect();
-        let words = anc.len().div_ceil(64);
+        let bit_of: HashMap<git2::Oid, usize> = known
+            .iter()
+            .filter_map(|(r, o)| out.index_of(r).map(|i| (*o, i)))
+            .collect();
+        let words = out.words();
         let Ok(mut walk) = repo.revwalk() else {
-            return out;
+            return Ancestry::default();
         };
         if walk
             .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
             .is_err()
         {
-            return out;
+            return Ancestry::default();
         }
-        for (_, o) in &desc {
+        for (_, o) in &known {
             if walk.push(*o).is_err() {
-                return out;
+                return Ancestry::default();
             }
         }
         let mut sets: HashMap<git2::Oid, Vec<u64>> = HashMap::new();
@@ -208,15 +202,9 @@ impl RevisionGraph for GitGraph {
             }
             sets.insert(id, set);
         }
-        for (d, d_oid) in &desc {
-            let Some(set) = sets.get(d_oid) else {
-                continue;
-            };
-            for (i, (a, _)) in anc.iter().enumerate() {
-                out.insert(
-                    (a.to_string(), d.to_string()),
-                    set[i / 64] & (1 << (i % 64)) != 0,
-                );
+        for (o, i) in &bit_of {
+            if let Some(set) = sets.remove(o) {
+                out.set_all(*i, set);
             }
         }
         out

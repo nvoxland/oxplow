@@ -50,9 +50,10 @@ provider stays testable against a tempdir.
   indexer refreshes; tsk724). `revision_graph(ws)` is a
   synchronous `RevisionGraph` (ancestry, a revision's time, whether a file
   is at a revision — the link check's `has_file`) that metric
-  visibility caches over. Ancestry is asked in bulk — `ancestry(ancestors,
-  descendants)` answers every pair from one parents-first walk carrying
-  a bitset of the ancestors — never per pair.
+  visibility caches over. Ancestry is asked in bulk — `ancestry(revisions)`
+  returns an `Ancestry` (each known revision indexed, with a bitset of its
+  ancestors-or-self among them) from one parents-first walk — never per
+  pair, and never as a map of pairs.
 
 `rev_kind()` names the provider's revisions in a ref's `@<kind>:<rev>`
 slot (`git`); `features()` says what it supports beyond the floor. The

@@ -292,20 +292,95 @@ pub trait CleanBaseline: Send + Sync {
     fn candidates(&self) -> usize;
 }
 
+/// Ancestry among a set of revisions, compact: each revision the graph
+/// knows gets a small index, and each carries a bitset of the known
+/// revisions that are it or in its history. A thousand revisions cost
+/// about 128 KB, against tens of MB for the same answers as pairs of ids.
+/// A revision the graph doesn't know answers `None` against everything.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Ancestry {
+    index: std::collections::HashMap<String, usize>,
+    /// Per revision (by index), the indexes of its ancestors-or-self.
+    ancestors: Vec<Vec<u64>>,
+}
+
+impl Ancestry {
+    /// Over `known` revisions, `is_ancestor(a, d)` deciding each pair.
+    pub fn from_fn(known: &[&str], is_ancestor: impl Fn(&str, &str) -> bool) -> Self {
+        let mut a = Self::with_revisions(known.iter().copied());
+        for d in known {
+            for anc in known {
+                if anc == d || is_ancestor(anc, d) {
+                    let (ai, di) = (a.index[*anc], a.index[*d]);
+                    a.set(ai, di);
+                }
+            }
+        }
+        a
+    }
+
+    /// The revisions, indexed in this order, with no ancestry yet.
+    pub fn with_revisions<'a>(known: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut index = std::collections::HashMap::new();
+        for r in known {
+            let next = index.len();
+            index.entry(r.to_string()).or_insert(next);
+        }
+        let words = index.len().div_ceil(64);
+        Self {
+            ancestors: vec![vec![0; words]; index.len()],
+            index,
+        }
+    }
+
+    /// The index of `rev`, if known.
+    pub fn index_of(&self, rev: &str) -> Option<usize> {
+        self.index.get(rev).copied()
+    }
+
+    /// Bitset words per revision.
+    pub fn words(&self) -> usize {
+        self.index.len().div_ceil(64)
+    }
+
+    /// Record that revision `ancestor` (by index) is an ancestor-or-self
+    /// of `descendant`.
+    pub fn set(&mut self, ancestor: usize, descendant: usize) {
+        self.ancestors[descendant][ancestor / 64] |= 1 << (ancestor % 64);
+    }
+
+    /// Replace `descendant`'s whole ancestor set (a bitset over indexes,
+    /// [`Self::words`] long).
+    pub fn set_all(&mut self, descendant: usize, ancestors: Vec<u64>) {
+        self.ancestors[descendant] = ancestors;
+    }
+
+    /// How many revisions it knows.
+    pub fn len(&self) -> usize {
+        self.index.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.index.is_empty()
+    }
+
+    /// Is `ancestor` the `descendant` or in its history? `None` when
+    /// either is unknown.
+    pub fn is_ancestor_or_equal(&self, ancestor: &str, descendant: &str) -> Option<bool> {
+        let a = *self.index.get(ancestor)?;
+        let d = *self.index.get(descendant)?;
+        Some(self.ancestors[d][a / 64] & (1 << (a % 64)) != 0)
+    }
+}
+
 /// A VCS's revision graph, read synchronously (metric visibility asks it
 /// from inside a blocking fold). Unresolvable revisions answer `None`.
 pub trait RevisionGraph: Send {
     /// The full id `rev` names (a short id, a branch), if it names one.
     fn resolve(&self, rev: &str) -> Option<String>;
-    /// For every (ancestor, descendant) pair of the two lists, whether the
-    /// ancestor is the descendant or in its history — answered together,
-    /// in one pass over the graph. A pair naming a revision the graph
-    /// doesn't have is left out.
-    fn ancestry(
-        &self,
-        ancestors: &[&str],
-        descendants: &[&str],
-    ) -> std::collections::HashMap<(String, String), bool>;
+    /// The ancestry among `revisions`, answered together in one pass over
+    /// the graph. A revision the graph doesn't have is left unknown.
+    fn ancestry(&self, revisions: &[&str]) -> Ancestry;
     /// When `rev` was made.
     fn time_of(&self, rev: &str) -> Option<crate::Timestamp>;
     /// Whether `path` (repo-relative) is a file at `rev`; `None` when `rev`
@@ -550,6 +625,23 @@ impl specta::Type for Revision {
 #[cfg(test)]
 mod revision_tests {
     use super::Revision;
+
+    /// Ancestry answers each known pair, or-equal included, and nothing
+    /// for a revision it doesn't know.
+    #[test]
+    fn ancestry_answers_known_pairs_only() {
+        use super::Ancestry;
+        let a = Ancestry::from_fn(&["A", "B", "C"], |x, y| x == "A" && y == "B");
+        assert_eq!(a.is_ancestor_or_equal("A", "B"), Some(true));
+        assert_eq!(a.is_ancestor_or_equal("B", "A"), Some(false));
+        assert_eq!(a.is_ancestor_or_equal("C", "C"), Some(true));
+        assert_eq!(a.is_ancestor_or_equal("A", "Z"), None);
+        let many: Vec<String> = (0..130).map(|i| format!("r{i}")).collect();
+        let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+        let wide = Ancestry::from_fn(&refs, |_, y| y == "r129");
+        assert_eq!(wide.is_ancestor_or_equal("r0", "r129"), Some(true));
+        assert_eq!(wide.is_ancestor_or_equal("r128", "r0"), Some(false));
+    }
 
     /// tsk550: a revision that reads as a command-line option is refused,
     /// so it can't reach git's argv as a flag.

@@ -1542,19 +1542,12 @@ mod tests {
         impl crate::metric_visibility::AncestryOracle for TwoBranchDag {
             fn ancestry(
                 &mut self,
-                ancestors: &[&str],
-                descendants: &[&str],
-            ) -> std::collections::HashMap<(String, String), bool> {
-                let mut out = std::collections::HashMap::new();
-                for anc in ancestors {
-                    for desc in descendants {
-                        out.insert(
-                            (anc.to_string(), desc.to_string()),
-                            anc == desc || (*anc == "A" && *desc == "FA"),
-                        );
-                    }
-                }
-                out
+                commits: &[&str],
+            ) -> std::sync::Arc<oxplow_domain::vcs::Ancestry> {
+                std::sync::Arc::new(oxplow_domain::vcs::Ancestry::from_fn(
+                    commits,
+                    |anc, desc| anc == "A" && desc == "FA",
+                ))
             }
             fn commit_time(&mut self, sha: &str) -> Option<Timestamp> {
                 match sha {
