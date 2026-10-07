@@ -1,20 +1,21 @@
 import { expect, test } from "bun:test";
-import type { Task, ThreadWorkState } from "../../api.js";
+import type { WorkItem, WorkList } from "../../workItems.js";
 import { summarizeThreadWork } from "./TaskDetailPane.js";
 
-function task(id: string, status: Task["status"], updated_at: string): Task {
+function task(ref: string, state: WorkItem["state"], updatedAt: string): WorkItem {
   return {
-    id,
-    title: `task ${id}`,
-    status,
-    updated_at,
-    completed_at: status === "done" ? updated_at : null,
-  } as unknown as Task;
+    ref,
+    title: `item ${ref}`,
+    state,
+    updatedAt,
+    closedAt: state === "done" || state === "canceled" ? updatedAt : null,
+  } as unknown as WorkItem;
 }
 
-function workState(partial: Partial<ThreadWorkState>): ThreadWorkState {
+function workState(partial: Partial<WorkList>): WorkList {
   return {
     threadId: "th1",
+    all: [],
     waiting: [],
     inProgress: [],
     done: [],
@@ -22,14 +23,14 @@ function workState(partial: Partial<ThreadWorkState>): ThreadWorkState {
     items: [],
     followups: [],
     ...partial,
-  } as unknown as ThreadWorkState;
+  } as unknown as WorkList;
 }
 
 test("summary counts come from the bucketed arrays, not items", () => {
   // The backend puts only Ready tasks in `items`; in_progress /
   // blocked / done arrive solely via their buckets.
   const work = workState({
-    items: [task("r1", "ready", "2026-06-01T00:00:00Z")],
+    items: [task("r1", "todo", "2026-06-01T00:00:00Z")],
     inProgress: [task("p1", "in_progress", "2026-06-01T00:00:00Z")],
     waiting: [
       task("b1", "blocked", "2026-06-01T00:00:00Z"),
@@ -42,8 +43,8 @@ test("summary counts come from the bucketed arrays, not items", () => {
   });
   const s = summarizeThreadWork(work);
   expect(s.counts).toEqual({ inProgress: 1, ready: 1, blocked: 2, done: 2 });
-  expect(s.oldestBlocked?.id).toBe("b2");
-  expect(s.recentDone.map((t) => t.id)).toEqual(["d2", "d1"]);
+  expect(s.oldestBlocked?.ref).toBe("b2");
+  expect(s.recentDone.map((t) => t.ref)).toEqual(["d2", "d1"]);
 });
 
 test("null thread work summarizes to zeros", () => {
@@ -53,18 +54,11 @@ test("null thread work summarizes to zeros", () => {
   expect(s.recentDone).toEqual([]);
 });
 
-test("done bucket may include canceled/archived rows; only done counts", () => {
-  // The backend folds Canceled/Archived into the done bucket for the
-  // Work panel; the summary's Done number should count real
-  // completions only.
+test("the done bucket holds canceled items too; only done counts", () => {
   const work = workState({
-    done: [
-      task("d1", "done", "2026-06-02T00:00:00Z"),
-      task("c1", "canceled", "2026-06-02T00:00:00Z"),
-      task("a1", "archived", "2026-06-02T00:00:00Z"),
-    ],
+    done: [task("d1", "done", "2026-06-02T00:00:00Z"), task("c1", "canceled", "2026-06-02T00:00:00Z")],
   });
   const s = summarizeThreadWork(work);
   expect(s.counts.done).toBe(1);
-  expect(s.recentDone.map((t) => t.id)).toEqual(["d1"]);
+  expect(s.recentDone.map((t) => t.ref)).toEqual(["d1"]);
 });

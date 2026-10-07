@@ -52,12 +52,23 @@ pub const BUILT_INS: &[BuiltIn] = &[
         ],
         tools: &["list_tasks", "get_task", "read_task_options"],
         id_pattern: Some(r"tsk\d+"),
-        fields: &[BuiltInField {
-            name: "priority",
-            title: "Priority",
-            kind: oxplow_domain::work_items::FieldKind::Enum,
-            values: &["urgent", "high", "medium", "low"],
-        }],
+        fields: &[
+            BuiltInField {
+                name: "priority",
+                title: "Priority",
+                kind: oxplow_domain::work_items::FieldKind::Enum,
+                values: &["urgent", "high", "medium", "low"],
+                read_only: false,
+            },
+            // Who filed it: set from the actor that created it.
+            BuiltInField {
+                name: "author",
+                title: "Filed by",
+                kind: oxplow_domain::work_items::FieldKind::Enum,
+                values: &["user", "agent"],
+                read_only: true,
+            },
+        ],
     },
     BuiltIn {
         entry: "oxplow:commit-or-switch",
@@ -104,6 +115,7 @@ pub struct BuiltInField {
     pub title: &'static str,
     pub kind: oxplow_domain::work_items::FieldKind,
     pub values: &'static [&'static str],
+    pub read_only: bool,
 }
 
 /// A built-in's fields, as an implementation declares them.
@@ -116,6 +128,7 @@ fn built_in_fields(b: &BuiltIn) -> Value {
                 title: f.title.into(),
                 kind: f.kind,
                 values: f.values.iter().map(|v| v.to_string()).collect(),
+                read_only: f.read_only,
             })
             .collect::<Vec<_>>(),
     )
@@ -617,6 +630,7 @@ impl CapabilityRegistry {
                     choosable: spec.choosable,
                     optional: spec.optional,
                     fields: i.fields.clone(),
+                    id_pattern: i.id_pattern.clone(),
                 });
             }
             if let Some(wanted) = &resolved.wanted {
@@ -638,6 +652,7 @@ impl CapabilityRegistry {
                         choosable: spec.choosable,
                         optional: spec.optional,
                         fields: Value::Array(Vec::new()),
+                        id_pattern: None,
                     });
                 }
             }
@@ -1310,14 +1325,47 @@ mod tests {
         };
         assert_eq!(
             fields("oxplow"),
-            serde_json::json!([{
-                "name": "priority",
-                "title": "Priority",
-                "kind": "enum",
-                "values": ["urgent", "high", "medium", "low"]
-            }])
+            serde_json::json!([
+                {
+                    "name": "priority",
+                    "title": "Priority",
+                    "kind": "enum",
+                    "values": ["urgent", "high", "medium", "low"],
+                    "read_only": false
+                },
+                {
+                    "name": "author",
+                    "title": "Filed by",
+                    "kind": "enum",
+                    "values": ["user", "agent"],
+                    "read_only": true
+                }
+            ])
         );
         assert_eq!(fields(NONE), serde_json::json!([]));
+    }
+
+    /// Each work list's id pattern is published beside it, so a screen
+    /// recognizes its ids in text as core's vocabulary does: oxplow's
+    /// `tsk<n>`, nothing for none.
+    #[tokio::test]
+    async fn a_work_lists_id_pattern_is_published() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let out = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT provider, id_pattern FROM v_capability_provider
+                  WHERE capability = 'work_items' ORDER BY provider",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            serde_json::json!([[NONE, null], ["oxplow", r"tsk\d+"]])
+        );
     }
 
     /// The vocabulary reads the active work list's own ids in text, as it

@@ -9,7 +9,7 @@ import { anchorIsApprox, CommentPopover } from "../components/Comments/CommentPo
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { fileRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, workItemTabRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 
@@ -17,7 +17,7 @@ import { EmptyState } from "../components/Prompts/EmptyState.js";
 function targetRef(kind: string, id: string): TabRef | null {
   if (kind === "file") return fileRef(id);
   if (kind === "wiki") return wikiPageRef(id);
-  if (kind === "work_item" && id.startsWith("oxplow:")) return taskRef(id.slice("oxplow:".length));
+  if (kind === "work_item") return workItemTabRef(`work_item:${id}`);
   return null;
 }
 

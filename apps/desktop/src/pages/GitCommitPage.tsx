@@ -1,7 +1,8 @@
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { RevisionDetail, Stream, ThreadWorkState } from "../api.js";
+import type { RevisionDetail, Stream } from "../api.js";
+import type { WorkList } from "../workItems.js";
 import { gitCherryPick, gitRevert, vcsRevision } from "../api.js";
 import { awaitGitOp, gitOpErrorMessage, gitOpOutcomeMessage, opErrorOf } from "../git-op.js";
 import { logUi } from "../logger.js";
@@ -23,7 +24,7 @@ export interface GitCommitPageProps {
   sha: string;
   /** Subject the caller already knows (for instant header rendering). */
   subject?: string;
-  threadWork: ThreadWorkState | null;
+  threadWork: WorkList | null;
   /** Opens a changed file's diff (parent → this commit). */
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;

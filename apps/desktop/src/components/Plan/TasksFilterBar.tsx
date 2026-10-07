@@ -1,11 +1,6 @@
 import type { CSSProperties } from "react";
-import type { TaskPriority, TaskStatus } from "../../api.js";
-
-export interface TasksFilters {
-  priorities: ReadonlySet<TaskPriority>;
-}
-
-const PRIORITIES: TaskPriority[] = ["urgent", "high", "medium", "low"];
+import type { FieldDecl } from "../../workItems.js";
+import type { FieldFilter } from "./plan-utils.js";
 
 const barStyle: CSSProperties = {
   display: "flex",
@@ -35,77 +30,70 @@ const chipOnStyle: CSSProperties = {
 };
 
 /**
- * Filter bar shown above the Tasks page list. Renders priority chips
- * only; the section split (Ready / Blocked / Done preview) and drag-
- * reorder cover what the search/status/hide-auto/show-closed knobs
- * used to do, so they were removed.
- *
- * Toggling a chip on filters to items matching that priority. With no
- * chips on, no client-side filtering is applied.
+ * Filter bar above the Tasks page list: a row of chips for each enum
+ * field the active list declares (priority, who filed it, …). Toggling a
+ * chip on keeps the items with that value; a field with no chip on
+ * doesn't filter. Renders nothing for a list with no enum fields.
  */
 export function TasksFilterBar({
-  filters,
+  fields,
+  filter,
   onChange,
 }: {
-  filters: TasksFilters;
-  onChange(next: TasksFilters): void;
+  fields: FieldDecl[];
+  filter: FieldFilter;
+  onChange(next: FieldFilter): void;
 }) {
-  const togglePriority = (p: TaskPriority) => {
-    const next = new Set(filters.priorities);
-    if (next.has(p)) next.delete(p); else next.add(p);
-    onChange({ ...filters, priorities: next });
+  const enums = fields.filter((f) => f.kind === "enum");
+  if (enums.length === 0) return null;
+  const toggle = (name: string, value: string) => {
+    const current = filter[name] ?? [];
+    const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+    onChange({ ...filter, [name]: next });
   };
   return (
     <div style={barStyle} data-testid="tasks-filter-bar">
-      <span style={{ color: "var(--muted)" }}>Priority:</span>
-      {PRIORITIES.map((p) => (
-        <button
-          key={p}
-          type="button"
-          onClick={() => togglePriority(p)}
-          style={filters.priorities.has(p) ? chipOnStyle : chipStyle}
-          data-testid={`tasks-filter-priority-${p}`}
-        >
-          {p}
-        </button>
+      {enums.map((field) => (
+        <span key={field.name} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ color: "var(--muted)" }}>{field.title}:</span>
+          {field.values.map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => toggle(field.name, value)}
+              style={(filter[field.name] ?? []).includes(value) ? chipOnStyle : chipStyle}
+              data-testid={`tasks-filter-${field.name}-${value}`}
+            >
+              {value.replace(/_/g, " ")}
+            </button>
+          ))}
+        </span>
       ))}
     </div>
   );
 }
 
-export const DEFAULT_TASKS_FILTERS: TasksFilters = {
-  priorities: new Set(),
-};
-
 const STORAGE_KEY = "tasks-filters";
 
-export function loadTasksFilters(): TasksFilters {
-  if (typeof window === "undefined") return DEFAULT_TASKS_FILTERS;
+/** The person's chips, kept per browser across reloads. */
+export function loadTasksFilters(): FieldFilter {
+  if (typeof window === "undefined") return {};
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_TASKS_FILTERS;
-    const parsed = JSON.parse(raw) as { priorities?: string[] };
-    return {
-      priorities: new Set((parsed.priorities ?? []) as TaskPriority[]),
-    };
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string[]> = {};
+    for (const [name, values] of Object.entries(parsed as Record<string, unknown>)) {
+      if (Array.isArray(values)) out[name] = values.filter((v): v is string => typeof v === "string");
+    }
+    return out;
   } catch {
-    return DEFAULT_TASKS_FILTERS;
+    return {};
   }
 }
 
-export function saveTasksFilters(filters: TasksFilters): void {
+export function saveTasksFilters(filter: FieldFilter): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      priorities: [...filters.priorities],
-    }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(filter));
   } catch { /* ignore quota */ }
-}
-
-export function applyTasksFilters<T extends { priority: TaskPriority; status: TaskStatus }>(
-  items: T[],
-  filters: TasksFilters,
-): T[] {
-  if (filters.priorities.size === 0) return items;
-  return items.filter((item) => filters.priorities.has(item.priority));
 }

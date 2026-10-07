@@ -6,7 +6,10 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
+import { decodeWorkItemDrag, dragHasWorkItems, setWorkItemDrag } from "../../agent-context-dnd.js";
 import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
+import { useWorkListProfile } from "../../useWorkListProfile.js";
+import { FieldBadge } from "../WorkItemFields.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { RouteLink } from "../../tabs/RouteLink.js";
 import { workItemTabRef } from "../../tabs/pageRefs.js";
@@ -35,10 +38,11 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
   const [over, setOver] = useState<CanonicalState | null>(null);
   const ctxMenu = useContextMenu();
   const uiCommands = useUiCommands();
+  const { fields } = useWorkListProfile();
   const scopeKey = JSON.stringify(scope);
   const refresh = useCallback(async () => {
     try {
-      const out = await readWorkItems({ scope: JSON.parse(scopeKey) as WorkItemScope, hideArchived: true });
+      const out = await readWorkItems({ scope: JSON.parse(scopeKey) as WorkItemScope });
       setItems(out.items);
       setReads(out.reads);
     } catch (e) {
@@ -58,7 +62,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
           data-testid={`board-column-${col.state}`}
           style={{ ...columnStyle, ...(over === col.state ? dropStyle : null) }}
           onDragOver={(e) => {
-            if (!Array.from(e.dataTransfer.types ?? []).includes(WORK_ITEM_DRAG_MIME)) return;
+            if (!dragHasWorkItems(e)) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = "move";
             setOver(col.state);
@@ -66,11 +70,13 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
           onDragLeave={() => setOver((s) => (s === col.state ? null : s))}
           onDrop={(e) => {
             setOver(null);
-            const ref = e.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
-            if (!ref) return;
+            const drag = decodeWorkItemDrag(e.dataTransfer.getData(WORK_ITEM_DRAG_MIME));
+            if (!drag) return;
             e.preventDefault();
-            const item = items.find((i) => i.ref === ref);
-            if (item && item.state !== col.state) void move(ref, col.state);
+            for (const ref of drag.refs) {
+              const item = items.find((i) => i.ref === ref);
+              if (item && item.state !== col.state) void move(ref, col.state);
+            }
           }}
         >
           <h3 style={headStyle}>
@@ -84,10 +90,13 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                 tabIndex={0}
                 draggable
                 style={cardStyle}
-                onDragStart={(e) => {
-                  e.dataTransfer.setData(WORK_ITEM_DRAG_MIME, item.ref);
-                  e.dataTransfer.effectAllowed = "move";
-                }}
+                onDragStart={(e) =>
+                  setWorkItemDrag(e, {
+                    refs: [item.ref],
+                    items: [{ ref: item.ref, title: item.title, state: item.state }],
+                    fromThreadId: item.threadId,
+                  })
+                }
                 onContextMenu={(e) =>
                   ctxMenu.open(e, [
                     ...CANONICAL_STATES.filter((s) => s !== item.state).map((s) => ({
@@ -111,8 +120,16 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                   {item.title}
                 </RouteLink>
                 <div style={metaStyle}>
-                  {item.provider === "oxplow" ? item.task?.priority : `${item.provider} · ${item.nativeState}`}
-                  {item.task && item.task.noteCount > 0 ? ` · ${item.task.noteCount} ${item.task.noteCount === 1 ? "note" : "notes"}` : ""}
+                  {fields
+                    .filter((f) => f.kind === "enum" && !f.read_only)
+                    .map((f) => (
+                      <FieldBadge key={f.name} field={f} value={item.native[f.name]} />
+                    ))}
+                  {item.commentCount > 0 ? (
+                    <span>
+                      {item.commentCount} {item.commentCount === 1 ? "comment" : "comments"}
+                    </span>
+                  ) : null}
                 </div>
               </div>
             );
@@ -157,4 +174,11 @@ const titleLinkStyle: CSSProperties = {
   textAlign: "left",
   font: "inherit",
 };
-const metaStyle: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)", marginTop: 4 };
+const metaStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  color: "var(--text-secondary)",
+  fontSize: "var(--text-xs)",
+  marginTop: 4,
+};

@@ -72,6 +72,10 @@ pub struct FieldDecl {
     /// other kind).
     #[serde(default)]
     pub values: Vec<String>,
+    /// Set by the list itself (who filed it, when it synced): shown, never
+    /// edited — a `oxplow.work_item.update` that names it is refused.
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 /// What's wrong with `fields`, if anything: names snake_case and unique,
@@ -431,6 +435,7 @@ mod tests {
             title: name.into(),
             kind,
             values: values.iter().map(|v| v.to_string()).collect(),
+            read_only: false,
         };
         assert_eq!(
             fields_problem(&[field("priority", FieldKind::Enum, &["high", "low"])]),

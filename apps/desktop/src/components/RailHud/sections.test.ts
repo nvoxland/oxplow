@@ -46,12 +46,12 @@ describe("computePagesDirectory", () => {
     expect(computePagesDirectory({ backlogReadyCount: 3 }).find((e) => e.id === "backlog")?.badge).toBe(3);
   });
 
-  test("includes the four work pages in plan→done→backlog→archived order", () => {
+  test("includes the work pages in plan→done→backlog order", () => {
     const entries = computePagesDirectory({ backlogReadyCount: 0 });
     const ids = entries.map((e) => e.id);
     expect(ids.indexOf("tasks")).toBeGreaterThanOrEqual(0);
     expect(ids.indexOf("tasks")).toBeLessThan(ids.indexOf("done-work"));
     expect(ids.indexOf("done-work")).toBeLessThan(ids.indexOf("backlog"));
-    expect(ids.indexOf("backlog")).toBeLessThan(ids.indexOf("archived"));
+    expect(ids).not.toContain("archived");
   });
 });

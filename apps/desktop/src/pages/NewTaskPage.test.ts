@@ -1,43 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { resolveSaveAndAnotherDefaults } from "./NewTaskPage.js";
+import { fieldDefaults } from "./NewTaskPage.js";
 
-describe("resolveSaveAndAnotherDefaults", () => {
-  test("returns the same parent/category/priority that the caller supplied", () => {
-    const next = resolveSaveAndAnotherDefaults({
-      parentId: "wi-parent",
-      initialCategory: "task",
-      initialPriority: "high",
-      lastCategory: null,
-      lastPriority: null,
-    });
-    expect(next).toEqual({
-      parentId: "wi-parent",
-      initialCategory: "task",
-      initialPriority: "high",
-    });
+const priority = { name: "priority", title: "Priority", kind: "enum" as const, values: ["high", "low"], read_only: false };
+const author = { name: "author", title: "Filed by", kind: "enum" as const, values: ["user", "agent"], read_only: true };
+const estimate = { name: "estimate", title: "Estimate", kind: "number" as const, values: [], read_only: false };
+
+describe("fieldDefaults", () => {
+  test("a new item starts with no value for any field; the list sets its own", () => {
+    expect(fieldDefaults([priority, estimate], {})).toEqual({});
   });
 
-  test("prefers last-saved values over the original initials when both exist", () => {
-    const next = resolveSaveAndAnotherDefaults({
-      parentId: null,
-      initialCategory: "task",
-      initialPriority: "medium",
-      lastCategory: "bug",
-      lastPriority: "urgent",
-    });
-    expect(next).toEqual({
-      parentId: null,
-      initialCategory: "bug",
-      initialPriority: "urgent",
-    });
-  });
-
-  test("normalises undefined/empty payload fields to safe defaults", () => {
-    const next = resolveSaveAndAnotherDefaults({});
-    expect(next).toEqual({
-      parentId: null,
-      initialCategory: "task",
-      initialPriority: "medium",
+  // Save and Another carries the values just filed forward, so a run of
+  // similar items needs them chosen once — only the editable fields the
+  // list still declares.
+  test("what was last filed carries forward, for the fields the list still declares", () => {
+    expect(fieldDefaults([priority, author, estimate], { priority: "high", author: "user", gone: "x", estimate: 3 })).toEqual({
+      priority: "high",
+      estimate: 3,
     });
   });
 });

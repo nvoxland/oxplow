@@ -1,6 +1,5 @@
 import type { TabRef } from "../../tabs/tabState.js";
 import {
-  archivedRef,
   backlogRef,
   closedThreadsRef,
   dashboardRef,
@@ -65,7 +64,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
       category: "Work",
       badge: opts.backlogReadyCount > 0 ? opts.backlogReadyCount : undefined,
     },
-    { id: "archived", label: "Archived", ref: archivedRef(), category: "Work" },
     { id: "board", label: "Board", ref: indexRef("board"), category: "Work", keywords: "kanban columns state work items" },
     { id: "files", label: "Files", ref: indexRef("files"), category: "Code" },
     { id: "problems", label: "Problems", ref: indexRef("problems"), category: "Code", keywords: "diagnostics errors warnings lsp compiler" },

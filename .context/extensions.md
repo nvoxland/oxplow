@@ -422,8 +422,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `data-slot="<slot>"`, which the "every enhancement off" smoke test
     looks for): every mounted lens, run with
     the slot params it declares (`slotRuns`), re-run on data events.
-    DiffViewPage offers `effort_id` and `change_id`; TaskPage and
-    WorkItemPage `ref` (body and sidebar; the item's ref, whichever list); PlanPane
+    DiffViewPage offers `effort_id` and `change_id`; WorkItemPage `ref`
+    (body and sidebar; the item's ref, whichever list); PlanPane
     `thread_id` (the compact `strip` variant, which hides lenses with no
     rows); GitCommitPage and UncommittedChangesPage `change_id`, plus
     UncommittedChangesPage's strip and GitHistoryPage's side column
@@ -1034,8 +1034,8 @@ they live under `ui:`.
 | Slot | Core page | Params |
 |---|---|---|
 | `effort.review.details` | diff-view for an effort | `effort_id`, `change_id` |
-| `work_item.detail.body` | TaskPage / WorkItemPage, below the body | `ref` |
-| `work_item.detail.sidebar` | TaskPage / WorkItemPage, in the side rail | `ref` |
+| `work_item.detail.body` | WorkItemPage, below the body | `ref` |
+| `work_item.detail.sidebar` | WorkItemPage, in the side rail | `ref` |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
 | `vcs.commit.details` | GitCommitPage | `change_id` |
 | `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
@@ -2766,7 +2766,7 @@ collection ingest, attribution, token ingest, page visits (the rail and
 launcher use them), the fact store and engine, the Go To page and
 bookmarks (`v_bookmark`; the rail's Go To pane is the extension's), the Git
 dashboard. diff-view shrinks to title + file list + diff + the
-`effort.review.details` slot; TaskPage keeps the `work_item.detail.body` slot.
+`effort.review.details` slot; WorkItemPage keeps the `work_item.detail.body` slot.
 
 New in the extension: the **effort review packet**, all live exception
 lenses:

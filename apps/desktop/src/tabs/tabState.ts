@@ -40,7 +40,6 @@ export type RoutePageKind =
   | "tasks"
   | "done-work"
   | "backlog"
-  | "archived"
   | "wiki-index"
   | "files"
   | "comments"

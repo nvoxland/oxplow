@@ -1,31 +1,24 @@
 /**
  * Work-item refs on the TS side — the mirror of Rust's
  * `oxplow_domain::refs::build` work-item helpers (`.context/refs.md`).
- *
- * An effort is on a WORK ITEM: an oxplow task (`work_item:oxplow:tsk42`)
- * or another provider's item (`work_item:issues:ENG-12`). Only the first
- * has a task page; everything else is shown by its label.
+ * A work item's ref is `work_item:<provider>:<id>`, whichever list it's
+ * on (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`); the UI never
+ * reads meaning into the id.
  */
 
-const OXPLOW_TASK = /^work_item:oxplow:(tsk\d+)$/;
+const PREFIX = "work_item:";
 
-/** The `work_item` ref of an oxplow task id (`tsk42`). */
-export function workItemRef(taskId: string): string {
-  return `work_item:oxplow:${taskId}`;
+/** The `<provider>:<id>` part of a work-item ref (its `page_ref` id);
+ *  `null` for anything that isn't one. */
+export function workItemId(ref: string): string | null {
+  if (!ref.startsWith(PREFIX)) return null;
+  const rest = ref.slice(PREFIX.length);
+  return rest.includes(":") && !rest.startsWith(":") && !rest.endsWith(":") ? rest : null;
 }
 
-/** The oxplow task (`tsk42`) a work-item ref names; `null` for another
- *  provider's item or anything that isn't a work-item ref. */
-export function taskIdOfWorkItemRef(ref: string): string | null {
-  return OXPLOW_TASK.exec(ref)?.[1] ?? null;
-}
-
-/** How a person names a work item: `tsk42` for an oxplow task, the
- *  provider-scoped id (`issues:ENG-12`) otherwise. */
+/** How a person names a work item: its own id, as its list gives it
+ *  (`tsk42`, `ENG-12`); the input when it isn't a work-item ref. */
 export function workItemLabel(ref: string): string {
-  const task = taskIdOfWorkItemRef(ref);
-  if (task) return task;
-  return ref.startsWith("work_item:") && ref.length > "work_item:".length
-    ? ref.slice("work_item:".length)
-    : ref;
+  const id = workItemId(ref);
+  return id === null ? ref : id.slice(id.indexOf(":") + 1);
 }

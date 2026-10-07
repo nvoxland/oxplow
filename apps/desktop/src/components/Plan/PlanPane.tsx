@@ -2,22 +2,23 @@ import { LensSlots } from "../../lens/LensSlots.js";
 import { numericRowId } from "../../lens/lensModel.js";
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  AgentStatus,
-  BacklogState,
-  Thread,
-  ThreadWorkState,
-  Task,
-  TaskPriority,
-  TaskStatus,
-} from "../../api.js";
+import type { AgentStatus, Thread } from "../../api.js";
+import {
+  CANONICAL_STATES,
+  type CanonicalState,
+  type FieldDecl,
+  type WorkItem,
+  type WorkList,
+  type WorkListProfile,
+} from "../../workItems.js";
 import {
   listOpenAgentTurns,
   type OpenAgentTurn,
   removeFollowup,
   subscribeAgentTurns,
 } from "../../api.js";
-import { TASK_DRAG_MIME } from "../../dragMimes.js";
+import { decodeWorkItemDrag, dragHasWorkItems } from "../../agent-context-dnd.js";
+import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { showToast } from "../toastStore.js";
 import type { MenuItem } from "../../menu.js";
@@ -30,20 +31,25 @@ import { SelectionActionBar } from "./SelectionActionBar.js";
 import { SectionHeaderMenu, TaskGroupList } from "./TaskGroupList.js";
 import type { TaskDetailChanges } from "./TaskDetail.js";
 import {
-  applyStatusFilter,
+  applyStateFilter,
   buildBacklogGroups,
   buildGroups,
-  classifyTaskStatus,
-  filterAutoAuthored,
+  classifyState,
   statusLabel,
   useCollapsedSections,
   type TaskSectionKind,
 } from "./plan-utils.js";
 
 const STATUS_RANK: Record<string, number> = { inProgress: 0, ready: 1, blocked: 2, done: 3 };
-function statusOrderRank(status: TaskStatus): number {
-  return STATUS_RANK[classifyTaskStatus(status)] ?? 0;
+function statusOrderRank(state: CanonicalState): number {
+  return STATUS_RANK[classifyState(state)] ?? 0;
 }
+
+/** A keyboard picker: the state, or one of the list's own fields. */
+type KbPickerKind = { kind: "state" } | { kind: "field"; field: FieldDecl };
+
+const mention = (item: WorkItem) =>
+  formatContextMention({ kind: "work_item", ref: item.ref, title: item.title, state: item.state });
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -60,22 +66,26 @@ function isEditableTarget(target: EventTarget | null): boolean {
 interface Props {
   thread: Thread | null;
   activeThreadId: string | null;
-  threadWork: ThreadWorkState | null;
+  threadWork: WorkList | null;
   /** Live agent status for the displayed thread. Drives the In Progress
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
   agentStatus?: AgentStatus;
-  backlog: BacklogState | null;
-  onUpdateTask(itemId: string, changes: TaskDetailChanges): Promise<void>;
-  onDeleteTask(itemId: string): Promise<void>;
-  onReorderTasks(orderedItemIds: string[]): Promise<void>;
-  onUpdateBacklogItem(itemId: string, changes: TaskDetailChanges): Promise<void>;
-  onDeleteBacklogItem(itemId: string): Promise<void>;
-  onReorderBacklog(orderedItemIds: string[]): Promise<void>;
-  onMoveItemToBacklog(itemId: string, fromThreadId: string): Promise<void>;
+  backlog: WorkList | null;
+  /** The active list: what it can do (each action shows only when it
+   *  can) and its own fields. */
+  profile: WorkListProfile;
+  /** Shorthand for `profile.fields`. */
+  fields: FieldDecl[];
+  onUpdateTask(ref: string, changes: TaskDetailChanges): Promise<void>;
+  onDeleteTask(ref: string): Promise<void>;
+  /** Apply a drag's new order to the thread's list (refs). */
+  onReorderTasks(orderedRefs: string[]): Promise<void>;
+  onReorderBacklog(orderedRefs: string[]): Promise<void>;
+  onMoveItemToBacklog(ref: string, fromThreadId: string): Promise<void>;
   openNewRequest?: number;
-  /** Open the edit modal for the specified tasks. Change the token to
-   *  request again even if the itemId repeats. */
-  editRequest?: { itemId: string; token: number } | null;
+  /** Open the page for the given item. Change the token to request again
+   *  even if the ref repeats. */
+  editRequest?: { ref: string; token: number } | null;
   /** On mount, PlanPane calls this with its openCreateModal function so
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
@@ -83,14 +93,10 @@ interface Props {
   /** Route the "new task" / "+ Task on epic" buttons to a NewTaskPage
    *  tab. When omitted, those buttons do nothing (tests, standalone
    *  usages). */
-  onOpenNewTaskPage?(payload: { parentId?: string | null }): void;
-  /** Route a row click / Enter to the read+edit TaskPage tab for that
-   *  item. When omitted, row clicks still select but no page opens. */
-  onOpenTaskPage?(itemId: string): void;
-  /** When true, agent-authored tasks are filtered out of the visible
-   *  groups. Epics are always kept so their children
-   *  don't silently lose their container row. */
-  hideAuto?: boolean;
+  onOpenNewTaskPage?(payload: { parentRef?: string | null }): void;
+  /** Route a row click / Enter to the item's page. When omitted, row
+   *  clicks still select but no page opens. */
+  onOpenTaskPage?(ref: string): void;
   /** Restrict the visible sections (Ready / Blocked / etc). Used by the
    *  page split: Plan Work shows ready+blocked+done previews,
    *  Done Work / Archived show only "done", etc. Default = all four. */
@@ -98,14 +104,10 @@ interface Props {
   /** Cap the number of items rendered per section after sort. Used by
    *  Plan Work to render "last 5" previews of Done. */
   sectionItemLimit?: Partial<Record<TaskSectionKind, number>>;
-  /** Override the default section header label per kind. The Archived
-   *  page uses this so the Done section reads "Archived". */
-  sectionLabelOverrides?: Partial<Record<TaskSectionKind, string>>;
-  /** Filter raw items by status before grouping. Done Work passes
-   *  `excludeStatuses: ["archived"]`; Archived passes
-   *  `onlyStatuses: ["archived"]`. */
-  onlyStatuses?: TaskStatus[];
-  excludeStatuses?: TaskStatus[];
+  /** Filter items by state before grouping (the Tasks list leaves out
+   *  canceled ones). */
+  onlyStates?: CanonicalState[];
+  excludeStates?: CanonicalState[];
   /** Per-section header link nodes (right-aligned, after `sectionActions`).
    *  Used by Plan Work for "View all done →" links pointing at the
    *  dedicated Done Work / Archived pages. */
@@ -117,16 +119,12 @@ interface Props {
   /** Suppress the bottom Backlog chip entirely. The page split drops it
    *  in favour of rail-nav + a "View backlog" link on Plan Work. */
   hideBacklogChip?: boolean;
-  /** Suppress the built-in Done-section "Show archived (N) / Archive
-   *  all" controls. The page split owns archive flow via a dedicated
-   *  Archived page. */
-  hideArchiveToggle?: boolean;
 }
 
 interface ContextMenuState {
   x: number;
   y: number;
-  item: Task;
+  item: WorkItem;
   /** Non-null when the right-clicked item belongs to a multi-selection. */
   groupIds: string[] | null;
 }
@@ -137,11 +135,11 @@ export function PlanPane({
   threadWork,
   agentStatus,
   backlog,
+  profile,
+  fields,
   onUpdateTask,
   onDeleteTask,
   onReorderTasks,
-  onUpdateBacklogItem,
-  onDeleteBacklogItem,
   onReorderBacklog,
   onMoveItemToBacklog,
   openNewRequest,
@@ -149,17 +147,16 @@ export function PlanPane({
   registerOpenCreate,
   onOpenNewTaskPage,
   onOpenTaskPage,
-  hideAuto = false,
   visibleSections,
   sectionItemLimit,
-  sectionLabelOverrides,
-  onlyStatuses,
-  excludeStatuses,
+  onlyStates,
+  excludeStates,
   extraSectionLinks,
   forceMode,
   hideBacklogChip = false,
-  hideArchiveToggle = false,
 }: Props) {
+  const features = profile.features;
+  const editableEnums = fields.filter((f) => f.kind === "enum" && !f.read_only);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [internalMode, setInternalMode] = useState<"thread" | "backlog">("thread");
@@ -174,7 +171,7 @@ export function PlanPane({
   // in `TaskGroupList`, and the agent terminal — can move them all in one
   // gesture. Plain click clears marks.
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
-  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
+  const [kbPicker, setKbPicker] = useState<(KbPickerKind & { itemId: string; extraIds?: string[] }) | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const threadId = thread?.id ?? null;
@@ -210,30 +207,23 @@ export function PlanPane({
   }, [threadId]);
 
   const groups = useMemo(() => {
-    let raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
-    if (onlyStatuses || excludeStatuses) {
-      raw = applyStatusFilter(raw, { only: onlyStatuses, exclude: excludeStatuses });
-    }
-    return hideAuto ? filterAutoAuthored(raw) : raw;
-  }, [mode, threadWork, backlog, hideAuto, onlyStatuses, excludeStatuses]);
+    const raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
+    return onlyStates || excludeStates ? applyStateFilter(raw, { only: onlyStates, exclude: excludeStates }) : raw;
+  }, [mode, threadWork, backlog, onlyStates, excludeStates]);
 
-  // Flat top-to-bottom list of tasks ids in the order they appear on
-  // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
-  // sync with the section split in TaskGroupList (In progress → To do →
-  // Blocked → Done).
+  // Flat top-to-bottom list of refs in the order they appear on screen.
+  // Rebuilt whenever the groups change so ↑/↓ navigation stays in sync
+  // with the section split in TaskGroupList (In progress → Ready →
+  // Blocked → Done); within a section, list order (a stable sort).
   const navigableIds = useMemo(() => {
     const ids: string[] = [];
     for (const group of groups) {
-      const sorted = group.items.slice().sort((a, b) => {
-        const byStatus = statusOrderRank(a.status) - statusOrderRank(b.status);
-        if (byStatus !== 0) return byStatus;
-        return a.sort_index - b.sort_index;
-      });
+      const sorted = group.items.slice().sort((a, b) => statusOrderRank(a.state) - statusOrderRank(b.state));
       for (const item of sorted) {
-        ids.push(item.id);
-        const children = group.epicChildren.get(item.id);
+        ids.push(item.ref);
+        const children = group.epicChildren.get(item.ref);
         if (children) {
-          for (const child of children) ids.push(child.id);
+          for (const child of children) ids.push(child.ref);
         }
       }
     }
@@ -296,22 +286,22 @@ export function PlanPane({
   };
 
 
-  const selectedItem: Task | null = useMemo(() => {
+  const selectedItem: WorkItem | null = useMemo(() => {
     if (!selectedId) return null;
     for (const group of groups) {
-      const hit = group.items.find((item) => item.id === selectedId);
+      const hit = group.items.find((item) => item.ref === selectedId);
       if (hit) return hit;
       for (const children of group.epicChildren.values()) {
-        const childHit = children.find((item) => item.id === selectedId);
+        const childHit = children.find((item) => item.ref === selectedId);
         if (childHit) return childHit;
       }
     }
     return null;
   }, [groups, selectedId]);
 
-  const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateTask;
-  const activeDelete = mode === "backlog" ? onDeleteBacklogItem : onDeleteTask;
-  const activeReorder = mode === "backlog" ? onReorderBacklog : onReorderTasks;
+  const activeUpdate = onUpdateTask;
+  const activeDelete = features.delete ? onDeleteTask : null;
+  const activeReorder = features.ordering ? (mode === "backlog" ? onReorderBacklog : onReorderTasks) : null;
   const currentScopeThreadId = mode === "backlog" ? null : thread?.id ?? null;
 
   useEffect(() => {
@@ -336,13 +326,13 @@ export function PlanPane({
         // the user drags, which intentionally changes status as a side
         // effect. Reordering is section-local so the keyboard path
         // doesn't silently promote/demote.
-        if (!selectedId) return;
-        const selected = allItems.find((item) => item.id === selectedId);
+        if (!selectedId || !activeReorder) return;
+        const selected = allItems.find((item) => item.ref === selectedId);
         if (!selected) return;
-        const selSection = classifyTaskStatus(selected.status);
+        const selSection = classifyState(selected.state);
         const sectionIds = navigableIds.filter((id) => {
-          const item = allItems.find((i) => i.id === id);
-          return item ? classifyTaskStatus(item.status) === selSection : false;
+          const item = allItems.find((i) => i.ref === id);
+          return item ? classifyState(item.state) === selSection : false;
         });
         const posInSection = sectionIds.indexOf(selectedId);
         const neighborPosInSection = key === "ArrowDown" ? posInSection + 1 : posInSection - 1;
@@ -354,7 +344,7 @@ export function PlanPane({
         const j = nextOrder.indexOf(neighborId);
         if (i < 0 || j < 0) return;
         [nextOrder[i], nextOrder[j]] = [nextOrder[j]!, nextOrder[i]!];
-        void runWithError("Reorder tasks", activeReorder(nextOrder));
+        void runWithError("Reorder items", activeReorder(nextOrder));
         return;
       }
       if (key === "ArrowDown" || key === "ArrowUp") {
@@ -367,25 +357,26 @@ export function PlanPane({
         setSelectedId(navigableIds[next] ?? null);
       } else if (key === "Enter" && selectedId) {
         event.preventDefault();
-        const item = allItems.find((i) => i.id === selectedId);
+        const item = allItems.find((i) => i.ref === selectedId);
         if (item) openEditModal(item);
       } else if ((key === "s" || key === "S") && selectedId) {
-        if (allItems.find((i) => i.id === selectedId)?.status === "in_progress") return;
+        if (allItems.find((i) => i.ref === selectedId)?.state === "in_progress") return;
         event.preventDefault();
-        setKbPicker({ kind: "status", itemId: selectedId });
-      } else if ((key === "p" || key === "P") && selectedId) {
+        setKbPicker({ kind: "state", itemId: selectedId });
+      } else if ((key === "p" || key === "P") && selectedId && editableEnums[0]) {
+        // P: the list's first editable enum field (oxplow's: priority).
         event.preventDefault();
-        setKbPicker({ kind: "priority", itemId: selectedId });
+        setKbPicker({ kind: "field", field: editableEnums[0], itemId: selectedId });
       }
     };
     el.addEventListener("keydown", handler);
     return () => el.removeEventListener("keydown", handler);
-  }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
+  }, [navigableIds, selectedId, kbPicker, groups, activeReorder, editableEnums]);
 
-  const openCreateModal = (parentId: string | null = null) => {
+  const openCreateModal = (parentRef: string | null = null) => {
     // Creation always routes through a full-tab NewTaskPage. Tests /
     // standalone harnesses must wire `onOpenNewTaskPage`.
-    onOpenNewTaskPage?.({ parentId });
+    onOpenNewTaskPage?.({ parentRef });
   };
 
   // Register the imperative opener with the parent so menu-click
@@ -404,12 +395,11 @@ export function PlanPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registerOpenCreate]);
 
-  const openEditModal = (item: Task) => {
-    // Row clicks (and Enter on the keyboard-selected row) open the
-    // canonical Task page (TaskPage) which renders a readable view
-    // with inline editing via TaskDetail.
-    setSelectedId(item.id);
-    onOpenTaskPage?.(item.id);
+  const openEditModal = (item: WorkItem) => {
+    // Row clicks (and Enter on the keyboard-selected row) open the item's
+    // page, which renders a readable view with inline editing.
+    setSelectedId(item.ref);
+    onOpenTaskPage?.(item.ref);
   };
 
   useEffect(() => {
@@ -424,9 +414,9 @@ export function PlanPane({
     if (!editRequest) return;
     const allItems = groups.flatMap((g) => [
       ...g.items,
-      ...g.items.flatMap((item) => g.epicChildren?.get(item.id) ?? []),
+      ...g.items.flatMap((item) => g.epicChildren?.get(item.ref) ?? []),
     ]);
-    const item = allItems.find((i) => i.id === editRequest.itemId);
+    const item = allItems.find((i) => i.ref === editRequest.ref);
     if (item) openEditModal(item);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest?.token]);
@@ -437,37 +427,22 @@ export function PlanPane({
   }
 
   const handleBacklogChipDragOver = (event: React.DragEvent) => {
-    const types = event.dataTransfer.types;
-    if (!types || !Array.from(types).includes(TASK_DRAG_MIME)) return;
+    if (!dragHasWorkItems(event)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     if (!backlogChipDragOver) setBacklogChipDragOver(true);
   };
 
   const handleBacklogChipDrop = (event: React.DragEvent) => {
-    const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
+    const drag = decodeWorkItemDrag(event.dataTransfer.getData(WORK_ITEM_DRAG_MIME));
     setBacklogChipDragOver(false);
-    if (!raw) return;
+    if (!drag) return;
     event.preventDefault();
-    try {
-      const payload = JSON.parse(raw) as {
-        itemIds?: string[];
-        fromThreadId?: string | null;
-      };
-      const fromThreadId = payload.fromThreadId;
-      if (!fromThreadId) return;
-      const ids = payload.itemIds ?? [];
-      // Move each marked item in sequence — the store already serialises the
-      // thread mutations, and doing them one at a time keeps the failure mode
-      // simple (a bad id throws, the rest keep going isn't worth the risk of
-      // a partial state that surprises the user). If the first one fails the
-      // later ones are skipped by Promise.allSettled semantics in the caller.
-      for (const id of ids) {
-        void onMoveItemToBacklog(id, fromThreadId);
-      }
-    } catch {
-      // ignore malformed payload
-    }
+    const fromThreadId = drag.fromThreadId;
+    if (!fromThreadId) return;
+    // Move each carried item in sequence — one at a time keeps the failure
+    // mode simple.
+    for (const ref of drag.refs) void onMoveItemToBacklog(ref, fromThreadId);
   };
 
   return (
@@ -493,68 +468,54 @@ export function PlanPane({
             ...[...g.epicChildren.values()].flat(),
           ]);
           const markedItems = [...markedIds]
-            .map((id) => allItems.find((item) => item.id === id))
-            .filter((item): item is Task => item !== undefined);
+            .map((id) => allItems.find((item) => item.ref === id))
+            .filter((item): item is WorkItem => item !== undefined);
           if (markedItems.length === 0) return null;
           return (
             <SelectionActionBar
               items={markedItems}
+              fields={fields}
               onClear={() => setMarkedIds(new Set())}
               onChangeStatus={() => {
                 const liveIds = markedItems
-                  .filter((item) => item.status !== "in_progress")
-                  .map((item) => item.id);
+                  .filter((item) => item.state !== "in_progress")
+                  .map((item) => item.ref);
                 if (liveIds.length === 0) return;
-                const anchor = markedItems.find((item) => item.status !== "in_progress") ?? markedItems[0]!;
-                setSelectedId(anchor.id);
-                setKbPicker({
-                  kind: "status",
-                  itemId: anchor.id,
-                  extraIds: liveIds.filter((id) => id !== anchor.id),
-                });
+                const anchor = markedItems.find((item) => item.state !== "in_progress") ?? markedItems[0]!;
+                setSelectedId(anchor.ref);
+                setKbPicker({ kind: "state", itemId: anchor.ref, extraIds: liveIds.filter((id) => id !== anchor.ref) });
               }}
-              onChangePriority={() => {
-                const ids = markedItems.map((item) => item.id);
+              onChangeField={(field) => {
                 const anchor = markedItems[0]!;
-                setSelectedId(anchor.id);
+                setSelectedId(anchor.ref);
                 setKbPicker({
-                  kind: "priority",
-                  itemId: anchor.id,
-                  extraIds: ids.filter((id) => id !== anchor.id),
+                  kind: "field",
+                  field,
+                  itemId: anchor.ref,
+                  extraIds: markedItems.map((item) => item.ref).filter((id) => id !== anchor.ref),
                 });
               }}
               onAddAllToAgent={() => {
-                // Reuse the same mention formatter the kebab "Add to agent
-                // context" path uses; concatenate so the user sees a
-                // space-separated chain of bracketed tasks refs.
-                const text = markedItems
-                  .map((item) => formatContextMention({
-                    kind: "task",
-                    itemId: item.id,
-                    title: item.title,
-                    status: item.status,
-                  }))
-                  .join("");
-                insertIntoAgent(text);
+                // The same mention the "Add to agent context" menu item
+                // makes, chained.
+                insertIntoAgent(markedItems.map(mention).join(""));
               }}
-              onDelete={() => {
+              onDelete={activeDelete ? () => {
                 const liveIds = markedItems
-                  .filter((item) => item.status !== "in_progress")
-                  .map((item) => item.id);
+                  .filter((item) => item.state !== "in_progress")
+                  .map((item) => item.ref);
                 if (liveIds.length === 0) return;
                 for (const id of liveIds) void activeDelete(id);
-                showToast({
-                  message: `Deleted ${liveIds.length} tasks${liveIds.length === 1 ? "" : "s"}.`,
-                });
+                showToast({ message: `Deleted ${liveIds.length} item${liveIds.length === 1 ? "" : "s"}.` });
                 setMarkedIds(new Set());
-              }}
+              } : undefined}
             />
           );
         })()}
         {groups.length === 0 ? (
           <>
             <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>
-              No tasks.
+              Nothing here.
             </div>
           </>
         ) : (
@@ -564,7 +525,7 @@ export function PlanPane({
             const readyMenuItems: MenuItem[] = [
               {
                 id: "plan-new-task",
-                label: "New task",
+                label: "New item",
                 shortcut: "⇧⌘N",
                 enabled: true,
                 run: () => openCreateModal(),
@@ -589,13 +550,14 @@ export function PlanPane({
             }
             return (
               <TaskGroupList
-                key={group.epic?.id ?? "__root__"}
+                key={group.epic?.ref ?? "__root__"}
                 group={group}
                 scopeThreadId={currentScopeThreadId}
+                fields={fields}
                 onUpdateTask={activeUpdate}
-                onReorderTasks={activeReorder}
+                onReorderTasks={activeReorder ?? undefined}
                 onOpenMenu={(rect, item) => {
-                  const groupIds = markedIds.has(item.id) && markedIds.size > 1
+                  const groupIds = markedIds.has(item.ref) && markedIds.size > 1
                     ? [...markedIds]
                     : null;
                   setContextMenu({ x: rect.right, y: rect.bottom + 4, item, groupIds });
@@ -606,8 +568,8 @@ export function PlanPane({
                 onSelect={handleSelect}
                 onRequestEdit={openEditModal}
                 epicChildrenMap={group.epicChildren}
-                onReparentTask={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
-                onAddChildTask={(epicId) => openCreateModal(epicId)}
+                onReparentTask={features.hierarchy ? (ref, parentRef) => activeUpdate(ref, { parentRef }) : undefined}
+                onAddChildTask={features.hierarchy ? (epicRef) => openCreateModal(epicRef) : undefined}
                 isActive={isActive}
                 agentStatus={agentStatus}
                 isSectionCollapsed={isSectionCollapsed}
@@ -619,14 +581,12 @@ export function PlanPane({
                   : undefined}
                 visibleSections={visibleSections}
                 sectionItemLimit={sectionItemLimit}
-                sectionLabelOverrides={sectionLabelOverrides}
-                hideArchiveToggle={hideArchiveToggle}
               />
             );
           })
         )}
       </div>
-      {hideBacklogChip || forceMode ? null : (
+      {hideBacklogChip || forceMode || !features.lists ? null : (
       <div style={bottomBarStyle}>
         <button type="button"
           onClick={() => setInternalMode((prev) => (prev === "backlog" ? "thread" : "backlog"))}
@@ -649,75 +609,63 @@ export function PlanPane({
       {contextMenu ? (
         <ContextMenu
           items={contextMenu.groupIds
-            ? buildGroupMenu(contextMenu.item, contextMenu.groupIds, {
+            ? buildGroupMenu(contextMenu.item, contextMenu.groupIds, editableEnums, {
                 onChangeStatus: (item, ids) => {
                   setContextMenu(null);
-                  setSelectedId(item.id);
+                  setSelectedId(item.ref);
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
-                  const liveIds = ids.filter((id) => allWi.find((i) => i.id === id)?.status !== "in_progress");
-                  setKbPicker({ kind: "status", itemId: item.id, extraIds: liveIds.filter((id) => id !== item.id) });
+                  const liveIds = ids.filter((id) => allWi.find((i) => i.ref === id)?.state !== "in_progress");
+                  setKbPicker({ kind: "state", itemId: item.ref, extraIds: liveIds.filter((id) => id !== item.ref) });
                 },
-                onChangePriority: (item, ids) => {
+                onChangeField: (item, ids, field) => {
                   setContextMenu(null);
-                  setSelectedId(item.id);
-                  setKbPicker({ kind: "priority", itemId: item.id, extraIds: ids.filter((id) => id !== item.id) });
+                  setSelectedId(item.ref);
+                  setKbPicker({ kind: "field", field, itemId: item.ref, extraIds: ids.filter((id) => id !== item.ref) });
                 },
-                onDelete: (_item, ids) => {
+                onDelete: activeDelete ? (_item, ids) => {
                   setContextMenu(null);
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
-                  const liveIds = ids.filter((id) => allWi.find((i) => i.id === id)?.status !== "in_progress");
+                  const liveIds = ids.filter((id) => allWi.find((i) => i.ref === id)?.state !== "in_progress");
                   if (liveIds.length === 0) return;
                   for (const id of liveIds) void activeDelete(id);
-                  showToast({
-                    message: `Deleted ${liveIds.length} tasks${liveIds.length === 1 ? "" : "s"}.`,
-                  });
-                },
+                  showToast({ message: `Deleted ${liveIds.length} item${liveIds.length === 1 ? "" : "s"}.` });
+                } : null,
                 onAddToAgent: (ids) => {
                   setContextMenu(null);
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
                   const text = ids
-                    .map((id) => allWi.find((i) => i.id === id))
-                    .filter((item): item is Task => item !== undefined)
-                    .map((item) => formatContextMention({
-                      kind: "task",
-                      itemId: item.id,
-                      title: item.title,
-                      status: item.status,
-                    }))
+                    .map((id) => allWi.find((i) => i.ref === id))
+                    .filter((item): item is WorkItem => item !== undefined)
+                    .map(mention)
                     .join("");
                   if (text.length > 0) insertIntoAgent(text);
                 },
               })
-            : buildtasksMenu(contextMenu.item, {
-                onDelete: (item) => {
+            : buildItemMenu(contextMenu.item, editableEnums, {
+                onDelete: activeDelete ? (item) => {
                   setContextMenu(null);
-                  if (expandedId === item.id) setExpandedId(null);
-                  void activeDelete(item.id);
+                  if (expandedId === item.ref) setExpandedId(null);
+                  void activeDelete(item.ref);
                   showToast({ message: `Deleted "${item.title}".` });
-                },
+                } : null,
                 onRename: (item) => {
                   setContextMenu(null);
-                  setSelectedId(item.id);
+                  setSelectedId(item.ref);
                   openEditModal(item);
                 },
                 onChangeStatus: (item) => {
                   setContextMenu(null);
-                  setSelectedId(item.id);
-                  setKbPicker({ kind: "status", itemId: item.id });
+                  setSelectedId(item.ref);
+                  setKbPicker({ kind: "state", itemId: item.ref });
                 },
-                onChangePriority: (item) => {
+                onChangeField: (item, field) => {
                   setContextMenu(null);
-                  setSelectedId(item.id);
-                  setKbPicker({ kind: "priority", itemId: item.id });
+                  setSelectedId(item.ref);
+                  setKbPicker({ kind: "field", field, itemId: item.ref });
                 },
                 onAddToAgent: (item) => {
                   setContextMenu(null);
-                  insertIntoAgent(formatContextMention({
-                    kind: "task",
-                    itemId: item.id,
-                    title: item.title,
-                    status: item.status,
-                  }));
+                  insertIntoAgent(mention(item));
                 },
                 onComment: (item) => {
                   setContextMenu(null);
@@ -731,16 +679,17 @@ export function PlanPane({
       ) : null}
       {kbPicker && selectedItem ? (
         <KeyboardValuePicker
-          kind={kbPicker.kind}
+          picker={kbPicker}
           item={selectedItem}
           onPick={(value) => {
             const allIds = kbPicker.extraIds
               ? [kbPicker.itemId, ...kbPicker.extraIds]
               : [kbPicker.itemId];
-            if (kbPicker.kind === "status") {
-              for (const id of allIds) void activeUpdate(id, { status: value as TaskStatus });
+            if (kbPicker.kind === "state") {
+              for (const id of allIds) void activeUpdate(id, { state: value as CanonicalState });
             } else {
-              for (const id of allIds) void activeUpdate(id, { priority: value as TaskPriority });
+              const name = kbPicker.field.name;
+              for (const id of allIds) void activeUpdate(id, { native: { [name]: value } });
             }
             setKbPicker(null);
             paneRef.current?.focus();
@@ -752,34 +701,25 @@ export function PlanPane({
   );
 }
 
-const KB_STATUS_OPTIONS: TaskStatus[] = [
-  "blocked", "ready", "done", "archived", "canceled",
-];
-const KB_PRIORITY_OPTIONS: TaskPriority[] = ["urgent", "high", "medium", "low"];
-
 /**
- * Small centered picker opened by the keyboard shortcuts `S` / `P` when a
- * tasks row is selected. Autofocuses, ↑/↓ navigate options, Enter
+ * Small centered picker opened by the keyboard shortcuts `S` (state) /
+ * `P` (the list's first enum field) when a row is selected. Autofocuses, ↑/↓ navigate options, Enter
  * commits, Escape cancels. Mouse click on a row also commits. Kept in-line
  * in this file rather than extracted because nothing else uses it.
  */
 function KeyboardValuePicker({
-  kind,
+  picker,
   item,
   onPick,
   onClose,
 }: {
-  kind: "status" | "priority";
-  item: Task;
+  picker: KbPickerKind;
+  item: WorkItem;
   onPick(value: string): void;
   onClose(): void;
 }) {
-  const baseOptions = kind === "status" ? KB_STATUS_OPTIONS : KB_PRIORITY_OPTIONS;
-  const options: readonly string[] =
-    kind === "status" && item.status === "in_progress"
-      ? [...baseOptions, "in_progress"]
-      : baseOptions;
-  const current = kind === "status" ? item.status : item.priority;
+  const options: readonly string[] = picker.kind === "state" ? CANONICAL_STATES : picker.field.values;
+  const current = picker.kind === "state" ? item.state : String(item.native[picker.field.name] ?? "");
   const initialIdx = Math.max(0, options.indexOf(current as string));
   const [idx, setIdx] = useState(initialIdx);
 
@@ -807,7 +747,7 @@ function KeyboardValuePicker({
     <div style={kbPickerOverlayStyle} onClick={onClose}>
       <div style={kbPickerStyle} onClick={(event) => event.stopPropagation()}>
         <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>
-          {kind === "status" ? "Set status" : "Set priority"}
+          {picker.kind === "state" ? "Set state" : `Set ${picker.field.title.toLowerCase()}`}
           <span style={{ float: "right", fontFamily: "ui-monospace, monospace" }}>↑↓ · Enter · Esc</span>
         </div>
         <div style={{ padding: 4 }}>
@@ -827,7 +767,7 @@ function KeyboardValuePicker({
                   color: active ? "#fff" : "var(--fg)",
                 }}
               >
-                {kind === "status" ? statusLabel(option as TaskStatus) : option}
+                {picker.kind === "state" ? statusLabel(option as CanonicalState) : option.replace(/_/g, " ")}
                 {option === current ? <span style={{ marginLeft: 8, opacity: 0.7 }}>· current</span> : null}
               </div>
             );
@@ -858,110 +798,76 @@ const kbPickerStyle: CSSProperties = {
 };
 
 
-/// Open the comment composer anchored to a task row's title. Used by the
-/// row context menu's "Comment…" item — task rows are draggable, so a
+/// Open the comment composer anchored to an item row's title. Used by
+/// the row context menu's "Comment…" item — rows are draggable, so a
 /// drag-select can't start on them; this is the right-click path. Finds
 /// the row's `data-ref` element and dispatches a pending comment to the
 /// app-level layer via the compose bus.
-function openCommentForTask(item: Task): void {
+function openCommentForTask(item: WorkItem): void {
   const el = document.querySelector(
-    `[data-ref-kind="work_item"][data-ref-id="oxplow:${item.id}"]`,
+    `[data-ref-kind="work_item"][data-ref-id="${CSS.escape(item.ref.replace(/^work_item:/, ""))}"]`,
   );
   if (!el) return;
   const req = composeForElement(el, item.title, el.getBoundingClientRect());
   if (req) requestCommentCompose(req);
 }
 
-function buildtasksMenu(
-  item: Task,
+function buildItemMenu(
+  item: WorkItem,
+  fields: FieldDecl[],
   actions: {
-    onDelete: (item: Task) => void;
-    onRename: (item: Task) => void;
-    onChangeStatus: (item: Task) => void;
-    onChangePriority: (item: Task) => void;
-    onAddToAgent: (item: Task) => void;
-    onComment: (item: Task) => void;
+    onDelete: ((item: WorkItem) => void) | null;
+    onRename: (item: WorkItem) => void;
+    onChangeStatus: (item: WorkItem) => void;
+    onChangeField: (item: WorkItem, field: FieldDecl) => void;
+    onAddToAgent: (item: WorkItem) => void;
+    onComment: (item: WorkItem) => void;
   },
 ): MenuItem[] {
-  const locked = item.status === "in_progress";
-  return [
-    {
-      id: "tasks.rename",
-      label: "Rename…",
-      enabled: !locked,
-      run: () => actions.onRename(item),
-    },
-    {
-      id: "tasks.comment",
-      label: "Comment…",
+  const locked = item.state === "in_progress";
+  const items: MenuItem[] = [
+    { id: "tasks.rename", label: "Rename…", enabled: !locked, run: () => actions.onRename(item) },
+    { id: "tasks.comment", label: "Comment…", enabled: true, run: () => actions.onComment(item) },
+    { id: "tasks.status", label: "Change state…", enabled: !locked, run: () => actions.onChangeStatus(item) },
+    ...fields.map((field) => ({
+      id: `tasks.field.${field.name}`,
+      label: `Change ${field.title.toLowerCase()}…`,
       enabled: true,
-      run: () => actions.onComment(item),
-    },
-    {
-      id: "tasks.status",
-      label: "Change status…",
-      enabled: !locked,
-      run: () => actions.onChangeStatus(item),
-    },
-    {
-      id: "tasks.priority",
-      label: "Change priority…",
-      enabled: true,
-      run: () => actions.onChangePriority(item),
-    },
-    {
-      id: "tasks.add-to-agent",
-      label: "Add to agent context",
-      enabled: true,
-      run: () => actions.onAddToAgent(item),
-    },
-    {
-      id: "tasks.delete",
-      label: "Delete",
-      enabled: !locked,
-      run: () => actions.onDelete(item),
-    },
+      run: () => actions.onChangeField(item, field),
+    })),
+    { id: "tasks.add-to-agent", label: "Add to agent context", enabled: true, run: () => actions.onAddToAgent(item) },
   ];
+  const onDelete = actions.onDelete;
+  if (onDelete) items.push({ id: "tasks.delete", label: "Delete", enabled: !locked, run: () => onDelete(item) });
+  return items;
 }
 
 function buildGroupMenu(
-  item: Task,
+  item: WorkItem,
   groupIds: string[],
+  fields: FieldDecl[],
   actions: {
-    onChangeStatus: (item: Task, ids: string[]) => void;
-    onChangePriority: (item: Task, ids: string[]) => void;
-    onDelete: (item: Task, ids: string[]) => void;
+    onChangeStatus: (item: WorkItem, ids: string[]) => void;
+    onChangeField: (item: WorkItem, ids: string[], field: FieldDecl) => void;
+    onDelete: ((item: WorkItem, ids: string[]) => void) | null;
     onAddToAgent: (ids: string[]) => void;
   },
 ): MenuItem[] {
-  const locked = item.status === "in_progress";
+  const locked = item.state === "in_progress";
   const n = groupIds.length;
-  return [
-    {
-      id: "tasks.status",
-      label: `Change status… (${n} items)`,
-      enabled: !locked,
-      run: () => actions.onChangeStatus(item, groupIds),
-    },
-    {
-      id: "tasks.priority",
-      label: `Change priority… (${n} items)`,
+  const items: MenuItem[] = [
+    { id: "tasks.status", label: `Change state… (${n} items)`, enabled: !locked, run: () => actions.onChangeStatus(item, groupIds) },
+    ...fields.map((field) => ({
+      id: `tasks.field.${field.name}`,
+      label: `Change ${field.title.toLowerCase()}… (${n} items)`,
       enabled: true,
-      run: () => actions.onChangePriority(item, groupIds),
-    },
-    {
-      id: "tasks.add-to-agent",
-      label: `Add to agent context (${n} items)`,
-      enabled: true,
-      run: () => actions.onAddToAgent(groupIds),
-    },
-    {
-      id: "tasks.delete",
-      label: `Delete (${n} items)`,
-      enabled: !locked,
-      run: () => actions.onDelete(item, groupIds),
-    },
+      run: () => actions.onChangeField(item, groupIds, field),
+    })),
+    { id: "tasks.add-to-agent", label: `Add to agent context (${n} items)`, enabled: true, run: () => actions.onAddToAgent(groupIds) },
   ];
+  const onDelete = actions.onDelete;
+  if (onDelete) items.push({ id: "tasks.delete", label: `Delete (${n} items)`, enabled: !locked, run: () => onDelete(item, groupIds) });
+  return items;
 }
 
 const bottomBarStyle: CSSProperties = {

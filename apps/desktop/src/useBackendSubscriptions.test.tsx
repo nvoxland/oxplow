@@ -13,9 +13,11 @@ let reconnectHandlers: Array<() => void> = [];
 let unsubCount = 0;
 // What the reads read: the hook re-runs them on a change to those models
 // (`readsChanged`), not on a hard-coded list.
-const taskReads = { reads: { models: ["v_task", "v_task_note"], tables: [], measures: [] } };
-const readThreadWork = mock(async () => taskReads);
-const readBacklog = mock(async () => taskReads);
+const taskReads = { reads: { models: ["v_work_item", "v_work_item_comment"], tables: [], measures: [] } };
+const readWorkList = mock(async (_thread: string | null) => taskReads);
+/** The calls that read the backlog, and the threads the others read. */
+const backlogReads = () => readWorkList.mock.calls.filter((c) => c[0] === null).length;
+const threadReads = () => readWorkList.mock.calls.map((c) => c[0]).filter((t) => t !== null);
 const listAgentStatuses = mock(async () => []);
 const getConfig = mock(async () => ({ generated: { exclude: [], include: [] } }));
 const getThreadState = mock(async () => ({ selectedThreadId: null, activeThreadId: null, threads: [] }));
@@ -39,9 +41,8 @@ function makeApi(): BackendSubscriptionApi {
         unsubCount += 1;
       };
     }) as never,
-    readBacklog: readBacklog as never,
+    readWorkList: readWorkList as never,
     getThreadState: getThreadState as never,
-    readThreadWork: readThreadWork as never,
     listStreams: (async () => []) as never,
     listAgentStatuses: listAgentStatuses as never,
     getConfig: getConfig as never,
@@ -84,8 +85,7 @@ beforeEach(() => {
   oxplowHandlers = [];
   reconnectHandlers = [];
   unsubCount = 0;
-  readThreadWork.mockClear();
-  readBacklog.mockClear();
+  readWorkList.mockClear();
   listAgentStatuses.mockClear();
   getConfig.mockClear();
 });
@@ -125,7 +125,7 @@ test("registers reconnect handlers for the core stores", () => {
 test("re-hydrates core stores on a remote reconnect", async () => {
   render(<Harness workStates={{}} />);
   // One fetch each on mount.
-  expect(readBacklog).toHaveBeenCalledTimes(1);
+  expect(backlogReads()).toBe(1);
   expect(getConfig).toHaveBeenCalledTimes(1);
   expect(listAgentStatuses).toHaveBeenCalledTimes(1);
 
@@ -135,7 +135,7 @@ test("re-hydrates core stores on a remote reconnect", async () => {
   });
 
   // A second fetch each after the reconnect fired.
-  expect(readBacklog).toHaveBeenCalledTimes(2);
+  expect(backlogReads()).toBe(2);
   expect(getConfig).toHaveBeenCalledTimes(2);
   expect(listAgentStatuses).toHaveBeenCalledTimes(2);
 });
@@ -146,17 +146,15 @@ test("a change to a model the reads read re-reads the backlog and every loaded t
   await act(async () => {
     await Promise.resolve();
   });
-  readThreadWork.mockClear();
-  readBacklog.mockClear();
+  readWorkList.mockClear();
   await act(async () => {
-    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_task_note"] });
+    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_work_item_comment"] });
     await Promise.resolve();
   });
-  expect(readBacklog).toHaveBeenCalledTimes(1);
-  expect(readThreadWork.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["thr1", "thr2"]);
+  expect(backlogReads()).toBe(1);
+  expect(threadReads()).toEqual(["thr1", "thr2"]);
 
-  readThreadWork.mockClear();
-  readBacklog.mockClear();
+  readWorkList.mockClear();
   await act(async () => {
     // A model nothing here read — and a model a task read *could* name
     // but these didn't (what the hook knows comes from the reads, not a
@@ -166,8 +164,8 @@ test("a change to a model the reads read re-reads the backlog and every loaded t
     for (const handler of oxplowHandlers) handler({ kind: "followupsChanged", threadId: "thr3" });
     await Promise.resolve();
   });
-  expect(readBacklog).toHaveBeenCalledTimes(0);
-  expect(readThreadWork.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["thr3"]);
+  expect(backlogReads()).toBe(0);
+  expect(threadReads()).toEqual(["thr3"]);
 });
 
 test("a change to v_thread re-reads every loaded stream's thread state, and nothing else does", async () => {

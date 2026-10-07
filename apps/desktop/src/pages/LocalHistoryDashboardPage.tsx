@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommitRefLabel, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
-import { readTasksById } from "../workItems.js";
+import { readWorkItemsByRef } from "../workItems.js";
 import type { SnapshotTrigger } from "../tauri-bridge/generated/bindings.js";
 import {
   effortTitles,
@@ -56,8 +56,8 @@ export interface LocalHistoryDashboardPageProps {
 
 interface SnapshotRowEffort {
   effortId: string;
-  /** The oxplow task; `null` for another provider's work item. */
-  tasksId: string | null;
+  /** Its work item's ref; `null` while unlinked. */
+  workItem: string | null;
   title: string;
 }
 
@@ -79,15 +79,15 @@ interface SnapshotRow {
   isInitial: boolean;
 }
 
-/** What a Local History row calls an effort: its task's title, another
- *  tracker's item, or — unlinked — its own title. */
+/** What a Local History row calls an effort: its work item's title (its
+ *  id when the item isn't on the active list), or — unlinked — its own
+ *  title. */
 export function effortLabel(
-  e: Pick<EffortAtSnapshot, "effortId" | "workItem" | "tasksId">,
-  titleByTaskId: Map<string, string>,
+  e: Pick<EffortAtSnapshot, "effortId" | "workItem">,
+  titleByItem: Map<string, string>,
   titleByEffort: Map<string, string>,
 ): string {
-  if (e.tasksId) return titleByTaskId.get(e.tasksId) ?? `task ${e.tasksId}`;
-  if (e.workItem) return workItemLabel(e.workItem);
+  if (e.workItem) return titleByItem.get(e.workItem) ?? workItemLabel(e.workItem);
   return titleByEffort.get(e.effortId) ?? "Unlinked work";
 }
 
@@ -191,20 +191,16 @@ export function LocalHistoryDashboardPage({
       for (const [id, s] of summaries) {
         if (s) summaryById.set(id, s);
       }
-      // Resolve task titles for every effort the dashboard will show
-      // — the efforts IPC only carries effort columns, no task title.
-      const uniqueTaskIds = Array.from(
-        new Set(effortsAt.flatMap((e) => (e.tasksId ? [e.tasksId] : []))),
-      );
-      const taskSummaries = await readTasksById(uniqueTaskIds)
-        .then((r) => r.tasks)
+      // Resolve the work items' titles for every effort the dashboard
+      // will show — the efforts IPC only carries effort columns.
+      const uniqueItems = Array.from(new Set(effortsAt.flatMap((e) => (e.workItem ? [e.workItem] : []))));
+      const itemSummaries = await readWorkItemsByRef(uniqueItems)
+        .then((r) => r.items)
         .catch((err) => {
-          logUi("warn", "task summaries fetch failed", { error: String(err) });
-          return [] as Array<{ id: string; title: string }>;
+          logUi("warn", "work item titles fetch failed", { error: String(err) });
+          return [] as Array<{ ref: string; title: string }>;
         });
-      const titleByTaskId = new Map<string, string>(
-        taskSummaries.map((t) => [t.id, t.title] as [string, string]),
-      );
+      const titleByItem = new Map<string, string>(itemSummaries.map((t) => [t.ref, t.title] as [string, string]));
       // An unlinked effort is named by its own title (`v_effort.title`:
       // its own, else its first prompt's first line).
       const unlinked = Array.from(new Set(effortsAt.filter((e) => !e.workItem).map((e) => e.effortId)));
@@ -219,8 +215,8 @@ export function LocalHistoryDashboardPage({
         const list = target.get(e.snapshotId) ?? [];
         list.push({
           effortId: e.effortId,
-          tasksId: e.tasksId,
-          title: effortLabel(e, titleByTaskId, titleByEffort),
+          workItem: e.workItem,
+          title: effortLabel(e, titleByItem, titleByEffort),
         });
         target.set(e.snapshotId, list);
       }

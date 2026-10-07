@@ -11,6 +11,8 @@ import { pageH1Style } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { workItemTabRef } from "../tabs/pageRefs.js";
 import { workItemLabel } from "../workItemRef.js";
+import { useWorkListProfile } from "../useWorkListProfile.js";
+import { workItemRefOfMention } from "../workItems.js";
 
 /** An effort as its page shows it (`v_effort`). */
 export interface EffortRecord {
@@ -41,13 +43,13 @@ export const realEffortHeaderDeps: EffortHeaderDeps = {
   runCommand: (name, input) => runCommand(name, input),
 };
 
-/** The work-item ref a person typed: `tsk42` (oxplow's), or a full
- *  `work_item:<provider>:<id>`; null for anything else. */
-export function normalizeWorkItemInput(raw: string): string | null {
+/** The work-item ref a person typed: an id of the active list's (as it
+ *  declares them), or a full `work_item:<provider>:<id>`; null for
+ *  anything else. */
+export function normalizeWorkItemInput(raw: string, mentionRef: (id: string) => string | null): string | null {
   const v = raw.trim();
-  if (/^tsk\d+$/.test(v)) return `work_item:oxplow:${v}`;
   if (/^work_item:[a-z0-9_-]+:\S+$/.test(v)) return v;
-  return null;
+  return mentionRef(v);
 }
 
 /** How an effort closed, in words. */
@@ -87,6 +89,7 @@ export function EffortHeader({
   onTitle?(title: string | null): void;
   deps?: EffortHeaderDeps;
 }) {
+  const profile = useWorkListProfile();
   const row = effortRowId(effortId);
   const ref = row === null ? effortId : `eff${row}`;
   const [effort, setEffort] = useState<EffortRecord | null>(null);
@@ -202,9 +205,9 @@ export function EffortHeader({
           busy={busy}
           onCancel={() => setLinking(false)}
           onSubmit={async ({ item }) => {
-            const workItem = normalizeWorkItemInput(item ?? "");
+            const workItem = normalizeWorkItemInput(item ?? "", (id) => workItemRefOfMention(profile, id));
             if (!workItem) {
-              recordOpError({ label: "Link the effort", message: `\`${item}\` isn't a task id (tsk42) or work item ref` });
+              recordOpError({ label: "Link the effort", message: `\`${item}\` isn't a work item's id or ref` });
               return;
             }
             if (await run("Link the effort", "oxplow.effort.link", { effort: ref, work_item: workItem })) {

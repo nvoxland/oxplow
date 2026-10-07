@@ -70,84 +70,73 @@ There are two writers, one schema:
 
 ## Reading them in the UI
 
-`apps/desktop/src/workItems.ts` (P6.E1a) is the UI's one read path:
-`v_work_item` joined to `v_task` for oxplow's own fields (thread,
-`sort_index`, priority, author, note count), scoped to a thread, the
-backlog or everything, in list order. A thread's scope is
-`v_work_item.thread_id` (v2, tsk1041): an oxplow task's own thread, and
-an outside tracker's item **the thread it was filed on** — `create`'s
-common `thread`, else an agent's own (`filing_thread`, tsk1058), carried
-as the `work_item.recorded` envelope's anchor and kept by the projection
-from the item's first record (`work_item.filed_in_thread`, V167) — so it
-shows on that thread's Board and in the rail's Work panel ("On your
-tracker"). The tracker never sees the thread: it is oxplow's record. Each read returns its `reads` so a
-page re-runs with `useRerunOnChange`. Writes are `work_item.*` commands
-(`transitionWorkItem`; the task pages reorder and move through `reorderTasks` / `moveTask`). `modelIds.ts`
-converts the models' integer ids to the UI's `thr3` / `tsk42`.
+The desktop reads **only the interface**, whichever list is active —
+never oxplow's task tables, ids or refs; a guard test
+(`apps/desktop/src/workItemInterface.guard.test.ts`) fails on `v_task`,
+a built `work_item:oxplow:` ref or `tsk` id parsing in desktop code.
 
-It is also the **only** way the UI reads and writes oxplow's tasks
-(P6.E1b): `Task`, `ThreadWorkState` and `BacklogState` are its types over
-`v_task` (with `author`, not the vestigial `created_by`);
-`readThreadWork`, `readBacklog`, `readTask`, `readTasksById`,
-`readTaskEfforts` and `readRecentlyFinished` read the models;
-`createTask`, `updateTask`, `deleteTask`, `reorderTasks` (a drag's new
-order becomes one `oxplow.work_item.reorder` by neighbour, `placementFromOrder`)
-and `moveTask` run commands. Every read returns what it read (`reads`;
-`ThreadWorkState` and `BacklogState` carry theirs), and a consumer
-re-runs it through `useRerunOnChange` — or `readsChanged`, outside a
-component (`useBackendSubscriptions`, the title caches) — when one of
-those models changes: the one rerun rule, with no list of "task models"
-to keep in step with the queries (P6 review, tsk610). The typed task RPCs
-(`get_thread_work_state`,
-`get_backlog_state`, `list_backlog`, `get_task`, `upsert_task`,
-`create_task`, `update_task`, `delete_task`, `reorder_tasks`, `move_task`,
-`list_work_item_efforts`, `list_recently_finished`,
-`clear_recently_finished`) are gone, and so are the MCP task-write tools
-(`create_task`, `update_task`, `complete_task`, `upsert_task`,
-`transition_tasks`, `reorder_tasks`, `file_epic_with_children`, P8.A10):
-an agent runs the same `work_item.*` commands through MCP `run_command`
-as itself, so its reorders are `oxplow.work_item.reorder { ref, before?, after?
-}` by neighbour, audited and dense like the UI's. An agent has no delete,
-since `oxplow.work_item.delete` is destructive and an agent never confirms one
-(an agent cancels or archives). `TaskService::reorder` and `soft_delete` went
-with them (P6 review, tsk609).
+`apps/desktop/src/workItems.ts` is the one read and write path:
+
+- **`WorkItem`** is a `v_work_item` row — `ref`, `provider`, `title`,
+  `body`, `state`, `parentRef`, `threadId` (null = the backlog), `rank`,
+  `closedAt`, the list's own fields as `native`, and `commentCount`
+  (`v_work_item_comment`).
+- **`readWorkList(thread | null)`** reads a thread's list or the backlog
+  in list order (`rank`, then `created_at`) and buckets it into a
+  **`WorkList`** by state (an item with a child on the list is an epic;
+  done and canceled share `done`), with the thread's followups.
+  `readWorkItem`, `readWorkItemsByRef` and `readWorkItems` (the Board's
+  scopes: a thread, the backlog, everything) read the rest;
+  `readItemEfforts(ref)` an item's activity.
+- **Writes** are `work_item.*` commands by ref: `createWorkItem` (no
+  list named — it files on the active one; `native` carries the list's
+  own fields), `updateWorkItem`, `transitionWorkItem`, `applyItemChange`
+  (an edit from any surface: fields and/or state), `deleteWorkItem`,
+  `reorderWorkItems` (a drag's new order becomes one `oxplow.work_item.reorder`
+  by neighbour, `placementFromOrder`) and `moveWorkItem`.
+- **The active list's profile** — `readWorkListProfile` /
+  `useWorkListProfile` (one shared read, re-read on a switch): its
+  provider, features, declared `fields` and `idPattern`
+  (`v_capability_provider`). Screens offer only what it can do: drag
+  reordering with `ordering`, the backlog and thread moves with `lists`,
+  epics, parents and "+ Item" with `hierarchy`, Comment… / Link… with
+  `comments` / `links`, Delete with `delete`. **Declared fields render
+  generically** (`components/WorkItemFields.tsx`: an enum as a pill
+  picker — a `priority` enum with the priority glyph — text and number
+  as inputs, a `read_only` field shown only): on list rows and Board
+  cards, in the detail rail, in New Item, as bulk "Change …" actions,
+  and as the Tasks page's filter chips. oxplow declares `priority` and
+  a read-only `author` (who filed it). **`workItemRefOfMention`** turns
+  a loose id in text into a ref by the list's `idPattern` (markdown
+  `[[tsk42]]`, the effort header's link field) — none matches nothing.
+
+Every read returns what it read (`reads`), and a consumer re-runs it
+through `useRerunOnChange` — or `readsChanged` outside a component
+(`useBackendSubscriptions`, the title cache) — when one of those models
+changes. With **none** active every read is empty and the screens show
+their empty states.
+
+**One page for every item** (`pages/WorkItemPage.tsx`, routed from any
+`work_item:<provider>:<id>` tab, payload `ref`): title and body edited
+in place, the rail's state pill and declared fields, activity (its
+efforts), backlinks and outbound (`canonicalIdForTarget` maps the ref to
+the graph's `<provider>:<id>`), comments targeting `work_item` /
+`<provider>:<id>`, and the feature-gated actions above. The item's own
+list's extension may add its state view (`work_item.detail.state`,
+`Replaceable`), beside the state pill — never instead of it, so an item
+can always move. The `work_item.detail.body` / `.sidebar` slots get
+`{ ref }`. Link…'s link type is free text (default `relates_to`): the
+provider names its own types.
 
 The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
-items as cards in one column per canonical state (archived tasks left
-out). Drag a card to a column, or right-click → Move To, to transition
-it (`transitionWorkItem`: `oxplow.work_item.transition { ref, to: <canonical
-state> }` for any provider — the bus dispatches it). Like Comment… and
-Link… it runs through `personCommands` (one person path: its
-confirmation and its error reporting). Every card opens its item's page
-(`workItemTabRef`). **The New Task page files on the active tracker**
-(`createTaskInput`, tsk1059): the canonical `state` (Ready is `todo`) and
-`create`'s common `thread`, which any tracker takes; a parent epic and
-priority are oxplow's own, so the page offers and sends them only while
-oxplow's list is the active tracker (`activeProviderOf` over
-`v_capability_provider`, re-read when it changes). `updateTask` sends a
-status as oxplow's `native_state` and priority under `native`.
-
-**Another provider's item has a page of its own** (P6b.C3,
-`pages/WorkItemPage.tsx`; oxplow's tasks keep `TaskPage`):
-`refFromTabId("work_item:<p>:<id>")` is a `work_item` tab with a `ref`
-payload. It reads the item (`readWorkItem`) and the provider's features
-(`readCapabilityProviders` → `featuresFor`) and shows title, state
-(canonical and native), body and Move To; its Parent only with
-`hierarchy`, **Comment…** only with `comments` and **Link…** only with
-`links`, each an `InlinePromptStrip` run through `personCommands` as
-`oxplow.work_item.comment` / `oxplow.work_item.link` (the strip keeps its text until
-the run succeeds — `personCommands.run` returns whether it ran), and a
-rail **Delete** only with `delete` (an `InlineConfirm`, which is the
-person's confirmation of the destructive `oxplow.work_item.delete`). Link…'s
-link type is free text (default `relates_to`): the provider names its
-own types, so oxplow's enum isn't offered as a list. The tab is titled
-with the item's title (`usePageTitle`), and the page has backlinks and
-outbound like `TaskPage` (`canonicalIdForTarget` maps the ref to the
-graph's `<provider>:<id>`). Comments on another
-provider's item are write-only here: `v_comment` is oxplow's store. Both
-pages mount the `work_item.detail.body` and `work_item.detail.sidebar`
-slots with `{ ref, task_id }` (`task_id` null for another provider's
-item).
+items as cards in one column per canonical state. Drag a card to a
+column, or right-click → Move To, to transition it through
+`personCommands` (one person path: its confirmation and its error
+reporting). List rows and Board cards share one drag
+(`WORK_ITEM_DRAG_MIME`: refs, each one's title and state), which the
+agent terminal reads as context refs. **New Item** files on the active
+list: title, body, a canonical starting state (todo or blocked), the
+list's editable fields and — with `hierarchy` — a parent.
 
 ## The capability
 
@@ -329,7 +318,7 @@ changed the item logged an event naming it (oxplow's
 `work_item.created` / `edited` / `transitioned` / `linked` /
 `commented`, an external provider's `work_item.recorded`); reading the
 provider back restates what its writes recorded — after a
-`oxplow.provider.sync` (`WorkItemsProbe::sync`; nothing to read for oxplow's
+`provider.sync` (`WorkItemsProbe::sync`; nothing to read for oxplow's
 own or a provider without collectors) every item it filed is the row it
 was (P7.A7; the fake's `stale-read` hook is the red); a provider that
 declares `idempotent_writes` keeps it — a create sent twice with one key

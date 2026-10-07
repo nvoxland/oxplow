@@ -33,8 +33,6 @@ import {
   switchStream,
   createDashboard,
   writeWorkspaceFile,
-  type BacklogState,
-  type ThreadWorkState,
   type ThreadState,
   type AgentKind,
   type SqlCell,
@@ -42,17 +40,18 @@ import {
   type WorkspaceContext,
 } from "./api.js";
 import {
-  createTask,
-  deleteTask,
-  moveTask,
-  orderedTaskIds,
-  readThreadWork,
-  reorderTasks,
-  updateTask,
-  type CanonicalState,
-  type TaskPriority,
-  type TaskStatus,
+  applyItemChange,
+  createWorkItem,
+  deleteWorkItem,
+  moveWorkItem,
+  readWorkList,
+  reorderWorkItems,
+  type ItemChange,
+  type NewWorkItem,
+  type WorkList,
 } from "./workItems.js";
+import { useWorkListProfile } from "./useWorkListProfile.js";
+import { workItemLabel } from "./workItemRef.js";
 import {
   closeOpenFile,
   createEmptyFileSession,
@@ -128,10 +127,8 @@ import { ProblemsPage } from "./pages/ProblemsPage.js";
 import { ExtensionPageView } from "./pages/ExtensionPageView.js";
 import { SymbolsPage } from "./pages/SymbolsPage.js";
 import { resolveSymbol } from "./codeIntel.js";
-import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
-import { TaskPage } from "./pages/TaskPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
 import { WikiFreshnessPage } from "./pages/WikiFreshnessPage.js";
@@ -146,7 +143,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, customDashboardRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, customDashboardRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -271,10 +268,12 @@ export function App() {
       cancelled = true;
     };
   }, []);
-  const [threadWorkStates, setThreadWorkStates] = useState<Record<string, ThreadWorkState>>({});
+  const [threadWorkStates, setThreadWorkStates] = useState<Record<string, WorkList>>({});
   const threadWorkStatesRef = useRef(threadWorkStates);
   threadWorkStatesRef.current = threadWorkStates;
-  const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
+  const [backlogState, setBacklogState] = useState<WorkList | null>(null);
+  // The active work list: what it can do and its own fields.
+  const workListProfile = useWorkListProfile();
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   // Parallel to agentStatuses: the question each thread is waiting on, set
   // only while that thread's status is "awaiting". Feeds the rail dot's
@@ -358,7 +357,7 @@ export function App() {
         const initialThreadState = await getThreadState(current.id);
         const initialThread = initialThreadState.threads.find((thread) => thread.id === initialThreadState.selectedThreadId);
         if (initialThread) {
-          const initialWork = await readThreadWork(initialThread.id);
+          const initialWork = await readWorkList(initialThread.id);
           setThreadWorkStates((prev) => ({ ...prev, [initialThread.id]: initialWork }));
         }
         setStreams(allStreams);
@@ -457,7 +456,7 @@ export function App() {
       }
       const nextThread = nextThreadState.threads.find((thread) => thread.id === nextThreadState.selectedThreadId);
       if (nextThread && !threadWorkStates[nextThread.id]) {
-        const nextWork = await readThreadWork(nextThread.id);
+        const nextWork = await readWorkList(nextThread.id);
         setThreadWorkStates((prev) => ({ ...prev, [nextThread.id]: nextWork }));
       }
       setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
@@ -532,7 +531,7 @@ export function App() {
         setThreadCenterActive((prev) => (
           prev[thread.id] !== undefined ? prev : { ...prev, [thread.id]: seeded }
         ));
-        void readThreadWork(thread.id).then((work) => {
+        void readWorkList(thread.id).then((work) => {
           setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
         });
       }
@@ -795,7 +794,7 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [streamId]: next }));
       const thread = next.threads.find((candidate) => candidate.id === threadId);
       if (thread) {
-        const work = await readThreadWork(thread.id);
+        const work = await readWorkList(thread.id);
         setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
       }
       setError(null);
@@ -811,7 +810,7 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
       const thread = next.threads.find((candidate) => candidate.id === next.selectedThreadId);
       if (thread) {
-        const work = await readThreadWork(thread.id);
+        const work = await readWorkList(thread.id);
         setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
       }
       setError(null);
@@ -854,8 +853,8 @@ export function App() {
     }
   }
 
-  // Task writes are work_item.* commands (P6.E1b); the thread's and the
-  // backlog's work re-read from the models when they change
+  // Work-item writes are work_item.* commands, by ref; the thread's and
+  // the backlog's lists re-read from the models when they change
   // (useBackendSubscriptions), so a handler only runs the command.
   async function runTaskWrite(write: () => Promise<unknown>) {
     try {
@@ -867,49 +866,43 @@ export function App() {
     }
   }
 
-  async function handleCreateTask(input: {
-    title: string;
-    description?: string;
-    parentId?: string | null;
-    state?: CanonicalState;
-    priority?: TaskPriority;
-  }) {
+  async function handleCreateTask(input: NewWorkItem) {
     if (!selectedThread) return;
-    await runTaskWrite(() => createTask(selectedThread.id, input));
+    await runTaskWrite(() => createWorkItem(selectedThread.id, input));
   }
 
-  async function handleUpdateTask(
-    itemId: string,
-    changes: { title?: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
-  ) {
-    await runTaskWrite(() => updateTask(itemId, changes));
+  async function handleUpdateTask(ref: string, change: ItemChange) {
+    await runTaskWrite(() => applyItemChange(ref, change));
   }
 
-  /** The person chose Delete (a right-click menu item, the task page's
+  /** The person chose Delete (a right-click menu item, the item page's
    *  confirm): that is the confirmation the command asks for. */
-  async function handleDeleteTask(itemId: string) {
-    await runTaskWrite(() => deleteTask(itemId, true));
-    // If the deleted task is open in a tab, go back in its history rather
-    // than leaving a stale "task not found" page (or close it if there's
-    // nothing to go back to).
-    closeOrGoBackPageTab(taskRef(itemId).id);
+  async function handleDeleteTask(ref: string) {
+    await runTaskWrite(() => deleteWorkItem(ref, true));
+    // If the deleted item is open in a tab, go back in its history rather
+    // than leaving a stale page (or close it if there's nothing to go
+    // back to).
+    closeOrGoBackPageTab(workItemTabRef(ref).id);
   }
 
-  async function handleReorderTasks(orderedItemIds: string[]) {
+  /** A drag's new order on a list: the item it moved, placed by its
+   *  neighbour (`oxplow.work_item.reorder`). */
+  async function reorderList(list: WorkList | null | undefined, orderedRefs: string[]) {
+    const before = (list?.all ?? []).map((i) => i.ref).filter((ref) => orderedRefs.includes(ref));
+    await runTaskWrite(() => reorderWorkItems(before, orderedRefs));
+  }
+
+  async function handleReorderTasks(orderedRefs: string[]) {
     if (!selectedThread) return;
-    const current = threadWorkStates[selectedThread.id];
-    const before = current ? orderedTaskIds(current) : [];
-    await runTaskWrite(() => reorderTasks(before.filter((id) => orderedItemIds.includes(id)), orderedItemIds));
+    await reorderList(threadWorkStates[selectedThread.id], orderedRefs);
   }
 
-  async function handleMoveItemToBacklog(itemId: string) {
-    await runTaskWrite(() => moveTask(itemId, null));
+  async function handleMoveItemToBacklog(ref: string) {
+    await runTaskWrite(() => moveWorkItem(ref, null));
   }
 
-  async function handleReorderBacklog(orderedItemIds: string[]) {
-    const all = backlogState ? [...backlogState.items, ...backlogState.waiting, ...backlogState.in_progress, ...backlogState.done] : [];
-    const before = [...all].sort((a, b) => a.sort_index - b.sort_index).map((t) => t.id);
-    await runTaskWrite(() => reorderTasks(before.filter((id) => orderedItemIds.includes(id)), orderedItemIds));
+  async function handleReorderBacklog(orderedRefs: string[]) {
+    await reorderList(backlogState, orderedRefs);
   }
 
   const currentSession = useMemo(
@@ -1072,7 +1065,7 @@ export function App() {
 
   useEffect(() => {
     if (!stream || !selectedThread || threadWorkStates[selectedThread.id]) return;
-    void readThreadWork(selectedThread.id)
+    void readWorkList(selectedThread.id)
       .then((next) => {
         setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       })
@@ -1087,7 +1080,7 @@ export function App() {
     if (missing.length === 0) return;
     let cancelled = false;
     void Promise.all(
-      missing.map(async (thread) => [thread.id, await readThreadWork(thread.id)] as const),
+      missing.map(async (thread) => [thread.id, await readWorkList(thread.id)] as const),
     )
       .then((results) => {
         if (cancelled) return;
@@ -1130,7 +1123,7 @@ export function App() {
     for (const [streamId, state] of Object.entries(threadStates)) {
       for (const thread of state.threads) {
         if (threadWorkStates[thread.id]) continue;
-        void readThreadWork(thread.id)
+        void readWorkList(thread.id)
           .then((work) => setThreadWorkStates((prev) => (prev[thread.id] ? prev : { ...prev, [thread.id]: work })))
           .catch((error) => logUi("warn", "failed to preload thread work state", { streamId, threadId: thread.id, error: String(error) }));
       }
@@ -1202,7 +1195,6 @@ export function App() {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [selectedFilePath, stream]);
-  const [planEditRequest, setPlanEditRequest] = useState<{ itemId: string; token: number } | null>(null);
   // Imperative shortcut for opening the New-Task modal. When PlanPane is
   // mounted it registers its openCreateModal here; the menu handler can
   // call this ref directly instead of going through setState + useEffect.
@@ -1563,19 +1555,6 @@ export function App() {
 
   const handleRevealCommit = (sha: string) => {
     handleOpenPage(gitCommitRef(sha));
-  };
-
-  const handleRequestEditTask = (itemId: string) => {
-    const token = Date.now();
-    handleOpenPage(indexRef("tasks"));
-    setPlanEditRequest({ itemId, token });
-    void recordUsage({
-      kind: "task",
-      key: itemId,
-      event: "open",
-      streamId: stream?.id ?? null,
-      threadId: selectedThread?.id ?? null,
-    }).catch(() => {});
   };
 
   const closeDiffTab = (id: string) => {
@@ -2258,24 +2237,22 @@ export function App() {
         threadWork: selectedThreadWork,
         agentStatus: agentThreadStatus,
         backlog: backlogState,
+        profile: workListProfile,
+        fields: workListProfile.fields,
         onUpdateTask: handleUpdateTask,
         onDeleteTask: handleDeleteTask,
         onReorderTasks: handleReorderTasks,
-        onUpdateBacklogItem: handleUpdateTask,
-        onDeleteBacklogItem: handleDeleteTask,
         onReorderBacklog: handleReorderBacklog,
         onMoveItemToBacklog: handleMoveItemToBacklog,
-        editRequest: planEditRequest,
         registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
-        onOpenNewTaskPage: (payload: { parentId?: string | null }) =>
+        onOpenNewTaskPage: (payload: { parentRef?: string | null }) =>
           nav.navOpen(newTaskRef(payload)),
-        onOpenTaskPage: (itemId: string) => nav.navOpen(taskRef(itemId)),
+        onOpenTaskPage: (ref: string) => nav.navOpen(workItemTabRef(ref)),
       };
       const labelByKind: Record<string, string> = {
         "tasks": "Tasks",
         "done-work": "Done Work",
         "backlog": "Backlog",
-        "archived": "Archived",
       };
       return {
         id: ref.id,
@@ -2286,11 +2263,9 @@ export function App() {
             case "tasks":
               return <TasksPage {...sharedProps} streams={streams} currentStreamId={stream?.id ?? null} onOpenPage={nav.navOpen} />;
             case "done-work":
-              return <DoneWorkPage {...sharedProps} onOpenPage={nav.navOpen} />;
+              return <DoneWorkPage {...sharedProps} />;
             case "backlog":
               return <BacklogPage {...sharedProps} />;
-            case "archived":
-              return <ArchivedPage {...sharedProps} />;
             default:
               return null;
           }
@@ -2746,7 +2721,6 @@ export function App() {
       "tasks": workPage,
       "done-work": workPage,
       "backlog": workPage,
-      "archived": workPage,
       "closed-threads": (ref, nav) => {
         return {
           id: ref.id,
@@ -2838,48 +2812,23 @@ export function App() {
         };
       },
       work_item: (ref, nav) => {
-        // Another provider's item: the provider-neutral page (P6b.C3).
-        const otherRef = (ref.payload as { ref?: string } | null)?.ref;
-        if (otherRef) {
-          return {
-            id: ref.id,
-            label: otherRef,
-            closable: true,
-            render: () => <WorkItemPage workItemRef={otherRef} streamId={stream?.id ?? null} onOpenPage={nav.navOpen} />,
-          };
-        }
-        const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
-        // ThreadWorkState splits items by status (Ready→items, InProgress→inProgress,
-        // Done/Canceled/Archived→done, Blocked→waiting, Epics→epics). Merge them all
-        // for the lookup so TaskPage can resolve any item on this thread, not
-        // just Ready ones — otherwise clicking a done/in-progress item renders the
-        // misleading "not loaded in the current thread" fallback.
-        const items = selectedThreadWork
-          ? [
-              ...selectedThreadWork.inProgress,
-              ...selectedThreadWork.items,
-              ...selectedThreadWork.waiting,
-              ...selectedThreadWork.done,
-              ...selectedThreadWork.epics,
-            ]
-          : [];
-        const matching = items.find((i) => i.id === itemId);
+        // Every work item, whichever list it's on, has one page.
+        const itemRef = (ref.payload as { ref?: string } | null)?.ref ?? ref.id;
+        const loaded = selectedThreadWork?.all.find((i) => i.ref === itemRef);
         return {
           id: ref.id,
-          label: matching ? matching.title : itemId,
+          label: loaded ? loaded.title : workItemLabel(itemRef),
           closable: true,
           render: () => (
-            <TaskPage
+            <WorkItemPage
+              workItemRef={itemRef}
               stream={stream}
               thread={selectedThread}
-              itemId={itemId}
-              items={items}
-              threadWork={selectedThreadWork}
-              onDelete={(id) => { void handleDeleteTask(id); }}
               onOpenPage={nav.navOpen}
               onOpenFile={(p) => nav.navOpenFile(p)}
               onShowEffortDiff={(effortId) => nav.navOpen(effortDiffRef(effortId))}
               onOpenDiff={nav.navOpenDiff}
+              onDeleted={(deleted) => closeOrGoBackPageTab(workItemTabRef(deleted).id)}
             />
           ),
         };
@@ -2944,34 +2893,18 @@ export function App() {
           ),
         };
       },
-      "new-task": (ref, nav) => {
-        const payload = (ref.payload as {
-          parentId?: string | null;
-          initialCategory?: string | null;
-          initialPriority?: string | null;
-        } | null) ?? {};
+      "new-task": (ref) => {
+        const payload = (ref.payload as { parentRef?: string | null } | null) ?? {};
         return {
           id: ref.id,
-          label: "New task",
+          label: "New item",
           closable: true,
           render: () => (
             <NewTaskPage
-              defaults={{
-                parentId: payload.parentId ?? null,
-                initialCategory: payload.initialCategory ?? null,
-                initialPriority: payload.initialPriority ?? null,
-              }}
+              defaults={{ parentRef: payload.parentRef ?? null }}
               epics={selectedThreadWork?.epics ?? []}
               onClose={() => closePageTab(ref.id)}
-              onSubmit={async (input) => {
-                await handleCreateTask({
-                  title: input.title,
-                  description: input.description,
-                  parentId: input.parentId ?? null,
-                  state: input.state ?? "todo",
-                  priority: input.priority,
-                });
-              }}
+              onSubmit={(input) => handleCreateTask({ ...input, state: input.state ?? "todo" })}
             />
           ),
         };
@@ -3151,7 +3084,6 @@ export function App() {
     currentThreadState.activeThreadId,
     selectedThreadWork,
     backlogState,
-    planEditRequest,
   ]);
 
   return (
@@ -3309,7 +3241,7 @@ export function App() {
         threadId={selectedThreadId}
         selectedFilePath={selectedFilePath}
         pages={computePagesDirectory({
-          backlogReadyCount: backlogState?.items.filter((i) => i.status === "ready").length ?? 0,
+          backlogReadyCount: backlogState?.items.length ?? 0,
         })}
         menuGroups={menuGroups}
         onClose={() => setQuickOpenVisible(false)}

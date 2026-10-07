@@ -39,7 +39,7 @@ test("renaming the effort runs effort.update; clearing it restores the default",
   await waitFor(() => expect(ran[1]).toEqual(["oxplow.effort.update", { effort: "eff12", title: null }]));
 });
 
-test("linking takes a task id; Escape cancels", async () => {
+test("linking takes a work item; Escape cancels", async () => {
   const { deps, ran } = fake(open);
   const view = render(<EffortHeader effortId="eff12" onOpenPage={() => {}} deps={deps} />);
   await waitFor(() => view.getByTestId("effort-not-linked"));
@@ -50,7 +50,7 @@ test("linking takes a task id; Escape cancels", async () => {
 
   fireEvent.click(view.getByTestId("effort-link"));
   const again = view.getByTestId("effort-link-prompt-item");
-  fireEvent.change(again, { target: { value: "tsk42" } });
+  fireEvent.change(again, { target: { value: "work_item:oxplow:tsk42" } });
   fireEvent.click(view.getByTestId("effort-link-prompt-submit"));
   await waitFor(() =>
     expect(ran).toEqual([["oxplow.effort.link", { effort: "eff12", work_item: "work_item:oxplow:tsk42" }]]),
@@ -81,9 +81,11 @@ test("an open effort closes; a closed one says how it closed", async () => {
   expect(after.queryByTestId("effort-close")).toBeNull();
 });
 
-test("a typed item is a task id or a work item ref", () => {
-  expect(normalizeWorkItemInput(" tsk42 ")).toBe("work_item:oxplow:tsk42");
-  expect(normalizeWorkItemInput("work_item:issues:ENG-12")).toBe("work_item:issues:ENG-12");
-  expect(normalizeWorkItemInput("fix it")).toBeNull();
+test("a typed item is the active list's id or a work item ref", () => {
+  const ids = (id: string) => (/^tsk\d+$/.test(id) ? `work_item:oxplow:${id}` : null);
+  expect(normalizeWorkItemInput(" tsk42 ", ids)).toBe("work_item:oxplow:tsk42");
+  expect(normalizeWorkItemInput("work_item:issues:ENG-12", ids)).toBe("work_item:issues:ENG-12");
+  expect(normalizeWorkItemInput("fix it", ids)).toBeNull();
+  expect(normalizeWorkItemInput("tsk42", () => null)).toBeNull();
   expect(closedByLabel("switch")).toBe("Closed when the thread moved on");
 });

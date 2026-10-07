@@ -53,11 +53,11 @@ const base: Lens = {
   needs: [],
   path: "",
 };
-const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d"];
+const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d", "ref"];
 const rows: SqlCell[][] = [
-  ["In progress", "page:tasks", 1, "Epic", "in_progress", null, 0, 0],
-  ["In progress", "page:tasks", 2, "Child", "done", "warning", 1, 1],
-  ["Ready", null, 3, "Next", "ready", null, 0, 0],
+  ["In progress", "page:tasks", 1, "Epic", "in_progress", null, 0, 0, "work_item:oxplow:tsk1"],
+  ["In progress", "page:tasks", 2, "Child", "done", "warning", 1, 1, "work_item:oxplow:tsk2"],
+  ["Ready", null, 3, "Next", "todo", null, 0, 0, "work_item:oxplow:tsk3"],
 ];
 const runOf = (lens: Partial<Lens>): LensRun =>
   ({ lens: { ...base, ...lens }, params: {}, result: { columns, rows, truncated: false } }) as unknown as LensRun;
@@ -65,7 +65,7 @@ const grouped: Partial<Lens> = {
   group: { by: "bucket", link: link("page", "bucket_ref") },
   emphasis: "on",
   depth: "d",
-  columns: [{ key: "title", label: null, link: link("task", "id"), unit: null, icon: "status", tone: "hue" }],
+  columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null, icon: "status", tone: "hue" }],
   actions: [{ id: "add", label: "+", command: "oxplow.work_item.create", input: {}, row: false, group: "Ready" }],
 };
 
@@ -141,7 +141,7 @@ test("a tree's labels follow their column's link, and its rows drag", () => {
     viz: "tree",
     tree: { id: "id", parent: "d", label: "title" },
     emphasis: "on",
-    columns: [{ key: "title", label: null, link: link("task", "id"), unit: null, icon: "status", tone: null }],
+    columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null, icon: "status", tone: null }],
   });
   const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
   const nodes = view.getAllByTestId("lens-tree-row");

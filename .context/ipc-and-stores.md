@@ -407,10 +407,10 @@ Surfaces:
   re-publishes its `subscribe` events as `followup.changed`
   (`{ threadId, kind: "added" | "removed" | "cleared", id }`) on the
   EventBus.
-- `workItems.readThreadWork(threadId)` (the Work panel's read, P6.E1b)
-  buckets the thread's `v_task` rows and adds its current followups
+- `workItems.readWorkList(threadId)` (the Plan's read) buckets the
+  thread's `v_work_item` rows and adds its current followups
   (`list_followups`) in the `followups` field, so PlanPane /
-  WorkGroupList see them alongside durable tasks.
+  TaskGroupList see them alongside the list's items.
 - IPC: only one new method — `removeFollowup(threadId, id)` — used by
   the ✕ dismiss button on each follow-up row. Adds happen
   exclusively via the MCP tool surface; the UI never adds.

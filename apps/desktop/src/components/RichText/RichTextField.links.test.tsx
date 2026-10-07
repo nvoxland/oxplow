@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
 import { setRefKinds, type RefKind } from "../../refKinds.js";
 import { PageNavigationContext, type PageNavigation } from "../../tabs/PageNavigationContext.js";
-import { refFromTabId, taskRef } from "../../tabs/pageRefs.js";
+import { refFromTabId, workItemTabRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { RichTextField } from "./RichTextField.js";
 
@@ -27,7 +27,7 @@ afterEach(() => {
   setRefKinds([]);
 });
 
-test("a task link and an extension's ref open their pages", async () => {
+test("a work item link and an extension's ref open their pages", async () => {
   setRefKinds([ACME_PR]);
   const opened: TabRef[] = [];
   const nav = { navigate: (ref: TabRef) => opened.push(ref) } as unknown as PageNavigation;
@@ -44,5 +44,5 @@ test("a task link and an extension's ref open their pages", async () => {
     expect(anchor).not.toBeNull();
     fireEvent.click(anchor!);
   }
-  expect(opened.map((r) => r.id)).toEqual([taskRef("tsk1").id, refFromTabId("acme_pr:12")!.id]);
+  expect(opened.map((r) => r.id)).toEqual([workItemTabRef("work_item:oxplow:tsk1").id, refFromTabId("acme_pr:12")!.id]);
 });

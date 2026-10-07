@@ -104,7 +104,8 @@ describe("row groups and styling", () => {
     const link = (kind: "task" | "wiki" | "file" | "page", from: string) => ({ kind, from, line: null, base: null, head: null });
     const at = (kind: "task" | "wiki" | "file" | "page", value: string | number) =>
       rowContextRef(lens({ columns: [{ key: "title", label: null, link: link(kind, "v"), unit: null }] }), ["title", "v"], ["T", value]);
-    expect(at("task", 12)).toEqual({ kind: "ref", ref: "work_item:oxplow:tsk12" });
+    // A bare id names nothing without its list: a `task` link is no link.
+    expect(at("task", 12)).toBeNull();
     expect(at("page", "page:comments")).toEqual({ kind: "ref", ref: "page:comments" });
     expect(at("wiki", "auth-flow")).toEqual({ kind: "wiki", slug: "auth-flow" });
     expect(at("file", "src/a.ts")).toEqual({ kind: "file", path: "src/a.ts" });
@@ -116,8 +117,9 @@ describe("cellLinkRef", () => {
   const cols = ["id", "title", "path", "slug", "effort"];
   const row = [42, "Fix it", "src/a.ts", "auth-flow", 7];
 
-  test("task link reads the id from `from`", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "title", row, cols)?.id).toBe("work_item:oxplow:tsk42");
+  // A work item links by its ref (`kind: page`); a bare id is no link.
+  test("a task link is no link", () => {
+    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "title", row, cols)).toBeNull();
   });
   test("file / wiki / effort-diff links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("file:src/a.ts");
@@ -245,10 +247,6 @@ describe("effortRowId", () => {
 describe("links added for extraction", () => {
   const cols = ["id", "path", "ln", "sha", "key"];
   const row = [42, "src/a.rs", 7, "abc123", "oxplow.complexity"];
-  test("a task link from a v_task integer id opens tsk<id>", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "id", row, cols)?.id).toBe("work_item:oxplow:tsk42");
-    expect(cellLinkRef({ kind: "task", from: null, line: null, base: null, head: null }, "t", ["tsk9"], ["t"])?.id).toBe("work_item:oxplow:tsk9");
-  });
   test("file links can carry a line", () => {
     const ref = cellLinkRef({ kind: "file", from: "path", line: "ln", base: null, head: null }, "path", row, cols);
     expect(ref?.id).toBe("file:src/a.rs");

@@ -986,7 +986,7 @@ is `{ to: done|canceled, native_state: archived }`.
   for the decision rule (follow-up vs. task). Storage:
   `crates/oxplow-app/src/followup.rs`; runtime publishes the bus event
   `followup.changed` so the UI re-reads that thread's work
-  (`workItems.readThreadWork`).
+  (`workItems.readWorkList`).
 - Forking a thread is `run_command oxplow.thread.create { from }` — see
   "Forking a thread" above.
 - `list_comments({ id, scope?, status? })`, then `run_command
@@ -1088,7 +1088,7 @@ drifted | unchanged | not_a_ref | no_pin | binary; the diff is capped
 (`truncated` flags it). The wiki-only
 `find_wiki_pages_for_file` was removed in favour of `list_backlinks`
 (below) — every cross-kind backlinks question goes through one tool
-now. **Writes are commands** — `run_command oxplow.knowledge.write_page` /
+now. **Writes are commands** — `run_command knowledge.write_page` /
 `delete_page` / `link` / `resync` ([knowledge.md](./knowledge.md)); the
 write guard refuses an agent's Write/Edit into `.oxplow/wiki/`.
 
@@ -1143,7 +1143,7 @@ persisted and return a `link_warnings` array naming each invalid `[[…]]`
 — unrecognized syntax or a dangling target — so the authoring agent
 self-corrects in the same turn; `oxplow.work_item.create` / `oxplow.work_item.update`
 check an oxplow item's body the same way (tsk775).
-`oxplow.knowledge.write_page` refuses instead, through the same synchronous core
+`knowledge.write_page` refuses instead, through the same synchronous core
 (`check_links_in`). **Every kind the vocabulary knows is a link**
 (tsk894): a typed `Reference` (task, wiki, file, dir, commit, finding) is
 probed for existence; another known kind (an effort, another provider's
@@ -1340,7 +1340,7 @@ in-progress changes.
   `crates/oxplow-app/src/lib.rs`.
 - **Wiki pages are written by command.** A direct write to
   `.oxplow/wiki/` is denied for every thread (`write_guard::wiki_page_reason`);
-  pages go through `oxplow.knowledge.write_page`, which any thread may run.
+  pages go through `knowledge.write_page`, which any thread may run.
   Other `.oxplow/` paths (`local.sqlite`, `snapshots/`, `runtime/`) stay
   blocked.
 - **Bash isn't classified.** A non-writer's shell commands aren't

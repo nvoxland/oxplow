@@ -65,7 +65,7 @@ export function refFromHref(href: string): RefNode | null {
     case "commit":
       return { kind: "commit", id: parsed.sha };
     case "work_item":
-      return { kind: "work_item", id: `oxplow:${parsed.id}` };
+      return { kind: "work_item", id: parsed.ref.slice("work_item:".length) };
     default:
       return null;
   }

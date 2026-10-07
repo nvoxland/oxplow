@@ -2,29 +2,29 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
 import type { SqlQueryResult } from "../../tauri-bridge/generated/bindings.js";
-import { bucketThreadWork, tasksFromResult } from "../../workItems.js";
+import { bucketWorkList, itemsFromResult } from "../../workItems.js";
 import { TaskGroupList } from "./TaskGroupList.js";
 import { buildGroups } from "./plan-utils.js";
 
 afterEach(cleanup);
 
-// P6.E1b: the Tasks list renders from the models — `v_task` rows read by
-// the data layer, bucketed into the thread's work, grouped by the plan's
-// own grouping — with no typed task RPC in between.
-test("the task list renders a thread's work read from v_task", () => {
+// The list renders from the work-item interface — `v_work_item` rows read
+// by the data layer, bucketed into the thread's list, grouped by the
+// plan's own grouping — whichever list is active.
+test("the list renders a thread's work read from v_work_item", () => {
   const result = {
-    columns: ["id", "thread_id", "parent_id", "title", "description", "status", "priority", "sort_index", "author", "created_at", "updated_at", "completed_at", "note_count"],
+    columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
     rows: [
-      [1, 1, null, "Epic", "", "ready", "medium", 0, "user", "t", "t", null, 0],
-      [2, 1, 1, "Child step", "", "in_progress", "high", 1, "agent", "t", "t", null, 1],
-      [3, 1, null, "Loose task", "", "ready", "low", 2, "user", "t", "t", null, 0],
+      ["work_item:issues:E-1", "issues", "Epic", "", "todo", null, 1, 0, null, "t", "t", null, 0],
+      ["work_item:issues:E-2", "issues", "Child step", "", "in_progress", "work_item:issues:E-1", 1, 1, null, "t", "t", null, 1],
+      ["work_item:issues:E-3", "issues", "Loose item", "", "todo", null, 1, 2, null, "t", "t", null, 0],
     ],
     truncated: false,
-    reads: { models: ["v_task"], tables: [], measures: [] },
+    reads: { models: ["v_work_item"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult;
-  const work = bucketThreadWork("thr1", tasksFromResult(result), []);
-  const groups = buildGroups(work);
+  const list = bucketWorkList("thr1", itemsFromResult(result), [], result.reads);
+  const groups = buildGroups(list);
   const NOOP = async () => {};
   const view = render(
     <>
@@ -41,11 +41,12 @@ test("the task list renders a thread's work read from v_task", () => {
           isSectionCollapsed={() => false}
           onToggleSectionCollapsed={() => {}}
           visibleSections={["inProgress", "ready", "blocked", "done"]}
+          fields={[]}
         />
       ))}
     </>,
   );
   expect(view.container.textContent).toContain("Epic");
-  expect(view.container.textContent).toContain("Loose task");
-  expect(view.getByTestId("tasks-row-tsk3")).not.toBeNull();
+  expect(view.container.textContent).toContain("Loose item");
+  expect(view.getByTestId("tasks-row-work_item:issues:E-3")).not.toBeNull();
 });

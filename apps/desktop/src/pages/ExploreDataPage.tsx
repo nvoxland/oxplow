@@ -246,7 +246,7 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
       <textarea
         data-testid="explore-sql"
         value={sql}
-        placeholder="SELECT … FROM v_task …  or  SELECT bucket, MEASURE('…') FROM metric_grid('day')   (Cmd/Ctrl+Enter runs)"
+        placeholder="SELECT … FROM v_work_item …  or  SELECT bucket, MEASURE('…') FROM metric_grid('day')   (Cmd/Ctrl+Enter runs)"
         onChange={(e) => setSql(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {

@@ -1,8 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-// P6b.C3: another provider's work item has a page of its own, and what it
-// offers follows the provider's declared features.
+// A work item's page — one for every list — offers what its list declares.
 
 const realApi = await import("../api.js");
 const realQuerySql = realApi.querySql;
@@ -16,17 +15,20 @@ mock.module("../api.js", () => ({
   querySql: async (sql: string, ...rest: unknown[]) => {
     if (sql.includes("FROM v_capability_provider")) {
       return {
-        columns: ["capability", "provider", "extension", "features", "active"],
-        rows: [["work_items", "fake", "tracker", JSON.stringify(features), 1]],
+        columns: ["capability", "provider", "extension", "features", "fields", "id_pattern", "active"],
+        rows: [["work_items", "fake", "tracker", JSON.stringify(features), "[]", null, 1]],
         truncated: false,
         reads: { models: ["v_capability_provider"], tables: [], measures: [] },
         freshness: {},
       };
     }
+    if (sql.includes("FROM v_effort e")) {
+      return { columns: [], rows: [], truncated: false, reads: { models: ["v_effort"], tables: [], measures: [] }, freshness: {} };
+    }
     if (sql.includes("FROM v_work_item w")) {
       return {
-        columns: ["ref", "provider", "title", "body", "state", "native_state", "parent_ref", "created_at", "updated_at", "task_id", "thread_id", "status", "priority", "sort_index", "author", "completed_at", "note_count"],
-        rows: [["work_item:fake:W-1", "fake", "Their bug", "It breaks.", "todo", "Backlog", parent, "t", "t", null, null, null, null, null, null, null, 0]],
+        columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
+        rows: [["work_item:fake:W-1", "fake", "Their bug", "It breaks.", "todo", parent, null, null, null, "t", "t", null, 0]],
         truncated: false,
         reads: { models: ["v_work_item"], tables: [], measures: [] },
         freshness: {},
@@ -70,7 +72,8 @@ afterEach(() => {
   cleanup();
 });
 
-const page = () => render(<WorkItemPage workItemRef="work_item:fake:W-1" streamId={null} onOpenPage={() => {}} />);
+const page = () =>
+  render(<WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />);
 
 test("a provider without comments, links or hierarchy offers none of them", async () => {
   features = {};
@@ -80,26 +83,26 @@ test("a provider without comments, links or hierarchy offers none of them", asyn
   expect(view.queryByTestId("work-item-comment-open")).toBeNull();
   expect(view.queryByTestId("work-item-link-open")).toBeNull();
   expect(view.queryByTestId("work-item-parent")).toBeNull();
-  expect(view.queryByTestId("work-item-delete-trigger")).toBeNull();
+  expect(view.queryByTestId("task-rail-delete-trigger")).toBeNull();
 });
 
 // P7.A1: Delete shows only when the provider declares `delete`; the
 // inline confirm is the person's confirmation.
-test("Delete shows with the provider's delete feature and runs oxplow.work_item.delete confirmed", async () => {
+test("Delete shows with the provider's delete feature and runs work_item.delete confirmed", async () => {
   features = { delete: true };
   const view = page();
-  fireEvent.click(await waitFor(() => view.getByTestId("work-item-delete-trigger")));
-  fireEvent.click(view.getByTestId("work-item-delete-confirm"));
+  fireEvent.click(await waitFor(() => view.getByTestId("task-rail-delete-trigger")));
+  fireEvent.click(view.getByTestId("task-rail-delete-confirm"));
   await waitFor(() => expect(ran).toEqual([["oxplow.work_item.delete", { ref: "work_item:fake:W-1", confirmed: true }]]));
 });
 
 // P7.A1: every write is a `work_item.*` command, whatever the provider.
-test("comments, links and a parent show when the provider declares them; Comment runs oxplow.work_item.comment", async () => {
+test("comments, links and a parent show when the provider declares them; Comment runs work_item.comment", async () => {
   features = { comments: true, links: true, hierarchy: true };
   const view = page();
   const open = await waitFor(() => view.getByTestId("work-item-comment-open"));
   expect(view.getByTestId("work-item-link-open")).toBeTruthy();
-  expect(view.getByTestId("work-item-parent").textContent).toContain("work_item:fake:W-0");
+  expect(view.getByTestId("work-item-parent").textContent).toContain("W-0");
   fireEvent.click(open);
   fireEvent.change(view.getByTestId("work-item-comment-body"), { target: { value: "Seen it too." } });
   fireEvent.keyDown(view.getByTestId("work-item-comment-body"), { key: "Enter", metaKey: true });
@@ -128,16 +131,16 @@ test("the tab is titled with the item's title", async () => {
   const nav = { goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, setTitle: (t: string) => titles.push(t) };
   render(
     <PageNavigationContext.Provider value={nav as never}>
-      <WorkItemPage workItemRef="work_item:fake:W-1" streamId={null} onOpenPage={() => {}} />
+      <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />
     </PageNavigationContext.Provider>,
   );
   await waitFor(() => expect(titles).toContain("Their bug"));
 });
 
-test("Move To runs the provider's transition; the item's slots get its ref", async () => {
+test("a state change runs the provider's transition; the item's slots get its ref", async () => {
   features = {};
   const view = page();
-  fireEvent.click(await waitFor(() => view.getByTestId("work-item-move-done")));
+  fireEvent.change(await waitFor(() => view.getByLabelText("State")), { target: { value: "done" } });
   await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
   await waitFor(() =>
     expect(lensRuns.map(([id, p]) => [id, p])).toEqual(

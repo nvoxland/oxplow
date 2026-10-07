@@ -1,8 +1,11 @@
 import { InlineConfirm } from "../InlineConfirm.js";
+import { workItemLabel } from "../../workItemRef.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Pencil } from "lucide-react";
-import type { EffortDetail, Task, TaskPriority, TaskStatus } from "../../api.js";
+import type { EffortDetail } from "../../api.js";
+import { CANONICAL_STATES, STATE_LABEL, type CanonicalState, type FieldDecl, type ItemChange, type WorkItem } from "../../workItems.js";
+import { FieldPill, PillSelect, stateColor } from "../WorkItemFields.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { RichTextField } from "../RichText/RichTextField.js";
 import type { RichTextCommentConfig } from "../RichText/RichTextField.js";
@@ -56,38 +59,22 @@ export function buildActivityTimeline(efforts: EffortDetail[]): ActivityRow[] {
   return rows;
 }
 
-export interface TaskDetailChanges {
-  title?: string;
-  description?: string;
-  parentId?: string | null;
-  status?: TaskStatus;
-  priority?: TaskPriority;
-}
-
-const STATUS_OPTIONS_BASE: TaskStatus[] = [
-  "blocked", "ready", "done", "archived", "canceled",
-];
-const PRIORITY_OPTIONS: TaskPriority[] = ["low", "medium", "high", "urgent"];
-
-function statusOptionsFor(current: TaskStatus): TaskStatus[] {
-  return current === "in_progress" ? [...STATUS_OPTIONS_BASE, "in_progress"] : STATUS_OPTIONS_BASE;
-}
+/** One edit to an item, from any surface: its text, parent (`null`
+ *  clears), state (a `oxplow.work_item.transition`) or own fields. */
+export type TaskDetailChanges = ItemChange;
 
 /**
- * Body half of the tasks detail view — title + description. Status /
- * priority / category / tags / timestamps / destructive actions live
- * in `TaskDetailRail`. Acceptance criteria are no longer a separate
- * field; agents and users are nudged to include a "## Acceptance
- * criteria" subsection inside the description when it would be
- * helpful (the description is rendered as markdown anyway).
+ * Body half of an item's detail view — title + body. State, the list's
+ * own fields, timestamps and destructive actions live in
+ * `TaskDetailRail`.
  */
 export function TaskDetail({
   item,
   onUpdateTask,
   comments,
 }: {
-  item: Task;
-  onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  item: WorkItem;
+  onUpdateTask: (ref: string, changes: TaskDetailChanges) => Promise<void>;
   comments?: RichTextCommentConfig;
 }) {
   return (
@@ -97,23 +84,23 @@ export function TaskDetail({
       onClick={(event) => event.stopPropagation()}
     >
       <TitleField
-        key={`title-${item.id}`}
+        key={`title-${item.ref}`}
         value={item.title}
         onCommit={(value) => {
           const trimmed = value.trim();
           if (!trimmed || trimmed === item.title) return;
-          void onUpdateTask(item.id, { title: trimmed });
+          void onUpdateTask(item.ref, { title: trimmed });
         }}
       />
       <RichTextField
-        key={`desc-${item.id}`}
-        value={item.description}
+        key={`desc-${item.ref}`}
+        value={item.body}
         placeholder="Add a description…"
         style={{ paddingLeft: 0, paddingRight: 22 }}
         comments={comments}
         onCommit={(value) => {
-          if (value === item.description) return;
-          void onUpdateTask(item.id, { description: value });
+          if (value === item.body) return;
+          void onUpdateTask(item.ref, { body: value });
         }}
       />
     </div>
@@ -204,20 +191,26 @@ function TitleField({
 }
 
 /**
- * Rail half of the tasks detail view — status + priority pickers,
- * category, tags, timestamps, created-by, and bottom action buttons
- * (scope move + delete). Mirror image of `TaskDetail` body fields.
+ * Rail half of an item's detail view — the state picker, the list's own
+ * fields (as it declares them), timestamps, and bottom action buttons
+ * (list move + delete). Mirror image of `TaskDetail` body fields.
  */
 export function TaskDetailRail({
   item,
+  fields,
   onUpdateTask,
   onDelete,
   scopeAction,
   onReview,
+  extra,
   formatTimestamp = (iso) => new Date(iso).toLocaleString(),
 }: {
-  item: Task;
-  onUpdateTask: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  item: WorkItem;
+  /** The list's own fields. */
+  fields: FieldDecl[];
+  onUpdateTask: (ref: string, changes: TaskDetailChanges) => Promise<void>;
+  /** Rows the page adds under the fields (the parent, links). */
+  extra?: ReactNode;
   /** Open the task's latest effort's review; absent until it has one. */
   onReview?: () => void;
   /** When provided, renders a danger "Delete" button at the bottom of
@@ -233,22 +226,19 @@ export function TaskDetailRail({
       style={{ display: "flex", flexDirection: "column", gap: 14, fontSize: "var(--text-xs)" }}
       onClick={(event) => event.stopPropagation()}
     >
-      <RailPillRow label="Status">
-        <PillSelect
-          value={item.status}
-          options={statusOptionsFor(item.status)}
-          color={statusColor(item.status)}
-          onChange={(value) => void onUpdateTask(item.id, { status: value as TaskStatus })}
-        />
+      <RailPillRow label="State">
+        <StatePill item={item} onUpdateTask={onUpdateTask} />
       </RailPillRow>
-      <RailPillRow label="Priority">
-        <PillSelect
-          value={item.priority}
-          options={PRIORITY_OPTIONS}
-          color={priorityColor(item.priority)}
-          onChange={(value) => void onUpdateTask(item.id, { priority: value as TaskPriority })}
-        />
-      </RailPillRow>
+      {fields.map((field) => (
+        <RailPillRow key={field.name} label={field.title}>
+          <FieldPill
+            field={field}
+            value={item.native[field.name]}
+            onChange={(value) => void onUpdateTask(item.ref, { native: { [field.name]: value } })}
+          />
+        </RailPillRow>
+      ))}
+      {extra}
       {onReview ? (
         <button
           type="button"
@@ -271,10 +261,10 @@ export function TaskDetailRail({
         color: "var(--text-muted)",
         fontSize: "var(--text-xs)",
       }}>
-        <RailMetaRow label="ID">#{item.id}</RailMetaRow>
-        <RailMetaRow label="Created">{formatTimestamp(item.created_at)}</RailMetaRow>
-        <RailMetaRow label="Updated">{formatTimestamp(item.updated_at)}</RailMetaRow>
-        <RailMetaRow label="By">{item.author ?? "—"}</RailMetaRow>
+        <RailMetaRow label="ID">{workItemLabel(item.ref)}</RailMetaRow>
+        <RailMetaRow label="Created">{formatTimestamp(item.createdAt)}</RailMetaRow>
+        <RailMetaRow label="Updated">{formatTimestamp(item.updatedAt)}</RailMetaRow>
+        {item.closedAt ? <RailMetaRow label="Closed">{formatTimestamp(item.closedAt)}</RailMetaRow> : null}
       </div>
 
       {scopeAction || onDelete ? (
@@ -307,7 +297,7 @@ export function TaskDetailRail({
           ) : null}
           {onDelete ? (
             // Asks inline: the first press arms it, Confirm deletes.
-            <InlineConfirm onConfirm={onDelete} confirmLabel="Delete Task" testIdPrefix="task-rail-delete">
+            <InlineConfirm onConfirm={onDelete} confirmLabel="Delete Item" testIdPrefix="task-rail-delete">
               {(arm) => (
                 <button
                   type="button"
@@ -335,28 +325,25 @@ export function TaskDetailRail({
   );
 }
 
-function statusColor(status: TaskStatus): string {
-  switch (status) {
-    case "in_progress": return "var(--status-running)";
-    case "ready": return "var(--status-ready)";
-    case "done": return "var(--status-done)";
-    case "blocked": return "var(--status-waiting)";
-    case "canceled":
-    case "archived":
-      return "var(--status-canceled)";
-    default:
-      return "var(--status-ready)";
-  }
-}
-
-function priorityColor(priority: TaskPriority): string {
-  switch (priority) {
-    case "urgent": return "var(--priority-urgent)";
-    case "high":   return "var(--priority-high)";
-    case "medium": return "var(--priority-medium)";
-    case "low":    return "var(--priority-low)";
-    default:       return "var(--priority-medium)";
-  }
+/** An item's state as a pill picker: every canonical state, through a
+ *  `oxplow.work_item.transition`. */
+function StatePill({
+  item,
+  onUpdateTask,
+}: {
+  item: WorkItem;
+  onUpdateTask: (ref: string, changes: TaskDetailChanges) => Promise<void>;
+}) {
+  return (
+    <PillSelect
+      value={item.state}
+      options={CANONICAL_STATES}
+      color={stateColor(item.state)}
+      label="State"
+      render={(v) => STATE_LABEL[v as CanonicalState] ?? v}
+      onChange={(value) => void onUpdateTask(item.ref, { state: value as CanonicalState })}
+    />
+  );
 }
 
 function RailPillRow({ label, children }: { label: string; children: ReactNode }) {
@@ -371,71 +358,6 @@ function RailPillRow({ label, children }: { label: string; children: ReactNode }
       }}>{label}</div>
       <div>{children}</div>
     </div>
-  );
-}
-
-/**
- * Colored pill that opens a native `<select>` on click. The native
- * select stays transparent over the pill so keyboard navigation +
- * accessibility come for free; the pill chrome is purely visual.
- */
-function PillSelect({
-  value,
-  options,
-  color,
-  onChange,
-}: {
-  value: string;
-  options: readonly string[];
-  color: string;
-  onChange(value: string): void;
-}) {
-  return (
-    <span
-      style={{
-        position: "relative",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "3px 10px",
-        borderRadius: 999,
-        background: "var(--surface-card)",
-        border: `1px solid ${color}`,
-        color: "var(--text-primary)",
-        fontSize: "var(--text-xs)",
-        cursor: "pointer",
-        minWidth: 0,
-      }}
-    >
-      <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          background: color,
-          flexShrink: 0,
-        }}
-        aria-hidden
-      />
-      <span>{value.replace(/_/g, " ")}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        style={{
-          position: "absolute",
-          inset: 0,
-          opacity: 0,
-          cursor: "pointer",
-          width: "100%",
-          height: "100%",
-          font: "inherit",
-        }}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>{option.replace(/_/g, " ")}</option>
-        ))}
-      </select>
-    </span>
   );
 }
 

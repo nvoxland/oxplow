@@ -4,7 +4,7 @@ import type { Stream } from "../tauri-bridge/index.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import type { WikiRefFreshness } from "../knowledge.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
-import type { ThreadWorkState } from "../workItems.js";
+import type { WorkList } from "../workItems.js";
 import { readWikiFreshness } from "../knowledge.js";
 import { summarizeWikiFreshness } from "../components/Wiki/wikiFreshness.js";
 import { Page } from "../tabs/Page.js";
@@ -21,7 +21,7 @@ import { usePageTitle, useOptionalPageNavigation } from "../tabs/PageNavigationC
 export interface WikiPageProps {
   stream: Stream | null;
   slug: string;
-  threadWork: ThreadWorkState | null;
+  threadWork: WorkList | null;
   onClosed(): void;
   onOpenWikiPage(slug: string): void;
   onOpenFile(path: string): void;

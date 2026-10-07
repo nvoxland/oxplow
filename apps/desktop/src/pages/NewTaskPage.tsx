@@ -1,118 +1,52 @@
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Task, TaskPriority } from "../api.js";
-import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
+import { useEffect, useRef, useState } from "react";
+import { FieldPill } from "../components/WorkItemFields.js";
 import { Page } from "../tabs/Page.js";
-import type { Reads } from "../tauri-bridge/generated/bindings.js";
-import { activeProviderOf, readCapabilityProviders, type CanonicalState } from "../workItems.js";
+import { useWorkListProfile } from "../useWorkListProfile.js";
+import type { CanonicalState, FieldDecl, NewWorkItem, WorkItem } from "../workItems.js";
 
-// Edit flow now lives on TaskPage (the canonical Task page); this
-// form is create-only.
-
-// Local-only categorization choice for the form UI. The DB no longer
-// stores a `kind` discriminator, but the picker still helps the user
-// frame what they're filing; we collapse the choice into the title.
-type TaskKind = "task" | "epic" | "subtask" | "bug" | "note";
-const KIND_OPTIONS: TaskKind[] = ["task", "epic", "subtask", "bug", "note"];
-const PRIORITY_OPTIONS: TaskPriority[] = ["low", "medium", "high", "urgent"];
-/** Canonical states, which every tracker takes (tsk1059). */
+/** The states a new item may start in; every list takes them. */
 const STATE_OPTIONS: Array<Extract<CanonicalState, "todo" | "blocked">> = ["todo", "blocked"];
 
 /**
- * Defaults negotiation between the original `newTaskRef` payload
- * (the form's "open with these defaults" hint) and the values the user
- * last submitted via "Save and Another". The latter wins when present
- * so a flow like "file 5 bugs at urgent priority" only requires
- * choosing `bug` / `urgent` once.
- *
- * Pure — exported for tests so we don't need a renderer to verify the
- * carry-forward logic.
+ * The list's own field values a new form starts with: what was last filed
+ * (Save and Another carries it forward), for the editable fields the list
+ * still declares; nothing otherwise — the list sets its own defaults.
+ * Pure — exported for tests.
  */
-export function resolveSaveAndAnotherDefaults(input: {
-  parentId?: string | null;
-  initialCategory?: string | null;
-  initialPriority?: string | null;
-  lastCategory?: string | null;
-  lastPriority?: string | null;
-} = {}): { parentId: string | null; initialCategory: string; initialPriority: string } {
-  return {
-    parentId: input.parentId ?? null,
-    initialCategory: input.lastCategory ?? input.initialCategory ?? "task",
-    initialPriority: input.lastPriority ?? input.initialPriority ?? "medium",
-  };
+export function fieldDefaults(fields: FieldDecl[], last: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) {
+    if (!f.read_only && last[f.name] !== undefined && last[f.name] !== null && last[f.name] !== "") out[f.name] = last[f.name];
+  }
+  return out;
 }
 
 export interface NewTaskPageProps {
-  /** Defaults from the page-ref payload (incl. parentId for + Task on epic). */
-  defaults?: {
-    parentId?: string | null;
-    initialCategory?: string | null;
-    initialPriority?: string | null;
-  };
-  /** All epics in the current thread, for the optional parent dropdown. */
-  epics?: Task[];
+  /** Defaults from the page-ref payload (a parent for "+ Item" on an epic). */
+  defaults?: { parentRef?: string | null };
+  /** The current list's epics, for the optional parent. */
+  epics?: WorkItem[];
   /** Closes the page (caller closes the tab). */
   onClose?(): void;
-  /** Submit the form. The page resets in-place when `andAnother` is true. */
-  onSubmit(input: {
-    title: string;
-    description?: string;
-    parentId?: string | null;
-    state?: CanonicalState;
-    priority?: TaskPriority;
-  }): Promise<void>;
-}
-
-/** Whether oxplow's own list is the active tracker — where every create
- *  files (tsk1058) — so its own fields (priority, a parent epic) apply;
- *  null until it's known. */
-function useOwnTasksActive(): boolean | null {
-  const [own, setOwn] = useState<boolean | null>(null);
-  const [reads, setReads] = useState<Reads>(NO_READS);
-  const load = useCallback(() => {
-    void readCapabilityProviders("work_items").then(({ providers, reads }) => {
-      setOwn(activeProviderOf(providers) === "oxplow");
-      setReads(reads);
-    });
-  }, []);
-  useEffect(load, [load]);
-  useRerunOnChange(reads, load);
-  return own;
+  /** File the item. The page resets in place for Save and Another. */
+  onSubmit(input: NewWorkItem): Promise<void>;
 }
 
 /**
- * Full-tab "New tasks" form. Replaces the centred NewtasksModal
- * that used to live inside `PlanPane.tsx`. Carries Save-and-Another
- * forward by remembering the last-submitted kind/priority and
- * re-mounting the form with those values prefilled. The parent id is
- * also preserved so multiple subtasks can be filed under the same
- * epic in sequence.
+ * Full-tab "New item" form, on the active work list: its title, body and
+ * starting state; the list's own fields as it declares them; and a parent
+ * when the list nests. Save and Another keeps the field values and the
+ * parent, so a series of similar items is filed without re-picking them.
  */
-export function NewTaskPage({
-  defaults = {},
-  epics = [],
-  onClose,
-  onSubmit,
-}: NewTaskPageProps) {
-  const [lastKind, setLastKind] = useState<TaskKind | null>(null);
-  const [lastPriority, setLastPriority] = useState<TaskPriority | null>(null);
-  const [lastParentId, setLastParentId] = useState<string | null>(null);
-
-  const resolved = resolveSaveAndAnotherDefaults({
-    parentId: lastParentId ?? defaults.parentId,
-    initialCategory: defaults.initialCategory,
-    initialPriority: defaults.initialPriority,
-    lastCategory: lastKind,
-    lastPriority,
-  });
-
-  const [kind, setKind] = useState<TaskKind>(coerceKind(resolved.initialCategory));
-  const [priority, setPriority] = useState<TaskPriority>(coercePriority(resolved.initialPriority));
+export function NewTaskPage({ defaults = {}, epics = [], onClose, onSubmit }: NewTaskPageProps) {
+  const profile = useWorkListProfile();
+  const editable = profile.fields.filter((f) => !f.read_only);
+  const [native, setNative] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<"todo" | "blocked">("todo");
-  const ownTasks = useOwnTasksActive();
-  const [parentId, setParentId] = useState<string | null>(resolved.parentId);
+  const [parentRef, setParentRef] = useState<string | null>(defaults.parentRef ?? null);
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
@@ -130,21 +64,14 @@ export function NewTaskPage({
     try {
       await onSubmit({
         title: title.trim(),
-        description: description.trim() ? description : undefined,
-        // A parent epic and priority are oxplow's own: another tracker
-        // takes neither.
-        ...(ownTasks ? { parentId: parentId ?? null, priority } : {}),
+        body: body.trim() ? body : undefined,
+        ...(profile.features.hierarchy ? { parentRef } : {}),
         state,
+        native: fieldDefaults(profile.fields, native),
       });
-      // Save-and-Another resets the title/description fields but
-      // keeps the kind/priority/parent so the user doesn't have to
-      // re-pick them for a series of similar items.
-      setLastKind(kind);
-      setLastPriority(priority);
-      setLastParentId(parentId);
       if (andAnother) {
         setTitle("");
-        setDescription("");
+        setBody("");
         titleRef.current?.focus();
       } else {
         onClose?.();
@@ -159,7 +86,7 @@ export function NewTaskPage({
   return (
     <Page
       testId="page-new-tasks"
-      title="New task"
+      title="New item"
       kind="new-task"
       actions={
         onClose ? (
@@ -189,44 +116,14 @@ export function NewTaskPage({
         <Field label="Description">
           <textarea
             data-testid="tasks-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
             placeholder="Description (markdown)"
             style={textareaStyle}
             rows={6}
           />
         </Field>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Field label="Kind">
-            <select
-              data-testid="tasks-kind"
-              value={kind}
-              onChange={(e) => setKind(coerceKind(e.target.value))}
-              style={inputStyle}
-            >
-              {KIND_OPTIONS.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {ownTasks ? (
-          <Field label="Priority">
-            <select
-              data-testid="tasks-priority"
-              value={priority}
-              onChange={(e) => setPriority(coercePriority(e.target.value))}
-              style={inputStyle}
-            >
-              {PRIORITY_OPTIONS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </Field>
-          ) : null}
           <Field label="Status">
             <select
               data-testid="tasks-status"
@@ -241,17 +138,28 @@ export function NewTaskPage({
               ))}
             </select>
           </Field>
-          {ownTasks && epics.length > 0 ? (
-            <Field label="Parent epic">
+          {editable.map((field) => (
+            <Field key={field.name} label={field.title}>
+              <span data-testid={`tasks-field-${field.name}`}>
+                <FieldPill
+                  field={field}
+                  value={native[field.name]}
+                  onChange={(value) => setNative((prev) => ({ ...prev, [field.name]: value }))}
+                />
+              </span>
+            </Field>
+          ))}
+          {profile.features.hierarchy && epics.length > 0 ? (
+            <Field label="Parent">
               <select
                 data-testid="tasks-parent"
-                value={parentId ?? ""}
-                onChange={(e) => setParentId(e.target.value || null)}
+                value={parentRef ?? ""}
+                onChange={(e) => setParentRef(e.target.value || null)}
                 style={inputStyle}
               >
                 <option value="">(none)</option>
                 {epics.map((epic) => (
-                  <option key={epic.id} value={epic.id}>
+                  <option key={epic.ref} value={epic.ref}>
                     {epic.title}
                   </option>
                 ))}
@@ -275,12 +183,7 @@ export function NewTaskPage({
           >
             Save and Another
           </button>
-          <button
-            type="submit"
-            data-testid="tasks-save"
-            disabled={!canSubmit}
-            style={primaryButtonStyle}
-          >
+          <button type="submit" data-testid="tasks-save" disabled={!canSubmit} style={primaryButtonStyle}>
             {submitting ? "Saving…" : "Save"}
           </button>
         </div>
@@ -296,16 +199,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </label>
   );
-}
-
-function coerceKind(input: string | null | undefined): TaskKind {
-  if (input && (KIND_OPTIONS as string[]).includes(input)) return input as TaskKind;
-  return "task";
-}
-
-function coercePriority(input: string | null | undefined): TaskPriority {
-  if (input && (PRIORITY_OPTIONS as string[]).includes(input)) return input as TaskPriority;
-  return "medium";
 }
 
 const inputStyle: CSSProperties = {

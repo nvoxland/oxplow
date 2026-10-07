@@ -1,9 +1,25 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { activeProviderOf, boardColumns, createTaskInput, effortDetailsFromResult, itemsFromResult, orderedTaskIds, workItemsQuery, type CapabilityProvider, type WorkItem } from "./workItems.js";
+import {
+  activeProviderOf,
+  boardColumns,
+  bucketWorkList,
+  capabilityProvidersFromResult,
+  createWorkItemInput,
+  effortDetailsFromResult,
+  featuresFor,
+  itemsFromResult,
+  placementFromOrder,
+  workItemsQuery,
+  workItemRefOfMention,
+  workListProfileOf,
+  NO_FEATURES,
+  type CapabilityProvider,
+  type WorkItem,
+} from "./workItems.js";
 
-// A task's activity is one read over the models: `v_effort` joined to
+// An item's activity is one read over the models: `v_effort` joined to
 // `v_effort_file` (one row per effort and file; an effort with no files
 // still appears), newest effort first.
 test("effort rows join to their files: one detail per effort, counts by change kind", () => {
@@ -35,20 +51,22 @@ test("effort rows join to their files: one detail per effort, counts by change k
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
     columns: [
-      "ref", "provider", "title", "body", "state", "native_state", "parent_ref", "created_at", "updated_at",
-      "task_id", "thread_id", "status", "priority", "sort_index", "author", "completed_at", "note_count",
+      "ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at",
+      "created_at", "updated_at", "native", "comment_count",
     ],
     rows,
     truncated: false,
-    reads: { models: ["v_work_item", "v_task"], tables: [], measures: [] },
+    reads: { models: ["v_work_item", "v_work_item_comment"], tables: [], measures: [] },
     freshness: {},
   }) as unknown as SqlQueryResult;
 
-test("rows read as work items, with oxplow's own fields when the item is a task", () => {
+// Every item reads the same way, whichever list it's on: the interface's
+// columns, and the list's own fields as `native`.
+test("rows read as work items: the interface's columns and the list's own fields", () => {
   const items = itemsFromResult(
     result([
-      ["work_item:oxplow:tsk4", "oxplow", "Fix it", "", "in_progress", "in_progress", null, "t0", "t1", 4, 2, "in_progress", "high", 0, "agent", null, 3],
-      ["work_item:issues:ENG-1", "issues", "Theirs", "b", "todo", "Backlog", "work_item:oxplow:tsk4", "t0", "t1", null, null, null, null, null, null, null, 0],
+      ["work_item:oxplow:tsk4", "oxplow", "Fix it", "", "in_progress", null, 2, 1.5, null, "t0", "t1", '{"priority":"high","author":"agent"}', 3],
+      ["work_item:issues:ENG-1", "issues", "Theirs", "b", "done", "work_item:issues:ENG-0", null, null, "t2", "t0", "t1", null, 0],
     ]),
   );
   expect(items[0]).toEqual({
@@ -57,31 +75,31 @@ test("rows read as work items, with oxplow's own fields when the item is a task"
     title: "Fix it",
     body: "",
     state: "in_progress",
-    nativeState: "in_progress",
     parentRef: null,
+    threadId: "thr2",
+    rank: 1.5,
+    closedAt: null,
     createdAt: "t0",
     updatedAt: "t1",
-    task: { id: "tsk4", threadId: "thr2", status: "in_progress", priority: "high", sortIndex: 0, author: "agent", completedAt: null, noteCount: 3 },
+    native: { priority: "high", author: "agent" },
+    commentCount: 3,
   });
-  expect(items[1]!.task).toBeNull();
-  expect(items[1]!.parentRef).toBe("work_item:oxplow:tsk4");
+  expect(items[1]).toMatchObject({ threadId: null, rank: null, closedAt: "t2", native: {}, parentRef: "work_item:issues:ENG-0" });
 });
 
-test("a query scoped to a thread, the backlog, or everything; states filter", () => {
+test("a query scoped to a thread, the backlog, or everything; states filter; list order", () => {
   expect(workItemsQuery({ scope: { thread: "thr2" } }).params).toEqual([2]);
-  // The item's thread, whatever its provider: an outside tracker's item is
-  // in the thread that filed it (tsk1041).
   expect(workItemsQuery({ scope: { thread: "thr2" } }).sql).toContain("w.thread_id = ?1");
-  expect(workItemsQuery({ scope: "backlog" }).sql).toContain("t.thread_id IS NULL");
+  // The backlog is any list's: no thread.
+  expect(workItemsQuery({ scope: "backlog" }).sql).toContain("w.thread_id IS NULL");
   const all = workItemsQuery({ scope: "all", states: ["todo", "blocked"] });
   expect(all.sql).toContain("w.state IN ('todo', 'blocked')");
-  expect(all.sql).toContain("ORDER BY");
-  expect(workItemsQuery({ scope: "all", hideArchived: true }).sql).toContain("w.native_state IS NOT 'archived'");
+  expect(all.sql).toContain("ORDER BY w.rank IS NULL, w.rank, w.created_at");
+  expect(all.sql).not.toContain("v_task");
 });
 
 test("the Board groups by canonical state, in workflow order, each column in list order", () => {
-  const item = (ref: string, state: WorkItem["state"]): WorkItem =>
-    ({ ref, state, title: ref, task: null }) as unknown as WorkItem;
+  const item = (ref: string, state: WorkItem["state"]): WorkItem => ({ ref, state, title: ref }) as unknown as WorkItem;
   const columns = boardColumns([item("a", "done"), item("b", "todo"), item("c", "todo"), item("d", "blocked")]);
   expect(columns.map((c) => [c.state, c.items.map((i) => i.ref)])).toEqual([
     ["todo", ["b", "c"]],
@@ -92,53 +110,23 @@ test("the Board groups by canonical state, in workflow order, each column in lis
   ]);
 });
 
-import { bucketThreadWork, placementFromOrder, tasksFromResult } from "./workItems.js";
-
-const taskResult = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
-  ({
-    columns: ["id", "thread_id", "parent_id", "title", "description", "status", "priority", "sort_index", "author", "created_at", "updated_at", "completed_at", "note_count"],
-    rows,
-    truncated: false,
-    reads: { models: ["v_task"], tables: [], measures: [] },
-    freshness: {},
-  }) as unknown as SqlQueryResult;
-
-test("tasks read from v_task with the UI's ids", () => {
-  expect(tasksFromResult(taskResult([[4, 2, 1, "Fix", "body", "ready", "high", 3, "agent", "t0", "t1", null, 2]]))).toEqual([
-    {
-      id: "tsk4",
-      thread_id: "thr2",
-      parent_id: "tsk1",
-      title: "Fix",
-      description: "body",
-      status: "ready",
-      priority: "high",
-      sort_index: 3,
-      author: "agent",
-      created_at: "t0",
-      updated_at: "t1",
-      completed_at: null,
-      note_count: 2,
-    },
-  ]);
-});
-
-test("a thread's work: a task with a child is an epic, the rest by status", () => {
-  const tasks = tasksFromResult(
-    taskResult([
-      [1, 2, null, "Epic", "", "ready", "medium", 0, "user", "t", "t", null, 0],
-      [2, 2, 1, "Child", "", "in_progress", "medium", 1, "user", "t", "t", null, 0],
-      [3, 2, null, "Blocked", "", "blocked", "medium", 2, "user", "t", "t", null, 0],
-      [4, 2, null, "Done", "", "archived", "medium", 3, "user", "t", "t", "t", 0],
-      [5, 2, null, "Next", "", "ready", "medium", 4, "user", "t", "t", null, 0],
-    ]),
+// A list: an item with a child on it is an epic; the rest by state, done
+// and canceled together. `all` keeps the list order.
+test("a work list: an item with a child is an epic, the rest by state", () => {
+  const item = (ref: string, state: WorkItem["state"], parentRef: string | null = null) =>
+    ({ ref, state, parentRef }) as unknown as WorkItem;
+  const list = bucketWorkList(
+    "thr2",
+    [item("e", "todo"), item("c", "in_progress", "e"), item("b", "blocked"), item("d", "done"), item("x", "canceled"), item("n", "todo")],
+    [],
+    { models: [], tables: [], measures: [] },
   );
-  const work = bucketThreadWork("thr2", tasks, []);
-  expect(work.epics.map((t) => t.id)).toEqual(["tsk1"]);
-  expect(work.inProgress.map((t) => t.id)).toEqual(["tsk2"]);
-  expect(work.waiting.map((t) => t.id)).toEqual(["tsk3"]);
-  expect(work.done.map((t) => t.id)).toEqual(["tsk4"]);
-  expect(work.items.map((t) => t.id)).toEqual(["tsk5"]);
+  expect(list.epics.map((i) => i.ref)).toEqual(["e"]);
+  expect(list.inProgress.map((i) => i.ref)).toEqual(["c"]);
+  expect(list.waiting.map((i) => i.ref)).toEqual(["b"]);
+  expect(list.done.map((i) => i.ref)).toEqual(["d", "x"]);
+  expect(list.items.map((i) => i.ref)).toEqual(["n"]);
+  expect(list.all.map((i) => i.ref)).toEqual(["e", "c", "b", "d", "x", "n"]);
 });
 
 test("a reordered list is one item placed next to a neighbour", () => {
@@ -148,72 +136,83 @@ test("a reordered list is one item placed next to a neighbour", () => {
   expect(placementFromOrder(["a", "b"], ["a", "b"])).toBeNull();
 });
 
-// A drag's "before" order is the server's list order — sort_index, then
-// created_at — whatever bucket each task sits in, so equal indices can't
-// make a drag pick the wrong moved item.
-test("orderedTaskIds follows the server's order, ties by creation time", () => {
-  const t = (id: string, status: string, sort_index: number, created_at: string) =>
-    ({ id, status, sort_index, created_at, parent_id: null }) as never;
-  const work = {
-    threadId: "thr1",
-    epics: [],
-    items: [t("tsk3", "ready", 0, "2026-01-03")],
-    waiting: [],
-    inProgress: [t("tsk1", "in_progress", 0, "2026-01-01")],
-    done: [t("tsk2", "done", 0, "2026-01-02")],
-    followups: [],
-    reads: { models: [], tables: [], measures: [] },
-  };
-  expect(orderedTaskIds(work)).toEqual(["tsk1", "tsk2", "tsk3"]);
-});
-
-import { capabilityProvidersFromResult, featuresFor } from "./workItems.js";
-
-// P6b.C2: a provider's flags come from v_capability_provider; a provider
-// the model doesn't list (or a flag it doesn't declare) is off.
-test("capability providers read with their features; an unknown provider has none", () => {
+// A provider's flags and fields come from v_capability_provider; a
+// provider the model doesn't list (or a flag it doesn't declare) is off.
+test("capability providers read with their features and fields; an unknown provider has none", () => {
   const providers = capabilityProvidersFromResult({
-    columns: ["capability", "provider", "extension", "features", "active"],
+    columns: ["capability", "provider", "extension", "features", "fields", "active"],
     rows: [
-      ["work_items", "oxplow", null, '{"hierarchy":true,"comments":true,"links":true,"delete":true}', 1],
-      ["work_items", "fake", "tracker", '{"comments":true}', 1],
+      [
+        "work_items",
+        "oxplow",
+        null,
+        '{"hierarchy":true,"comments":true,"links":true,"delete":true,"ordering":true,"lists":true}',
+        '[{"name":"priority","title":"Priority","kind":"enum","values":["high","low"],"read_only":false}]',
+        1,
+      ],
+      ["work_items", "fake", "tracker", '{"comments":true}', "[]", 0],
     ],
     truncated: false,
     reads: { models: ["v_capability_provider"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult);
-  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true });
-  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false });
-  expect(featuresFor(providers, "issues")).toEqual({ hierarchy: false, comments: false, links: false, delete: false });
+  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false, ordering: true, lists: true });
+  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false, idempotent_writes: false, ordering: false, lists: false });
+  expect(featuresFor(providers, "issues")).toEqual({ hierarchy: false, comments: false, links: false, delete: false, idempotent_writes: false, ordering: false, lists: false });
   expect(providers.find((p) => p.provider === "fake")?.extension).toBe("tracker");
+  expect(workListProfileOf(providers)).toEqual({
+    provider: "oxplow",
+    features: { hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false, ordering: true, lists: true },
+    fields: [{ name: "priority", title: "Priority", kind: "enum", values: ["high", "low"], read_only: false }],
+    idPattern: null,
+  });
 });
 
-
-// tsk1058: every create files on the active tracker, so the page names
-// none; the thread is the common field, the state canonical (every tracker
-// takes it), oxplow's priority its own.
-test("a new task's input names no tracker and files on the thread", () => {
-  expect(createTaskInput("thr2", { title: "Fix it", description: "why", priority: "high", state: "blocked" })).toEqual({
+// Every create files on the active list, so the input names none: the
+// thread, the canonical state and the list's own fields under `native`.
+test("a new item's input names no list and files on the thread", () => {
+  expect(
+    createWorkItemInput("thr2", {
+      title: "Fix it",
+      body: "why",
+      state: "blocked",
+      parentRef: "work_item:oxplow:tsk1",
+      native: { priority: "high" },
+    }),
+  ).toEqual({
     title: "Fix it",
     body: "why",
     state: "blocked",
+    parent_ref: "work_item:oxplow:tsk1",
     thread: "thr2",
     native: { priority: "high" },
   });
-  expect(createTaskInput(null, { title: "Later" })).toEqual({ title: "Later" });
+  expect(createWorkItemInput(null, { title: "Later", native: {} })).toEqual({ title: "Later" });
 });
 
-// tsk1059: the page offers oxplow's own fields only while its list is the
-// active tracker.
 test("the active work-items provider is the row marked active", () => {
   const row = (provider: string, active: boolean): CapabilityProvider => ({
     capability: "work_items",
     provider,
     extension: provider === "oxplow" ? null : "tracker",
     features: {},
+    fields: [],
+    idPattern: null,
     active,
   });
   expect(activeProviderOf([row("oxplow", false), row("fake", true)])).toBe("fake");
   expect(activeProviderOf([row("oxplow", true), row("fake", false)])).toBe("oxplow");
   expect(activeProviderOf([])).toBeNull();
+  expect(workListProfileOf([])).toEqual({ provider: null, features: NO_FEATURES, fields: [], idPattern: null });
+});
+
+// A loose id in text names an item of the active list only when the list
+// says what its ids look like (none says nothing).
+test("a mention resolves through the active list's id pattern", () => {
+  const profile = { provider: "oxplow", features: NO_FEATURES, fields: [], idPattern: "tsk\\d+" };
+  expect(workItemRefOfMention(profile, "tsk42")).toBe("work_item:oxplow:tsk42");
+  expect(workItemRefOfMention(profile, "tsk42x")).toBeNull();
+  expect(workItemRefOfMention(profile, "ENG-1")).toBeNull();
+  expect(workItemRefOfMention({ ...profile, provider: "issues", idPattern: "[A-Z]+-\\d+" }, "ENG-1")).toBe("work_item:issues:ENG-1");
+  expect(workItemRefOfMention({ ...profile, idPattern: null }, "tsk42")).toBeNull();
 });

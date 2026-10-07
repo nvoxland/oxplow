@@ -2,7 +2,7 @@ import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import type { Stream, Thread } from "../tauri-bridge/index.js";
-import { readThreadWork, type Task } from "../workItems.js";
+import { CANONICAL_STATES, STATE_LABEL, readWorkList, type WorkItem } from "../workItems.js";
 import { readsChanged, readsOf } from "../lens/lensRerun.js";
 
 const THREAD_READS = readsOf("v_thread");
@@ -19,7 +19,7 @@ export interface ClosedThreadsPageProps {
 
 interface RowState {
   thread: Thread;
-  items: Task[];
+  items: WorkItem[];
   loading: boolean;
 }
 
@@ -40,8 +40,8 @@ export function ClosedThreadsPage({ stream, onAfterReopen }: ClosedThreadsPagePr
       const next: RowState[] = await Promise.all(
         closed.map(async (thread) => {
           try {
-            const work = await readThreadWork(thread.id);
-            return { thread, items: work.items, loading: false };
+            const work = await readWorkList(thread.id);
+            return { thread, items: work.all, loading: false };
           } catch {
             return { thread, items: [], loading: false };
           }
@@ -111,7 +111,7 @@ function ClosedThreadRow({
   onReopen,
 }: {
   thread: Thread;
-  items: Task[];
+  items: WorkItem[];
   onReopen(): void;
 }) {
   const grouped = groupByStatus(items);
@@ -159,13 +159,13 @@ function ClosedThreadRow({
       </div>
       {items.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-xs)" }}>
-          {(["in_progress", "ready", "blocked", "done", "canceled", "archived"] as const).map((status) => {
+          {CANONICAL_STATES.map((status) => {
             const bucket = grouped[status];
             if (!bucket || bucket.length === 0) return null;
             return (
               <div key={status} style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
                 <span style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, minWidth: 90 }}>
-                  {status} ({bucket.length})
+                  {STATE_LABEL[status]} ({bucket.length})
                 </span>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {bucket.map((i) => i.title).join(" · ")}
@@ -179,10 +179,10 @@ function ClosedThreadRow({
   );
 }
 
-function groupByStatus(items: Task[]): Record<string, Task[]> {
-  const out: Record<string, Task[]> = {};
+function groupByStatus(items: WorkItem[]): Record<string, WorkItem[]> {
+  const out: Record<string, WorkItem[]> = {};
   for (const item of items) {
-    (out[item.status] ??= []).push(item);
+    (out[item.state] ??= []).push(item);
   }
   return out;
 }

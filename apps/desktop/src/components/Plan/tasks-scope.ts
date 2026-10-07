@@ -1,4 +1,5 @@
-import type { ThreadWorkState } from "../../api.js";
+import { bucketWorkList, type WorkList } from "../../workItems.js";
+import { unionReads } from "../../lens/lensRerun.js";
 
 /**
  * Tasks page view scope. The page can show:
@@ -36,22 +37,17 @@ export function saveScope(scope: TasksScope): void {
 }
 
 /**
- * Merge multiple ThreadWorkStates into a single synthetic state so the
- * existing TasksList/PlanPane render path can show items across threads.
- * The result's `threadId` is empty since the rows came from many threads;
- * mutation handlers already need a real threadId so the page treats this
- * merged state as read-only.
+ * Merge several threads' lists into one so the TasksList/PlanPane render
+ * path can show items across threads. The result's `threadId` is empty
+ * since the rows came from many threads; the page treats it as read-only.
  */
-export function mergeThreadWork(states: ThreadWorkState[]): ThreadWorkState {
-  return {
-    threadId: "",
-    waiting: states.flatMap((s) => s.waiting ?? []),
-    inProgress: states.flatMap((s) => s.inProgress ?? []),
-    done: states.flatMap((s) => s.done ?? []),
-    epics: states.flatMap((s) => s.epics ?? []),
-    items: states.flatMap((s) => s.items ?? []),
-    followups: states.flatMap((s) => s.followups ?? []),
-  } as ThreadWorkState;
+export function mergeThreadWork(lists: WorkList[]): WorkList {
+  return bucketWorkList(
+    "",
+    lists.flatMap((l) => l.all),
+    lists.flatMap((l) => l.followups),
+    unionReads(lists.map((l) => l.reads)),
+  );
 }
 
 export function isReadOnlyScope(scope: TasksScope): boolean {

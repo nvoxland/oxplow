@@ -24,11 +24,14 @@ import { useRowContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
-import { fileRef, directoryRef, gitCommitRef, wikiPageRef, taskRef, refFromTabId } from "../../tabs/pageRefs.js";
+import { fileRef, directoryRef, gitCommitRef, wikiPageRef, workItemTabRef, refFromTabId } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { WORKING, gitRevision, type Revision } from "../../revision.js";
 import { useWikiRef } from "../../wikiTitleCache.js";
-import { useTaskRef } from "../../taskTitleCache.js";
+import { useWorkItemRef } from "../../workItemTitleCache.js";
+import { useWorkListProfile } from "../../useWorkListProfile.js";
+import { workItemRefOfMention } from "../../workItems.js";
+import { workItemId, workItemLabel } from "../../workItemRef.js";
 import { parseRef } from "../../refs/ref.js";
 import { pluginWikilinkRef, refKindInfo, usePluginRefTitle, useRefKinds } from "../../refKinds.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
@@ -54,9 +57,8 @@ export type ParsedLink =
     }
   | { kind: "directory"; path: string }
   | { kind: "commit"; sha: string }
-  /** A task: `id` is the `tsk<n>` id (the href carries the provider,
-   *  `work_item:oxplow:tsk42`). */
-  | { kind: "work_item"; id: string }
+  /** A work item, by its ref (`work_item:<provider>:<id>`). */
+  | { kind: "work_item"; ref: string }
   /** A ref of an extension's kind (`acme_pr:12`, P8.D7). */
   | { kind: "ref"; ref: string }
   /** A `[[…]]` whose target matches no known ref shape (e.g. the GitHub
@@ -65,10 +67,9 @@ export type ParsedLink =
 
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 
-/** The href prefix of a task link: the canonical `work_item` ref under
- *  the oxplow provider (`work_item:oxplow:tsk42`). */
-const OXPLOW_PROVIDER = "oxplow:";
-const WORK_ITEM_HREF = `work_item:${OXPLOW_PROVIDER}`;
+/** Which work item a loose id in text names, if any: the active list's
+ *  ids, as it declares them (`workItemRefOfMention`). */
+export type MentionRef = (id: string) => string | null;
 
 /**
  * Heuristic: does a wikilink target look like a git commit reference?
@@ -170,12 +171,8 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     return { kind: "commit", sha };
   }
   if (rawHref.startsWith("work_item:")) {
-    // Only oxplow's own items have a page; the provider prefix is dropped
-    // from the parsed id (`tsk42`).
-    const rest = rawHref.slice("work_item:".length);
-    const id = rest.startsWith(OXPLOW_PROVIDER) ? rest.slice(OXPLOW_PROVIDER.length) : rest;
-    if (!id) return { kind: "empty" };
-    return { kind: "work_item", id };
+    // Any list's item, by its ref.
+    return workItemId(rawHref) === null ? { kind: "empty" } : { kind: "work_item", ref: rawHref };
   }
   {
     const kind = parseRef(rawHref)?.kind;
@@ -185,7 +182,7 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     const target = decodeURIComponent(rawHref.slice("oxplow-invalid:".length));
     return {
       kind: "broken",
-      reason: `Broken link: “${target}” is not a recognized reference (use [[tsk42]] for a task, [[some-slug]] for a wiki page)`,
+      reason: `Broken link: “${target}” is not a recognized reference (use a work item's id, [[some-slug]] for a wiki page)`,
     };
   }
   let target = rawHref.replace(/^\.?\//, "");
@@ -272,12 +269,12 @@ function collapseInternalLink(label: string, url: string): string | null {
     const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
     return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
   }
-  if (url.startsWith(WORK_ITEM_HREF)) {
-    const id = url.slice(WORK_ITEM_HREF.length);
-    if (!id) return null;
-    // Bare `[[tsk42]]` renders with the id as text (the title swap is a
-    // render-time overlay, not stored), so a label equal to the id
-    // collapses to the bare form.
+  if (url.startsWith("work_item:") && workItemId(url) !== null) {
+    // A bare `[[tsk42]]` (or `[[work_item:…]]`) renders with what was
+    // written as its text (the title swap is a render-time overlay, not
+    // stored), so a label equal to it collapses to the bare form.
+    const id = workItemLabel(url);
+    if (label === url) return `[[${url}]]`;
     return label === id ? `[[${id}]]` : `[[${id}|${label}]]`;
   }
   if (url.startsWith("oxplow-invalid:")) {
@@ -340,16 +337,16 @@ function looksLikeFilePath(target: string): boolean {
  * Wikilinks inside fenced code blocks or inline code are left alone so
  * documentation about the syntax itself doesn't get rewritten.
  */
-export function preprocessWikilinks(body: string): string {
+export function preprocessWikilinks(body: string, mentionRef: MentionRef = () => null): string {
   // Split out fenced code blocks (```...```) and protect them.
   const segments = body.split(/(```[\s\S]*?```)/g);
   return segments.map((seg, idx) => {
     if (idx % 2 === 1) return seg; // fenced block — leave alone
-    return rewriteWikilinksOutsideInlineCode(seg);
+    return rewriteWikilinksOutsideInlineCode(seg, mentionRef);
   }).join("");
 }
 
-function rewriteWikilinksOutsideInlineCode(text: string): string {
+function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef): string {
   // Split on inline backtick spans. Even-index = prose, odd = code.
   const parts = text.split(/(`[^`\n]*`)/g);
   return parts.map((part, idx) => {
@@ -377,13 +374,14 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
           return `[${dirDisplay}](dir:${dir})`;
         }
       }
-      // Task ref: `[[tsk<digits>]]` (the whole token is the task id). The
-      // rendered link text defaults to the token; the task title is swapped
-      // in at render time (WikiLinkSpan + useTaskRef). Matches the backend
-      // ref extractor (refs.rs), which recognizes the same `tsk<digits>`
-      // form for backlinks.
-      if (/^tsk\d+$/i.test(target)) {
-        return `[${display}](${WORK_ITEM_HREF}${target})`;
+      // A work item: its full ref (`[[work_item:issues:ENG-1]]`), or a
+      // bare id of the active list's (`[[tsk42]]` with oxplow's tasks), as
+      // the backend's ref extractor recognizes them for backlinks. The
+      // rendered text defaults to the token; the item's title is swapped
+      // in at render time (WikiLinkSpan + useWorkItemRef).
+      const itemRef = workItemId(target) !== null ? target : mentionRef(target);
+      if (itemRef) {
+        return `[${display}](${itemRef})`;
       }
       // An extension's ref kind, by its kind or its `wikilink:` prefix.
       const pluginRef = pluginWikilinkRef(target);
@@ -419,7 +417,7 @@ function WikiLinkSpan({
   items,
   iconKind,
   internalSlug,
-  taskId,
+  itemRef,
   pluginRef,
 }: {
   anchorProps: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
@@ -427,12 +425,13 @@ function WikiLinkSpan({
   items: MenuItem[];
   iconKind: string | null;
   internalSlug: string | null;
-  taskId: string | null;
+  /** A work item's ref. */
+  itemRef: string | null;
   /** A ref of an extension's kind: titled from its kind's model. */
   pluginRef: string | null;
 }) {
   const wiki = useWikiRef(internalSlug);
-  const task = useTaskRef(taskId);
+  const item = useWorkItemRef(itemRef);
   const pluginTitle = usePluginRefTitle(pluginRef);
   const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
@@ -445,20 +444,21 @@ function WikiLinkSpan({
   const overrideText =
     internalSlug && wiki.title && childrenText === internalSlug
       ? wiki.title
-      : taskId && task.title && childrenText === taskId
-        ? task.title
+      : itemRef && item.title && (childrenText === workItemLabel(itemRef) || childrenText === itemRef)
+        ? item.title
         : pluginRef && pluginTitle && pluginWikilinkRef(childrenText) === pluginRef
           ? pluginTitle
           : null;
-  // A recognized ref whose object doesn't exist (deleted page / task,
-  // stale wikilink) renders broken and non-clickable. `loading` and
+  // A recognized ref whose object doesn't exist (deleted page / item, an
+  // item on a list that isn't active, a stale wikilink) renders broken
+  // and non-clickable. `loading` and
   // `found` both stay a live link so a not-yet-resolved ref isn't
   // briefly flagged.
   const brokenReason =
     internalSlug && wiki.status === "missing"
       ? `Broken link: wiki page “${internalSlug}” does not exist`
-      : taskId && task.status === "missing"
-        ? `Broken link: task ${taskId} does not exist`
+      : itemRef && item.status === "missing"
+        ? `Broken link: work item ${workItemLabel(itemRef)} isn't on the active work list`
         : null;
   if (brokenReason) {
     return <BrokenLink reason={brokenReason}>{children}</BrokenLink>;
@@ -503,7 +503,7 @@ export function linkTarget(parsed: ParsedLink): TabRef | null {
     case "commit":
       return gitCommitRef(parsed.sha);
     case "work_item":
-      return taskRef(parsed.id);
+      return workItemTabRef(parsed.ref);
     case "internal":
       return wikiPageRef(parsed.slug);
     case "ref":
@@ -594,7 +594,12 @@ export function MarkdownView({
 }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
   const refKinds = useRefKinds();
-  const processedBody = useMemo(() => preprocessWikilinks(body), [body, refKinds]);
+  // …and the active work list's ids do too.
+  const profile = useWorkListProfile();
+  const processedBody = useMemo(
+    () => preprocessWikilinks(body, (id) => workItemRefOfMention(profile, id)),
+    [body, refKinds, profile],
+  );
   const ref = useRef<HTMLDivElement | null>(null);
   const [lightbox, setLightbox] = useState<LightboxContent | null>(null);
   // Keep a stable handle to setLightbox so the imperative mermaid
@@ -725,10 +730,10 @@ export function MarkdownView({
       return items;
     }
     if (parsed.kind === "work_item") {
-      const id = parsed.id;
+      const id = workItemLabel(parsed.ref);
       const items: MenuItem[] = [];
       items.push(...openItems(parsed));
-      items.push({ id: "copy-id", label: "Copy task id", enabled: true, run: () => { void navigator.clipboard.writeText(id).catch(() => {}); } });
+      items.push({ id: "copy-id", label: "Copy id", enabled: true, run: () => { void navigator.clipboard.writeText(id).catch(() => {}); } });
       return items;
     }
     return [];
@@ -876,7 +881,7 @@ export function MarkdownView({
             // page title so readers see "Local Snapshots" not
             // `local-snapshots`. Author-supplied labels are preserved.
             const internalSlug = parsed.kind === "internal" ? parsed.slug : null;
-            const taskId = parsed.kind === "work_item" ? parsed.id : null;
+            const itemRef = parsed.kind === "work_item" ? parsed.ref : null;
             const pluginRef = parsed.kind === "ref" ? parsed.ref : null;
             return (
               <WikiLinkSpan
@@ -885,7 +890,7 @@ export function MarkdownView({
                 items={items}
                 iconKind={iconKind}
                 internalSlug={internalSlug}
-                taskId={taskId}
+                itemRef={itemRef}
                 pluginRef={pluginRef}
               />
             );
