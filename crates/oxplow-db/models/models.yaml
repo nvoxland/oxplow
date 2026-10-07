@@ -4,7 +4,7 @@
 # change to it needs a new `version`. See `.context/semantic-layer.md`
 # "Models".
 - name: agent_nudge
-  version: 2
+  version: 3
   description: "Guidance oxplow raised — a hint (`<extension>/<id>`) or its own nudge (`report-less-run`) — for the coding agent, taken by its next prompt or tool call, or for a person, shown in Alerts until they dismiss it."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }

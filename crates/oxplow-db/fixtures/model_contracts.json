@@ -25,7 +25,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "What kind of nudge, e.g. `report-less-run` or an advisory's `<extension>/<id>`."
+          "doc": "What kind of nudge, e.g. `coverage-target`, `report-less-run`."
         },
         {
           "name": "message",
@@ -51,6 +51,61 @@
       "key": []
     },
     "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort it was about, if any."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "What kind of nudge, e.g. `coverage-target`, `report-less-run`."
+        },
+        {
+          "name": "message",
+          "type": "TEXT",
+          "doc": "The text the agent was given."
+        },
+        {
+          "name": "trigger",
+          "type": "TEXT",
+          "doc": "What prompted it, if recorded."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "delivered_at",
+          "type": "TEXT",
+          "doc": "When a hook response carried it to the agent, or the person dismissed it; NULL while it waits."
+        },
+        {
+          "name": "audience",
+          "type": "TEXT",
+          "doc": "`agent` or `person`. (v2)"
+        }
+      ],
+      "key": []
+    },
+    "3": {
       "columns": [
         {
           "name": "id",
