@@ -139,6 +139,7 @@ in the background. `DuplicationRecorder::record`
 - **only the latest scan per scope is kept**: the same write deletes the
   older finished scans of its tool and scope (findings cascade; their page
   refs are deleted explicitly). Readers only ever want a scope's latest;
+  migration V19 pruned what had piled up before this;
 - **only parseable files are read** into the corpus
   (`oxplow_code_metrics::is_supported_path`), not every file in the tree;
 - **no facts**: a change scan anchors only its changed files, so a capture

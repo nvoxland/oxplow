@@ -92,6 +92,17 @@ pub struct SqlitePageRefStore {
     db: Database,
 }
 
+/// One source's edges for [`SqlitePageRefStore::replace_sources`]: the
+/// whole slice it owns (`ref_types: None`), or only the rows of the given
+/// `ref_types`.
+#[derive(Debug, Clone)]
+pub struct SourceSlice {
+    pub source_kind: String,
+    pub source_id: String,
+    pub ref_types: Option<Vec<String>>,
+    pub edges: Vec<PageRefEdge>,
+}
+
 impl SqlitePageRefStore {
     pub fn new(db: Database) -> Self {
         Self { db }
@@ -114,6 +125,36 @@ impl SqlitePageRefStore {
         self.db
             .transaction(move |tx| {
                 replace_source_tx(tx, &source_kind, &source_id, edges.clone())?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// [`replace_source`] / [`replace_source_for_ref_types`] for many
+    /// sources in one transaction — one commit, one change event, where a
+    /// call per source is a commit (and an event the UI hears) each. For
+    /// restating many rows at once (the boot repair).
+    pub async fn replace_sources(&self, slices: Vec<SourceSlice>) -> Result<(), DomainError> {
+        if slices.is_empty() {
+            return Ok(());
+        }
+        self.db
+            .transaction(move |tx| {
+                for s in &slices {
+                    match &s.ref_types {
+                        None => {
+                            replace_source_tx(tx, &s.source_kind, &s.source_id, s.edges.clone())?
+                        }
+                        Some(types) if types.is_empty() => {}
+                        Some(types) => replace_source_for_ref_types_tx(
+                            tx,
+                            &s.source_kind,
+                            &s.source_id,
+                            types,
+                            s.edges.clone(),
+                        )?,
+                    }
+                }
                 Ok(())
             })
             .await

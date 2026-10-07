@@ -160,6 +160,7 @@ disallowed-methods = [
   { path = "oxplow_db::page_ref_store::SqlitePageRefStore::merge_source", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::page_ref_store::SqlitePageRefStore::replace_source", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::page_ref_store::SqlitePageRefStore::replace_source_for_ref_types", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
+  { path = "oxplow_db::page_ref_store::SqlitePageRefStore::replace_sources", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::page_ref_store::SqlitePageRefStore::upsert_edge", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::page_ref_store::merge_source_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::page_ref_store::replace_source_for_ref_types_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },

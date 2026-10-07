@@ -1715,6 +1715,59 @@ mod tests {
         assert_eq!(rows, vec![(1, Some(40)), (2, None)]);
     }
 
+    /// V19: the code-quality scans piled up before a scan replaced its
+    /// scope's older ones are pruned to each scope's latest, with their
+    /// findings and file edges; a running scan and other scopes stay.
+    #[test]
+    fn v19_prunes_superseded_scans() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(18))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"PRAGMA foreign_keys = ON;
+               INSERT INTO code_quality_scan (id, tool, scope, status, started_at, revision, file_filter) VALUES
+                 (1, 'duplication', 'change 1', 'done',    '2026-01-01T00:00:00Z', 'working', 'x'),
+                 (2, 'duplication', 'change 1', 'failed',  '2026-01-02T00:00:00Z', 'working', 'x'),
+                 (3, 'duplication', 'change 1', 'done',    '2026-01-03T00:00:00Z', 'working', 'x'),
+                 (4, 'duplication', 'change 1', 'running', '2026-01-04T00:00:00Z', 'working', 'x'),
+                 (5, 'duplication', 'change 2', 'done',    '2026-01-01T00:00:00Z', 'working', 'x');
+               INSERT INTO code_quality_finding (id, scan_id, path, start_line, end_line, kind, metric_value) VALUES
+                 (10, 1, 'a.rs', 1, 9, 'duplicate-block', 9),
+                 (11, 1, 'b.rs', 1, 9, 'duplicate-block', 9),
+                 (12, 3, 'a.rs', 1, 9, 'duplicate-block', 9),
+                 (13, 5, 'c.rs', 1, 9, 'duplicate-block', 9);
+               INSERT INTO page_ref (source_kind, source_id, target_kind, target_id, ref_type) VALUES
+                 ('finding', '10', 'file', 'a.rs', 'finding-path'),
+                 ('finding', '11', 'file', 'b.rs', 'finding-path'),
+                 ('finding', '12', 'file', 'a.rs', 'finding-path'),
+                 ('finding', '13', 'file', 'c.rs', 'finding-path');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let ids = |sql: &str| -> Vec<i64> {
+            let mut stmt = conn.prepare(sql).unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert_eq!(
+            ids("SELECT id FROM code_quality_scan ORDER BY id"),
+            vec![3, 4, 5]
+        );
+        assert_eq!(
+            ids("SELECT id FROM code_quality_finding ORDER BY id"),
+            vec![12, 13]
+        );
+        assert_eq!(
+            ids("SELECT CAST(source_id AS INTEGER) FROM page_ref WHERE source_kind = 'finding' ORDER BY 1"),
+            vec![12, 13]
+        );
+    }
+
     /// V14: config.changed is v2, naming the layer; every logged change
     /// was the project's.
     #[test]

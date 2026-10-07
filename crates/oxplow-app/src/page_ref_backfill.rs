@@ -16,6 +16,10 @@
 //! last run is recorded as the `page_ref_repair` row of `asset_state`
 //! (`built_from`: the build and schema version), read as `v_asset`.
 //!
+//! It writes in batches ([`BATCH`] sources per transaction): every commit
+//! is a change event the UI hears, and a commit per row — a quarter of a
+//! million findings once — flooded it for a minute at boot.
+//!
 //! Ordering doesn't matter — projections are per-source and each
 //! writer owns its own slice. The backfill is idempotent: running
 //! it again replaces the same rows it wrote last time.
@@ -33,8 +37,8 @@ use oxplow_db::page_ref_projections::{
     work_item_id, KIND_FINDING, KIND_TASK_NOTE, KIND_WORK_ITEM,
 };
 use oxplow_db::{
-    SqliteCodeQualityStore, SqliteEffortStore, SqlitePageRefStore, SqliteTaskLinkStore,
-    SqliteTaskNoteStore, SqliteTaskStore,
+    SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqlitePageRefStore,
+    SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
 };
 use oxplow_domain::stores::TaskLinkStore as _;
 use oxplow_domain::vocabulary::VocabularyHandle;
@@ -48,6 +52,43 @@ pub struct BackfillCounts {
     pub efforts: usize,
     pub findings: usize,
     pub notes: usize,
+}
+
+/// Sources restated per transaction.
+const BATCH: usize = 1000;
+
+/// Write `slices` in batches; how many were written. A failed batch is
+/// logged and skipped (its rows keep whatever edges they had).
+async fn write_batched(
+    page_refs: &SqlitePageRefStore,
+    what: &str,
+    slices: Vec<SourceSlice>,
+) -> usize {
+    let mut written = 0;
+    let mut slices = slices.into_iter().peekable();
+    while slices.peek().is_some() {
+        let batch: Vec<SourceSlice> = slices.by_ref().take(BATCH).collect();
+        let n = batch.len();
+        match page_refs.replace_sources(batch).await {
+            Ok(()) => written += n,
+            Err(e) => tracing::warn!(?e, what, "page-ref backfill: a batch failed"),
+        }
+    }
+    written
+}
+
+fn slice(
+    kind: &str,
+    id: String,
+    ref_types: Option<Vec<String>>,
+    edges: Vec<oxplow_db::PageRefEdge>,
+) -> SourceSlice {
+    SourceSlice {
+        source_kind: kind.to_string(),
+        source_id: id,
+        ref_types,
+        edges,
+    }
 }
 
 /// The `asset_state` row recording the last repair.
@@ -141,18 +182,18 @@ pub async fn run(
 
     // 1. task body slice + touched-file slice.
     if let Ok(items) = tasks.list_all_for_backfill().await {
-        for item in items {
-            let edges = task_edges(kinds, &item);
-            let id_str = work_item_id(item.id);
-            if let Err(e) = page_refs
-                .replace_source_for_ref_types(KIND_WORK_ITEM, &id_str, task_body_ref_types(), edges)
-                .await
-            {
-                tracing::warn!(?e, id = %item.id, "page-ref backfill: task failed");
-                continue;
-            }
-            counts.tasks += 1;
-        }
+        let slices = items
+            .iter()
+            .map(|item| {
+                slice(
+                    KIND_WORK_ITEM,
+                    work_item_id(item.id),
+                    Some(task_body_ref_types()),
+                    task_edges(kinds, item),
+                )
+            })
+            .collect();
+        counts.tasks = write_batched(&page_refs, "tasks", slices).await;
     }
 
     // 1b. The effort-owned slice (touched files, summary mentions,
@@ -172,56 +213,44 @@ pub async fn run(
     //    write the whole slice owned by the source in one shot so
     //    deletions on the live path stay clean too.)
     if let Ok(from_items) = links.list_distinct_from_items().await {
+        let mut slices = Vec::new();
         for from in from_items {
-            let outgoing = match links.list_outgoing(from).await {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let edges: Vec<_> = outgoing.iter().map(link_edge).collect();
-            let from_str = work_item_id(from);
-            if let Err(e) = page_refs
-                .replace_source_for_ref_types(
-                    KIND_WORK_ITEM,
-                    &from_str,
-                    task_link_ref_types(),
-                    edges,
-                )
-                .await
-            {
-                tracing::warn!(?e, id = %from, "page-ref backfill: link slice failed");
+            let Ok(outgoing) = links.list_outgoing(from).await else {
                 continue;
-            }
-            counts.links += 1;
+            };
+            slices.push(slice(
+                KIND_WORK_ITEM,
+                work_item_id(from),
+                Some(task_link_ref_types()),
+                outgoing.iter().map(link_edge).collect(),
+            ));
         }
+        counts.links = write_batched(&page_refs, "links", slices).await;
     }
 
     // 3. Work notes — one source per note row, parsed from body.
     if let Ok(rows) = task_note.list_all_for_backfill().await {
-        for (id, body) in rows {
-            let edges = note_edges(kinds, &id, &body);
-            if page_refs
-                .replace_source(KIND_TASK_NOTE, &id, edges)
-                .await
-                .is_ok()
-            {
-                counts.notes += 1;
-            }
-        }
+        let slices = rows
+            .into_iter()
+            .map(|(id, body)| {
+                let edges = note_edges(kinds, &id, &body);
+                slice(KIND_TASK_NOTE, id, None, edges)
+            })
+            .collect();
+        counts.notes = write_batched(&page_refs, "notes", slices).await;
     }
 
     // 4. Findings — one edge per row.
     if let Ok(rows) = findings_store.list_all_findings_for_backfill().await {
-        for (id, path) in rows {
-            let id_str = id.to_string();
-            let edges = finding_edges(&id_str, &path);
-            if page_refs
-                .replace_source(KIND_FINDING, &id_str, edges)
-                .await
-                .is_ok()
-            {
-                counts.findings += 1;
-            }
-        }
+        let slices = rows
+            .into_iter()
+            .map(|(id, path)| {
+                let id = id.to_string();
+                let edges = finding_edges(&id, &path);
+                slice(KIND_FINDING, id, None, edges)
+            })
+            .collect();
+        counts.findings = write_batched(&page_refs, "findings", slices).await;
     }
 
     counts
@@ -259,6 +288,78 @@ mod tests {
         .await
         .unwrap();
         assert!(needs_repair(&db).await, "another build or schema");
+    }
+
+    /// The repair restates rows in batches: thousands of findings are a
+    /// handful of commits, not one each — each commit is a change event the
+    /// UI hears, and one per row flooded it at boot.
+    #[tokio::test]
+    async fn the_repair_writes_in_batches() {
+        let db = Database::in_memory();
+        let findings_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
+        let scan = findings_store
+            .create_scan("duplication", "change 1", "working", "x")
+            .await
+            .unwrap();
+        let rows = (0..2500)
+            .map(|i| oxplow_db::CodeQualityFinding {
+                id: 0,
+                scan_id: scan,
+                path: format!("src/f{i}.rs"),
+                start_line: 1,
+                end_line: 9,
+                kind: "duplicate-block".into(),
+                metric_value: 9.0,
+                extra_json: None,
+            })
+            .collect();
+        findings_store
+            .finish_scan_with_findings(scan, rows)
+            .await
+            .unwrap();
+        let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
+        // Lose the edges, as a migration resetting the graph would.
+        db.transaction(|tx| {
+            tx.execute("DELETE FROM page_ref", [])
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+
+        let mut changes = db.subscribe_changes();
+        let counts = run(
+            VocabularyHandle::core(),
+            page_refs.clone(),
+            Arc::new(SqliteTaskStore::new(db.clone())),
+            Arc::new(SqliteTaskLinkStore::new(db.clone())),
+            Arc::new(SqliteEffortStore::new(db.clone())),
+            findings_store,
+            Arc::new(SqliteTaskNoteStore::new(db.clone())),
+        )
+        .await;
+        assert_eq!(counts.findings, 2500);
+        assert_eq!(
+            page_refs
+                .list_backlinks("file", "src/f42.rs", None)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let mut published = 0;
+        loop {
+            match changes.try_recv() {
+                Ok(_) => published += 1,
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(n)) => {
+                    published += n as usize
+                }
+                Err(_) => break,
+            }
+        }
+        assert!(
+            published <= 10,
+            "{published} change messages for one repair"
+        );
     }
 
     #[tokio::test]
