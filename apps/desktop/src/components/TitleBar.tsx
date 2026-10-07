@@ -23,8 +23,8 @@ interface Props {
 
 /**
  * The bar across the top of the window, over both the left nav and the
- * content: where you are (`stream › thread`, and the stream's branch) and
- * the global search. The stream name opens the navigator below it, the
+ * content: where you are (`stream › thread` at the start) and, at the
+ * right end, the stream's branch and the global search beside it. The stream name opens the navigator below it, the
  * thread name its settings, the branch the branch picker.
  *
  * Its empty space drags the window (`data-tauri-drag-region` — Tauri drags
@@ -40,9 +40,9 @@ export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch, 
         height: 30,
         flexShrink: 0,
         display: "grid",
-        // Context | search | (drag space): the search sits centered over
-        // the window whatever the names' widths.
-        gridTemplateColumns: "minmax(0, 1fr) minmax(180px, 440px) minmax(0, 1fr)",
+        // Context (and the drag space after it) | branch | search, the
+        // last two pinned right.
+        gridTemplateColumns: "minmax(0, 1fr) auto clamp(180px, 28vw, 320px)",
         alignItems: "center",
         gap: 12,
         padding: `0 10px 0 ${leftInset}px`,
@@ -50,7 +50,7 @@ export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch, 
         fontSize: "var(--text-xs)",
       }}
     >
-      <div data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+      <div data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, height: "100%" }}>
         {stream ? (
           <>
             <button
@@ -76,9 +76,11 @@ export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch, 
                 </button>
               </>
             ) : null}
-            <BranchChip stream={stream} vcsEnabled={vcsEnabled} />
           </>
         ) : null}
+      </div>
+      <div style={{ display: "flex", alignItems: "center" }}>
+        {stream ? <BranchChip stream={stream} vcsEnabled={vcsEnabled} /> : null}
       </div>
       <button
         type="button"
@@ -91,7 +93,6 @@ export function TitleBar({ stream, thread, vcsEnabled, leftInset, onOpenSearch, 
         <span style={{ flex: 1, textAlign: "left" }}>Search…</span>
         <kbd style={kbdStyle}>⌘K</kbd>
       </button>
-      <div data-tauri-drag-region style={{ height: "100%" }} />
     </div>
   );
 }
@@ -122,7 +123,7 @@ function BranchChip({ stream, vcsEnabled }: { stream: Stream; vcsEnabled: boolea
       currentBranch={stream.branch}
       disabled={!vcsEnabled}
       anchor="bottom"
-      align="left"
+      align="right"
       mode="manage"
       streamId={stream.id}
       onPick={handlePick}
