@@ -509,9 +509,10 @@ welded to collection.
 >   never invent strictness from missing data; degraded = pre-tsk102 blind.
 >
 > **One `VisibilityResolver` instance feeds every fold** — the engine's fact
-> fold and the cube's seed share `AppState.metric_visibility`;
-> `CollectionService` builds its own in `new()` (same pure rule, same DB ⇒
-> same answers). One side resolved with the other blind is how the cube
+> fold and the cube's seed share `AppState.metric_visibility`, and
+> `CollectionService` (effort deltas) reads through the app's one
+> `MetricEngine`, never a per-call engine — so the fold memo and the
+> ancestry cache are shared too. One side resolved with the other blind is how the cube
 > silently diverges — `the_cube_seed_and_the_fact_fold_resolve_ancestry_
 > identically` pins the pair. Known, symmetric limitation: cross-branch
 > results flow only through the seed at a branch's FIRST capture, so work

@@ -426,7 +426,10 @@ pub struct CollectionService {
     /// `tree_state_series` call — built in `new` from the stores it already
     /// holds, so the wiring can't be forgotten at a call site. Same rule,
     /// same answers as the engine's resolver (both are pure over the same DB).
-    metric_visibility: Arc<crate::metric_visibility::VisibilityResolver>,
+    /// The app's one metric engine: its fold memo and its visibility
+    /// resolver (with the ancestry cache) are shared with every other
+    /// metric read, never rebuilt per call.
+    metric_engine: crate::metric_engine::MetricEngine,
     /// Validates the `test.*` events a capture logs with it.
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
@@ -555,12 +558,8 @@ impl CollectionService {
         content: crate::snapshot_content::SnapshotContent,
         vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
-        project_dir: PathBuf,
+        metric_engine: crate::metric_engine::MetricEngine,
     ) -> Self {
-        let metric_visibility = Arc::new(crate::metric_visibility::VisibilityResolver::new(
-            (*snapshots).clone(),
-            vcs.revision_graph(&project_dir),
-        ));
         Self {
             facts,
             nudges,
@@ -574,7 +573,7 @@ impl CollectionService {
             config,
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             run_log: None,
-            metric_visibility,
+            metric_engine,
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         }
     }
@@ -2972,9 +2971,7 @@ impl CollectionService {
         // history).
         let per_path = measure.capture_scope == "per-path";
         let tree_totals: std::collections::HashMap<i64, f64> = if per_path {
-            let engine = crate::metric_engine::MetricEngine::new((*self.facts).clone())
-                .with_visibility(self.metric_visibility.clone());
-            engine
+            self.metric_engine
                 .series_in_stream(measure_key, agg, &filter, None, stream, None)
                 .await
                 .unwrap_or_default()
@@ -4296,7 +4293,18 @@ mod tests {
                 ),
                 Arc::new(crate::vcs::GitProvider),
                 Arc::new(RwLock::new(cfg)),
-                project_dir,
+                crate::metric_engine::MetricEngine::new(oxplow_db::SqliteFactStore::new(
+                    db.clone(),
+                ))
+                .with_visibility(Arc::new(
+                    crate::metric_visibility::VisibilityResolver::new(
+                        SqliteSnapshotStore::new(db.clone()),
+                        oxplow_domain::vcs::Vcs::revision_graph(
+                            &crate::vcs::GitProvider,
+                            &project_dir,
+                        ),
+                    ),
+                )),
             )
             .with_run_log(crate::collector_runner::RunLog {
                 db: db.clone(),

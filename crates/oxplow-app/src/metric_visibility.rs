@@ -25,9 +25,8 @@
 //!
 //! **Every fold must use the same visibility RULE.** The engine's fact fold
 //! and the cube's seed (`metric_cube::seed_rows`) share one
-//! [`VisibilityResolver`] instance (`AppState.metric_visibility`);
-//! `CollectionService` builds its own in `new()` — same pure rule over the
-//! same DB, so the answers agree. One fold resolved with another blind is how
+//! [`VisibilityResolver`] instance (`AppState.metric_visibility`), and
+//! `CollectionService` reads through the app's one `MetricEngine`. One fold resolved with another blind is how
 //! the cube silently diverges from the facts.
 
 use std::collections::{BTreeSet, HashMap};

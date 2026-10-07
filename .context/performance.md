@@ -402,6 +402,18 @@ anchors × 1,078, 1.16 M pairs over 2,156 commits, in 1.2 s in a debug
 build. Don't go back to per-pair questions; the cross product is not
 "tiny by construction".
 
+## Effort evidence after the cube, through the shared engine (2026-10-06)
+
+Right after boot the daemon went from ~150 MB to 1.7–2.2 GB: the
+`effort_evidence` asset's first build raced the cube's backfill, so every
+per-path effort delta missed the cube (`cube_series` serves only when the
+watermark covers every capture) and folded the measure's whole history —
+on a per-call `MetricEngine` whose fold memo was always empty. Evidence
+now reads the cube asset as its input (it recomputes after the cube,
+never while it's pending; `assets.rs`), and `CollectionService` uses the
+app's one engine. A spec with `min_value`/`max_value` still can't be
+cube-served; it folds once per capture token, shared.
+
 ## The dev loop: build and test time (tsk678, 2026-10-01)
 
 Measured on the 14-core dev Mac (under background load ~11, so expect

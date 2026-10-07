@@ -491,6 +491,14 @@ seq as it began — `snapshot_id`, `elapsed_ms`): an asset's freshness and
 provenance. A registered asset builds once at registration (its
 backfill); a failed recompute is logged and the next change retries.
 
+An input may name **another asset** instead of a table: the asset then
+recomputes after that one does — each recompute the other finishes marks
+it dirty — and never while that one is pending (recomputes asked for but
+not yet done); its first build waits for the other's. `effort_evidence`
+reads `metric_cube` this way rather than `metric_capture` and `fact`, so
+its series reads are cube-served: racing the cube's backfill at startup,
+every one missed and folded a measure's whole history (gigabytes).
+
 Derived data whose inputs include the world **outside** the tables (a
 working tree, the VCS tree, a program, a provider) is ingestion
 instead — a collector or a pump consumer, at-least-once and checkpointed.
@@ -503,7 +511,8 @@ coverage capture is pinned to. A blob can only go away (collected), and the
 asset then says so on its next recompute — the diff gives no row — rather
 than reading something else. A working tree is never such an input.
 
-The metric cube is the first asset (inputs `metric_capture`, `fact`): see
+The metric cube is the first asset (inputs `metric_capture`, `fact`; read
+by `effort_evidence`): see
 [metrics.md](./metrics.md). What a burst costs it is in
 [performance.md](./performance.md).
 

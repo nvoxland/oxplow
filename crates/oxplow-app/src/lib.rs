@@ -1219,7 +1219,7 @@ impl Services {
             snapshot_content.clone(),
             vcs.clone(),
             config_arc.clone(),
-            layout.project_dir.clone(),
+            metric_engine.clone(),
         )
         .with_approvals(approvals.clone())
         .with_vocabulary(vocabulary.clone())

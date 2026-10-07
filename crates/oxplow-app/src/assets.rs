@@ -54,7 +54,9 @@ pub struct Recomputed {
 pub trait Materializer: Send + Sync {
     /// `metric_cube`, or a materialized model's view.
     fn asset(&self) -> &str;
-    /// The tables whose commits make it stale.
+    /// The tables whose commits make it stale — or another asset by name:
+    /// this one then recomputes after that one does, never while that one
+    /// is pending (its first build waits for the other's).
     fn inputs(&self) -> Vec<String>;
     /// Recomputed on this clock instead of on its inputs' changes.
     fn every(&self) -> Option<Duration> {
@@ -82,6 +84,70 @@ struct Entry {
     needs_full: Arc<std::sync::atomic::AtomicBool>,
     /// Its recompute loop, stopped when the asset goes.
     task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Recomputes asked for, and asked-for ones done: pending while
+    /// `done < wanted`. An asset reading this one waits until it isn't.
+    wanted: std::sync::atomic::AtomicU64,
+    done: std::sync::atomic::AtomicU64,
+    /// Woken after each recompute.
+    settled: Notify,
+}
+
+impl Entry {
+    fn mark(&self) {
+        self.wanted
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.dirty.notify_one();
+    }
+
+    fn pending(&self) -> bool {
+        self.done.load(std::sync::atomic::Ordering::SeqCst)
+            < self.wanted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+type Entries = Arc<std::sync::RwLock<Vec<Arc<Entry>>>>;
+
+/// Wait until no asset `entry` reads is pending.
+async fn wait_for_upstream(entries: &Entries, entry: &Entry) {
+    loop {
+        let upstream: Vec<Arc<Entry>> = entries
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|e| {
+                e.materializer.asset() != entry.materializer.asset()
+                    && entry.inputs.contains(e.materializer.asset())
+            })
+            .cloned()
+            .collect();
+        let Some(up) = upstream.iter().find(|e| e.pending()) else {
+            return;
+        };
+        let settled = up.settled.notified();
+        if up.pending() {
+            // Bounded, so a wake-up between the check and the wait is
+            // never lost for long.
+            let _ = tokio::time::timeout(Duration::from_millis(250), settled).await;
+        }
+    }
+}
+
+/// Recompute `entry` once nothing it reads is pending, then tell the
+/// assets that read it.
+async fn run_once(db: &Database, entries: &Entries, entry: &Entry, now: &Now) {
+    wait_for_upstream(entries, entry).await;
+    let asked = entry.wanted.load(std::sync::atomic::Ordering::SeqCst);
+    recompute(db, entry, now).await;
+    entry
+        .done
+        .fetch_max(asked, std::sync::atomic::Ordering::SeqCst);
+    entry.settled.notify_waiters();
+    let asset = entry.materializer.asset();
+    for downstream in entries.read().unwrap_or_else(|e| e.into_inner()).iter() {
+        if downstream.materializer.asset() != asset && downstream.inputs.contains(asset) {
+            downstream.mark();
+        }
+    }
 }
 
 /// A materialized model as the registry has it: its compiled SELECT, its
@@ -107,7 +173,7 @@ pub struct Assets {
     db: Database,
     coalesce: Duration,
     now: Now,
-    entries: Arc<std::sync::RwLock<Vec<Arc<Entry>>>>,
+    entries: Entries,
     /// The materialized models registered from the model registry
     /// ([`Assets::sync_models`]), by view.
     models: Arc<tokio::sync::Mutex<BTreeMap<String, ModelAsset>>>,
@@ -149,16 +215,21 @@ impl Assets {
             dirty: Arc::new(Notify::new()),
             needs_full: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             task: std::sync::Mutex::new(None),
+            // Its first build is asked for.
+            wanted: std::sync::atomic::AtomicU64::new(1),
+            done: std::sync::atomic::AtomicU64::new(0),
+            settled: Notify::new(),
         });
         self.entries
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .push(entry.clone());
-        let (db, coalesce, now, looping) = (
+        let (db, coalesce, now, looping, entries) = (
             self.db.clone(),
             self.coalesce,
             self.now.clone(),
             entry.clone(),
+            self.entries.clone(),
         );
         let task = tokio::spawn(async move {
             let entry = looping;
@@ -173,11 +244,12 @@ impl Assets {
                 .await;
                 loop {
                     tokio::time::sleep(wait).await;
-                    recompute(&db, &entry, &now).await;
+                    entry.mark();
+                    run_once(&db, &entries, &entry, &now).await;
                     wait = every;
                 }
             }
-            recompute(&db, &entry, &now).await;
+            run_once(&db, &entries, &entry, &now).await;
             loop {
                 entry.dirty.notified().await;
                 // Wait until its inputs have been quiet for the window.
@@ -185,7 +257,11 @@ impl Assets {
                     .await
                     .is_ok()
                 {}
-                recompute(&db, &entry, &now).await;
+                // A wake-up the last recompute already covered (it asked
+                // for this one before running) needs nothing.
+                if entry.pending() {
+                    run_once(&db, &entries, &entry, &now).await;
+                }
             }
         });
         *entry.task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
@@ -250,7 +326,7 @@ impl Assets {
                     .store(true, std::sync::atomic::Ordering::SeqCst);
             }
             if entry.inputs.iter().any(|t| changed.contains(t)) {
-                entry.dirty.notify_one();
+                entry.mark();
             }
         }
     }
@@ -266,7 +342,7 @@ impl Assets {
             entry
                 .needs_full
                 .store(true, std::sync::atomic::Ordering::SeqCst);
-            entry.dirty.notify_one();
+            entry.mark();
         }
     }
 }
@@ -724,6 +800,69 @@ mod tests {
         ]));
         settle().await;
         assert_eq!(runs.load(Ordering::SeqCst), 2, "not one of its inputs");
+    }
+
+    /// An asset that logs when it starts and ends, and takes a while.
+    struct Logged {
+        name: &'static str,
+        inputs: Vec<String>,
+        log: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl Materializer for Logged {
+        fn asset(&self) -> &str {
+            self.name
+        }
+        fn inputs(&self) -> Vec<String> {
+            self.inputs.clone()
+        }
+        async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("{} start", self.name));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            self.log.lock().unwrap().push(format!("{} end", self.name));
+            Ok(Recomputed::default())
+        }
+    }
+
+    /// An asset that reads another asset recomputes after it, never while
+    /// it is pending: its first build waits for the other's, and a change
+    /// to the other's inputs reaches it once the other has recomputed.
+    #[tokio::test]
+    async fn an_asset_reading_another_follows_it() {
+        let db = Database::in_memory();
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let assets = Assets::new(db.clone(), Duration::from_millis(30));
+        assets.register(Arc::new(Logged {
+            name: "cube",
+            inputs: vec!["fact".into()],
+            log: log.clone(),
+        }));
+        assets.register(Arc::new(Logged {
+            name: "evidence",
+            inputs: vec!["cube".into()],
+            log: log.clone(),
+        }));
+        let settle = || tokio::time::sleep(Duration::from_millis(600));
+        settle().await;
+        assets.changed(&oxplow_db::changes::Changed::inserted(["fact".to_string()]));
+        settle().await;
+        assert_eq!(
+            *log.lock().unwrap(),
+            [
+                "cube start",
+                "cube end",
+                "evidence start",
+                "evidence end",
+                "cube start",
+                "cube end",
+                "evidence start",
+                "evidence end",
+            ]
+        );
     }
 
     struct Clocked {

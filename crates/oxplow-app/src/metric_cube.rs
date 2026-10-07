@@ -542,6 +542,10 @@ fn restated_keys(scope: CaptureScope, own: &[&FactRow], scanned: Vec<String>) ->
     keys
 }
 
+/// The cube's asset name: what an asset that reads the cube names as an
+/// input, to recompute after it.
+pub const ASSET: &str = "metric_cube";
+
 /// The cube is an asset (P7.B1, `assets.rs`): its inputs are the capture and
 /// fact tables, so a commit to either makes it stale and the asset runner
 /// folds what landed — no bus event, no list of recording sites to keep in
@@ -554,7 +558,7 @@ fn restated_keys(scope: CaptureScope, own: &[&FactRow], scanned: Vec<String>) ->
 #[async_trait::async_trait]
 impl crate::assets::Materializer for MetricCubeBuilder {
     fn asset(&self) -> &str {
-        "metric_cube"
+        ASSET
     }
 
     fn inputs(&self) -> Vec<String> {

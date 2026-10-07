@@ -19,10 +19,12 @@ pub const ASSET: &str = "effort_evidence";
 
 /// What the evidence reads: metric captures and facts (deltas and
 /// observations; a run is a capture stamped with its effort) and the
-/// effort's files (the File family's deltas). Token usage reaches it as
-/// facts; the `agent_token_usage` rows themselves aren't read, so they
-/// aren't an input.
-const INPUTS: [&str; 3] = ["metric_capture", "fact", "effort_file"];
+/// effort's files (the File family's deltas). Captures and facts reach it
+/// through the **cube asset**, which reads them: the evidence recomputes
+/// after the cube has folded what landed, never while it's pending, so its
+/// series reads are cube-served instead of folding a measure's whole
+/// history (which at startup, racing the cube's backfill, cost gigabytes).
+const INPUTS: [&str; 2] = [crate::metric_cube::ASSET, "effort_file"];
 
 /// Recompute one effort's evidence; failures are logged.
 pub(crate) async fn refresh(state: &crate::Services, effort_id: i64) {
