@@ -68,6 +68,12 @@ pub trait Materializer: Send + Sync {
     fn definition(&self) -> Option<String> {
         None
     }
+    /// Tables it writes, when they're its own (a materialized model's):
+    /// a rebuilt or emptied one means it isn't current, whatever its
+    /// inputs did.
+    fn outputs(&self) -> Vec<String> {
+        Vec::new()
+    }
     /// `full`: refill whole — an input saw a rewrite, or this is the first
     /// build since it registered. Only an incremental model does less
     /// otherwise.
@@ -130,6 +136,98 @@ async fn wait_for_upstream(entries: &Entries, entry: &Entry) {
             let _ = tokio::time::timeout(Duration::from_millis(250), settled).await;
         }
     }
+}
+
+/// The generations of `tables` (`table_generations`), `None` when one
+/// isn't tracked — then the asset can never be shown current.
+async fn generations(db: &Database, tables: Vec<String>) -> Option<BTreeMap<String, i64>> {
+    db.read(move |tx| oxplow_db::table_generations::generations_tx(tx, &tables))
+        .await
+        .ok()?
+        .into_iter()
+        .map(|(t, g)| g.map(|g| (t, g)))
+        .collect()
+}
+
+/// What an asset is built from: this build, its definition, its inputs'
+/// generations as its recompute began and its own tables' as it ended.
+fn built_from(
+    definition: Option<String>,
+    inputs: &BTreeMap<String, i64>,
+    outputs: &BTreeMap<String, i64>,
+) -> String {
+    serde_json::json!({
+        "build": oxplow_db::table_generations::build_identity(),
+        "definition": definition,
+        "inputs": inputs,
+        "outputs": outputs,
+    })
+    .to_string()
+}
+
+/// Whether `entry` is current as stored: nothing it reads or writes has
+/// changed since its last recompute, by this build and definition.
+async fn is_current(db: &Database, entry: &Entry) -> bool {
+    let m = entry.materializer.as_ref();
+    let (Some(inputs), Some(outputs)) = (
+        generations(db, entry.inputs.iter().cloned().collect()).await,
+        generations(db, m.outputs()).await,
+    ) else {
+        return false;
+    };
+    let asset = m.asset().to_string();
+    let stored: Option<String> = db
+        .read(move |tx| {
+            use rusqlite::OptionalExtension;
+            tx.query_row(
+                "SELECT built_from FROM asset_state WHERE asset = ?1",
+                [asset],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .ok()
+        .flatten();
+    stored == Some(built_from(m.definition(), &inputs, &outputs))
+}
+
+/// Track the tables `entry` reads and writes, so its changes are known
+/// across restarts.
+async fn track(db: &Database, entry: &Entry) {
+    let tables: Vec<String> = entry
+        .inputs
+        .iter()
+        .cloned()
+        .chain(entry.materializer.outputs())
+        .collect();
+    if let Err(error) = db
+        .transaction(move |tx| oxplow_db::table_generations::track_tx(tx, &tables))
+        .await
+    {
+        tracing::warn!(asset = %entry.materializer.asset(), %error, "tracking an asset's tables failed");
+    }
+}
+
+/// Its first build — skipped when what it stores is current (a restart
+/// with nothing changed): marked done, nothing announced.
+async fn first_build(db: &Database, entries: &Entries, entry: &Entry, now: &Now) {
+    track(db, entry).await;
+    if is_current(db, entry).await {
+        entry
+            .needs_full
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let asked = entry.wanted.load(std::sync::atomic::Ordering::SeqCst);
+        entry
+            .done
+            .fetch_max(asked, std::sync::atomic::Ordering::SeqCst);
+        entry.settled.notify_waiters();
+        tracing::debug!(asset = %entry.materializer.asset(), "unchanged since its last build; not rebuilt");
+        return;
+    }
+    run_once(db, entries, entry, now).await;
 }
 
 /// Recompute `entry` once nothing it reads is pending, then tell the
@@ -249,7 +347,7 @@ impl Assets {
                     wait = every;
                 }
             }
-            run_once(&db, &entries, &entry, &now).await;
+            first_build(&db, &entries, &entry, &now).await;
             loop {
                 entry.dirty.notified().await;
                 // Wait until its inputs have been quiet for the window.
@@ -587,6 +685,10 @@ impl Materializer for SqlModelMaterializer {
         Some(hex::encode(Sha256::digest(self.sql.as_bytes())))
     }
 
+    fn outputs(&self) -> Vec<String> {
+        vec![oxplow_db::models::materialized_table(&self.view)]
+    }
+
     /// Refill whole, or append past the watermark. An append that hits
     /// the key is a failure like any other: with the watermark the key, it
     /// means the SELECT emitted one key twice, which a refill would hit
@@ -663,21 +765,29 @@ async fn recompute(db: &Database, entry: &Entry, now: &Now) {
     };
     let started = Instant::now();
     let definition = m.definition();
+    // The inputs as the recompute begins: a write during it leaves them
+    // moved, so it's never mistaken for current.
+    let inputs = generations(db, entry.inputs.iter().cloned().collect()).await;
     match m.recompute(full).await {
         Ok(done) => {
             let elapsed = started.elapsed().as_millis() as i64;
+            let built = match (inputs, generations(db, m.outputs()).await) {
+                (Some(i), Some(o)) => Some(built_from(definition.clone(), &i, &o)),
+                _ => None,
+            };
             let at = now().to_string();
             let recorded = db
                 .transaction(move |tx| {
                     tx.execute(
                         "INSERT INTO asset_state (asset, computed_at, events_to, snapshot_id, elapsed_ms,
-                                                  mode, watermark, row_count, definition)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                                                  mode, watermark, row_count, definition, built_from)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                          ON CONFLICT (asset) DO UPDATE SET
                             computed_at = excluded.computed_at, events_to = excluded.events_to,
                             snapshot_id = excluded.snapshot_id, elapsed_ms = excluded.elapsed_ms,
                             mode = excluded.mode, watermark = excluded.watermark,
-                            row_count = excluded.row_count, definition = excluded.definition",
+                            row_count = excluded.row_count, definition = excluded.definition,
+                            built_from = excluded.built_from",
                         rusqlite::params![
                             asset,
                             at,
@@ -687,7 +797,8 @@ async fn recompute(db: &Database, entry: &Entry, now: &Now) {
                             done.mode,
                             done.watermark,
                             done.row_count,
-                            definition
+                            definition,
+                            built
                         ],
                     )
                     .map_err(oxplow_db::map_sql_err)?;
@@ -800,6 +911,68 @@ mod tests {
         ]));
         settle().await;
         assert_eq!(runs.load(Ordering::SeqCst), 2, "not one of its inputs");
+    }
+
+    /// Counts its runs over the `scratch` table, with a definition.
+    struct Scratch {
+        runs: Arc<AtomicUsize>,
+        definition: Option<&'static str>,
+    }
+
+    #[async_trait]
+    impl Materializer for Scratch {
+        fn asset(&self) -> &str {
+            "scratch_asset"
+        }
+        fn inputs(&self) -> Vec<String> {
+            vec!["scratch".into()]
+        }
+        fn definition(&self) -> Option<String> {
+            self.definition.map(str::to_string)
+        }
+        async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            Ok(Recomputed::default())
+        }
+    }
+
+    /// After a restart, an asset whose inputs haven't changed since its
+    /// last build skips its first build; a write while it was down, or
+    /// another definition, rebuilds it.
+    #[tokio::test]
+    async fn an_unchanged_asset_skips_its_boot_build() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE scratch (x)")
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let boot = |definition: Option<&'static str>| {
+            let (db, runs) = (db.clone(), runs.clone());
+            async move {
+                let assets = Assets::new(db, Duration::from_millis(20));
+                assets.register(Arc::new(Scratch { runs, definition }));
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+        };
+        boot(None).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "the first build ever");
+        boot(None).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "nothing changed: skipped");
+        db.transaction(|tx| {
+            tx.execute_batch("INSERT INTO scratch VALUES (1)")
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        boot(None).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 2, "written while down");
+        boot(Some("v2")).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 3, "another definition");
+        boot(Some("v2")).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 3);
     }
 
     /// An asset that logs when it starts and ends, and takes a while.

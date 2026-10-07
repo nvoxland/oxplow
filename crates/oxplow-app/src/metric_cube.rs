@@ -561,8 +561,12 @@ impl crate::assets::Materializer for MetricCubeBuilder {
         ASSET
     }
 
+    /// The captures and facts it folds, and which measures and promoted
+    /// dimensions there are: what it builds.
     fn inputs(&self) -> Vec<String> {
-        vec!["metric_capture".into(), "fact".into()]
+        ["metric_capture", "fact", "measure", "dimension"]
+            .map(String::from)
+            .to_vec()
     }
 
     async fn recompute(&self, _full: bool) -> Result<crate::assets::Recomputed, DomainError> {

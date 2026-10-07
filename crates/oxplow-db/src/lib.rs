@@ -44,6 +44,7 @@ pub mod snapshot_tree;
 pub mod sql_tokens;
 pub mod stream_store;
 pub mod symbol_store;
+pub mod table_generations;
 pub mod task_satellite;
 pub mod task_store;
 pub mod thread_answer_store;

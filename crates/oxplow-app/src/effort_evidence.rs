@@ -24,7 +24,13 @@ pub const ASSET: &str = "effort_evidence";
 /// after the cube has folded what landed, never while it's pending, so its
 /// series reads are cube-served instead of folding a measure's whole
 /// history (which at startup, racing the cube's backfill, cost gigabytes).
-const INPUTS: [&str; 2] = [crate::metric_cube::ASSET, "effort_file"];
+/// The specs say which deltas there are, and the efforts which are open.
+const INPUTS: [&str; 4] = [
+    crate::metric_cube::ASSET,
+    "effort_file",
+    "metric_spec",
+    "effort",
+];
 
 /// Recompute one effort's evidence; failures are logged.
 pub(crate) async fn refresh(state: &crate::Services, effort_id: i64) {

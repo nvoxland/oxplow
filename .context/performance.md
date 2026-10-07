@@ -419,6 +419,16 @@ never while it's pending; `assets.rs`), and `CollectionService` uses the
 app's one engine. A spec with `min_value`/`max_value` still can't be
 cube-served; it folds once per capture token, shared.
 
+## Assets skip their boot rebuild (2026-10-06)
+
+Every asset rebuilt at boot because which tables changed was known only
+in memory. Tables an asset reads or writes now carry triggers bumping a
+per-table generation (`table_generation`), and an asset whose recorded
+`built_from` still matches skips its first build. The trigger's cost,
+measured with the sqlite3 CLI: 200k single-statement inserts into a bare
+two-column table took 86 ms with it against 41 ms without — about 0.2 µs
+a row, proportionally less on real tables with indexes.
+
 ## The dev loop: build and test time (tsk678, 2026-10-01)
 
 Measured on the 14-core dev Mac (under background load ~11, so expect

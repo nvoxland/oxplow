@@ -491,6 +491,19 @@ seq as it began — `snapshot_id`, `elapsed_ms`): an asset's freshness and
 provenance. A registered asset builds once at registration (its
 backfill); a failed recompute is logged and the next change retries.
 
+**A restart rebuilds only what changed.** Which tables a commit touched is
+known in memory, so without more every asset would rebuild at boot to be
+safe. Instead each table an asset reads or writes (`outputs()`, a
+materialized model's own table) carries triggers that bump its row in
+`table_generation` inside the writing transaction, whatever path wrote
+it (`oxplow-db/src/table_generations.rs`, V11). A recompute records
+what it was built from in `asset_state.built_from`: this build of the
+program (the executable's identity), its `definition()`, its inputs'
+generations as it began and its outputs' as it ended. At registration an
+asset whose stored `built_from` still matches skips its first build. A
+table without the triggers (dropped and recreated, never tracked) is
+unknown, so it never matches; nor does a new binary.
+
 An input may name **another asset** instead of a table: the asset then
 recomputes after that one does — each recompute the other finishes marks
 it dirty — and never while that one is pending (recomputes asked for but

@@ -198,6 +198,7 @@ disallowed-methods = [
   { path = "oxplow_db::search_store::restate_kind_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::stream_store::upsert_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::symbol_store::SqliteSymbolStore::record", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
+  { path = "oxplow_db::table_generations::track_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::task_satellite::add_task_note_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::task_satellite::add_thread_note_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::task_satellite::create_link_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },

@@ -98,7 +98,9 @@ impl Changes {
                   db: &str,
                   table: &str,
                   _: &rusqlite::hooks::PreUpdateCase| {
-                if db == "main" {
+                // A generation bump is bookkeeping for the write it rides
+                // with (`table_generations`), not a change of its own.
+                if db == "main" && table != "table_generation" {
                     state
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())

@@ -95,6 +95,15 @@ impl Materializer for KindSearchIndex {
         self.spec.tables.clone()
     }
 
+    /// What it indexes beyond its tables' rows: the view's SQL and how a
+    /// row's ref reads.
+    fn definition(&self) -> Option<String> {
+        use sha2::{Digest, Sha256};
+        Some(hex::encode(Sha256::digest(
+            format!("{:?}", self.spec).as_bytes(),
+        )))
+    }
+
     async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
         let (kind, view, core) = (self.kind.clone(), self.spec.view.clone(), self.spec.core);
         let spec_prefix = self.spec.ref_prefix.clone();
@@ -995,9 +1004,9 @@ mod core_tests {
         .await;
     }
 
-    /// tsk864: a restart re-registers the kinds and recomputes them — and,
-    /// their rows unchanged, writes nothing: the index entries are the ones
-    /// already there.
+    /// A restart re-registers the kinds, and a kind whose tables and
+    /// definition haven't changed since its last build isn't rebuilt: no
+    /// recompute, and nothing written to the index.
     #[tokio::test]
     async fn boot_rebuilds_nothing_when_assets_are_fresh() {
         let (svc, _dir) = services().await;
@@ -1022,19 +1031,17 @@ mod core_tests {
                 .await
                 .unwrap()
         };
+        // Settled: the last build is the one a restart compares against.
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let first = computed(svc.clone()).await;
-        // tsk897: hear every commit from here on — a rewrite of the index
-        // touches `search_entry` (rowids alone can't tell: a delete and
-        // re-insert hands the same ones back).
+        // Hear every commit from here on — a rewrite of the index touches
+        // `search_entry` (rowids alone can't tell: a delete and re-insert
+        // hands the same ones back).
         let mut commits = svc.db.subscribe_changes();
-        // A restart: a new change loop registers every kind again, and each
-        // builds once.
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        // A restart: a new change loop registers every kind again.
         change_loop(&svc);
-        eventually("the restart recomputed the task kind", || async {
-            computed(svc.clone()).await != first
-        })
-        .await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(computed(svc.clone()).await, first, "not recomputed");
         let mut touched = Vec::new();
         while let Ok(changed) = commits.try_recv() {
             touched.extend(changed.tables.iter().cloned());
