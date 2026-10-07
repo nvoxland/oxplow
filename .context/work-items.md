@@ -240,10 +240,20 @@ Settings → Pieces (`PiecesSection.tsx`, below). A choice that isn't
 available falls to `none` (the work list is optional), listed with
 `available = 0` and the active row's `chosen_by = fallback`. The
 registry's `active()` resolves from the config as it is now, so a
-person's choice applies to the very next `create`. Every
-`work_item.create` files on the active work list; with none active it is
-`Invalid` ("Needs: Work list …", the bus's refusal for an unmet need),
-never another list. **Loose ids.** A work list declares what its ids look
+person's choice applies to the very next `create`. **Every verb goes to
+the active work list**, never another: a ref of another list's item is
+refused (`` `work_item:issues:ENG-12` is issues's, which isn't the active
+work list (`oxplow`) ``), as it isn't visible either.
+
+**None is a sink** (`work_items::none_provider`, registered by core
+beside oxplow's): every verb succeeds with `{ tracked: false }` and
+keeps nothing. It has every feature, takes any item's ref and any id
+(`sink`), and the interface reads empty, so nothing that writes work
+items is refused or retried while no list is active and no screen or
+skill explains it. The typed client's `create` returns `None` for it
+(`plugin_repair` files nothing); an effect's automatic retry is never
+sent to a sink (`safe_to_resend`: the list it was meant for went
+away). **Loose ids.** A work list declares what its ids look
 like (`WorkItemsProvider::id_pattern`, a regex matched whole: oxplow's
 tasks `tsk\d+`, an external one its `providers:` entry's `id_pattern`).
 A work-item field (`ref`, `parent_ref`, `target`, `work_item`, and

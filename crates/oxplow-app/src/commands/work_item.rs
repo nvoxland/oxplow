@@ -314,23 +314,45 @@ fn provider_named(
         .map_err(|e| invalid_at(field, e.to_string()))
 }
 
-/// The provider `item_ref` belongs to, or `Invalid` at `field`.
+/// The active work list: every verb goes to it, whichever implementation
+/// it is. One the person chose that isn't running resolved to none.
+fn active_provider(registry: &WorkItemsRegistry) -> Result<WorkItemsProvider, CommandError> {
+    provider_named(registry, &registry.active(), "").map_err(|e| match e {
+        CommandError::Invalid { message, .. } => CommandError::Invalid {
+            field: None,
+            message: format!("the active work-items provider isn't running: {message}"),
+        },
+        e => e,
+    })
+}
+
+/// The active work list, for an input naming `item_ref` (at `field`): it
+/// must be that list's item — another list's isn't visible, so it's
+/// refused — unless the active one is a sink, which takes any.
 fn provider_of_ref(
     registry: &WorkItemsRegistry,
     item_ref: &str,
     field: &str,
 ) -> Result<WorkItemsProvider, CommandError> {
-    let id = provider_of(item_ref).map_err(|e| invalid_at(field, e.to_string()))?;
-    provider_named(registry, id, field)
+    let provider = active_provider(registry)?;
+    belongs(&provider, item_ref, field)?;
+    Ok(provider)
 }
 
-/// `other` (a parent, a link target) must be `provider`'s own item.
-fn same_provider(provider: &str, other: &str, field: &str) -> Result<(), CommandError> {
-    let owner = provider_of(other).map_err(|e| invalid_at(field, e.to_string()))?;
-    if owner != provider {
+/// `item_ref` (an item, a parent, a link target) is `provider`'s own, or
+/// `provider` is a sink.
+fn belongs(provider: &WorkItemsProvider, item_ref: &str, field: &str) -> Result<(), CommandError> {
+    if provider.sink {
+        return Ok(());
+    }
+    let owner = provider_of(item_ref).map_err(|e| invalid_at(field, e.to_string()))?;
+    if owner != provider.id {
         return Err(invalid_at(
             field,
-            format!("`{other}` is {owner}'s; a {provider} item can't refer to it"),
+            format!(
+                "`{item_ref}` is {owner}'s, which isn't the active work list (`{}`)",
+                provider.id
+            ),
         ));
     }
     Ok(())
@@ -363,23 +385,9 @@ fn create_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemCreateInput = parse(input.clone())?;
-    // Always the work list the person and project chose. One that isn't
-    // available resolves to none, and filing says what it needs (as the bus
-    // does before routing) — never another list.
-    let active = registry.active();
-    if active == oxplow_domain::capability::NONE {
-        return Err(CommandError::Invalid {
-            field: None,
-            message: crate::capabilities::needs_message(&["work_items".into()]),
-        });
-    }
-    let provider = provider_named(registry, &active, "").map_err(|e| match e {
-        CommandError::Invalid { message, .. } => CommandError::Invalid {
-            field: None,
-            message: format!("the active work-items provider isn't running: {message}"),
-        },
-        e => e,
-    })?;
+    // Always the work list the person and project chose — never another.
+    // One that isn't available resolved to none, which files nowhere.
+    let provider = active_provider(registry)?;
     if let Some(parent) = &input.parent_ref {
         supports(
             &provider,
@@ -387,7 +395,7 @@ fn create_target(
             "hierarchy",
             "/parent_ref",
         )?;
-        same_provider(&provider.id, parent, "/parent_ref")?;
+        belongs(&provider, parent, "/parent_ref")?;
     }
     Ok(provider)
 }
@@ -406,7 +414,7 @@ fn update_target(
             "/parent_ref",
         )?;
         if !parent.is_empty() {
-            same_provider(&provider.id, parent, "/parent_ref")?;
+            belongs(&provider, parent, "/parent_ref")?;
         }
     }
     Ok(provider)
@@ -427,7 +435,7 @@ fn link_target(
     let input: WorkItemLinkInput = parse(input.clone())?;
     let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
     supports(&provider, provider.features.links, "links", "/ref")?;
-    same_provider(&provider.id, &input.target, "/target")?;
+    belongs(&provider, &input.target, "/target")?;
     Ok(provider)
 }
 
@@ -671,12 +679,13 @@ fn spec(
     undoable: bool,
     atomicity: Atomicity,
 ) -> CommandSpec {
-    // Each needs a work list, and the feature its verb is.
+    // The feature its verb is, if any: every work list (none included, a
+    // sink with every feature) takes the rest.
     let needs = match name {
         LINK => vec!["work_items.links".to_string()],
         COMMENT => vec!["work_items.comments".to_string()],
         DELETE => vec!["work_items.delete".to_string()],
-        _ => vec!["work_items".to_string()],
+        _ => Vec::new(),
     };
     CommandSpec {
         name: name.into(),
@@ -1531,7 +1540,7 @@ mod tests {
     /// P5.C2: the commands take canonical refs and refuse another
     /// provider's, naming the registered ones.
     #[tokio::test]
-    async fn a_foreign_ref_is_refused_naming_the_registered_providers() {
+    async fn another_lists_ref_is_refused_naming_the_active_list() {
         let fx = crate::test_fixtures::services_with_effort().await;
         for (name, input) in [
             (
@@ -1557,7 +1566,8 @@ mod tests {
                 CommandError::Invalid { field, message } => {
                     assert_eq!(field.as_deref(), Some("/ref"), "{name}");
                     assert_eq!(
-                        message, "no work-items provider `issues`; registered: oxplow",
+                        message,
+                        "`work_item:issues:ENG-12` is issues's, which isn't the active work list (`oxplow`)",
                         "{name}"
                     );
                 }
@@ -1818,16 +1828,14 @@ mod tests {
             .unwrap()
             .active_providers
             .insert("work_items".into(), "issues".into());
-        let err = fx
+        // The chosen one isn't running: none is, and files nowhere.
+        let out = fx
             .svc
             .commands
             .run(&Actor::Human, CREATE, json!({ "title": "where?" }), false)
             .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { message, .. } if message.contains("Needs: Work list")),
-            "{err:?}"
-        );
+            .unwrap();
+        assert_eq!(out.result["tracked"], json!(false));
         assert_eq!(fx.svc.work_items.active(), oxplow_domain::capability::NONE);
     }
 
@@ -1867,19 +1875,15 @@ mod tests {
             .active_providers
             .insert("work_items".into(), "tracker".into());
         let before = list_order(&fx, None).await.len();
-        let err = fx
+        // Never another list: the chosen one isn't running, so none files
+        // it nowhere.
+        let out = fx
             .svc
             .commands
             .run(&Actor::Human, CREATE, json!({ "title": "where?" }), false)
             .await
-            .unwrap_err();
-        match err {
-            CommandError::Invalid { field, message } => {
-                assert_eq!(field, None);
-                assert!(message.contains("Needs: Work list"), "{message}");
-            }
-            other => panic!("{other:?}"),
-        }
+            .unwrap();
+        assert_eq!(out.result["tracked"], json!(false));
         assert_eq!(list_order(&fx, None).await.len(), before, "nothing filed");
     }
 

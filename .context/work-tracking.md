@@ -150,8 +150,10 @@ implementation shipped in `oxplow-bundled`, and users free to write their
 own — heavier ones included (beads as a work list).
 
 - **A capability** is defined by its interface, whether it may be
-  **none** (then a core no-op stands in, and anything that declares it
-  needs the capability says so instead of showing empty results), its
+  **none** (then a core no-op stands in — for the work list a sink that
+  takes every verb and keeps nothing, so everything written against the
+  interface just finds nothing — and anything that declares it needs the
+  capability itself says so), its
   default, its conformance suite, and the kinds of implementation it
   accepts. Capabilities are independent and many: Settings lists them
   from the registry, agents propose changes through config like any

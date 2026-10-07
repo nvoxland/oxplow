@@ -42,7 +42,50 @@ pub fn oxplow_provider() -> WorkItemsProvider {
         external: None,
         // Its ids: `tsk12`.
         id_pattern: Some(r"tsk\d+".into()),
+        sink: false,
     }
+}
+
+/// None as a work list: a sink. Every verb succeeds with `{ tracked:
+/// false }` and keeps nothing; it has every feature and takes any item's
+/// ref and any id, so nothing that writes work items is refused while no
+/// list is active, and the interface reads empty.
+pub fn none_provider() -> WorkItemsProvider {
+    WorkItemsProvider {
+        id: oxplow_domain::capability::NONE.into(),
+        features: WorkItemsFeatures {
+            hierarchy: true,
+            comments: true,
+            links: true,
+            delete: true,
+            idempotent_writes: true,
+        },
+        external: Some(Arc::new(Sink)),
+        id_pattern: Some(".+".into()),
+        sink: true,
+    }
+}
+
+/// [`none_provider`]'s verbs: kept nowhere.
+struct Sink;
+
+#[async_trait::async_trait]
+impl oxplow_domain::work_items::ExternalVerbs for Sink {
+    async fn invoke(
+        &self,
+        _actor: &oxplow_domain::Actor,
+        _verb: &str,
+        _input: serde_json::Value,
+        _idempotency_key: Option<String>,
+    ) -> Result<oxplow_domain::work_items::VerbOutcome, oxplow_domain::CommandError> {
+        Ok(oxplow_domain::work_items::VerbOutcome {
+            result: serde_json::json!({ "tracked": false }),
+            events: Vec::new(),
+            inverse: None,
+        })
+    }
+
+    async fn restart(&self) {}
 }
 
 /// A new item, as `work_item.create` takes it.
@@ -79,7 +122,13 @@ impl WorkItems {
     }
 
     /// File an item; its ref.
-    pub async fn create(&self, actor: &Actor, item: NewItem) -> Result<String, CommandError> {
+    /// File `item` on the active work list: its ref, or `None` when the
+    /// list keeps nothing (none, a sink).
+    pub async fn create(
+        &self,
+        actor: &Actor,
+        item: NewItem,
+    ) -> Result<Option<String>, CommandError> {
         let input = serde_json::to_value(work_item::WorkItemCreateInput {
             title: item.title,
             body: (!item.body.is_empty()).then_some(item.body),
@@ -91,9 +140,12 @@ impl WorkItems {
         })
         .expect("input serializes");
         let out = self.run(actor, work_item::CREATE, input).await?;
+        if out.result["tracked"] == serde_json::json!(false) {
+            return Ok(None);
+        }
         out.result["ref"]
             .as_str()
-            .map(str::to_string)
+            .map(|r| Some(r.to_string()))
             .ok_or_else(|| CommandError::Failed {
                 message: "work_item.create returned no ref".into(),
             })

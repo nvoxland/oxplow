@@ -689,8 +689,11 @@ pub(crate) const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(10), Duratio
 fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
     !calls.is_empty()
         && calls.iter().all(|call| {
+            // A sink (none: the list went away) never takes a retry: the
+            // work was meant for a list, and resending it nowhere would
+            // lose it quietly.
             crate::commands::work_item::provider_for(&svc.work_items, &call.name, &call.input)
-                .is_some_and(|p| p.external.is_some() && p.features.idempotent_writes)
+                .is_some_and(|p| p.external.is_some() && !p.sink && p.features.idempotent_writes)
         })
 }
 

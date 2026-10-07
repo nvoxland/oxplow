@@ -1123,6 +1123,9 @@ impl Services {
             }))
         };
         work_items.register(work_items::oxplow_provider());
+        // None as a work list: the sink every verb reaches while no list is
+        // active (`work_items::none_provider`).
+        work_items.register(work_items::none_provider());
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),

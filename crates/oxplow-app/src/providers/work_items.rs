@@ -60,6 +60,7 @@ impl ExternalWorkItems {
         Ok(WorkItemsProvider {
             id: instance.id.clone(),
             id_pattern: instance.spec.id_pattern.clone(),
+            sink: false,
             features,
             external: Some(Arc::new(ExternalWorkItems {
                 instance: instance.clone(),

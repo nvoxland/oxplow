@@ -172,6 +172,9 @@ pub struct WorkItemsProvider {
     /// loose id in a command resolves to its item while it's the active
     /// work list; `None` declares none.
     pub id_pattern: Option<String>,
+    /// It takes any item's ref and keeps nothing (none): verbs naming
+    /// another list's items reach it instead of being refused.
+    pub sink: bool,
 }
 
 impl std::fmt::Debug for WorkItemsProvider {
@@ -181,6 +184,7 @@ impl std::fmt::Debug for WorkItemsProvider {
             .field("features", &self.features)
             .field("external", &self.external.is_some())
             .field("id_pattern", &self.id_pattern)
+            .field("sink", &self.sink)
             .finish()
     }
 }
@@ -300,6 +304,7 @@ mod tests {
             features: WorkItemsFeatures::default(),
             external: None,
             id_pattern: None,
+            sink: false,
         }
     }
 

@@ -148,15 +148,23 @@ impl Implementation {
         }
     }
 
-    /// The "nothing implements it" of an optional capability.
+    /// The "nothing implements it" of an optional capability: it takes
+    /// everything and keeps nothing, so it declares every feature the
+    /// capability has — what needs one isn't refused while it's none.
     pub fn none(capability: &str) -> Self {
+        let features = capability::spec(capability)
+            .map(|c| c.features)
+            .unwrap_or_default()
+            .iter()
+            .map(|f| (f.to_string(), Value::Bool(true)))
+            .collect();
         Self {
             capability: capability.into(),
             id: NONE.into(),
             title: "None".into(),
             extension: None,
             source: Source::None,
-            features: Value::Object(Default::default()),
+            features: Value::Object(features),
         }
     }
 }
@@ -237,7 +245,8 @@ impl Active {
     }
 
     /// The needs in `needs` it doesn't meet: a capability whose active
-    /// implementation is none, or a feature it doesn't have.
+    /// implementation is none, or a feature the active one doesn't have
+    /// (none has every feature: it takes everything, keeping nothing).
     pub fn unmet(&self, needs: &[String]) -> Vec<String> {
         needs
             .iter()
@@ -246,12 +255,10 @@ impl Active {
                     Some((id, f)) => (id, Some(f)),
                     None => (need.as_str(), None),
                 };
-                match self.by_capability.get(id) {
-                    None => true,
-                    Some((active, _)) if active == NONE => true,
-                    Some((_, features)) => {
-                        feature.is_some_and(|f| !features.iter().any(|x| x == f))
-                    }
+                match (self.by_capability.get(id), feature) {
+                    (None, _) => true,
+                    (Some((_, features)), Some(f)) => !features.iter().any(|x| x == f),
+                    (Some((active, _)), None) => active == NONE,
                 }
             })
             .cloned()
@@ -924,7 +931,7 @@ mod tests {
             serde_json::to_value(&rows.rows).unwrap(),
             serde_json::json!([["oxplow", 1, 1, "builtin"]])
         );
-        let err = svc
+        let out = svc
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
@@ -933,8 +940,8 @@ mod tests {
                 false,
             )
             .await
-            .unwrap_err();
-        assert!(format!("{err:?}").contains("Needs: Work list"), "{err:?}");
+            .unwrap();
+        assert_eq!(out.result["tracked"], serde_json::json!(false));
     }
 
     /// The rows say which is active and why, and a choice that isn't
@@ -1011,68 +1018,82 @@ mod tests {
         );
     }
 
-    /// The agent is offered what's active: with no work list, no
-    /// `work_item.*` and none of oxplow's tasks' own, and running one says
-    /// what it needs; efforts stay.
+    /// With no work list, the interface is a sink: every verb is offered
+    /// and succeeds, keeping nothing — a create files nowhere, a change to an
+    /// item (one of another list's, a loose id) changes nothing — and the
+    /// interface reads empty.
     #[tokio::test]
-    async fn only_what_is_active_is_offered() {
+    async fn with_no_work_list_the_interface_is_a_sink() {
+        use serde_json::json;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let agent = oxplow_domain::Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let names = || {
-            let mut n: Vec<String> = svc
-                .commands
-                .list(&agent)
-                .into_iter()
-                .map(|c| c.name)
-                .collect();
-            n.sort();
-            n
-        };
-        let offered = names();
-        for name in [
-            "work_item.create",
-            "work_item.comment",
-            "work_item.reorder",
-            "effort.open",
-        ] {
-            assert!(
-                offered.iter().any(|n| n == name),
-                "{name} offered by default"
-            );
-        }
         svc.config
             .write()
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), NONE.into());
-        let offered = names();
+        refresh(svc).await.unwrap();
+        let offered: Vec<String> = svc
+            .commands
+            .list(&agent)
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
         for name in [
             "work_item.create",
             "work_item.transition",
             "work_item.comment",
-            "work_item.reorder",
+            "work_item.link",
         ] {
-            assert!(
-                !offered.iter().any(|n| n == name),
-                "{name} hidden without a work list"
+            assert!(offered.iter().any(|n| n == name), "{name} offered");
+        }
+        let run = |name: &'static str, input: serde_json::Value| {
+            let svc = svc.clone();
+            let agent = agent.clone();
+            async move { svc.commands.run(&agent, name, input, false).await.unwrap() }
+        };
+        let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+        for (name, input) in [
+            (
+                crate::commands::work_item::CREATE,
+                json!({ "title": "filed nowhere" }),
+            ),
+            (
+                crate::commands::work_item::NAME,
+                json!({ "ref": task, "to": "done" }),
+            ),
+            (
+                crate::commands::work_item::NAME,
+                json!({ "ref": fx.task.to_string(), "to": "done" }),
+            ),
+            (
+                crate::commands::work_item::COMMENT,
+                json!({ "ref": task, "body": "kept nowhere" }),
+            ),
+        ] {
+            assert_eq!(
+                run(name, input).await.result["tracked"],
+                json!(false),
+                "{name}"
             );
         }
-        assert!(offered.iter().any(|n| n == "effort.open"));
-        let err = svc
-            .commands
-            .run(
-                &agent,
-                crate::commands::work_item::NAME,
-                serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
-                false,
-            )
+        use oxplow_domain::stores::TaskStore as _;
+        let kept = svc.task_store.get(fx.task).await.unwrap().unwrap();
+        assert_eq!(
+            kept.status,
+            oxplow_domain::TaskStatus::InProgress,
+            "oxplow's task untouched"
+        );
+        let count = svc
+            .sql
+            .query_sql("SELECT count(*) FROM v_work_item", vec![], None)
             .await
-            .unwrap_err();
-        assert!(format!("{err}").contains("Needs: Work list"), "{err}");
+            .unwrap();
+        assert_eq!(serde_json::to_value(count.rows).unwrap(), json!([[0]]));
     }
 
     /// A feature the active work list doesn't declare hides what needs it.
@@ -1152,8 +1173,9 @@ mod tests {
     }
 
     /// A runtime already on disk gets what's offered (boot refreshes it
-    /// for an agent that outlived an upgrade, tsk376): core's skills, and
-    /// the work list's while one is active — none takes them away.
+    /// for an agent that outlived an upgrade, tsk376): core's skills, the
+    /// work-items skill (any list, none included), and oxplow's tasks' own
+    /// `/work-next` only while they're the list.
     #[tokio::test]
     async fn the_runtimes_skills_follow_what_is_offered() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1178,7 +1200,7 @@ mod tests {
             .personal_active_providers
             .insert("work_items".into(), NONE.into());
         refresh_agent_text(svc);
-        assert!(!skills.join("work-items").exists());
+        assert!(skills.join("work-items/SKILL.md").is_file());
         assert!(!commands.join("work-next.md").exists());
         assert!(commands.join("configure.md").is_file());
     }

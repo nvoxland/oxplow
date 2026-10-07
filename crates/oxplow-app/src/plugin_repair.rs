@@ -380,10 +380,16 @@ impl AsyncEventConsumer for PluginRepair {
                 // One that's down — even the contribution just disabled
                 // (tsk714) — fails this delivery: retried, then a dead
                 // letter in Delivery, beside the tracker's own alert.
-                client
+                match client
                     .create(&Actor::System, item)
                     .await
                     .map_err(|e| DomainError::Invalid(format!("filing the repair item: {e}")))?
+                {
+                    Some(item) => item,
+                    // The active list keeps nothing (none): no item to
+                    // comment on next time.
+                    None => return Ok(()),
+                }
             }
         };
         let seq = event.seq;
@@ -476,11 +482,11 @@ mod tests {
 
     /// A repair item goes to the active work list like every item. When the
     /// chosen tracker isn't running — it may be the very contribution that
-    /// was disabled — no work list is active, the delivery fails saying so
-    /// (retried, then a dead letter in Delivery), and nothing lands in
-    /// oxplow's list.
+    /// was disabled — none is active, which files it nowhere: the delivery
+    /// succeeds (no retries, no dead letter) and nothing lands in oxplow's
+    /// list.
     #[tokio::test]
-    async fn a_repair_item_waits_for_the_active_tracker() {
+    async fn without_a_running_tracker_the_repair_item_files_nowhere() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx.svc.layout.project_dir.clone();
         let ext = root.join("oxplow/extensions/work");
@@ -503,11 +509,7 @@ mod tests {
             .insert("work_items".into(), "tracker".into());
         let consumer = PluginRepair::new(Arc::downgrade(&fx.svc));
         let event = disable(&fx.svc, "3 failures in a row; the last: boom").await;
-        let err = consumer.handle(&event).await.unwrap_err();
-        assert!(
-            err.to_string().contains("Needs: Work list"),
-            "says no list could take it: {err}"
-        );
+        consumer.handle(&event).await.unwrap();
         assert!(repair_items(&fx.svc).await.is_empty());
     }
 

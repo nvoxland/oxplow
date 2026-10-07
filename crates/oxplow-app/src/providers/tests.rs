@@ -538,7 +538,8 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("the list keeps it");
     assert_eq!(item, "work_item:fake:W-1");
     let moved = items
         .transition(
@@ -679,7 +680,8 @@ async fn a_composite_writes_another_providers_item_as_steps() {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("the list keeps it");
     let out = fx
         .svc
         .commands
@@ -1551,7 +1553,8 @@ async fn three_items(fx: &EffortFixture) -> Vec<String> {
                     },
                 )
                 .await
-                .unwrap(),
+                .unwrap()
+                .expect("the list keeps it"),
         );
     }
     refs
@@ -2140,7 +2143,8 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("the list keeps it");
     seen = deliver(seen).await;
     for _ in 0..3 {
         fx.svc
@@ -2465,11 +2469,16 @@ async fn two_instances_of_one_provider_run_side_by_side() {
         items
             .create(&Actor::Human, new("fake_second"))
             .await
-            .unwrap(),
+            .unwrap()
+            .expect("the list keeps it"),
         "work_item:fake_second:W-1"
     );
     assert_eq!(
-        items.create(&Actor::Human, new("fake")).await.unwrap(),
+        items
+            .create(&Actor::Human, new("fake"))
+            .await
+            .unwrap()
+            .expect("the list keeps it"),
         "work_item:fake:W-1"
     );
     let listed = fx
@@ -4731,17 +4740,14 @@ async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
         .to_string();
     react(&fx).await;
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    // What the effect reads changes before its retry.
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            "work_item.update",
-            json!({ "ref": task, "title": "renamed" }),
-            false,
-        )
-        .await
-        .unwrap();
+    // What the effect reads changes before its retry (oxplow's task,
+    // through its own store: the fake is the active list).
+    {
+        use oxplow_domain::stores::TaskStore as _;
+        let mut t = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
+        t.title = "renamed".into();
+        fx.svc.task_store.update(&t).await.unwrap();
+    }
     assert_eq!(
         crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
             .await

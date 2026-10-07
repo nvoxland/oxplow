@@ -829,10 +829,10 @@ mod tests {
     /// cleared it (an extension command recording an event), grouped
     /// under headings; collapsed, just the active item; counted without
     /// an alert.
-    /// A lens that needs a work list says so when none is active, instead
-    /// of running: the ready tasks with the work list chosen as none.
+    /// The task lenses need no work list: with none they run (and, reading
+    /// the interface, show nothing) rather than saying what's missing.
     #[tokio::test]
-    async fn a_lens_needing_a_work_list_says_so_without_one() {
+    async fn the_task_lenses_run_without_a_work_list() {
         let f = crate::test_fixtures::services_with_effort().await;
         let run = |svc: std::sync::Arc<crate::Services>| async move {
             let ctx = crate::extensions::lens_context(&svc, None, None).await;
@@ -854,13 +854,7 @@ mod tests {
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), "none".into());
-        let inactive = run(f.svc.clone()).await.inactive.expect("inactive");
-        assert_eq!(inactive.needs, vec!["work_items".to_string()]);
-        assert!(
-            inactive.message.contains("Work list"),
-            "{}",
-            inactive.message
-        );
+        assert!(run(f.svc.clone()).await.inactive.is_none());
     }
 
     #[tokio::test]

@@ -2412,9 +2412,11 @@ active (`LensContext.active`, a `capabilities::Active` snapshot that
 needs, message }` ("Needs: Work list (choose one in Settings → Pieces)."),
 which the lens view shows instead of its empty state. An advisory whose
 needs aren't met doesn't run. A context built without `Services` (param
-checks) checks nothing. In `oxplow-bundled`, the ready and backlog task
-lenses and the `landed-in-progress` hint need `work_items`; the Work
-panel doesn't — its efforts exist without a work list.
+checks) checks nothing. A capability's none declares every feature (it
+takes everything, keeping nothing), so a feature need is met by none and
+only a need of the capability itself (`work_items`) isn't. `oxplow-bundled`
+declares no `work_items` need: with no list its task lenses, hint and
+skill just find nothing.
 
 **What a built-in owns.** A built-in may own commands and MCP tools that
 only it offers (`BuiltIn.commands` / `tools`: `oxplow:tasks` owns

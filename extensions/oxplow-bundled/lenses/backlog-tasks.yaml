@@ -1,5 +1,4 @@
 title: Backlog
-needs: [work_items]
 query: |
   SELECT id, title, priority
   FROM v_task

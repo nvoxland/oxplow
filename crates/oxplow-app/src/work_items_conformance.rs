@@ -63,6 +63,21 @@ pub trait WorkItemsProbe: Send + Sync {
 /// suite checks it's `provider`). `native` is the provider's own fields
 /// for the items it files, `None` for none; an agent `actor` files them on
 /// its thread, so `in_progress` claims it on oxplow.
+/// A create that must keep the item (the suite checks a list that keeps
+/// its items; none is a sink, checked on its own): its ref.
+async fn filed(
+    items: &crate::work_items::WorkItems,
+    actor: &Actor,
+    item: crate::work_items::NewItem,
+) -> Result<String, oxplow_domain::CommandError> {
+    items
+        .create(actor, item)
+        .await?
+        .ok_or_else(|| oxplow_domain::CommandError::Failed {
+            message: "the create kept nothing (no ref)".into(),
+        })
+}
+
 /// How many `work_item.state_changed` events name `item`.
 async fn state_changes(probe: &dyn WorkItemsProbe, item: &str) -> usize {
     probe
@@ -110,7 +125,7 @@ pub async fn suite(
     let mut created: Vec<String> = Vec::new();
 
     // 1. A new item is a row in its canonical `todo` state.
-    let item = match items.create(actor, new("conformance item", None)).await {
+    let item = match filed(items, actor, new("conformance item", None)).await {
         Ok(r) => r,
         Err(e) => {
             fail("create", format!("create failed: {e}"));
@@ -226,9 +241,7 @@ pub async fn suite(
     }
 
     // 4. A parent resolves with `hierarchy`, and is refused without it.
-    let child = items
-        .create(actor, new("conformance child", Some(item.clone())))
-        .await;
+    let child = filed(items, actor, new("conformance child", Some(item.clone()))).await;
     match (features.hierarchy, child) {
         (true, Ok(child)) => {
             created.push(child.clone());
@@ -250,8 +263,7 @@ pub async fn suite(
     }
 
     // 5. Links and comments follow the features.
-    let other = items
-        .create(actor, new("conformance other", None))
+    let other = filed(items, actor, new("conformance other", None))
         .await
         .unwrap_or_default();
     if !other.is_empty() {
