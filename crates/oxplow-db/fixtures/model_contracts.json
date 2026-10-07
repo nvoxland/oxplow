@@ -25,7 +25,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "What kind of nudge, e.g. `coverage-target`, `report-less-run`."
+          "doc": "What kind of nudge, e.g. `report-less-run` or an advisory's `<extension>/<id>`."
         },
         {
           "name": "message",
@@ -75,7 +75,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "What kind of nudge, e.g. `coverage-target`, `report-less-run`."
+          "doc": "What kind of nudge, e.g. `report-less-run` or an advisory's `<extension>/<id>`."
         },
         {
           "name": "message",

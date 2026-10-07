@@ -1187,8 +1187,8 @@ nudge" section in `.context/collection.md`.
 ### Nudge persistence
 
 The PostToolUse nudges — the report-less-run nudge above and any
-post-tool-use **advisory** that fires (e.g. oxplow-bundled's
-`coverage-target`, kind `oxplow-bundled/coverage-target`) — are written by
+post-tool-use **advisory** that fires (kind `<extension>/<advisory id>`)
+— are written by
 the pump reactors (`collection`, `advisories.post_tool` —
 `crates/oxplow-app/src/post_tool_reactors.rs`, P3.6) to the `agent_nudge`
 table (`crates/oxplow-db/src/agent_nudge_store.rs`, see

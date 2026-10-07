@@ -1941,11 +1941,6 @@ Feedback is **advisory — oxplow never blocks**. It lives in the bundled
 [extensions.md](./extensions.md) → "Advisories"), SQL over the stored
 per-effort views, not in core:
 
-- **`coverage-target`** (post-tool-use, once per effort): the effort's diff
-  coverage (`v_effort_observation`, kind `diff-coverage`) is below 80%. The
-  message text is unchanged. It reads the stored observation, so it fires on
-  the tool call *after* the coverage lands (the evidence refresh is debounced
-  3 s), not the same one.
 - **`metric-deltas`** (prompt, every turn): "# Metric deltas (this effort)",
   one `title: baseline → current (Δ ±N)` line per moved **code** metric
   (`v_effort_metric_delta`; operational `agent.*`/`effort.*`/`task.*` and

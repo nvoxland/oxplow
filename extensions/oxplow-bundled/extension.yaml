@@ -97,22 +97,6 @@ advisories:
       WHERE e.thread_id = :thread_id AND e.closed_by = 'commit' AND w.state = 'in_progress'
         AND NOT EXISTS (SELECT 1 FROM v_effort o WHERE o.work_item = w.ref AND o.ended_at IS NULL)
       GROUP BY w.ref
-  # Steer the agent to add tests when this effort's changed lines are poorly
-  # covered. Reads the stored observation, so it fires on the tool call after
-  # the coverage lands.
-  - id: coverage-target
-    on: post-tool-use
-    once_per: effort
-    query: |
-      SELECT printf(
-               'Diff coverage on this effort''s changed lines is %d%%, below the %d%% target. '
-               || 'Add tests for the uncovered changed lines before closing (advisory — oxplow '
-               || 'won''t block you). See the effort''s coverage panel for which lines are uncovered.',
-               CAST(round(metric_value) AS INTEGER), 80) AS message
-      FROM v_effort_observation
-      WHERE effort_id = :effort_id AND kind = 'diff-coverage' AND metric_value < 80
-      ORDER BY seq DESC
-      LIMIT 1
   # How code metrics moved this effort, every prompt while any moved.
   # Operational metrics (tokens, cycle time, …) grow every turn and aren't
   # code-health signals, so they're left out.
