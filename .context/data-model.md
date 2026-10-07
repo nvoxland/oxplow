@@ -718,9 +718,9 @@ commands (`stream.create_worktree`, `stream.adopt_worktree`,
 runtime. Callers resolve the right service via
 `snapshot_captures.get(&stream_id)` (when the stream is known)
 or `snapshot_captures.primary()` (for project-shared surfaces
-like the wiki page watcher and freshness checks). `TaskService`
-resolves via task → thread → stream, so lifecycle snapshots
-capture against the task's actual worktree — a task on a
+like the wiki page watcher and freshness checks). `EffortService`
+resolves via effort → thread → stream, so lifecycle snapshots
+capture against the effort's actual worktree — an effort on a
 worktree stream never bleeds into the primary's snapshot
 history.
 
@@ -750,7 +750,7 @@ and `effort.end_snapshot_id`, each pointing at a `snapshot.id`.
 A closed effort's `end_snapshot_id` is non-null whenever the effort has
 a baseline — capture de-dupes an unchanged tree to the latest existing
 snapshot id rather than writing a near-identical row, and on a no-op
-close the effort-lifecycle consumer (`TaskService::on_effort_closed`) falls back to the effort's
+close the effort-lifecycle consumer (`EffortService::on_effort_closed`) falls back to the effort's
 `start_snapshot_id`. `end_snapshot_id` is null only while the effort is
 open (`end_snapshot_id` null ⇔ effort in progress); there is no
 time-based gap.
@@ -1345,11 +1345,14 @@ events that trigger it, and `after()` still orders consumers in `settle`.
 `EventPump::settle(&[names], timeout)` spawns a catch-up of just the named
 consumers — side by side within a level, a consumer in a level after those
 it runs `after` — and waits for it, for callers whose answer needs their
-effect (`TaskService` settles `effort.lifecycle`).
+effect (`effort_lifecycle::settle`, which `EffortService` and
+`TaskService` call, settles `effort.lifecycle`).
 
 The one async consumer so far is **`effort.lifecycle`**
 (`crates/oxplow-app/src/effort_lifecycle.rs`), on `effort.opened` /
-`effort.closed`: `TaskService::on_effort_opened` waits for the startup
+`effort.closed`: `EffortService::on_effort_opened`
+(`crates/oxplow-app/src/effort_service.rs`, the effort's lifecycle
+work, whichever work list its item is on) waits for the startup
 sweep, takes the `effort_start` snapshot and pins it (skipped when already
 pinned). An open delivered after its close — nothing settled in between —
 pins the stream's last snapshot at or before `started_at` instead
@@ -1375,12 +1378,12 @@ decisions — a model call; failures logged). (`effort.gauges` is gone:
 `{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
 They hold `Services` weakly (the pump is part
 of it).
-`TaskService::update` / `create`, `effort.report`, and MCP `run_command`
-after any write call `settle` on `effort.lifecycle` (up to 10 min; a
+`TaskService::update` / `create`, `effort.report`, and MCP / IPC
+`run_command` after any write call `settle` on `effort.lifecycle` (up to 10 min; a
 start baseline on a huge repo waits for the startup sweep) so a report
 lands on the effort a close just before it closed and a batch's opens
 pin before its closes; the consumer holds
-`TaskService::without_event_pump()` so there's no reference cycle.
+`EffortService::without_event_pump()` so there's no reference cycle.
 Letters are `pending | retried | discarded`; the
 person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless

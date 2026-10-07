@@ -957,11 +957,11 @@ is `{ to: done|canceled, native_state: archived }`.
      (`SnapshotCaptureRegistry`), each watching its own worktree, so an
      effort on a worktree stream captures against THAT worktree.
 - **Paths the project never snapshots belong to no effort.**
-  `TaskService::claimable_paths(thread, paths)` runs every claim and
+  `EffortService::claimable_paths(thread, paths)` runs every claim and
   observation through the stream's `WorkspaceFilter` (the project's
   `generated.exclude` list + `.gitignore`) and drops what capture
   excludes. With no capture service reachable for the thread (bare
-  `TaskService`, unregistered stream) paths pass through unfiltered.
+  `EffortService`, unregistered stream) paths pass through unfiltered.
 - **A run is the effort its causing tool call was in.** Producers
   observe-always: tests, analysis and coverage are recorded whether or
   not an effort is open (coverage stores absolute line-sets and derives
@@ -1725,7 +1725,7 @@ it wrote for the effort it was written in. The `effort.claim` async
 consumer (`crates/oxplow-app/src/tool_call_reactors.rs`) reacts to
 `agent.tool.finished`; the ingest already made `path` relative to the
 thread's own tree (its stream's worktree), and an absolute path (outside
-it) is never claimed. It calls `TaskService::claim_effort_file` with the
+it) is never claimed. It calls `EffortService::claim_effort_file` with the
 event's **effort anchor**, so a claim that lands after that effort closed
 (the reactor ran late) still goes to it; with no anchor the thread's open
 effort takes it. The claim is idempotent (`record_file` is `INSERT OR

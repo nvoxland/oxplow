@@ -56,6 +56,7 @@ pub mod effort_lifecycle;
 pub mod effort_observation;
 pub mod effort_policy;
 pub mod effort_reactors;
+pub mod effort_service;
 pub mod entity_metrics;
 pub mod event_bodies;
 pub mod event_lineage;
@@ -465,6 +466,9 @@ pub struct Services {
     pub streams: StreamService,
     pub threads: ThreadService,
     pub tasks: TaskService,
+    /// What an effort's lifecycle does around its store (snapshot pins,
+    /// lifecycle metrics, file claims).
+    pub efforts: effort_service::EffortService,
     pub stream_store: Arc<SqliteStreamStore>,
     pub thread_store: Arc<SqliteThreadStore>,
     pub task_store: Arc<SqliteTaskStore>,
@@ -1040,21 +1044,20 @@ impl Services {
             vocabulary: event_log_store.vocabulary().clone(),
             layer: sql.clone(),
         });
-        let tasks = tasks
-            .with_effort_store(effort_store.clone())
-            .with_snapshot_captures(snapshot_captures.clone())
-            .with_thread_store(thread_store.clone())
-            .with_metrics(fact_store.clone(), event_bus.clone())
-            .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
+        let efforts =
+            effort_service::EffortService::new(effort_store.clone(), thread_store.clone())
+                .with_event_pump(event_pump.clone())
+                .with_snapshot_captures(snapshot_captures.clone())
+                .with_metrics(fact_store.clone(), event_bus.clone())
+                .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         // The post-commit half of effort open/close runs on the pump.
         event_pump.register_async(Arc::new(effort_lifecycle::EffortLifecycleConsumer::new(
-            tasks.without_event_pump(),
+            efforts.without_event_pump(),
             (*event_log_store).clone(),
         )));
         // A structured edit claims its file for the effort it happened in.
         event_pump.register_async(Arc::new(tool_call_reactors::EffortClaimConsumer::new(
-            tasks.without_event_pump(),
-            effort_store.clone(),
+            efforts.without_event_pump(),
             db.clone(),
             layout.project_dir.clone(),
         )));
@@ -1153,7 +1156,7 @@ impl Services {
             efforts: effort_store.clone(),
             snapshots: snapshot_store.clone(),
             sql: sql.clone(),
-            tasks: tasks.without_event_pump(),
+            lifecycle: efforts.without_event_pump(),
         }));
         // The project's effort policy reacts to items starting and
         // finishing, through this bus (`.context/work-tracking.md`).
@@ -1199,7 +1202,7 @@ impl Services {
         .chain(commands::ui::commands())
         .chain(commands::effort_report::commands(
             commands::effort_report::EffortDeps {
-                tasks: tasks.clone(),
+                lifecycle: efforts.clone(),
                 efforts: effort_store.clone(),
                 sql: sql.clone(),
                 db: db.clone(),
@@ -1433,6 +1436,7 @@ impl Services {
             streams,
             threads,
             tasks,
+            efforts,
             snapshot_captures,
             stream_store,
             thread_store,

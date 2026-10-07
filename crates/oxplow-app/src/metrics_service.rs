@@ -5380,7 +5380,7 @@ def transform(input):
         assert_eq!(spec.source_measure.as_deref(), Some("oxplow.coverage"));
         assert_eq!(spec.aggregation, "ratio");
         // The new V46 measures exist for the producers with no prior home.
-        for key in ["oxplow.turn", "oxplow.task_effort", "oxplow.nudge"] {
+        for key in ["oxplow.turn", "oxplow.work_item_effort", "oxplow.nudge"] {
             assert!(
                 svc.fact_store.get_measure(key).await.unwrap().is_some(),
                 "{key} measure seeded by V46"

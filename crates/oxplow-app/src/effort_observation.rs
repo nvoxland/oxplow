@@ -29,7 +29,7 @@ pub struct EffortObservationConsumer {
     pub snapshots: std::sync::Arc<SqliteSnapshotStore>,
     pub sql: SqlGateway,
     /// Resolves the VCS revision a file was at, like a claim's.
-    pub tasks: crate::task_service::TaskService,
+    pub lifecycle: crate::effort_service::EffortService,
 }
 
 impl EffortObservationConsumer {
@@ -138,7 +138,7 @@ impl AsyncEventConsumer for EffortObservationConsumer {
         // that began mid-turn (after a commit closed the last) holds only
         // what came after. Its start pin may not be taken yet (the policy
         // just opened it): take it now (idempotent).
-        self.tasks.on_effort_opened(effort).await?;
+        self.lifecycle.on_effort_opened(effort).await?;
         let effort_start = self
             .efforts
             .get_effort(&effort)
@@ -163,12 +163,12 @@ impl AsyncEventConsumer for EffortObservationConsumer {
             })
             .collect();
         let claimable: Vec<String> = changes.iter().map(|(p, _)| p.clone()).collect();
-        let claimable = self.tasks.claimable_paths(&thread, &claimable).await;
+        let claimable = self.lifecycle.claimable_paths(&thread, &claimable).await;
         let changes = changes
             .into_iter()
             .filter(|(p, _)| claimable.contains(p))
             .collect();
-        let v = self.tasks.file_version_at(&thread, end).await;
+        let v = self.lifecycle.file_version_at(&thread, end).await;
         self.efforts
             .observe_files(
                 &effort,

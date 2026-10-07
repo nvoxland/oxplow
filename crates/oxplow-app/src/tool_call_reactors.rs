@@ -18,12 +18,12 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use oxplow_db::{Database, SqliteEffortStore};
+use oxplow_db::Database;
 use oxplow_domain::events::schema::{AgentToolFinished, EventType};
 use oxplow_domain::{DomainError, StoredEvent, ThreadId};
 
+use crate::effort_service::EffortService;
 use crate::event_pump::{AsyncEventConsumer, EventConsumer};
-use crate::task_service::TaskService;
 
 pub const TOOL_CALL_PROJECTION: &str = "tool_call.project";
 pub const EFFORT_CLAIM: &str = "effort.claim";
@@ -71,21 +71,14 @@ impl EventConsumer for ToolCallProjection {
 
 /// Claims an edited file for the effort it was edited in.
 pub struct EffortClaimConsumer {
-    tasks: TaskService,
-    efforts: std::sync::Arc<SqliteEffortStore>,
+    efforts: EffortService,
     db: Database,
     project_dir: PathBuf,
 }
 
 impl EffortClaimConsumer {
-    pub fn new(
-        tasks: TaskService,
-        efforts: std::sync::Arc<SqliteEffortStore>,
-        db: Database,
-        project_dir: PathBuf,
-    ) -> Self {
+    pub fn new(efforts: EffortService, db: Database, project_dir: PathBuf) -> Self {
         Self {
-            tasks,
             efforts,
             db,
             project_dir,
@@ -140,26 +133,15 @@ impl AsyncEventConsumer for EffortClaimConsumer {
             return Ok(());
         }
         let worktree = self.worktree(thread).await?;
-        self.tasks
+        self.efforts
             .claim_effort_file(
-                &self.efforts,
                 &thread,
                 event.envelope.anchors.effort_id,
                 path,
                 Some(&worktree),
             )
             .await
-            .map_or_else(claim_outcome, |_| Ok(()))
-    }
-}
-
-/// A failed claim as the pump reads it: a storage error keeps its kind (a
-/// `Busy` defers the event rather than parking it); a task that no longer
-/// exists has nothing to claim.
-fn claim_outcome(err: crate::task_service::TaskServiceError) -> Result<(), DomainError> {
-    match err {
-        crate::task_service::TaskServiceError::Storage(e) => Err(e),
-        crate::task_service::TaskServiceError::NotFound(_) => Ok(()),
+            .map(|_| ())
     }
 }
 
@@ -167,15 +149,6 @@ fn claim_outcome(err: crate::task_service::TaskServiceError) -> Result<(), Domai
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_busy_claim_defers_and_a_vanished_task_is_nothing_to_claim() {
-        use crate::task_service::TaskServiceError;
-        let busy = claim_outcome(TaskServiceError::Storage(DomainError::Busy(
-            "locked".into(),
-        )));
-        assert!(busy.unwrap_err().is_retryable());
-        assert!(claim_outcome(TaskServiceError::NotFound(oxplow_domain::TaskId::new(1))).is_ok());
-    }
     use crate::{HookEnvelope, ToolDecision};
     use oxplow_db::EffortStore as _;
     use oxplow_domain::HookKind;

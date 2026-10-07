@@ -540,7 +540,7 @@ pub struct ServicesProbe<'a>(pub &'a crate::Services);
 #[async_trait]
 impl WorkItemsProbe for ServicesProbe<'_> {
     async fn settle(&self) {
-        self.0.tasks.settle_lifecycle().await;
+        self.0.efforts.settle_lifecycle().await;
         // The in-transaction consumers (the `work_items.project`
         // projection) run on the pump's next pass; run it now.
         if let Err(e) = self.0.event_pump.run_once().await {

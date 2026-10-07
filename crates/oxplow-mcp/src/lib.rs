@@ -3182,7 +3182,7 @@ impl OxplowMcp {
         // `work_item.transition`): let its snapshot pin land before the
         // agent's next step.
         if outcome.audit_id.is_some() {
-            self.services.tasks.settle_lifecycle().await;
+            self.services.efforts.settle_lifecycle().await;
         }
         json_result(&outcome)
     }

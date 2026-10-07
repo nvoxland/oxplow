@@ -6,7 +6,7 @@
 //! It runs on the event pump as an async consumer, so the work is durable:
 //! a crash between the commit and the snapshot re-delivers the event on
 //! the next run instead of leaving the effort unpinned. The work itself
-//! lives on [`TaskService`] (`on_effort_opened` / `on_effort_closed`),
+//! lives on [`EffortService`] (`on_effort_opened` / `on_effort_closed`),
 //! which is idempotent under re-delivery.
 
 use async_trait::async_trait;
@@ -15,20 +15,36 @@ use oxplow_domain::events::schema::{EffortFinished, EffortFinishedV2};
 use oxplow_domain::refs::build::{snapshot_ref, system_source};
 use oxplow_domain::{DomainError, EffortId, Envelope, StoredEvent};
 
+use crate::effort_service::EffortService;
 use crate::event_pump::AsyncEventConsumer;
-use crate::task_service::TaskService;
 
 /// The consumer's name (its checkpoint key; what callers settle on).
 pub const NAME: &str = "effort.lifecycle";
 
+/// How long a caller waits for the effort-lifecycle consumer (the
+/// `effort_start` / `effort_end` snapshot) before returning anyway.
+/// Long, like the inline capture it replaced (which had no limit): the
+/// start snapshot is the effort's baseline, and on a huge repo it waits
+/// for the startup sweep. It only bounds a stuck pump.
+const LIFECYCLE_SETTLE: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Run the event pump now and wait (bounded) for this consumer to handle
+/// what's been logged — the snapshot pins of a just-committed open or
+/// close. On timeout the work finishes on a later run; nothing is lost.
+pub async fn settle(pump: &std::sync::Arc<crate::event_pump::EventPump>) {
+    if !pump.settle(&[NAME], LIFECYCLE_SETTLE).await {
+        tracing::debug!("effort lifecycle: pump didn't settle in time; continuing");
+    }
+}
+
 pub struct EffortLifecycleConsumer {
-    tasks: TaskService,
+    efforts: EffortService,
     log: SqliteEventLogStore,
 }
 
 impl EffortLifecycleConsumer {
-    pub fn new(tasks: TaskService, log: SqliteEventLogStore) -> Self {
-        Self { tasks, log }
+    pub fn new(efforts: EffortService, log: SqliteEventLogStore) -> Self {
+        Self { efforts, log }
     }
 
     /// Log `effort.finished` for a close this consumer finished handling.
@@ -90,8 +106,8 @@ impl AsyncEventConsumer for EffortLifecycleConsumer {
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         let effort = effort_of(event)?;
         match event.envelope.event_type.as_str() {
-            "effort.opened" => self.tasks.on_effort_opened(effort).await,
-            "effort.closed" => match self.tasks.on_effort_closed(effort).await? {
+            "effort.opened" => self.efforts.on_effort_opened(effort).await,
+            "effort.closed" => match self.efforts.on_effort_closed(effort).await? {
                 Some(finished) => self.log_finished(event, &finished).await,
                 None => Ok(()),
             },

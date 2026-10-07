@@ -185,8 +185,8 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             description: Some("How long an effort stayed open (close minus start)."),
         },
         ProducerMetric {
-            key: "task.efforts",
-            title: "Efforts per task",
+            key: "work_item.efforts",
+            title: "Efforts per work item",
             kind: "gauge",
             unit: "count",
             direction: "lower-better",
@@ -195,7 +195,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "operational",
             producer: "effort-lifecycle",
             dimensions: EFFORT_DIMS,
-            description: Some("Number of efforts spent on a task (the redo-rate signal)."),
+            description: Some("Number of efforts spent on a work item (the redo-rate signal)."),
         },
         // Wasted-token pair (tsk77) — both fold `oxplow.token_waste`, the
         // append-only ratio measure: closes contribute (num 0 / den spend),
@@ -580,7 +580,7 @@ fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<
         "effort.time_to_green_ms" => ("oxplow.effort_time_to_green", "avg", None),
         "agent.turns" => ("oxplow.turn", "sum", None),
         "effort.cycle_time_ms" => ("oxplow.cycle_time", "avg", None),
-        "task.efforts" => ("oxplow.task_effort", "avg", None),
+        "work_item.efforts" => ("oxplow.work_item_effort", "avg", None),
         "agent.nudges.fired" => ("oxplow.nudge", "sum", None),
         "oxplow.tests.passed" => (
             "oxplow.test_case",

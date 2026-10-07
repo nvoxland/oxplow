@@ -25,8 +25,8 @@ use serde_json::{json, Value};
 
 use super::thread::parse_thread_ref;
 use super::{Command, Handler, HandlerOutput, Invocation};
+use crate::effort_service::EffortService;
 use crate::sql_gateway::SqlGateway;
-use crate::task_service::TaskService;
 
 pub const REPORT: &str = "effort.report";
 
@@ -49,7 +49,8 @@ pub struct ReportInput {
 /// What reporting reads and writes.
 #[derive(Clone)]
 pub struct EffortDeps {
-    pub tasks: TaskService,
+    /// Settles a close's lifecycle (its end snapshot) before the report reads it.
+    pub lifecycle: EffortService,
     pub efforts: Arc<SqliteEffortStore>,
     pub sql: SqlGateway,
     pub db: Database,
@@ -154,7 +155,7 @@ async fn report(
     };
     // A close just before (the policy's, on the item finishing) settles
     // first, so the report lands on the effort it closed.
-    deps.tasks.settle_lifecycle().await;
+    deps.lifecycle.settle_lifecycle().await;
     let effort = match deps
         .efforts
         .find_open_for_thread(&thread)
@@ -271,7 +272,7 @@ mod tests {
             )
             .await
             .unwrap();
-        fx.svc.tasks.settle_lifecycle().await;
+        fx.svc.efforts.settle_lifecycle().await;
         let children = &out.result["children"];
         (children[0]["result"].clone(), children[1]["result"].clone())
     }

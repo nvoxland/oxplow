@@ -26,7 +26,7 @@ pub async fn run_command(
     // A write may have opened or closed an effort: let its snapshot pin
     // land before the UI reads what follows.
     if outcome.audit_id.is_some() {
-        svc.tasks.settle_lifecycle().await;
+        svc.efforts.settle_lifecycle().await;
     }
     Ok(outcome)
 }
@@ -51,7 +51,7 @@ pub async fn undo_command(
         .undo(&Actor::Human, audit_id, confirmed)
         .await?;
     if outcome.audit_id.is_some() {
-        svc.tasks.settle_lifecycle().await;
+        svc.efforts.settle_lifecycle().await;
     }
     Ok(outcome)
 }
@@ -71,7 +71,7 @@ pub async fn decide_proposal(
     }
     let outcome = svc.commands.approve(&Actor::Human, proposal).await?;
     if outcome.audit_id.is_some() {
-        svc.tasks.settle_lifecycle().await;
+        svc.efforts.settle_lifecycle().await;
     }
     Ok(Some(outcome))
 }
