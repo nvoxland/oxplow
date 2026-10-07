@@ -356,6 +356,11 @@ impl SqliteChangeStore {
                 }
                 tx.execute("DELETE FROM change_duplicate WHERE change_id = ?1", [id])
                     .map_err(map_sql_err)?;
+                tx.execute(
+                    "UPDATE change SET duplicates_events_to = ?2 WHERE id = ?1",
+                    rusqlite::params![id, events_to],
+                )
+                .map_err(map_sql_err)?;
                 for d in &rows {
                     tx.execute(
                         "INSERT INTO change_duplicate (change_id, path, start_line, end_line, lines, peer_path,
@@ -369,6 +374,65 @@ impl SqliteChangeStore {
                     .map_err(map_sql_err)?;
                 }
                 Ok(true)
+            })
+            .await
+    }
+}
+
+/// A change analyzed since its duplicates were last stored: what a scan
+/// of it needs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AwaitingDuplicates {
+    pub id: i64,
+    pub stream_id: i64,
+    /// The revision its files are read at.
+    pub head: Revision,
+    /// The analysis the scan belongs to.
+    pub events_to: i64,
+    /// Its changed files, the scan's scope.
+    pub paths: Vec<String>,
+}
+
+impl SqliteChangeStore {
+    /// The analyzed changes whose duplicates weren't stored for their
+    /// latest analysis (a scan a stop cut off), with changed files to
+    /// scan.
+    pub async fn awaiting_duplicates(&self) -> Result<Vec<AwaitingDuplicates>, DomainError> {
+        self.db
+            .call(|c| {
+                let mut st = c.prepare(
+                    "SELECT c.id, c.stream_id, c.head_revision, c.events_to,
+                            (SELECT json_group_array(path) FROM
+                               (SELECT f.path FROM change_file f WHERE f.change_id = c.id ORDER BY f.path))
+                     FROM change c
+                     WHERE c.status = 'done' AND c.events_to IS NOT NULL
+                       AND c.duplicates_events_to IS NOT c.events_to
+                       AND EXISTS (SELECT 1 FROM change_file f WHERE f.change_id = c.id)
+                     ORDER BY c.id",
+                )?;
+                let rows = st.query_map([], |r| {
+                    let paths: String = r.get(4)?;
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        revision_at(r, 2)?,
+                        r.get::<_, i64>(3)?,
+                        paths,
+                    ))
+                })?;
+                let mut out = Vec::new();
+                for row in rows {
+                    let (id, stream_id, head, events_to, paths) = row?;
+                    let Some(head) = head else { continue };
+                    out.push(AwaitingDuplicates {
+                        id,
+                        stream_id,
+                        head,
+                        events_to,
+                        paths: serde_json::from_str(&paths).unwrap_or_default(),
+                    });
+                }
+                Ok(out)
             })
             .await
     }
@@ -563,9 +627,23 @@ mod tests {
                 peer_end_line: 28,
             }]
         };
+        // Analyzed, its duplicates not yet stored: it awaits them, with
+        // what a scan needs.
+        let awaiting = store.awaiting_duplicates().await.unwrap();
+        assert_eq!(awaiting.len(), 1);
+        assert_eq!(
+            (
+                awaiting[0].id,
+                awaiting[0].events_to,
+                awaiting[0].paths.clone()
+            ),
+            (c.id, 11, vec!["b.rs".to_string()])
+        );
         // A scan of the superseded analysis stores nothing; the latest's does.
         assert!(!store.store_duplicates(c.id, dup(), 10).await.unwrap());
+        assert!(!store.awaiting_duplicates().await.unwrap().is_empty());
         assert!(store.store_duplicates(c.id, dup(), 11).await.unwrap());
+        assert!(store.awaiting_duplicates().await.unwrap().is_empty());
         let row = store.get(c.id).await.unwrap().unwrap();
         assert_eq!(
             (row.status.as_str(), row.snapshot_id, row.events_to),

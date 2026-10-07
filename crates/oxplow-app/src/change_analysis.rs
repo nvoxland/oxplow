@@ -745,6 +745,22 @@ async fn analyzed_from(
     ))
 }
 
+/// Queue the duplicate scans a stop cut off: each analyzed change whose
+/// duplicates weren't stored for its latest analysis (boot runs this). How
+/// many were queued.
+pub async fn resume_duplicates(svc: &crate::Services) -> Result<usize, oxplow_domain::DomainError> {
+    let awaiting = svc.change_store.awaiting_duplicates().await?;
+    let n = awaiting.len();
+    for a in awaiting {
+        let root = svc
+            .worktrees
+            .resolve(Some(&oxplow_domain::StreamId::new(a.stream_id).to_string()))
+            .await;
+        spawn_duplicates(svc, a.id, a.events_to, &root, &a.head, a.paths);
+    }
+    Ok(n)
+}
+
 /// The event log's highest seq now.
 async fn events_to(svc: &crate::Services) -> Result<i64, oxplow_domain::DomainError> {
     svc.db
@@ -928,6 +944,52 @@ async fn compute(
 mod tests {
     use super::*;
     use crate::code_analysis::{AnalyzedFileChurn, AnalyzedFileSide, AnalyzedFunctionChurn};
+
+    /// A duplicate scan a stop cut off is redone at boot: the change still
+    /// awaits its duplicates, and `resume_duplicates` stores them.
+    #[tokio::test]
+    async fn a_cut_off_duplicate_scan_is_redone() {
+        let f = crate::thread_checkpoint::tests::with_baseline().await;
+        let svc = &f.svc;
+        std::fs::write(svc.layout.project_dir.join("a.rs"), "fn a() {}\n").unwrap();
+        let stream = svc.streams.list_streams().await.unwrap()[0].id;
+        let capture = svc.snapshot_captures.get(&stream).unwrap();
+        capture.enqueue_startup_diff().await.unwrap();
+        capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
+            .await
+            .unwrap();
+        refresh_change(
+            svc,
+            ChangeTarget::Working {
+                stream_id: stream.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let awaiting = || async { svc.change_store.awaiting_duplicates().await.unwrap() };
+        let settled = || async {
+            for _ in 0..200 {
+                if awaiting().await.is_empty() {
+                    return true;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            false
+        };
+        assert!(settled().await, "the analysis's own scan stores them");
+        // The daemon stopped mid-scan: nothing stored for this analysis.
+        svc.db
+            .transaction(|tx| {
+                tx.execute("UPDATE change SET duplicates_events_to = NULL", [])
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(awaiting().await.len(), 1);
+        resume_duplicates(svc).await.unwrap();
+        assert!(settled().await, "redone");
+    }
 
     /// A forced rerun of a change whose inputs haven't moved — the same
     /// tree, base and own files, by the same build — keeps what's stored
@@ -1378,9 +1440,23 @@ mod tests {
             rows(&f.svc, "SELECT name, status, signature_changed FROM v_change_function WHERE change_id = ?1 ORDER BY name", c.id).await,
             serde_json::json!([["fresh", "added", 0], ["grow", "modified", 1]])
         );
+        // Its duplicate scan has stored (it stamps the change), so what
+        // follows hears only the read.
+        for _ in 0..200 {
+            if f.svc
+                .change_store
+                .awaiting_duplicates()
+                .await
+                .unwrap()
+                .is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         // HEAD resolves to the same commit, so it's the same change — read,
         // not written: a write announces `v_change`, and a page re-asks on
-        // every announcement (tsk1024).
+        // every announcement.
         let mut changes = f.svc.db.subscribe_changes();
         let again = ensure_change(
             &f.svc,

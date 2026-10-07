@@ -103,6 +103,7 @@ where
     P: Into<String>,
     S: AsRef<str>,
 {
+    let _running = Running::start();
     let mut subtrees: Vec<SubtreeRef> = Vec::new();
     for (path, source) in files {
         let path = path.into();
@@ -127,6 +128,49 @@ where
         );
     }
     pair_up(subtrees, opts)
+}
+
+#[cfg(test)]
+static RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(test)]
+static PEAK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The most detections that ran at once (tests).
+#[cfg(test)]
+pub(crate) fn peak_running() -> usize {
+    PEAK.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Held by the detection running: one at a time per process. A detection
+/// parses its whole corpus (the tree) and is CPU-bound, so two at once — a
+/// change's scan and the whole-tree `oxplow.duplicate_lines` collector's —
+/// only compete for the same cores and the person's typing; the second
+/// waits for the first.
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// One detection running, for as long as it's held.
+struct Running {
+    _held: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Running {
+    fn start() -> Self {
+        let held = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(test)]
+        {
+            use std::sync::atomic::Ordering::SeqCst;
+            let now = RUNNING.fetch_add(1, SeqCst) + 1;
+            PEAK.fetch_max(now, SeqCst);
+        }
+        Running { _held: held }
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        RUNNING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// Same as [`detect_duplicates`] but applies "scope" semantics:

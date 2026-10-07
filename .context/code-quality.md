@@ -160,8 +160,17 @@ its changed files. There is no manual "Scan now" any more.
   effort's own files; a rerun from the same keeps what's stored, and no
   duplicate scan is queued. A turn's end no longer forces a rerun: its
   take does, and only when it recorded files.
+- **One detection at a time per process, whoever asks.** The detector
+  (`oxplow_code_dup::detect_duplicates`) holds a process-wide lock while
+  it runs, so a change's scan and the whole-tree `oxplow.duplicate_lines`
+  collector (which runs in the collector runtime, outside `DupQueue`)
+  wait for each other instead of parsing the tree side by side.
 - A scan stores its rows only if its analysis generation is still the
-  change's latest.
+  change's latest, and stamps `change.duplicates_events_to` (V13). A
+  change analyzed since its last stored scan — one a stop cut off —
+  awaits its duplicates (`awaiting_duplicates`); boot queues those
+  (`change_analysis::resume_duplicates`), since an analysis whose inputs
+  haven't moved isn't redone.
 - A failure while storing marks the scan and its task failed rather than
   leaving them "running".
 - An effort analyzed while open is recomputed once it closes: the change

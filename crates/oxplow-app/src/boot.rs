@@ -485,6 +485,19 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
+    // Duplicate scans a stop cut off: redone, so a change whose tree
+    // doesn't move again still gets its duplicates.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            match crate::change_analysis::resume_duplicates(&state).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(n, "resumed cut-off duplicate scans"),
+                Err(error) => tracing::warn!(%error, "resuming duplicate scans failed"),
+            }
+        });
+    }
+
     // Commit indexer + branch refresh: walk the most-recent N commits
     // and restate the branch list at boot, then again whenever git refs
     // change. Idempotent.

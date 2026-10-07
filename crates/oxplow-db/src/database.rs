@@ -1501,6 +1501,35 @@ mod tests {
         .unwrap();
     }
 
+    /// V13: changes analyzed before it count as scanned, so the first boot
+    /// doesn't rescan every one.
+    #[test]
+    fn v13_counts_earlier_analyses_as_scanned() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(12))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'p', 'main', 'r', 'r', '/r', '2026-01-01', '2026-01-01');
+             INSERT INTO change (id, stream_id, kind, target, head_revision, status, events_to)
+               VALUES (1, 1, 'working', '1', 'working', 'done', 40),
+                      (2, 1, 'working', '2', 'working', 'pending', NULL);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(i64, Option<i64>)> = conn
+            .prepare("SELECT id, duplicates_events_to FROM change ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![(1, Some(40)), (2, None)]);
+    }
+
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every

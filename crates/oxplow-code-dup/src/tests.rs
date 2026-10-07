@@ -781,3 +781,25 @@ fn clojure_ns_require_preamble_is_skipped() {
         "shared Clojure ns/require/import preamble must not seed a finding, got {blocks:?}"
     );
 }
+
+/// Detection parses the whole corpus and is CPU-bound, so runs never
+/// overlap within a process, whoever asks: a change's scan and the
+/// whole-tree collector's wait for each other instead of competing for
+/// the same cores.
+#[test]
+fn detections_run_one_at_a_time() {
+    let body = "fn f(x: i32) -> i32 {\n    let a = x + 1;\n    let b = a * 2;\n    let c = b - 3;\n    let d = c / 4;\n    a + b + c + d\n}\n";
+    let corpus: Vec<(String, String)> = (0..300)
+        .map(|i| (format!("src/f{i}.rs"), body.to_string()))
+        .collect();
+    let threads: Vec<_> = (0..4)
+        .map(|_| {
+            let corpus = corpus.clone();
+            std::thread::spawn(move || detect_duplicates(corpus, detect_opts()))
+        })
+        .collect();
+    for t in threads {
+        t.join().unwrap();
+    }
+    assert_eq!(peak_running(), 1);
+}
