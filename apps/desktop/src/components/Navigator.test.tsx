@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Stream, Thread, ThreadState } from "../api.js";
+import { requestNavigatorOpen } from "../navigator-bus.js";
 import { Navigator } from "./Navigator.js";
 
 afterEach(cleanup);
@@ -172,6 +173,12 @@ test("the expand and collapse toggles show the open/close-sidebar icons", () => 
   expect(getByTestId("navigator-expand").querySelector("svg.lucide-panel-left-open")).not.toBeNull();
   fireEvent.click(getByTestId("navigator-expand"));
   expect(getByTestId("navigator-collapse").querySelector("svg.lucide-panel-left-close")).not.toBeNull();
+});
+
+test("a request from elsewhere (the title bar's stream name) expands the panel", () => {
+  const { queryByTestId } = renderNavigator();
+  act(() => requestNavigatorOpen());
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 });
 
 test("clicking empty space in the strip expands the panel", () => {

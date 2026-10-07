@@ -1,3 +1,4 @@
+import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
 import { refKindInfo, useRefKinds } from "../refKinds.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -134,23 +135,22 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  // Anchor the panel *over* the rail "Search…" box so it reads as that
-  // bar expanding in place — across (wider than the rail) and down (the
-  // results) — rather than a second search bar / modal appearing below
-  // it. The opaque panel starts at the box's top-left and fully covers
+  // Anchor the panel *over* the title bar's "Search…" field so it reads
+  // as that field expanding in place — across and down (the results) —
+  // rather than a second search bar / modal appearing below it. The opaque panel starts at the box's top-left and fully covers
   // it. We read the always-visible trigger's rect by testid so both the
   // click and the Cmd-K/P keyboard paths land in the same place; if the
   // rail isn't mounted we fall back to a centered position near the top.
   useLayoutEffect(() => {
     if (!open) return;
     function place() {
-      const anchor = document.querySelector('[data-testid="rail-search"]');
+      const anchor = document.querySelector(`[data-testid="${SEARCH_TRIGGER_TESTID}"]`);
       if (!anchor) {
         setPanelCoords(centeredFallbackCoords);
         return;
       }
       const rect = anchor.getBoundingClientRect();
-      // Expand across: at least as wide as the rail box, wider where the
+      // Expand across: at least as wide as the field, wider where the
       // window allows, clamped to the viewport.
       const width = Math.min(Math.max(rect.width, 460), window.innerWidth - 16);
       setPanelCoords({
@@ -634,7 +634,7 @@ function shortStatus(status: WorkspaceIndexedFile["status"]): string {
 
 // Transparent full-screen layer: it captures the outside-click that
 // closes the launcher but no longer dims the app, so the panel reads as
-// a dropdown anchored to the rail Search box rather than a modal.
+// a dropdown anchored to the title bar's Search field rather than a modal.
 const backdropStyle: CSSProperties = {
   position: "fixed",
   inset: 0,

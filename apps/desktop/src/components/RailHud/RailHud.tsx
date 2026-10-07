@@ -29,8 +29,6 @@ export interface RailHudProps {
   streamId?: string | null;
   /** Open a page (or focus if already open) in the active thread's tab area. */
   onOpenPage(ref: TabRef): void;
-  /** Optional: invoked when the user clicks the search affordance. */
-  onOpenSearch?(): void;
 }
 
 // ─── Uniform collapsible sections + drag-to-reorder ──────────────────
@@ -354,7 +352,6 @@ function RailSection({
 export function RailHud({
   streamId,
   onOpenPage,
-  onOpenSearch,
 }: RailHudProps) {
   const width = useRailWidth();
   // One owner for every panel's lens runs, shared with the bell and the
@@ -399,7 +396,6 @@ export function RailHud({
       }}
     >
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <SearchTrigger onOpenSearch={onOpenSearch} />
         <RailSectionsContext.Provider value={sections.value}>
           {sections.order.map((id) => renderSection(id))}
         </RailSectionsContext.Provider>
@@ -493,48 +489,6 @@ function RailResizeHandle({ onChange }: { onChange(phase: "start" | "move" | "en
         zIndex: 5,
       }}
     />
-  );
-}
-
-
-function SearchTrigger({ onOpenSearch }: { onOpenSearch?: () => void }) {
-  return (
-    <div style={{ padding: "0 6px 6px", flexShrink: 0 }}>
-      <button
-        type="button"
-        data-testid="rail-search"
-        onClick={onOpenSearch}
-        style={{
-          width: "100%",
-          padding: "8px 10px",
-          background: "var(--surface-card)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: 6,
-          color: "var(--text-secondary)",
-          fontSize: "var(--text-sm)",
-          textAlign: "left",
-          cursor: onOpenSearch ? "pointer" : "default",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <span aria-hidden style={{ opacity: 0.7 }}>🔍</span>
-        <span style={{ flex: 1 }}>Search…</span>
-        <kbd
-          style={{
-            fontSize: 10,
-            color: "var(--text-muted)",
-            background: "var(--surface-tab-inactive)",
-            padding: "1px 5px",
-            borderRadius: 3,
-            border: "1px solid var(--border-subtle)",
-          }}
-        >
-          ⌘K
-        </kbd>
-      </button>
-    </div>
   );
 }
 

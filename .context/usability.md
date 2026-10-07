@@ -627,7 +627,8 @@ declaring *what it is* and mounting the generic layer.
   - `plan-new-task`, `task-title`, `task-priority`,
     `task-description`, `task-acceptance`, `task-save`,
     `task-save-another`, `task-cancel`
-  - `rail-search` (the always-visible launcher trigger). The launcher
+  - `title-bar-search` (the always-visible launcher trigger, in the
+    title bar). The launcher
     overlay is `QuickOpenOverlay`; the old `command-palette-input`
     testid is gone (the command palette was removed).
   - `plan-pane` (the keydown-listening wrapper — focus this before
@@ -664,7 +665,7 @@ declaring *what it is* and mounting the generic layer.
     stable aliases `undo-toast`, `undo-toast-undo`, and
     `undo-toast-dismiss` (no id suffix) so probes can target "the
     toast that just appeared" without chasing the random toast id.
-  - To open a page in a test, drive the launcher: click `rail-search`
+  - To open a page in a test, drive the launcher: click `title-bar-search`
     (or open it via Cmd+P), type the page name into the overlay input,
     and Enter / click the result; assert via `page-<kind>` on the body
     (e.g. `page-git-history`, `page-local-history`, etc.). The old

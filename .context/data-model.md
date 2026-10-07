@@ -234,7 +234,7 @@ Each stream owns:
   branch, branchRef)`, which emits `stream.changed` (kind:
   `"branch-changed"`). The runtime drives it from two sites:
   `Services.checkoutStreamBranch(streamId, branch)` (user-triggered
-  via the `BranchPicker` in the `StatusBar`) and
+  via the `BranchPicker` in the `TitleBar`) and
   `maybeSyncStreamBranch(streamId)` (fired by every `git-refs.changed`
   event so external `git checkout` in a worktree is picked up live).
   Git-level errors (dirty tree, missing branch, branch already checked

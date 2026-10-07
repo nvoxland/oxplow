@@ -327,11 +327,27 @@ The next structural change is not an IA change but a scope change:
 analytics pages move out of core into the `oxplow-bundled` extension as
 `lens:<slug>` pages mounted through slots ([extensions.md](./extensions.md)).
 
+## The title bar
+
+`components/TitleBar.tsx` spans the top of the window, over both the left
+nav and the content (decided 2026-10-07): where you are — `stream ›
+thread` and the stream's branch (`BranchPicker`) — and the global search
+field, centered. The stream name opens the navigator panel
+(`navigator-bus.ts`, `requestNavigatorOpen`), the thread name its settings
+page, the branch the branch picker. On macOS it *is* the window's top (an
+Overlay titlebar): its start leaves 78 px for the floating traffic lights,
+and its empty space carries `data-tauri-drag-region` (Tauri drags only from
+elements that carry it, so the controls stay clickable). Elsewhere it sits
+under the menu bar. The bottom bar keeps only the alerts bell and the
+background-task indicator (`StatusBar.tsx`). Testids: `title-bar`,
+`title-bar-stream`, `title-bar-thread`, `title-bar-search`.
+
 ## One Search — the single discovery surface
 
 There is exactly **one** way to discover and reach pages: the launcher
 (`QuickOpenOverlay`). It is opened by **Cmd+P** (the `file.quickOpen`
-menu command) and the rail **Search…** button (`rail-search`). Cmd+K and
+menu command) and the title bar's **Search…** field (`title-bar-search`,
+`SEARCH_TRIGGER_TESTID`; the overlay opens over it). Cmd+K and
 Cmd+Shift+F are kept only as **aliases** that open the same launcher, so
 the old command-palette / find-in-files reflexes still land somewhere
 useful — there is no separate command palette or search overlay anymore
@@ -379,7 +395,7 @@ approach (tsk147).
 
 The rail no longer has a "Pages" section (the `rail-page-*` / `rail-pages`
 testids are gone); Go To's bookmarks are the always-visible curated nav. E2e
-probes that used to click `rail-page-*` should drive `rail-search` → the
+probes that used to click `rail-page-*` should drive `title-bar-search` → the
 launcher (type, then assert `page-<kind>` on the body).
 
 **Work pages split (post-Phase-3).** The single `AllWorkPage` was
