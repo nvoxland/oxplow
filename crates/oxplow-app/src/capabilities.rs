@@ -24,8 +24,13 @@
 use std::sync::RwLock;
 
 use oxplow_config::OxplowConfig;
-use oxplow_db::{CapabilityProvider, SqliteCapabilityStore};
+use oxplow_db::capability_store::{list_tx, reset_tx};
+use oxplow_db::CapabilityProvider;
+pub use oxplow_domain::capability::ChosenBy;
 use oxplow_domain::capability::{self, NONE};
+use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV1, EventType as _};
+use oxplow_domain::events::Envelope;
+use oxplow_domain::vocabulary::VocabularyHandle;
 use oxplow_domain::DomainError;
 use serde_json::Value;
 
@@ -38,18 +43,24 @@ pub const BUILT_INS: &[BuiltIn] = &[
         capability: "work_items",
         title: "oxplow's tasks",
         features: &["hierarchy", "comments", "links", "delete"],
+        commands: &["work_item.reorder", "work_item.move"],
+        tools: &["list_tasks", "get_task", "read_task_options"],
     },
     BuiltIn {
         entry: "oxplow:commit-or-switch",
         capability: "effort_policy",
         title: "A commit lands it, or the task switches",
         features: &[],
+        commands: &[],
+        tools: &[],
     },
     BuiltIn {
         entry: "oxplow:snapshots",
         capability: "snapshots",
         title: "Keep every version",
         features: &["contents"],
+        commands: &[],
+        tools: &[],
     },
 ];
 
@@ -61,6 +72,21 @@ pub struct BuiltIn {
     pub title: &'static str,
     /// The features it has — core's to say, since it's core's code.
     pub features: &'static [&'static str],
+    /// The commands only it offers (its own agent surface): offered
+    /// while it's the active implementation, hidden otherwise.
+    pub commands: &'static [&'static str],
+    /// Likewise, the MCP tools only it offers.
+    pub tools: &'static [&'static str],
+}
+
+/// A built-in's features, as an implementation declares them.
+fn built_in_features(b: &BuiltIn) -> Value {
+    Value::Object(
+        b.features
+            .iter()
+            .map(|f| (f.to_string(), Value::Bool(true)))
+            .collect(),
+    )
 }
 
 /// The built-in `entry` names, if core has it.
@@ -107,6 +133,21 @@ pub struct Implementation {
 }
 
 impl Implementation {
+    /// What only it offers: a built-in's declared commands and tools; a
+    /// provider instance's command namespace (`<id>.*`).
+    fn surface(&self) -> (Vec<String>, Vec<String>) {
+        match &self.source {
+            Source::BuiltIn(entry) => built_in(entry).map_or_else(Default::default, |b| {
+                (
+                    b.commands.iter().map(|c| c.to_string()).collect(),
+                    b.tools.iter().map(|t| t.to_string()).collect(),
+                )
+            }),
+            Source::External => (vec![format!("{}.*", self.id)], Vec::new()),
+            Source::Core | Source::None => Default::default(),
+        }
+    }
+
     /// The "nothing implements it" of an optional capability.
     pub fn none(capability: &str) -> Self {
         Self {
@@ -120,31 +161,6 @@ impl Implementation {
     }
 }
 
-/// Why the active implementation is the one it is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChosenBy {
-    /// The person's own layer.
-    Personal,
-    /// The project's `activeProviders`.
-    Project,
-    /// Nothing chose: the capability's default.
-    Default,
-    /// The choice isn't available (its extension is disabled, its
-    /// instance stopped, its id unknown).
-    Fallback,
-}
-
-impl ChosenBy {
-    fn as_str(self) -> &'static str {
-        match self {
-            ChosenBy::Personal => "personal",
-            ChosenBy::Project => "project",
-            ChosenBy::Default => "default",
-            ChosenBy::Fallback => "fallback",
-        }
-    }
-}
-
 /// A capability's active implementation and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
@@ -154,19 +170,131 @@ pub struct Resolved {
     pub wanted: Option<String>,
 }
 
+/// What's active, per capability: its implementation and features — what
+/// a declared need is checked against (a lens, an advisory).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Active {
+    by_capability: std::collections::BTreeMap<String, (String, Vec<String>)>,
+    /// What implementations that aren't active own, kept from offering:
+    /// command names (or `<namespace>.*`) and tool names.
+    hidden_commands: Vec<Hidden>,
+    hidden_tools: Vec<Hidden>,
+}
+
+/// A command or tool its owner, not being active, keeps from offering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Hidden {
+    pattern: String,
+    owner: String,
+    capability: String,
+}
+
+impl Hidden {
+    fn matches(&self, name: &str) -> bool {
+        match self.pattern.strip_suffix('*') {
+            Some(prefix) => name.starts_with(prefix),
+            None => self.pattern == name,
+        }
+    }
+
+    fn message(&self, name: &str) -> String {
+        let title =
+            capability::spec(&self.capability).map_or(self.capability.as_str(), |c| c.title);
+        format!(
+            "`{name}` is {}'s, which isn't the active {} (choose one in Settings → Pieces).",
+            self.owner,
+            title.to_lowercase()
+        )
+    }
+}
+
+impl Active {
+    /// Why `spec` isn't offered — its owner isn't active, or a need is
+    /// unmet — or `None` when it is.
+    pub fn refusal(&self, spec: &oxplow_domain::CommandSpec) -> Option<String> {
+        self.command_refusal(&spec.name, &spec.needs)
+    }
+
+    /// Why the command `name` needing `needs` isn't offered, or `None`.
+    pub fn command_refusal(&self, name: &str, needs: &[String]) -> Option<String> {
+        if let Some(h) = self.hidden_commands.iter().find(|h| h.matches(name)) {
+            return Some(h.message(name));
+        }
+        let unmet = self.unmet(needs);
+        (!unmet.is_empty()).then(|| needs_message(&unmet))
+    }
+
+    /// Why the MCP tool `name` isn't offered, or `None` when it is.
+    pub fn tool_refusal(&self, name: &str) -> Option<String> {
+        self.hidden_tools
+            .iter()
+            .find(|h| h.matches(name))
+            .map(|h| h.message(name))
+    }
+
+    pub fn offers_tool(&self, name: &str) -> bool {
+        self.tool_refusal(name).is_none()
+    }
+
+    /// The needs in `needs` it doesn't meet: a capability whose active
+    /// implementation is none, or a feature it doesn't have.
+    pub fn unmet(&self, needs: &[String]) -> Vec<String> {
+        needs
+            .iter()
+            .filter(|need| {
+                let (id, feature) = match need.split_once('.') {
+                    Some((id, f)) => (id, Some(f)),
+                    None => (need.as_str(), None),
+                };
+                match self.by_capability.get(id) {
+                    None => true,
+                    Some((active, _)) if active == NONE => true,
+                    Some((_, features)) => {
+                        feature.is_some_and(|f| !features.iter().any(|x| x == f))
+                    }
+                }
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+/// What a person reads when `unmet` needs keep something from showing.
+pub fn needs_message(unmet: &[String]) -> String {
+    let named: Vec<String> = unmet
+        .iter()
+        .map(|need| {
+            let (id, feature) = match need.split_once('.') {
+                Some((id, f)) => (id, Some(f)),
+                None => (need.as_str(), None),
+            };
+            let title = capability::spec(id).map_or(id, |c| c.title);
+            match feature {
+                Some(f) => format!("{title} with {f}"),
+                None => title.to_string(),
+            }
+        })
+        .collect();
+    format!(
+        "Needs: {} (choose one in Settings → Pieces).",
+        named.join(", ")
+    )
+}
+
 /// Every implementation oxplow has now: core's, the ones extensions
 /// declare, and running provider instances'.
-#[derive(Default)]
 pub struct CapabilityRegistry {
     core: RwLock<Vec<Implementation>>,
     declared: RwLock<Vec<Implementation>>,
     external: RwLock<Vec<Implementation>>,
+    /// What `capability.switched` is validated against.
+    vocabulary: VocabularyHandle,
 }
 
 impl CapabilityRegistry {
     /// A registry with core's fixed implementations (`vcs`, `knowledge`)
     /// and [`NONE`] for each optional capability.
-    pub fn new(fixed: Vec<Implementation>) -> Self {
+    pub fn new(fixed: Vec<Implementation>, vocabulary: VocabularyHandle) -> Self {
         let mut core = fixed;
         core.extend(
             capability::CAPABILITIES
@@ -174,9 +302,29 @@ impl CapabilityRegistry {
                 .filter(|c| c.optional)
                 .map(|c| Implementation::none(c.id)),
         );
+        // A required capability's default is core's own, always there —
+        // what it falls back to whatever is disabled.
+        core.extend(
+            capability::CAPABILITIES
+                .iter()
+                .filter(|c| c.choosable && !c.optional)
+                .filter_map(|c| {
+                    let b = BUILT_INS.iter().find(|b| b.capability == c.id)?;
+                    Some(Implementation {
+                        capability: c.id.into(),
+                        id: c.default.into(),
+                        title: b.title.into(),
+                        extension: None,
+                        source: Source::BuiltIn(b.entry),
+                        features: built_in_features(b),
+                    })
+                }),
+        );
         Self {
             core: RwLock::new(core),
-            ..Self::default()
+            declared: RwLock::default(),
+            external: RwLock::default(),
+            vocabulary,
         }
     }
 
@@ -268,6 +416,78 @@ impl CapabilityRegistry {
         }
     }
 
+    /// What's active under `config`, for checking needs.
+    pub fn snapshot(&self, config: &OxplowConfig) -> Active {
+        let mut by_capability = std::collections::BTreeMap::new();
+        for spec in capability::CAPABILITIES {
+            let id = self.active(config, spec.id);
+            let features = self
+                .get(spec.id, &id)
+                .and_then(|i| i.features.as_object().cloned())
+                .map(|m| {
+                    m.into_iter()
+                        .filter(|(_, v)| v.as_bool() == Some(true))
+                        .map(|(k, _)| k)
+                        .collect()
+                })
+                .unwrap_or_default();
+            by_capability.insert(spec.id.to_string(), (id, features));
+        }
+        // What each implementation owns, kept from offering unless it's
+        // the active one: every built-in's (declared or not — the bundled
+        // extension off is the same as another one chosen) and every
+        // running instance's.
+        let mut owners: Vec<(Implementation, bool)> = BUILT_INS
+            .iter()
+            .map(|b| Implementation {
+                capability: b.capability.into(),
+                id: b.entry.into(),
+                title: b.title.into(),
+                extension: None,
+                source: Source::BuiltIn(b.entry),
+                features: Value::Null,
+            })
+            .map(|i| {
+                let active = by_capability
+                    .get(&i.capability)
+                    .and_then(|(id, _)| self.get(&i.capability, id))
+                    .is_some_and(|a| a.source == i.source);
+                (i, active)
+            })
+            .collect();
+        owners.extend(
+            self.external
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .map(|i| {
+                    (
+                        i.clone(),
+                        by_capability
+                            .get(&i.capability)
+                            .is_some_and(|(a, _)| a == &i.id),
+                    )
+                }),
+        );
+        let mut hidden_commands = Vec::new();
+        let mut hidden_tools = Vec::new();
+        for (owner, _) in owners.iter().filter(|(_, active)| !active) {
+            let (commands, tools) = owner.surface();
+            let hide = |pattern: String| Hidden {
+                pattern,
+                owner: owner.title.clone(),
+                capability: owner.capability.clone(),
+            };
+            hidden_commands.extend(commands.into_iter().map(hide));
+            hidden_tools.extend(tools.into_iter().map(hide));
+        }
+        Active {
+            by_capability,
+            hidden_commands,
+            hidden_tools,
+        }
+    }
+
     /// `capability`'s active implementation id under `config`.
     pub fn active(&self, config: &OxplowConfig, capability: &str) -> String {
         self.resolve(config, capability).id
@@ -275,7 +495,11 @@ impl CapabilityRegistry {
 
     /// Restate `v_capability_provider` from what the registry holds: every
     /// implementation, the active one marked with why, and a choice that
-    /// isn't available as its own row (`available = 0`).
+    /// isn't available as its own row (`available = 0`). A capability whose
+    /// active implementation differs from the one the rows had logs
+    /// `capability.switched@1`, in the same transaction — so a change is
+    /// logged once, across restarts too; the very first statement, with
+    /// nothing active before, logs nothing.
     pub async fn publish(
         &self,
         config: &OxplowConfig,
@@ -283,6 +507,7 @@ impl CapabilityRegistry {
     ) -> Result<(), DomainError> {
         let all = self.implementations();
         let mut rows: Vec<CapabilityProvider> = Vec::new();
+        let mut now = Vec::new();
         for spec in capability::CAPABILITIES {
             let resolved = self.resolve(config, spec.id);
             for i in all.iter().filter(|i| i.capability == spec.id) {
@@ -297,6 +522,9 @@ impl CapabilityRegistry {
                     source: i.source.as_str().into(),
                     available: true,
                     chosen_by: active.then(|| resolved.chosen_by.as_str().to_string()),
+                    capability_title: spec.title.into(),
+                    choosable: spec.choosable,
+                    optional: spec.optional,
                 });
             }
             if let Some(wanted) = &resolved.wanted {
@@ -314,12 +542,51 @@ impl CapabilityRegistry {
                         source: "unknown".into(),
                         available: false,
                         chosen_by: None,
+                        capability_title: spec.title.into(),
+                        choosable: spec.choosable,
+                        optional: spec.optional,
                     });
                 }
             }
+            now.push((spec.id, resolved));
         }
-        SqliteCapabilityStore::new(db.clone()).reset(rows).await
+        let vocabulary = self.vocabulary.current();
+        db.transaction(move |tx| {
+            let before = list_tx(tx)?;
+            reset_tx(tx, &rows)?;
+            for switch in switches(&before, &now) {
+                let envelope = Envelope::new(
+                    CapabilitySwitched::TYPE,
+                    CapabilitySwitched::V,
+                    "system",
+                    serde_json::to_value(&switch)
+                        .map_err(|e| DomainError::Invalid(format!("capability.switched: {e}")))?,
+                )?;
+                oxplow_db::event_log_store::append_tx(tx, &vocabulary, &envelope)?;
+            }
+            Ok(())
+        })
+        .await
     }
+}
+
+/// The capabilities whose active implementation in `before` (the rows as
+/// they were) isn't the one `now` resolves; one with no active row before
+/// (the first statement) isn't a switch.
+fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<CapabilitySwitchedV1> {
+    now.iter()
+        .filter_map(|(capability, resolved)| {
+            let from = before
+                .iter()
+                .find(|r| r.active && r.capability == *capability)?;
+            (from.provider != resolved.id).then(|| CapabilitySwitchedV1 {
+                capability: capability.to_string(),
+                from: from.provider.clone(),
+                to: resolved.id.clone(),
+                chosen_by: resolved.chosen_by,
+            })
+        })
+        .collect()
 }
 
 /// The implementations `extensions` declare, as the registry holds them.
@@ -336,16 +603,110 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
                     title: d.title.clone().unwrap_or_else(|| b.title.to_string()),
                     extension: Some(e.name.clone()),
                     source: Source::BuiltIn(b.entry),
-                    features: Value::Object(
-                        b.features
-                            .iter()
-                            .map(|f| (f.to_string(), Value::Bool(true)))
-                            .collect(),
-                    ),
+                    features: built_in_features(b),
                 })
             })
         })
         .collect()
+}
+
+/// Every skill and slash command the agent gets now: core's, and each
+/// consented extension's that's offered — what it needs is active, and,
+/// when an implementation lists it, that implementation is the active one.
+/// A name another extension already took is left out (logged).
+pub fn agent_text(svc: &crate::Services) -> oxplow_plugin::AgentText {
+    let project_dir = svc.worktrees.project_dir();
+    let extensions =
+        crate::advisories::consented(&svc.approvals, &svc.extension_catalog.get(project_dir));
+    let config = crate::config_service::read_config(&svc.config);
+    offered_text(&svc.capabilities, &config, &extensions, |ext, file| {
+        crate::extensions::read_extension_file(project_dir, ext, file)
+    })
+}
+
+/// Rewrite the skills and commands of the agent runtimes already on disk
+/// to what's offered now: at boot (an agent that outlived an upgrade,
+/// tsk376), when the extensions change, and on a switch.
+pub fn refresh_agent_text(svc: &crate::Services) {
+    if let Err(error) = oxplow_plugin::refresh_skills(&svc.layout.project_dir, &agent_text(svc)) {
+        tracing::warn!(%error, "refreshing the agent's skills failed");
+    }
+}
+
+/// [`refresh_agent_text`] on each `capability.switched`.
+pub struct AgentTextRefresh {
+    services: std::sync::Weak<crate::Services>,
+}
+
+/// Register [`AgentTextRefresh`] on `svc`'s pump (boot, before it spawns).
+pub fn register(svc: &std::sync::Arc<crate::Services>) {
+    svc.event_pump
+        .register_async(std::sync::Arc::new(AgentTextRefresh {
+            services: std::sync::Arc::downgrade(svc),
+        }));
+}
+
+#[async_trait::async_trait]
+impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
+    fn name(&self) -> &'static str {
+        "capabilities.agent_text"
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == CapabilitySwitched::TYPE
+    }
+
+    async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
+        if let Some(svc) = self.services.upgrade() {
+            refresh_agent_text(&svc);
+        }
+        Ok(())
+    }
+}
+
+/// [`agent_text`] over `extensions`, reading each file with `read`.
+pub fn offered_text(
+    registry: &CapabilityRegistry,
+    config: &OxplowConfig,
+    extensions: &[crate::extensions::Extension],
+    read: impl Fn(&str, &str) -> Option<String>,
+) -> oxplow_plugin::AgentText {
+    use crate::extensions::skills::SkillKind;
+    let active = registry.snapshot(config);
+    let mut text = oxplow_plugin::AgentText::core();
+    for ext in extensions.iter().filter(|e| e.enabled) {
+        for skill in &ext.skills {
+            let owner = ext
+                .implementations
+                .iter()
+                .find(|d| d.skills.contains(&skill.name));
+            let owner_active = owner.is_none_or(|d| {
+                registry.active(config, &d.capability) == d.id
+                    && registry
+                        .get(&d.capability, &d.id)
+                        .is_some_and(|i| i.extension.as_deref() == Some(ext.name.as_str()))
+            });
+            if !owner_active || !active.unmet(&skill.needs).is_empty() {
+                continue;
+            }
+            if text.names(&skill.name) {
+                tracing::warn!(extension = %ext.name, skill = %skill.name, "another extension's skill has this name; leaving it out");
+                continue;
+            }
+            let Some(body) = read(&ext.name, &skill.file) else {
+                continue;
+            };
+            let item = oxplow_plugin::Text {
+                name: skill.name.clone(),
+                body,
+            };
+            match skill.kind {
+                SkillKind::Skill => text.skills.push(item),
+                SkillKind::Command => text.commands.push(item),
+            }
+        }
+    }
+    text
 }
 
 /// Restate the registry's declared implementations from the project's
@@ -373,12 +734,11 @@ mod tests {
     }
 
     fn registry(declared: bool) -> CapabilityRegistry {
-        let r = CapabilityRegistry::new(Vec::new());
+        let r = CapabilityRegistry::new(Vec::new(), VocabularyHandle::core());
         if declared {
             r.set_declared(vec![
                 builtin("work_items", "oxplow", "oxplow:tasks"),
                 builtin("effort_policy", "oxplow", "oxplow:commit-or-switch"),
-                builtin("snapshots", "oxplow", "oxplow:snapshots"),
             ]);
         }
         r
@@ -445,6 +805,11 @@ mod tests {
         let snapshots = disabled.resolve(&none, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
+            ("oxplow", ChosenBy::Default)
+        );
+        let hashes = disabled.resolve(&config(&[("snapshots", "hashes")], &[]), "snapshots");
+        assert_eq!(
+            (hashes.id.as_str(), hashes.chosen_by),
             ("oxplow", ChosenBy::Fallback)
         );
         assert_eq!(disabled.active(&none, "vcs"), "git");
@@ -488,9 +853,10 @@ mod tests {
         assert_eq!(declared, on);
     }
 
-    /// With `oxplow-bundled` disabled, nothing declares the defaults: the
-    /// work list and the effort policy fall to none, snapshots to core's
-    /// default — and filing says no work list is active.
+    /// With `oxplow-bundled` disabled, nothing declares the optional
+    /// defaults: the work list and the effort policy fall to none, while
+    /// snapshots — required — keep core's own default, published as the
+    /// active row; filing says what it needs.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -510,7 +876,21 @@ mod tests {
         let snapshots = svc.capabilities.resolve(&config, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
-            ("oxplow", ChosenBy::Fallback)
+            ("oxplow", ChosenBy::Default)
+        );
+        let rows = svc
+            .sql
+            .query_sql(
+                "SELECT provider, active, available, source FROM v_capability_provider
+                  WHERE capability = 'snapshots'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&rows.rows).unwrap(),
+            serde_json::json!([["oxplow", 1, 1, "builtin"]])
         );
         let err = svc
             .commands
@@ -522,10 +902,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(
-            format!("{err:?}").contains("no work list is active"),
-            "{err:?}"
-        );
+        assert!(format!("{err:?}").contains("Needs: Work list"), "{err:?}");
     }
 
     /// The rows say which is active and why, and a choice that isn't
@@ -556,5 +933,221 @@ mod tests {
                 ["work_items", "oxplow", 0, null, 1],
             ])
         );
+    }
+
+    /// A change of what's active is logged once, as
+    /// `capability.switched`: not the first statement, nor an unchanged
+    /// one.
+    #[tokio::test]
+    async fn a_change_of_the_active_one_is_logged() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let default = config(&[], &[]);
+        let off = config(&[("effort_policy", "none")], &[]);
+        for c in [&default, &default, &off, &off] {
+            svc.capabilities.publish(c, &svc.db).await.unwrap();
+        }
+        let switches: Vec<String> = svc
+            .db
+            .read(|tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT payload FROM event_log WHERE type = 'capability.switched'
+                          ORDER BY seq",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let switches: Vec<Value> = switches
+            .iter()
+            .map(|p| serde_json::from_str(p).unwrap())
+            .collect();
+        assert_eq!(
+            switches,
+            vec![serde_json::json!({
+                "capability": "effort_policy",
+                "from": "oxplow",
+                "to": "none",
+                "chosen_by": "project",
+            })]
+        );
+    }
+
+    /// The agent is offered what's active: with no work list, no
+    /// `work_item.*` and none of oxplow's tasks' own, and running one says
+    /// what it needs; efforts stay.
+    #[tokio::test]
+    async fn only_what_is_active_is_offered() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let agent = oxplow_domain::Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let names = || {
+            let mut n: Vec<String> = svc
+                .commands
+                .list(&agent)
+                .into_iter()
+                .map(|c| c.name)
+                .collect();
+            n.sort();
+            n
+        };
+        let offered = names();
+        for name in [
+            "work_item.create",
+            "work_item.comment",
+            "work_item.reorder",
+            "effort.open",
+        ] {
+            assert!(
+                offered.iter().any(|n| n == name),
+                "{name} offered by default"
+            );
+        }
+        svc.config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), NONE.into());
+        let offered = names();
+        for name in [
+            "work_item.create",
+            "work_item.transition",
+            "work_item.comment",
+            "work_item.reorder",
+        ] {
+            assert!(
+                !offered.iter().any(|n| n == name),
+                "{name} hidden without a work list"
+            );
+        }
+        assert!(offered.iter().any(|n| n == "effort.open"));
+        let err = svc
+            .commands
+            .run(
+                &agent,
+                crate::commands::work_item::NAME,
+                serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(format!("{err}").contains("Needs: Work list"), "{err}");
+    }
+
+    /// A feature the active work list doesn't declare hides what needs it.
+    #[tokio::test]
+    async fn a_missing_feature_hides_what_needs_it() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        svc.capabilities.set_external(
+            Implementation {
+                capability: "work_items".into(),
+                id: "plain".into(),
+                title: "plain".into(),
+                extension: Some("tracker".into()),
+                source: Source::External,
+                features: serde_json::json!({ "comments": false, "links": true }),
+            },
+            true,
+        );
+        svc.config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert("work_items".into(), "plain".into());
+        let offered: Vec<String> = svc
+            .commands
+            .list(&oxplow_domain::Actor::Human)
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert!(offered.iter().any(|n| n == "work_item.link"));
+        assert!(!offered.iter().any(|n| n == "work_item.comment"));
+        assert!(
+            !offered.iter().any(|n| n == "work_item.reorder"),
+            "oxplow's tasks' own"
+        );
+    }
+
+    /// The tools oxplow's tasks own are offered only while they're the
+    /// work list.
+    #[test]
+    fn owned_tools_follow_the_active_list() {
+        let r = registry(true);
+        assert!(r.snapshot(&config(&[], &[])).offers_tool("list_tasks"));
+        assert!(r.snapshot(&config(&[], &[])).offers_tool("query_sql"));
+        let none = r.snapshot(&config(&[("work_items", "none")], &[]));
+        assert!(!none.offers_tool("list_tasks"));
+        assert!(none.offers_tool("query_sql"));
+        // Undeclared (the bundled extension off), it isn't offered either.
+        let bare = registry(false).snapshot(&config(&[], &[]));
+        assert!(!bare.offers_tool("get_task"));
+    }
+
+    /// A provider instance's own commands are offered only while it's the
+    /// active implementation.
+    #[test]
+    fn an_instance_namespace_follows_the_active_list() {
+        let r = registry(true);
+        r.set_external(
+            Implementation {
+                capability: "work_items".into(),
+                id: "fake".into(),
+                title: "Fake".into(),
+                extension: Some("tracker".into()),
+                source: Source::External,
+                features: Value::Null,
+            },
+            true,
+        );
+        let default = r.snapshot(&config(&[], &[]));
+        assert!(default
+            .command_refusal("fake.sync_now", &[])
+            .is_some_and(|m| m.contains("Fake's")));
+        assert_eq!(default.command_refusal("work_item.reorder", &[]), None);
+        let fake = r.snapshot(&config(&[("work_items", "fake")], &[]));
+        assert_eq!(fake.command_refusal("fake.sync_now", &[]), None);
+        assert!(fake.command_refusal("work_item.reorder", &[]).is_some());
+    }
+
+    /// A runtime already on disk gets what's offered (boot refreshes it
+    /// for an agent that outlived an upgrade, tsk376): core's skills, and
+    /// the work list's while one is active — none takes them away.
+    #[tokio::test]
+    async fn the_runtimes_skills_follow_what_is_offered() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let plugin = svc.layout.project_dir.join(".oxplow/runtime/claude-plugin");
+        let (skills, commands) = (plugin.join("skills"), plugin.join("commands"));
+        std::fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
+        std::fs::create_dir_all(&commands).unwrap();
+        std::fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
+        refresh_agent_text(svc);
+        assert_eq!(
+            std::fs::read_to_string(skills.join("oxplow-extension/SKILL.md")).unwrap(),
+            oxplow_plugin::AgentText::core()
+                .skill_body("oxplow-extension")
+                .unwrap()
+        );
+        assert!(skills.join("work-items/SKILL.md").is_file());
+        assert!(commands.join("work-next.md").is_file());
+        svc.config
+            .write()
+            .unwrap()
+            .personal_active_providers
+            .insert("work_items".into(), NONE.into());
+        refresh_agent_text(svc);
+        assert!(!skills.join("work-items").exists());
+        assert!(!commands.join("work-next.md").exists());
+        assert!(commands.join("configure.md").is_file());
     }
 }

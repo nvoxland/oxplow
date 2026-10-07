@@ -32,7 +32,9 @@ or exact mechanics.
   what it observes (`.context/work-tracking.md`); there's nothing to
   file before editing. File a task when it helps the person follow the
   work: a multi-step plan, or a follow-up spotted along the way (as
-  `ready`).
+  `ready`). With the work list none (the bundled extension disabled
+  locally), use `cargo run -q -p oxplow-dev -- task …` instead
+  (`.context/working-in-this-repo.md` "oxplow-dev").
 - **Asking the user a question.** When your reply needs the user's
   answer, end it with the question itself: a final message that ends in
   a question shows the thread as waiting on them.

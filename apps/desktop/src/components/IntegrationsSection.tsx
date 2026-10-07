@@ -1,7 +1,6 @@
-/// "Integrations" section body for SettingsPage (P5.D4): which provider
-/// the project's work items are filed on (P7.A2: `activeProviders`,
-/// written with `config.set` as the person), then each extension
-/// provider's instance on this machine — its state, its config (a form
+/// "Integrations" section body for SettingsPage (P5.D4): each extension
+/// provider's instance on this machine (which one the project's work
+/// items go to is chosen under Settings → Pieces) — its state, its config (a form
 /// from the provider's `config_schema`, P6.B2), Check, and Enable /
 /// Disable. Between the two, the core components an extension replaces
 /// (P9.A1), each with a switch back to oxplow's own (`replacementsOff`).
@@ -44,7 +43,6 @@ import { readsOf, useRerunOnChange } from "../lens/lensRerun.js";
 import { CredentialRow } from "./ExtensionsSection.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import {
-  activeProviderProblem,
   canRemoveInstance,
   canTurnOffHere,
   collectorLine,
@@ -52,7 +50,6 @@ import {
   newInstanceProblem,
   providerPrograms,
   signInLine,
-  workItemsChoices,
 } from "./integrationsModel.js";
 import { SchemaForm } from "./SchemaForm/SchemaForm.js";
 import { recordOpError } from "./opErrorsStore.js";
@@ -60,8 +57,6 @@ import { showToast } from "./toastStore.js";
 
 export function IntegrationsSection() {
   const [views, setViews] = useState<ProviderInstanceView[] | null>(null);
-  // `activeProviders` as set: one choice per capability.
-  const [chosen, setChosen] = useState<Record<string, string>>({});
   const [replaced, setReplaced] = useState<UiReplacement[]>([]);
   const [off, setOff] = useState<string[]>([]);
 
@@ -76,10 +71,6 @@ export function IntegrationsSection() {
       setReplaced(extensions.filter((e) => e.enabled).flatMap((e) => e.ui.replacements));
       const turnedOff = settings.find((s) => s.key === "replacementsOff")?.value;
       setOff(Array.isArray(turnedOff) ? turnedOff.map(String) : []);
-      const set = settings.find((s) => s.key === "activeProviders")?.value as Record<string, unknown> | null;
-      setChosen(
-        Object.fromEntries(Object.entries(set ?? {}).filter((e): e is [string, string] => typeof e[1] === "string")),
-      );
     } catch (e) {
       recordOpError({ label: "List integrations", message: String(e) });
       setViews([]);
@@ -112,70 +103,12 @@ export function IntegrationsSection() {
   }
   return (
     <div data-testid="integrations-section">
-      <ActiveWorkItems views={views} chosen={chosen} onChosen={setChosen} />
       <Replacements replaced={replaced} off={off} onChanged={setOff} />
       {views.map((v) => (
         <IntegrationRow key={v.instance} view={v} onChanged={setViews} onCredentialChanged={() => void refresh()} />
       ))}
       <AddInstance views={views} onChanged={setViews} />
     </div>
-  );
-}
-
-/** Which provider new work items are filed on: a person's choice
- *  (`activeProviders` is a person-only key), so the click is the
- *  confirmation `config.set` asks for. Only `work_items` changes; the
- *  other capabilities' choices stay. */
-function ActiveWorkItems({
-  views,
-  chosen,
-  onChosen,
-}: {
-  views: ProviderInstanceView[];
-  chosen: Record<string, string>;
-  onChosen(chosen: Record<string, string>): void;
-}) {
-  const choices = workItemsChoices(views);
-  if (choices.length < 2) return null;
-  const active = chosen.work_items ?? "oxplow";
-  const problem = activeProviderProblem(choices, active);
-  async function choose(provider: string) {
-    const { work_items: _, ...others } = chosen;
-    const next = provider === "oxplow" ? others : { ...others, work_items: provider };
-    try {
-      if (Object.keys(next).length === 0) {
-        await runCommand("config.unset", { key: "activeProviders" }, true);
-      } else {
-        await runCommand("config.set", { key: "activeProviders", value: next }, true);
-      }
-      onChosen(next);
-      showToast({ message: `New work items are filed on ${provider}.` });
-    } catch (e) {
-      recordOpError({ label: "Choose where work items are filed", message: e instanceof Error ? e.message : String(e) });
-    }
-  }
-  return (
-    <fieldset data-testid="integrations-active-work-items" style={fieldsetStyle}>
-      <legend style={mutedStyle}>Active for work items — new items are filed here</legend>
-      {choices.map((c) => (
-        <label key={c.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input
-            type="radio"
-            name="active-work-items"
-            data-testid={`integrations-active-${c.id}`}
-            checked={active === c.id}
-            onChange={() => void choose(c.id)}
-          />
-          {c.label}
-          {c.running ? null : <span style={mutedStyle}>· not running</span>}
-        </label>
-      ))}
-      {problem ? (
-        <div style={errorStyle} data-testid="integrations-active-problem">
-          {problem}
-        </div>
-      ) : null}
-    </fieldset>
   );
 }
 

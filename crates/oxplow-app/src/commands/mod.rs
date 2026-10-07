@@ -479,6 +479,12 @@ pub struct CommandBus {
     pump: Arc<EventPump>,
     commands: RwLock<Registry>,
     write_gate: Option<WriteGate>,
+    /// What's active, for what a command needs or which implementation
+    /// owns it (`capabilities::Active::refusal`); `None` offers everything.
+    capabilities: Option<(
+        Arc<crate::capabilities::CapabilityRegistry>,
+        Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
+    )>,
 }
 
 impl CommandBus {
@@ -497,7 +503,26 @@ impl CommandBus {
             pump,
             commands: RwLock::new(Registry::default()),
             write_gate: None,
+            capabilities: None,
         }
+    }
+
+    /// Offer and run a command only while what it needs is active and,
+    /// when an implementation owns it, while that one is the active one.
+    pub fn with_capabilities(
+        mut self,
+        registry: Arc<crate::capabilities::CapabilityRegistry>,
+        config: Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
+    ) -> Self {
+        self.capabilities = Some((registry, config));
+        self
+    }
+
+    /// What's active now, when the bus knows.
+    fn active(&self) -> Option<crate::capabilities::Active> {
+        self.capabilities.as_ref().map(|(registry, config)| {
+            registry.snapshot(&crate::config_service::read_config(config))
+        })
     }
 
     /// Consult `gate` before an agent thread runs a `Write` command: a
@@ -602,13 +627,15 @@ impl CommandBus {
         &self.proposals
     }
 
-    /// The specs `actor` may invoke, by name.
+    /// The specs `actor` may invoke and that are offered now, by name.
     pub fn list(&self, actor: &Actor) -> Vec<CommandSpec> {
+        let active = self.active();
         self.commands
             .read()
             .commands
             .values()
             .filter(|c| c.spec.invokers.allows(actor.invoker()))
+            .filter(|c| active.as_ref().is_none_or(|a| a.refusal(&c.spec).is_none()))
             .map(|c| c.spec.clone())
             .collect()
     }
@@ -747,6 +774,18 @@ impl CommandBus {
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
         let spec = &command.spec;
+
+        // 0. It must be offered: what it needs is active, and so is the
+        // implementation that owns it.
+        if let Some(message) = self.active().and_then(|a| a.refusal(spec)) {
+            let err = CommandError::Invalid {
+                field: None,
+                message,
+            };
+            self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
+                .await;
+            return Err(err);
+        }
 
         // 1. The input must match the schema — and, for a `Dispatch`
         // command, name a route.
@@ -2093,6 +2132,7 @@ mod tests {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Write,
+            needs: Vec::new(),
         }
     }
 
@@ -3152,6 +3192,7 @@ mod tests {
             lifecycle: oxplow_domain::Lifecycle::Experimental,
             atomicity: oxplow_domain::Atomicity::Dispatch,
             effect: oxplow_domain::CommandEffect::Write,
+            needs: Vec::new(),
         };
         let compose: Arc<Composer> = Arc::new(|_conn, input: &Value| {
             Ok(Composition {

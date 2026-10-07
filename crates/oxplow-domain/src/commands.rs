@@ -124,6 +124,10 @@ pub struct CommandSpec {
     pub lifecycle: Lifecycle,
     pub atomicity: Atomicity,
     pub effect: CommandEffect,
+    /// The capabilities (or their features: `work_items.comments`) it
+    /// needs active; unmet, it isn't offered and doesn't run
+    /// (`.context/commands.md`).
+    pub needs: Vec<String>,
 }
 
 impl CommandSpec {

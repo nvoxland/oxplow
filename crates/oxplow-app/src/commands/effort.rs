@@ -24,6 +24,9 @@ use oxplow_db::effort_store::{
     finish_tx, link_tx, open_for_thread_tx, retitle_tx, start_tx, ClosedBy, EffortEnd, EffortStart,
 };
 use oxplow_domain::refs::build::validate_work_item_ref;
+use oxplow_domain::work_items::WorkItemsRegistry;
+
+use super::work_item::with_loose_refs;
 use oxplow_domain::{
     Actor, Atomicity, CommandCall, CommandError, CommandSpec, Confirm, EffortId, Invokers,
     Lifecycle, StreamId, ThreadId, Timestamp,
@@ -123,6 +126,7 @@ fn spec(name: &str, summary: &str, schema: serde_json::Value, undoable: bool) ->
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
         effect: oxplow_domain::CommandEffect::Record,
+        needs: Vec::new(),
     }
 }
 
@@ -229,9 +233,9 @@ fn output(result: serde_json::Value, inverse: Option<CommandCall>) -> HandlerOut
     }
 }
 
-pub fn open_command() -> Command {
-    let handler = Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-        let input: EffortOpenInput = parse(input)?;
+pub fn open_command(work_items: WorkItemsRegistry) -> Command {
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: EffortOpenInput = parse(with_loose_refs(&work_items, input)?)?;
         if let Some(w) = &input.work_item {
             validate_work_item_ref(w).map_err(|e| invalid("/work_item", e.to_string()))?;
         }
@@ -342,9 +346,9 @@ pub fn close_command() -> Command {
     .expect("effort.close registers")
 }
 
-pub fn link_command() -> Command {
-    let handler = Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-        let input: EffortLinkInput = parse(input)?;
+pub fn link_command(work_items: WorkItemsRegistry) -> Command {
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: EffortLinkInput = parse(with_loose_refs(&work_items, input)?)?;
         if let Some(w) = &input.work_item {
             validate_work_item_ref(w).map_err(|e| invalid("/work_item", e.to_string()))?;
         }
@@ -396,12 +400,13 @@ pub fn update_command() -> Command {
     .expect("effort.update registers")
 }
 
-/// The effort commands, for the bus.
-pub fn commands() -> Vec<Command> {
+/// The effort commands, for the bus. A loose id in `work_item` is the
+/// active work list's (`work_item::with_loose_refs`).
+pub fn commands(work_items: WorkItemsRegistry) -> Vec<Command> {
     vec![
-        open_command(),
+        open_command(work_items.clone()),
         close_command(),
-        link_command(),
+        link_command(work_items),
         update_command(),
     ]
 }

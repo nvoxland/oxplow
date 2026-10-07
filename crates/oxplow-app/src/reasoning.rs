@@ -109,7 +109,7 @@ mod tests {
 
     #[tokio::test]
     async fn inferred_decisions_are_never_fed_back_to_the_agent() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let effort = f.effort.value();
         let d = |q: &str| oxplow_db::NewDecision {
             thread_id: f.thread.value(),

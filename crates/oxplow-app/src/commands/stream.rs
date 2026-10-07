@@ -174,6 +174,7 @@ fn person_external(
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::External,
         effect: CommandEffect::Write,
+        needs: Vec::new(),
     }
 }
 
@@ -193,6 +194,7 @@ fn row_spec(
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
         effect: CommandEffect::Record,
+        needs: Vec::new(),
     }
 }
 

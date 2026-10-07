@@ -21,6 +21,7 @@ pub mod decorators;
 pub mod implementations;
 pub mod manifest_v2;
 pub mod replacements;
+pub mod skills;
 pub mod ui_commands;
 use manifest_v2::{at, entry_line, key_line, line_under, ManifestV2};
 pub use manifest_v2::{
@@ -573,6 +574,10 @@ struct LensFile {
     actions: Vec<serde_yaml::Value>,
     #[serde(default)]
     alert: Option<AlertFile>,
+    /// Capabilities or features it needs (`work_items`,
+    /// `snapshots.contents`).
+    #[serde(default)]
+    needs: Vec<String>,
 }
 
 /// A button on a lens: a command it runs (P6.B1, target §11.4). The
@@ -826,6 +831,9 @@ pub struct Advisory {
     /// Line put above the messages (e.g. `# Metric deltas (this effort)`).
     pub heading: Option<String>,
     pub audience: AdvisoryAudience,
+    /// The capabilities (or features) it needs; without them it doesn't
+    /// run.
+    pub needs: Vec<String>,
 }
 
 /// An advisory as written in `extension.yaml`.
@@ -841,6 +849,8 @@ struct AdvisoryFile {
     heading: Option<String>,
     #[serde(default)]
     audience: AdvisoryAudience,
+    #[serde(default)]
+    needs: Vec<String>,
 }
 
 /// Places in core pages an extension can mount a lens, and the params each
@@ -1015,6 +1025,9 @@ pub struct Lens {
     pub actions: Vec<LensAction>,
     /// When the lens needs attention (its panel's badge).
     pub alert: Option<LensAlert>,
+    /// The capabilities (or their features) it needs (`needs:
+    /// [work_items]`): without them its run says so instead of running.
+    pub needs: Vec<String>,
     /// Repo-relative path of the lens file.
     pub path: String,
 }
@@ -1062,6 +1075,9 @@ pub struct Extension {
     /// The capability implementations it declares (stable:
     /// `implementations:`, each a built-in of core's).
     pub implementations: Vec<implementations::ImplementationDecl>,
+    /// Skills and slash commands it gives the coding agent (`skills:`;
+    /// valid ones — invalid ones are in `errors`).
+    pub skills: Vec<skills::SkillDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1146,6 +1162,19 @@ pub struct LensRun {
     /// What's worth knowing about its data: a view it read comes from a
     /// collector failures disabled (P7.C2), so it isn't being refreshed.
     pub warnings: Vec<String>,
+    /// Set when the lens needs a capability that isn't active: it didn't
+    /// run, and says what it needs instead of showing nothing.
+    pub inactive: Option<LensInactive>,
+}
+
+/// A lens that didn't run for want of a capability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LensInactive {
+    /// The needs that aren't met (`work_items`, `snapshots.contents`).
+    pub needs: Vec<String>,
+    /// What a person reads.
+    pub message: String,
 }
 
 /// Load bundled extensions plus every project extension under
@@ -1672,6 +1701,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         ref_kinds: Vec::new(),
         effects: Vec::new(),
         implementations: Vec::new(),
+        skills: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -1797,8 +1827,28 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.effects = effects;
             ext.errors.extend(errors);
         }
+        if let Some(v) = m.skills.as_ref() {
+            let (declared, errors) = skills::parse_skills(v, &file, &manifest, files);
+            ext.skills = declared;
+            ext.errors.extend(errors);
+        }
         if let Some(v) = m.implementations.as_ref() {
             let (declared, errors) = implementations::parse_implementations(v, &file, &manifest);
+            // An implementation owns the skills it lists: they must be its
+            // extension's.
+            for d in &declared {
+                for skill in d
+                    .skills
+                    .iter()
+                    .filter(|s| !ext.skills.iter().any(|k| &k.name == *s))
+                {
+                    ext.errors.push(at(
+                        &file,
+                        entry_line(&manifest, "implementations", "id", &d.id),
+                        format!("implementation `{}` lists skill `{skill}`, which `skills:` doesn't declare", d.id),
+                    ));
+                }
+            }
             ext.implementations = declared;
             ext.errors.extend(errors);
         }
@@ -1898,7 +1948,23 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 once_per: a.once_per,
                 heading: a.heading,
                 audience: a.audience,
+                needs: a.needs,
             }) {
+                Ok(a)
+                    if a.needs
+                        .iter()
+                        .any(|n| oxplow_domain::capability::check_need(n).is_err()) =>
+                {
+                    for need in &a.needs {
+                        if let Err(e) = oxplow_domain::capability::check_need(need) {
+                            ext.errors.push(at(
+                                &file,
+                                line_under(&manifest, "advisories", &a.id),
+                                format!("advisory {}: {e}", a.id),
+                            ));
+                        }
+                    }
+                }
                 Ok(a) if !is_advisory_id(&a.id) => ext.errors.push(at(
                     &file,
                     line_under(&manifest, "advisories", &a.id),
@@ -2048,6 +2114,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()))
             .and_then(|mut l| {
                 let alert = l.alert.take().map(AlertFile::into_alert).transpose()?;
+                for need in &l.needs {
+                    oxplow_domain::capability::check_need(need)?;
+                }
                 let actions =
                     parse_actions(std::mem::take(&mut l.actions), &l.params, l.group.is_some())?;
                 Ok((l, alert, actions))
@@ -2089,6 +2158,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 hidden: l.hidden,
                 actions,
                 alert,
+                needs: l.needs,
                 path: lens_rel,
             }),
             Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
@@ -2641,10 +2711,13 @@ pub fn find_lens(
 /// thread (numeric ids, as the `v_*` views use). A lens that declares a
 /// `stream_id` or `thread_id` param gets these unless it's given another
 /// value (tsk375).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LensContext {
     pub stream_id: Option<i64>,
     pub thread_id: Option<i64>,
+    /// What's active, to check a lens's needs against; `None` checks
+    /// nothing.
+    pub active: Option<crate::capabilities::Active>,
 }
 
 impl LensContext {
@@ -2694,6 +2767,10 @@ pub async fn lens_context(
     LensContext {
         stream_id: stream.map(|s| s.value()),
         thread_id: thread.map(|t| t.value()),
+        active: Some(
+            svc.capabilities
+                .snapshot(&crate::config_service::read_config(&svc.config)),
+        ),
     }
 }
 
@@ -2720,6 +2797,29 @@ pub async fn run_lens(
     ctx: &LensContext,
 ) -> Result<LensRun, DomainError> {
     let lens = catalog.find_lens(root, id)?;
+    if let Some(active) = &ctx.active {
+        let unmet = active.unmet(&lens.needs);
+        if !unmet.is_empty() {
+            let params = resolve_params(&lens, &params, ctx)?;
+            return Ok(LensRun {
+                lens,
+                params,
+                result: SqlQueryResult {
+                    columns: Vec::new(),
+                    rows: Vec::new(),
+                    truncated: false,
+                    reads: Default::default(),
+                    freshness: Vec::new(),
+                },
+                alert: None,
+                warnings: Vec::new(),
+                inactive: Some(LensInactive {
+                    message: crate::capabilities::needs_message(&unmet),
+                    needs: unmet,
+                }),
+            });
+        }
+    }
     let mut run = execute(layer, lens, params, ctx)
         .await
         .map_err(|e| match e {
@@ -2924,6 +3024,7 @@ async fn execute(
         result,
         alert,
         warnings: Vec::new(),
+        inactive: None,
     })
 }
 
@@ -3760,6 +3861,7 @@ impl Lens {
             hidden: false,
             actions: Vec::new(),
             alert: None,
+            needs: Vec::new(),
             path: String::new(),
         }
     }
@@ -4285,6 +4387,7 @@ empty: No tasks.
         let here = LensContext {
             stream_id: Some(2),
             thread_id: Some(5),
+            active: None,
         };
         let run = run_lens(
             &sl,
@@ -4336,6 +4439,11 @@ empty: No tasks.
         let expect = LensContext {
             stream_id: Some(thread.stream_id.value()),
             thread_id: Some(f.thread.value()),
+            active: Some(
+                f.svc
+                    .capabilities
+                    .snapshot(&crate::config_service::read_config(&f.svc.config)),
+            ),
         };
         assert_eq!(lens_context(&f.svc, None, None).await, expect);
         assert_eq!(lens_context(&f.svc, None, Some(f.thread)).await, expect);

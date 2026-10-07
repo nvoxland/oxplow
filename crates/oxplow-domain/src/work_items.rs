@@ -168,6 +168,10 @@ pub struct WorkItemsProvider {
     pub id: String,
     pub features: WorkItemsFeatures,
     pub external: Option<Arc<dyn ExternalVerbs>>,
+    /// What its own ids look like (a regex, matched whole: `tsk\d+`), so a
+    /// loose id in a command resolves to its item while it's the active
+    /// work list; `None` declares none.
+    pub id_pattern: Option<String>,
 }
 
 impl std::fmt::Debug for WorkItemsProvider {
@@ -176,6 +180,7 @@ impl std::fmt::Debug for WorkItemsProvider {
             .field("id", &self.id)
             .field("features", &self.features)
             .field("external", &self.external.is_some())
+            .field("id_pattern", &self.id_pattern)
             .finish()
     }
 }
@@ -294,6 +299,7 @@ mod tests {
             id: id.into(),
             features: WorkItemsFeatures::default(),
             external: None,
+            id_pattern: None,
         }
     }
 

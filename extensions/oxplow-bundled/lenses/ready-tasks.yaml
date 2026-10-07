@@ -1,4 +1,5 @@
 title: Ready Tasks
+needs: [work_items]
 query: |
   SELECT t.id, t.title, t.priority, th.title AS thread
   FROM v_task t JOIN v_thread th ON th.id = t.thread_id

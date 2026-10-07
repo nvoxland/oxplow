@@ -76,6 +76,34 @@ answer, end it with the question itself. A final message that ends in
 a question shows the thread as waiting on them (`.context/work-tracking.md`
 "No gates"), until their next prompt.
 
+### oxplow-dev: tasks while the work list is none
+
+Stripping oxplow to its core (disabling `oxplow-bundled` in
+`.oxplow/project.yaml`, uncommitted) leaves this project with no work
+list, so `work_item.*` is refused and the task tools are hidden. The
+development helper `oxplow-dev` (`crates/oxplow-dev`, never shipped or
+bundled) keeps oxplow's own tasks usable meanwhile:
+
+```
+cargo run -q -p oxplow-dev -- task list [--all]
+cargo run -q -p oxplow-dev -- task show tsk12
+cargo run -q -p oxplow-dev -- task create "Title" [--body …] [--parent tsk1] [--state in_progress]
+cargo run -q -p oxplow-dev -- task transition tsk12 done
+cargo run -q -p oxplow-dev -- task update tsk12 [--title …] [--body …] [--parent …]
+cargo run -q -p oxplow-dev -- task comment tsk12 "…"
+cargo run -q -p oxplow-dev -- task link tsk12 tsk13 blocks
+```
+
+It runs the task system's own `work_item.*` commands on a command bus
+over the project's database (validation, audit and events as the app
+writes them; the acting thread is `$OXPLOW_THREAD_ID` or `--thread`), on
+a bus that checks nothing active. So it's the same tasks, and
+re-enabling the extension shows everything done meanwhile. The database
+is opened as it is (`Database::open_existing`: no migrating, no model
+recompile under the running app; refused at another schema version).
+The running app picks up the new events with its next pump pass; with
+the work list none, no effort policy reacts to them.
+
 ## Repo layout (post-Tauri rewrite)
 
 The backend is Rust; the desktop frontend is React/Monaco/xterm.
@@ -153,6 +181,14 @@ need `lint:collect` clean before they're pushed.
 (`Database::in_memory()` restores `<temp>/oxplow-db-templates/<build+date>.sqlite`
 instead of running every migration, ~330 ms → a few ms). A new migration
 or model needs nothing: a rebuilt test binary is a new template key.
+
+**An effort needs no task, and neither does its fixture.**
+`test_fixtures::services_with_effort()` opens an effort linked to nothing
+(through `effort.open`, so its event is logged like a real one); a test
+about oxplow's tasks takes `services_with_task_effort()` instead (an
+in-progress task, the effort linked to it; it derefs to the plain
+fixture, so helpers take either). Reach for the task one only when the
+test reads or relies on the task.
 
 ### The browser suite (`bun run e2e`, P11)
 

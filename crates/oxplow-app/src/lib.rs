@@ -683,6 +683,8 @@ impl Services {
             db: self.db.clone(),
             sql: self.sql.clone(),
             collection: self.collection.clone(),
+            capabilities: self.capabilities.clone(),
+            config: self.config.clone(),
         }
     }
 
@@ -715,10 +717,6 @@ impl Services {
 
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
         info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
-        // An agent that outlived an upgrade reads current skills (tsk376).
-        if let Err(error) = oxplow_plugin::refresh_skills(&layout.project_dir) {
-            tracing::warn!(%error, "refreshing agent skills failed");
-        }
 
         let db = Database::open(&layout.state_db_path)?;
         let machine = MachineEnv {
@@ -1064,6 +1062,23 @@ impl Services {
             db.clone(),
             layout.project_dir.clone(),
         )));
+        // Every capability's implementations (`capabilities`): core's (the
+        // VCS here, knowledge once it's built), what the project's
+        // extensions declare, and running provider instances'.
+        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(
+            vec![capabilities::Implementation {
+                capability: "vcs".into(),
+                id: vcs.rev_kind().into(),
+                title: vcs.rev_kind().into(),
+                extension: None,
+                source: capabilities::Source::Core,
+                features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
+            }],
+            vocabulary.clone(),
+        ));
+        capabilities.set_declared(capabilities::declared_by(
+            &extension_catalog.get(&layout.project_dir),
+        ));
         let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(
@@ -1083,28 +1098,14 @@ impl Services {
                         matches!(threads.get(&thread).await, Ok(Some(t)) if t.status.is_writer())
                     })
                 })
-            }),
+            })
+            // Offered and run only while what it needs is active.
+            .with_capabilities(capabilities.clone(), config_arc.clone()),
         );
         // Composition (P6b.A1): several Tx commands as one run.
         commands
             .register(commands::compose::sequence_command(&commands))
             .expect("command.sequence registers");
-        // Every capability's implementations (`capabilities`): core's (the
-        // VCS here, knowledge once it's built), what the project's
-        // extensions declare, and running provider instances'.
-        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(vec![
-            capabilities::Implementation {
-                capability: "vcs".into(),
-                id: vcs.rev_kind().into(),
-                title: vcs.rev_kind().into(),
-                extension: None,
-                source: capabilities::Source::Core,
-                features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
-            },
-        ]));
-        capabilities.set_declared(capabilities::declared_by(
-            &extension_catalog.get(&layout.project_dir),
-        ));
         // The work-items providers (`.context/work-items.md`); oxplow's
         // own, over this bus. Its active one is resolved from the config as
         // it is now.
@@ -1162,7 +1163,7 @@ impl Services {
         .into_iter()
         .chain(commands::review::commands())
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
-        .chain(commands::effort::commands())
+        .chain(commands::effort::commands(work_items.clone()))
         .chain(commands::bookmark::commands())
         .chain(commands::hint::commands())
         .chain(commands::dashboard::commands(db.clone(), sql.clone()))
@@ -1385,6 +1386,8 @@ impl Services {
             db: db.clone(),
             sql: sql.clone(),
             collection: collection.clone(),
+            capabilities: capabilities.clone(),
+            config: config_arc.clone(),
         };
         event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
             deps: advisory_deps.clone(),
@@ -1630,28 +1633,6 @@ mod tests {
         assert!(
             matches!(got, OxplowEvent::FollowupsChanged { thread_id } if thread_id == thread),
             "{got:?}"
-        );
-    }
-
-    /// Boot refreshes an existing agent runtime's skills, so an agent that
-    /// outlived an upgrade reads the current ones (tsk376).
-    #[tokio::test]
-    async fn boot_refreshes_existing_agent_skills() {
-        let project = tempdir().unwrap();
-        crate::test_fixtures::init_git_repo(project.path());
-        let skill = project
-            .path()
-            .join(".oxplow/runtime/claude-plugin/skills/oxplow-extension/SKILL.md");
-        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
-        std::fs::write(&skill, "stale").unwrap();
-        let _svc = Services::boot(
-            AppLayout::for_project(project.path()),
-            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-        )
-        .unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&skill).unwrap(),
-            oxplow_plugin::skill_body("oxplow-extension").unwrap()
         );
     }
 

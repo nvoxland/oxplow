@@ -184,6 +184,13 @@ pub fn oxplow_task(
         field: Some(field.into()),
         message,
     };
+    let canonical;
+    let item_ref = if item_ref.starts_with("work_item:") {
+        item_ref
+    } else {
+        canonical = canonical_ref(registry, item_ref).map_err(invalid)?;
+        canonical.as_str()
+    };
     let provider = provider_of(item_ref).map_err(|e| invalid(e.to_string()))?;
     registry.get(provider).map_err(|e| invalid(e.to_string()))?;
     if provider != OXPLOW {
@@ -234,6 +241,56 @@ fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError
         field: None,
         message: e.to_string(),
     })
+}
+
+/// The fields that name a work item, in any command's input.
+const REF_FIELDS: [&str; 4] = ["ref", "parent_ref", "target", "work_item"];
+
+/// `input` with each work-item field that holds a loose id (`tsk12`)
+/// made canonical against the active work list, which declares what its
+/// ids look like (`WorkItemsProvider::id_pattern`). A canonical ref is
+/// left as it is; a loose id the active list doesn't declare is `Invalid`
+/// at its field.
+pub(crate) fn with_loose_refs(
+    registry: &WorkItemsRegistry,
+    mut input: Value,
+) -> Result<Value, CommandError> {
+    for key in REF_FIELDS {
+        let Some(raw) = input.get(key).and_then(Value::as_str) else {
+            continue;
+        };
+        if raw.starts_with("work_item:") {
+            continue;
+        }
+        let canonical =
+            canonical_ref(registry, raw).map_err(|m| invalid_at(&format!("/{key}"), m))?;
+        input[key] = Value::String(canonical);
+    }
+    Ok(input)
+}
+
+/// The canonical ref of `raw`, a loose id of the active work list's.
+fn canonical_ref(registry: &WorkItemsRegistry, raw: &str) -> Result<String, String> {
+    let active = registry.active();
+    let pattern = registry.get(&active).ok().and_then(|p| p.id_pattern);
+    match pattern {
+        Some(p) if regex::Regex::new(&format!("^(?:{p})$")).is_ok_and(|r| r.is_match(raw)) => {
+            Ok(format!("work_item:{active}:{raw}"))
+        }
+        Some(p) => Err(format!(
+            "`{raw}` isn't a work item ref (work_item:<provider>:<id>) or an id of the active \
+             work list (`{p}`)"
+        )),
+        None => Err(format!(
+            "`{raw}` isn't a work item ref (work_item:<provider>:<id>), and the active work \
+             list declares no id of its own"
+        )),
+    }
+}
+
+/// `tx` run on its input's loose ids made canonical ([`with_loose_refs`]).
+fn resolving(registry: WorkItemsRegistry, tx: Arc<TxHandler>) -> Arc<TxHandler> {
+    Arc::new(move |ctx: &TxCtx<'_>, input: Value| tx(ctx, with_loose_refs(&registry, input)?))
 }
 
 fn invalid_at(field: &str, message: String) -> CommandError {
@@ -307,14 +364,13 @@ fn create_target(
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemCreateInput = parse(input.clone())?;
     // Always the work list the person and project chose. One that isn't
-    // available resolves to none, and filing says so — never another list.
+    // available resolves to none, and filing says what it needs (as the bus
+    // does before routing) — never another list.
     let active = registry.active();
     if active == oxplow_domain::capability::NONE {
         return Err(CommandError::Invalid {
             field: None,
-            message: "no work list is active (none was chosen, or the chosen one isn't \
-                      available); choose one in Settings → Pieces"
-                .into(),
+            message: crate::capabilities::needs_message(&["work_items".into()]),
         });
     }
     let provider = provider_named(registry, &active, "").map_err(|e| match e {
@@ -430,9 +486,13 @@ fn dispatching(
     } else {
         tx
     };
+    // A loose id is the active list's, on every path (route, inside the
+    // transaction, through the provider).
+    let tx = resolving(registry.clone(), tx);
     let route_registry = registry.clone();
     let route = Arc::new(move |input: &Value| {
-        target(&route_registry, input).map(|p| match p.external {
+        let input = with_loose_refs(&route_registry, input.clone())?;
+        target(&route_registry, &input).map(|p| match p.external {
             None => Route::Tx,
             Some(_) => Route::External(format!("provider `{}`", p.id)),
         })
@@ -440,6 +500,7 @@ fn dispatching(
     let external = Arc::new(move |invocation: Invocation, input: Value| {
         let registry = registry.clone();
         Box::pin(async move {
+            let input = with_loose_refs(&registry, input)?;
             let provider = target(&registry, &input)?;
             let verbs = provider.external.ok_or_else(|| CommandError::Failed {
                 message: format!(
@@ -610,6 +671,13 @@ fn spec(
     undoable: bool,
     atomicity: Atomicity,
 ) -> CommandSpec {
+    // Each needs a work list, and the feature its verb is.
+    let needs = match name {
+        LINK => vec!["work_items.links".to_string()],
+        COMMENT => vec!["work_items.comments".to_string()],
+        DELETE => vec!["work_items.delete".to_string()],
+        _ => vec!["work_items".to_string()],
+    };
     CommandSpec {
         name: name.into(),
         summary: summary.into(),
@@ -620,6 +688,7 @@ fn spec(
         lifecycle: Lifecycle::Stable,
         atomicity,
         effect: oxplow_domain::CommandEffect::Record,
+        needs,
     }
 }
 
@@ -1501,7 +1570,8 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": "tsk42", "to": "done" }),
+                // Not a ref, nor an id the active list declares.
+                json!({ "ref": "ENG-12", "to": "done" }),
                 false,
             )
             .await
@@ -1519,7 +1589,7 @@ mod tests {
     /// exact status.
     #[tokio::test]
     async fn a_transition_takes_a_state_and_an_optional_native_state() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
         let err = fx
             .svc
@@ -1647,7 +1717,7 @@ mod tests {
     /// oxplow's own isn't shown as the person's.
     #[tokio::test]
     async fn a_comment_is_recorded_as_whoever_made_it() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let item = oxplow_domain::refs::build::work_item_ref(fx.task);
         for (actor, author) in [
             (Actor::Human, "user"),
@@ -1678,6 +1748,67 @@ mod tests {
     /// `create` right after a person chose another files there, with no
     /// reconcile in between; one that isn't available resolves to none, and
     /// filing says so.
+    /// A loose id the active work list declares (`tsk12` for oxplow's
+    /// tasks) is that list's item, in every work-item ref field and in an
+    /// effort's link; one it doesn't declare is refused naming the shapes.
+    #[tokio::test]
+    async fn a_loose_id_resolves_against_the_active_work_list() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let loose = fx.task.to_string();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                NAME,
+                json!({ "ref": loose, "to": "blocked" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["status"], "blocked");
+        let child = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "child", "parent_ref": loose }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(child.result["parent_id"], json!(loose));
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                crate::commands::effort::LINK,
+                json!({ "effort": fx.effort.to_string(), "work_item": loose }),
+                false,
+            )
+            .await
+            .unwrap();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                NAME,
+                json!({ "ref": "ENG-1", "to": "done" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            CommandError::Invalid { field, message } => {
+                assert_eq!(field.as_deref(), Some("/ref"));
+                assert!(message.contains("tsk"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn a_create_reads_the_active_provider_the_config_names_now() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1694,7 +1825,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { message, .. } if message.contains("no work list is active")),
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("Needs: Work list")),
             "{err:?}"
         );
         assert_eq!(fx.svc.work_items.active(), oxplow_domain::capability::NONE);
@@ -1745,7 +1876,7 @@ mod tests {
         match err {
             CommandError::Invalid { field, message } => {
                 assert_eq!(field, None);
-                assert!(message.contains("no work list is active"), "{message}");
+                assert!(message.contains("Needs: Work list"), "{message}");
             }
             other => panic!("{other:?}"),
         }
@@ -1807,7 +1938,7 @@ mod tests {
     /// linked task's thread; two backlog tasks can't be linked that way.
     #[tokio::test]
     async fn a_persons_link_takes_the_tasks_thread() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let from = work_item_ref(fx.task);
         let other = file_on(&fx, "other", None).await;
         let out = fx
@@ -1856,7 +1987,7 @@ mod tests {
     #[tokio::test]
     async fn a_deleted_task_takes_no_comments_or_links() {
         use oxplow_domain::stores::TaskStore as _;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let other = fx
             .svc
             .commands
@@ -1901,7 +2032,7 @@ mod tests {
     /// note, each with its event, caused by the run.
     #[tokio::test]
     async fn links_and_comments_are_commands_with_their_events() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,
@@ -1969,7 +2100,7 @@ mod tests {
     /// The effort policy closes the item's effort after it, as a reaction.
     #[tokio::test]
     async fn a_transition_commits_with_its_audit_and_names_its_cause() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
@@ -2027,7 +2158,7 @@ mod tests {
     /// undoable — an undo restores both.
     #[tokio::test]
     async fn an_update_edits_fields_and_state_atomically_and_undoes() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let bus = &fx.svc.commands;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
@@ -2093,7 +2224,7 @@ mod tests {
     /// `in_progress`: task bookkeeping isn't a claim on the worktree.
     #[tokio::test]
     async fn a_queued_thread_edits_and_finishes_tasks() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let queued = queued_agent(&fx).await;
         let out = fx
             .svc
@@ -2151,7 +2282,7 @@ mod tests {
     /// thread's effort to it; the body's mentions are projected by the pump.
     #[tokio::test]
     async fn a_create_is_audited_and_its_start_switches_the_effort() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
@@ -2345,7 +2476,7 @@ mod tests {
     /// in its own list; undo puts it back where it was.
     #[tokio::test]
     async fn reorder_places_an_item_and_undo_puts_it_back() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
         let a = file_on(&fx, "a", Some(fx.thread)).await;
         let b = file_on(&fx, "b", Some(fx.thread)).await;
@@ -2422,7 +2553,7 @@ mod tests {
     /// an item there); undo brings it back to its place.
     #[tokio::test]
     async fn move_takes_an_item_to_another_list_and_undo_brings_it_back() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
         let a = file_on(&fx, "a", Some(fx.thread)).await;
         let x = file_on(&fx, "x", None).await;
@@ -2497,7 +2628,7 @@ mod tests {
     /// caused by the run.
     #[tokio::test]
     async fn delete_asks_first_then_removes_the_task() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
         let err = fx
             .svc

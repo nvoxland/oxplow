@@ -50,6 +50,7 @@ const base: Lens = {
   hidden: false,
   actions: [],
   alert: null,
+  needs: [],
   path: "",
 };
 const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d"];
@@ -149,4 +150,14 @@ test("a tree's labels follow their column's link, and its rows drag", () => {
   expect(nodes[0]!.querySelector("[data-testid=lens-icon]")).not.toBeNull();
   expect(JSON.parse(dragData(nodes[0]!)[CONTEXT_REF_MIME]!)).toEqual({ kind: "ref", ref: "work_item:oxplow:tsk1" });
   expect(nodes.some((n) => n.getAttribute("data-emphasis") === "true")).toBe(true);
+});
+
+test("a lens that needs a capability that isn't active says so instead of showing rows", () => {
+  const run = {
+    ...runOf(grouped),
+    inactive: { needs: ["work_items"], message: "Needs: Work list (choose one in Settings → Pieces)." },
+  } as LensRun;
+  const view = render(<LensResultView run={run} compact onOpenPage={() => {}} />);
+  expect(view.getByTestId("lens-inactive").textContent).toContain("Needs: Work list");
+  expect(view.queryByTestId("lens-row-0")).toBeNull();
 });

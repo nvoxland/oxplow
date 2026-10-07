@@ -1753,6 +1753,7 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
+            needs: Vec::new(),
         },
         Handler::External(std::sync::Arc::new(
             move |Invocation { actor, .. }, input| {

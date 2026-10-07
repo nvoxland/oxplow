@@ -40,6 +40,7 @@ pub fn restore_file_command(files: SnapshotFiles) -> Command {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
+            needs: Vec::new(),
         },
         Handler::External(Arc::new(move |_: Invocation, input: Value| {
             let files = files.clone();

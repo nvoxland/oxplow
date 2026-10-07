@@ -1,22 +1,22 @@
 # What an agent should be able to answer and do about work items.
 - question: What work is in progress, across every provider?
-  skill: oxplow-runtime
+  skill: work-items
   reaches:
     sql: SELECT ref, provider, title FROM v_work_item WHERE state = 'in_progress'
   shape: { columns: [ref, provider, title] }
 - question: What has been done on this work item so far?
   about: work_item
-  skill: oxplow-runtime
+  skill: work-items
   reaches:
     sql: SELECT id, started_at, ended_at, summary FROM v_effort WHERE work_item = 'work_item:oxplow:tsk1' ORDER BY started_at
   shape: { columns: [id, started_at, ended_at, summary] }
 - question: Mark a work item done.
-  skill: oxplow-runtime
+  skill: work-items
   reaches:
     command: work_item.transition
     input: { ref: "work_item:oxplow:tsk1", to: done }
 - question: Record that one work item blocks another.
-  skill: oxplow-runtime
+  skill: work-items
   reaches:
     command: work_item.link
     input: { ref: "work_item:oxplow:tsk1", target: "work_item:oxplow:tsk2", link_type: blocks }

@@ -167,6 +167,7 @@ fn opencode_config_content(
     mcp_endpoint_url: &str,
     hooks_plugin: &std::path::Path,
     instructions: &[String],
+    text: &oxplow_plugin::AgentText,
 ) -> String {
     serde_json::json!({
         "mcp": {
@@ -185,7 +186,7 @@ fn opencode_config_content(
         },
         "plugin": [hooks_plugin.to_string_lossy()],
         "instructions": instructions,
-        "command": oxplow_plugin::opencode_command_definitions(),
+        "command": oxplow_plugin::opencode_command_definitions(text),
     })
     .to_string()
 }
@@ -331,12 +332,16 @@ pub async fn open_terminal_session(
     // Materialize the agent-specific runtime on every spawn. Claude
     // uses its plugin directory and MCP JSON; Codex uses command-hook
     // and MCP config overrides. Per-spawn identity rides env vars below.
+    // Its skills and commands are what's offered now
+    // (`capabilities::agent_text`).
+    let agent_text = oxplow_app::capabilities::agent_text(ctx);
     let agent_runtime = oxplow_plugin::write_agent_runtime(
         agent,
         &ctx.layout.project_dir,
         &plugin_runtime.hook_base_url,
         &plugin_runtime.mcp_endpoint_url,
         &plugin_runtime.hook_token,
+        &agent_text,
     )
     .map_err(|e| IpcError::internal(format!("plugin write failed: {e}")))?;
 
@@ -446,6 +451,7 @@ pub async fn open_terminal_session(
                     &plugin_runtime.mcp_endpoint_url,
                     &paths.hooks_plugin,
                     &instructions,
+                    &agent_text,
                 ),
             ));
         }
@@ -709,6 +715,7 @@ mod tests {
             "http://127.0.0.1:9/mcp",
             Path::new("/proj/.oxplow/runtime/opencode-plugin/plugin/oxplow-hooks.js"),
             &["/proj/.oxplow/runtime/opencode-plugin/prompts/thr1.md".to_string()],
+            &oxplow_plugin::AgentText::core(),
         );
         let v: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
         assert_eq!(v["mcp"]["oxplow"]["type"], "remote");
@@ -727,11 +734,11 @@ mod tests {
         // command dirs are fixed locations opencode controls, but
         // config commands have no disk footprint.
         assert!(
-            v["command"]["oxplow-work-next"]["template"]
+            v["command"]["oxplow-review-comments"]["template"]
                 .as_str()
                 .map(|t| !t.is_empty())
                 .unwrap_or(false),
-            "oxplow-work-next command must be defined inline"
+            "oxplow-review-comments command must be defined inline"
         );
         assert_eq!(
             v["instructions"][0],

@@ -161,26 +161,6 @@ afterEach(async () => {
   replacements = [];
 });
 
-test("choosing a provider as active runs config.set as the person; oxplow unsets it", async () => {
-  const view = render(<IntegrationsSection />);
-  const oxplow = (await waitFor(() => view.getByTestId("integrations-active-oxplow"))) as HTMLInputElement;
-  expect(oxplow.checked).toBe(true);
-  fireEvent.click(view.getByTestId("integrations-active-fake"));
-  await waitFor(() =>
-    expect(ran).toEqual([["config.set", { key: "activeProviders", value: { work_items: "fake" } }, true]]),
-  );
-  expect((view.getByTestId("integrations-active-fake") as HTMLInputElement).checked).toBe(true);
-  fireEvent.click(view.getByTestId("integrations-active-oxplow"));
-  await waitFor(() => expect(ran[1]).toEqual(["config.unset", { key: "activeProviders" }, true]));
-});
-
-test("an active provider that isn't running is said so", async () => {
-  active = { work_items: "issues" };
-  const view = render(<IntegrationsSection />);
-  const problem = await waitFor(() => view.getByTestId("integrations-active-problem"));
-  expect(problem.textContent).toContain("No enabled extension declares `issues`");
-});
-
 // P7.A3: a running instance's collector shows its last read and records,
 // and Sync Now reads it as the person.
 test("Sync Now runs provider.sync for that collector", async () => {
@@ -480,18 +460,3 @@ test("a row re-reads when the instance's health is recorded", async () => {
   }
 });
 
-test("choosing where work items go keeps the other capabilities' choices", async () => {
-  active = { effort_policy: "none" };
-  const view = render(<IntegrationsSection />);
-  await waitFor(() => view.getByTestId("integrations-active-fake"));
-  fireEvent.click(view.getByTestId("integrations-active-fake"));
-  await waitFor(() =>
-    expect(ran).toEqual([
-      ["config.set", { key: "activeProviders", value: { effort_policy: "none", work_items: "fake" } }, true],
-    ]),
-  );
-  fireEvent.click(view.getByTestId("integrations-active-oxplow"));
-  await waitFor(() =>
-    expect(ran[1]).toEqual(["config.set", { key: "activeProviders", value: { effort_policy: "none" } }, true]),
-  );
-});

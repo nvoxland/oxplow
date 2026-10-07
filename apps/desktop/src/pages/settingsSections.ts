@@ -17,6 +17,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "settings-data", title: "Data" },
   { id: "settings-data-programs", title: "Programs" },
   { id: "settings-data-delivery", title: "Delivery" },
+  { id: "settings-pieces", title: "Pieces" },
   { id: "settings-integrations", title: "Integrations" },
   { id: "settings-ai", title: "AI" },
 ];

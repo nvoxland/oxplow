@@ -141,6 +141,7 @@ fn spec(
         lifecycle: Lifecycle::Stable,
         atomicity,
         effect,
+        needs: Vec::new(),
     }
 }
 
@@ -378,6 +379,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Write,
+            needs: Vec::new(),
         },
         Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
             let input: EnableInput =

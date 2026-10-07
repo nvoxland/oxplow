@@ -95,7 +95,6 @@ pub struct PluginPaths {
     pub wiki_capture_skill: PathBuf,
     pub mermaid_skill: PathBuf,
     pub collection_skill: PathBuf,
-    pub work_next_command: PathBuf,
     pub review_comments_command: PathBuf,
     pub configure_command: PathBuf,
 }
@@ -147,14 +146,23 @@ pub fn write_agent_runtime(
     hook_base_url: &str,
     mcp_endpoint_url: &str,
     hook_token: &str,
+    text: &AgentText,
 ) -> Result<AgentRuntimePaths, PluginError> {
     match agent {
-        AgentKind::Claude => write_plugin(project_dir, hook_base_url, mcp_endpoint_url, hook_token)
-            .map(AgentRuntimePaths::Claude),
+        AgentKind::Claude => write_plugin(
+            project_dir,
+            hook_base_url,
+            mcp_endpoint_url,
+            hook_token,
+            text,
+        )
+        .map(AgentRuntimePaths::Claude),
         AgentKind::Codex => {
-            write_codex_runtime(project_dir, mcp_endpoint_url).map(AgentRuntimePaths::Codex)
+            write_codex_runtime(project_dir, mcp_endpoint_url, text).map(AgentRuntimePaths::Codex)
         }
-        AgentKind::Opencode => write_opencode_runtime(project_dir).map(AgentRuntimePaths::Opencode),
+        AgentKind::Opencode => {
+            write_opencode_runtime(project_dir, text).map(AgentRuntimePaths::Opencode)
+        }
         AgentKind::Acp => Err(PluginError::NotTerminal("ACP")),
     }
 }
@@ -162,7 +170,10 @@ pub fn write_agent_runtime(
 /// Materialize the opencode hook-bridge plugin. Idempotent like the
 /// other writers; per-spawn identity rides env vars (the JS reads
 /// `OXPLOW_*` from its process env), so one dir serves every spawn.
-pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths, PluginError> {
+pub fn write_opencode_runtime(
+    project_dir: &Path,
+    text: &AgentText,
+) -> Result<OpencodeRuntimePaths, PluginError> {
     let runtime_dir = project_dir.join(OPENCODE_RUNTIME_DIR_REL);
     let plugin_dir = runtime_dir.join("plugin");
     let prompts_dir = runtime_dir.join("prompts");
@@ -178,7 +189,7 @@ pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths
     // assets' frontmatter (name matching the dir, description) is
     // already opencode-compatible. Each generated dir gets a `*`
     // .gitignore so these never land in the user's commits.
-    let skills_dir = write_opencode_skills(project_dir)?;
+    let skills_dir = write_opencode_skills(project_dir, text)?;
 
     Ok(OpencodeRuntimePaths {
         runtime_dir,
@@ -190,11 +201,11 @@ pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths
 
 /// opencode's skills: `<project>/.opencode/skills/<name>/SKILL.md`, each
 /// dir with a `*` `.gitignore`. Returns the skills dir.
-fn write_opencode_skills(project_dir: &Path) -> Result<PathBuf, PluginError> {
+fn write_opencode_skills(project_dir: &Path, text: &AgentText) -> Result<PathBuf, PluginError> {
     let skills_dir = project_dir.join(".opencode").join("skills");
-    write_oxplow_skills(&skills_dir)?;
-    for (name, _) in OXPLOW_SKILLS {
-        fs::write(skills_dir.join(name).join(".gitignore"), "*\n")?;
+    write_skills(&skills_dir, &text.skills)?;
+    for skill in &text.skills {
+        fs::write(skills_dir.join(&skill.name).join(".gitignore"), "*\n")?;
     }
     Ok(skills_dir)
 }
@@ -202,28 +213,23 @@ fn write_opencode_skills(project_dir: &Path) -> Result<PathBuf, PluginError> {
 /// Rewrite the skills of every agent runtime already materialized under
 /// `project_dir`, creating none. A runtime is written on each spawn, so
 /// this is for what outlives one: an agent still running (or resumed)
-/// across an oxplow upgrade reads the current skills (tsk376).
-pub fn refresh_skills(project_dir: &Path) -> Result<(), PluginError> {
+/// across an oxplow upgrade, or a switch of what's active, reads the
+/// current skills and commands (tsk376).
+pub fn refresh_skills(project_dir: &Path, text: &AgentText) -> Result<(), PluginError> {
     for rel in [PLUGIN_DIR_REL, CODEX_RUNTIME_DIR_REL] {
         let skills_dir = project_dir.join(rel).join("skills");
         if skills_dir.is_dir() {
-            write_oxplow_skills(&skills_dir)?;
+            write_skills(&skills_dir, &text.skills)?;
         }
     }
+    let commands_dir = project_dir.join(PLUGIN_DIR_REL).join("commands");
+    if commands_dir.is_dir() {
+        write_commands(&commands_dir, &text.commands)?;
+    }
     if project_dir.join(OPENCODE_RUNTIME_DIR_REL).is_dir() {
-        write_opencode_skills(project_dir)?;
+        write_opencode_skills(project_dir, text)?;
     }
     Ok(())
-}
-
-/// Every oxplow skill as `(name, description)`, the description taken
-/// from its frontmatter: the index an agent that can't discover skill
-/// files (an ACP agent) is given, to fetch bodies with `get_skill`.
-pub fn skill_index() -> Vec<(&'static str, &'static str)> {
-    OXPLOW_SKILLS
-        .iter()
-        .map(|(name, body)| (*name, frontmatter_description(body)))
-        .collect()
 }
 
 /// The capability answerability questions (`assets/questions/<capability>.yaml`,
@@ -281,16 +287,8 @@ pub fn capability_prompts() -> Vec<CapabilityPrompt> {
         .collect()
 }
 
-/// One skill's `SKILL.md` body by name.
-pub fn skill_body(name: &str) -> Option<&'static str> {
-    OXPLOW_SKILLS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, body)| *body)
-}
-
 /// The `description:` line of a `---`-fenced frontmatter block.
-fn frontmatter_description(body: &'static str) -> &'static str {
+fn frontmatter_description(body: &str) -> &str {
     let Some(front) = body
         .strip_prefix("---\n")
         .and_then(|rest| rest.split("\n---").next())
@@ -304,29 +302,122 @@ fn frontmatter_description(body: &'static str) -> &'static str {
         .unwrap_or("")
 }
 
-/// Write every skill in [`OXPLOW_SKILLS`] as `<skills_dir>/<name>/SKILL.md`,
-/// and remove any other `oxplow-*` skill there: one oxplow no longer
-/// ships. The one place a runtime's skill set comes from, so adding or
-/// retiring a skill is one row in that list.
-fn write_oxplow_skills(skills_dir: &Path) -> Result<(), PluginError> {
+/// The file in each skill folder oxplow writes: how it tells its own
+/// from a person's when one is no longer offered.
+const SKILL_MARKER: &str = ".oxplow";
+
+/// Write each of `skills` as `<skills_dir>/<name>/SKILL.md`, and remove
+/// any other skill folder oxplow wrote there (one it no longer ships, or
+/// an extension's no longer offered); a person's own stay.
+fn write_skills(skills_dir: &Path, skills: &[Text]) -> Result<(), PluginError> {
     if let Ok(entries) = fs::read_dir(skills_dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with("oxplow-")
-                && entry.path().is_dir()
-                && !OXPLOW_SKILLS.iter().any(|(n, _)| *n == name)
-            {
+            if entry.path().join(SKILL_MARKER).is_file() && !skills.iter().any(|s| s.name == name) {
                 fs::remove_dir_all(entry.path())?;
             }
         }
     }
-    for (name, body) in OXPLOW_SKILLS {
-        let dir = skills_dir.join(name);
+    for skill in skills {
+        let dir = skills_dir.join(&skill.name);
         fs::create_dir_all(&dir)?;
-        fs::write(dir.join("SKILL.md"), body)?;
+        fs::write(dir.join("SKILL.md"), &skill.body)?;
+        fs::write(dir.join(SKILL_MARKER), "")?;
     }
     Ok(())
 }
+
+/// Write each of `commands` as `<commands_dir>/<name>.md`, removing every
+/// other `.md` there: the folder is oxplow's.
+fn write_commands(commands_dir: &Path, commands: &[Text]) -> Result<(), PluginError> {
+    if let Ok(entries) = fs::read_dir(commands_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(stem) = name.strip_suffix(".md") {
+                if !commands.iter().any(|c| c.name == stem) {
+                    fs::remove_file(entry.path())?;
+                }
+            }
+        }
+    }
+    for command in commands {
+        fs::write(
+            commands_dir.join(format!("{}.md", command.name)),
+            &command.body,
+        )?;
+    }
+    Ok(())
+}
+
+/// One piece of text for the agent: a skill (its `SKILL.md`, whose
+/// frontmatter `name:` is `name`) or a slash command (its markdown).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Text {
+    pub name: String,
+    pub body: String,
+}
+
+/// Every skill and slash command an agent runtime gets: core's, and what
+/// the project's extensions offer now (`oxplow_app::capabilities::agent_text`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentText {
+    pub skills: Vec<Text>,
+    pub commands: Vec<Text>,
+}
+
+impl AgentText {
+    /// Core's own skills and commands.
+    pub fn core() -> Self {
+        let text = |list: &[(&str, &str)]| {
+            list.iter()
+                .map(|(name, body)| Text {
+                    name: (*name).into(),
+                    body: (*body).into(),
+                })
+                .collect()
+        };
+        Self {
+            skills: text(OXPLOW_SKILLS),
+            commands: text(CORE_COMMANDS),
+        }
+    }
+
+    /// Every skill as `(name, description)`, the description taken from
+    /// its frontmatter: the index an agent that can't discover skill files
+    /// (an ACP agent) is given, to fetch bodies with `get_skill`.
+    pub fn skill_index(&self) -> Vec<(&str, &str)> {
+        self.skills
+            .iter()
+            .map(|s| (s.name.as_str(), frontmatter_description(&s.body)))
+            .collect()
+    }
+
+    /// One skill's `SKILL.md` body by name.
+    pub fn skill_body(&self, name: &str) -> Option<&str> {
+        self.skills
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s.body.as_str())
+    }
+
+    /// Whether `name` is taken by a skill or command already.
+    pub fn names(&self, name: &str) -> bool {
+        self.skills
+            .iter()
+            .chain(&self.commands)
+            .any(|t| t.name == name)
+    }
+}
+
+/// Core's slash commands, as `(name, markdown)`: `/oxplow:<name>`.
+const CORE_COMMANDS: &[(&str, &str)] = &[
+    (
+        "review-comments",
+        include_str!("../assets/review-comments.md"),
+    ),
+    ("configure", include_str!("../assets/configure.md")),
+    ("new-metric", include_str!("../assets/new-metric.md")),
+];
 
 /// The oxplow skills every agent runtime ships, as `(dir_name, SKILL.md body)`
 /// pairs. The dir name must match the frontmatter `name:` — both Claude and
@@ -369,25 +460,19 @@ const OXPLOW_SKILLS: &[(&str, &str)] = &[
 /// and the body becomes the prompt template. Names are prefixed
 /// `oxplow-` since opencode has no plugin namespacing (`/oxplow-work-next`
 /// vs claude's `/oxplow:work-next`).
-pub fn opencode_command_definitions() -> serde_json::Value {
-    const COMMANDS: &[(&str, &str)] = &[
-        ("oxplow-work-next", include_str!("../assets/work-next.md")),
-        (
-            "oxplow-review-comments",
-            include_str!("../assets/review-comments.md"),
-        ),
-        ("oxplow-configure", include_str!("../assets/configure.md")),
-        ("oxplow-new-metric", include_str!("../assets/new-metric.md")),
-    ];
+pub fn opencode_command_definitions(text: &AgentText) -> serde_json::Value {
     let mut map = serde_json::Map::new();
-    for (name, asset) in COMMANDS {
-        let (description, template) = split_frontmatter_description(asset);
+    for command in &text.commands {
+        let (description, template) = split_frontmatter_description(&command.body);
         let mut def = serde_json::Map::new();
         def.insert("template".into(), template.into());
         if let Some(description) = description {
             def.insert("description".into(), description.into());
         }
-        map.insert((*name).into(), serde_json::Value::Object(def));
+        map.insert(
+            format!("oxplow-{}", command.name),
+            serde_json::Value::Object(def),
+        );
     }
     serde_json::Value::Object(map)
 }
@@ -419,6 +504,7 @@ pub fn write_plugin(
     hook_base_url: &str,
     mcp_endpoint_url: &str,
     hook_token: &str,
+    text: &AgentText,
 ) -> Result<PluginPaths, PluginError> {
     let plugin_dir = project_dir.join(PLUGIN_DIR_REL);
     let manifest_dir = plugin_dir.join(".claude-plugin");
@@ -449,30 +535,15 @@ pub fn write_plugin(
     let agent_guide = plugin_dir.join("AGENT_GUIDE.md");
     fs::write(&agent_guide, include_str!("../assets/AGENT_GUIDE.md"))?;
 
-    write_oxplow_skills(&skills_dir)?;
+    write_skills(&skills_dir, &text.skills)?;
     let runtime_skill = skills_dir.join("oxplow-runtime").join("SKILL.md");
     let wiki_capture_skill = skills_dir.join("oxplow-wiki-capture").join("SKILL.md");
     let mermaid_skill = skills_dir.join("oxplow-mermaid").join("SKILL.md");
     let collection_skill = skills_dir.join("oxplow-collection").join("SKILL.md");
 
-    let work_next_command = commands_dir.join("work-next.md");
-    fs::write(&work_next_command, include_str!("../assets/work-next.md"))?;
-
+    write_commands(&commands_dir, &text.commands)?;
     let review_comments_command = commands_dir.join("review-comments.md");
-    fs::write(
-        &review_comments_command,
-        include_str!("../assets/review-comments.md"),
-    )?;
-
     let configure_command = commands_dir.join("configure.md");
-    fs::write(&configure_command, include_str!("../assets/configure.md"))?;
-
-    // /oxplow:new-metric — no named PluginPaths field (covered by OXPLOW_SKILLS
-    // parity + the opencode command parity test).
-    fs::write(
-        commands_dir.join("new-metric.md"),
-        include_str!("../assets/new-metric.md"),
-    )?;
 
     Ok(PluginPaths {
         plugin_dir,
@@ -484,7 +555,6 @@ pub fn write_plugin(
         wiki_capture_skill,
         mermaid_skill,
         collection_skill,
-        work_next_command,
         review_comments_command,
         configure_command,
     })
@@ -586,6 +656,7 @@ pub fn write_claude_mcp_config(
 pub fn write_codex_runtime(
     project_dir: &Path,
     mcp_endpoint_url: &str,
+    text: &AgentText,
 ) -> Result<CodexRuntimePaths, PluginError> {
     let runtime_dir = project_dir.join(CODEX_RUNTIME_DIR_REL);
     let manifest_dir = runtime_dir.join(".codex-plugin");
@@ -614,7 +685,7 @@ pub fn write_codex_runtime(
     let mcp_config = runtime_dir.join("mcp-config.toml");
     fs::write(&mcp_config, build_codex_mcp_config(mcp_endpoint_url))?;
 
-    write_oxplow_skills(&skills_dir)?;
+    write_skills(&skills_dir, &text.skills)?;
     let runtime_skill = skills_dir.join("oxplow-runtime").join("SKILL.md");
     let wiki_capture_skill = skills_dir.join("oxplow-wiki-capture").join("SKILL.md");
     let mermaid_skill = skills_dir.join("oxplow-mermaid").join("SKILL.md");
@@ -728,6 +799,7 @@ mod tests {
             "http://127.0.0.1:51823/hook",
             "http://127.0.0.1:51823/mcp",
             "test-token",
+            &AgentText::core(),
         )
         .unwrap();
         assert!(paths.manifest.exists());
@@ -748,26 +820,40 @@ mod tests {
                 .join("SKILL.md");
             assert!(skill.exists(), "claude plugin missing skill {name}");
         }
-        assert!(paths.work_next_command.exists());
         assert!(paths.review_comments_command.exists());
         assert!(paths.configure_command.exists());
         assert!(paths.agent_guide.exists());
     }
 
-    /// A skill oxplow no longer ships leaves the installed set on the next
-    /// write; a skill that isn't oxplow's is left alone.
+    /// What's offered is installed; a skill or command oxplow wrote that
+    /// isn't offered any more (retired, or its extension's implementation
+    /// not active) leaves on the next write; a person's own stays.
     #[test]
-    fn retired_oxplow_skills_are_pruned() {
+    fn what_is_no_longer_offered_is_removed() {
         let tmp = TempDir::new().unwrap();
-        let skills = tmp.path().join("skills");
-        for name in ["oxplow-retired", "someone-elses"] {
-            fs::create_dir_all(skills.join(name)).unwrap();
-            fs::write(skills.join(name).join("SKILL.md"), "x").unwrap();
-        }
-        write_oxplow_skills(&skills).unwrap();
-        assert!(!skills.join("oxplow-retired").exists());
+        let mut text = AgentText::core();
+        text.skills.push(Text {
+            name: "work-items".into(),
+            body: "---\nname: work-items\ndescription: d\n---\n".into(),
+        });
+        text.commands.push(Text {
+            name: "work-next".into(),
+            body: "next".into(),
+        });
+        let paths =
+            write_plugin(tmp.path(), "http://h/hook", "http://h/mcp", "tok", &text).unwrap();
+        let skills = paths.plugin_dir.join("skills");
+        let commands = paths.plugin_dir.join("commands");
+        fs::create_dir_all(skills.join("someone-elses")).unwrap();
+        fs::write(skills.join("someone-elses").join("SKILL.md"), "x").unwrap();
+        assert!(skills.join("work-items").join("SKILL.md").exists());
+        assert!(commands.join("work-next.md").exists());
+        refresh_skills(tmp.path(), &AgentText::core()).unwrap();
+        assert!(!skills.join("work-items").exists());
+        assert!(!commands.join("work-next.md").exists());
         assert!(skills.join("someone-elses").exists());
         assert!(skills.join("oxplow-runtime").join("SKILL.md").exists());
+        assert!(commands.join("configure.md").exists());
     }
 
     #[test]
@@ -776,7 +862,14 @@ mod tests {
         // leak into the skills / prompts / hooks / commands oxplow writes
         // into a user's project (those docs don't exist downstream).
         let tmp = TempDir::new().unwrap();
-        write_plugin(tmp.path(), "http://h/hook", "http://h/mcp", "tok").unwrap();
+        write_plugin(
+            tmp.path(),
+            "http://h/hook",
+            "http://h/mcp",
+            "tok",
+            &AgentText::core(),
+        )
+        .unwrap();
         let mut offenders = Vec::new();
         let mut stack = vec![tmp.path().to_path_buf()];
         while let Some(dir) = stack.pop() {
@@ -803,7 +896,14 @@ mod tests {
         // commands surface as `/<name>:<command>`. Keep it `oxplow`
         // so users type `/oxplow:work-next`, not `/oxplow-runtime:…`.
         let tmp = TempDir::new().unwrap();
-        let paths = write_plugin(tmp.path(), "http://h/hook", "http://h/mcp", "tok").unwrap();
+        let paths = write_plugin(
+            tmp.path(),
+            "http://h/hook",
+            "http://h/mcp",
+            "tok",
+            &AgentText::core(),
+        )
+        .unwrap();
         let body = fs::read_to_string(&paths.manifest).unwrap();
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["name"], "oxplow");
@@ -867,9 +967,23 @@ mod tests {
     #[test]
     fn write_plugin_is_idempotent() {
         let tmp = TempDir::new().unwrap();
-        write_plugin(tmp.path(), "http://h/hook", "http://h/mcp", "t1").unwrap();
+        write_plugin(
+            tmp.path(),
+            "http://h/hook",
+            "http://h/mcp",
+            "t1",
+            &AgentText::core(),
+        )
+        .unwrap();
         // Second call must not error.
-        let p = write_plugin(tmp.path(), "http://h2/hook", "http://h2/mcp", "t2").unwrap();
+        let p = write_plugin(
+            tmp.path(),
+            "http://h2/hook",
+            "http://h2/mcp",
+            "t2",
+            &AgentText::core(),
+        )
+        .unwrap();
         let body = fs::read_to_string(&p.hooks).unwrap();
         assert!(body.contains("http://h2/hook"));
         let mcp_body = fs::read_to_string(&p.mcp_config).unwrap();
@@ -879,7 +993,9 @@ mod tests {
     #[test]
     fn write_codex_runtime_emits_expected_files() {
         let tmp = TempDir::new().unwrap();
-        let paths = write_codex_runtime(tmp.path(), "http://127.0.0.1:51823/mcp").unwrap();
+        let paths =
+            write_codex_runtime(tmp.path(), "http://127.0.0.1:51823/mcp", &AgentText::core())
+                .unwrap();
         assert!(paths.manifest.exists());
         assert!(paths.hooks.exists());
         assert!(paths.oxplow_executable.exists());
@@ -905,7 +1021,8 @@ mod tests {
     /// (tsk376): every skill, with its frontmatter description.
     #[test]
     fn the_skill_index_names_every_skill_with_its_description() {
-        let index = skill_index();
+        let text = AgentText::core();
+        let index = text.skill_index();
         assert_eq!(index.len(), OXPLOW_SKILLS.len());
         let (name, description) = index
             .iter()
@@ -917,10 +1034,11 @@ mod tests {
             "{description}"
         );
         assert!(index.iter().all(|(_, d)| !d.is_empty()));
-        assert!(skill_body("oxplow-extension")
+        assert!(text
+            .skill_body("oxplow-extension")
             .unwrap()
             .contains("# Building oxplow lenses"));
-        assert_eq!(skill_body("nope"), None);
+        assert_eq!(text.skill_body("nope"), None);
     }
 
     /// Boot refreshes the skills of runtimes already on disk, so a running
@@ -931,7 +1049,7 @@ mod tests {
         let claude = tmp.path().join(PLUGIN_DIR_REL).join("skills");
         std::fs::create_dir_all(claude.join("oxplow-extension")).unwrap();
         std::fs::write(claude.join("oxplow-extension/SKILL.md"), "stale").unwrap();
-        refresh_skills(tmp.path()).unwrap();
+        refresh_skills(tmp.path(), &AgentText::core()).unwrap();
         for (name, body) in OXPLOW_SKILLS {
             assert_eq!(
                 std::fs::read_to_string(claude.join(name).join("SKILL.md")).unwrap(),
@@ -945,7 +1063,7 @@ mod tests {
     #[test]
     fn write_opencode_runtime_emits_hook_bridge_plugin() {
         let tmp = TempDir::new().unwrap();
-        let paths = write_opencode_runtime(tmp.path()).unwrap();
+        let paths = write_opencode_runtime(tmp.path(), &AgentText::core()).unwrap();
         assert!(paths.hooks_plugin.exists());
         assert!(paths.prompts_dir.is_dir());
         let js = fs::read_to_string(&paths.hooks_plugin).unwrap();
@@ -966,7 +1084,7 @@ mod tests {
     #[test]
     fn write_opencode_runtime_materializes_skills_with_gitignore() {
         let tmp = TempDir::new().unwrap();
-        let paths = write_opencode_runtime(tmp.path()).unwrap();
+        let paths = write_opencode_runtime(tmp.path(), &AgentText::core()).unwrap();
         assert_eq!(paths.skills_dir, tmp.path().join(".opencode/skills"));
         for name in [
             "oxplow-runtime",
@@ -992,9 +1110,8 @@ mod tests {
 
     #[test]
     fn opencode_command_definitions_carry_description_and_template() {
-        let defs = opencode_command_definitions();
+        let defs = opencode_command_definitions(&AgentText::core());
         for name in [
-            "oxplow-work-next",
             "oxplow-review-comments",
             "oxplow-configure",
             "oxplow-new-metric",
@@ -1016,15 +1133,15 @@ mod tests {
     #[test]
     fn write_opencode_runtime_is_idempotent() {
         let tmp = TempDir::new().unwrap();
-        write_opencode_runtime(tmp.path()).unwrap();
-        let paths = write_opencode_runtime(tmp.path()).unwrap();
+        write_opencode_runtime(tmp.path(), &AgentText::core()).unwrap();
+        let paths = write_opencode_runtime(tmp.path(), &AgentText::core()).unwrap();
         assert!(paths.hooks_plugin.exists());
     }
 
     #[test]
     fn codex_runtime_configures_hooks_and_mcp() {
         let tmp = TempDir::new().unwrap();
-        let paths = write_codex_runtime(tmp.path(), "http://h/mcp").unwrap();
+        let paths = write_codex_runtime(tmp.path(), "http://h/mcp", &AgentText::core()).unwrap();
         let hooks = fs::read_to_string(paths.hooks).unwrap();
         assert!(hooks.contains("PreToolUse"));
         assert!(!hooks.contains("http://"));

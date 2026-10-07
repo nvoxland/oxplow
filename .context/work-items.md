@@ -223,18 +223,42 @@ instance runs (`ProviderRegistry::publish`, a work-items provider's
 features as `ExternalWorkItems` reads them). **`active`** is the
 resolved implementation: a person's own choice (`.oxplow/personal.yaml`),
 else the project's `activeProviders` (`{ work_items: <instance id> }`, a
-person-only key), else the default (`oxplow`). A choice that isn't
+person-only key), else the default (`oxplow`); both are chosen in
+Settings → Pieces (`PiecesSection.tsx`, below). A choice that isn't
 available falls to `none` (the work list is optional), listed with
 `available = 0` and the active row's `chosen_by = fallback`. The
 registry's `active()` resolves from the config as it is now, so a
 person's choice applies to the very next `create`. Every
 `work_item.create` files on the active work list; with none active it is
-`Invalid` ("no work list is active …"), never another list. The
+`Invalid` ("Needs: Work list …", the bus's refusal for an unmet need),
+never another list. **Loose ids.** A work list declares what its ids look
+like (`WorkItemsProvider::id_pattern`, a regex matched whole: oxplow's
+tasks `tsk\d+`, an external one its `providers:` entry's `id_pattern`).
+A work-item field (`ref`, `parent_ref`, `target`, `work_item`, and
+`reorder` / `move`'s refs) holding a loose id that matches the active
+list's is that list's item — `tsk12` is `work_item:oxplow:tsk12` while
+oxplow's tasks are active (`commands/work_item.rs` `with_loose_refs`, on
+every path: routing, the transaction, the provider; also `effort.link` /
+`effort.open`). One that doesn't match is `Invalid` at its field, naming
+both shapes. Free-text recognition (wikilinks, commit bodies) is still
+core's. The
 conformance suite runs with the provider under test active, and checks it. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and
 `featuresFor(providers, provider)` → `WorkItemsFeatures` (the Rust type,
 exported through the bindings), which turns every flag a provider
 doesn't declare — or a provider that isn't listed — off.
+
+**Settings → Pieces** (`PiecesSection.tsx`, `piecesModel.ts`) is
+generated from `v_capability_provider`: for each choosable capability
+(`choosable`, `capability_title` and `optional` are core's
+`CapabilitySpec`, on every row since v4) the active implementation and
+why (`chosenNote`: personal, project, default, or which chosen one fell
+back), the project's choice as radios ("The default" unsets the
+capability's entry) and "Just for me" (`config.set` / `config.unset` with
+`layer: personal`). An optional capability's `none` names what it turns
+off: the enabled extensions' lenses and hints that declare a `needs:` on
+it (`offWithout`). A click is the confirmation (`activeProviders` is
+person-only); a failure goes to the op-errors store.
 
 ## Conformance
 

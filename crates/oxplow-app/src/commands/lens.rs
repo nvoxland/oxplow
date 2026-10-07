@@ -267,6 +267,7 @@ fn show(target: LensTarget) -> Command {
         let lens_ctx = LensContext {
             stream_id: Some(stream),
             thread_id: Some(thread),
+            active: None,
         };
         let (title, shows, lens) = match (input.lens, input.spec) {
             (Some(id), None) => {
@@ -323,6 +324,7 @@ fn show(target: LensTarget) -> Command {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Record,
+            needs: Vec::new(),
         },
         handler,
     )
@@ -439,6 +441,7 @@ async fn keeping_spec(
             let lens_ctx = LensContext {
                 stream_id,
                 thread_id: thread,
+                active: None,
             };
             Ok(
                 check_spec_shape(&spec, &BTreeMap::new(), &lens_ctx).map(|_| Keeping {
@@ -564,6 +567,7 @@ fn keep(target: LensTarget) -> Command {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
+            needs: Vec::new(),
         },
         handler,
     )
@@ -615,6 +619,7 @@ fn share(target: LensTarget) -> Command {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
+            needs: Vec::new(),
         },
         handler,
     )
@@ -831,7 +836,7 @@ mod tests {
     /// runs as the person will see it.
     #[tokio::test]
     async fn show_stores_logs_and_runs_an_answer() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let out = fx
             .svc
             .commands
@@ -866,7 +871,7 @@ mod tests {
     /// lenses: what the app shows never comes from a stream's copy.
     #[tokio::test]
     async fn a_worktree_thread_shows_the_main_worktrees_lens() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let ext = fx.svc.layout.project_dir.join("oxplow/extensions/demo");
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
         std::fs::write(

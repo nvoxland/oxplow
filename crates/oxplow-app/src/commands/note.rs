@@ -89,6 +89,7 @@ fn spec(name: &str, summary: &str, schema: Value, undoable: bool) -> CommandSpec
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
         effect: CommandEffect::Record,
+        needs: Vec::new(),
     }
 }
 

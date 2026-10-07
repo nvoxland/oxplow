@@ -43,6 +43,7 @@ pub fn dismiss_command() -> Command {
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::Tx,
             effect: CommandEffect::Record,
+            needs: Vec::new(),
         },
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: DismissInput =

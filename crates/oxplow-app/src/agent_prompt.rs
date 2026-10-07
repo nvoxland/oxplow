@@ -129,29 +129,34 @@ pub fn assemble_system_prompt(
     stream: &Stream,
     thread: Option<&Thread>,
 ) -> String {
-    assemble(project_dir, config, stream, thread, true)
+    assemble(project_dir, config, stream, thread, None)
 }
 
 /// The system prompt for an ACP agent: the same, minus the
 /// `<session-context>` block. An ACP session's first human prompt always
 /// carries a fresh one (`AgentContext::prompt_context`), so including it
-/// here too would send it twice.
+/// here too would send it twice. It has no skill files to discover, so it
+/// gets `skills`' index instead (`capabilities::agent_text`).
 pub fn assemble_acp_system_prompt(
     project_dir: &Path,
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
+    skills: &oxplow_plugin::AgentText,
 ) -> String {
-    assemble(project_dir, config, stream, thread, false)
+    assemble(project_dir, config, stream, thread, Some(skills))
 }
 
+/// `skills` is an ACP agent's index; a terminal agent (`None`) gets the
+/// session context instead and discovers its skill files.
 fn assemble(
     project_dir: &Path,
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
-    session_context: bool,
+    skills: Option<&oxplow_plugin::AgentText>,
 ) -> String {
+    let session_context = skills.is_none();
     let mut out = String::new();
     let claude_md = load_claude_md(project_dir);
     if !claude_md.is_empty() {
@@ -186,9 +191,9 @@ fn assemble(
         out.push_str(hint);
         out.push('\n');
     }
-    if !session_context {
+    if let Some(text) = skills {
         // An ACP agent: no skill files to discover (tsk376).
-        out.push_str(&skill_index_block());
+        out.push_str(&skill_index_block(text));
     }
     out.trim_end().to_string()
 }
@@ -196,12 +201,12 @@ fn assemble(
 /// The oxplow skills for an agent that can't discover skill files: one
 /// line each, to be fetched with the MCP `get_skill` tool when the work
 /// matches.
-fn skill_index_block() -> String {
+fn skill_index_block(text: &oxplow_plugin::AgentText) -> String {
     let mut out = String::from(
         "\n# oxplow skills\nBefore doing work one of these describes, call the oxplow MCP tool \
          `get_skill` with its name and follow what it says.\n",
     );
-    for (name, description) in oxplow_plugin::skill_index() {
+    for (name, description) in text.skill_index() {
         out.push_str(&format!("- {name}: {description}\n"));
     }
     out
@@ -397,7 +402,13 @@ mod tests {
     fn the_acp_system_prompt_leaves_session_context_to_the_first_prompt() {
         let dir = tempdir().unwrap();
         let full = assemble_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
-        let acp = assemble_acp_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
+        let acp = assemble_acp_system_prompt(
+            dir.path(),
+            &config(),
+            &stream(),
+            Some(&thread()),
+            &oxplow_plugin::AgentText::core(),
+        );
         assert!(full.contains("<session-context>"));
         assert!(!acp.contains("<session-context>"), "{acp}");
         assert!(acp.contains("be precise"));
@@ -410,7 +421,13 @@ mod tests {
     fn the_acp_system_prompt_indexes_the_skills() {
         let dir = tempdir().unwrap();
         let full = assemble_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
-        let acp = assemble_acp_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
+        let acp = assemble_acp_system_prompt(
+            dir.path(),
+            &config(),
+            &stream(),
+            Some(&thread()),
+            &oxplow_plugin::AgentText::core(),
+        );
         assert!(acp.contains("get_skill"), "{acp}");
         assert!(
             acp.contains("- oxplow-extension: Build oxplow lenses"),

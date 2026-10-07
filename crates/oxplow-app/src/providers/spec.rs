@@ -86,6 +86,11 @@ pub struct ProviderSpec {
     pub network: Vec<String>,
     /// The checked-in `InitializeResult` (JSON), relative to the folder.
     pub declarations: String,
+    /// What a work list's own ids look like (a regex matched whole:
+    /// `[A-Z]+-\d+`), so a loose id resolves to its item while it's the
+    /// active work list.
+    #[serde(default)]
+    pub id_pattern: Option<String>,
 }
 
 /// How a credential is obtained by signing in (P9.B3): OAuth 2.1's
@@ -745,6 +750,17 @@ pub fn parse_providers(
             .find(|h| !crate::net_sandbox::valid_host_pattern(h))
         {
             Some(format!("provider `{id}`: `{bad}` isn't a host pattern"))
+        } else if let Some(pattern) = &spec.id_pattern {
+            match regex::Regex::new(pattern) {
+                Err(e) => Some(format!(
+                    "provider `{id}`: id_pattern `{pattern}` isn't a regex: {e}"
+                )),
+                Ok(_) if spec.capability != "work_items" => Some(format!(
+                    "provider `{id}`: id_pattern is a work list's; `{}` has no ids",
+                    spec.capability
+                )),
+                Ok(_) => read_declarations(&spec, read).err(),
+            }
         } else {
             read_declarations(&spec, read).err()
         };

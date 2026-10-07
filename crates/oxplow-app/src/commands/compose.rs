@@ -117,6 +117,7 @@ pub fn sequence_spec() -> CommandSpec {
         // In the transaction, or as steps outside it: its calls decide.
         atomicity: Atomicity::Dispatch,
         effect: CommandEffect::Write,
+        needs: Vec::new(),
     }
 }
 
@@ -158,7 +159,7 @@ mod tests {
     /// reverses both.
     #[tokio::test]
     async fn a_sequence_of_work_item_commands_is_one_audited_undoable_run() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,

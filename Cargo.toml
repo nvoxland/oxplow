@@ -17,6 +17,7 @@ members = [
     "crates/oxplow-rpc",
     "crates/oxplow-daemon",
     "crates/oxplow-daemon-sim",
+    "crates/oxplow-dev",
     "crates/oxplow-tauri-ipc",
     "crates/oxplow-plugin",
     "crates/oxplow-control-plane",

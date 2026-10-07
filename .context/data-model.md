@@ -1776,7 +1776,8 @@ agent could see them; those weren't carried over.
 
 ### `capability_provider` — `SqliteCapabilityStore` (`crates/oxplow-db/src/capability_store.rs`)
 
-V128 (P6b.C2; V15 adds `title`, `source`, `available`, `chosen_by`).
+V128 (P6b.C2; V15 adds `title`, `source`, `available`, `chosen_by`; V16
+the capability's own `capability_title`, `choosable`, `optional`).
 Each capability's implementations and their features (`capability`,
 `provider` — the primary key — `extension`, NULL for core's,
 `features_json`, `active`). Restated whole (`reset`) by the app's

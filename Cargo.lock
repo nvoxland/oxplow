@@ -4662,6 +4662,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-dev"
+version = "0.7.0"
+dependencies = [
+ "oxplow-ai",
+ "oxplow-app",
+ "oxplow-db",
+ "oxplow-domain",
+ "oxplow-workspace-hack",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "oxplow-domain"
 version = "0.7.0"
 dependencies = [

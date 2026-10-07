@@ -30,6 +30,9 @@ pub struct ImplementationDecl {
     /// The built-in it is (`oxplow:tasks`); its features are core's to
     /// say.
     pub entry: String,
+    /// The extension's skills (`skills:`) it owns: offered only while it's
+    /// the active implementation.
+    pub skills: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -40,6 +43,8 @@ struct ImplementationFile {
     #[serde(default)]
     title: Option<String>,
     entry: String,
+    #[serde(default)]
+    skills: Vec<String>,
 }
 
 /// Parse `implementations:`: the valid declarations, and what's wrong
@@ -101,6 +106,13 @@ fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
                 .join(", ")
         ));
     };
+    if !spec.optional && f.id == spec.default {
+        return Err(format!(
+            "`{}` implementation `{}` is core's own (a required capability's default); \
+             declare another id",
+            spec.id, f.id
+        ));
+    }
     if f.id == capability::NONE
         || f.id.is_empty()
         || !f
@@ -135,6 +147,7 @@ fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
         id: f.id,
         title: f.title,
         entry: f.entry,
+        skills: f.skills,
     })
 }
 
@@ -160,6 +173,7 @@ mod tests {
                 id: "oxplow".into(),
                 title: None,
                 entry: "oxplow:tasks".into(),
+                skills: vec![],
             }]
         );
     }
@@ -182,6 +196,10 @@ mod tests {
         assert!(
             errors("  - { capability: work_items, id: none, entry: oxplow:tasks }\n")
                 .contains("not `none`")
+        );
+        assert!(
+            errors("  - { capability: snapshots, id: oxplow, entry: oxplow:snapshots }\n")
+                .contains("core's own")
         );
         assert!(errors(
             "  - { capability: work_items, id: x, entry: oxplow:tasks, features: [a] }\n"

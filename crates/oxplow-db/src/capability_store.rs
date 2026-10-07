@@ -2,7 +2,7 @@
 //! capability's implementations, with the features each declares, which
 //! is active and why. Published as `v_capability_provider`, so the UI
 //! hides what an implementation can't do and Settings lists the choices.
-//! Restated whole by the app's capability registry whenever what it holds
+//! Restated whole (`reset_tx`) by the app's capability registry whenever what it holds
 //! or the choices change (`oxplow_app::capabilities`).
 
 use rusqlite::{params, Connection};
@@ -36,13 +36,19 @@ pub struct CapabilityProvider {
     /// On the active row, why it's the one: `personal`, `project`,
     /// `default` or `fallback`.
     pub chosen_by: Option<String>,
+    /// The capability as core declares it: how a person names it, whether
+    /// a project chooses it, whether it may be none.
+    pub capability_title: String,
+    pub choosable: bool,
+    pub optional: bool,
 }
 
 fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainError> {
     conn.execute(
         "INSERT INTO capability_provider
-           (capability, provider, extension, features_json, active, title, source, available, chosen_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+           (capability, provider, extension, features_json, active, title, source, available,
+            chosen_by, capability_title, choosable, optional)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             row.capability,
             row.provider,
@@ -53,17 +59,27 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
             row.source,
             row.available,
             row.chosen_by,
+            row.capability_title,
+            row.choosable,
+            row.optional,
         ],
     )
     .map_err(map_sql_err)?;
     Ok(())
 }
 
+/// Replace every row with `rows`.
+pub fn reset_tx(conn: &Connection, rows: &[CapabilityProvider]) -> Result<(), DomainError> {
+    conn.execute("DELETE FROM capability_provider", [])
+        .map_err(map_sql_err)?;
+    rows.iter().try_for_each(|r| insert_tx(conn, r))
+}
+
 pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError> {
     let mut stmt = conn
         .prepare(
             "SELECT capability, provider, extension, features_json, active, title, source,
-                    available, chosen_by
+                    available, chosen_by, capability_title, choosable, optional
                FROM capability_provider ORDER BY capability, provider",
         )
         .map_err(map_sql_err)?;
@@ -80,6 +96,9 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
                 source: r.get(6)?,
                 available: r.get(7)?,
                 chosen_by: r.get(8)?,
+                capability_title: r.get(9)?,
+                choosable: r.get(10)?,
+                optional: r.get(11)?,
             })
         })
         .map_err(map_sql_err)?;
@@ -95,17 +114,6 @@ pub struct SqliteCapabilityStore {
 impl SqliteCapabilityStore {
     pub fn new(db: Database) -> Self {
         Self { db }
-    }
-
-    /// Replace every row with `rows`.
-    pub async fn reset(&self, rows: Vec<CapabilityProvider>) -> Result<(), DomainError> {
-        self.db
-            .transaction(move |tx| {
-                tx.execute("DELETE FROM capability_provider", [])
-                    .map_err(map_sql_err)?;
-                rows.iter().try_for_each(|r| insert_tx(tx, r))
-            })
-            .await
     }
 
     pub async fn list(&self) -> Result<Vec<CapabilityProvider>, DomainError> {
@@ -129,23 +137,27 @@ mod tests {
             source: "builtin".into(),
             available: true,
             chosen_by: Some("default".into()),
+            capability_title: capability.into(),
+            choosable: true,
+            optional: false,
         }
     }
 
     #[tokio::test]
     async fn rows_are_restated_whole() {
-        let store = SqliteCapabilityStore::new(Database::in_memory());
+        let db = Database::in_memory();
+        let store = SqliteCapabilityStore::new(db.clone());
+        let reset = |rows: Vec<CapabilityProvider>| db.transaction(move |tx| reset_tx(tx, &rows));
         let mut fake = row("work_items", "fake", json!({ "comments": false }));
         fake.extension = Some("tracker".into());
         fake.available = false;
         fake.chosen_by = None;
-        store
-            .reset(vec![
-                row("work_items", "oxplow", json!({ "comments": true })),
-                fake.clone(),
-            ])
-            .await
-            .unwrap();
+        reset(vec![
+            row("work_items", "oxplow", json!({ "comments": true })),
+            fake.clone(),
+        ])
+        .await
+        .unwrap();
         assert_eq!(
             store.list().await.unwrap(),
             vec![
@@ -153,8 +165,7 @@ mod tests {
                 row("work_items", "oxplow", json!({ "comments": true }))
             ]
         );
-        store
-            .reset(vec![row("vcs", "git", json!({ "remotes": true }))])
+        reset(vec![row("vcs", "git", json!({ "remotes": true }))])
             .await
             .unwrap();
         assert_eq!(

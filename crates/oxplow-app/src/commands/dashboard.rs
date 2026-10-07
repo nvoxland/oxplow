@@ -177,6 +177,7 @@ fn spec(
         lifecycle: Lifecycle::Stable,
         atomicity,
         effect: CommandEffect::Record,
+        needs: Vec::new(),
     }
 }
 

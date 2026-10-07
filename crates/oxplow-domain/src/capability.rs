@@ -8,6 +8,35 @@
 //! a provider instance); which one is active is resolved from the
 //! person's and the project's choices (`oxplow_app::capabilities`).
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+/// Why a capability's active implementation is the one it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChosenBy {
+    /// The person's own layer.
+    Personal,
+    /// The project's `activeProviders`.
+    Project,
+    /// Nothing chose: the capability's default.
+    Default,
+    /// The choice isn't available (its extension is disabled, its
+    /// instance stopped, its id unknown).
+    Fallback,
+}
+
+impl ChosenBy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChosenBy::Personal => "personal",
+            ChosenBy::Project => "project",
+            ChosenBy::Default => "default",
+            ChosenBy::Fallback => "fallback",
+        }
+    }
+}
+
 /// One capability, as core declares it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilitySpec {
@@ -93,6 +122,38 @@ pub fn choosable() -> impl Iterator<Item = &'static CapabilitySpec> {
     CAPABILITIES.iter().filter(|c| c.choosable)
 }
 
+/// Check one declared need: a capability (`work_items`), or one of its
+/// features (`snapshots.contents`), as core declares them.
+pub fn check_need(need: &str) -> Result<(), String> {
+    let (id, feature) = match need.split_once('.') {
+        Some((id, feature)) => (id, Some(feature)),
+        None => (need, None),
+    };
+    let Some(spec) = spec(id) else {
+        return Err(format!(
+            "needs `{need}`: `{id}` isn't a capability ({})",
+            CAPABILITIES
+                .iter()
+                .map(|c| c.id)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    };
+    if let Some(f) = feature {
+        if !spec.features.contains(&f) {
+            return Err(format!(
+                "needs `{need}`: `{f}` isn't a feature of `{id}` ({})",
+                if spec.features.is_empty() {
+                    "it has none".to_string()
+                } else {
+                    spec.features.join(", ")
+                }
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +178,17 @@ mod tests {
         );
         assert_eq!(spec("snapshots").map(|c| c.optional), Some(false));
         assert!(spec("nope").is_none());
+    }
+
+    #[test]
+    fn a_need_names_a_capability_or_one_of_its_features() {
+        assert!(check_need("work_items").is_ok());
+        assert!(check_need("snapshots.contents").is_ok());
+        assert!(check_need("teleport")
+            .unwrap_err()
+            .contains("isn't a capability"));
+        assert!(check_need("work_items.flying")
+            .unwrap_err()
+            .contains("isn't a feature"));
     }
 }

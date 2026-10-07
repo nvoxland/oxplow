@@ -269,6 +269,7 @@ fn spec(
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
         effect: CommandEffect::Record,
+        needs: Vec::new(),
     }
 }
 

@@ -59,6 +59,7 @@ impl ExternalWorkItems {
             .collect::<Result<_, _>>()?;
         Ok(WorkItemsProvider {
             id: instance.id.clone(),
+            id_pattern: instance.spec.id_pattern.clone(),
             features,
             external: Some(Arc::new(ExternalWorkItems {
                 instance: instance.clone(),

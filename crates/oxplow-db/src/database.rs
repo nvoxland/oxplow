@@ -239,10 +239,25 @@ impl Database {
     /// file. Refuses a file whose schema version differs from this build's
     /// (its views may not match what this build would query).
     pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, DbInitError> {
+        Self::attach(path.as_ref(), true)
+    }
+
+    /// Open an existing project database to write, as it is: no migrating
+    /// and no recompiling its models — for a tool beside the running app
+    /// (the `oxplow-dev` helper), whose views it must not rebuild under
+    /// it. Refuses a file whose schema version differs from this build's.
+    pub fn open_existing(path: impl AsRef<Path>) -> Result<Self, DbInitError> {
+        Self::attach(path.as_ref(), false)
+    }
+
+    fn attach(path: &Path, read_only: bool) -> Result<Self, DbInitError> {
         use rusqlite::OpenFlags;
-        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        let probe =
-            Connection::open_with_flags(path.as_ref(), flags).map_err(DbInitError::Sqlite)?;
+        let flags = if read_only {
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        } else {
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        };
+        let probe = Connection::open_with_flags(path, flags).map_err(DbInitError::Sqlite)?;
         let have: Option<i64> = probe
             .query_row(
                 "SELECT max(version) FROM refinery_schema_history",
@@ -266,10 +281,14 @@ impl Database {
         }
         let changes = Arc::new(crate::changes::Changes::default());
         let hooks = changes.clone();
-        let manager = SqliteConnectionManager::file(path.as_ref())
+        let manager = SqliteConnectionManager::file(path)
             .with_flags(flags)
             .with_init(move |c| {
-                c.pragma_update(None, "foreign_keys", "ON")?;
+                if read_only {
+                    c.pragma_update(None, "foreign_keys", "ON")?;
+                } else {
+                    init_connection(c)?;
+                }
                 c.busy_timeout(std::time::Duration::from_secs(5))?;
                 hooks.install(c)
             });
@@ -762,6 +781,46 @@ pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An existing database opens to write as it is — its models not
+    /// rebuilt — and only at this build's schema version.
+    #[tokio::test]
+    async fn an_existing_database_opens_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("local.sqlite");
+        drop(Database::open(&path).unwrap());
+        let views = |c: &Connection| -> i64 {
+            c.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'view'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let raw = Connection::open(&path).unwrap();
+        raw.execute_batch("CREATE VIEW v_kept_by_attach AS SELECT 1")
+            .unwrap();
+        let before = views(&raw);
+        let db = Database::open_existing(&path).unwrap();
+        db.transaction(|tx| {
+            tx.execute("CREATE TABLE attached_write (x INTEGER)", [])
+                .map(|_| ())
+                .map_err(crate::map_sql_err)
+        })
+        .await
+        .unwrap();
+        assert_eq!(views(&raw), before, "nothing recompiled");
+        raw.execute(
+            "INSERT INTO refinery_schema_history (version, name, applied_on, checksum)
+             VALUES (99999, 'future', 'now', '0')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            Database::open_existing(&path).is_err(),
+            "another build's schema"
+        );
+    }
 
     /// A database restored from the migrated template is exactly what
     /// migrating from scratch makes: same tables, views, indexes and

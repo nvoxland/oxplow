@@ -336,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn a_table_change_reaches_its_models_and_their_readers_only() {
         use oxplow_domain::stores::TaskStore as _;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let lineage = Lineage::load(&f.svc.db).await.unwrap();
         let changed = lineage.affected(&["task".to_string()]);
         assert!(changed.contains(&"v_task".to_string()), "{changed:?}");
@@ -520,7 +520,7 @@ mod tests {
     async fn a_materialized_model_recomputes_once_per_burst_and_announces_its_readers() {
         use oxplow_db::models::{ColumnDecl, ExtensionModels, Materialize, ModelDecl, ModelSource};
         use oxplow_domain::stores::TaskStore as _;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let model =
             |name: &str, sql: &str, columns: &[(&str, &str)], on_change: bool| ModelSource {
                 decl: ModelDecl {
@@ -635,7 +635,7 @@ mod tests {
     #[tokio::test]
     async fn a_contract_change_alone_refills_a_materialized_model() {
         use oxplow_db::models::{ColumnDecl, ExtensionModels, Materialize, ModelDecl, ModelSource};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_task_effort().await;
         let model =
             |name: &str, version: u32, sql: &str, title_type: &str, on_change: bool| ModelSource {
                 decl: ModelDecl {

@@ -727,3 +727,71 @@ fn no_tmux_in_the_app() {
         .collect();
     assert_eq!(named, Vec::<String>::new());
 }
+
+/// What core may not do with its own pieces (`.context/work-tracking.md`
+/// "Swappable pieces"): name the bundled extension as a value outside
+/// `bundled_extensions.rs` (its contributions are what any extension's
+/// are), or compare a provider id with oxplow's to decide how to treat
+/// it. Each `(file, pattern)` still here says why.
+#[rustfmt::skip]
+const SPECIAL_CASES: &[(&str, &str, &str)] = &[
+    // Placing a task among oxplow's own: these commands are oxplow's
+    // tasks', until the tasks sit behind the work-list interface like any
+    // other implementation (so does `dispatching`'s in-transaction route
+    // for them, in the same file).
+    ("crates/oxplow-app/src/commands/work_item.rs", "!= OXPLOW", "oxplow's tasks' own commands"),
+    // Reserving the name, so no provider takes oxplow's refs: no decision
+    // about how to call one.
+    ("crates/oxplow-domain/src/work_items.rs", "== OXPLOW", "the reserved provider id"),
+];
+
+/// Each `(file, pattern)` in production code, comments left out.
+fn special_cases() -> BTreeSet<(String, String)> {
+    const PATTERNS: &[&str] = &[
+        "\"oxplow-bundled\"",
+        "\"oxplow-bundled/",
+        "== OXPLOW",
+        "!= OXPLOW",
+        "== \"oxplow\"",
+        "!= \"oxplow\"",
+        "\"oxplow\" ==",
+        "\"oxplow\" !=",
+    ];
+    let mut out = BTreeSet::new();
+    for (path, text) in production_sources() {
+        if path.ends_with("/bundled_extensions.rs") {
+            continue;
+        }
+        for line in text.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            for pattern in PATTERNS.iter().filter(|p| names(line, p)) {
+                out.insert((path.clone(), pattern.to_string()));
+            }
+        }
+    }
+    out
+}
+
+/// Whether `line` has `pattern`, a whole identifier at its end (`==
+/// OXPLOW`, not `== OXPLOW_CONFIG_FILE`).
+fn names(line: &str, pattern: &str) -> bool {
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    line.match_indices(pattern)
+        .any(|(i, _)| !pattern.ends_with(ident) || !line[i + pattern.len()..].starts_with(ident))
+}
+
+/// Core treats its own implementations as any other's: a special case is
+/// pinned in [`SPECIAL_CASES`] with its reason, and goes when it's fixed.
+#[test]
+fn core_never_special_cases_its_own_pieces() {
+    let pinned: BTreeSet<(String, String)> = SPECIAL_CASES
+        .iter()
+        .map(|(f, p, _)| (f.to_string(), p.to_string()))
+        .collect();
+    let found = special_cases();
+    let unlisted: Vec<_> = found.difference(&pinned).collect();
+    let gone: Vec<_> = pinned.difference(&found).collect();
+    assert!(
+        unlisted.is_empty() && gone.is_empty(),
+        "core's special cases changed.\nunlisted (go through the capability registry instead): {unlisted:#?}\nno longer there (drop from SPECIAL_CASES): {gone:#?}"
+    );
+}
