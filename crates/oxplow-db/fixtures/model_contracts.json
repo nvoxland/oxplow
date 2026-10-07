@@ -5794,5 +5794,22 @@
       ],
       "key": []
     }
+  },
+  "commit_work_item": {
+    "1": {
+      "columns": [
+        {
+          "name": "sha",
+          "type": "TEXT",
+          "doc": "The commit (v_commit.sha)."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item (v_work_item.ref)."
+        }
+      ],
+      "key": []
+    }
   }
 }

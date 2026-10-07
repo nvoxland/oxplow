@@ -560,7 +560,7 @@ commit into the unified `page_ref` graph (see
   effort's end-snapshot bytes would be (`Vcs::object_at` against
   `ObjectStore::id_of`; a partial commit holds it too). It's linked by a
   `(work_item:<id>) -- committed --> (commit:<sha>)` edge — the shape of
-  a declared impact, the effort in `source_extra` — which `v_commit_task`
+  a declared impact, the effort in `source_extra` — which `v_commit_work_item`
   (v2) and the commit's backlinks read. The other order (committed, then
   the task closed) is the `effort.commits` reaction to `effort.finished`,
   over the commits since the effort started. An effort whose end-snapshot

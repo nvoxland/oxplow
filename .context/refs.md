@@ -209,7 +209,7 @@ in the agent tools' vocabulary (`IMPACT_KINDS`: `wiki | work_item | file
 V165 renamed stored spellings and V20 made `task` `work_item`, its ids
 canonical refs), which `impact_kind` projects to the canonical ones; a
 `work_item` impact's id is its ref or one of the active list's own ids. Migration V92 wiped the old rows; the boot
-restate regenerates them. `v_commit_task` reads the new shape.
+restate regenerates them. `v_commit_work_item` reads the new shape.
 `ref_resolver::resolve_ref` and `CommentTarget` use the same kinds.
 
 ## The TS side is on canonical refs (built)

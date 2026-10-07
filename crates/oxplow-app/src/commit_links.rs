@@ -1,4 +1,4 @@
-//! A commit is linked to the task it was for by what it holds (tsk1035).
+//! A commit is linked to the work item it was for by what it holds.
 //!
 //! An agent's commit rarely names its task — and the agent rule is to name
 //! tasks by title, never id — so the message can't be the link. The work
@@ -9,7 +9,7 @@
 //!
 //! The link is a `work_item → commit` `page_ref` edge (`RT_COMMITTED`, the
 //! effort in `source_extra`) — the same shape as a declared impact — so
-//! `v_commit_task` and the commit's backlinks read it. Made from both sides:
+//! `v_commit_work_item` and the commit's backlinks read it. Made from both sides:
 //! when a commit is indexed, against the efforts that closed before it
 //! ([`link_commit`]); and when an effort finishes, against the commits made
 //! since it started ([`link_effort`]: committed before the task was closed).
@@ -149,12 +149,12 @@ mod tests {
 
     use crate::test_fixtures::commit_all;
 
-    /// The project's tasks per commit, as `v_commit_task` reads them.
-    async fn tasks_of(svc: &crate::Services, sha: &str) -> serde_json::Value {
+    /// The work items per commit, as `v_commit_work_item` reads them.
+    async fn items_of(svc: &crate::Services, sha: &str) -> serde_json::Value {
         let out = svc
             .sql
             .query_sql(
-                "SELECT task_id FROM v_commit_task WHERE sha = ?1 ORDER BY task_id",
+                "SELECT work_item FROM v_commit_work_item WHERE sha = ?1 ORDER BY work_item",
                 vec![oxplow_db::SqlCell::Text(sha.to_string())],
                 None,
             )
@@ -262,14 +262,14 @@ mod tests {
         let sha = commit_all(&root, "the discount fix");
         index_and_link(&f.svc, &sha).await;
         assert_eq!(
-            tasks_of(&f.svc, &sha).await,
-            serde_json::json!([[f.task.value()]])
+            items_of(&f.svc, &sha).await,
+            serde_json::json!([[format!("work_item:oxplow:{}", f.task)]])
         );
         // Edited again and committed: not the effort's version.
         std::fs::write(root.join("src/a.rs"), "fn a() { 2 }\n").unwrap();
         let other = commit_all(&root, "something else");
         index_and_link(&f.svc, &other).await;
-        assert_eq!(tasks_of(&f.svc, &other).await, serde_json::json!([]));
+        assert_eq!(items_of(&f.svc, &other).await, serde_json::json!([]));
     }
 
     /// tsk1078: an older effort whose end version has expired from Local
@@ -302,8 +302,8 @@ mod tests {
         let sha = commit_all(&root, "the second fix");
         index_and_link(&f.svc, &sha).await;
         assert_eq!(
-            tasks_of(&f.svc, &sha).await,
-            serde_json::json!([[f.task.value()]])
+            items_of(&f.svc, &sha).await,
+            serde_json::json!([[format!("work_item:oxplow:{}", f.task)]])
         );
     }
 
@@ -319,8 +319,8 @@ mod tests {
         close_effort(&f.svc, f.effort, &["src/a.rs"]).await;
         link_effort(&f.svc, &f.effort).await.unwrap();
         assert_eq!(
-            tasks_of(&f.svc, &sha).await,
-            serde_json::json!([[f.task.value()]])
+            items_of(&f.svc, &sha).await,
+            serde_json::json!([[format!("work_item:oxplow:{}", f.task)]])
         );
     }
 }

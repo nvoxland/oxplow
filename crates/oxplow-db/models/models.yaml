@@ -326,12 +326,14 @@
     - { name: "status", type: "TEXT", doc: "`added`, `modified`, `deleted` or `renamed`." }
     - { name: "additions", type: "INTEGER", doc: "Lines added." }
     - { name: "deletions", type: "INTEGER", doc: "Lines deleted." }
-- name: commit_task
+- name: commit_work_item
   version: 1
-  description: "The tasks each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`), the ones that declared it as an impact, and the ones whose effort's work it holds (its version of every file they share is the effort's end version; tsk1035)."
+  description: "The active work list's items each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`, by the list's id pattern), the ones that declared it as an impact, and the ones whose effort's work it holds (its version of every file they share is the effort's end version)."
   columns:
     - { name: "sha", type: "TEXT", doc: "The commit (v_commit.sha)." }
-    - { name: "task_id", type: "INT", doc: "The task (v_task.id)." }
+    - { name: "work_item", type: "TEXT", doc: "The work item (v_work_item.ref)." }
+  tests:
+    - { relationships: { column: work_item, to: work_item, field: ref } }
 - name: context_read
   version: 1
   description: "Which `.context/*.md` project docs the agent read, and when. Compare with the files it changed to spot work done without reading the relevant doc."

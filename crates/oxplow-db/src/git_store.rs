@@ -1,5 +1,5 @@
 //! Git history and branches, as the semantic layer reads them (`v_commit`,
-//! `v_commit_file`, `v_branch`; `v_commit_task` comes from `page_ref`).
+//! `v_commit_file`, `v_branch`; `v_commit_work_item` comes from `page_ref`).
 //! Written by the commit indexer and the branch refresh in `oxplow-app`.
 //! See `.context/semantic-layer.md`.
 

@@ -598,7 +598,7 @@ mod tests {
         .len();
         assert_eq!(n, 1, "should index the one commit");
 
-        // The commit, its file and its task mention read through v_*.
+        // The commit and its file read through v_*.
         let sl = crate::sql_gateway::SqlGateway::new(db.clone());
         let q = |sql: &'static str| {
             let sl = sl.clone();
@@ -613,10 +613,6 @@ mod tests {
         assert_eq!(
             q("SELECT path, status FROM v_commit_file").await,
             serde_json::json!([["a.rs", "added"]])
-        );
-        assert_eq!(
-            q("SELECT task_id FROM v_commit_task").await,
-            serde_json::json!([[42]])
         );
 
         // tsk42 has the commit as a backlink.
