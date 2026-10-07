@@ -1998,6 +1998,13 @@ per effort, per recompute). A **deletion** of facts (a capture prune; facts
 cascade) can't cheaply say which measures it touched, so it bumps the
 memo's epoch (`invalidate_all`) and every entry is forgotten.
 
+The cube builder skips a measure whose producers recorded no capture
+since its last complete pass and whose cube epoch hasn't moved
+(`capture_token_for_producers` + `cube_epoch`, remembered in memory): a
+pass on every write burst used to load all of every measure's captures to
+find nothing past the watermark. Every cube wipe bumps the epoch, so a
+wipe always rebuilds.
+
 If you add another path that inserts into `fact`, it must call
 `db.memo().invalidate_measures(<the measures written>)` after committing;
 one that deletes facts, `db.memo().invalidate_all()`.

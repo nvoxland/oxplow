@@ -48,7 +48,17 @@ pub struct MetricCubeBuilder {
     /// the cube diverges from the facts. `None` ⇒ blind, matching an
     /// unresolved engine.
     visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
+    /// Per measure, the producers' capture token and the cube epoch its last
+    /// complete pass ran at: a pass where neither moved has nothing to fold.
+    built: std::sync::Arc<std::sync::Mutex<HashMap<i64, BuiltAt>>>,
+    /// Passes that loaded a measure's captures (tests).
+    #[cfg(test)]
+    loads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
+
+/// What a measure's last complete pass saw: its producers' capture token
+/// and the cube epoch.
+type BuiltAt = ((i64, Option<i64>), i64);
 
 /// Captures folded per build transaction (tsk113). Large enough to amortize
 /// the WAL page rewrites the profile flagged; small enough to bound the
@@ -84,7 +94,24 @@ impl MetricCubeBuilder {
         Self {
             facts,
             visibility: None,
+            built: Default::default(),
+            #[cfg(test)]
+            loads: Default::default(),
         }
+    }
+
+    /// How many passes loaded a measure's captures.
+    #[cfg(test)]
+    fn loads(&self) -> usize {
+        self.loads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn built_at(&self, measure: i64) -> Option<BuiltAt> {
+        self.built
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&measure)
+            .copied()
     }
 
     /// Attach the ancestry resolver — the same instance the engine holds, so
@@ -119,6 +146,37 @@ impl MetricCubeBuilder {
         };
         let scope = parse_capture_scope(measure_key, &measure.capture_scope)?;
         let producers = self.facts.producers_for_measure(measure.id).await?;
+        // Nothing recorded since the last complete pass, and no invalidation:
+        // nothing past the watermark, so don't load every capture to see so.
+        let at: BuiltAt = (
+            self.facts
+                .capture_token_for_producers(producers.clone())
+                .await?,
+            self.facts.cube_epoch().await?,
+        );
+        if self.built_at(measure.id) == Some(at) {
+            return Ok(0);
+        }
+        #[cfg(test)]
+        self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let folded = self.build_measure_from(&measure, scope, producers).await?;
+        // A pass an invalidation fenced (the epoch moved) isn't complete.
+        if self.facts.cube_epoch().await? == at.1 {
+            self.built
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(measure.id, at);
+        }
+        Ok(folded)
+    }
+
+    /// [`Self::build_measure`]'s pass over `producers`' captures.
+    async fn build_measure_from(
+        &self,
+        measure: &Measure,
+        scope: CaptureScope,
+        producers: Vec<String>,
+    ) -> Result<usize, DomainError> {
         let captures = self.facts.captures_for_producers(producers).await?;
 
         // Promoted dims ARE the cube's grain. Read once per build: promoting a dim
@@ -143,11 +201,11 @@ impl MetricCubeBuilder {
         for (stream, caps) in by_stream {
             folded += match scope {
                 CaptureScope::Complete => {
-                    self.build_stream_complete(&measure, stream, &caps, &promoted)
+                    self.build_stream_complete(measure, stream, &caps, &promoted)
                         .await?
                 }
                 _ => {
-                    self.build_stream(&measure, scope, stream, &caps, &promoted)
+                    self.build_stream(measure, scope, stream, &caps, &promoted)
                         .await?
                 }
             };
@@ -981,6 +1039,29 @@ mod tests {
             subject_ref: Some(subject.into()),
             ..NewFact::new(measure, value)
         }
+    }
+
+    /// A build pass skips a measure whose producers recorded no capture
+    /// since its last pass (nor was the cube invalidated): it doesn't load
+    /// their captures again just to find nothing past the watermark.
+    #[tokio::test]
+    async fn a_measure_with_nothing_new_isnt_reloaded() {
+        let (_engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.test_case").await;
+        facts
+            .record_facts(cap_in(1, "2026-06-30T10:00:00Z"), vec![case(m, "t1", 1.0)])
+            .await
+            .unwrap();
+        assert_eq!(builder.build_measure("acme.test_case").await.unwrap(), 1);
+        assert_eq!(builder.loads(), 1);
+        assert_eq!(builder.build_measure("acme.test_case").await.unwrap(), 0);
+        assert_eq!(builder.loads(), 1, "nothing new: not reloaded");
+        facts
+            .record_facts(cap_in(1, "2026-06-30T11:00:00Z"), vec![case(m, "t1", 2.0)])
+            .await
+            .unwrap();
+        assert_eq!(builder.build_measure("acme.test_case").await.unwrap(), 1);
+        assert_eq!(builder.loads(), 2);
     }
 
     #[tokio::test]
