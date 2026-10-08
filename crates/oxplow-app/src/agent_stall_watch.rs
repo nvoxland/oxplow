@@ -91,6 +91,7 @@ impl AgentStallWatch {
             // ever arrive to trigger this through the normal path.
             self.events.emit(OxplowEvent::AgentStatusChanged {
                 thread_id,
+                stream_id: status.stream_id,
                 agent_session_id: session,
                 state: AgentStatusState::Stalled,
                 detail: None,
@@ -136,6 +137,7 @@ mod tests {
             talking_pane: String::new(),
             working_session_id: String::new(),
             talking_session_id: String::new(),
+            host: oxplow_domain::HostId::LOCAL,
             custom_prompt: None,
             created_at: now,
             updated_at: now,

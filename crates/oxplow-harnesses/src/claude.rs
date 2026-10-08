@@ -28,8 +28,8 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Endpoints, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec,
-    Transcript,
+    AgentHarness, Endpoints, Gate, HarnessError, HarnessSetting, Input, Interact, Launch,
+    LaunchInput, LaunchSpec, Transcript,
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn, UsageDelta};
 use oxplow_domain::agent::text::AgentText;
@@ -142,6 +142,10 @@ impl AgentHarness for Claude {
 
     fn env_markers(&self) -> &[&str] {
         MARKERS
+    }
+
+    fn settings(&self) -> &[HarnessSetting] {
+        &[]
     }
 
     fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError> {

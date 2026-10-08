@@ -59,6 +59,7 @@ async fn the_fake_harness_session_is_recorded_canonically() {
         talking_pane: String::new(),
         working_session_id: String::new(),
         talking_session_id: String::new(),
+        host: oxplow_domain::HostId::LOCAL,
         custom_prompt: None,
         created_at: now,
         updated_at: now,

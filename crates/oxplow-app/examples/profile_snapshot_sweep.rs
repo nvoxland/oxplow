@@ -64,6 +64,7 @@ async fn main() {
             talking_pane: String::new(),
             working_session_id: String::new(),
             talking_session_id: String::new(),
+            host: oxplow_domain::HostId::LOCAL,
             custom_prompt: None,
             created_at: oxplow_domain::Timestamp::from_unix_ms(0),
             updated_at: oxplow_domain::Timestamp::from_unix_ms(0),

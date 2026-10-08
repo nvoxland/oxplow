@@ -251,6 +251,10 @@ Each stream owns:
     to the branch name; the runtime rewrites the title when the branch
     switches only if the old title matched the old branch (preserves
     user renames).
+- a `host` (V35, `HostId`; `'local'` for every stream so far): the host its
+  worktree is on. The router answers it with the path (`WorktreeRoot`,
+  [vcs.md](./vcs.md) "Around the provider"); nothing takes a host
+  parameter yet, and no model exposes it.
 - a `branch` / `branch_ref` pair that is **not** pinned — any stream can
   switch branches. Updated by `StreamStore.setStreamBranch(streamId,
   branch, branchRef)`, which emits `stream.changed` (kind:

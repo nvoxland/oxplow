@@ -225,7 +225,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::set_agent_prompt_append,
             commands::generated::set_agents,
             commands::generated::set_generated,
-            commands::generated::set_agent_model,
+            commands::generated::set_agent_setting,
             commands::generated::get_workspace_context,
             // efforts
             commands::generated::get_effort_files,

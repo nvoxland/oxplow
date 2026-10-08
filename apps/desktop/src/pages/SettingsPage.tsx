@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import {
   effectiveConfig,
   getConfig,
-  setAgentModel,
+  setAgentSetting,
   setAgents,
   setAgentPromptAppend,
   subscribeOxplowEvents,
@@ -52,7 +52,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   // shows what the project has (every harness when `agents:` names none).
   const [editedAgents, setAgentsState] = useState<string[] | null>(null);
   const agents = editedAgents ?? harnesses.filter((h) => h.enabled).map((h) => h.id);
-  const [opencodeModel, setOpencodeModel] = useState("");
+  // Each harness's settings as loaded (`agentConfig.<harness>.<key>`) and
+  // as edited, keyed `<harness>.<key>`.
+  const [loadedSettings, setLoadedSettings] = useState<Record<string, string>>({});
+  const [harnessSettings, setHarnessSettings] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<EffectiveSetting[]>([]);
   const [search, setSearch] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -68,8 +71,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     void getConfig()
       .then((config) => {
         setPromptAppend(config.agentPromptAppend ?? "");
-        const opencode = config.agentConfig?.opencode as { model?: string } | undefined;
-        setOpencodeModel(opencode?.model ?? "");
+        const values = harnessSettingValues(config.agentConfig ?? {});
+        setLoadedSettings(values);
+        setHarnessSettings(values);
         setLoaded(true);
       })
       .catch((e) => {
@@ -99,7 +103,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         throw new Error("Enable at least one agent.");
       }
       if (editedAgents) await setAgents(editedAgents);
-      await setAgentModel("opencode", opencodeModel.trim() || null);
+      for (const h of harnesses) {
+        for (const s of h.settings) {
+          const at = `${h.id}.${s.key}`;
+          const value = (harnessSettings[at] ?? "").trim();
+          if (value !== (loadedSettings[at] ?? "")) await setAgentSetting(h.id, s.key, value || null);
+        }
+      }
       await setAgentPromptAppend(promptAppend);
       setSavedMessage("Saved. Agent prompt applies to newly-started sessions.");
     } catch (e) {
@@ -160,24 +170,29 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             Enabled agents for this project. The first enabled agent is the default for new sessions.
           </Hint>
           <AgentPicker harnesses={harnesses} agents={agents} onChange={setAgentsState} disabled={!loaded || saving} />
-          {agents.includes("opencode") ? (
-            <div style={{ marginTop: 10 }}>
-              <Hint>
-                Model OpenCode launches with (<code>provider/model</code>, e.g.{" "}
-                <code>github-copilot/gpt-5-mini</code>). Blank uses the built-in default. Applies to
-                sessions started after Save.
-              </Hint>
-              <input
-                data-testid="settings-opencode-model"
-                type="text"
-                value={opencodeModel}
-                onChange={(event) => setOpencodeModel(event.target.value)}
-                disabled={!loaded || saving}
-                placeholder="github-copilot/gpt-5-mini"
-                style={{ ...numberInputStyle, width: 320 }}
-              />
-            </div>
-          ) : null}
+          {harnesses
+            .filter((h) => agents.includes(h.id))
+            .flatMap((h) =>
+              h.settings.map((s) => {
+                const at = `${h.id}.${s.key}`;
+                return (
+                  <div key={at} style={{ marginTop: 10 }}>
+                    <Hint>
+                      {h.title} — {s.title}: {s.hint}
+                    </Hint>
+                    <input
+                      data-testid={`settings-agent-${h.id}-${s.key}`}
+                      type="text"
+                      value={harnessSettings[at] ?? ""}
+                      onChange={(event) => setHarnessSettings({ ...harnessSettings, [at]: event.target.value })}
+                      disabled={!loaded || saving}
+                      placeholder={s.placeholder}
+                      style={{ ...numberInputStyle, width: 320 }}
+                    />
+                  </div>
+                );
+              }),
+            )}
         </Section>
 
         <Section title="Agent Prompt Additions" id="settings-prompt">
@@ -532,3 +547,15 @@ const actionsRowStyle: CSSProperties = {
   paddingTop: 12,
   borderTop: "1px solid var(--border-subtle)",
 };
+
+/// `agentConfig`'s string values, keyed `<harness>.<key>`.
+function harnessSettingValues(agentConfig: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [harness, fields] of Object.entries(agentConfig)) {
+    if (!fields || typeof fields !== "object") continue;
+    for (const [key, value] of Object.entries(fields as Record<string, unknown>)) {
+      if (typeof value === "string") out[`${harness}.${key}`] = value;
+    }
+  }
+  return out;
+}

@@ -89,3 +89,33 @@ test("closing tabs that leave the active tab open does not refocus", () => {
   fireEvent.click(getByTestId("menu-item-tab.close-right"));
   expect(activated).toEqual([]);
 });
+
+/// A session's tab closes only after its × is armed and confirmed — and
+/// confirming does close it.
+test("a confirm-close tab closes once its confirm is clicked", () => {
+  const closed: string[] = [];
+  const tabs: CenterTab[] = [
+    {
+      id: "agent_session:ses7",
+      label: "Claude",
+      closable: true,
+      pinned: true,
+      closeConfirm: "Close session",
+      render: () => null,
+    },
+    { id: "file:a.ts", label: "a.ts", closable: true, render: () => null },
+  ];
+  const { getByTestId } = render(
+    <CenterTabs
+      tabs={tabs}
+      activeId="agent_session:ses7"
+      onActivate={() => {}}
+      onClose={(id) => closed.push(id)}
+      onReorder={() => {}}
+    />,
+  );
+  fireEvent.click(getByTestId("center-tab-close-agent_session:ses7"));
+  expect(closed).toEqual([]);
+  fireEvent.click(getByTestId("center-tab-close-agent_session:ses7-confirm"));
+  expect(closed).toEqual(["agent_session:ses7"]);
+});

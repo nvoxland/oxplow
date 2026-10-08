@@ -347,7 +347,7 @@ macro_rules! oxplow_command_table {
                 set_agent_prompt_append => $crate::commands::config::set_agent_prompt_append { text: String } -> ::oxplow_config::OxplowConfig,
                 set_agents => $crate::commands::config::set_agents { agents: Vec<String> } -> ::oxplow_config::OxplowConfig,
                 set_generated => $crate::commands::config::set_generated { generated: ::oxplow_config::GeneratedConfig } -> ::oxplow_config::OxplowConfig,
-                set_agent_model => $crate::commands::config::set_agent_model { agent: String, model: Option<String> } -> ::oxplow_config::OxplowConfig,
+                set_agent_setting => $crate::commands::config::set_agent_setting { agent: String, key: String, value: Option<String> } -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,
                 // lsp
                 list_installed_lsp_packages => $crate::commands::lsp::list_installed_lsp_packages {} -> Vec<$crate::commands::lsp::InstalledLspPackage>,

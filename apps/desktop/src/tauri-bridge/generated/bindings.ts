@@ -40,6 +40,8 @@ export const commands = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	// The host its worktree is on.
+	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
 	 *  when this stream is active. `None` (or empty) clears it.
@@ -72,6 +74,8 @@ export const commands = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	// The host its worktree is on.
+	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
 	 *  when this stream is active. `None` (or empty) clears it.
@@ -664,7 +668,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgentModel: (agent: string, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
+	setAgentSetting: (agent: string, key: string, value: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_setting", { agent, key, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1291,6 +1295,8 @@ export type AgentSessionId = string;
 
 export type AgentStatus = {
 	thread_id: ThreadId,
+	// The thread's stream.
+	stream_id: StreamId,
 	/**
 	 *  The agent session it is the status of; `None` for activity no
 	 *  session claims (an agent oxplow didn't start).
@@ -3264,6 +3270,16 @@ export type HarnessListing = {
 	chat: boolean,
 	// The project enables it (`agents:` names it, or names none).
 	enabled: boolean,
+	// The settings it reads from its `agentConfig` entry.
+	settings: HarnessSettingListing[],
+};
+
+// A harness setting, as Settings → Agents shows it.
+export type HarnessSettingListing = {
+	key: string,
+	title: string,
+	hint: string,
+	placeholder: string,
 };
 
 // Where a stream's workspace is.
@@ -3325,6 +3341,13 @@ export type HookKind =
  *  a permission prompt waits on them.
  */
 "notification";
+
+/**
+ *  The host a stream's worktree is on. Every stream is on the local machine
+ *  today ([`HostId::LOCAL`]); naming it keeps "local" from being assumed
+ *  silently where a worktree path is reached (`WorktreeRoot::local_path`).
+ */
+export type HostId = string;
 
 // Everything installing or updating an extension would change.
 export type ImpactReport = {
@@ -4649,6 +4672,11 @@ export type OxplowEvent =
  */
 { kind: "agentStatusChanged"; threadId: ThreadId; 
 /**
+ *  The thread's stream, so a view over every stream (the Git
+ *  dashboard) files it without a lookup.
+ */
+streamId: StreamId; 
+/**
  *  The agent session whose status it is; `None` for activity no
  *  session claims. The renderer rolls a thread's sessions up
  *  (`rollUpAgentStatus`).
@@ -5518,6 +5546,8 @@ export type Stream = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	// The host its worktree is on.
+	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
 	 *  when this stream is active. `None` (or empty) clears it.

@@ -47,6 +47,7 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
     let talking_pane: String = row.get("talking_pane")?;
     let working_session_id: String = row.get("working_session_id")?;
     let talking_session_id: String = row.get("talking_session_id")?;
+    let host: String = row.get("host")?;
     let custom_prompt: Option<String> = row.get("custom_prompt")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
@@ -66,6 +67,7 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
         talking_pane,
         working_session_id,
         talking_session_id,
+        host: oxplow_domain::HostId::new(host),
         custom_prompt,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
         updated_at: string_to_ts(&updated_at).map_err(map_err)?,
@@ -98,8 +100,8 @@ pub fn upsert_tx(conn: &rusqlite::Connection, stream: &Stream) -> rusqlite::Resu
             id, kind, title, branch, branch_ref, branch_source,
             worktree_path, working_pane, talking_pane,
             working_session_id, talking_session_id, custom_prompt,
-            created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            created_at, updated_at, host
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(id) DO UPDATE SET
             kind = excluded.kind,
             title = excluded.title,
@@ -112,7 +114,8 @@ pub fn upsert_tx(conn: &rusqlite::Connection, stream: &Stream) -> rusqlite::Resu
             working_session_id = excluded.working_session_id,
             talking_session_id = excluded.talking_session_id,
             custom_prompt = excluded.custom_prompt,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at,
+            host = excluded.host",
         params![
             id_param,
             kind_to_str(stream.kind),
@@ -128,6 +131,7 @@ pub fn upsert_tx(conn: &rusqlite::Connection, stream: &Stream) -> rusqlite::Resu
             stream.custom_prompt,
             ts_to_string(stream.created_at),
             ts_to_string(stream.updated_at),
+            stream.host.as_str(),
         ],
     )?;
     Ok(if stream.id.is_placeholder() {
@@ -271,6 +275,7 @@ mod tests {
             talking_pane: String::new(),
             working_session_id: String::new(),
             talking_session_id: String::new(),
+            host: oxplow_domain::HostId::LOCAL,
             custom_prompt: None,
             created_at: ts(),
             updated_at: ts(),
@@ -285,6 +290,37 @@ mod tests {
         store.upsert(&s).await.unwrap();
         let got = store.get(&s.id).await.unwrap().unwrap();
         assert_eq!(got, s);
+    }
+
+    /// A stream's host round-trips; a row written before hosts were
+    /// recorded is local.
+    #[tokio::test]
+    async fn a_streams_host_round_trips() {
+        let db = Database::in_memory();
+        let store = SqliteStreamStore::new(db.clone());
+        let s = Stream {
+            host: oxplow_domain::HostId::new("buildbox"),
+            ..primary()
+        };
+        store.upsert(&s).await.unwrap();
+        assert_eq!(
+            store.get(&s.id).await.unwrap().unwrap().host.as_str(),
+            "buildbox"
+        );
+        let default: String = db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO streams (kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                     VALUES ('worktree', 't', 'b', 'refs/heads/b', 'main', '/w', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                    [],
+                )
+                .map_err(crate::map_sql_err)?;
+                tx.query_row("SELECT host FROM streams WHERE title = 't'", [], |r| r.get(0))
+                    .map_err(crate::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(default, "local");
     }
 
     /// tsk573: recording the branch a stream checked out writes only the

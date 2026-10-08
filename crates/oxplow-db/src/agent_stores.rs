@@ -370,8 +370,8 @@ pub fn close_turn_tx(
 // -- Agent status ------------------------------------------------------
 
 /// One `agent.status.changed` row (`thread_id, agent_session_id, v,
-/// payload, at`) as its session's status, read at the type's newest
-/// version.
+/// payload, at`, and the thread's `stream_id`) as its session's status,
+/// read at the type's newest version.
 fn row_to_status(
     vocabulary: &Vocabulary,
     row: &rusqlite::Row<'_>,
@@ -381,6 +381,7 @@ fn row_to_status(
     let v: u32 = row.get(2)?;
     let payload: String = row.get(3)?;
     let at: String = row.get(4)?;
+    let stream: i64 = row.get(5)?;
     let decode = || -> Result<AgentStatus, DomainError> {
         let value = serde_json::from_str(&payload)
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
@@ -389,6 +390,7 @@ fn row_to_status(
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
         Ok(AgentStatus {
             thread_id: ThreadId::new(thread),
+            stream_id: StreamId::new(stream),
             agent_session_id: session.map(AgentSessionId::new),
             state: p.state.into(),
             detail: p.detail,
@@ -407,9 +409,10 @@ pub fn last_status_tx(
     session: Option<AgentSessionId>,
 ) -> Result<Option<AgentStatus>, DomainError> {
     conn.query_row(
-        "SELECT thread_id, agent_session_id, v, payload, at FROM event_log
-          WHERE thread_id = ?1 AND agent_session_id IS ?3 AND type = ?2
-          ORDER BY seq DESC LIMIT 1",
+        "SELECT e.thread_id, e.agent_session_id, e.v, e.payload, e.at, th.stream_id
+           FROM event_log e JOIN threads th ON th.id = e.thread_id
+          WHERE e.thread_id = ?1 AND e.agent_session_id IS ?3 AND e.type = ?2
+          ORDER BY e.seq DESC LIMIT 1",
         params![
             thread.value(),
             AgentStatusChanged::TYPE,
@@ -429,7 +432,7 @@ fn all_statuses_tx(
 ) -> Result<Vec<AgentStatus>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT e.thread_id, e.agent_session_id, e.v, e.payload, e.at
+            "SELECT e.thread_id, e.agent_session_id, e.v, e.payload, e.at, th.stream_id
                FROM event_log e JOIN threads th ON th.id = e.thread_id
                LEFT JOIN agent_session s ON s.id = e.agent_session_id
               WHERE e.seq IN (SELECT MAX(seq) FROM event_log
@@ -744,6 +747,7 @@ mod tests {
             talking_pane: String::new(),
             working_session_id: String::new(),
             talking_session_id: String::new(),
+            host: oxplow_domain::HostId::LOCAL,
             custom_prompt: None,
             created_at: now,
             updated_at: now,
@@ -812,6 +816,13 @@ mod tests {
         let got = store.get(&tid, None).await.unwrap().unwrap();
         assert_eq!(got.state, S::AwaitingUser);
         assert_eq!(got.detail.as_deref(), Some("A or B?"));
+        // It names its thread's stream, so a view over every stream files
+        // it without a lookup.
+        let stream = crate::thread_store::get_tx(&db.conn().unwrap(), tid)
+            .unwrap()
+            .unwrap()
+            .stream_id;
+        assert_eq!(got.stream_id, stream);
         let all = store.list_all().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0], got);

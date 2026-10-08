@@ -80,6 +80,9 @@ pub enum OxplowEvent {
     /// re-derive) compute it inline before emitting.
     AgentStatusChanged {
         thread_id: ThreadId,
+        /// The thread's stream, so a view over every stream (the Git
+        /// dashboard) files it without a lookup.
+        stream_id: oxplow_domain::StreamId,
         /// The agent session whose status it is; `None` for activity no
         /// session claims. The renderer rolls a thread's sessions up
         /// (`rollUpAgentStatus`).

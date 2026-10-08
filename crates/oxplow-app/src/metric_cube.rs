@@ -952,6 +952,7 @@ mod tests {
                     talking_pane: String::new(),
                     working_session_id: String::new(),
                     talking_session_id: String::new(),
+                    host: oxplow_domain::HostId::LOCAL,
                     custom_prompt: None,
                     created_at: Timestamp::from_unix_ms(0),
                     updated_at: Timestamp::from_unix_ms(0),

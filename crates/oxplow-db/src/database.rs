@@ -1776,15 +1776,15 @@ mod tests {
         );
     }
 
-    /// V35: the health table, the enable command, the contribution events,
+    /// V36: the health table, the enable command, the contribution events,
     /// the repair consumer, `extension:` refs and the `exec:` trust tag
     /// carry their new names.
     #[test]
-    fn v35_rewrites_plugin_names_to_extensions_and_contributions() {
+    fn v36_rewrites_plugin_names_to_extensions_and_contributions() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
-            .set_target(refinery::Target::Version(34))
+            .set_target(refinery::Target::Version(35))
             .run(&mut conn)
             .unwrap();
         conn.execute_batch(
@@ -1812,7 +1812,7 @@ mod tests {
         )
         .unwrap();
         embedded::migrations::runner()
-            .set_target(refinery::Target::Version(35))
+            .set_target(refinery::Target::Version(36))
             .run(&mut conn)
             .unwrap();
         let rows = |sql: &str| -> Vec<String> {
@@ -1859,14 +1859,14 @@ mod tests {
         );
     }
 
-    /// V36: the zone the agent harnesses and agent text live in is
+    /// V37: the zone the agent harnesses and agent text live in is
     /// `agents`, in the changes already analyzed too.
     #[test]
-    fn v36_renames_the_plugin_zone_to_agents() {
+    fn v37_renames_the_plugin_zone_to_agents() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
-            .set_target(refinery::Target::Version(35))
+            .set_target(refinery::Target::Version(36))
             .run(&mut conn)
             .unwrap();
         conn.execute_batch(
@@ -1880,7 +1880,7 @@ mod tests {
         )
         .unwrap();
         embedded::migrations::runner()
-            .set_target(refinery::Target::Version(36))
+            .set_target(refinery::Target::Version(37))
             .run(&mut conn)
             .unwrap();
         let rows = |sql: &str| -> Vec<String> {

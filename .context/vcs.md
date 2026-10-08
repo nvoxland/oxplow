@@ -91,8 +91,9 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
   the worktree's host (`HostId`, `oxplow_domain::stream`) and its path
   there, with no `Deref` to a path. The only way to one is
   `local_path()` / `into_local_path()`, which says the caller reads this
-  machine's filesystem. Every stream is `HostId::LOCAL` until streams
-  record a host (a `streams.host` column, waiting on the next migration).
+  machine's filesystem. The host is the stream's `streams.host` (V35;
+  every stream so far is `HostId::LOCAL`), and the primary checkout is
+  local.
   `source_guards::only_workspace_providers_take_a_local_path` pins who
   does: the providers proper (workspace files, VCS reads and commands, the
   branch reconciler and commit indexer, language servers, collectors,

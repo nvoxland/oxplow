@@ -318,9 +318,10 @@ async fn config_setters_round_trip() {
             .is_err(),
         "a harness nothing registers is refused"
     );
-    let config = commands::generated::set_agent_model(
+    let config = commands::generated::set_agent_setting(
         app.state(),
         "opencode".into(),
+        "model".into(),
         Some("github-copilot/gpt-5-mini".into()),
     )
     .await
@@ -328,6 +329,17 @@ async fn config_setters_round_trip() {
     assert_eq!(
         config.agent_config["opencode"]["model"],
         "github-copilot/gpt-5-mini"
+    );
+    assert!(
+        commands::generated::set_agent_setting(
+            app.state(),
+            "claude".into(),
+            "model".into(),
+            Some("x".into())
+        )
+        .await
+        .is_err(),
+        "a setting the harness doesn't declare is refused"
     );
     commands::generated::set_agent_prompt_append(app.state(), "be concise".into())
         .await

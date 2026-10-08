@@ -1070,14 +1070,11 @@ export async function setGenerated(
   return unwrap(await commands.setGenerated(generated));
 }
 
-/// Set (or clear, with null/blank) one harness's launch model —
-/// `agentConfig.<agent>.model` in .oxplow/project.yaml, which its launch
-/// reads.
-export async function setAgentModel(
-  agent: string,
-  model: string | null,
-): Promise<OxplowConfig> {
-  return unwrap(await commands.setAgentModel(agent, model));
+/// Set (or clear, with null/blank) one of a harness's declared settings —
+/// `agentConfig.<agent>.<key>` in .oxplow/project.yaml, which its launch
+/// reads (the harness's listing names its settings).
+export async function setAgentSetting(agent: string, key: string, value: string | null): Promise<OxplowConfig> {
+  return unwrap(await commands.setAgentSetting(agent, key, value));
 }
 
 export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;
@@ -2462,7 +2459,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
   return rows.map((row) => {
     const status = collapseAgentStatusState(row.state);
     return {
-      streamId: "",
+      streamId: row.stream_id,
       threadId: row.thread_id,
       sessionId: row.agent_session_id,
       // detail is what it waits on only while awaiting; other
@@ -2619,11 +2616,10 @@ export function subscribeAgentStatus(
     if (!threadId || !rawState) return;
     const status = collapseAgentStatusState(rawState);
     const detail = event.detail as string | null | undefined;
-    // streamId filter is a no-op — the event doesn't carry stream
-    // attribution. The single caller in App.tsx subscribes with "all".
-    void streamId;
+    const eventStream = event.streamId as string | undefined;
+    if (!eventStream || (streamId !== "all" && eventStream !== streamId)) return;
     onEvent({
-      streamId: "",
+      streamId: eventStream,
       threadId,
       sessionId: (event.agentSessionId as string | null | undefined) ?? null,
       status,

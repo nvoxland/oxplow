@@ -524,8 +524,8 @@ pub const MANIFEST: &[Capability] = &[
         "the Settings form; an agent sets config with `oxplow.config.set`",
     ),
     ui(
-        "set_agent_model",
-        "the Settings form for a person-only key (`agentModels`): an agent's `oxplow.config.set` of it is a proposal the person decides",
+        "set_agent_setting",
+        "the Settings form for a person-only key (`agentConfig`): an agent's `oxplow.config.set` of it is a proposal the person decides",
     ),
     ui(
         "get_workspace_context",
