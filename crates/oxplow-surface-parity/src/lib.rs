@@ -415,6 +415,10 @@ pub const MANIFEST: &[Capability] = &[
         "list_acp_agents",
         "the thread picker's ACP agents (tsk335): an agent never starts an agent",
     ),
+    ui(
+        "list_agent_harnesses",
+        "the session picker's and Settings' harnesses: an agent never starts an agent",
+    ),
     // ACP sessions: the prompt box, permission cards and banners. Never
     // agent tools — an agent must not prompt an agent (tsk281).
     ui(

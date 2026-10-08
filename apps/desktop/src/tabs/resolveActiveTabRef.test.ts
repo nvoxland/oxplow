@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { agentRef, fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
+import { agentSessionRef, fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
 import { resolveActiveTabRef } from "./resolveActiveTabRef.js";
 
 describe("resolveActiveTabRef", () => {
-  test("agent id resolves to agentRef", () => {
-    expect(resolveActiveTabRef("page:agent", [], [])).toEqual(agentRef());
+  test("an agent session's tab resolves from the page tabs like any other", () => {
+    const session = agentSessionRef("ses3");
+    expect(resolveActiveTabRef(session.id, [session], [])).toBe(session);
   });
 
   test("matching pageTab id returns that ref", () => {

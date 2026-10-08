@@ -110,6 +110,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // threads
             commands::generated::list_threads,
             commands::generated::list_acp_agents,
+            commands::generated::list_agent_harnesses,
             commands::generated::list_closed_threads,
             commands::generated::select_thread,
             commands::generated::get_thread_state,

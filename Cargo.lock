@@ -4345,9 +4345,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-agent-text"
+version = "0.7.0"
+dependencies = [
+ "oxplow-domain",
+ "oxplow-workspace-hack",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
 name = "oxplow-ai"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
  "keyring",
  "oxplow-ai-fake",
  "oxplow-workspace-hack",
@@ -4373,6 +4384,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-ai-providers"
+version = "0.7.0"
+dependencies = [
+ "async-trait",
+ "oxplow-ai",
+ "oxplow-ai-fake",
+ "oxplow-workspace-hack",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "oxplow-app"
 version = "0.7.0"
 dependencies = [
@@ -4389,8 +4413,10 @@ dependencies = [
  "libc",
  "opentelemetry-proto",
  "oxplow-acp-fake",
+ "oxplow-agent-text",
  "oxplow-ai",
  "oxplow-ai-fake",
+ "oxplow-ai-providers",
  "oxplow-code-deps",
  "oxplow-code-dup",
  "oxplow-code-metrics",
@@ -4401,10 +4427,10 @@ dependencies = [
  "oxplow-domain",
  "oxplow-fs-watch",
  "oxplow-git",
+ "oxplow-harnesses",
  "oxplow-lsp",
  "oxplow-lsp-installer",
  "oxplow-oauth-sim",
- "oxplow-plugin",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "oxplow-pty",
@@ -4538,6 +4564,7 @@ dependencies = [
  "oxplow-app",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-harness-fake",
  "oxplow-mcp",
  "oxplow-runtime",
  "oxplow-tasks",
@@ -4743,6 +4770,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-harness-fake"
+version = "0.7.0"
+dependencies = [
+ "opentelemetry-proto",
+ "oxplow-domain",
+ "oxplow-workspace-hack",
+ "prost",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "oxplow-harnesses"
+version = "0.7.0"
+dependencies = [
+ "oxplow-agent-text",
+ "oxplow-domain",
+ "oxplow-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "oxplow-lsp"
 version = "0.7.0"
 dependencies = [
@@ -4789,7 +4841,6 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-git",
- "oxplow-plugin",
  "oxplow-sdk",
  "oxplow-tasks",
  "oxplow-workspace-hack",
@@ -4827,20 +4878,6 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "url",
-]
-
-[[package]]
-name = "oxplow-plugin"
-version = "0.7.0"
-dependencies = [
- "oxplow-domain",
- "oxplow-workspace-hack",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
 ]
 
 [[package]]
@@ -4923,7 +4960,6 @@ dependencies = [
  "oxplow-domain",
  "oxplow-fs-watch",
  "oxplow-git",
- "oxplow-plugin",
  "oxplow-sdk",
  "oxplow-session",
  "oxplow-workspace-hack",
@@ -4947,9 +4983,7 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-workspace-hack",
- "serde",
  "serde_json",
- "specta",
  "tempfile",
  "thiserror 2.0.21",
  "time",
@@ -4962,12 +4996,12 @@ dependencies = [
 name = "oxplow-sdk"
 version = "0.7.0"
 dependencies = [
+ "oxplow-agent-text",
  "oxplow-ai",
  "oxplow-app",
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
- "oxplow-plugin",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "oxplow-workspace-hack",
@@ -5038,7 +5072,6 @@ dependencies = [
  "oxplow-fs-watch",
  "oxplow-git",
  "oxplow-oauth-redirect",
- "oxplow-plugin",
  "oxplow-rpc",
  "oxplow-sdk",
  "oxplow-session",
@@ -5093,6 +5126,7 @@ dependencies = [
  "futures-core",
  "futures-executor",
  "futures-io",
+ "futures-sink",
  "futures-task",
  "futures-util",
  "getrandom 0.3.4",
@@ -5114,6 +5148,9 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "once_cell",
+ "opentelemetry",
+ "opentelemetry-proto",
+ "opentelemetry_sdk",
  "parking_lot",
  "percent-encoding",
  "ppv-lite86",

@@ -9,11 +9,11 @@
 
 pub mod acp;
 pub mod advisories;
-pub mod agent_command;
 pub mod agent_context;
 pub mod agent_path;
 pub mod agent_policy;
 pub mod agent_prompt;
+pub mod agent_sessions;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;
 pub mod ai_compute;
@@ -73,6 +73,7 @@ pub mod extension_ref_kinds;
 pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;
+pub mod harnesses;
 pub mod hook_ingest;
 pub mod indexer;
 pub mod inferred_decisions;
@@ -96,6 +97,7 @@ pub mod metric_visibility;
 pub mod metrics_service;
 pub mod models_changed;
 pub mod net_sandbox;
+pub mod observe_conformance;
 pub mod otlp_ingest;
 pub mod otlp_tokens;
 pub mod output_activity;
@@ -509,6 +511,11 @@ pub struct Services {
     pub commands: Arc<commands::CommandBus>,
     /// The work-items providers, by name (`.context/work-items.md`).
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
+    /// The agent harnesses the project's extensions declare, by key.
+    pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
+    /// The ACP adapters they declare, in declaration order
+    /// (`acp::agents` layers the project's `acpAgents:` over them).
+    pub acp_adapters: oxplow_domain::agent::registry::AcpAdapterRegistry,
     /// Every capability's implementations and which is active.
     pub capabilities: Arc<capabilities::CapabilityRegistry>,
     /// The enabled external provider instances (`.context/providers.md`).
@@ -761,9 +768,12 @@ impl Services {
     ) -> Result<Self, AppInitError> {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
-        let agent_session_store = Arc::new(SqliteAgentSessionStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
         let vocabulary = VocabularyHandle::core();
+        let agent_session_store = Arc::new(SqliteAgentSessionStore::with_vocabulary(
+            db.clone(),
+            vocabulary.clone(),
+        ));
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
@@ -849,20 +859,11 @@ impl Services {
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let config_arc = Arc::new(RwLock::new(config));
-        // A stream's seeded thread runs the project's default agent, as
-        // the config says it when the thread is made (tsk970).
         let streams = StreamService::new(
             workspace_layout,
             vcs.clone(),
             stream_store.clone(),
             thread_store.clone(),
-            agent_session_store.clone(),
-            {
-                let config = config_arc.clone();
-                Arc::new(move || {
-                    oxplow_config::default_thread_agent(&config_service::read_config(&config))
-                })
-            },
         );
         let threads = ThreadService::new(thread_store.clone());
 
@@ -889,9 +890,12 @@ impl Services {
                 machine.secrets.clone(),
             ),
         });
+        // The model providers foundation declares, registered with the
+        // other declarations below.
+        let model_providers = oxplow_ai::client::ModelProviders::default();
         let ai = Arc::new(
             ai_service::AiService::new(
-                oxplow_ai::client::Client::default(),
+                model_providers.clone(),
                 machine.secrets.clone(),
                 Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
                 machine.config_dir.clone(),
@@ -1012,6 +1016,8 @@ impl Services {
                 efforts: effort_store.clone(),
                 config: config_arc.clone(),
             }));
+        // An agent's PTY exiting ends its session (Codex posts no SessionEnd).
+        terminal_sessions.ingest_exits_into(hook_ingest.clone());
         // Built before the metric runner, which reports whole-tree collector sweeps
         // through it (tsk48).
         let background_tasks = BackgroundTaskStore::new();
@@ -1079,6 +1085,7 @@ impl Services {
                 features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
                 fields: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
+                config: serde_json::json!({}),
             }],
             vocabulary.clone(),
         ));
@@ -1152,10 +1159,28 @@ impl Services {
         // None as a work list: the sink every verb reaches while no list is
         // active (`work_items::none_provider`).
         work_items.register(work_items::none_provider());
+        // The agent harnesses foundation declares; a new session's default
+        // is the project's first enabled agent, else the first declared.
+        let harnesses = {
+            let config = config_arc.clone();
+            oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
+                config_service::read_config(&config)
+                    .agents
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
+            }))
+        };
+        harnesses::register_built_ins(&harnesses, &declared);
+        // The ACP adapters foundation declares.
+        let acp_adapters = oxplow_domain::agent::registry::AcpAdapterRegistry::default();
+        harnesses::register_acp_adapters(&acp_adapters, &declared);
+        ai_service::register_built_ins(&model_providers, &declared);
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
             sql: sql.clone(),
+            harnesses: harnesses.clone(),
         }));
         // Its turn's changed files become the effort's observed ones.
         event_pump.register_async(Arc::new(effort_observation::EffortObservationConsumer {
@@ -1182,6 +1207,8 @@ impl Services {
             commands.add_op(command).expect("vcs ops register");
         }
         let acp = Arc::new(acp::manager::AcpManager::new());
+        let session_processes =
+            agent_sessions::SessionProcesses::new(acp.clone(), terminal_sessions.clone());
         let link_deps = link_check::LinkDeps {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
@@ -1200,7 +1227,13 @@ impl Services {
         ]
         .into_iter()
         .chain(commands::review::ops())
-        .chain(commands::thread::ops(config_arc.clone(), acp.clone()))
+        .chain(commands::thread::ops(session_processes.clone()))
+        .chain(commands::agent_session::ops(
+            config_arc.clone(),
+            harnesses.clone(),
+            acp_adapters.clone(),
+            session_processes.clone(),
+        ))
         .chain(commands::effort::ops(work_items.clone()))
         .chain(commands::hint::ops())
         .chain(commands::dashboard::ops(db.clone(), sql.clone()))
@@ -1224,6 +1257,8 @@ impl Services {
             snapshot_captures: snapshot_captures.clone(),
             ref_moves: ref_moves.clone(),
             threads: thread_store.clone(),
+            sessions: agent_session_store.clone(),
+            processes: session_processes.clone(),
             log: event_log_store.clone(),
             search: search_store.clone(),
             worktrees: worktrees.clone(),
@@ -1331,6 +1366,7 @@ impl Services {
             features: serde_json::json!({}),
             fields: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
+            config: serde_json::json!({}),
         });
         for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
@@ -1400,9 +1436,14 @@ impl Services {
             thread_store.clone(),
             agent_session_store.clone(),
             fact_store.clone(),
+            harnesses.clone(),
         );
-        let otlp_ingest =
-            otlp_ingest::OtlpIngestService::new(db.clone(), vocabulary.clone(), event_pump.clone());
+        let otlp_ingest = otlp_ingest::OtlpIngestService::new(
+            db.clone(),
+            vocabulary.clone(),
+            event_pump.clone(),
+            harnesses.clone(),
+        );
 
         let advisories = Arc::new(advisories::AdvisoryRunner::new((*nudge_store).clone()));
         // State entity metrics re-capture as their rows move (P7.B6).
@@ -1483,6 +1524,8 @@ impl Services {
             client_host,
             commands,
             work_items,
+            harnesses,
+            acp_adapters,
             capabilities,
             providers,
             knowledge,
@@ -1879,6 +1922,8 @@ mod tests {
         assert_eq!(
             services.commands.open_ops(),
             [
+                "agent_sessions.write/open",
+                "agent_sessions.write/rename",
                 "collectors.sync/sync",
                 "config.read/get",
                 "config.read/list_keys",

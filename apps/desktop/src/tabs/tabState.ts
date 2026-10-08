@@ -3,9 +3,8 @@
  * active tab id, and (subscribers permitting) emits change notifications.
  *
  * Tab state is held in memory; it does NOT persist across app restarts in
- * v1. Threads exist for the lifetime of the daemon's session, and the
- * agent terminal — the always-present per-thread tab — already has its
- * own server-side resume mechanism.
+ * v1. Threads exist for the lifetime of the daemon's session, and an
+ * agent session's tab follows its `agent_session` row.
  */
 
 /**
@@ -29,10 +28,12 @@ export type EntityPageKind =
   | "effort"
   | "turn"
   // Opens its file at the symbol's line; never a tab of its own (P6.E3).
-  | "symbol";
+  | "symbol"
+  // An agent slot on the thread: its terminal or ACP chat.
+  | "agent_session";
 
 export type RoutePageKind =
-  | "agent"
+  | "new-session"
   | "diff"
   | "diff-view"
   | "duplicate-block"
@@ -81,6 +82,9 @@ export interface TabRef {
   kind: PageKind;
   /** Page-kind-specific data — file path, tasks id, dashboard variant, etc. */
   payload: unknown;
+  /** Pinned: it leads the strip, isn't dragged, and is never evicted or
+   *  counted against the tab cap (an agent session's tab). */
+  pinned?: true;
 }
 
 /**
@@ -170,13 +174,12 @@ export interface ThreadTabState {
 }
 
 /** Maximum number of tabs kept open per thread. When `openTab` would
- *  push the count over this, the least-recently-used closable tab(s)
- *  are auto-evicted. The `agent` tab (kind === "agent") is never
- *  evicted — it's the always-pinned per-thread tab. */
+ *  push the count over this, the least-recently-used tab(s) are
+ *  auto-evicted; a pinned tab never is. */
 export const MAX_TABS = 20;
 
 function isEvictable(ref: TabRef): boolean {
-  return ref.kind !== "agent";
+  return !ref.pinned;
 }
 
 function bumpLru(lru: string[], id: string): string[] {

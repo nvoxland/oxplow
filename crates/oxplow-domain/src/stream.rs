@@ -87,3 +87,22 @@ mod tests {
         );
     }
 }
+
+/// The host a stream's worktree is on. Every stream is on the local machine
+/// today ([`HostId::LOCAL`]); naming it keeps "local" from being assumed
+/// silently where a worktree path is reached (`WorktreeRoot::local_path`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct HostId(std::borrow::Cow<'static, str>);
+
+impl HostId {
+    /// The machine oxplow runs on.
+    pub const LOCAL: HostId = HostId(std::borrow::Cow::Borrowed("local"));
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_local(&self) -> bool {
+        *self == Self::LOCAL
+    }
+}

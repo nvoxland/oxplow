@@ -54,6 +54,9 @@ pub enum AgentStatusState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct AgentStatus {
     pub thread_id: ThreadId,
+    /// The agent session it is the status of; `None` for activity no
+    /// session claims (an agent oxplow didn't start).
+    pub agent_session_id: Option<AgentSessionId>,
     pub state: AgentStatusState,
     pub detail: Option<String>,
     pub updated_at: Timestamp,
@@ -109,6 +112,7 @@ mod tests {
     fn agent_status_round_trips() {
         let s = AgentStatus {
             thread_id: ThreadId::new(1),
+            agent_session_id: Some(AgentSessionId::new(2)),
             state: AgentStatusState::Running,
             detail: Some("typing".into()),
             updated_at: Timestamp::from_unix_ms(1),

@@ -7,8 +7,8 @@
 //! ([`TokenUsageService::record_reported`]). OTEL is accurate (the agent's own billed counts),
 //! multi-agent, and format-stable; the old transcript parse overcounted ~2–3×
 //! because Claude repeats a message's cumulative `usage` on every content-block
-//! JSONL line and [`parse_claude_usage`] summed every line (the dedupe-by
-//! `message.id` fix here removed that).
+//! JSONL line and the parse summed every line (counting each `message.id`
+//! once, in the Claude harness, removed that).
 //!
 //! The **transcript path** ([`TokenUsageService::on_stop`], run by the
 //! `token_usage.turns` reactor on `agent.turn.ended`) survives for what OTEL
@@ -23,8 +23,8 @@
 //! counts ride the event instead ([`TokenUsageService::record_turn`]).
 //! Provenance is `observed`.
 //!
-//! Pluggable per agent kind: Claude is implemented; Codex/Opencode return
-//! `None` (their session formats differ — and are wired later). We track
+//! Each harness reads its own transcript (`AgentHarness::turns`): Claude's
+//! is read; Codex's and opencode's formats aren't yet. We track
 //! token counts only; oxplow deliberately does not derive a USD price (rates
 //! move and a stale price table is worse than none). The per-turn `model` is
 //! stored so usage can be sliced by model.
@@ -42,214 +42,10 @@ use oxplow_db::{
     NewAgentTokenUsage, NewFact, NewMetricCapture, SqliteAgentSessionStore, SqliteEffortStore,
     SqliteFactStore, SqliteThreadStore, SqliteTokenUsageStore,
 };
+use oxplow_domain::agent::observe::{Turn, UsageDelta};
+use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{AgentKind, DomainError, StreamId, ThreadId};
-
-/// Summed usage across a chunk of transcript (one Stop's delta).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct UsageDelta {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cache_creation_input_tokens: i64,
-    pub cache_read_input_tokens: i64,
-    pub message_count: i64,
-    /// The model of the last assistant message in the chunk.
-    pub model: Option<String>,
-}
-
-impl UsageDelta {
-    fn is_empty(&self) -> bool {
-        self.message_count == 0
-    }
-}
-
-/// Sum the `usage` blocks across every `type=="assistant"` line in a chunk
-/// of Claude transcript JSONL. Blank and malformed lines are skipped, so a
-/// partially-written tail line never poisons the sum.
-pub fn parse_claude_usage(content: &str) -> UsageDelta {
-    let mut d = UsageDelta::default();
-    let mut seen = std::collections::HashSet::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-            continue;
-        }
-        let Some(msg) = v.get("message") else {
-            continue;
-        };
-        let Some(usage) = msg.get("usage") else {
-            continue;
-        };
-        // Claude writes one JSONL line per content block (thinking/text/
-        // tool_use) and repeats the message's cumulative `usage` on each, so
-        // count each `message.id` once — else a message inflates ~2-3× by its
-        // block count (tsk23). A line without an id (a synthetic one) is
-        // counted on its own.
-        if let Some(id) = msg.get("id").and_then(|i| i.as_str()) {
-            if !seen.insert(id.to_string()) {
-                continue;
-            }
-        }
-        let get = |k: &str| usage.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
-        d.input_tokens += get("input_tokens");
-        d.output_tokens += get("output_tokens");
-        d.cache_creation_input_tokens += get("cache_creation_input_tokens");
-        d.cache_read_input_tokens += get("cache_read_input_tokens");
-        d.message_count += 1;
-        if let Some(m) = msg.get("model").and_then(|m| m.as_str()) {
-            d.model = Some(m.to_string());
-        }
-    }
-    d
-}
-
-/// Pluggable per-agent-kind usage parser. Returns `None` when there is
-/// nothing to record (no usage in the chunk, or an agent kind whose
-/// transcript format isn't parsed yet).
-pub fn parse_usage_delta(kind: AgentKind, content: &str) -> Option<UsageDelta> {
-    match kind {
-        AgentKind::Claude => {
-            let d = parse_claude_usage(content);
-            (!d.is_empty()).then_some(d)
-        }
-        // Codex / opencode session formats differ (opencode surfaces its
-        // own $cost). Stubbed until their parsers land.
-        AgentKind::Codex | AgentKind::Opencode => None,
-        // ACP agents have no transcript: usage arrives on the protocol.
-        AgentKind::Acp => None,
-    }
-}
-
-/// One agent turn within a transcript chunk: the human-authored prompt that
-/// opened it (when present) plus the summed usage of the assistant messages
-/// that answered it (tsk143). A "turn" begins at a genuine user prompt and
-/// runs until the next one; assistant lines accumulate into the current turn.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Turn {
-    /// The opening user prompt text, or `None` for an assistant continuation
-    /// with no fresh prompt at the head of the chunk.
-    pub prompt: Option<String>,
-    pub usage: UsageDelta,
-}
-
-impl Turn {
-    /// A turn is worth recording if it captured either a prompt or usage.
-    fn is_recordable(&self) -> bool {
-        self.prompt.is_some() || !self.usage.is_empty()
-    }
-}
-
-/// Extract the human-authored prompt text from a Claude `type=="user"`
-/// message, or `None` when the line is not a genuine user prompt. Claude
-/// transcripts reuse `type=="user"` for two things: the actual prompt the
-/// human typed, and tool-result continuations the harness injects. We only
-/// want the former — so a user message whose content is exclusively
-/// tool_result blocks (no text) is NOT a prompt and returns `None`. String
-/// content is taken verbatim; array content joins its `text` blocks.
-fn extract_user_prompt(msg: &serde_json::Value) -> Option<String> {
-    let content = msg.get("content")?;
-    if let Some(s) = content.as_str() {
-        let s = s.trim();
-        return (!s.is_empty()).then(|| s.to_string());
-    }
-    let arr = content.as_array()?;
-    let mut parts = Vec::new();
-    for block in arr {
-        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-            if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
-                let t = t.trim();
-                if !t.is_empty() {
-                    parts.push(t.to_string());
-                }
-            }
-        }
-    }
-    (!parts.is_empty()).then(|| parts.join("\n"))
-}
-
-/// Split a Claude transcript chunk into per-turn rows. Each genuine user
-/// prompt opens a new turn; assistant `usage` blocks accumulate into the
-/// current turn; tool-result user messages are folded into the current turn
-/// (they are not fresh prompts). Assistant lines that precede any prompt in
-/// the chunk form a leading prompt-less turn.
-pub fn parse_claude_turns(content: &str) -> Vec<Turn> {
-    let mut turns: Vec<Turn> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        let kind = v.get("type").and_then(|t| t.as_str());
-        let Some(msg) = v.get("message") else {
-            continue;
-        };
-        match kind {
-            Some("user") => {
-                if let Some(prompt) = extract_user_prompt(msg) {
-                    turns.push(Turn {
-                        prompt: Some(prompt),
-                        usage: UsageDelta::default(),
-                    });
-                }
-                // tool_result-only user message → not a fresh turn; skip.
-            }
-            Some("assistant") => {
-                let Some(usage) = msg.get("usage") else {
-                    continue;
-                };
-                // Count each message id once — Claude repeats a message's
-                // cumulative usage on every content-block line (tsk23).
-                if let Some(id) = msg.get("id").and_then(|i| i.as_str()) {
-                    if !seen.insert(id.to_string()) {
-                        continue;
-                    }
-                }
-                if turns.is_empty() {
-                    turns.push(Turn::default());
-                }
-                let d = &mut turns.last_mut().expect("just pushed").usage;
-                let get = |k: &str| usage.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
-                d.input_tokens += get("input_tokens");
-                d.output_tokens += get("output_tokens");
-                d.cache_creation_input_tokens += get("cache_creation_input_tokens");
-                d.cache_read_input_tokens += get("cache_read_input_tokens");
-                d.message_count += 1;
-                if let Some(m) = msg.get("model").and_then(|m| m.as_str()) {
-                    d.model = Some(m.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    turns
-}
-
-/// Pluggable per-agent-kind turn parser (tsk143). Returns the recordable
-/// turns in this chunk — empty when there is nothing to persist (no usage
-/// and no prompt, or an agent kind whose transcript format isn't parsed).
-pub fn parse_turns(kind: AgentKind, content: &str) -> Vec<Turn> {
-    match kind {
-        AgentKind::Claude => parse_claude_turns(content)
-            .into_iter()
-            .filter(Turn::is_recordable)
-            .collect(),
-        // Codex / opencode session formats differ. Stubbed until their
-        // parsers land (mirrors `parse_usage_delta`).
-        AgentKind::Codex | AgentKind::Opencode => Vec::new(),
-        // ACP agents have no transcript: turns arrive on the protocol.
-        AgentKind::Acp => Vec::new(),
-    }
-}
+use oxplow_domain::{DomainError, StreamId, ThreadId};
 
 /// Pull `transcript_path` out of a raw hook payload body, expanding a
 /// leading `~/`.
@@ -328,6 +124,9 @@ pub struct TurnRecord {
     pub turn_id: Option<i64>,
     /// The effort open when the turn ran (the event's anchor).
     pub effort: Option<oxplow_domain::EffortId>,
+    /// The agent session it ran in (the event's anchor): its harness says
+    /// how to read the transcript.
+    pub agent_session: Option<oxplow_domain::AgentSessionId>,
     /// The `agent.turn.ended` event id. It keys the `oxplow.turn` facts
     /// capture, and — only for counts the turn reported itself (one row per
     /// event) — the row, so a redelivery records them once. Transcript rows
@@ -360,6 +159,8 @@ pub struct TokenUsageService {
     /// Durable fact layer (epic tsk12): per-kind token totals land as facts
     /// on the `oxplow.tokens` measure.
     facts: Arc<SqliteFactStore>,
+    /// Who reads a transcript: the turn's harness (`AgentHarness::turns`).
+    harnesses: HarnessRegistry,
 }
 
 impl TokenUsageService {
@@ -369,6 +170,7 @@ impl TokenUsageService {
         threads: Arc<SqliteThreadStore>,
         sessions: Arc<SqliteAgentSessionStore>,
         facts: Arc<SqliteFactStore>,
+        harnesses: HarnessRegistry,
     ) -> Self {
         Self {
             usage,
@@ -376,16 +178,20 @@ impl TokenUsageService {
             threads,
             sessions,
             facts,
+            harnesses,
         }
     }
 
-    /// The harness that ran on `thread`: its newest session's.
-    async fn harness_of(&self, thread: ThreadId) -> Result<AgentKind, DomainError> {
-        Ok(self
-            .sessions
-            .newest_for_thread(thread)
-            .await?
-            .map(|s| s.harness)
+    /// The harness that ran a turn: its agent session's; a turn no session
+    /// claims reads as the default harness's.
+    async fn harness_of(&self, rec: &TurnRecord) -> Result<String, DomainError> {
+        use oxplow_domain::stores::AgentSessionStore as _;
+        let session = match rec.agent_session {
+            Some(id) => self.sessions.get(&id).await?.map(|s| s.harness),
+            None => None,
+        };
+        Ok(session
+            .or_else(|| self.harnesses.default().ok().map(|h| h.id().to_string()))
             .unwrap_or_default())
     }
 
@@ -410,7 +216,7 @@ impl TokenUsageService {
         let Some(thread_row) = self.threads.get(thread).await? else {
             return Ok(None);
         };
-        let kind = self.harness_of(*thread).await?;
+        let kind = self.harness_of(rec).await?;
         let stream_id = thread_row.stream_id.to_string();
 
         // Cursor key: the session id (1:1 with the transcript for Claude),
@@ -438,11 +244,17 @@ impl TokenUsageService {
             return Ok(None);
         };
 
-        let turns = parse_turns(kind, &tail);
+        // The turn's harness reads its own transcript; one no longer
+        // registered reads as none.
+        let turns = self
+            .harnesses
+            .get(&kind)
+            .map(|h| h.turns(&tail))
+            .unwrap_or_default();
         if turns.is_empty() {
-            // Nothing to record from this chunk (no usage / no prompt /
-            // unsupported agent), but the bytes are consumed — advance so we
-            // don't re-scan them every Stop.
+            // Nothing to record from this chunk (no usage / no prompt / a
+            // harness that reads no transcript), but the bytes are consumed —
+            // advance so we don't re-scan them every Stop.
             self.usage.set_cursor(&session_key, new_offset).await?;
             return Ok(None);
         }
@@ -487,7 +299,7 @@ impl TokenUsageService {
             .insert_turns(
                 thread,
                 &stream_id,
-                self.harness_of(*thread).await?,
+                self.harness_of(rec).await?,
                 session_id,
                 vec![turn],
                 rec,
@@ -506,7 +318,7 @@ impl TokenUsageService {
         &self,
         thread: &ThreadId,
         stream_id: &str,
-        kind: AgentKind,
+        kind: String,
         session_key: &str,
         turns: Vec<Turn>,
         rec: &TurnRecord,
@@ -543,7 +355,7 @@ impl TokenUsageService {
                 thread_id: thread.to_string(),
                 effort_id: effort_id.clone(),
                 session_id: session_key.to_string(),
-                agent_kind: kind.as_str().to_string(),
+                agent_kind: kind.clone(),
                 model: turn.usage.model,
                 prompt: turn.prompt,
                 input_tokens: input,
@@ -850,6 +662,7 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
         let rec = TurnRecord {
             turn_id: Some(turn_id),
             effort: env.anchors.effort_id,
+            agent_session: env.anchors.agent_session_id,
             cause: Some(env.id.as_str().to_string()),
         };
         if let Some(u) = payload.usage {
@@ -893,143 +706,6 @@ mod tests {
     use std::io::Write;
 
     const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}"#;
-
-    #[test]
-    fn parse_claude_usage_sums_assistant_lines_and_skips_others() {
-        let content = format!(
-            "{ASSISTANT_LINE}\n\
-             {{\"type\":\"user\",\"message\":{{\"content\":\"hi\"}}}}\n\
-             not json at all\n\
-             {ASSISTANT_LINE}\n"
-        );
-        let d = parse_claude_usage(&content);
-        assert_eq!(d.message_count, 2);
-        assert_eq!(d.input_tokens, 200);
-        assert_eq!(d.output_tokens, 40);
-        assert_eq!(d.cache_creation_input_tokens, 100);
-        assert_eq!(d.cache_read_input_tokens, 400);
-        assert_eq!(d.model.as_deref(), Some("claude-opus-4-8"));
-    }
-
-    // A genuine user prompt line (string content).
-    fn user_line(text: &str) -> String {
-        serde_json::json!({"type": "user", "message": {"content": text}}).to_string()
-    }
-
-    // An assistant line for message `id` carrying the given cumulative usage.
-    // Claude writes one such line per content block (thinking/text/tool_use),
-    // each repeating the SAME id + usage.
-    fn assistant_id_line(id: &str, input: i64, output: i64) -> String {
-        serde_json::json!({
-            "type": "assistant",
-            "message": {
-                "id": id,
-                "model": "claude-opus-4-8",
-                "usage": {"input_tokens": input, "output_tokens": output},
-            },
-        })
-        .to_string()
-    }
-
-    #[test]
-    fn parse_claude_usage_counts_each_message_id_once() {
-        // One assistant message split across 3 content-block lines, each
-        // stamped with the same cumulative usage — must count ONCE, not 3×.
-        let line = assistant_id_line("msg_a", 10, 583);
-        let content = format!("{line}\n{line}\n{line}\n");
-        let d = parse_claude_usage(&content);
-        assert_eq!(d.message_count, 1, "3 block-lines → one message");
-        assert_eq!(d.output_tokens, 583, "not 1749");
-        assert_eq!(d.input_tokens, 10);
-    }
-
-    #[test]
-    fn parse_claude_turns_counts_each_message_id_once() {
-        let line = assistant_id_line("msg_a", 10, 583);
-        let content = format!("{}\n{line}\n{line}\n{line}\n", user_line("prompt"));
-        let turns = parse_claude_turns(&content);
-        assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].usage.output_tokens, 583, "counted once");
-        assert_eq!(turns[0].usage.input_tokens, 10);
-        assert_eq!(turns[0].usage.message_count, 1);
-    }
-
-    #[test]
-    fn parse_claude_turns_splits_one_turn_per_user_prompt() {
-        // [prompt A → assistant turn][prompt B → assistant turn]
-        let content = format!(
-            "{}\n{ASSISTANT_LINE}\n{}\n{ASSISTANT_LINE}\n",
-            user_line("prompt A"),
-            user_line("prompt B"),
-        );
-        let turns = parse_claude_turns(&content);
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0].prompt.as_deref(), Some("prompt A"));
-        assert_eq!(turns[0].usage.message_count, 1);
-        assert_eq!(turns[0].usage.input_tokens, 100);
-        assert_eq!(turns[1].prompt.as_deref(), Some("prompt B"));
-        assert_eq!(turns[1].usage.message_count, 1);
-        assert_eq!(turns[1].usage.model.as_deref(), Some("claude-opus-4-8"));
-    }
-
-    #[test]
-    fn parse_turns_via_kind_carries_each_prompt() {
-        let content = format!(
-            "{}\n{ASSISTANT_LINE}\n{}\n{ASSISTANT_LINE}\n",
-            user_line("prompt A"),
-            user_line("prompt B"),
-        );
-        let turns = parse_turns(AgentKind::Claude, &content);
-        let prompts: Vec<_> = turns.iter().map(|t| t.prompt.as_deref()).collect();
-        assert_eq!(prompts, vec![Some("prompt A"), Some("prompt B")]);
-        // Non-Claude agents are stubbed.
-        assert!(parse_turns(AgentKind::Codex, &content).is_empty());
-    }
-
-    #[test]
-    fn tool_result_user_messages_do_not_open_a_turn() {
-        // A real prompt, then an assistant message, then a tool_result user
-        // message (the harness continuation), then another assistant message.
-        // The tool_result must NOT start a second turn — both assistant
-        // messages fold into the single real-prompt turn.
-        let tool_result = serde_json::json!({
-            "type": "user",
-            "message": {"content": [{"type": "tool_result", "content": "ok"}]}
-        })
-        .to_string();
-        let content = format!(
-            "{}\n{ASSISTANT_LINE}\n{tool_result}\n{ASSISTANT_LINE}\n",
-            user_line("real prompt"),
-        );
-        let turns = parse_claude_turns(&content);
-        assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].prompt.as_deref(), Some("real prompt"));
-        assert_eq!(turns[0].usage.message_count, 2);
-    }
-
-    #[test]
-    fn extract_user_prompt_joins_text_blocks_and_skips_tool_results() {
-        let arr = serde_json::json!({"content": [
-            {"type": "text", "text": "hello"},
-            {"type": "tool_result", "content": "ignored"},
-            {"type": "text", "text": "world"},
-        ]});
-        assert_eq!(extract_user_prompt(&arr).as_deref(), Some("hello\nworld"));
-        let only_tool = serde_json::json!({"content": [{"type": "tool_result"}]});
-        assert!(extract_user_prompt(&only_tool).is_none());
-        let empty = serde_json::json!({"content": "   "});
-        assert!(extract_user_prompt(&empty).is_none());
-    }
-
-    #[test]
-    fn parse_usage_delta_is_pluggable_per_agent() {
-        assert!(parse_usage_delta(AgentKind::Claude, ASSISTANT_LINE).is_some());
-        // No usage at all → None even for Claude.
-        assert!(parse_usage_delta(AgentKind::Claude, "{\"type\":\"user\"}\n").is_none());
-        // Other agents are stubbed.
-        assert!(parse_usage_delta(AgentKind::Codex, ASSISTANT_LINE).is_none());
-        assert!(parse_usage_delta(AgentKind::Opencode, ASSISTANT_LINE).is_none());
-    }
 
     #[test]
     fn extract_transcript_path_reads_field() {
@@ -1076,6 +752,7 @@ mod tests {
             kind: oxplow_domain::HookKind::Stop,
             thread_id: Some(thread),
             stream_id: None,
+            agent_session_id: None,
             session_id: Some("sess-r".into()),
             payload_json: body.to_string(),
             prompt: None,
@@ -1089,6 +766,7 @@ mod tests {
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(thread),
                 stream_id: None,
+                agent_session_id: None,
                 session_id: Some("sess-r".into()),
                 payload_json: "{}".into(),
                 prompt: Some("count me".into()),
@@ -1402,6 +1080,7 @@ mod tests {
         let rec = TurnRecord {
             turn_id: None,
             effort: None,
+            agent_session: None,
             cause: Some("evt-stop-1".into()),
         };
         assert!(svc
@@ -1433,7 +1112,7 @@ mod tests {
 
     /// An agent's export, logged and counted (P10.M2).
     async fn report(svc: &crate::Services, thread: ThreadId, body: &[u8]) -> bool {
-        let logged = svc.otlp_ingest.ingest(thread, body).await.unwrap();
+        let logged = svc.otlp_ingest.ingest(thread, None, body).await.unwrap();
         svc.event_pump.run_once().await.unwrap();
         logged
     }
@@ -1443,7 +1122,7 @@ mod tests {
         // tsk22: an OTLP metrics export lands per-kind token facts on
         // `oxplow.tokens`, and a retransmit of the identical export is a no-op.
         let (svc, _dir, thread) = service_fixture().await;
-        let body = crate::otlp_tokens::encoded_claude_export("claude-opus-4-8", 100, 20);
+        let body = crate::otlp_tokens::tests::encoded_claude_export("claude-opus-4-8", 100, 20);
 
         assert!(report(&svc, thread, &body).await);
 
@@ -1497,7 +1176,7 @@ mod tests {
         // per-model `oxplow.cache_usage` ratio fact: num = cache_read, den =
         // prompt-side total (input + cache_read + cache_creation).
         let (svc, _dir, thread) = service_fixture().await;
-        let body = crate::otlp_tokens::encoded_claude_export_with_cache(
+        let body = crate::otlp_tokens::tests::encoded_claude_export_with_cache(
             "claude-fable-5",
             100, // input
             20,  // output
@@ -1564,7 +1243,7 @@ mod tests {
         // An agent that reports no cache telemetry must read as "no data",
         // not a 0% point dragging the cumulative hit ratio down.
         let (svc, _dir, thread) = service_fixture().await;
-        let body = crate::otlp_tokens::encoded_claude_export("claude-fable-5", 100, 20);
+        let body = crate::otlp_tokens::tests::encoded_claude_export("claude-fable-5", 100, 20);
         report(&svc, thread, &body).await;
         let usage = svc
             .fact_store

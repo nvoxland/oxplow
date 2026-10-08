@@ -18,7 +18,11 @@ pub async fn read_at(
     path: String,
     revision: Revision,
 ) -> Result<Option<String>, IpcError> {
-    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    let ws = svc
+        .worktrees
+        .resolve(stream_id.as_deref())
+        .await
+        .into_local_path();
     Ok(svc
         .trees
         .read_at(&ws, &revision, &path)
@@ -32,7 +36,11 @@ pub async fn files_at(
     stream_id: Option<String>,
     revision: Revision,
 ) -> Result<Vec<String>, IpcError> {
-    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    let ws = svc
+        .worktrees
+        .resolve(stream_id.as_deref())
+        .await
+        .into_local_path();
     Ok(svc.trees.files_at(&ws, &revision).await?)
 }
 
@@ -43,7 +51,11 @@ pub async fn diff(
     from: Option<Revision>,
     to: Revision,
 ) -> Result<Vec<DiffEntry>, IpcError> {
-    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    let ws = svc
+        .worktrees
+        .resolve(stream_id.as_deref())
+        .await
+        .into_local_path();
     Ok(svc.trees.diff(&ws, from.as_ref(), &to).await?)
 }
 
@@ -56,7 +68,11 @@ pub async fn changed_paths(
     from: Option<Revision>,
     to: Revision,
 ) -> Result<Vec<ChangedPath>, IpcError> {
-    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    let ws = svc
+        .worktrees
+        .resolve(stream_id.as_deref())
+        .await
+        .into_local_path();
     Ok(svc.trees.changes(&ws, from.as_ref(), &to).await?)
 }
 
@@ -69,7 +85,11 @@ pub async fn extension_effects_between(
     start: Option<Revision>,
     end: Revision,
 ) -> Result<Vec<oxplow_app::extensions::ExtensionChange>, IpcError> {
-    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    let ws = svc
+        .worktrees
+        .resolve(stream_id.as_deref())
+        .await
+        .into_local_path();
     Ok(oxplow_app::extensions::extension_changes_between(svc, &ws, start.as_ref(), &end).await?)
 }
 

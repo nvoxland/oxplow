@@ -307,12 +307,12 @@ rows. Statuses: `active` (writer — may mutate the worktree) and `queued`
 [agent-model.md](./agent-model.md)'s write-guard section). Writer status
 is the thread's: every session in the writer thread may write. Exactly
 one thread per stream is `active`; the rest are `queued`. A newly-seeded
-stream ships with one thread titled `Thread` and one session on it running
-the project's default agent — `oxplow_config::default_thread_agent`, the
-same rule `oxplow.thread.create` uses when no agent is named: the first
-enabled agent, and for `acp` the project's first `acpAgents:` entry, else
-the first preset. `StreamService` reads it through the source `Services`
-gives it, so it's the config as it is when the thread is made.
+stream ships with one thread titled `Thread` and no agent session; neither
+does `oxplow.thread.create` open one. A person opens sessions
+(`oxplow.agent_session.open`, whose default harness is the project's first
+enabled agent, else the first declared (`HarnessRegistry::default`), and for
+a chat harness `acp::agents::default_agent`: the project's first
+`acpAgents:` entry, else the first declared ACP adapter).
 The rolling `summary` field + `record_batch_summary` MCP tool were
 removed in v13 — use the task log as the source of truth instead.
 
@@ -364,7 +364,10 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   `closed_reason` (`closed`, `thread_closed`, `stream_archived`),
   `updated_at`.
 - **Lifecycle: the row is the slot, not the process.** `closed_at` is set
-  only by closing the session, its thread or its stream's archive. A
+  only by closing the session (`oxplow.agent_session.close`), its thread
+  (`thread_closed`) or its stream's archive (`stream_archived`) —
+  `agent_stores::close_session_tx`, which also ends its open turns and logs
+  `stopped`; the caller stops its process after commit. A
   harness process ending (a PTY exit, `/clear`, an ACP close) logs
   `agent.session.ended` and leaves the row open, so its tab keeps the
   ended notice and the resume id.
@@ -1061,7 +1064,7 @@ materialized as an edge) and the paths it took out (`removed_refs`:
 must be gone). Refs left in the body but in NEITHER list keep their
 existing pin — that's how "this content relies on a stale source" stays
 accurate ([knowledge.md](./knowledge.md)).
-Skill prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
+Skill prompt at `crates/oxplow-agent-text/assets/oxplow-wiki-capture.SKILL.md`.
 
 **User-facing Freshness view.** `v_knowledge_ref` (read by
 `knowledge.ts`'s `readWikiFreshness`) joins `page_ref` with the latest
@@ -1167,9 +1170,11 @@ time), `type` (`namespace.name`, snake_case, validated on append), `v`
 (schema version), `at`, `source` (`agent:thr3`, `human`, `lens:<id>`,
 `system`, or `system:<component>` from `refs::build::system_source` —
 `system:task_service`, `system:hook_ingest`, `system:snapshot_capture`),
-`anchors` (nullable stream / thread / effort / turn / snapshot columns,
-so per-anchor timelines are indexed range scans; an event that names a
-thread also carries its stream; V153 adds a partial index on a
+`anchors` (nullable stream / thread / effort / turn / snapshot / agent
+session columns, so per-anchor timelines are indexed range scans; an
+event that names a thread also carries its stream, and agent activity
+carries the agent session it came from — `hook_ingest`'s resolution,
+agent-model.md; V153 adds a partial index on a
 `work_item.recorded`'s item ref, for a provider read's "did this
 change?" lookup — providers.md), `subject` (JSON array of canonical
 refs built with `oxplow_domain::refs::build` and validated against the

@@ -107,6 +107,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listAgentHarnesses: () => typedError<HarnessListing[], IpcError>(__TAURI_INVOKE("list_agent_harnesses")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listClosedThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_closed_threads", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -649,7 +654,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgents: (agents: AgentKind[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
+	setAgents: (agents: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -659,7 +664,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgentModel: (agent: AgentKind, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
+	setAgentModel: (agent: string, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -991,27 +996,27 @@ export const commands = {
 	 *  Open (or reattach to) an ACP thread's agent session. Hand-written like
 	 *  `open_terminal_session`: the MCP endpoint comes from the plugin runtime.
 	 */
-	acpOpenSession: (threadId: ThreadId) => typedError<AcpSnapshot, IpcError>(__TAURI_INVOKE("acp_open_session", { threadId })),
+	acpOpenSession: (sessionId: AgentSessionId) => typedError<AcpSnapshot, IpcError>(__TAURI_INVOKE("acp_open_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpPrompt: (threadId: ThreadId, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("acp_prompt", { threadId, text })),
+	acpPrompt: (sessionId: AgentSessionId, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("acp_prompt", { sessionId, text })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpCancel: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_cancel", { threadId })),
+	acpCancel: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_cancel", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpRespondPermission: (threadId: ThreadId, requestId: string, optionId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("acp_respond_permission", { threadId, requestId, optionId })),
+	acpRespondPermission: (sessionId: AgentSessionId, requestId: string, optionId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("acp_respond_permission", { sessionId, requestId, optionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpTranscript: (threadId: ThreadId, sinceSeq: number) => typedError<{
+	acpTranscript: (sessionId: AgentSessionId, sinceSeq: number) => typedError<{
 	agent: string,
 	/**
 	 *  The session's generation: a new one (a Restart) replaces the
@@ -1024,12 +1029,12 @@ export const commands = {
 	headSeq: number,
 	items: TranscriptItem[],
 	stderrTail: string[],
-} | null, IpcError>(__TAURI_INVOKE("acp_transcript", { threadId, sinceSeq })),
+} | null, IpcError>(__TAURI_INVOKE("acp_transcript", { sessionId, sinceSeq })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpCloseSession: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_close_session", { threadId })),
+	acpCloseSession: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_close_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1054,7 +1059,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lookupTerminalSession: (threadId: ThreadId, pane: string | null) => typedError<string | null, IpcError>(__TAURI_INVOKE("lookup_terminal_session", { threadId, pane })),
+	lookupTerminalSession: (sessionId: AgentSessionId) => typedError<string | null, IpcError>(__TAURI_INVOKE("lookup_terminal_session", { sessionId })),
 	/**
 	 *  Replace the native menu with the calling window's snapshot. Each
 	 *  activation fires `menu:command` with `{ id: "<command-id>" }` back
@@ -1134,10 +1139,11 @@ export type Access =
 
 /**
  *  An agent oxplow talks to over the Agent Client Protocol (tsk335): a
- *  program that speaks ACP on its stdio. Presets cover the common ones
- *  ([`acp_presets`]); `acpAgents:` in `.oxplow/project.yaml` adds or
- *  overrides by name. A project entry names a program from the repo, so it
- *  runs only once a person approved it (see `exec_consent`).
+ *  program that speaks ACP on its stdio. The extensions' declared ACP
+ *  adapters cover the common ones; `acpAgents:` in `.oxplow/project.yaml`
+ *  adds or overrides by name (`oxplow_app::acp::agents`). A project entry
+ *  names a program from the repo, so it runs only once a person approved it
+ *  (see `exec_consent`).
  */
 export type AcpAgentConfig = {
 	// Short name a thread picks it by (`claude`, `gemini`, `my-agent`).
@@ -1155,7 +1161,10 @@ export type AcpAgentListing = {
 	command: string,
 	args: string[],
 	source: AcpAgentSource,
-	// May start on this machine: a preset, or an approved project entry.
+	/**
+	 *  May start on this machine: a declared adapter, or an approved
+	 *  project entry.
+	 */
 	approved: boolean,
 	// The command's absolute path, or `None` when it isn't installed.
 	resolvedPath: string | null,
@@ -1163,16 +1172,19 @@ export type AcpAgentListing = {
 
 // Where an ACP agent definition came from.
 export type AcpAgentSource = 
-// Built into oxplow; runs without approval.
-"preset" | 
+// An adapter an extension declares; runs without approval.
+"declared" | 
 // The project's `acpAgents:`; needs a person's approval to run.
 "project";
 
-// A change to one thread's ACP session, pushed to the UI.
+// A change to one agent session's ACP agent, pushed to the UI.
 export type AcpEvent = {
+	// The agent session (`ses3`) it is about.
+	agentSessionId: string,
+	// Its thread, for a client that filters by thread.
 	threadId: string,
 	/**
-	 *  Which session of the thread: each open is a new generation whose
+	 *  Which run of the session: each open is a new generation whose
 	 *  ids and seqs start over, so a client resets rather than merging it
 	 *  with the last one's transcript.
 	 */
@@ -1275,17 +1287,15 @@ export type AdvisoryOncePer =
 // Once per thread per day (UTC).
 "day";
 
-export type AgentKind = "claude" | "codex" | "opencode" | 
-/**
- *  An agent spoken to over the Agent Client Protocol (tsk335); which one
- *  is the thread's `acp_agent`.
- */
-"acp";
-
 export type AgentSessionId = string;
 
 export type AgentStatus = {
 	thread_id: ThreadId,
+	/**
+	 *  The agent session it is the status of; `None` for activity no
+	 *  session claims (an agent oxplow didn't start).
+	 */
+	agent_session_id: AgentSessionId | null,
 	state: AgentStatusState,
 	detail: string | null,
 	updated_at: Timestamp,
@@ -1344,6 +1354,8 @@ export type AiSettings = {
 	providers: ProviderStatus[],
 	// Every role, in `Role::ALL` order.
 	roles: RoleStatus[],
+	// The kinds a provider can be: the registered model providers.
+	kinds: ProviderKindInfo[],
 };
 
 // A lens's alert, evaluated on one run.
@@ -3264,6 +3276,20 @@ export type Grants = {
 	scopes: string[],
 };
 
+// One registered harness, as the session picker and Settings see it.
+export type HarnessListing = {
+	// Its key (what `agents:` and a session's `harness` name).
+	id: string,
+	title: string,
+	/**
+	 *  It runs an ACP agent in a chat (a structured transcript), so a
+	 *  session of it names one.
+	 */
+	chat: boolean,
+	// The project enables it (`agents:` names it, or names none).
+	enabled: boolean,
+};
+
 // Where a stream's workspace is.
 export type HeadInfo = {
 	// The head revision; `None` before the first commit.
@@ -3283,6 +3309,12 @@ export type HookEnvelope = {
 	kind: HookKind,
 	thread_id: ThreadId | null,
 	stream_id: StreamId | null,
+	/**
+	 *  The agent session it came from (`X-Oxplow-Session`, the ACP host,
+	 *  the UI's interrupt), when the sender knows it.
+	 */
+	agent_session_id?: AgentSessionId | null,
+	// The harness's own session id.
 	session_id: string | null,
 	payload_json: string,
 	/**
@@ -3335,6 +3367,11 @@ export type ImplementationDecl = {
 	 *  the active implementation.
 	 */
 	skills: string[],
+	/**
+	 *  What the declaration configures, checked against the built-in's
+	 *  schema; `{}` when it says nothing.
+	 */
+	config: any,
 };
 
 // An operation paused mid-way, waiting on its conflicts.
@@ -4413,10 +4450,12 @@ export type OpRef = {
 
 export type OxplowConfig = {
 	/**
-	 *  Enabled agent implementations for this project, in priority order.
-	 *  The first entry is the default for newly-created threads.
+	 *  The agent harnesses enabled for this project, by registry key, in
+	 *  priority order: the first is a new session's default. Empty (the
+	 *  default) enables every registered harness, the first declared one
+	 *  the default.
 	 */
-	agents: AgentKind[],
+	agents: string[],
 	/**
 	 *  Human-readable project name. Defaults to the basename of the
 	 *  project dir when not set in .oxplow/project.yaml.
@@ -4535,16 +4574,13 @@ export type OxplowConfig = {
 	 */
 	zones?: ZoneRuleConfig[],
 	/**
-	 *  Per-agent launch model overrides, e.g.
-	 *  `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
-	 *  Only opencode consumes this today (its `-m provider/model`
-	 *  flag); claude/codex launch with their own defaults. Absent
-	 *  entries fall back to the built-in constant.
+	 *  Each harness's configuration, by its key: what its `launch` reads,
+	 *  e.g. `agentConfig: { opencode: { model: "github-copilot/gpt-5-mini" } }`.
 	 */
-	agentModels: Partial<{ [key in AgentKind]: string }>,
+	agentConfig: { [key in string]: unknown },
 	/**
-	 *  The project's ACP agents (`acpAgents:`), layered over
-	 *  [`acp_presets`] by [`resolve_acp_agents`].
+	 *  The project's ACP agents (`acpAgents:`), layered over the declared
+	 *  ACP adapters (`oxplow_app::acp::agents::resolve`).
 	 */
 	acpAgents: AcpAgentConfig[],
 	/**
@@ -4611,7 +4647,13 @@ export type OxplowEvent =
  *  PreToolUse/PostToolUse, where the renderer used to refetch and
  *  re-derive) compute it inline before emitting.
  */
-{ kind: "agentStatusChanged"; threadId: ThreadId; state: AgentStatusState; 
+{ kind: "agentStatusChanged"; threadId: ThreadId; 
+/**
+ *  The agent session whose status it is; `None` for activity no
+ *  session claims. The renderer rolls a thread's sessions up
+ *  (`rollUpAgentStatus`).
+ */
+agentSessionId: AgentSessionId | null; state: AgentStatusState; 
 /**
  *  The status detail, when meaningful to the renderer. Carries
  *  what the agent is waiting on (its question, the permission it
@@ -4872,8 +4914,15 @@ export type ProviderConfig = {
 	 *  keychain entry name for its key.
 	 */
 	id: string,
-	kind: ProviderKind,
-	// Required for `openai-compatible`; optional override for others.
+	/**
+	 *  What it is: a declared `ai_provider` id (`anthropic`, `openai`,
+	 *  `openai_compatible`, `openrouter`, `typesafe`).
+	 */
+	kind: string,
+	/**
+	 *  Its API base: required for a kind with no default
+	 *  (`openai_compatible`), an override for the others.
+	 */
 	baseUrl?: string | null,
 };
 
@@ -4940,18 +4989,14 @@ export type ProviderInstanceView = {
 	collectors: CollectorView[],
 };
 
-// Kinds of provider oxplow can talk to.
-export type ProviderKind = 
-// Anthropic Messages API.
-"anthropic" | 
-// OpenAI Chat Completions.
-"openai" | 
-// OpenRouter (OpenAI-compatible, one key for many models).
-"openrouter" | 
-// Any OpenAI-compatible server (Ollama, LM Studio, vLLM, LiteLLM); needs `base_url`.
-"openai-compatible" | 
-// TypeSafe (Jev decision model).
-"typesafe";
+// A kind of provider, as the Settings form offers it.
+export type ProviderKindInfo = {
+	// What a provider's `kind:` names.
+	kind: string,
+	title: string,
+	// Its API base when a provider names none; `None` when one must.
+	defaultBaseUrl: string | null,
+};
 
 // A provider's collector a `read` collector runs.
 export type ProviderRead = {
@@ -5013,7 +5058,7 @@ export type ProviderSpec = {
 // A provider as the UI and agents see it: never its key.
 export type ProviderStatus = {
 	id: string,
-	kind: ProviderKind,
+	kind: string,
 	baseUrl: string | null,
 	keySet: boolean,
 };

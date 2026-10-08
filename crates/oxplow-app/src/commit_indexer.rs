@@ -214,7 +214,11 @@ pub async fn refresh(svc: &crate::Services) -> usize {
     let mut workspaces: Vec<std::path::PathBuf> = Vec::new();
     let mut stream_of: Vec<Option<oxplow_domain::StreamId>> = Vec::new();
     for s in &streams {
-        let ws = svc.worktrees.resolve(Some(&s.id.to_string())).await;
+        let ws = svc
+            .worktrees
+            .resolve(Some(&s.id.to_string()))
+            .await
+            .into_local_path();
         if !workspaces.contains(&ws) {
             workspaces.push(ws);
             stream_of.push(Some(s.id));
@@ -253,7 +257,11 @@ pub async fn refresh(svc: &crate::Services) -> usize {
     // not the stream row, which the branch reconciler updates later.
     let mut checkouts: Vec<(i64, String)> = Vec::new();
     for s in &streams {
-        let ws = svc.worktrees.resolve(Some(&s.id.to_string())).await;
+        let ws = svc
+            .worktrees
+            .resolve(Some(&s.id.to_string()))
+            .await
+            .into_local_path();
         if let Ok(oxplow_domain::vcs::Head {
             branch: Some(branch),
             ..

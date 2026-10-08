@@ -82,10 +82,8 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
     services.thread_store.upsert(&thread).await.unwrap();
     services
         .agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::of(
-            thread.id,
-            oxplow_domain::AgentKind::Claude,
-            None,
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread.id, "claude",
         ))
         .await
         .unwrap();
@@ -210,4 +208,36 @@ async fn prompt_context_first_then_deduped() {
     golden("prompt_context_first", &first, &root);
     let second = post(&cp, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_second", &second, &root);
+}
+
+/// Every harness core runs renders the write guard's deny as the golden:
+/// the answer is core's, the shape the harness's (Codex's hooks and
+/// opencode's bridge speak Claude's), so a session of any of them gets
+/// these bytes.
+#[tokio::test]
+async fn every_built_in_harness_renders_the_golden_deny() {
+    let (_cp, svc, _root, _dir) = boot().await;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/goldens/pre_tool_write_guard_path.json");
+    let golden: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let reason = golden["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let harnesses = svc.harnesses.all();
+    assert!(
+        harnesses.len() >= 4,
+        "foundation's harnesses are registered"
+    );
+    for h in harnesses {
+        assert_eq!(
+            h.render(&oxplow_domain::agent::observe::HookAnswer::Deny {
+                reason: reason.clone()
+            }),
+            golden,
+            "{}",
+            h.id()
+        );
+    }
 }

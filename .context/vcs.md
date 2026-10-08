@@ -86,7 +86,19 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
   router memoizes lookups and `forget`s a deleted stream. `resolve`
   falls back to the primary checkout for no stream or an unknown one.
   `resolve_strict` refuses instead, and any stream-scoped write uses it
-  (see git-integration.md "Stream-scoped destructive ops").
+  (see git-integration.md "Stream-scoped destructive ops"). What it
+  answers is a **`WorktreeRoot`** (`resolve`, `resolve_strict`, `all`):
+  the worktree's host (`HostId`, `oxplow_domain::stream`) and its path
+  there, with no `Deref` to a path. The only way to one is
+  `local_path()` / `into_local_path()`, which says the caller reads this
+  machine's filesystem. Every stream is `HostId::LOCAL` until streams
+  record a host (a `streams.host` column, waiting on the next migration).
+  `source_guards::only_workspace_providers_take_a_local_path` pins who
+  does: the providers proper (workspace files, VCS reads and commands, the
+  branch reconciler and commit indexer, language servers, collectors,
+  collection) and, as a ratchet, the callers that still reach the
+  filesystem themselves (`WORKTREE_PATH_USERS`, each with its reason). A
+  new caller goes through a provider; the list only shrinks.
 - **`WorkspaceFiles`** (`Services.workspace_files`): list, read, write,
   create, rename and delete under a stream's workspace, with
   path-traversal protection, annotated with `vcs.status`. Writes

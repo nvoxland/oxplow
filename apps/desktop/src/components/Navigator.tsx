@@ -7,9 +7,7 @@ import {
   subscribeNavigatorOpenRequests,
   type NavigatorMenuRequest,
 } from "../navigator-bus.js";
-import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
-import { agentChoices, parseAgentChoice } from "../agentKinds.js";
-import { listAcpAgents } from "../api.js";
+import { archiveStream, type Stream, type Thread, type ThreadState } from "../api.js";
 import type { AcpAgentListing } from "../tauri-bridge/generated/bindings.js";
 import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
@@ -28,10 +26,11 @@ interface NavigatorProps {
   /// while that thread's status is "awaiting". Absent for every other
   /// state. Keyed by thread id, parallel to agentStatuses.
   agentQuestions?: Record<string, string | undefined>;
-  enabledAgents: AgentKind[];
   onSwitchStream(id: string): void | Promise<void>;
   onSelectThread(streamId: string, threadId: string): void | Promise<void>;
-  onCreateThread(streamId: string, title: string, agent?: AgentKind, acpAgent?: string | null): Promise<void>;
+  onCreateThread(streamId: string, title: string): Promise<void>;
+  /// Open the session picker on a thread ("New session…").
+  onNewSession?(streamId: string, threadId: string): void | Promise<void>;
   onOpenNewStreamPage?(): void;
   onRenameStream?(streamId: string, title: string): void | Promise<void>;
   onRenameThread?(threadId: string, title: string): void | Promise<void>;
@@ -97,7 +96,6 @@ export function Navigator({
   streamStatuses,
   agentStatuses,
   agentQuestions,
-  enabledAgents,
   onSwitchStream,
   onSelectThread,
   onCreateThread,
@@ -106,6 +104,7 @@ export function Navigator({
   onRenameThread,
   onPromoteThread,
   onCloseThread,
+  onNewSession,
   onOpenStreamSettings,
   onOpenThreadSettings,
   vcsEnabled,
@@ -264,6 +263,12 @@ export function Navigator({
       });
     }
     items.push(
+      {
+        id: "thread.new-session",
+        label: "New session…",
+        enabled: !!onNewSession,
+        run: () => onNewSession?.(thread.stream_id, thread.id),
+      },
       {
         id: "thread.rename",
         label: "Rename…",
@@ -502,9 +507,8 @@ export function Navigator({
                       the stream's menu. */}
                   {pendingNewThreadFor === g.stream.id ? (
                     <InlineNewThread
-                      enabledAgents={enabledAgents}
-                      onSubmit={async (title, agent, acpAgent) => {
-                        await onCreateThread(g.stream.id, title, agent, acpAgent);
+                      onSubmit={async (title) => {
+                        await onCreateThread(g.stream.id, title);
                         setPendingNewThreadFor(null);
                       }}
                       onCancel={() => setPendingNewThreadFor(null)}
@@ -1002,28 +1006,17 @@ function AddStreamButton({ vcsEnabled, onClick }: { vcsEnabled: boolean; onClick
   );
 }
 
+/// The new-thread title strip. A thread names no agent: it opens on the
+/// session picker.
 function InlineNewThread({
-  enabledAgents,
   onSubmit,
   onCancel,
 }: {
-  enabledAgents: AgentKind[];
-  onSubmit(title: string, agent?: AgentKind, acpAgent?: string | null): Promise<void>;
+  onSubmit(title: string): Promise<void>;
   onCancel(): void;
 }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [acpAgents, setAcpAgents] = useState<AcpAgentListing[]>([]);
-  const acpEnabled = enabledAgents.includes("acp");
-  useEffect(() => {
-    if (!acpEnabled) return;
-    void listAcpAgents()
-      .then(setAcpAgents)
-      .catch(() => setAcpAgents([]));
-  }, [acpEnabled]);
-  const choices = agentChoices(enabledAgents.length > 0 ? enabledAgents : ["claude"], acpAgents);
-  const [choice, setChoice] = useState<string>(choices[0]?.value ?? "claude");
-  const picked = choices.some((c) => c.value === choice) ? choice : (choices[0]?.value ?? "claude");
   return (
     <form
       onSubmit={async (e) => {
@@ -1032,8 +1025,7 @@ function InlineNewThread({
         if (!t) return onCancel();
         setBusy(true);
         try {
-          const { agent, acpAgent } = parseAgentChoice(picked);
-          await onSubmit(t, agent, acpAgent);
+          await onSubmit(t);
         } finally {
           setBusy(false);
         }
@@ -1073,28 +1065,6 @@ function InlineNewThread({
           fontSize: "var(--text-xs)",
         }}
       />
-      {choices.length > 1 ? (
-        <select
-          data-testid="navigator-new-thread-agent"
-          value={picked}
-          disabled={busy}
-          onChange={(e) => setChoice(e.target.value)}
-          style={{
-            background: "var(--surface-card)",
-            color: "var(--text-primary)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: 4,
-            padding: "4px 6px",
-            fontSize: "var(--text-xs)",
-          }}
-        >
-          {choices.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-      ) : null}
     </form>
   );
 }

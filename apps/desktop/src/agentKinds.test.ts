@@ -1,39 +1,49 @@
 import { expect, test } from "bun:test";
 
-import type { AcpAgentListing } from "./tauri-bridge/generated/bindings.js";
-import { agentChoices, parseAgentChoice, sessionLabel } from "./agentKinds.js";
+import type { AcpAgentListing, HarnessListing } from "./tauri-bridge/generated/bindings.js";
+import { agentChoices, harnessLabel, parseAgentChoice, sessionLabel } from "./agentKinds.js";
 
 const acp = (name: string, over: Partial<AcpAgentListing> = {}): AcpAgentListing => ({
   name,
   command: name,
   args: [],
-  source: "preset",
+  source: "declared",
   approved: true,
   resolvedPath: `/bin/${name}`,
   ...over,
 });
 
-test("the ACP kind expands into one choice per ACP agent, flagged when it can't start", () => {
-  const choices = agentChoices(
-    ["claude", "acp"],
-    [acp("claude"), acp("gemini", { resolvedPath: null }), acp("mine", { source: "project", approved: false })],
-  );
+const harness = (id: string, title: string, over: Partial<HarnessListing> = {}): HarnessListing => ({
+  id,
+  title,
+  chat: false,
+  enabled: true,
+  ...over,
+});
+
+const harnesses = [harness("claude", "Claude"), harness("acp", "ACP", { chat: true }), harness("codex", "Codex", { enabled: false })];
+
+test("each enabled harness is a choice, in order; a chat harness is one per ACP agent, flagged when it can't start", () => {
+  const choices = agentChoices(harnesses, [
+    acp("claude"),
+    acp("gemini", { resolvedPath: null }),
+    acp("mine", { source: "project", approved: false }),
+  ]);
   expect(choices.map((c) => [c.value, c.label])).toEqual([
     ["claude", "Claude"],
     ["acp:claude", "ACP · claude"],
     ["acp:gemini", "ACP · gemini (not installed)"],
     ["acp:mine", "ACP · mine (needs approval)"],
   ]);
-  // Without ACP enabled, no ACP choices.
-  expect(agentChoices(["claude", "codex"], [acp("gemini")]).map((c) => c.value)).toEqual(["claude", "codex"]);
 });
 
-test("a choice value parses back to the agent and ACP agent", () => {
-  expect(parseAgentChoice("codex")).toEqual({ agent: "codex", acpAgent: null });
-  expect(parseAgentChoice("acp:gemini")).toEqual({ agent: "acp", acpAgent: "gemini" });
+test("a choice value parses back to the harness and ACP agent", () => {
+  expect(parseAgentChoice("codex")).toEqual({ harness: "codex", acpAgent: null });
+  expect(parseAgentChoice("acp:gemini")).toEqual({ harness: "acp", acpAgent: "gemini" });
 });
 
-test("an ACP session's label names its ACP agent", () => {
-  expect(sessionLabel({ harness: "acp", acpAgent: "gemini" })).toBe("ACP · gemini");
-  expect(sessionLabel({ harness: "claude", acpAgent: null })).toBe("Claude");
+test("a session is labelled by its harness's title, and a chat session by its ACP agent too", () => {
+  expect(sessionLabel(harnesses, { harness: "acp", acpAgent: "gemini" })).toBe("ACP · gemini");
+  expect(sessionLabel(harnesses, { harness: "claude", acpAgent: null })).toBe("Claude");
+  expect(harnessLabel(harnesses, "gone")).toBe("gone");
 });

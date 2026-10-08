@@ -1033,7 +1033,7 @@ Landed:
 | wasted tokens (tsk77) | close-time producer + `collection.rs::record_token_waste_for_reverts` (fires on any landed commit incl. `git revert`, via `detect_git_revert` — revert never says "commit") | **`oxplow.token_waste`** is an append-only ratio measure with two writers: a metered CLOSE emits (num 0, den = the effort's spend, value 0) — rides inside the effort_tokens gate since the denominator IS that spend — and a detected revert emits (num = spend, den 0, value = spend) for the ONE closed effort whose window contains the reverted commit (`This reverts commit <sha>` trailers in HEAD; 0/ambiguous candidates → no attribution; idempotency key `token-waste:<effort>` → one waste fact per effort ever; commit times are seconds-granular so containment spans the whole second). `task.tokens.wasted` = SUM over values (closes are 0); `task.tokens.wasted_pct` = ratio Σn/Σd = wasted ÷ all metered spend. V1 is coarse: one reverted commit flags the effort's FULL spend. Pre-V61 closes never entered the denominator |
 | effort steering (tsk76) | same close-time producer | one **`oxplow.effort_steering`** fact per closed effort (num=value/den=1, non-additive → `task.steering` reads the MEAN per close — the autonomy number, lower = more autonomous): user prompt submissions (`agent_turn` rows opened in the effort window, newest-1000 scan) + Stop-hook nudges (Σ of the effort's `oxplow.nudge` facts) + non-`agent`-authored comment threads opened in the effort's thread during the window. **Zero IS emitted** — a fully autonomous effort is real data. Interrupts are NOT counted (nothing records them yet). Needs `with_steering_sources` (agent-turn + comment stores) wired, as boot does |
 | effort time-to-green (tsk76) | same close-time producer (shares the `oxplow.test_case` read with effort_test_outcome — one fetch when either gate is open) | one **`oxplow.effort_time_to_green`** fact per closed effort: wall-clock ms from the FIRST red run to the first green after it (pure `test_outcome::time_to_green_ms` over per-capture red flags + `captured_at`). Only emitted when that red→green transition exists — always-green or never-recovered is "no data", not a zero. `effort.time_to_green_ms` reads the mean |
-| turns — transcript (tsk22) | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The `parse_claude_turns`/`parse_claude_usage` dedupe-by-`message.id` fix (tsk22) removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
+| turns — transcript (tsk22) | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The Claude harness's transcript parse counts each `message.id` once (tsk22), which removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
 | effort lifecycle (T-B) | `effort_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.work_item_effort` fact (subject=work_item, the effort's work-item ref; the efforts-so-far redo signal, none while unlinked); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort). **Also (tsk38)** emits four `oxplow.effort_test_outcome` facts per close, sliced by `oxplow.tests_stat` — `at_close` (failed count of the last run = quality gate), `peak` (max failed in any run), `distinct_failed` (distinct cases red in ≥1 run), `red_runs` (# runs with ≥1 failure). Computed by the pure `test_outcome::{runs_from_case_facts, compute_effort_test_outcome}` from the effort's `oxplow.test_case` facts (grouped per capture): these "within-effort" aggregates are **not expressible** as a spec (the engine's temporal collapse is only sum/last/Σn÷Σd), so they're materialized here. Gated by `measure_has_active_spec("oxplow.effort_test_outcome")` |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 
@@ -1087,8 +1087,12 @@ summed every assistant line) and was Claude-only + format-fragile.
   one `otel-tokens` capture per event carrying its turn and effort, keyed
   `otel-tokens:<event id>`, so a redelivery counts nothing twice.
 - **Decode + map:** `oxplow-app/src/otlp_tokens.rs` decodes the OTLP protobuf
-  (`opentelemetry-proto` crate) and `otlp_metrics_to_token_facts` projects both
-  agents' token metrics into `TokenFact`s (pure + unit-tested):
+  (`opentelemetry-proto` crate) into neutral `OtlpRecord`s (metric data
+  points, log records; `oxplow_domain::agent::observe`) and asks every
+  registered harness for its `TokenReading`s (`AgentHarness::token_readings`,
+  in `crates/oxplow-harnesses`): the metric and event names are each
+  harness's own, and asking only the session's harness would cost a database
+  read per export, most of which carry no counts. Pure + unit-tested:
   - **Claude** — `claude_code.token.usage` **counter** (delta temporality → each
     export is the increment), `type ∈ {input,output,cacheRead,cacheCreation}`
     (the cache kinds on their own measure, tsk73);
@@ -1102,13 +1106,13 @@ summed every assistant line) and was Claude-only + format-fragile.
     one endpoint accepts both agents. (A speculative `codex.turn.token_usage`
     *metric* mapper also exists, unemitted by 0.142.0 — kept as a defensive
     path.)
-- **Launch wiring:** per-agent, injected at spawn (`terminal.rs`):
-  - **Claude** (`claude_otel_env`, env — Claude has OTEL env support):
+- **Launch wiring:** per-agent, injected by each harness's `launch`:
+  - **Claude** (`otel_env` in its harness, env — Claude has OTEL env support):
     `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER=otlp`,
     `http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` = the control-plane
     `otlp_base_url` (base; SDK appends `/v1/metrics`) threaded via
     `PluginRuntime`, + bearer + `X-Oxplow-Thread` header.
-  - **Codex** (`codex_otel_overrides`, `--config otel.*` — Codex has NO OTEL env
+  - **Codex** (`otel_overrides` in its harness, `--config otel.*` — Codex has NO OTEL env
     vars): `otel.exporter.otlp-http.endpoint` = the **full** `<base>/v1/metrics`
     URL, `protocol="binary"` (protobuf), same bearer + `X-Oxplow-Thread` in the
     exporter's `headers` map.
@@ -1920,7 +1924,7 @@ metrics:                              # the read SPEC (the chartable metric)
   an unknown key resolves to a warning (skipped), not an error.
 
 The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
-+ the **`/oxplow:new-metric`** command (assets in `crates/oxplow-plugin/`,
++ the **`/oxplow:new-metric`** command (assets in `crates/oxplow-agent-text/`,
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
 the measure+collector+metric trio + script + verification (`oxplow.collector.sync`
 runs it now), no oxplow-team involvement.

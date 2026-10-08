@@ -50,9 +50,15 @@ pub struct CapabilitySpec {
     /// Whether it may be [`NONE`]: nothing implements it, and what
     /// needs it says so.
     pub optional: bool,
+    /// Whether many implementations serve it at once (every agent
+    /// harness, every AI provider) rather than one chosen: each one
+    /// declared is active, nothing is chosen or switched, and a need on
+    /// one of its features is met by any of them. Never choosable or
+    /// optional.
+    pub many: bool,
     /// The implementation used when none is chosen — and, for a required
     /// capability, when the chosen one isn't available. Core always has
-    /// it.
+    /// it. For a many-capability: the one used when nothing names one.
     pub default: &'static str,
     /// The features an implementation may declare.
     pub features: &'static [&'static str],
@@ -69,6 +75,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         title: "Work list",
         choosable: true,
         optional: true,
+        many: false,
         default: "oxplow",
         features: &[
             "hierarchy",
@@ -85,6 +92,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         title: "Effort policy",
         choosable: true,
         optional: true,
+        many: false,
         default: "oxplow",
         features: &[],
     },
@@ -93,6 +101,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         title: "Snapshots",
         choosable: true,
         optional: false,
+        many: false,
         default: "oxplow",
         features: &["contents"],
     },
@@ -101,6 +110,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         title: "Version control",
         choosable: false,
         optional: false,
+        many: false,
         default: "git",
         features: &[],
     },
@@ -109,8 +119,42 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         title: "Knowledge",
         choosable: false,
         optional: false,
+        many: false,
         default: "oxplow",
         features: &[],
+    },
+    CapabilitySpec {
+        id: "agent_harness",
+        title: "Agent harness",
+        choosable: false,
+        optional: false,
+        many: true,
+        default: "claude",
+        features: &[
+            "terminal",
+            "structured_transcript",
+            "permission_prompts",
+            "resume",
+            "programmatic",
+        ],
+    },
+    CapabilitySpec {
+        id: "acp_adapter",
+        title: "ACP agent",
+        choosable: false,
+        optional: false,
+        many: true,
+        default: "claude",
+        features: &[],
+    },
+    CapabilitySpec {
+        id: "ai_provider",
+        title: "AI provider",
+        choosable: false,
+        optional: false,
+        many: true,
+        default: "anthropic",
+        features: &["decide_native"],
     },
 ];
 
@@ -122,6 +166,31 @@ pub fn spec(id: &str) -> Option<&'static CapabilitySpec> {
 /// The capabilities a project chooses an implementation of.
 pub fn choosable() -> impl Iterator<Item = &'static CapabilitySpec> {
     CAPABILITIES.iter().filter(|c| c.choosable)
+}
+
+/// Check a declaration's `config` against its built-in's JSON Schema
+/// (`schema`, its text). The error says what's wrong, where.
+pub fn check_config(schema: &str, config: &serde_json::Value) -> Result<(), String> {
+    let schema: serde_json::Value =
+        serde_json::from_str(schema).map_err(|e| format!("the built-in's config schema: {e}"))?;
+    let validator = jsonschema::validator_for(&schema)
+        .map_err(|e| format!("the built-in's config schema: {e}"))?;
+    let errors: Vec<String> = validator
+        .iter_errors(config)
+        .map(|e| {
+            let at = e.instance_path().to_string();
+            if at.is_empty() {
+                e.to_string()
+            } else {
+                format!("{at}: {e}")
+            }
+        })
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("config: {}", errors.join("; ")))
+    }
 }
 
 /// Check one declared need: a scope (`sql.read`,
@@ -188,6 +257,25 @@ mod tests {
             choosable().map(|c| c.id).collect::<Vec<_>>(),
             ["work_items", "effort_policy", "snapshots"]
         );
+        for c in CAPABILITIES.iter().filter(|c| c.many) {
+            assert!(
+                !c.choosable && !c.optional,
+                "{}: many implementations are registered at once, never chosen or none",
+                c.id
+            );
+        }
+        assert_eq!(
+            CAPABILITIES
+                .iter()
+                .filter(|c| c.many)
+                .map(|c| (c.id, c.default))
+                .collect::<Vec<_>>(),
+            [
+                ("agent_harness", "claude"),
+                ("acp_adapter", "claude"),
+                ("ai_provider", "anthropic")
+            ]
+        );
         assert_eq!(spec("snapshots").map(|c| c.optional), Some(false));
         assert!(spec("nope").is_none());
     }
@@ -202,5 +290,23 @@ mod tests {
         assert!(check_need("work_items.flying")
             .unwrap_err()
             .contains("isn't a feature"));
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    /// A declaration's `config:` is checked against its built-in's schema:
+    /// the error names what's wrong.
+    #[test]
+    fn config_is_checked_against_a_schema() {
+        let schema = r#"{"type":"object","required":["command"],"properties":{"command":{"type":"string"}},"additionalProperties":false}"#;
+        assert!(check_config(schema, &serde_json::json!({"command": "gemini"})).is_ok());
+        let err = check_config(schema, &serde_json::json!({})).unwrap_err();
+        assert!(err.contains("command"), "{err}");
+        let err =
+            check_config(schema, &serde_json::json!({"command": "x", "nope": 1})).unwrap_err();
+        assert!(err.contains("nope"), "{err}");
     }
 }

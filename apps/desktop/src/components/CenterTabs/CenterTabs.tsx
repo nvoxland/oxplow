@@ -5,6 +5,7 @@ import { AgentStatusDot } from "../AgentStatusDot.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { ErrorBoundary } from "../ErrorBoundary.js";
+import { InlineConfirm } from "../InlineConfirm.js";
 import { leadingPinnedCount, moveToIndex, reorderToAfterPinned } from "./centerTabsReorder.js";
 import { tabsToCloseOthers, tabsToCloseRight } from "./tabClose.js";
 
@@ -12,8 +13,16 @@ export interface CenterTab {
   id: string;
   label: string;
   closable: boolean;
+  /** Pinned: it leads the strip, isn't dragged or dropped on, and the
+   *  bulk closes ("Close Other Tabs") skip it (an agent session's tab). */
+  pinned?: boolean;
+  /** Its × arms first and closes on the second click — the inline
+   *  confirm for a destructive close; the label names what it does. */
+  closeConfirm?: string;
   render: () => ReactNode;
   agentStatus?: AgentStatus;
+  /** What the agent is waiting on, when `agentStatus` is awaiting. */
+  question?: string;
   /** Kind-specific right-click menu entries for this tab. They render at
    *  the top of the tab's context menu, above the universal "Close Other
    *  Tabs" / "Close Tabs to the Right" pair that CenterTabs appends for
@@ -70,10 +79,12 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   const hasOverflow = hiddenInStripIds.size > 0;
 
   // A tab is reorderable when reordering is wired and the tab isn't
-  // pinned. "Pinned" = non-closable (the Agent tab); it stays at the
-  // front and is never a drag source or drop target. Every other tab
-  // can be dragged anywhere in the strip — there are no per-kind groups.
-  const isReorderable = (tab: CenterTab): boolean => !!onReorder && tab.closable;
+  // pinned (an agent session's): pinned tabs stay at the front, in the
+  // order their sessions opened, and are never a drag source or drop
+  // target. Every other closable tab can be dragged anywhere after them.
+  const isReorderable = (tab: CenterTab): boolean => !!onReorder && tab.closable && !tab.pinned;
+  // What the bulk closes may close: never a pinned tab.
+  const bulkClosable = stripTabs.map((t) => ({ id: t.id, closable: t.closable && !t.pinned }));
 
   // Close a batch of tabs through the host's single-tab close path, then —
   // only if the close swept away the active tab — fall the selection back to
@@ -95,8 +106,8 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   const buildTabMenu = (tab: CenterTab): MenuItem[] => {
     const items: MenuItem[] = tab.contextMenu ? [...tab.contextMenu] : [];
     if (onClose) {
-      const others = tabsToCloseOthers(stripTabs, tab.id);
-      const toRight = tabsToCloseRight(stripTabs, tab.id);
+      const others = tabsToCloseOthers(bulkClosable, tab.id);
+      const toRight = tabsToCloseRight(bulkClosable, tab.id);
       if (items.length > 0) {
         items.push({ id: "tab.close-sep", label: "", enabled: false, separator: true });
       }
@@ -179,10 +190,10 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
     if (!onReorder) return false;
     if (!hiddenInStripIds.has(id)) return false;
     const ids = tabs.map((t) => t.id);
-    // Land it right after the leading run of pinned (non-closable) tabs
-    // — i.e. directly after Agent — so it surfaces in the most prominent
-    // slot rather than wherever the first file tab happens to be.
-    const pinned = leadingPinnedCount(tabs.map((t) => t.closable));
+    // Land it right after the leading run of pinned tabs (the agent
+    // sessions') so it surfaces in the most prominent slot rather than
+    // wherever the first file tab happens to be.
+    const pinned = leadingPinnedCount(tabs.map((t) => !!t.pinned));
     const next = reorderToAfterPinned(ids, pinned, id);
     if (next === ids) return false;
     onReorder(next);
@@ -312,7 +323,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                   }}
                 />
               ) : null}
-              {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
+              {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} question={tab.question} /> : null}
               <PageKindIcon
                 kind={kindForTabId(tab.id)}
                 size={13}
@@ -331,7 +342,29 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               >
                 {tab.label}
               </span>
-              {tab.closable && onClose ? (
+              {tab.closable && onClose && tab.closeConfirm ? (
+                // A destructive close arms first (usability.md "Per-row
+                // destructives"); the clicks stay off the tab itself.
+                <span onClick={(event) => event.stopPropagation()} style={{ display: "inline-flex" }}>
+                  <InlineConfirm
+                    confirmLabel={tab.closeConfirm}
+                    onConfirm={() => onClose(tab.id)}
+                    testIdPrefix={`center-tab-close-${tab.id}`}
+                  >
+                    {(arm) => (
+                      <button
+                        type="button"
+                        data-testid={`center-tab-close-${tab.id}`}
+                        onClick={arm}
+                        title={tab.closeConfirm}
+                        style={closeButtonStyle}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </InlineConfirm>
+                </span>
+              ) : tab.closable && onClose ? (
                 <button type="button"
                   data-testid={`center-tab-close-${tab.id}`}
                   onClick={(event) => {
@@ -521,11 +554,11 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
               if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "transparent";
             }}
           >
-            {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
+            {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} question={tab.question} /> : null}
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tab.label}>
               {tab.label}
             </span>
-            {tab.closable && onClose ? (
+            {tab.closable && onClose && !tab.closeConfirm ? (
               <button
                 type="button"
                 data-testid={`center-tabs-overflow-close-${tab.id}`}
@@ -553,3 +586,13 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
     </div>
   );
 }
+
+const closeButtonStyle = {
+  border: "none",
+  background: "transparent",
+  color: "var(--muted)",
+  cursor: "pointer",
+  padding: "0 2px",
+  fontSize: "var(--text-base)",
+  lineHeight: 1,
+} as const;

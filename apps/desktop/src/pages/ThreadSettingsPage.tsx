@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { setThreadPrompt, type Thread } from "../api.js";
 import { sessionLabel } from "../agentKinds.js";
+import { useAgentHarnesses } from "../useAgentHarnesses.js";
 import { useThreadSessions } from "../agentSessions.js";
 import { Page } from "../tabs/Page.js";
 import { normalizePromptForSave } from "./StreamSettingsPage.js";
@@ -20,6 +21,7 @@ export interface ThreadSettingsPageProps {
  */
 export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: ThreadSettingsPageProps) {
   const sessions = useThreadSessions(thread?.id ?? null);
+  const harnesses = useAgentHarnesses();
   const [prompt, setPrompt] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,11 +68,11 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
           </div>
         ) : (
           <>
-            <Section title="Agent">
+            <Section title="Agent sessions">
               <Hint>
                 {sessions && sessions.length > 0
-                  ? `This thread runs ${sessions.map(sessionLabel).join(", ")}. Agent assignment is fixed after thread creation.`
-                  : "This thread has no agent session."}
+                  ? `Open: ${sessions.map((s) => s.title || sessionLabel(harnesses, s)).join(", ")}. Each has its own tab; New session… on the thread's menu adds one.`
+                  : "None open. New session… on the thread's menu starts one."}
               </Hint>
             </Section>
 

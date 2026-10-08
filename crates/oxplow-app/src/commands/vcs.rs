@@ -115,7 +115,8 @@ where
                 let ws = target
                     .worktrees
                     .resolve_strict(Some(&stream.to_string()))
-                    .await?;
+                    .await?
+                    .into_local_path();
                 let ran = op(target.clone(), ws, input).await;
                 let announce = announcement(&target, stream, touched).await;
                 match ran {

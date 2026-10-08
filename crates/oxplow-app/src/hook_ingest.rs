@@ -44,21 +44,20 @@ use specta::Type;
 use thiserror::Error;
 
 use oxplow_db::agent_stores::{
-    activity_anchors_tx, close_turn_tx, last_status_tx, open_session_turn_ids_tx, open_turn_ids_tx,
-    open_turn_tx, TurnEnd,
+    activity_anchors_tx, close_turn_tx, last_status_tx, log_status_tx, open_harness_turn_ids_tx,
+    open_turn_ids_in_tx, open_turn_tx, TurnEnd,
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
 use oxplow_domain::events::schema::{
     AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
-    AgentSessionStarted, AgentSessionStartedV1, AgentStatusChanged, AgentStatusChangedV1,
-    AgentToolFinished, AgentToolFinishedV1, AgentToolRequested, AgentToolRequestedV1, ContentRef,
-    LoggedAgentStatus, ToolDecision as Decision,
+    AgentSessionStarted, AgentSessionStartedV2, AgentToolFinished, AgentToolFinishedV1,
+    AgentToolRequested, AgentToolRequestedV1, ContentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
-    AgentKind, AgentStatus, AgentStatusState, AgentTurnId, DomainError, HookKind, StreamId,
-    ThreadId, Timestamp,
+    AgentStatus, AgentStatusState, AgentTurnId, DomainError, HookKind, StreamId, ThreadId,
+    Timestamp,
 };
 
 use crate::events::{EventBus, OxplowEvent};
@@ -91,6 +90,11 @@ pub struct HookEnvelope {
     pub kind: HookKind,
     pub thread_id: Option<ThreadId>,
     pub stream_id: Option<StreamId>,
+    /// The agent session it came from (`X-Oxplow-Session`, the ACP host,
+    /// the UI's interrupt), when the sender knows it.
+    #[serde(default)]
+    pub agent_session_id: Option<oxplow_domain::AgentSessionId>,
+    /// The harness's own session id.
     pub session_id: Option<String>,
     pub payload_json: String,
     /// UserPromptSubmit: the text the person submitted — stored with its
@@ -113,11 +117,18 @@ pub enum HookIngestError {
 pub struct IngestOutcome {
     /// The turn a Stop / Interrupt closed.
     pub closed_turn: Option<AgentTurnId>,
+    /// The harness of the agent session the hook came from (its registry
+    /// key): what renders the answer. `None` when no session claims it.
+    pub harness: Option<String>,
 }
 
 /// What the transaction decided, applied after it commits.
 #[derive(Default)]
 struct Applied {
+    /// The agent session the hook came from.
+    session: Option<oxplow_domain::AgentSessionId>,
+    /// Its harness's registry key.
+    harness: Option<String>,
     turn: Option<AgentTurnId>,
     opened_turn: bool,
     closed_turn: Option<AgentTurnId>,
@@ -200,9 +211,13 @@ impl HookIngestService {
         // The activity log and the Work panel's live turn rows re-read
         // `v_event` / `v_agent_turn` on the commit's `ModelsChanged`.
         outcome.closed_turn = applied.closed_turn;
+        outcome.harness = applied.harness.clone();
         match applied.status {
-            Some((state, detail)) => self.announce(thread, state, detail),
-            None => self.announce_derived_status(&thread, kind).await,
+            Some((state, detail)) => self.announce(thread, applied.session, state, detail),
+            None => {
+                self.announce_derived_status(&thread, applied.session, kind)
+                    .await
+            }
         }
         drop(order);
         if let Some(pump) = &self.pump {
@@ -216,55 +231,68 @@ impl HookIngestService {
         Ok(outcome)
     }
 
-    /// Log and announce a thread's status outside a hook (the ACP session's
-    /// permission cards).
+    /// Log and announce an agent session's status outside a hook (the ACP
+    /// session's permission cards). `session` resolves as a hook's does.
     pub async fn set_status(
         &self,
         thread: &ThreadId,
+        session: Option<oxplow_domain::AgentSessionId>,
         state: AgentStatusState,
         detail: Option<String>,
     ) -> Result<(), HookIngestError> {
         let _order = self.status_order.lock().await;
         let vocabulary = self.vocabulary.clone();
         let (thread_c, detail_c) = (*thread, detail.clone());
-        let logged = self
+        let slot = self
             .db
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
                 let ev = EventCtx::system(&vocabulary, "hook_ingest");
-                let current = last_status_tx(tx, &vocabulary, thread_c)?;
-                if !changed(current.as_ref(), state, detail_c.as_deref()) {
-                    return Ok(false);
+                let slot = oxplow_db::agent_session_store::resolve_tx(tx, thread_c, session, None)?
+                    .map(|s| s.id);
+                let current = last_status_tx(tx, &vocabulary, thread_c, slot)?;
+                if changed(current.as_ref(), state, detail_c.as_deref()) {
+                    log_status_tx(tx, &ev, thread_c, slot, None, state, detail_c.clone())?;
                 }
-                log_status_tx(tx, &ev, thread_c, None, state, detail_c.clone())?;
-                Ok(true)
+                Ok(slot)
             })
             .await?;
-        let _ = logged;
-        self.announce(*thread, state, detail);
+        self.announce(*thread, slot, state, detail);
         Ok(())
     }
 
-    fn announce(&self, thread: ThreadId, state: AgentStatusState, detail: Option<String>) {
+    fn announce(
+        &self,
+        thread: ThreadId,
+        session: Option<oxplow_domain::AgentSessionId>,
+        state: AgentStatusState,
+        detail: Option<String>,
+    ) {
         self.events.emit(OxplowEvent::AgentStatusChanged {
             thread_id: thread,
+            agent_session_id: session,
             state,
             detail,
         });
     }
 
     /// Tool hooks set no status of their own, but they change what the
-    /// renderer derives (an open `Task` keeps a thread working). Re-derive
-    /// from the thread's logged activity and announce it, keeping an
-    /// status that parked the thread on the person.
-    async fn announce_derived_status(&self, thread: &ThreadId, kind: HookKind) {
+    /// renderer derives (an open `Task` keeps a session working). Re-derive
+    /// from the session's logged activity and announce it, keeping a
+    /// status that parked it on the person.
+    async fn announce_derived_status(
+        &self,
+        thread: &ThreadId,
+        session: Option<oxplow_domain::AgentSessionId>,
+        kind: HookKind,
+    ) {
         if !matches!(kind, HookKind::PreToolUse | HookKind::PostToolUse) {
             return;
         }
         let current = {
             use oxplow_domain::stores::AgentStatusStore as _;
             oxplow_db::SqliteAgentStatusStore::new(self.db.clone(), self.vocabulary.clone())
-                .get(thread)
+                .get(thread, session)
                 .await
                 .ok()
                 .flatten()
@@ -274,15 +302,16 @@ impl HookIngestService {
                 (AgentStatusState::AwaitingUser, s.detail)
             }
             _ => {
-                let recent = crate::agent_status_derive::recent_activity(&self.log, *thread)
-                    .await
-                    .unwrap_or_default();
+                let recent =
+                    crate::agent_status_derive::recent_activity(&self.log, *thread, session)
+                        .await
+                        .unwrap_or_default();
                 let derived =
-                    crate::agent_status_derive::derive_thread_status(&recent, Timestamp::now());
+                    crate::agent_status_derive::derive_session_status(&recent, Timestamp::now());
                 (derived, None)
             }
         };
-        self.announce(*thread, state, detail);
+        self.announce(*thread, session, state, detail);
     }
 }
 
@@ -294,49 +323,23 @@ fn changed(current: Option<&AgentStatus>, state: AgentStatusState, detail: Optio
     }
 }
 
-/// Log a status change, anchored to the thread's open turn — or, for the
-/// status a Stop sets, to the turn that Stop closed (`turn`), so the
-/// turn's own record says how it ended (`TurnSignals::awaiting_user`).
-fn log_status_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    thread: ThreadId,
-    turn: Option<AgentTurnId>,
-    state: AgentStatusState,
-    detail: Option<String>,
-) -> Result<(), DomainError> {
-    let mut anchors = activity_anchors_tx(conn, thread)?;
-    if let Some(turn) = turn {
-        anchors.turn_id = Some(turn.value());
-    }
-    let env = ev
-        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-            thread: thread_ref(thread),
-            state: LoggedAgentStatus::of(state).ok_or_else(|| {
-                DomainError::Invalid(format!("{state:?} is derived, never logged"))
-            })?,
-            detail,
-        })
-        .with_anchors(anchors)
-        .with_subject([thread_ref(thread)]);
-    ev.append(conn, &env)?;
-    Ok(())
-}
-
-/// What the ingest needs of the thread and its agent session.
+/// What the ingest needs of the thread and the agent session a hook came
+/// from.
 struct ThreadRow {
-    /// The thread's newest agent session, when it has one.
+    /// The session it came from (`agent_session_store::resolve_tx`); `None`
+    /// for an agent oxplow didn't start.
     session: Option<oxplow_domain::AgentSessionId>,
     resume_session_id: String,
-    agent: AgentKind,
+    /// The session's harness key; `None` with no session.
+    harness: Option<String>,
     worktree: PathBuf,
 }
 
-/// The thread's row as the ingest reads it, with its newest agent session
-/// standing in for "the session this hook came from".
+/// The thread's worktree and the session `env` came from.
 fn session_row_tx(
     conn: &rusqlite::Connection,
     thread: ThreadId,
+    env: &HookEnvelope,
     project_dir: &Path,
 ) -> Result<Option<ThreadRow>, DomainError> {
     use rusqlite::OptionalExtension as _;
@@ -353,14 +356,19 @@ fn session_row_tx(
     else {
         return Ok(None);
     };
-    let session = oxplow_db::agent_session_store::newest_for_thread_tx(conn, thread)?;
+    let session = oxplow_db::agent_session_store::resolve_tx(
+        conn,
+        thread,
+        env.agent_session_id,
+        env.session_id.as_deref(),
+    )?;
     Ok(Some(ThreadRow {
         session: session.as_ref().map(|s| s.id),
         resume_session_id: session
             .as_ref()
             .map(|s| s.resume_session_id.clone())
             .unwrap_or_default(),
-        agent: session.map(|s| s.harness).unwrap_or_default(),
+        harness: session.map(|s| s.harness),
         worktree: if worktree.is_empty() {
             project_dir.to_path_buf()
         } else {
@@ -378,12 +386,17 @@ fn record_tx(
     env: &HookEnvelope,
     now: Timestamp,
 ) -> Result<Applied, DomainError> {
-    let Some(row) = session_row_tx(conn, thread, project_dir)? else {
+    let Some(row) = session_row_tx(conn, thread, env, project_dir)? else {
         return Ok(Applied::default()); // an unknown thread: the hook log only
     };
     let body: serde_json::Value = serde_json::from_str(&env.payload_json).unwrap_or_default();
     let session = env.session_id.as_deref().filter(|s| !s.is_empty());
-    let mut applied = Applied::default();
+    let slot = row.session;
+    let mut applied = Applied {
+        session: slot,
+        harness: row.harness.clone(),
+        ..Applied::default()
+    };
     let mut status = None;
     let starts = starts_session(env.kind, &body);
     let transcript_path = body.get("transcript_path").and_then(|p| p.as_str());
@@ -401,13 +414,13 @@ fn record_tx(
                 transcript_path,
                 ..end.clone()
             };
-            for id in open_session_turn_ids_tx(conn, thread, sid)? {
+            for id in open_harness_turn_ids_tx(conn, thread, sid)? {
                 if close_turn_tx(conn, ev, id, &own)?.is_some() && applied.closed_turn.is_none() {
                     applied.closed_turn = Some(id);
                 }
             }
         }
-        if let Some(id) = close_open_turns_tx(conn, ev, thread, &end)? {
+        if let Some(id) = close_open_turns_tx(conn, ev, thread, slot, &end)? {
             applied.closed_turn = applied.closed_turn.or(Some(id));
         }
         status = Some((AgentStatusState::Idle, None));
@@ -417,13 +430,13 @@ fn record_tx(
             track_session_tx(conn, ev, thread, &row, sid, starts, now)?;
         }
     }
-    applied.turn = open_turn_ids_tx(conn, thread)?.first().copied();
+    applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
     match env.kind {
         HookKind::UserPromptSubmit => {
             let reprompt = applied.turn.is_some();
             if !reprompt {
                 let prompt = env.prompt.as_deref().unwrap_or_default();
-                applied.turn = Some(open_turn_tx(conn, ev, thread, prompt, session, now)?);
+                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, prompt, session, now)?);
                 applied.opened_turn = true;
             }
             let text = env.prompt.as_deref().filter(|p| !p.is_empty());
@@ -438,7 +451,7 @@ fn record_tx(
             };
             let env = ev
                 .typed::<AgentPromptSubmitted>(&payload)
-                .with_anchors(activity_anchors_tx(conn, thread)?)
+                .with_anchors(activity_anchors_tx(conn, thread, slot)?)
                 .with_subject([applied
                     .turn
                     .map(turn_ref)
@@ -447,7 +460,7 @@ fn record_tx(
             status = Some((AgentStatusState::Running, None));
         }
         HookKind::PreToolUse | HookKind::PostToolUse => {
-            log_tool_tx(conn, ev, thread, &row.worktree, env, &body, session)?;
+            log_tool_tx(conn, ev, thread, &row, env, &body, session)?;
             let tool = body
                 .get("tool_name")
                 .and_then(|t| t.as_str())
@@ -458,7 +471,7 @@ fn record_tx(
                 status = Some((AgentStatusState::AwaitingUser, Some(asked_of(tool, &body))));
             } else if env.kind == HookKind::PostToolUse
                 && (asks
-                    || last_status_tx(conn, ev.vocabulary, thread)?
+                    || last_status_tx(conn, ev.vocabulary, thread, slot)?
                         .is_some_and(|s| s.state == AgentStatusState::AwaitingUser))
             {
                 // Answered, or the tool it was waiting on permission for ran.
@@ -500,7 +513,7 @@ fn record_tx(
                     .and_then(|u| serde_json::from_value(u.clone()).ok()),
                 ..TurnEnd::new(now, outcome)
             };
-            applied.closed_turn = close_open_turns_tx(conn, ev, thread, &end)?;
+            applied.closed_turn = close_open_turns_tx(conn, ev, thread, slot, &end)?;
             applied.turn = None;
             status = Some(if env.kind == HookKind::Interrupt {
                 (AgentStatusState::Stopped, Some("interrupt".to_string()))
@@ -509,16 +522,24 @@ fn record_tx(
             });
         }
         HookKind::SessionEnd => {
-            if let Some(sid) = session {
+            // A harness's own SessionEnd names its session; a process exit
+            // (the PTY's, for a harness that posts none) names only the
+            // agent session, and ends the harness session it resumes.
+            let exited = session.is_none();
+            if !exited || slot.is_some() {
                 // A session that ends mid-turn (an exit with no Stop)
-                // leaves no one to close its turn (tsk449).
-                // Its transcript, so the turn's tokens are its own (tsk924).
+                // leaves no one to close its turn.
+                // Its transcript, so the turn's tokens are its own.
                 let end = TurnEnd {
                     answer: Some("session ended"),
                     transcript_path,
                     ..TurnEnd::new(now, TurnOutcome::Interrupted)
                 };
-                for id in open_session_turn_ids_tx(conn, thread, sid)? {
+                let open = match session {
+                    Some(sid) => open_harness_turn_ids_tx(conn, thread, sid)?,
+                    None => open_turn_ids_in_tx(conn, thread, slot)?,
+                };
+                for id in open {
                     if close_turn_tx(conn, ev, id, &end)?.is_some() && applied.closed_turn.is_none()
                     {
                         applied.closed_turn = Some(id);
@@ -527,15 +548,22 @@ fn record_tx(
                 if applied.closed_turn.is_some() {
                     status = Some((AgentStatusState::Stopped, Some("session ended".into())));
                 }
-                applied.turn = open_turn_ids_tx(conn, thread)?.first().copied();
-                end_session_tx(conn, ev, thread, &row, sid, &body, now)?;
+                applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
+                let ended =
+                    session.or(Some(row.resume_session_id.as_str()).filter(|s| !s.is_empty()));
+                if let Some(sid) = ended {
+                    // The harness said so itself before its process went.
+                    if !(exited && already_ended_tx(conn, slot)?) {
+                        end_session_tx(conn, ev, thread, &row, sid, &body, now)?;
+                    }
+                }
             }
         }
         HookKind::SessionStart => {} // handled above
     }
     if let Some((state, detail)) = &status {
         if changed(
-            last_status_tx(conn, ev.vocabulary, thread)?.as_ref(),
+            last_status_tx(conn, ev.vocabulary, thread, slot)?.as_ref(),
             *state,
             detail.as_deref(),
         ) {
@@ -543,6 +571,7 @@ fn record_tx(
                 conn,
                 ev,
                 thread,
+                slot,
                 applied.closed_turn,
                 *state,
                 detail.clone(),
@@ -588,17 +617,18 @@ fn starts_session(kind: HookKind, body: &serde_json::Value) -> bool {
     kind == HookKind::SessionStart && body.get("source").and_then(|s| s.as_str()) != Some("compact")
 }
 
-/// Close every open turn on the thread; returns the newest one closed,
-/// which owns the turn-end snapshot.
+/// Close every open turn of agent session `session` on the thread; returns
+/// the newest one closed, which owns the turn-end snapshot.
 fn close_open_turns_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
+    session: Option<oxplow_domain::AgentSessionId>,
     end: &TurnEnd<'_>,
 ) -> Result<Option<AgentTurnId>, DomainError> {
     let mut newest = None;
     // Newest first.
-    for id in open_turn_ids_tx(conn, thread)? {
+    for id in open_turn_ids_in_tx(conn, thread, session)? {
         if close_turn_tx(conn, ev, id, end)?.is_some() && newest.is_none() {
             newest = Some(id);
         }
@@ -621,14 +651,14 @@ fn track_session_tx(
     now: Timestamp,
 ) -> Result<(), DomainError> {
     let env = ev
-        .typed::<AgentSessionStarted>(&AgentSessionStartedV1 {
+        .typed::<AgentSessionStarted>(&AgentSessionStartedV2 {
             session: session.to_string(),
             thread: thread_ref(thread),
-            harness: row.agent.into(),
+            harness: row.harness.clone().unwrap_or_default(),
             resumed: row.resume_session_id == session,
         })
-        .with_anchors(activity_anchors_tx(conn, thread)?)
-        .with_subject([thread_ref(thread)]);
+        .with_anchors(activity_anchors_tx(conn, thread, row.session)?)
+        .with_subject(session_subject(thread, row.session));
     let first = env
         .clone()
         .with_dedupe_key(format!("session:{session}:started"));
@@ -639,6 +669,35 @@ fn track_session_tx(
         oxplow_db::agent_session_store::set_resume_tx(conn, id, session, now)?;
     }
     Ok(())
+}
+
+/// What an `agent.session.*` event is about: its thread, and its agent
+/// session when one claims it.
+fn session_subject(thread: ThreadId, slot: Option<oxplow_domain::AgentSessionId>) -> Vec<String> {
+    std::iter::once(thread_ref(thread))
+        .chain(slot.map(oxplow_domain::refs::build::agent_session_ref))
+        .collect()
+}
+
+/// Whether agent session `slot`'s last session event is an
+/// `agent.session.ended`: its harness ended it before the process exited.
+fn already_ended_tx(
+    conn: &rusqlite::Connection,
+    slot: Option<oxplow_domain::AgentSessionId>,
+) -> Result<bool, DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let last: Option<String> = conn
+        .query_row(
+            "SELECT type FROM event_log
+              WHERE agent_session_id = ?1
+                AND type IN ('agent.session.started', 'agent.session.ended')
+              ORDER BY seq DESC LIMIT 1",
+            [slot.map(|s| s.value())],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(oxplow_db::map_sql_err)?;
+    Ok(last.as_deref() == Some("agent.session.ended"))
 }
 
 /// `SessionEnd`: log it, and drop the resume id only when an explicit
@@ -662,8 +721,8 @@ fn end_session_tx(
             thread: thread_ref(thread),
             reason: reason.map(str::to_string),
         })
-        .with_anchors(activity_anchors_tx(conn, thread)?)
-        .with_subject([thread_ref(thread)]);
+        .with_anchors(activity_anchors_tx(conn, thread, row.session)?)
+        .with_subject(session_subject(thread, row.session));
     ev.append(conn, &env)?;
     if let Some(id) = row.session.filter(|_| reason == Some("clear")) {
         oxplow_db::agent_session_store::forget_resume_tx(conn, id, session, now)?;
@@ -677,12 +736,12 @@ fn log_tool_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
-    worktree: &Path,
+    row: &ThreadRow,
     env: &HookEnvelope,
     body: &serde_json::Value,
     session: Option<&str>,
 ) -> Result<(), DomainError> {
-    let Some(parts) = crate::tool_calls::parse_tool_call(&env.payload_json, worktree) else {
+    let Some(parts) = crate::tool_calls::parse_tool_call(&env.payload_json, &row.worktree) else {
         return Ok(()); // no tool name: nothing to record
     };
     let content = |key: &str| -> Result<Option<ContentRef>, DomainError> {
@@ -694,7 +753,7 @@ fn log_tool_tx(
     let tool_use = body.get("tool_use_id").and_then(|t| t.as_str());
     let dedupe =
         |phase: &str| tool_use.map(|id| format!("{}:{id}:{phase}", session.unwrap_or("-")));
-    let anchors = activity_anchors_tx(conn, thread)?;
+    let anchors = activity_anchors_tx(conn, thread, row.session)?;
     let subject = anchors
         .turn_id
         .map(|t| turn_ref(AgentTurnId::new(t)))
@@ -797,7 +856,7 @@ mod tests {
         db.transaction(move |tx| {
             oxplow_db::agent_session_store::insert_tx(
                 tx,
-                &oxplow_domain::agent_session::NewAgentSession::of(t.id, AgentKind::Claude, None),
+                &oxplow_domain::agent_session::NewAgentSession::terminal(t.id, "claude"),
                 now,
             )
         })
@@ -826,20 +885,26 @@ mod tests {
     async fn set_status_logs_once_and_refreshes_the_activity_log() {
         let (svc, tid) = fixture().await;
         for _ in 0..2 {
-            svc.set_status(&tid, AgentStatusState::AwaitingUser, Some("A?".into()))
-                .await
-                .unwrap();
+            svc.set_status(
+                &tid,
+                Some(first_session()),
+                AgentStatusState::AwaitingUser,
+                Some("A?".into()),
+            )
+            .await
+            .unwrap();
         }
         // The second call changed nothing: logged once.
         let events = logged(&svc).await;
         assert_eq!(of_type(&events, "agent.status.changed").len(), 1);
     }
 
-    /// The thread's status as a freshly started daemon would read it.
+    /// The fixture session's status as a freshly started daemon would
+    /// read it.
     async fn status(svc: &HookIngestService, tid: ThreadId) -> Option<AgentStatus> {
         use oxplow_domain::stores::AgentStatusStore as _;
         oxplow_db::SqliteAgentStatusStore::new(svc.db.clone(), svc.vocabulary.clone())
-            .get(&tid)
+            .get(&tid, Some(first_session()))
             .await
             .unwrap()
     }
@@ -876,6 +941,7 @@ mod tests {
             kind,
             thread_id: Some(tid),
             stream_id: None,
+            agent_session_id: None,
             session_id: session.map(str::to_string),
             payload_json: body.to_string(),
             prompt: body
@@ -884,6 +950,263 @@ mod tests {
                 .map(str::to_string),
             decision: None,
         }
+    }
+
+    /// The session the fixture opens with its thread.
+    fn first_session() -> oxplow_domain::AgentSessionId {
+        oxplow_domain::AgentSessionId::new(1)
+    }
+
+    /// A hook from agent session `ses` (`X-Oxplow-Session`).
+    fn hook_in(
+        kind: HookKind,
+        tid: ThreadId,
+        ses: oxplow_domain::AgentSessionId,
+        session: Option<&str>,
+        body: serde_json::Value,
+    ) -> HookEnvelope {
+        HookEnvelope {
+            agent_session_id: Some(ses),
+            ..hook(kind, tid, session, body)
+        }
+    }
+
+    /// Open another session on `thread`, after the ones it has.
+    async fn open_session(
+        svc: &HookIngestService,
+        thread: ThreadId,
+    ) -> oxplow_domain::AgentSessionId {
+        svc.db
+            .transaction(move |tx| {
+                oxplow_db::agent_session_store::insert_tx(
+                    tx,
+                    &oxplow_domain::agent_session::NewAgentSession::terminal(thread, "claude"),
+                    Timestamp::now(),
+                )
+            })
+            .await
+            .unwrap()
+            .id
+    }
+
+    /// The agent session each `agent.prompt.submitted` was anchored to.
+    async fn prompt_sessions(
+        svc: &HookIngestService,
+    ) -> Vec<Option<oxplow_domain::AgentSessionId>> {
+        of_type(&logged(svc).await, "agent.prompt.submitted")
+            .iter()
+            .map(|e| e.envelope.anchors.agent_session_id)
+            .collect()
+    }
+
+    /// The open turns and the session each runs in.
+    async fn open_turns(
+        svc: &HookIngestService,
+        tid: ThreadId,
+    ) -> Vec<Option<oxplow_domain::AgentSessionId>> {
+        let mut open: Vec<_> = turns(svc)
+            .list_open(&tid)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| t.agent_session_id)
+            .collect();
+        open.sort_by_key(|s| s.map(|s| s.value()));
+        open
+    }
+
+    /// Two sessions in one thread run their own turns: a Stop in one
+    /// closes only its turn.
+    #[tokio::test]
+    async fn a_stop_closes_only_its_own_sessions_turn() {
+        let (svc, tid) = fixture().await;
+        let (a, b) = (first_session(), open_session(&svc, tid).await);
+        for (ses, sid) in [(a, "ha"), (b, "hb")] {
+            svc.ingest(hook_in(
+                HookKind::UserPromptSubmit,
+                tid,
+                ses,
+                Some(sid),
+                json!({"prompt": "go"}),
+            ))
+            .await
+            .unwrap();
+        }
+        assert_eq!(open_turns(&svc, tid).await, vec![Some(a), Some(b)]);
+        svc.ingest(hook_in(HookKind::Stop, tid, a, Some("ha"), json!({})))
+            .await
+            .unwrap();
+        assert_eq!(open_turns(&svc, tid).await, vec![Some(b)]);
+    }
+
+    /// A process starting in one session interrupts that session's turn,
+    /// not the other's.
+    #[tokio::test]
+    async fn a_session_start_leaves_another_sessions_turn_open() {
+        let (svc, tid) = fixture().await;
+        let (a, b) = (first_session(), open_session(&svc, tid).await);
+        for (ses, sid) in [(a, "ha"), (b, "hb")] {
+            svc.ingest(hook_in(
+                HookKind::UserPromptSubmit,
+                tid,
+                ses,
+                Some(sid),
+                json!({"prompt": "go"}),
+            ))
+            .await
+            .unwrap();
+        }
+        svc.ingest(hook_in(
+            HookKind::SessionStart,
+            tid,
+            a,
+            Some("ha2"),
+            json!({"source": "startup"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(open_turns(&svc, tid).await, vec![Some(b)]);
+    }
+
+    /// Which session a hook came from: the header names it; else the
+    /// harness's session id finds the session it resumes; else the thread's
+    /// newest open session. A header naming another thread's session is
+    /// ignored.
+    #[tokio::test]
+    async fn the_header_beats_the_harness_id_which_beats_the_newest_session() {
+        let (svc, tid) = fixture().await;
+        let (a, b) = (first_session(), open_session(&svc, tid).await);
+        let prompt = |sid: Option<&str>| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                sid,
+                json!({"prompt": "go"}),
+            )
+        };
+        // A's first hook makes "ha" its resume id.
+        svc.ingest(HookEnvelope {
+            agent_session_id: Some(a),
+            ..prompt(Some("ha"))
+        })
+        .await
+        .unwrap();
+        // No header: "ha" is A's, though B is newer.
+        svc.ingest(prompt(Some("ha"))).await.unwrap();
+        // The header wins over the harness id (and B now resumes "ha").
+        svc.ingest(HookEnvelope {
+            agent_session_id: Some(b),
+            ..prompt(Some("ha"))
+        })
+        .await
+        .unwrap();
+        // Neither: the newest open session.
+        svc.ingest(prompt(None)).await.unwrap();
+        // Another thread's session in the header: ignored, so the newest
+        // open session again.
+        let other = svc
+            .db
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                       VALUES (2, 1, 'y', 'queued', 't', 't')",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .map(|_| ThreadId::new(2))
+            .unwrap();
+        let foreign = open_session(&svc, other).await;
+        svc.ingest(HookEnvelope {
+            agent_session_id: Some(foreign),
+            ..prompt(None)
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            prompt_sessions(&svc).await,
+            vec![Some(a), Some(a), Some(b), Some(b), Some(b)]
+        );
+    }
+
+    /// A process exit (the PTY's SessionEnd, naming only the agent
+    /// session) closes that session's turn and ends the harness session it
+    /// resumes — once: not again when the harness already ended it.
+    #[tokio::test]
+    async fn a_process_exit_ends_its_session_once() {
+        let (svc, tid) = fixture().await;
+        let a = first_session();
+        let exit = || HookEnvelope {
+            agent_session_id: Some(a),
+            ..hook(HookKind::SessionEnd, tid, None, json!({"reason": "exit"}))
+        };
+        svc.ingest(hook_in(
+            HookKind::UserPromptSubmit,
+            tid,
+            a,
+            Some("h1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(exit()).await.unwrap();
+        assert!(open_turns(&svc, tid).await.is_empty());
+        let events = logged(&svc).await;
+        let ended = of_type(&events, "agent.session.ended");
+        assert_eq!(ended.len(), 1);
+        assert_eq!(ended[0].envelope.payload["session"], "h1");
+        assert_eq!(ended[0].envelope.payload["reason"], "exit");
+        assert_eq!(ended[0].envelope.anchors.agent_session_id, Some(a));
+        assert!(ended[0]
+            .envelope
+            .subject
+            .contains(&oxplow_domain::refs::build::agent_session_ref(a)));
+
+        // The harness ends it itself, then its process exits: one more.
+        svc.ingest(hook_in(
+            HookKind::SessionStart,
+            tid,
+            a,
+            Some("h1"),
+            json!({"source": "resume"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook_in(
+            HookKind::SessionEnd,
+            tid,
+            a,
+            Some("h1"),
+            json!({"reason": "other"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(exit()).await.unwrap();
+        assert_eq!(of_type(&logged(&svc).await, "agent.session.ended").len(), 2);
+    }
+
+    /// A hook on a thread with no session (an agent oxplow didn't start)
+    /// records with the thread's anchors and no session.
+    #[tokio::test]
+    async fn a_hook_with_no_session_records_none() {
+        let (svc, tid) = fixture().await;
+        svc.db
+            .transaction(|tx| {
+                tx.execute_batch("DELETE FROM agent_session")
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("x"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(prompt_sessions(&svc).await, vec![None]);
+        assert_eq!(open_turns(&svc, tid).await, vec![None]);
     }
 
     async fn open_effort(svc: &HookIngestService) -> i64 {
@@ -901,11 +1224,11 @@ mod tests {
             .unwrap()
     }
 
-    /// P3.3 (tsk473): a finished tool call is an `agent.tool.finished`
-    /// anchored to stream, thread, turn and effort, with its input and
+    /// P3.3: a finished tool call is an `agent.tool.finished` anchored to
+    /// stream, thread, agent session, turn and effort, with its input and
     /// output stored by hash and its path made worktree-relative.
     #[tokio::test]
-    async fn a_finished_tool_is_logged_with_four_anchors_and_its_content() {
+    async fn a_finished_tool_is_logged_with_five_anchors_and_its_content() {
         let (svc, tid) = fixture().await;
         let effort = open_effort(&svc).await;
         svc.ingest(hook(
@@ -938,6 +1261,7 @@ mod tests {
         assert_eq!(e.anchors.thread_id, Some(tid));
         assert_eq!(e.anchors.turn_id, Some(turn));
         assert_eq!(e.anchors.effort_id.map(|e| e.value()), Some(effort));
+        assert_eq!(e.anchors.agent_session_id, Some(first_session()));
         assert_eq!(e.payload["tool"], "Edit");
         assert_eq!(e.payload["path"], "src/a.rs");
         assert_eq!(e.payload["ok"], true);
@@ -1270,6 +1594,7 @@ mod tests {
             kind,
             thread_id: Some(tid),
             stream_id: None,
+            agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
             prompt: prompt.map(str::to_string),
@@ -1294,6 +1619,7 @@ mod tests {
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
+            agent_session_id: None,
             session_id: Some("sess".into()),
             payload_json: "{}".into(),
             prompt: Some("do the thing".into()),
@@ -1315,6 +1641,7 @@ mod tests {
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
+            agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("do".into()),
@@ -1325,6 +1652,7 @@ mod tests {
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
+            agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
@@ -1343,6 +1671,7 @@ mod tests {
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
+            agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("p".into()),
@@ -1354,6 +1683,7 @@ mod tests {
             kind: HookKind::Interrupt,
             thread_id: Some(tid),
             stream_id: None,
+            agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
@@ -1376,6 +1706,7 @@ mod tests {
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
+            agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
@@ -1395,6 +1726,7 @@ mod tests {
             kind: HookKind::UserPromptSubmit,
             thread_id: None,
             stream_id: None,
+            agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("orphan".into()),
@@ -1416,6 +1748,7 @@ mod tests {
                 kind: HookKind::UserPromptSubmit,
                 thread_id: Some(tid),
                 stream_id: None,
+                agent_session_id: None,
                 session_id: None,
                 payload_json: "{}".into(),
                 prompt: Some(prompt.into()),
@@ -1429,12 +1762,13 @@ mod tests {
         assert_eq!(open[0].prompt, "first");
     }
 
-    /// The derived status the rail would show for the thread now.
+    /// The derived status the rail would show for the fixture session now.
     async fn derived(svc: &HookIngestService, tid: ThreadId) -> AgentStatusState {
-        let recent = crate::agent_status_derive::recent_activity(&svc.log, tid)
-            .await
-            .unwrap();
-        crate::agent_status_derive::derive_thread_status(&recent, Timestamp::now())
+        let recent =
+            crate::agent_status_derive::recent_activity(&svc.log, tid, Some(first_session()))
+                .await
+                .unwrap();
+        crate::agent_status_derive::derive_session_status(&recent, Timestamp::now())
     }
 
     #[tokio::test]

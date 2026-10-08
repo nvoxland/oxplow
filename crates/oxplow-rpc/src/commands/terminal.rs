@@ -4,196 +4,19 @@
 //! (`plugin_runtime`); both the Tauri shell and the daemon populate
 //! them from their own control plane.
 
-use oxplow_app::agent_command::{build_agent_command_for_session, AgentCommandOptions};
 use oxplow_app::agent_prompt::assemble_system_prompt;
 use oxplow_app::config_service::read_config;
-use oxplow_app::terminal_sessions::{AttachResult, SpawnRequest};
+use oxplow_app::terminal_sessions::{agent_pane_key, AttachResult, SpawnRequest};
 use oxplow_app::Services;
-use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::AgentKind;
+use oxplow_domain::agent::harness::{
+    AgentHarness, Endpoints, Launch, LaunchInput, LaunchSpec, SessionIds,
+};
+use oxplow_domain::agent_session::{AgentSession, SessionKind};
+use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
+use oxplow_domain::{AgentSessionId, Stream, StreamId, Thread, ThreadId};
 
 use crate::error::IpcError;
 use crate::RpcContext;
-
-/// The MCP endpoint with the calling thread's identity in the query
-/// string, for a harness whose MCP config has no per-session headers
-/// (Codex). The control plane reads `?thread=…&stream=…` like the
-/// `X-Oxplow-*` headers.
-fn mcp_url_with_identity(
-    mcp_endpoint_url: &str,
-    thread_id: Option<&str>,
-    stream_id: &str,
-) -> String {
-    let sep = if mcp_endpoint_url.contains('?') {
-        '&'
-    } else {
-        '?'
-    };
-    match thread_id {
-        Some(t) => format!("{mcp_endpoint_url}{sep}thread={t}&stream={stream_id}"),
-        None => format!("{mcp_endpoint_url}{sep}stream={stream_id}"),
-    }
-}
-
-fn codex_config_overrides(
-    paths: &oxplow_plugin::CodexRuntimePaths,
-    mcp_endpoint_url: &str,
-    thread_id: Option<&str>,
-    stream_id: &str,
-) -> Vec<String> {
-    let mut out = vec![
-        format!(
-            "mcp_servers.oxplow.url={}",
-            toml_cli_string(&mcp_url_with_identity(
-                mcp_endpoint_url,
-                thread_id,
-                stream_id
-            ))
-        ),
-        "mcp_servers.oxplow.bearer_token_env_var=\"OXPLOW_HOOK_TOKEN\"".into(),
-    ];
-    for event in [
-        "PreToolUse",
-        "PermissionRequest",
-        "PostToolUse",
-        "UserPromptSubmit",
-        "SessionStart",
-        "Stop",
-    ] {
-        let command = codex_hook_command(&paths.oxplow_executable, event);
-        let group = if matches!(event, "PreToolUse" | "PermissionRequest" | "PostToolUse") {
-            format!(
-                "hooks.{event}=[{{matcher=\"*\",hooks=[{{type=\"command\",command={},timeout=30,statusMessage=\"Syncing oxplow runtime\"}}]}}]",
-                toml_cli_string(&command)
-            )
-        } else {
-            format!(
-                "hooks.{event}=[{{hooks=[{{type=\"command\",command={},timeout=30,statusMessage=\"Syncing oxplow runtime\"}}]}}]",
-                toml_cli_string(&command)
-            )
-        };
-        out.push(group);
-    }
-    out
-}
-
-/// OTEL env that points Claude Code's OTLP metrics exporter at oxplow's
-/// control-plane receiver (epic tsk22). Only metrics are exported (no logs/
-/// traces). The owning thread/stream ride custom OTLP headers so the receiver
-/// attributes token facts without a session→thread lookup — one agent process
-/// per thread, so the headers are constant for its lifetime. Temporality is
-/// left at the SDK default (delta): each export is the per-interval increment,
-/// which maps straight onto the additive `oxplow.tokens` facts.
-fn claude_otel_env(
-    plugin_runtime: &crate::PluginRuntime,
-    thread_id: &str,
-) -> Vec<(String, String)> {
-    vec![
-        ("CLAUDE_CODE_ENABLE_TELEMETRY".to_string(), "1".to_string()),
-        ("OTEL_METRICS_EXPORTER".to_string(), "otlp".to_string()),
-        (
-            "OTEL_EXPORTER_OTLP_PROTOCOL".to_string(),
-            "http/protobuf".to_string(),
-        ),
-        (
-            // Base URL; the SDK appends the `/v1/metrics` signal path.
-            "OTEL_EXPORTER_OTLP_ENDPOINT".to_string(),
-            plugin_runtime.otlp_base_url.clone(),
-        ),
-        (
-            "OTEL_EXPORTER_OTLP_HEADERS".to_string(),
-            format!(
-                "Authorization=Bearer {},X-Oxplow-Thread={}",
-                plugin_runtime.hook_token, thread_id
-            ),
-        ),
-        // 10s (default is 60s) — snappier token updates in the UI.
-        (
-            "OTEL_METRIC_EXPORT_INTERVAL".to_string(),
-            "10000".to_string(),
-        ),
-    ]
-}
-
-/// Codex OTEL config (`--config otel.*`) pointing its OTLP metrics exporter at
-/// oxplow's receiver (tsk24). Codex has NO OTEL env vars — config only. The
-/// http exporter is protobuf ("binary"); the endpoint is the FULL signal URL
-/// (`<base>/v1/metrics` — Codex uses it as-is, unlike Claude which appends the
-/// signal path). Attribution + auth ride the `X-Oxplow-Thread` + bearer headers
-/// the receiver reads (the thread names its stream). The tagged-union `otel.exporter.otlp-http.*` keys select
-/// the http exporter (default is `none`).
-fn codex_otel_overrides(otlp_base_url: &str, hook_token: &str, thread_id: &str) -> Vec<String> {
-    let endpoint = format!("{otlp_base_url}/v1/metrics");
-    vec![
-        format!(
-            "otel.exporter.otlp-http.endpoint={}",
-            toml_cli_string(&endpoint)
-        ),
-        "otel.exporter.otlp-http.protocol=\"binary\"".to_string(),
-        format!(
-            "otel.exporter.otlp-http.headers.authorization={}",
-            toml_cli_string(&format!("Bearer {hook_token}"))
-        ),
-        format!(
-            "otel.exporter.otlp-http.headers.x-oxplow-thread={}",
-            toml_cli_string(thread_id)
-        ),
-    ]
-}
-
-fn codex_hook_command(oxplow_executable: &std::path::Path, event: &str) -> String {
-    format!(
-        "{} hook {}",
-        shell_command_arg(&oxplow_executable.to_string_lossy()),
-        shell_command_arg(event)
-    )
-}
-
-fn shell_command_arg(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
-}
-
-/// Inline opencode config carried per-spawn in the
-/// `OPENCODE_CONFIG_CONTENT` env var (opencode merges it on top of the
-/// user's global/project config). Wires the oxplow MCP server (bearer
-/// token interpolated from env by opencode itself), the hook-bridge
-/// plugin, the per-thread system-prompt file as an instruction, and
-/// the oxplow slash commands (inline `command` defs — opencode's
-/// markdown-command dirs are fixed locations, but config commands ride
-/// this env var with no disk footprint). Skills can't ride the config
-/// (no key exists) — `write_opencode_runtime` materializes them into
-/// `.opencode/skills/` instead.
-fn opencode_config_content(
-    mcp_endpoint_url: &str,
-    hooks_plugin: &std::path::Path,
-    instructions: &[String],
-    text: &oxplow_plugin::AgentText,
-) -> String {
-    serde_json::json!({
-        "mcp": {
-            "oxplow": {
-                "type": "remote",
-                "url": mcp_endpoint_url,
-                "enabled": true,
-                // opencode substitutes `{env:…}` in headers, so the
-                // per-spawn identity env vars ride along with the token.
-                "headers": {
-                    "Authorization": "Bearer {env:OXPLOW_HOOK_TOKEN}",
-                    "X-Oxplow-Thread": "{env:OXPLOW_THREAD_ID}",
-                    "X-Oxplow-Stream": "{env:OXPLOW_STREAM_ID}",
-                },
-            },
-        },
-        "plugin": [hooks_plugin.to_string_lossy()],
-        "instructions": instructions,
-        "command": oxplow_plugin::opencode_command_definitions(text),
-    })
-    .to_string()
-}
-
-fn toml_cli_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
 
 /// Build the PTY session key for a shell terminal, or `None` for a
 /// non-shell `pane_target`.
@@ -210,23 +33,47 @@ fn shell_session_key(stream_id: &str, pane_target: &str) -> Option<String> {
     }
 }
 
-/// Build the dedup key for an *agent* PTY session: (stream, thread,
-/// agent, pane), so a re-attach — another window, a browser client —
-/// resumes the one live agent PTY rather than spawning a duplicate agent
-/// in the same worktree (tsk138).
-fn agent_session_key(
-    stream_id: &str,
-    thread_id: Option<&str>,
-    agent: AgentKind,
-    pane_target: &str,
-) -> String {
-    format!(
-        "{}|{}|{}|{}",
-        stream_id,
-        thread_id.unwrap_or_default(),
-        agent.as_str(),
-        pane_target,
-    )
+/// Whether `session` runs in a terminal oxplow may start: it is open, and
+/// a terminal one (an ACP chat speaks the protocol on its stdio).
+fn has_a_terminal(session: &AgentSession) -> Result<(), IpcError> {
+    if !session.is_open() {
+        return Err(IpcError::invalid(format!(
+            "agent session {} is closed",
+            session.id
+        )));
+    }
+    if session.kind != SessionKind::Terminal {
+        return Err(IpcError::invalid(format!(
+            "agent session {} is a {}, which has no terminal",
+            session.id,
+            session.kind.as_str()
+        )));
+    }
+    Ok(())
+}
+
+/// What every process oxplow starts for agent session `session` is told
+/// about itself: the hook endpoint and token, and its stream, thread and
+/// session, which its hooks and exports send back (`X-Oxplow-*`).
+fn identity_env(
+    plugin_runtime: &crate::PluginRuntime,
+    stream: StreamId,
+    thread: ThreadId,
+    session: AgentSessionId,
+) -> Vec<(String, String)> {
+    vec![
+        (
+            "OXPLOW_HOOK_TOKEN".to_string(),
+            plugin_runtime.hook_token.clone(),
+        ),
+        (
+            "OXPLOW_HOOK_BASE_URL".to_string(),
+            plugin_runtime.hook_base_url.clone(),
+        ),
+        ("OXPLOW_STREAM_ID".to_string(), stream.to_string()),
+        ("OXPLOW_THREAD_ID".to_string(), thread.to_string()),
+        ("OXPLOW_SESSION".to_string(), session.to_string()),
+    ]
 }
 
 /// Open a renderer-attached terminal session: the agent CLI, or a shell,
@@ -263,7 +110,7 @@ pub async fn open_terminal_session(
                 args: vec!["-l".into()],
                 cwd,
                 env: oxplow_app::agent_path::base_pty_env(),
-                env_remove: oxplow_app::agent_path::not_inherited(),
+                env_remove: oxplow_app::agent_path::not_inherited(&ctx.harnesses),
                 cols: c,
                 rows: r,
             })
@@ -271,262 +118,151 @@ pub async fn open_terminal_session(
         return Ok(result);
     }
 
-    if !matches!(pane_target.as_str(), "working" | "talking") {
+    // Anything else is an agent session's pane: its id (`ses3`). The
+    // session names its thread, the thread its stream — what the person
+    // has selected doesn't matter.
+    let Some(session_id) = AgentSessionId::try_from_str(&pane_target) else {
         return Err(IpcError::invalid(format!(
             "unknown pane target: {pane_target}"
         )));
-    }
-
-    // Agent spawn needs the control-plane coordinates; a host that
-    // didn't supply them can't wire hooks/MCP, so refuse cleanly.
-    let plugin_runtime = ctx.plugin_runtime.as_ref().ok_or_else(|| {
-        IpcError::invalid("agent spawn unavailable: host supplied no plugin runtime")
-    })?;
-
-    // Resolve the stream the user is currently driving. Falls back to
-    // the primary so a brand-new project that hasn't called
-    // switch_stream still gets a working pane.
-    let stream = match ctx.streams.current().await? {
-        Some(s) => s,
-        None => ctx.streams.ensure_primary().await?,
     };
 
-    // Pull the selected thread so the system prompt the agent sees
-    // matches what the renderer is showing. Fall back to the stream's
-    // active writer thread when no explicit selection has been made,
-    // so the agent always knows its thread id (it shows up in the
-    // `<session-context>` block + OXPLOW_THREAD_ID env).
-    let thread_id = ctx.threads.selected_or_active(&stream.id).await?;
-    let thread = match thread_id {
-        Some(id) => ctx.thread_store.get(&id).await?,
-        None => None,
-    };
-
-    // The thread's agent session: what runs here and what it resumes.
-    let session = match thread_id {
-        Some(id) => ctx.agent_session_store.newest_for_thread(id).await?,
-        None => None,
-    };
+    let session = ctx
+        .agent_session_store
+        .get(&session_id)
+        .await?
+        .ok_or_else(|| IpcError::invalid(format!("no agent session {session_id}")))?;
+    has_a_terminal(&session)?;
+    let thread = ctx
+        .thread_store
+        .get(&session.thread_id)
+        .await?
+        .ok_or_else(IpcError::not_found)?;
+    let stream = ctx
+        .stream_store
+        .get(&thread.stream_id)
+        .await?
+        .ok_or_else(IpcError::not_found)?;
+    let harness = ctx
+        .harnesses
+        .get(session.harness.as_str())
+        .map_err(|e| IpcError::invalid(e.to_string()))?;
     let config = read_config(&ctx.config);
-    let agent = session
-        .as_ref()
-        .map(|s| s.harness)
-        .unwrap_or_else(|| config.agents.first().copied().unwrap_or(AgentKind::Claude));
-    // An ACP agent speaks the protocol on its stdio: it has no terminal
-    // (the thread's agent tab shows the ACP view instead).
-    if !agent.is_terminal() {
-        return Err(IpcError::invalid(
-            "this thread runs an ACP agent, which has no terminal",
-        ));
-    }
-    let cols = cols.max(20);
-    let rows = rows.max(5);
-
-    // Identity used to deduplicate sessions so re-attaches resume the
-    // same PTY instead of spawning a new one. Includes the thread id
-    // when known so per-thread state is isolated; a re-attach from
-    // another window resumes the one live agent (tsk138).
-    let thread_id_str = thread_id.as_ref().map(|t| t.to_string());
-    let session_key = agent_session_key(
-        &stream.id.to_string(),
-        thread_id_str.as_deref(),
-        agent,
-        &pane_target,
-    );
-
-    // Materialize the agent-specific runtime on every spawn. Claude
-    // uses its plugin directory and MCP JSON; Codex uses command-hook
-    // and MCP config overrides. Per-spawn identity rides env vars below.
-    // Its skills and commands are what's offered now
-    // (`capabilities::agent_text`).
-    let agent_text = oxplow_app::capabilities::agent_text(ctx);
-    let agent_runtime = oxplow_plugin::write_agent_runtime(
-        agent,
+    let prompt = assemble_system_prompt(
         &ctx.layout.project_dir,
-        &plugin_runtime.hook_base_url,
-        &plugin_runtime.mcp_endpoint_url,
-        &plugin_runtime.hook_token,
-        &agent_text,
+        harness.instruction_files(),
+        &config,
+        &stream,
+        Some(&thread),
+    );
+    let harness_config = config
+        .agent_config
+        .get(&session.harness)
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let launch = launch_session(
+        ctx,
+        harness.as_ref(),
+        &session,
+        &thread,
+        &stream,
+        Some(&prompt),
+        &harness_config,
     )
-    .map_err(|e| IpcError::internal(format!("plugin write failed: {e}")))?;
-
-    let mut plugin_env = vec![
-        (
-            "OXPLOW_HOOK_TOKEN".to_string(),
-            plugin_runtime.hook_token.clone(),
-        ),
-        (
-            "OXPLOW_HOOK_BASE_URL".to_string(),
-            plugin_runtime.hook_base_url.clone(),
-        ),
-        ("OXPLOW_STREAM_ID".to_string(), stream.id.to_string()),
-        (
-            "OXPLOW_THREAD_ID".to_string(),
-            thread_id
-                .as_ref()
-                .map(|t| t.to_string())
-                .unwrap_or_default(),
-        ),
-        ("OXPLOW_PANE".to_string(), pane_target.clone()),
-    ];
-    // Claude Code exports token-usage metrics via OTEL to the control-plane
-    // OTLP receiver (epic tsk22); the owning thread/stream ride custom OTLP
-    // headers so the receiver attributes the facts without a session→thread
-    // lookup. Codex is wired via `--config` (phase 2, tsk24); opencode is not
-    // auto-instrumented (a user's own OTEL plugin still reaches the receiver).
-    if agent == AgentKind::Claude {
-        plugin_env.extend(claude_otel_env(
-            plugin_runtime,
-            thread_id_str.as_deref().unwrap_or_default(),
-        ));
-    }
-
-    let prompt = assemble_system_prompt(&ctx.layout.project_dir, &config, &stream, thread.as_ref());
-    let mut opts = AgentCommandOptions {
-        env: plugin_env.clone(),
-        append_system_prompt: if prompt.is_empty() {
-            None
-        } else {
-            Some(prompt)
-        },
-        opencode_model: config.agent_models.get(&AgentKind::Opencode).cloned(),
-        // Spawn by absolute path: a GUI-launched oxplow has macOS's minimal
-        // PATH, and `sh -l` won't recover a zsh user's (tsk245).
-        program: oxplow_app::agent_path::resolve_agent_program(agent),
-        ..Default::default()
+    .await?;
+    let LaunchSpec::Pty { command } = launch.spec else {
+        return Err(IpcError::invalid(format!(
+            "agent session {session_id} runs no terminal"
+        )));
     };
-    match &agent_runtime {
-        oxplow_plugin::AgentRuntimePaths::Claude(paths) => {
-            opts.plugin_dir = Some(paths.plugin_dir.to_string_lossy().into_owned());
-            // Claude's MCP config can't read env vars, so the thread's
-            // identity is baked into a per-thread file (like the token).
-            let mcp_config = match thread_id_str.as_deref() {
-                Some(thread) => oxplow_plugin::write_claude_mcp_config(
-                    &paths.plugin_dir,
-                    &plugin_runtime.mcp_endpoint_url,
-                    &plugin_runtime.hook_token,
-                    oxplow_plugin::McpIdentity {
-                        thread_id: thread,
-                        stream_id: &stream.id.to_string(),
-                    },
-                )
-                .map_err(|e| IpcError::internal(format!("mcp config write failed: {e}")))?,
-                None => paths.mcp_config.clone(),
-            };
-            opts.mcp_config = Some(mcp_config.to_string_lossy().into_owned());
-        }
-        oxplow_plugin::AgentRuntimePaths::Codex(paths) => {
-            opts.codex_config_overrides = codex_config_overrides(
-                paths,
-                &plugin_runtime.mcp_endpoint_url,
-                thread_id_str.as_deref(),
-                &stream.id.to_string(),
-            );
-            // Codex exports token-usage metrics via OTEL to the same OTLP
-            // receiver as Claude (tsk24); Codex has NO OTEL env vars, so this
-            // rides `--config otel.*`. Attribution + auth via the same headers.
-            opts.codex_config_overrides.extend(codex_otel_overrides(
-                &plugin_runtime.otlp_base_url,
-                &plugin_runtime.hook_token,
-                thread_id_str.as_deref().unwrap_or_default(),
-            ));
-        }
-        oxplow_plugin::AgentRuntimePaths::Opencode(paths) => {
-            // opencode has no --append-system-prompt; the assembled
-            // prompt lands in a per-thread instructions file referenced
-            // from the inline config. Hooks + MCP ride the same config
-            // via OPENCODE_CONFIG_CONTENT (merged last by opencode).
-            let mut instructions = Vec::new();
-            if let Some(prompt_text) = opts.append_system_prompt.take() {
-                let file_name = format!(
-                    "{}.md",
-                    thread_id
-                        .as_ref()
-                        .map(|t| t.to_string())
-                        .unwrap_or_else(|| "default".into())
-                );
-                let prompt_path = paths.prompts_dir.join(file_name);
-                std::fs::write(&prompt_path, prompt_text)
-                    .map_err(|e| IpcError::internal(format!("prompt write failed: {e}")))?;
-                instructions.push(prompt_path.to_string_lossy().into_owned());
-            }
-            opts.env.push((
-                "OPENCODE_CONFIG_CONTENT".to_string(),
-                opencode_config_content(
-                    &plugin_runtime.mcp_endpoint_url,
-                    &paths.hooks_plugin,
-                    &instructions,
-                    &agent_text,
-                ),
-            ));
-        }
-    }
-
-    let result = {
-        // Resume from the agent session's resume_session_id (populated
-        // by the resume-tracker in the hook ingest), not the stream's
-        // working_session_id.
-        let mut resume_session_id = session
-            .as_ref()
-            .map(|s| s.resume_session_id.clone())
-            .unwrap_or_default();
-
-        // Proactively drop a stale Claude resume pointer. If the
-        // session transcript is gone, `claude --resume <id>` prints a
-        // raw "No conversation found" error before the shell `||` net
-        // falls back to fresh, and the dead id lingers in the DB until
-        // the next prompt self-heals it (Claude Code drops HTTP hooks
-        // for SessionStart, so nothing fires sooner). Clearing it here
-        // launches fresh with no `--resume` and no raw error. Claude-
-        // only: codex/opencode use different on-disk session schemes
-        // and keep the shell net. See `.context/agent-model.md`.
-        if matches!(agent, AgentKind::Claude) && !resume_session_id.is_empty() {
-            if let Ok(home) = std::env::var("HOME") {
-                let state = oxplow_app::resume_check::claude_resume_state(
-                    std::path::Path::new(&home),
-                    &stream.worktree_path,
-                    &resume_session_id,
-                );
-                if state == oxplow_app::resume_check::ResumeState::Missing {
-                    if let Some(s) = session.as_ref() {
-                        if let Err(err) = oxplow_app::resume_check::forget_missing(
-                            &ctx.db,
-                            s.id,
-                            &resume_session_id,
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                ?err,
-                                "resume-check: clearing stale resume pointer failed"
-                            );
-                        }
-                    }
-                    resume_session_id.clear();
-                }
-            }
-        }
-
-        let command = build_agent_command_for_session(
-            agent,
-            &stream.worktree_path,
-            &resume_session_id,
-            &opts,
-        );
-        let cwd = std::path::PathBuf::from(&stream.worktree_path);
-        ctx.terminal_sessions
-            .attach_or_create_for_thread(session_key, thread_id, cols, rows, |c, r| SpawnRequest {
+    let cwd = std::path::PathBuf::from(&stream.worktree_path);
+    let env_remove = oxplow_app::agent_path::not_inherited(&ctx.harnesses);
+    let result = ctx
+        .terminal_sessions
+        .attach_or_create_for_agent(
+            agent_pane_key(session_id),
+            Some(oxplow_app::terminal_sessions::AgentPane {
+                thread: thread.id,
+                session: Some(session.id),
+            }),
+            cols.max(20),
+            rows.max(5),
+            |c, r| SpawnRequest {
                 command: "sh".into(),
                 args: vec!["-lc".into(), command],
                 cwd,
                 env: oxplow_app::agent_path::base_pty_env(),
-                env_remove: oxplow_app::agent_path::not_inherited(),
+                env_remove,
                 cols: c,
                 rows: r,
-            })
-            .await?
-    };
+            },
+        )
+        .await?;
     Ok(result)
+}
+
+/// Launch agent session `session` (its thread and stream given) through
+/// its harness: identity, endpoints and what's offered now go in; how to
+/// start its process comes out. A resume id the harness found stale is
+/// forgotten here. Starting a session only spawns — nothing is typed.
+pub(crate) async fn launch_session(
+    ctx: &RpcContext,
+    harness: &dyn AgentHarness,
+    session: &AgentSession,
+    thread: &Thread,
+    stream: &Stream,
+    system_prompt: Option<&str>,
+    config: &serde_json::Value,
+) -> Result<Launch, IpcError> {
+    // Agent spawn needs the control-plane coordinates; a host that didn't
+    // supply them can't wire hooks/MCP, so refuse cleanly.
+    let rt = ctx.plugin_runtime.as_ref().ok_or_else(|| {
+        IpcError::invalid("agent spawn unavailable: host supplied no plugin runtime")
+    })?;
+    let endpoints = Endpoints {
+        hook_base_url: rt.hook_base_url.clone(),
+        mcp_endpoint_url: rt.mcp_endpoint_url.clone(),
+        otlp_base_url: rt.otlp_base_url.clone(),
+        hook_token: rt.hook_token.clone(),
+    };
+    let identity = identity_env(rt, stream.id, thread.id, session.id);
+    let text = oxplow_app::capabilities::agent_text(ctx);
+    let executable = std::env::current_exe()
+        .map_err(|e| IpcError::internal(format!("the oxplow binary: {e}")))?;
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let resolve = |bin: &str| oxplow_app::agent_path::resolve_program(bin);
+    let launch = harness
+        .launch(&LaunchInput {
+            session: SessionIds {
+                stream: stream.id,
+                thread: thread.id,
+                session: session.id,
+            },
+            workspace: std::path::Path::new(&stream.worktree_path),
+            project_dir: &ctx.layout.project_dir,
+            endpoints: &endpoints,
+            identity_env: &identity,
+            system_prompt,
+            resume: Some(session.resume_session_id.as_str()).filter(|r| !r.is_empty()),
+            text: &text,
+            config,
+            oxplow_executable: &executable,
+            home: home.as_deref(),
+            resolve_program: &resolve,
+        })
+        .map_err(|e| IpcError::internal(e.to_string()))?;
+    if launch.resume_dropped {
+        if let Err(err) = oxplow_app::resume_check::forget_missing(
+            &ctx.db,
+            session.id,
+            &session.resume_session_id,
+        )
+        .await
+        {
+            tracing::warn!(?err, "resume-check: clearing stale resume pointer failed");
+        }
+    }
+    Ok(launch)
 }
 
 /// Forward a terminal-input protocol message from the renderer to the
@@ -546,50 +282,23 @@ pub async fn forward_terminal_input(
     Ok(())
 }
 
-/// Read-only lookup of the live agent session id for `thread_id`'s
-/// pane, **without any spawn side effect**. Rebuilds the same
-/// `(stream, thread, agent, pane)` key `open_terminal_session` uses for
-/// an agent PTY, then reads the registry index — returning `None` when
-/// no live session exists (the thread was never opened, or its PTY was
-/// terminated; an unknown `thread_id` likewise reads as `None`).
+/// Read-only lookup of the live PTY of agent session `session_id`,
+/// **without any spawn side effect**: the registry index under the key
+/// `open_terminal_session` registers, `None` when no live PTY exists (never
+/// opened, or terminated; an unknown session likewise).
 ///
-/// This is the spawn-free path a second client / automation uses to
-/// resolve a thread's agent PTY before `forward_terminal_input`
-/// (delivering the human's keystrokes), instead of going through the
-/// spawn-capable `open_terminal_session` (tsk139). `pane` defaults to
-/// `"working"`; only the agent panes (`working` / `talking`) are valid.
+/// This is the spawn-free path a second client uses to resolve a
+/// session's agent PTY before `forward_terminal_input` (delivering the
+/// human's keystrokes), instead of the spawn-capable
+/// `open_terminal_session`.
 pub async fn lookup_terminal_session(
     svc: &Services,
-    thread_id: oxplow_domain::ThreadId,
-    pane: Option<String>,
+    session_id: AgentSessionId,
 ) -> Result<Option<String>, IpcError> {
-    let pane_target = pane.unwrap_or_else(|| "working".to_string());
-    // Agent panes only — shells aren't agent sessions and key
-    // differently.
-    match pane_target.as_str() {
-        "working" | "talking" => {}
-        other => return Err(IpcError::invalid(format!("unknown pane target: {other}"))),
-    }
-
-    // Resolve the thread's stream + agent so the rebuilt key matches the
-    // one the spawn path registered. A missing thread has no session.
-    let thread = match svc.thread_store.get(&thread_id).await? {
-        Some(t) => t,
-        None => return Ok(None),
-    };
-    let harness = svc
-        .agent_session_store
-        .newest_for_thread(thread_id)
-        .await?
-        .map(|s| s.harness)
-        .unwrap_or_default();
-    let key = agent_session_key(
-        &thread.stream_id.to_string(),
-        Some(&thread_id.to_string()),
-        harness,
-        &pane_target,
-    );
-    Ok(svc.terminal_sessions.session_id_for_key(&key).await)
+    Ok(svc
+        .terminal_sessions
+        .session_id_for_key(&agent_pane_key(session_id))
+        .await)
 }
 
 /// Detach the renderer from `session_id` without killing the PTY —
@@ -630,129 +339,117 @@ pub async fn terminate_terminal_session(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use std::path::Path;
 
-    use super::{
-        agent_session_key, claude_otel_env, codex_hook_command, codex_otel_overrides,
-        opencode_config_content, shell_session_key,
-    };
+    use super::{identity_env, shell_session_key};
+    use crate::error::IpcError;
     use crate::test_support::services;
-    use oxplow_domain::AgentKind;
 
     #[test]
-    fn claude_otel_env_points_exporter_at_receiver_with_attribution_headers() {
-        // tsk22: these exact env-var names/values are the contract with Claude
-        // Code's OTEL exporter — a typo silently breaks token capture, so pin
-        // them. The endpoint is the base (SDK appends /v1/metrics); the headers
-        // carry the bearer + attribution spine the receiver reads.
-        let pr = crate::PluginRuntime {
+    fn the_identity_env_names_the_session() {
+        let env: std::collections::HashMap<String, String> = identity_env(
+            &runtime(),
+            oxplow_domain::StreamId::new(1),
+            oxplow_domain::ThreadId::new(2),
+            oxplow_domain::AgentSessionId::new(3),
+        )
+        .into_iter()
+        .collect();
+        assert_eq!(env["OXPLOW_SESSION"], "ses3");
+        assert_eq!(env["OXPLOW_THREAD_ID"], "thr2");
+        assert_eq!(env["OXPLOW_STREAM_ID"], "str1");
+        assert_eq!(env["OXPLOW_HOOK_TOKEN"], "test-token");
+    }
+
+    fn runtime() -> crate::PluginRuntime {
+        crate::PluginRuntime {
             hook_base_url: "http://127.0.0.1:9/hook".into(),
             mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
             otlp_base_url: "http://127.0.0.1:9".into(),
-            hook_token: "tok123".into(),
+            hook_token: "test-token".into(),
+        }
+    }
+
+    /// An agent session opened, as a person does, on the primary stream's
+    /// writer thread.
+    async fn first_session(ctx: &crate::RpcContext) -> oxplow_domain::agent_session::AgentSession {
+        let stream = ctx.streams.ensure_primary().await.unwrap();
+        let thread = ctx
+            .threads
+            .selected_or_active(&stream.id)
+            .await
+            .unwrap()
+            .expect("the primary stream has a writer thread");
+        let out = crate::dispatch(
+            "run_command",
+            json!({ "id": "oxplow.agent_session.open", "input": {
+                "thread": oxplow_domain::refs::build::thread_ref(thread),
+            }, "confirmed": false }),
+            ctx,
+        )
+        .await
+        .unwrap();
+        serde_json::from_value(out["result"].clone()).unwrap()
+    }
+
+    async fn open(ctx: &crate::RpcContext, pane: &str) -> Result<serde_json::Value, IpcError> {
+        crate::dispatch(
+            "open_terminal_session",
+            json!({ "paneTarget": pane, "cols": 80, "rows": 24 }),
+            ctx,
+        )
+        .await
+    }
+
+    /// A session whose harness nothing registers is refused, naming the
+    /// ones that are.
+    #[tokio::test]
+    async fn an_unregistered_harness_is_refused_naming_the_registered() {
+        let (mut ctx, _dir) = services();
+        ctx.plugin_runtime = Some(runtime());
+        let session = first_session(&ctx).await.id;
+        ctx.harnesses.unregister("claude");
+        let err = open(&ctx, &session.to_string()).await.unwrap_err();
+        assert!(
+            err.message.contains("claude") && err.message.contains("codex"),
+            "msg: {}",
+            err.message
+        );
+    }
+
+    /// A closed session has no terminal, and neither does a chat.
+    #[test]
+    fn a_closed_or_chat_session_has_no_terminal() {
+        use oxplow_domain::agent_session::{AgentSession, SessionCloseReason, SessionKind};
+        let now = oxplow_domain::Timestamp::from_unix_ms(1);
+        let open = AgentSession {
+            id: oxplow_domain::AgentSessionId::new(3),
+            thread_id: oxplow_domain::ThreadId::new(1),
+            kind: SessionKind::Terminal,
+            harness: "claude".into(),
+            acp_agent: None,
+            title: String::new(),
+            resume_session_id: String::new(),
+            host: None,
+            opened_at: now,
+            closed_at: None,
+            closed_reason: None,
+            updated_at: now,
         };
-        let env: std::collections::HashMap<String, String> =
-            claude_otel_env(&pr, "thr1").into_iter().collect();
-        assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
-        assert_eq!(env["OTEL_METRICS_EXPORTER"], "otlp");
-        assert_eq!(env["OTEL_EXPORTER_OTLP_PROTOCOL"], "http/protobuf");
-        assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:9");
-        assert_eq!(
-            env["OTEL_EXPORTER_OTLP_HEADERS"],
-            "Authorization=Bearer tok123,X-Oxplow-Thread=thr1"
-        );
-        assert_eq!(env["OTEL_METRIC_EXPORT_INTERVAL"], "10000");
-    }
-
-    #[test]
-    fn codex_otel_overrides_configure_the_http_exporter_with_headers() {
-        // tsk24: Codex OTEL is config-only (`--config`). Pin the keys — the
-        // endpoint is the full /v1/metrics signal URL, protobuf ("binary"),
-        // and the bearer + attribution headers ride the exporter's headers map.
-        let ov = codex_otel_overrides("http://127.0.0.1:9", "tok123", "thr1");
-        assert!(ov.contains(
-            &"otel.exporter.otlp-http.endpoint=\"http://127.0.0.1:9/v1/metrics\"".to_string()
-        ));
-        assert!(ov.contains(&"otel.exporter.otlp-http.protocol=\"binary\"".to_string()));
-        assert!(ov.contains(
-            &"otel.exporter.otlp-http.headers.authorization=\"Bearer tok123\"".to_string()
-        ));
-        assert!(
-            ov.contains(&"otel.exporter.otlp-http.headers.x-oxplow-thread=\"thr1\"".to_string())
-        );
-        assert!(!ov.iter().any(|o| o.contains("x-oxplow-stream")));
-    }
-
-    #[test]
-    fn agent_key_distinguishes_thread_agent_and_pane() {
-        let base = agent_session_key("s-1", Some("thr3"), AgentKind::Claude, "working");
-        assert_ne!(
-            base,
-            agent_session_key("s-1", Some("thr4"), AgentKind::Claude, "working")
-        );
-        assert_ne!(
-            base,
-            agent_session_key("s-1", Some("thr3"), AgentKind::Codex, "working")
-        );
-        assert_ne!(
-            base,
-            agent_session_key("s-1", Some("thr3"), AgentKind::Claude, "talking")
-        );
-        // Missing thread id falls back to an empty segment.
-        assert_eq!(
-            agent_session_key("s-1", None, AgentKind::Claude, "working"),
-            "s-1||claude|working"
-        );
-    }
-
-    #[test]
-    fn codex_hook_command_is_stable_and_url_independent() {
-        let command =
-            codex_hook_command(Path::new("/Applications/Oxplow App/oxplow"), "PreToolUse");
-        assert_eq!(
-            command,
-            "'/Applications/Oxplow App/oxplow' hook 'PreToolUse'"
-        );
-        assert!(!command.contains("python"));
-        assert!(!command.contains("http://"));
-        assert!(!command.contains("https://"));
-    }
-
-    #[test]
-    fn opencode_config_content_wires_mcp_plugin_and_instructions() {
-        let content = opencode_config_content(
-            "http://127.0.0.1:9/mcp",
-            Path::new("/proj/.oxplow/runtime/opencode-plugin/plugin/oxplow-hooks.js"),
-            &["/proj/.oxplow/runtime/opencode-plugin/prompts/thr1.md".to_string()],
-            &oxplow_plugin::AgentText::core(),
-        );
-        let v: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
-        assert_eq!(v["mcp"]["oxplow"]["type"], "remote");
-        assert_eq!(v["mcp"]["oxplow"]["url"], "http://127.0.0.1:9/mcp");
-        // opencode interpolates {env:VAR} itself — the literal token
-        // must NOT be baked into the env var value.
-        assert_eq!(
-            v["mcp"]["oxplow"]["headers"]["Authorization"],
-            "Bearer {env:OXPLOW_HOOK_TOKEN}"
-        );
-        assert_eq!(
-            v["plugin"][0],
-            "/proj/.oxplow/runtime/opencode-plugin/plugin/oxplow-hooks.js"
-        );
-        // Slash commands ride the inline `command` key — markdown
-        // command dirs are fixed locations opencode controls, but
-        // config commands have no disk footprint.
-        assert!(
-            v["command"]["oxplow-review-comments"]["template"]
-                .as_str()
-                .map(|t| !t.is_empty())
-                .unwrap_or(false),
-            "oxplow-review-comments command must be defined inline"
-        );
-        assert_eq!(
-            v["instructions"][0],
-            "/proj/.oxplow/runtime/opencode-plugin/prompts/thr1.md"
-        );
+        assert!(super::has_a_terminal(&open).is_ok());
+        let chat = AgentSession {
+            kind: SessionKind::Chat,
+            harness: "acp".into(),
+            ..open.clone()
+        };
+        let err = super::has_a_terminal(&chat).unwrap_err();
+        assert!(err.message.contains("chat"), "msg: {}", err.message);
+        let closed = AgentSession {
+            closed_at: Some(now),
+            closed_reason: Some(SessionCloseReason::Closed),
+            ..open
+        };
+        let err = super::has_a_terminal(&closed).unwrap_err();
+        assert!(err.message.contains("closed"), "msg: {}", err.message);
     }
 
     #[test]
@@ -779,13 +476,8 @@ mod tests {
         // agent path must refuse cleanly instead of panicking, so a
         // mis-configured host degrades to plain terminals only.
         let (svc, _dir) = services();
-        let err = crate::dispatch(
-            "open_terminal_session",
-            json!({ "paneTarget": "working", "cols": 80, "rows": 24 }),
-            &svc,
-        )
-        .await
-        .unwrap_err();
+        let session = first_session(&svc).await.id;
+        let err = open(&svc, &session.to_string()).await.unwrap_err();
         assert_eq!(err.code, "INVALID");
         assert!(
             err.message.contains("plugin runtime"),
@@ -796,31 +488,14 @@ mod tests {
 
     #[tokio::test]
     async fn an_agent_session_is_reattached_not_spawned_again() {
-        // Regression for tsk138: opening the same (stream, thread, pane)
-        // twice — another window, a browser client — reattaches the ONE
-        // existing PTY, not a second agent.
+        // Opening the same agent session twice — another window, a
+        // browser client — reattaches the ONE existing PTY, not a second
+        // agent.
         let (mut ctx, _dir) = services();
-        ctx.plugin_runtime = Some(crate::PluginRuntime {
-            hook_base_url: "http://127.0.0.1:9/hook".into(),
-            mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
-            otlp_base_url: "http://127.0.0.1:9".into(),
-            hook_token: "test-token".into(),
-        });
-
-        let first = crate::dispatch(
-            "open_terminal_session",
-            json!({ "paneTarget": "working", "cols": 80, "rows": 24 }),
-            &ctx,
-        )
-        .await
-        .unwrap();
-        let second = crate::dispatch(
-            "open_terminal_session",
-            json!({ "paneTarget": "working", "cols": 80, "rows": 24 }),
-            &ctx,
-        )
-        .await
-        .unwrap();
+        ctx.plugin_runtime = Some(runtime());
+        let session = first_session(&ctx).await.id.to_string();
+        let first = open(&ctx, &session).await.unwrap();
+        let second = open(&ctx, &session).await.unwrap();
 
         let first_id = first["sessionId"].as_str().expect("first sessionId");
         let second_id = second["sessionId"].as_str().expect("second sessionId");
@@ -912,20 +587,13 @@ mod tests {
 
     #[tokio::test]
     async fn lookup_terminal_session_returns_none_without_spawning() {
-        // Read-only: a thread with no open agent PTY resolves to null,
-        // and the lookup never spawns (it runs on the svc path with no
-        // plugin runtime — an agent spawn would be impossible anyway).
+        // Read-only: a session with no live PTY resolves to null, and the
+        // lookup never spawns (no plugin runtime: a spawn is impossible).
         let (ctx, _dir) = services();
-        let stream = ctx.streams.ensure_primary().await.unwrap();
-        let thread_id = ctx
-            .threads
-            .selected_or_active(&stream.id)
-            .await
-            .unwrap()
-            .expect("primary stream has a writer thread");
+        let session = first_session(&ctx).await.id;
         let out = crate::dispatch(
             "lookup_terminal_session",
-            json!({ "threadId": thread_id.to_string(), "pane": "working" }),
+            json!({ "sessionId": session.to_string() }),
             &ctx,
         )
         .await
@@ -935,38 +603,16 @@ mod tests {
 
     #[tokio::test]
     async fn lookup_terminal_session_finds_live_agent_session() {
-        // Open an agent PTY, then resolve its session id by thread id +
-        // pane through the read-only lookup — the id must match.
+        // Open a session's PTY, then resolve it through the read-only
+        // lookup — the id must match.
         let (mut ctx, _dir) = services();
-        ctx.plugin_runtime = Some(crate::PluginRuntime {
-            hook_base_url: "http://127.0.0.1:9/hook".into(),
-            mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
-            otlp_base_url: "http://127.0.0.1:9".into(),
-            hook_token: "test-token".into(),
-        });
-        let opened = crate::dispatch(
-            "open_terminal_session",
-            json!({ "paneTarget": "working", "cols": 80, "rows": 24 }),
-            &ctx,
-        )
-        .await
-        .unwrap();
+        ctx.plugin_runtime = Some(runtime());
+        let session = first_session(&ctx).await.id.to_string();
+        let opened = open(&ctx, &session).await.unwrap();
         let opened_id = opened["sessionId"].as_str().expect("opened sessionId");
-
-        // The open path resolves the stream via current()-or-ensure_primary;
-        // with no switch_stream it took the ensure_primary fallback.
-        let stream = ctx.streams.ensure_primary().await.unwrap();
-        let thread_id = ctx
-            .threads
-            .selected_or_active(&stream.id)
-            .await
-            .unwrap()
-            .expect("a thread backs the opened session");
-
-        // `pane` omitted → defaults to "working", the pane we opened.
         let out = crate::dispatch(
             "lookup_terminal_session",
-            json!({ "threadId": thread_id.to_string() }),
+            json!({ "sessionId": session }),
             &ctx,
         )
         .await
@@ -976,29 +622,7 @@ mod tests {
             Some(opened_id),
             "lookup must find the live agent PTY"
         );
-
         let _ = ctx.terminal_sessions.close(opened_id).await;
-    }
-
-    #[tokio::test]
-    async fn lookup_terminal_session_rejects_non_agent_pane() {
-        let (ctx, _dir) = services();
-        let stream = ctx.streams.ensure_primary().await.unwrap();
-        let thread_id = ctx
-            .threads
-            .selected_or_active(&stream.id)
-            .await
-            .unwrap()
-            .expect("primary stream has a writer thread");
-        let err = crate::dispatch(
-            "lookup_terminal_session",
-            json!({ "threadId": thread_id.to_string(), "pane": "shell" }),
-            &ctx,
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code, "INVALID");
-        assert!(err.message.contains("pane"), "msg: {}", err.message);
     }
 
     #[tokio::test]

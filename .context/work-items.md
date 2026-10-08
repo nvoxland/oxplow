@@ -324,7 +324,9 @@ instance runs (`ProviderRegistry::publish`, a work-items provider's
 features as `ExternalWorkItems` reads them). **`active`** is the
 resolved implementation: a person's own choice (`.oxplow/personal.yaml`),
 else the project's `activeProviders` (`{ work_items: <instance id> }`, a
-person-only key), else the default (`oxplow`); both are chosen in
+person-only key), else the default (`oxplow`) — and every declared row
+of a capability many implementations serve (`chosen_by = declared`,
+work-tracking.md "Swappable pieces"); both are chosen in
 Settings → Pieces (`PiecesSection.tsx`, below). A choice that isn't
 available falls to `none` (the work list is optional), listed with
 `available = 0` and the active row's `chosen_by = fallback`. The

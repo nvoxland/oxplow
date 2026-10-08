@@ -50,7 +50,7 @@ async fn provider_rev(svc: &Services, rev: &Revision) -> Result<Option<String>, 
 }
 
 pub async fn head(svc: &Services, stream_id: Option<&str>) -> Result<HeadInfo, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     let head = svc.vcs.head(&ws).await?;
     Ok(HeadInfo {
         revision: head.revision.map(|r| vcs_revision(svc, r)),
@@ -62,7 +62,7 @@ pub async fn status(
     svc: &Services,
     stream_id: Option<&str>,
 ) -> Result<WorkspaceStatus, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     Ok(svc.vcs.status(&ws).await?)
 }
 
@@ -74,7 +74,7 @@ pub async fn blame(
     path: &str,
     revision: &Revision,
 ) -> Result<Vec<BlameLine>, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     let rev = provider_rev(svc, revision).await?;
     Ok(svc.vcs.blame(&ws, path, rev.as_deref()).await?)
 }
@@ -86,7 +86,7 @@ pub async fn revision(
     stream_id: Option<&str>,
     revision: &Revision,
 ) -> Result<Option<RevisionDetail>, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     let Some(rev) = provider_rev(svc, revision).await? else {
         return Err(DomainError::Invalid(
             "the working tree isn't a revision".into(),
@@ -102,7 +102,7 @@ pub async fn merge_base(
     a: &Revision,
     b: &Revision,
 ) -> Result<Option<Revision>, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     let (Some(a), Some(b)) = (provider_rev(svc, a).await?, provider_rev(svc, b).await?) else {
         return Err(DomainError::Invalid(
             "a merge base is between two revisions".into(),
@@ -138,12 +138,12 @@ pub async fn log(
     limit: Option<u32>,
     all: bool,
 ) -> Result<Vec<RevisionInfo>, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     Ok(svc.vcs.log(&ws, LogQuery { limit, all }).await?)
 }
 
 pub async fn branches(svc: &Services, stream_id: Option<&str>) -> Result<Vec<Branch>, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     Ok(svc.vcs.branches(&ws).await?)
 }
 
@@ -155,7 +155,7 @@ pub async fn divergence(
     base: &Revision,
     head: &Revision,
 ) -> Result<Divergence, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     let (base, head) = provider_pair(svc, base, head).await?;
     Ok(svc.vcs.divergence(&ws, &base, &head).await?)
 }
@@ -168,7 +168,7 @@ pub async fn revisions_between(
     head: &Revision,
     limit: u32,
 ) -> Result<Vec<RevisionInfo>, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     let (base, head) = provider_pair(svc, base, head).await?;
     Ok(svc.vcs.revisions_between(&ws, &base, &head, limit).await?)
 }
@@ -179,7 +179,7 @@ pub async fn file_history(
     path: &str,
     limit: u32,
 ) -> Result<Vec<RevisionInfo>, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await;
+    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
     Ok(svc.vcs.file_history(&ws, path, limit).await?)
 }
 

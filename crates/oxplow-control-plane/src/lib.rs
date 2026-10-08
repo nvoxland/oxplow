@@ -35,6 +35,8 @@ use tokio::net::TcpListener;
 use tracing::{info, warn};
 
 use oxplow_app::{HookEnvelope, Services, ToolDecision};
+use oxplow_domain::agent::observe::HookAnswer;
+use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::{HookKind, StreamId, ThreadId};
 
 #[derive(Debug, Error)]
@@ -236,11 +238,26 @@ async fn handle_otlp_metrics(
     };
     // Logged as `agent.tokens.reported`; the `token_usage.otlp` consumer
     // counts it.
-    match ctx.services.otlp_ingest.ingest(thread_id, &body).await {
+    match ctx
+        .services
+        .otlp_ingest
+        .ingest(thread_id, agent_session_of(&headers), &body)
+        .await
+    {
         Ok(logged) => tracing::debug!(logged, "OTLP token export"),
         Err(err) => warn!(?err, "failed to log OTLP token export"),
     }
     otlp_ok()
+}
+
+/// The agent session a hook or export came from: the `X-Oxplow-Session`
+/// header every process oxplow starts sends (`ses<n>`).
+fn agent_session_of(headers: &HeaderMap) -> Option<oxplow_domain::AgentSessionId> {
+    headers
+        .get("x-oxplow-session")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .and_then(oxplow_domain::AgentSessionId::try_from_str)
 }
 
 /// Append a human-readable dump of an OTLP export to the file named by
@@ -326,7 +343,7 @@ fn otlp_ok() -> Response {
 /// Upper bound on hook decision time. Claude Code blocks on the hook
 /// response, so a wedged backend (DB writer held by a snapshot flush,
 /// a slow store query) must not stall the agent indefinitely. On
-/// expiry we return the generic ack — i.e. allow the tool call.
+/// expiry we return the ack — i.e. allow the tool call.
 /// Availability over enforcement: a missed deny on one pathological turn
 /// beats a frozen agent, and the MCP tools re-check the write guard at
 /// the call site anyway.
@@ -342,18 +359,27 @@ async fn handle_hook(
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
     }
     let event_name = event.clone();
+    // The session isn't known until the ingest resolves it: a timed-out
+    // hook gets the default harness's ack.
+    let ack = respond(&ctx.services.harnesses, None, &HookAnswer::Ack);
     bounded_hook_response(
         HOOK_HANDLING_TIMEOUT,
         &event_name,
+        ack,
         handle_hook_inner(ctx, event, headers, body),
     )
     .await
 }
 
-/// Race `fut` against `timeout`; on expiry, log and fall back to the
-/// generic ack (allow / no directive). Split from [`handle_hook`] so
-/// the timeout path is unit-testable with a never-resolving future.
-async fn bounded_hook_response<F>(timeout: std::time::Duration, event: &str, fut: F) -> Response
+/// Race `fut` against `timeout`; on expiry, log and fall back to `ack`
+/// (allow / no directive). Split from [`handle_hook`] so the timeout path
+/// is unit-testable with a never-resolving future.
+async fn bounded_hook_response<F>(
+    timeout: std::time::Duration,
+    event: &str,
+    ack: Response,
+    fut: F,
+) -> Response
 where
     F: std::future::Future<Output = Response>,
 {
@@ -365,7 +391,7 @@ where
                 timeout_ms = timeout.as_millis() as u64,
                 "hook handling timed out — returning default allow/ack so the agent isn't stalled"
             );
-            hook_ack()
+            ack
         }
     }
 }
@@ -386,6 +412,8 @@ async fn handle_hook_inner(
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
         .and_then(ThreadId::try_from_str);
+
+    let agent_session_id = agent_session_of(&headers);
 
     hook_debug_dump(&event, thread_id.map(|t| t.to_string()).as_deref(), &body);
 
@@ -425,15 +453,24 @@ async fn handle_hook_inner(
             kind,
             thread_id,
             stream_id,
+            agent_session_id,
             session_id,
             payload_json: body_str,
             prompt: None,
             decision: None,
         };
-        if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
-            warn!(?event, ?err, "hook ingest failed");
-        }
-        return hook_ack();
+        let harness = match ctx.services.hook_ingest.ingest(envelope).await {
+            Ok(outcome) => outcome.harness,
+            Err(err) => {
+                warn!(?event, ?err, "hook ingest failed");
+                None
+            }
+        };
+        return respond(
+            &ctx.services.harnesses,
+            harness.as_deref(),
+            &HookAnswer::Ack,
+        );
     }
 
     let kind = match parse_hook_kind(&event) {
@@ -441,7 +478,7 @@ async fn handle_hook_inner(
         None => {
             // Unknown but non-fatal — record nothing, ack so the agent
             // doesn't block.
-            return hook_ack();
+            return respond(&ctx.services.harnesses, None, &HookAnswer::Ack);
         }
     };
 
@@ -465,6 +502,7 @@ async fn handle_hook_inner(
                 kind,
                 thread_id,
                 stream_id,
+                agent_session_id,
                 session_id: session_id.clone(),
                 payload_json: body_str,
                 prompt: None,
@@ -473,10 +511,18 @@ async fn handle_hook_inner(
                     reason: Some(reason.clone()),
                 }),
             };
-            if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
-                warn!(?err, "hook ingest failed for a denied tool call");
-            }
-            return (StatusCode::OK, Json(pre_tool_deny(reason))).into_response();
+            let harness = match ctx.services.hook_ingest.ingest(envelope).await {
+                Ok(outcome) => outcome.harness,
+                Err(err) => {
+                    warn!(?err, "hook ingest failed for a denied tool call");
+                    None
+                }
+            };
+            return respond(
+                &ctx.services.harnesses,
+                harness.as_deref(),
+                &HookAnswer::Deny { reason },
+            );
         }
     }
 
@@ -484,6 +530,7 @@ async fn handle_hook_inner(
         kind,
         thread_id,
         stream_id,
+        agent_session_id,
         session_id,
         payload_json: body_str,
         prompt,
@@ -494,13 +541,17 @@ async fn handle_hook_inner(
     };
 
     let envelope_for_resume = envelope.clone();
-    if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
-        // The agent can't act on an error status — Claude Code just
-        // prints a "non-blocking status code" warning into the user's
-        // terminal. Log the cause server-side and ack anyway.
-        warn!(?event, ?err, "hook ingest failed");
-        return hook_ack();
-    }
+    let harness = match ctx.services.hook_ingest.ingest(envelope).await {
+        Ok(outcome) => outcome.harness,
+        Err(err) => {
+            // The agent can't act on an error status — Claude Code just
+            // prints a "non-blocking status code" warning into the user's
+            // terminal. Log the cause server-side and ack anyway.
+            warn!(?event, ?err, "hook ingest failed");
+            return respond(&ctx.services.harnesses, None, &HookAnswer::Ack);
+        }
+    };
+    let harness = harness.as_deref();
     // Token usage (tsk104) is counted from the Stop's `agent.turn.ended`
     // by the `token_usage.turns` pump reactor (P3.7), not in the hook.
 
@@ -523,16 +574,14 @@ async fn handle_hook_inner(
                 )
                 .await
             {
-                return (
-                    StatusCode::OK,
-                    Json(serde_json::json!({
-                        "hookSpecificOutput": {
-                            "hookEventName": "PostToolUse",
-                            "additionalContext": context,
-                        }
-                    })),
-                )
-                    .into_response();
+                return respond(
+                    &ctx.services.harnesses,
+                    harness,
+                    &HookAnswer::Context {
+                        event: HookKind::PostToolUse,
+                        text: context,
+                    },
+                );
             }
         }
     }
@@ -551,45 +600,37 @@ async fn handle_hook_inner(
                 )
                 .await
             {
-                return (
-                    StatusCode::OK,
-                    Json(serde_json::json!({
-                        "hookSpecificOutput": {
-                            "hookEventName": "UserPromptSubmit",
-                            "additionalContext": combined,
-                        }
-                    })),
-                )
-                    .into_response();
+                return respond(
+                    &ctx.services.harnesses,
+                    harness,
+                    &HookAnswer::Context {
+                        event: HookKind::UserPromptSubmit,
+                        text: combined,
+                    },
+                );
             }
         }
     }
 
     // Stop is never refused: the ingest closed the turn; the ack ends it
     // (.context/work-tracking.md "No gates").
-    hook_ack()
+    respond(&ctx.services.harnesses, harness, &HookAnswer::Ack)
 }
 
-/// The default no-op hook acknowledgement. MUST be `200 {}` — Claude
-/// Code's HTTP hooks treat any other status (including an empty 202)
-/// as a failure and print a "Failed with non-blocking status code"
-/// warning into the user's terminal, which fills the xterm with noise
-/// on Edit/Write-heavy turns. See `.context/agent-model.md`.
-fn hook_ack() -> Response {
-    (StatusCode::OK, Json(serde_json::json!({}))).into_response()
-}
-
-/// Claude's `hookSpecificOutput` refusing a PreToolUse for `reason`.
-fn pre_tool_deny(reason: String) -> serde_json::Value {
-    use oxplow_runtime::write_guard::{HookSpecificOutput, WriteGuardDeny};
-    serde_json::to_value(WriteGuardDeny {
-        hook_specific_output: HookSpecificOutput {
-            hook_event_name: "PreToolUse",
-            permission_decision: "deny",
-            permission_decision_reason: reason,
-        },
-    })
-    .unwrap_or_default()
+/// `answer` as the hook's harness renders it (`AgentHarness::render`): its
+/// session's, else the default harness's; an empty object with none
+/// registered. Always `200` — Claude Code's HTTP hooks treat any other
+/// status (including an empty 202) as a failure and print a "Failed with
+/// non-blocking status code" warning into the user's terminal, which fills
+/// the xterm with noise on Edit/Write-heavy turns. See
+/// `.context/agent-model.md`.
+fn respond(harnesses: &HarnessRegistry, harness: Option<&str>, answer: &HookAnswer) -> Response {
+    let body = harness
+        .and_then(|h| harnesses.get(h).ok())
+        .or_else(|| harnesses.default().ok())
+        .map(|h| h.render(answer))
+        .unwrap_or_else(|| serde_json::json!({}));
+    (StatusCode::OK, Json(body)).into_response()
 }
 
 /// Run the shared agent policy (the write guard) against the
@@ -640,18 +681,23 @@ mod tests {
 
     #[tokio::test]
     async fn bounded_hook_response_passes_through_fast_futures() {
-        let resp = bounded_hook_response(std::time::Duration::from_secs(1), "Stop", async {
-            (StatusCode::OK, "directive").into_response()
-        })
+        let resp = bounded_hook_response(
+            std::time::Duration::from_secs(1),
+            "Stop",
+            StatusCode::NO_CONTENT.into_response(),
+            async { (StatusCode::OK, "directive").into_response() },
+        )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn bounded_hook_response_falls_back_to_ack_on_timeout() {
+        let none = HarnessRegistry::new(std::sync::Arc::new(String::new));
         let resp = bounded_hook_response(
             std::time::Duration::from_millis(10),
             "PreToolUse",
+            respond(&none, None, &HookAnswer::Ack),
             std::future::pending::<Response>(),
         )
         .await;

@@ -50,7 +50,11 @@ impl BranchReconciler {
             while let Some(moved) = rx.recv().await {
                 match moved {
                     Moved::Stream(stream_id) => {
-                        let path = self.router.resolve(Some(&stream_id.to_string())).await;
+                        let path = self
+                            .router
+                            .resolve(Some(&stream_id.to_string()))
+                            .await
+                            .into_local_path();
                         self.reconcile(&stream_id, &path).await;
                     }
                     // Any stream may have moved.
@@ -63,8 +67,8 @@ impl BranchReconciler {
     async fn reconcile_all(&self) {
         match self.router.all().await {
             Ok(all) => {
-                for (id, path) in all {
-                    self.reconcile(&id, &path).await;
+                for (id, root) in all {
+                    self.reconcile(&id, root.local_path()).await;
                 }
             }
             Err(error) => warn!(%error, "couldn't list the streams to reconcile"),
@@ -107,7 +111,11 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let stream = svc.stream_store.list().await.unwrap().remove(0);
-        let ws = svc.worktrees.resolve(Some(&stream.id.to_string())).await;
+        let ws = svc
+            .worktrees
+            .resolve(Some(&stream.id.to_string()))
+            .await
+            .into_local_path();
         svc.vcs
             .checkout_branch(&ws, "elsewhere", true)
             .await
@@ -126,7 +134,11 @@ mod tests {
         let svc = &f.svc;
         svc.branch_reconciler.clone().spawn();
         let stream = svc.stream_store.list().await.unwrap().remove(0);
-        let ws = svc.worktrees.resolve(Some(&stream.id.to_string())).await;
+        let ws = svc
+            .worktrees
+            .resolve(Some(&stream.id.to_string()))
+            .await
+            .into_local_path();
         svc.vcs.checkout_branch(&ws, "moved", true).await.unwrap();
         svc.ref_moves.moved(stream.id);
         for _ in 0..200 {

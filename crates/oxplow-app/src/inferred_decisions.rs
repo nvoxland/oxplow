@@ -437,7 +437,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_effort_is_inferred_stored_and_replaced_when_main_is_assigned() {
-        use crate::ai_service::{ProviderConfig, ProviderKind, RoleBinding};
+        use crate::ai_service::{ProviderConfig, RoleBinding};
         let f = crate::test_fixtures::services_with_effort().await;
         let effort = f.effort.value();
 
@@ -459,7 +459,7 @@ mod tests {
             .save_provider(
                 ProviderConfig {
                     id: "m".into(),
-                    kind: ProviderKind::OpenaiCompatible,
+                    kind: "openai_compatible".into(),
                     base_url: Some(base),
                 },
                 None,
@@ -562,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn closing_an_effort_infers_its_decisions_in_the_background() {
-        use crate::ai_service::{ProviderConfig, ProviderKind, RoleBinding};
+        use crate::ai_service::{ProviderConfig, RoleBinding};
         use oxplow_db::EffortStore as _;
         let f = crate::test_fixtures::services_with_effort().await;
         let reply = serde_json::json!({"decisions": [{"question": "Q", "choice": "C"}]});
@@ -577,7 +577,7 @@ mod tests {
             .save_provider(
                 ProviderConfig {
                     id: "m".into(),
-                    kind: ProviderKind::OpenaiCompatible,
+                    kind: "openai_compatible".into(),
                     base_url: Some(base),
                 },
                 None,

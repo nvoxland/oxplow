@@ -22,13 +22,23 @@ the agent are:
    which fills the xterm with noise on Edit/Write-heavy turns. This
    covers *every* path: ingest failures and handler timeouts also ack
    `200 {}` (the agent can't act on a 4xx/5xx — it just prints the
-   warning) with the cause logged server-side. The shared helper is
-   `hook_ack()` in `crates/oxplow-control-plane/src/lib.rs`; never
-   return a bespoke status from a hook branch.
+   warning) with the cause logged server-side. Every answer goes through
+   `respond()` in `crates/oxplow-control-plane/src/lib.rs`, which has the
+   hook's harness render a `HookAnswer` (an ack is `{}` for every
+   built-in) and always answers `200`; never return a bespoke status from
+   a hook branch.
 3. MCP tool responses (when the agent calls a `oxplow__*` tool).
 
 Auto-progression through the queue is built entirely on (2). The agent
 thinks it's about to stop; the harness says "actually, do this next."
+
+**Driving is an interface only.** `oxplow_domain::agent::drive::Drive`
+(`programmatic`, `prompt`) is how oxplow or an extension would one day
+prompt an agent, and only on a surface licensed for it (API-funded; a PTY,
+or an ACP agent signed in with a plan, never is). Nothing implements, holds
+or calls it: `source_guards::nothing_in_core_drives_an_agent` fails on
+production code outside `drive.rs` that names it, so the first driver is a
+decision, not a drift.
 
 ### No synthesized agent terminal input (no automation)
 
@@ -107,7 +117,7 @@ oxplow agent:
   `working` pane target; UI-side, it's an xterm.js inside
   `.xterm`. Click that element to focus, type with regular keystrokes;
   xterm pipes them through the PTY to the thread's assigned agent.
-- **When a turn is done.** `derive_thread_status`
+- **When a turn is done.** `derive_session_status`
   (`crates/oxplow-app/src/agent_status_derive.rs`) reduces the thread's
   logged `agent.*` activity to two states:
   `working` (agent is actively burning cycles) or `waiting` (agent
@@ -149,13 +159,37 @@ oxplow agent:
 
 ## Launching the agent
 
-`build_agent_command_for_session` in `crates/oxplow-app/src/agent_command.rs`
-constructs a shell command for the thread's assigned `AgentKind`.
+Each harness launches its own sessions: `AgentHarness::launch(&LaunchInput)`
+(`crates/oxplow-domain/src/agent/harness.rs`) writes whatever runtime files
+the agent needs and returns a `Launch { spec, resume_dropped }`. The spec is
+`LaunchSpec::Pty { command }` (a shell command for the PTY) or
+`LaunchSpec::Acp { program, args, env, system_prompt_via_meta }` (a process
+the ACP manager speaks to). The built-in harnesses live in
+`crates/oxplow-harnesses/` (`claude.rs`, `codex.rs`, `opencode.rs`,
+`acp.rs`; shared shell quoting in `shared.rs`). The caller is one function,
+`launch_session` in `crates/oxplow-rpc/src/commands/terminal.rs`, used by both
+the PTY path (`open_terminal_session`) and `acp_open_session`. It gathers the
+input — the session/thread/stream ids, the workspace and project dir, the
+control-plane endpoints, the identity env, the assembled system prompt, the
+session's resume id, the agent text, the harness config, oxplow's own
+executable, `HOME`, and a program resolver — and, when the harness reports
+`resume_dropped`, blanks the session's resume pointer. A harness never
+touches the database.
+
+The harness also names its **instruction files** (`instruction_files()`;
+`["CLAUDE.md"]` for every built-in today), which `agent_prompt` reads into the
+system prompt, and its **environment markers** (`env_markers()`), below. The
+harness config is a JSON value: the harness's `agentConfig.<key>` entry for the
+PTY harnesses (`{"model": …}` for opencode), `{program, args, env,
+systemPromptViaMeta}` from the ACP agent's entry. Where a session's `billing_pool` (plan / API credits / purchased) gets
+derived, when token facts carry it, is here: the harness knows how it was
+launched.
 
 **What an agent inherits (tsk1032).** Every agent and terminal (PTY and
-ACP) is spawned without `agent_path::NOT_INHERITED`: Claude Code's session
-markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, …) and an oxplow agent's
-identity (`OXPLOW_HOOK_TOKEN`, `OXPLOW_THREAD_ID`, …). Otherwise oxplow run
+ACP) is spawned without `agent_path::not_inherited(&harnesses)`: an oxplow
+agent's identity (`agent_path::NOT_INHERITED`: `OXPLOW_HOOK_TOKEN`,
+`OXPLOW_THREAD_ID`, …) plus every registered harness's `env_markers()`
+(Claude Code's `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, …). Otherwise oxplow run
 from inside an agent's terminal starts child sessions — Claude Code turns
 transcript saving off, breaking resume and token counts — whose hooks point
 at the outer oxplow. It's a list, not a prefix: `CLAUDE_CONFIG_DIR`,
@@ -165,38 +199,53 @@ Project configuration is changed through the `config.*` commands on the
 command bus ([commands.md](./commands.md)) — an agent sets `zones`,
 `metricRetentionDays`, `generated`, … with `oxplow.config.set`, while the keys
 that run a program or pick the model (`agents`, `lsp`, `collection`,
-`ai`, `acpAgents`, `agentModels`, `extensions`, `agentPromptAppend`, …)
+`ai`, `acpAgents`, `agentConfig`, `extensions`, `agentPromptAppend`, …)
 need a person's confirmation: the agent's `oxplow.config.set` is kept as a
 proposal (`proposal:N`, with the before/after) that the person approves
 or declines, and `run_command` tells the agent so ([commands.md](./commands.md),
 "Proposals"). `set_zones` is gone; `zones` is just a key.
 
-`.oxplow/project.yaml` lists enabled agents as `agents: [...]`; the first entry
-is the default for newly-created threads, and each thread persists its
-own `agent` at creation time so Claude and Codex threads can run
-concurrently.
+**A harness is a registry key, never an enum.** An agent session's
+`harness` is the key of a registered harness (`HarnessRegistry`, the
+`agent_harness` declarations, in declaration order); nothing in core names
+one. `.oxplow/project.yaml`'s `agents: [...]` lists the enabled ones in
+priority order (the first is a new session's default); left out, every
+registered harness is enabled and the first declared is the default. The
+config checks only the keys' shape; `set_agents` and
+`oxplow.agent_session.open` check them against the registry, naming the
+registered on a miss. Each harness's own settings are `agentConfig: { <key>:
+{ … } }`, what its `launch` reads; the retired `agentModels` is a load error
+naming it. Whether a session runs an ACP agent in a chat follows from its
+harness's `interact()` (a structured transcript), not its name. The UI reads
+the harnesses through `list_agent_harnesses` (`harnesses::listing`: key,
+title, enabled, chat; priority order) by `useAgentHarnesses`, and
+`agentKinds.ts` builds the picker and labels from it. Each session
+persists its own harness, so Claude and Codex sessions run concurrently.
 
 - Claude runs `claude --plugin-dir <abs> --append-system-prompt <text>
   --mcp-config <json> [--resume <sid>]`.
 - Codex runs `codex --cd <worktree>` or `codex resume --cd <worktree>
   <sid>`, plus CLI config overrides for oxplow MCP and lifecycle hooks.
 - opencode runs `opencode -m <model> [-s <sid>]` (with a fresh-session
-  fallback when the saved resume id is stale). The model is currently
-  hardcoded to `github-copilot/gpt-5-mini` (`OPENCODE_MODEL` in
-  `crates/oxplow-app/src/agent_command.rs`); per-project configurability
-  is a filed follow-up. Hooks, MCP, and the per-thread system prompt
+  fallback when the saved resume id is stale). The model is the harness
+  config's `model` (`agentConfig.opencode.model`), defaulting to
+  `github-copilot/gpt-5-mini`. Hooks, MCP, and the per-thread system prompt
   all ride the `OPENCODE_CONFIG_CONTENT` env var — inline opencode
   config (merged last by opencode) wiring the oxplow MCP server
   (bearer via opencode's own `{env:OXPLOW_HOOK_TOKEN}` interpolation),
   the hook-bridge plugin, and an `instructions` entry pointing at the
-  per-thread prompt file (opencode has no `--append-system-prompt`).
+  per-session prompt file (opencode has no `--append-system-prompt`).
 - All agents export `OXPLOW_STREAM_ID`, `OXPLOW_THREAD_ID`,
-  `OXPLOW_HOOK_TOKEN`, and `OXPLOW_PANE` so hooks can identify
-  themselves to the runtime.
+  `OXPLOW_HOOK_TOKEN`, and `OXPLOW_SESSION` (the agent session, `ses<n>`)
+  so hooks can identify themselves to the runtime. The OTLP exporters
+  carry the session too (`X-Oxplow-Session` beside `X-Oxplow-Thread`),
+  and so do the Claude and ACP MCP connections (nothing reads it there
+  yet).
 
 The command runs as `sh -lc <command>` in a PTY
-(`oxplow_rpc::commands::terminal::open_terminal_session`, keyed by stream,
-thread, agent and pane so a re-attach resumes the live session). Switching
+(`oxplow_rpc::commands::terminal::open_terminal_session`, keyed by the
+agent session — the pane target is its id, `ses3` — so a re-attach resumes
+the live process and two sessions in a thread are two processes). Switching
 streams or threads doesn't kill existing agent sessions: the daemon keeps
 them, and a re-attach replays their buffer. They end with the daemon; the
 next open resumes the agent's own session (`--resume`). There is no tmux
@@ -205,8 +254,8 @@ mode (tsk1018): it went with the "Open in tmux" toggle and the
 
 ### The agent is spawned by absolute path, on purpose (tsk245)
 
-`AgentCommandOptions::program` carries the resolved absolute path to the CLI,
-from `agent_path::resolve_agent_program`. **Don't "simplify" it back to the bare
+A harness resolves its CLI through `LaunchInput::resolve_program` (backed by
+`agent_path::resolve_program`) and launches the absolute path. **Don't "simplify" it back to the bare
 binary name** — that is a bug that only reproduces on a GUI launch:
 
 - A **GUI-launched** app (Finder, dock, oxplow's own launcher) gets macOS's
@@ -239,12 +288,18 @@ directories that no fixed list can guess, so a GUI-launched agent can still miss
 was deliberately not taken here — it costs a subprocess per launch and can hang
 on a user's rc file.
 
-## Plugin hook bridge
+## Harness runtimes
 
-Agent-specific runtime files are materialized by `oxplow-plugin` under
-`.oxplow/runtime/` on every spawn. The rest of the app consumes only the
-provider output (`AgentCommandOptions`) instead of branching on plugin
-details.
+Each harness in `crates/oxplow-harnesses` writes its own runtime files under
+`.oxplow/runtime/` in its `launch`, on every spawn, from the agent text it's
+handed (`oxplow-agent-text`'s `core_text` plus what extensions offer,
+`capabilities::agent_text`). The rest of the app consumes only the returned
+`Launch` instead of branching on harness details. `refresh_text` rewrites
+the skills and commands of a runtime already on disk, creating none:
+`capabilities::refresh_agent_text` calls it on every registered harness at
+boot, on an extension change and on a `capability.switched`. The crate
+depends only on the domain; core's text and the capability questions live in
+`oxplow-agent-text`, which the app and the SDK read.
 
 - Claude writes `.oxplow/runtime/claude-plugin/`, passes it with
   `--plugin-dir`, and registers HTTP hooks for `PreToolUse`,
@@ -274,17 +329,17 @@ details.
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
   turn lifecycle.
   Skills + slash commands ship too: opencode only discovers SKILL.md
-  from fixed locations (no config key), so `write_opencode_runtime`
+  from fixed locations (no config key), so the opencode harness's launch
   materializes the offered skills (`capabilities::agent_text`) into
   `<project>/.opencode/skills/<name>/` — each dir carries a `*`
   .gitignore so the generated files never land in commits. The offered
   commands ride `OPENCODE_CONFIG_CONTENT`'s inline `command` key
-  (`oxplow_plugin::opencode_command_definitions(&text)`, frontmatter
+  (`command_definitions` in `opencode.rs`, frontmatter
   description + body template) as `/oxplow-review-comments` etc. — opencode
   has no plugin namespacing, hence the `oxplow-` prefix instead of
   Claude's `/oxplow:` form. The launch model comes from
-  `agentModels.opencode` in .oxplow/project.yaml (falling back to the
-  `OPENCODE_MODEL` const). Known gaps vs the Claude bridge: no
+  `agentConfig.opencode.model` in .oxplow/project.yaml (falling back to the
+  harness's `DEFAULT_MODEL`). Known gaps vs the Claude bridge: no
   SessionStart/SessionEnd/Notification events.
 
 Gotcha: Claude Code silently drops HTTP hooks for `SessionStart` ("HTTP hooks
@@ -322,8 +377,30 @@ records the per-turn `agent_token_usage` prompt rows + `oxplow.turn` facts. Deta
 
 Each hook POSTs to the runtime's MCP server with bearer-token auth via the
 env-var-interpolated `OXPLOW_HOOK_TOKEN` header, plus `X-Oxplow-Stream`,
-`X-Oxplow-Thread`, `X-Oxplow-Pane`. The MCP server's `onHook` callback dispatches
+`X-Oxplow-Thread`, `X-Oxplow-Session`. The MCP server's `onHook` callback dispatches
 to `runtime.handleHookEnvelope`, which:
+
+**Which agent session a hook came from** (`agent_session_store::resolve_tx`,
+shared by hooks and OTLP exports), in order:
+1. the session the sender named (`X-Oxplow-Session`, the ACP host, the UI's
+   interrupt) — refused, with a warning, when it is another thread's;
+2. the session whose resume id is the hook's harness session id (an open
+   one first, then the newest);
+3. the thread's newest open session, one with a turn running first —
+   logged as a warning, since every process oxplow starts names its
+   session, so this firing means a sender that doesn't;
+4. none: an agent oxplow didn't start. It records with the thread's
+   anchors only, its turn and events carry no session (adopting it onto
+   one is later work).
+
+Turns are per session: a prompt opens a turn in its session, a Stop or
+Interrupt closes that session's turns, a process start interrupts only
+its own session's, and the resume id is the session's
+(`agent_session.resume_session_id`). A PTY's exit ingests a `SessionEnd`
+naming only its session (`TerminalSessionRegistry::ingest_exits_into`):
+that session's open turn closes and its harness session ends — once, so
+a harness that already posted its own SessionEnd (Claude) logs no second
+one, and one that posts none (Codex) still ends.
 
 1. (There is no in-memory hook ring any more — P3.9. What a hook did is its
    `agent.*` events in the log; the Hook events page lists them through
@@ -332,7 +409,8 @@ to `runtime.handleHookEnvelope`, which:
 2. Runs `HookIngestService::ingest` (`crates/oxplow-app/src/hook_ingest.rs`,
    P3.3): **one transaction per envelope** writes the state the hook changes
    and the `agent.*` events that record it, anchored to the thread's stream,
-   its open turn and its single open effort (`activity_anchors_tx`).
+   its agent session, that session's open turn and the thread's single
+   open effort (`activity_anchors_tx`).
    **Attribution is a best effort, by design (tsk511, decided with
    Nathan 2026-09-30).** Several agents, the person and outside processes
    can all change a worktree at once, so no rule ties every change to
@@ -403,16 +481,17 @@ to `runtime.handleHookEnvelope`, which:
    the thread row in its transaction anyway.)
    A second cleanup runs at **launch** for a token that's stale for any
    other reason (transcript pruned, machine moved, id rotted). Before
-   passing `--resume`, `open_terminal_session`'s direct branch probes the
-   session file via `resume_check::claude_resume_state`
-   (`crates/oxplow-app/src/resume_check.rs`): it maps the cwd to Claude's
+   passing `--resume`, the Claude harness's `launch` probes the
+   session file (`resume_state` in `crates/oxplow-harnesses/src/claude.rs`)
+   and reports `resume_dropped`, which `launch_session` turns into
+   `resume_check::forget_missing`: it maps the cwd to Claude's
    `$HOME/.claude/projects/<cwd-with-non-alnum→'-'>/<id>.jsonl` and, if
    the project dir exists but the `.jsonl` is gone (`Missing`), blanks the
    thread's pointer and launches fresh — so `claude --resume <stale>`
    never runs and its raw "No conversation found" error never reaches the
    terminal. Conservative by design: an absent project dir reads as
    `Unknown` (never clears), so an encoding drift can't wrongly wipe a
-   valid pointer, and the shell `||` net in `agent_command.rs` still
+   valid pointer, and the shell `||` net in the harness's command still
    covers the file-vanishes-between-check-and-exec race. Claude-only;
    codex/opencode keep just the shell net.
 3. Opens and closes `agent_turn` rows (UserPromptSubmit / Stop /
@@ -421,8 +500,8 @@ to `runtime.handleHookEnvelope`, which:
    attribution stays anchored to `effort`.
 4. For `PreToolUse`: asks the shared **`AgentPolicy`** (see "Agent
    policy" below): the write guard (see Write guard below). It never
-   asks for tracked work. A deny is rendered as Claude's
-   `hookSpecificOutput`.
+   asks for tracked work. A deny is a `HookAnswer::Deny` the session's
+   harness renders (Claude's `hookSpecificOutput` for every built-in).
    `claude_intent(body)` returns `None` for any tool outside the four
    worktree-mutating edits, so `pre_tool_check` short-circuits
    *before* any DB read or git-state stat — the common case (Read / Grep
@@ -467,35 +546,43 @@ site, so a timed-out PreToolUse deny is still caught there.
 
 ## ACP agents: configuration (tsk335)
 
-**Sessions.** `AgentKind::Acp` sessions name an ACP agent in
-`agent_session.acp_agent`. `AgentKind::is_terminal()` is false for them:
-`open_terminal_session` refuses them, and `write_agent_runtime` returns
-`PluginError::NotTerminal`.
+**Sessions.** A chat session (its harness's transcript is structured: the
+`acp` harness) names an ACP agent in `agent_session.acp_agent`.
+`open_terminal_session` refuses it: its harness launches a `LaunchSpec::Acp`,
+not a PTY command.
 
-**Configuration.** Agents come from `oxplow_config::acp_presets()`:
-- claude: `claude-agent-acp`;
+**Configuration.** Agents are declarations: `oxplow-foundation`'s
+`acp_adapter` implementations (the `oxplow:acp-adapter` built-in, config
+`{ command, args?, env?, systemPrompt?: meta|prompt }`, read into an
+`AcpAdapter` by `oxplow_harnesses::acp_adapter` and kept, in declaration
+order, in `Services.acp_adapters`):
+- claude: `claude-agent-acp`, the prompt in `_meta` (`systemPrompt: meta`);
 - gemini: `gemini --acp`;
 - codex: `codex-acp`.
 
-These are layered with the project's `acpAgents: [{name, command, args,
-env}]` by `resolve_acp_agents`; a project entry replaces a preset of the
-same name.
+The project's `acpAgents: [{name, command, args, env}]` are instances
+layered over them by `acp::agents::resolve`: an entry with a declared id
+overrides its program and keeps the adapter's prompt mode; a new name is a
+generic adapter (the prompt ahead of the first message). An `acp` session
+that names no agent runs the project's first entry, else the first declared
+adapter (`acp::agents::default_agent`); `oxplow.agent_session.open` checks
+the name against the same list.
 
 **Listing.** `oxplow_app::acp::agents::list` (IPC `list_acp_agents`,
 UI-only) reports each agent's source, whether it may start here, and its
-resolved path (`agent_path::resolve_program`). Presets may always start;
-a project entry needs a person's approval in Settings → Data → Programs
+resolved path (`agent_path::resolve_program`). A declared adapter may
+always start; a project entry needs a person's approval in Settings → Data → Programs
 (`exec_consent`, `ProgramKind::AcpAgent`).
 
-**Creating threads.** `oxplow.thread.create` takes `acp_agent` (stored on the
-thread's agent session). It's required for
-`agent: acp`, refused otherwise, and must name a known agent. The
-new-thread picker lists "ACP · <name>" per agent when ACP is enabled in
-`agents:`, flagged "not installed" or "needs approval" (`agentChoices` in
-`agentKinds.ts`).
+**Opening sessions.** `oxplow.agent_session.open` takes `acp_agent`. It's
+required for a chat harness (the project's first ACP agent when the harness
+isn't named either), refused otherwise, and must name a known agent. The
+session picker lists "<harness title> · <name>" per ACP agent for each
+enabled chat harness, flagged "not installed" or "needs approval"
+(`agentChoices` in `agentKinds.ts`).
 
-**Not built yet:** a personal (user-global) `acpAgents` file; presets and
-project entries only for now.
+**Not built yet:** a personal (user-global) `acpAgents` file; declared
+adapters and project entries only for now.
 
 ## ACP agents: protocol mapping and transcript (tsk336)
 
@@ -541,18 +628,18 @@ the same JSON.
 ## ACP agents: sessions (tsk337)
 
 **Shape.**
-- `Services.acp` (`acp/manager.rs`) holds each thread's command sender and a shared `SessionView` (status, transcript, stderr tail).
+- `Services.acp` (`acp/manager.rs`) holds each **agent session**'s command sender and a shared `SessionView` (status, transcript, stderr tail), keyed by `AgentSessionId`: two ACP sessions in one thread are two agents with their own transcripts.
 - One actor task per session (`acp/session.rs`) owns the connection.
 - `wire::run` feeds every agent message into ONE channel, and the prompt's result is an ordered barrier, so the actor sees updates, requests and turn end in wire order.
 - Events for every session go out on one broadcast channel (`AcpEvent`).
 - **Open and close are race-free (tsk359).**
-  - `open` reserves the thread's slot under one lock before spawning anything, so concurrent opens start one agent.
+  - `open` reserves the session's slot under one lock before spawning anything, so concurrent opens start one agent.
   - `close` marks the handle closed at once.
   - A closed session still winding down is replaced and marked not current; its actor then records no Interrupt over the new session's status.
-- **Thread lifecycle.** Closing a thread (`oxplow.thread.close`) closes its open effort in the same transaction; closing a thread whose session runs ACP also stops its session and agent process once the close commits. A fork (`oxplow.thread.create { from }`) keeps the source session's harness and `acp_agent`.
+- **Thread lifecycle.** Closing a thread (`oxplow.thread.close`) closes its open effort in the same transaction, and once the close commits it stops every open session's process — ACP agent or PTY — through `agent_sessions::SessionProcesses::kill`. A fork (`oxplow.thread.create { from }`) keeps the source session's harness and `acp_agent`.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
-**Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:
+**Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost::new(svc, stream, session)` holds `Weak<Services>` (sessions live in Services) and the agent session it hosts — every envelope and status it records names it — and records exactly what a hooked turn records:
 - `SessionStart` plus the resume id on start (a start closes turns a previous process left open and resets the thread to idle);
 - `UserPromptSubmit` on the person's prompt;
 - `PreToolUse` on every policy check;
@@ -602,10 +689,10 @@ the same JSON.
 
 **RPC and events (tsk338).** `oxplow-rpc/src/commands/acp.rs`; every command is a `ui(...)` parity row, so none can become an MCP tool.
 - **`acp_open_session`** (a ctx row with a hand-written Tauri adapter, because it needs `plugin_runtime` for oxplow's MCP URL and token). It:
-  - checks the thread is ACP;
+  - takes the agent session's id, and checks it is open and an `acp` session (its thread and stream come from the row);
   - resolves the agent (`find`, `may_start`, `resolve_command`);
-  - assembles the system prompt (`system_prompt_via_meta` is true when the command is `claude-agent-acp`);
-  - passes the thread's resume id;
+  - assembles the system prompt (`system_prompt_via_meta` is true when the agent's adapter declares `systemPrompt: meta`);
+  - passes the session's resume id;
   - opens the session and returns the `AcpSnapshot`.
 - **The rest:**
   - `acp_prompt`, the prompt box's Enter, and the only caller of `submit_human_prompt`, which the guard pins;
@@ -614,10 +701,11 @@ the same JSON.
   - `acp_transcript(sinceSeq)`, which returns `null` when there's no session;
   - `acp_dismiss_directive`;
   - `acp_close_session`.
-- **Events:** the `acp:event` channel (frame key `acp`) carries `AcpEvent { threadId, type: item|status|directive|usage|closed, … }` over the daemon's `/events`. It is in `event_channels::FRAMES` and in TS `EVENT_CHANNELS` / `CHANNEL_ROUTING` (multiplexed).
+- **Every RPC takes the session id** (`sessionId`), and `acp_close_session` stops the process only — the session's slot closes with its command.
+- **Events:** the `acp:event` channel (frame key `acp`) carries `AcpEvent { agentSessionId, threadId, generation, type: item|status|directive|usage|closed, … }` over the daemon's `/events`. It is in `event_channels::FRAMES` and in TS `EVENT_CHANNELS` / `CHANNEL_ROUTING` (multiplexed).
 - **Bindings:** raw agent JSON (`rawInput` / `rawOutput`) is TS `unknown`, via `specta_typescript::Unknown`, because specta's own `serde_json::Value` rendering doesn't typecheck.
 
-**UI (tsk339).** `AgentPage` renders `components/acp/AcpAgentView.tsx` for `agent: acp` threads instead of the terminal.
+**UI (tsk339).** `AgentPage` renders `components/acp/AcpAgentView.tsx` (by `sessionId`, filtering events by `agentSessionId`) for an `acp` session instead of the terminal.
 - **Transcript state:** `acpTranscript.ts` is a pure reducer over the `acpTranscript` snapshot and live `acp:event`s. Items upsert by id and the newer seq wins. A seq gap, or a remote reconnect (`onRemoteReconnect`), refetches `since(headSeq)`. Past a gap, `headSeq` stays at the last contiguous seq, so that refetch includes the missed items (tsk356). Each open of a thread's session is a new **generation** (`AcpEvent.generation`, `AcpSnapshot.generation`) whose ids and seqs restart. The reducer starts over on a new generation, so a Restart never mixes old and new transcripts, and late events from a closed session can't overwrite the new one (tsk357). The view subscribes to events before fetching, so nothing between the two is lost.
 - **Opening:** it opens the session on mount when none exists. A failure shows the error with Retry, plus "Open settings" when the agent needs approval.
 - **Items:**
@@ -663,6 +751,35 @@ the same JSON.
 - `acp/session_tests.rs` runs it in-process over a duplex pipe.
 - `tests/acp_services.rs` runs it against real `Services`, and once as its binary.
 
+## Observe conformance
+
+What core records of a harness's session is checked the same way for every
+harness, whatever its hooks look like on the wire:
+`oxplow_app::observe_conformance::suite(svc, &Expect { harness, thread,
+edited, tokens })` reads the thread's events and checks the canonical
+stream. The session started under the harness's key
+(`agent.session.started@2`), a prompt opened a turn, the edit was requested
+and finished with its worktree-relative path, the turn ended completed, and
+the tokens the harness exported were read (`agent.tokens.reported`). An
+empty list of findings passes.
+
+- **Live, over the fake harness** (`crates/oxplow-harness-fake`, a test
+  double: `-fake` keeps it off every shipped binary). The control plane's
+  `tests/observe_conformance.rs` registers it like any harness, opens a
+  session of it, runs its `launch()` command, and its binary posts a
+  scripted session to the live hook route and OTLP receiver with the
+  identity its launch gave it, then the suite runs. The fake renders its
+  own answer shape (`{"fake": …}`) and fails on any other, so a pass also
+  shows every answer was the harness's to render (`AgentHarness::render`).
+- **Every built-in renders the deny as the golden.**
+  `hook_goldens.rs::every_built_in_harness_renders_the_golden_deny`: each
+  registered harness's `render(Deny)` is byte-equal to
+  `pre_tool_write_guard_path.json`.
+- **Not yet: the real harnesses replayed.** The suite is shaped to run over
+  a real harness's hooks recorded with `OXPLOW_HOOK_DEBUG` and replayed
+  through `HookIngestService::ingest`; no recordings are checked in yet, so
+  Claude Code, Codex and opencode never run in CI.
+
 ## Agent policy (shared by every transport, tsk333)
 
 The write guard is one policy that every agent transport asks, not logic
@@ -682,6 +799,14 @@ thread can say what it's working on and get its own effort bucket. The
 bus's `WriteGate` applies to `Write` commands only; `Record` commands
 skip it ([commands.md](./commands.md) "Agent policy").
 
+**An agent may open a sibling agent session** in its own stream
+(`oxplow.agent_session.open`, decided 2026-10-08): the row makes the UI
+attach and start its process, and that is all — nothing types into it.
+The no-automation guards (`forward_terminal_input` UI-only,
+`submit_human_prompt`'s single caller, `no-agent-input-automation.test.ts`)
+are what keep a session an agent opened from being driven. Its close is
+destructive and waits for a person as a proposal.
+
 - **Pure rules** live in `crates/oxplow-runtime/src/policy.rs`.
   `decide_tool(ToolIntent{label, kind, paths}, PolicyFacts)` returns
   `Allow`, or `Deny { layer: WriteGuard, reason }`.
@@ -690,7 +815,7 @@ skip it ([commands.md](./commands.md) "Agent policy").
   - **Other streams:** a path in another stream's worktree (the primary checkout included) is denied for every thread, writer or not (workspace isolation). The primary project's `.oxplow/wiki` is shared and exempt.
   - **Outside every stream:** any other absolute path is allowed.
   - With several paths, the first refused path wins.
-  - The reason text comes from the same cores the Claude builders use
+  - The reason text comes from the same cores `write_guard_reason` uses
     (`write_guard::read_only_reason`), so the wording can't drift.
 - **I/O and state** live in `crates/oxplow-app/src/agent_policy.rs`,
   exposed as `Services.agent_policy`:
@@ -718,7 +843,13 @@ skip it ([commands.md](./commands.md) "Agent policy").
     its `to_payload()`. That is the one place the canonical shape is built;
     the ingest and every reactor key on Claude's tool names.
 - **Transports only render the answer.**
-  - The hook route renders `hookSpecificOutput` for a deny.
+  - The hook route's answer is a neutral `HookAnswer` (`Ack`, `Deny {
+    reason }`, `Context { event, text }`, `oxplow_domain::agent::observe`),
+    rendered by the hook's harness (`AgentHarness::render`): the session's,
+    which the ingest reports (`IngestOutcome.harness`), else the default
+    harness's. Every built-in renders Claude Code's shape
+    (`hookSpecificOutput`; an ack is `{}`) — Codex's command hooks and
+    opencode's bridge speak it too — from `oxplow-harnesses`' `shared.rs`.
   - An ACP agent gets an automatic permission reject or an fs error.
 - **Byte-for-byte pins.** `crates/oxplow-control-plane/tests/hook_goldens.rs`
   pins the Claude responses byte for byte (`UPDATE_GOLDENS=1` rewrites
@@ -1176,18 +1307,18 @@ triggers the same flow on demand.
 
 ## Collection command & skill
 
-The `/oxplow:configure` command (asset `crates/oxplow-plugin/assets/configure.md`)
+The `/oxplow:configure` command (asset `crates/oxplow-agent-text/assets/configure.md`)
 sets up the **collection** subsystem (see `.context/collection.md`): it has
 the agent instrument the project's test tooling to emit standard-format
 reports at stable paths, then records the `testing:` block and one report
 collector per report (`collectors:` with `records:`) in
 `.oxplow/project.yaml`. The standing `oxplow-collection` skill
-(`crates/oxplow-plugin/assets/oxplow-collection.SKILL.md`) loads when a task
+(`crates/oxplow-agent-text/assets/oxplow-collection.SKILL.md`) loads when a task
 closes and on `/oxplow:configure`; it tells the agent to run the tests
 before completing (so a report exists) and — critically — to **never parse
 or report coverage numbers itself**, because oxplow parses the report
-deterministically (`observed`). Both are wired in `write_plugin`
-(`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
+deterministically (`observed`). Both are core text (`core_text` in
+`crates/oxplow-agent-text/src/lib.rs`), which every harness writes. The ingestion side (PostToolUse test
 detector, the report collectors a detected run reads, `oxplow.collector.sync` for
 one run by hand, `oxplow.test.record_run`, and the `list_effort_observations` /
 `get_open_effort` MCP reads) is documented in `.context/collection.md`.
@@ -1263,21 +1394,22 @@ one row keyed by the event (`agent_token_usage.cause`), so a redelivery
 counts it once. Transcript rows carry no `cause` — one chunk can hold
 several turns, so the cursor (step 5) is their redelivery guard (tsk498).
 The transcript path:
-1. Pull `transcript_path` from the payload; resolve the thread's
-   `AgentKind` + stream.
+1. Pull `transcript_path` from the payload; resolve the turn's harness
+   (its agent session's) + stream.
 2. Read the persisted per-session cursor (`agent_token_cursor`), seek to
    it, and read only the COMPLETE lines of the tail (everything up to the
    last newline — a half-written final line is left for next time).
-3. `parse_turns(kind, tail)` splits the new tail into one `Turn` per agent
-   turn — each carrying the human-authored **prompt** that opened it plus
-   the summed usage + `model` of the assistant messages that answered it
-   (tsk143). A turn begins at a genuine user prompt and runs until the next
-   one; tool-result user messages (the harness's continuation lines) fold
-   into the current turn rather than opening a new one. **Pluggable per
-   agent kind:** Claude implemented; Codex/Opencode return `[]` (their
-   transcript formats differ — opencode surfaces its own `$cost` — and are
-   wired later). (`parse_usage_delta` still exists as the whole-chunk sum,
-   but `on_stop` records per-turn.)
+3. The harness's `turns(tail)` (`AgentHarness::turns`) splits the new
+   tail into one `Turn` per agent turn — each carrying the human-authored
+   **prompt** that opened it plus the summed usage + `model` of the
+   assistant messages that answered it (tsk143). For Claude
+   (`crates/oxplow-harnesses/src/claude.rs`) a turn begins at a genuine
+   user prompt and runs until the next one; tool-result user messages (the
+   harness's continuation lines) fold into the current turn rather than
+   opening a new one, and a message counts once by its id. Codex and
+   opencode return `[]` (their transcript formats differ — opencode
+   surfaces its own `$cost` — and aren't read yet); a harness no longer
+   registered reads as none.
 4. Attribute each turn to the effort the oxplow turn ran in (the event's
    effort anchor; without one, the thread's open effort — nullable: a Stop
    can land with no open effort) and persist one
@@ -1538,10 +1670,28 @@ provide finer-grained overrides without displacing earlier context.
 
 ## Agent status
 
-`derive_thread_status` (`crates/oxplow-app/src/agent_status_derive.rs`)
-reduces a thread's recent activity into one of two states: `working` or
-`waiting`. **The input is the event log** (P3.9): the thread's newest 200
-`agent.*` events (`recent_activity`, via `SqliteEventLogStore::recent`),
+**Status is per agent session.** Each session has its own: its newest
+`agent.status.changed` (anchored to the session) and the status derived
+from its own activity; a thread's activity no session claims has one
+too. A thread's status is its sessions' **roll-up**, and a stream's is its
+threads': `oxplow_domain::agent::roll_up_status`, the desktop's
+`rollUpAgentStatus` and the `v_agent_status` model share one rule and one
+truth table (`crates/oxplow-domain/fixtures/agent_status_rollup.json`;
+the model is tested against the Rust rule over every pair). The ranking
+is what the person owes first: **awaiting > stalled > working > waiting**
+(`awaiting_user > stalled > running > error > stopped > idle`). A dead
+turn (`stalled`) means the person owes the next move, so it outranks work
+in flight — a stream whose one thread died beside a busy one must still
+say so; the old stream dot that ranked working first hid it.
+`v_agent_session_status` holds each open session's logged status;
+`AgentStatusChanged` carries the session, the UI keeps statuses by session
+(`sessionStatusKey`) and rolls them up per thread (`threadStatuses`) and
+per stream.
+
+`derive_session_status` (`crates/oxplow-app/src/agent_status_derive.rs`)
+reduces a session's recent activity into one of two states: `working` or
+`waiting`. **The input is the event log** (P3.9): the session's newest 200
+`agent.*` events (`recent_activity`, via `SqliteEventLogStore::recent_in_session`),
 each read as an `Activity` (`activity_of`) — `prompt.submitted` (every
 prompt, re-prompts too), `tool.requested{allowed}` (a refused request never
 runs, so it opens no tool), `tool.finished`, `turn.ended` (completed vs
@@ -1576,7 +1726,7 @@ prompt — "should I implement this plan?") and `AskUserQuestion` (the
 clarifying-question prompt). Each fires `PreToolUse` when the agent
 invokes it, but the matching `PostToolUse` only arrives once the user
 answers. Until then no `Stop` hook fires either — the agent is
-genuinely waiting on the user. `derive_thread_status` counts unreturned
+genuinely waiting on the user. `derive_session_status` counts unreturned
 calls to either tool (`is_user_input_tool` in
 `crates/oxplow-app/src/agent_status_derive.rs`) and, if the count is >0
 at the end of replay, overrides the derived state to `AwaitingUser` so
@@ -1608,7 +1758,7 @@ mid-stream) or a model-unavailable error ("Claude Fable 5 is currently
 unavailable") and the process drops back to its prompt — observed live
 as a dot stuck on `working` for ~1h while the queue silently stalled.
 Nothing event-driven can catch that, so the derivation is time-aware:
-`derive_thread_status(events, now)` degrades a derived `Running` whose
+`derive_session_status(events, now)` degrades a derived `Running` whose
 newest hook event is older than its silence threshold to a derived-only
 `AgentStatusState::Stalled` (never persisted to the agent_status
 table). **Two thresholds (tsk130),** chosen by whether a tool call is
@@ -1625,23 +1775,23 @@ still open (any `PreToolUse` without its matching `PostToolUse`):
 tokens to the terminal for many minutes while emitting **no**
 Pre/PostToolUse between tool calls, so a frozen hook log alone reads as
 death even though the agent is plainly working — the inverse of the
-tsk130 death case. `derive_thread_status_with_activity(events,
+tsk130 death case. `derive_session_status_with_activity(events,
 last_output_at, now)` therefore measures silence from the *later* of
 the newest hook event and `last_output_at` (the thread's most recent
 PTY output). An agent still writing to its PTY stays `Running`
 regardless of how stale its last hook is; only when **both** signals go
 quiet past the threshold does the turn degrade to `Stalled` — so tsk130
 death detection is intact (a dead turn stops emitting output too, and
-output older than the threshold can't revive it). `derive_thread_status`
+output older than the threshold can't revive it). `derive_session_status`
 is the hook-only wrapper (`last_output_at = None`), used where a hook
 just arrived (so the log is fresh by construction); the watchdog uses
 the activity-aware form. Liveness is tracked by
-`output_activity::OutputActivity` (a per-`ThreadId` last-output
+`output_activity::OutputActivity` (a per-agent-session last-output
 timestamp, never persisted): the terminal forwarder
-(`terminal_sessions.rs`) stamps it on every output burst for sessions
-spawned with a known thread id (agent panes via
-`attach_or_create_for_thread`; shell panes are not thread-scoped and
-contribute none), and `AgentStallWatch` reads it. The single shared
+(`terminal_sessions.rs`) stamps it on every output burst for a pane
+spawned for an agent session (`attach_or_create_for_agent` with an
+`AgentPane`; shell panes contribute none), the ACP host on its agent's
+activity, and `AgentStallWatch` reads it. The single shared
 instance lives on `Services::output_activity`.
 
 The `AwaitingUser` override (ExitPlanMode / AskUserQuestion — see the
@@ -1649,8 +1799,8 @@ user-input-pending carve-out) is exempt from both: waiting on the user
 indefinitely is legitimate. Because no hook will ever arrive to trigger
 a re-derive, `AgentStallWatch`
 (`crates/oxplow-app/src/agent_stall_watch.rs`, spawned from `boot.rs`)
-re-derives every thread once a minute and pushes
-`AgentStatusChanged { state: Stalled }` so the renderer's dot recovers
+re-derives every open session once a minute and pushes
+`AgentStatusChanged { agent_session_id, state: Stalled }` so the renderer's dot recovers
 on its own. It raises nothing about in_progress tasks: a task left in
 progress while its agent is idle is normal (nothing marks work done, and
 the agent may be waiting on the person — `.context/work-tracking.md`).

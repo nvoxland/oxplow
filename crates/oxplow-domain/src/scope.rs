@@ -54,6 +54,12 @@ pub const SCOPES: &[Scope] = &[
         summary: "Put text in a thread's agent input, unsent — a person's: oxplow never types for the agent.",
     },
     Scope {
+        id: "agent_sessions.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        summary: "Open, rename and close a thread's agent sessions. Opening one only adds the slot (the UI starts its process, and nothing types into it); closing one stops its process.",
+    },
+    Scope {
         id: "bookmarks.write",
         access: Access::Record,
         host: Host::Daemon,

@@ -125,6 +125,22 @@ impl RingBuffer {
     }
 }
 
+/// The registry key of agent session `session`'s PTY: one per session, so
+/// a re-attach — another window, a browser client — resumes the one live
+/// agent rather than spawning a duplicate in the same worktree.
+pub fn agent_pane_key(session: oxplow_domain::AgentSessionId) -> SessionKey {
+    format!("session|{session}")
+}
+
+/// The agent a PTY runs: its thread and agent session. Its output stamps
+/// the session's liveness, and its exit ends the session's harness session
+/// (`HookIngestService` records a `SessionEnd` for it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentPane {
+    pub thread: ThreadId,
+    pub session: Option<oxplow_domain::AgentSessionId>,
+}
+
 #[derive(Clone)]
 pub struct TerminalSessionRegistry {
     pty: PtyManager,
@@ -139,6 +155,9 @@ pub struct TerminalSessionRegistry {
     /// watchdog can tell a busy long turn from a dead one — see
     /// [`crate::output_activity`] and tsk141.
     activity: crate::output_activity::OutputActivity,
+    /// Where an agent pane's exit is recorded; set once the ingest is
+    /// built (`ingest_exits_into`).
+    exits: Arc<std::sync::OnceLock<crate::hook_ingest::HookIngestService>>,
 }
 
 impl TerminalSessionRegistry {
@@ -150,7 +169,15 @@ impl TerminalSessionRegistry {
             by_key: Arc::new(Mutex::new(HashMap::new())),
             events_tx,
             activity,
+            exits: Arc::new(std::sync::OnceLock::new()),
         }
+    }
+
+    /// Record each agent pane's process exit through `ingest` (a
+    /// `SessionEnd` naming its agent session): a harness that posts no
+    /// SessionEnd of its own still ends its session and its open turn.
+    pub fn ingest_exits_into(&self, ingest: crate::hook_ingest::HookIngestService) {
+        let _ = self.exits.set(ingest);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<TerminalBridgeEvent> {
@@ -187,18 +214,17 @@ impl TerminalSessionRegistry {
         rows: u16,
         make_request: impl FnOnce(u16, u16) -> SpawnRequest,
     ) -> Result<AttachResult, TerminalSessionError> {
-        self.attach_or_create_for_thread(key, None, cols, rows, make_request)
+        self.attach_or_create_for_agent(key, None, cols, rows, make_request)
             .await
     }
 
-    /// As [`attach_or_create`], but binds the session's PTY output to a
-    /// thread so the forwarder records liveness for the stall watchdog
-    /// (tsk141). Agent panes pass `Some(thread)`; shell panes (which are
-    /// not thread-scoped) pass `None` and contribute no liveness.
-    pub async fn attach_or_create_for_thread(
+    /// As [`attach_or_create`], but binds the PTY to the agent it runs, so
+    /// the forwarder records liveness for the stall watchdog and its exit
+    /// ends the agent's session. Shell panes pass `None`.
+    pub async fn attach_or_create_for_agent(
         &self,
         key: SessionKey,
-        activity_thread: Option<ThreadId>,
+        agent: Option<AgentPane>,
         cols: u16,
         rows: u16,
         make_request: impl FnOnce(u16, u16) -> SpawnRequest,
@@ -214,7 +240,7 @@ impl TerminalSessionRegistry {
             // create a fresh session.
         }
         let req = make_request(cols, rows);
-        let session_id = self.spawn_with(req, key.clone(), activity_thread).await?;
+        let session_id = self.spawn_with(req, key.clone(), agent).await?;
         Ok(Self::build_attach_result(session_id, Vec::new()))
     }
 
@@ -239,7 +265,7 @@ impl TerminalSessionRegistry {
         &self,
         req: SpawnRequest,
         key: SessionKey,
-        activity_thread: Option<ThreadId>,
+        agent: Option<AgentPane>,
     ) -> Result<String, TerminalSessionError> {
         let mut handle = self.pty.spawn_pane(req).await?;
         let pane_id = handle.id.clone();
@@ -254,6 +280,7 @@ impl TerminalSessionRegistry {
         let ring = Arc::new(Mutex::new(RingBuffer::new()));
         let ring_for_task = Arc::clone(&ring);
         let activity = self.activity.clone();
+        let exits = Arc::clone(&self.exits);
         let sessions = Arc::clone(&self.inner);
         let by_key = Arc::clone(&self.by_key);
         let pty = self.pty.clone();
@@ -269,8 +296,8 @@ impl TerminalSessionRegistry {
                         // thread-bound (agent) panes record; the cadence
                         // distinguishes a busy long turn from a dead one
                         // (tsk141).
-                        if let Some(tid) = activity_thread {
-                            activity.record(tid, Timestamp::now());
+                        if let Some(session) = agent.and_then(|pane| pane.session) {
+                            activity.record(session, Timestamp::now());
                         }
                         ring_for_task.lock().await.push(bytes.clone());
                         let msg = serde_json::json!({
@@ -301,6 +328,22 @@ impl TerminalSessionRegistry {
                         let mut keys = by_key.lock().await;
                         if keys.get(&key_for_task) == Some(&session_id_for_task) {
                             keys.remove(&key_for_task);
+                        }
+                        drop(keys);
+                        if let (Some(pane), Some(ingest)) = (agent, exits.get()) {
+                            let exit = crate::hook_ingest::HookEnvelope {
+                                kind: oxplow_domain::HookKind::SessionEnd,
+                                thread_id: Some(pane.thread),
+                                stream_id: None,
+                                agent_session_id: pane.session,
+                                session_id: None,
+                                payload_json: serde_json::json!({ "reason": "exit" }).to_string(),
+                                prompt: None,
+                                decision: None,
+                            };
+                            if let Err(err) = ingest.ingest(exit).await {
+                                warn!(?err, "recording an agent's exit failed");
+                            }
                         }
                         break;
                     }
@@ -405,6 +448,13 @@ impl TerminalSessionRegistry {
     /// Permanently kill a session and free its PTY. Use when a thread
     /// is closed or the user explicitly asks to terminate the agent —
     /// not on every renderer unmount.
+    /// Stop the PTY registered under `key`, if one is.
+    pub async fn close_key(&self, key: &str) {
+        if let Some(id) = self.session_id_for_key(key).await {
+            let _ = self.close(&id).await;
+        }
+    }
+
     pub async fn close(&self, session_id: &str) -> Result<(), TerminalSessionError> {
         let mut map = self.inner.lock().await;
         let entry = map
@@ -555,6 +605,73 @@ mod tests {
         // Once killed, the key reads as None again (no stale id leaks).
         let _ = reg.close(&result.session_id).await;
         assert_eq!(reg.session_id_for_key(&key).await, None);
+    }
+
+    /// An agent's process exiting ends its session: the registry records a
+    /// `SessionEnd` for its agent session (Codex posts none of its own).
+    #[tokio::test]
+    async fn an_agent_panes_exit_ends_its_session() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let session = svc
+            .agent_session_store
+            .newest_for_thread(fx.thread)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        svc.db
+            .transaction(move |tx| {
+                oxplow_db::agent_session_store::set_resume_tx(tx, session, "h1", Timestamp::now())
+            })
+            .await
+            .unwrap();
+        svc.terminal_sessions
+            .attach_or_create_for_agent(
+                "s|ses".to_string(),
+                Some(AgentPane {
+                    thread: fx.thread,
+                    session: Some(session),
+                }),
+                80,
+                24,
+                |c, r| SpawnRequest {
+                    command: "sh".into(),
+                    args: vec!["-c".into(), "exit 0".into()],
+                    cwd: std::env::temp_dir(),
+                    env: vec![],
+                    env_remove: vec![],
+                    cols: c,
+                    rows: r,
+                },
+            )
+            .await
+            .expect("spawn");
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let events = svc.event_log_store.read_after(0, 1000).await.unwrap();
+                if let Some(e) = events
+                    .into_iter()
+                    .find(|e| e.envelope.event_type == "agent.session.ended")
+                {
+                    return e;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the exit is recorded");
+        assert_eq!(ended.envelope.payload["reason"], "exit");
+        assert_eq!(ended.envelope.payload["session"], "h1");
+        assert_eq!(ended.envelope.anchors.agent_session_id, Some(session));
+    }
+
+    #[test]
+    fn an_agent_pane_is_keyed_by_its_session() {
+        assert_eq!(
+            agent_pane_key(oxplow_domain::AgentSessionId::new(3)),
+            "session|ses3"
+        );
     }
 
     /// tsk1026: a session whose process exited is unregistered, so

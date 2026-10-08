@@ -1828,6 +1828,7 @@ impl ProviderRegistry {
                 features,
                 fields: serde_json::to_value(&instance.spec.fields).unwrap_or_default(),
                 id_pattern: instance.spec.id_pattern.clone(),
+                config: serde_json::json!({}),
             },
             true,
         );
@@ -1964,6 +1965,7 @@ impl ProviderRegistry {
                 features: Value::Null,
                 fields: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
+                config: serde_json::json!({}),
             },
             false,
         );

@@ -12,7 +12,17 @@
 //! An entry names a built-in in core's standard library
 //! (`capabilities::BUILT_INS`), the way a collector names `oxplow:junit`;
 //! which one is active is the person's and the project's choice
-//! (`capabilities::CapabilityRegistry::resolve`).
+//! (`capabilities::CapabilityRegistry::resolve`) — or, for a capability
+//! many implementations serve (`agent_harness`, `acp_adapter`,
+//! `ai_provider`), every one declared. `config:` configures the built-in,
+//! checked against its schema:
+//!
+//! ```yaml
+//!   - capability: acp_adapter
+//!     id: gemini
+//!     entry: oxplow:acp-adapter
+//!     config: { command: gemini, args: [--acp] }
+//! ```
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -33,6 +43,10 @@ pub struct ImplementationDecl {
     /// The extension's skills (`skills:`) it owns: offered only while it's
     /// the active implementation.
     pub skills: Vec<String>,
+    /// What the declaration configures, checked against the built-in's
+    /// schema; `{}` when it says nothing.
+    #[specta(type = specta_typescript::Any)]
+    pub config: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -45,6 +59,8 @@ struct ImplementationFile {
     entry: String,
     #[serde(default)]
     skills: Vec<String>,
+    #[serde(default)]
+    config: Option<Value>,
 }
 
 /// Parse `implementations:`: the valid declarations, and what's wrong
@@ -96,17 +112,21 @@ pub fn parse_implementations(
 
 fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
     use oxplow_domain::capability;
-    let Some(spec) = capability::spec(&f.capability).filter(|c| c.choosable) else {
+    let Some(spec) = capability::spec(&f.capability).filter(|c| c.choosable || c.many) else {
         return Err(format!(
-            "`{}` isn't a capability whose implementation can be chosen ({})",
+            "`{}` isn't a capability an extension implements ({})",
             f.capability,
-            capability::choosable()
+            capability::CAPABILITIES
+                .iter()
+                .filter(|c| c.choosable || c.many)
                 .map(|c| c.id)
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
     };
-    if !spec.optional && f.id == spec.default {
+    // A required capability's default is core's own; a many-capability's
+    // default is just the one used when nothing names one.
+    if !spec.optional && !spec.many && f.id == spec.default {
         return Err(format!(
             "`{}` implementation `{}` is core's own (a required capability's default); \
              declare another id",
@@ -148,12 +168,25 @@ fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
             f.entry, f.id
         ));
     }
+    let config = match f.config {
+        Some(v) => serde_json::to_value(v).map_err(|e| format!("config: {e}"))?,
+        None => serde_json::json!({}),
+    };
+    match built_in.config_schema {
+        Some(schema) => capability::check_config(schema, &config)
+            .map_err(|e| format!("`{}` implementation `{}`: {e}", spec.id, f.id))?,
+        None if config != serde_json::json!({}) => {
+            return Err(format!("entry `{}` takes no config", f.entry))
+        }
+        None => {}
+    }
     Ok(ImplementationDecl {
         capability: f.capability,
         id: f.id,
         title: f.title,
         entry: f.entry,
         skills: f.skills,
+        config,
     })
 }
 
@@ -180,6 +213,7 @@ mod tests {
                 title: None,
                 entry: "oxplow:tasks".into(),
                 skills: vec![],
+                config: serde_json::json!({}),
             }]
         );
     }
@@ -200,12 +234,40 @@ mod tests {
         );
     }
 
+    /// A declaration's `config:` is checked against its built-in's schema;
+    /// one that takes none refuses any.
+    #[test]
+    fn config_is_checked_against_the_built_ins_schema() {
+        let (decls, errors) = parse(
+            "  - { capability: acp_adapter, id: gemini, entry: oxplow:acp-adapter, config: { command: gemini, args: [--acp] } }\n",
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(
+            decls[0].config,
+            serde_json::json!({ "command": "gemini", "args": ["--acp"] })
+        );
+        let errors = |yaml: &str| parse(yaml).1.join("\n");
+        assert!(
+            errors("  - { capability: acp_adapter, id: x, entry: oxplow:acp-adapter, config: { args: [] } }\n")
+                .contains("command"),
+        );
+        assert!(errors(
+            "  - { capability: agent_harness, id: claude, entry: oxplow:claude-code, config: { a: 1 } }\n"
+        )
+        .contains("takes no config"));
+        // A many-capability's default id is anyone's to declare.
+        assert_eq!(
+            parse("  - { capability: agent_harness, id: claude, entry: oxplow:claude-code }\n").1,
+            Vec::<String>::new()
+        );
+    }
+
     #[test]
     fn what_core_doesnt_know_is_refused() {
         let errors = |yaml: &str| parse(yaml).1.join("\n");
         assert!(
             errors("  - { capability: vcs, id: jj, entry: oxplow:tasks }\n")
-                .contains("can be chosen")
+                .contains("an extension implements")
         );
         assert!(
             errors("  - { capability: work_items, id: beads, entry: oxplow:beads }\n")

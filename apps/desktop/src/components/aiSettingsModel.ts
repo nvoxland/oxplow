@@ -1,33 +1,30 @@
 /// Pure view-model for the Settings → AI section (`AiSection.tsx`).
 /// See `.context/ai-providers.md`.
 
-import type { AiSettings, ProviderKind, ProviderStatus, Role, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { AiSettings, ProviderKindInfo, Role, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
-export type ProviderForm = { id: string; kind: ProviderKind; baseUrl: string; key: string; editing: boolean };
+/// `kind` is a registered provider kind (`AiSettings.kinds`).
+export type ProviderForm = { id: string; kind: string; baseUrl: string; key: string; editing: boolean };
 
-export const PROVIDER_KINDS: { kind: ProviderKind; label: string; baseUrlHint: string }[] = [
-  { kind: "anthropic", label: "Anthropic", baseUrlHint: "https://api.anthropic.com" },
-  { kind: "openai", label: "OpenAI", baseUrlHint: "https://api.openai.com/v1" },
-  { kind: "openrouter", label: "OpenRouter", baseUrlHint: "https://openrouter.ai/api/v1" },
-  { kind: "openai-compatible", label: "Local / OpenAI-compatible (Ollama, LM Studio, vLLM)", baseUrlHint: "http://localhost:11434/v1" },
-  { kind: "typesafe", label: "TypeSafe (Jev)", baseUrlHint: "https://api.typesafe.ai" },
-];
-
-export function kindLabel(kind: ProviderKind): string {
-  return PROVIDER_KINDS.find((k) => k.kind === kind)?.label ?? kind;
+/// A kind as a person reads it: its title, else its key.
+export function kindLabel(kinds: ProviderKindInfo[], kind: string): string {
+  return kinds.find((k) => k.kind === kind)?.title ?? kind;
 }
 
-export function emptyProviderForm(): ProviderForm {
-  return { id: "", kind: "openrouter", baseUrl: "", key: "", editing: false };
+/// A blank form, its kind the first one registered.
+export function emptyProviderForm(kinds: ProviderKindInfo[]): ProviderForm {
+  return { id: "", kind: kinds[0]?.kind ?? "", baseUrl: "", key: "", editing: false };
 }
 
 /// Why the form can't be saved yet, or null when it can.
-export function providerFormError(form: ProviderForm, existing: ProviderStatus[]): string | null {
+export function providerFormError(form: ProviderForm, settings: AiSettings): string | null {
   const id = form.id.trim();
   if (!id) return "Name it (e.g. openrouter).";
   if (/\s/.test(id)) return "The name can't contain spaces.";
-  if (!form.editing && existing.some((p) => p.id === id)) return `There's already a provider named ${id}.`;
-  if (form.kind === "openai-compatible" && !form.baseUrl.trim()) return "Local and compatible servers need a base URL.";
+  if (!form.editing && settings.providers.some((p) => p.id === id)) return `There's already a provider named ${id}.`;
+  const kind = settings.kinds.find((k) => k.kind === form.kind);
+  if (!kind) return settings.kinds.length === 0 ? "No provider kinds are available." : "Pick a kind.";
+  if (kind.defaultBaseUrl === null && !form.baseUrl.trim()) return `${kind.title} needs a base URL.`;
   return null;
 }
 

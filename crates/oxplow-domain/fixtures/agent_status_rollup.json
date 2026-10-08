@@ -1,0 +1,15 @@
+{
+  "about": "How agent statuses roll up: a thread's from its sessions, a stream's from its threads. The person's attention ranks first: awaiting_user (they owe an answer) > stalled (a dead turn — they owe the next move) > running > error > stopped > idle. `null` is nothing to roll up. Shared by oxplow_domain::agent::roll_up_status and the desktop's rollUpAgentStatus.",
+  "cases": [
+    { "states": [], "expect": null },
+    { "states": ["idle"], "expect": "idle" },
+    { "states": ["running", "idle"], "expect": "running" },
+    { "states": ["running", "awaiting_user"], "expect": "awaiting_user" },
+    { "states": ["stalled", "running"], "expect": "stalled" },
+    { "states": ["awaiting_user", "stalled"], "expect": "awaiting_user" },
+    { "states": ["stopped", "idle"], "expect": "stopped" },
+    { "states": ["error", "stopped", "idle"], "expect": "error" },
+    { "states": ["running", "error"], "expect": "running" },
+    { "states": ["idle", "stalled", "idle"], "expect": "stalled" }
+  ]
+}

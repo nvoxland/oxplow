@@ -152,6 +152,8 @@ impl EventSchemaRegistry {
         r.register::<AgentTurnEndedAtV1>()
             .expect("core type registers");
         r.register::<AgentTurnEnded>().expect("core type registers");
+        r.register::<AgentSessionStartedAtV1>()
+            .expect("core type registers");
         r.register::<AgentSessionStarted>()
             .expect("core type registers");
         r.register::<AgentSessionEnded>()
@@ -1200,6 +1202,9 @@ pub struct ContentRef {
     pub truncated: bool,
 }
 
+// v1's harness vocabulary (`agent.session.started@1`), kept for that
+// published shape; v2 carries the harness's registry key. The doc comment
+// below is part of the published schema: never edit it.
 /// The agent harness a session ran in — the event's own vocabulary, so
 /// the published contract doesn't change with the internal `AgentKind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1210,18 +1215,6 @@ pub enum Harness {
     Opencode,
     /// Any agent spoken to over the Agent Client Protocol.
     Acp,
-}
-
-impl From<crate::agent::AgentKind> for Harness {
-    fn from(kind: crate::agent::AgentKind) -> Self {
-        use crate::agent::AgentKind as K;
-        match kind {
-            K::Claude => Harness::Claude,
-            K::Codex => Harness::Codex,
-            K::Opencode => Harness::Opencode,
-            K::Acp => Harness::Acp,
-        }
-    }
 }
 
 /// A status a thread's agent can be logged in. There is no `stalled`: that
@@ -1278,11 +1271,42 @@ pub struct AgentSessionStartedV1 {
     pub resumed: bool,
 }
 
-pub struct AgentSessionStarted;
-impl EventType for AgentSessionStarted {
+/// The v1 shape of `agent.session.started`, as a registry entry.
+pub struct AgentSessionStartedAtV1;
+impl EventType for AgentSessionStartedAtV1 {
     const TYPE: &'static str = "agent.session.started";
     const V: u32 = 1;
     type Payload = AgentSessionStartedV1;
+}
+
+/// `agent.session.started@2`: v1 with the harness as its registry key
+/// (`claude`, or whatever an extension declares). A v1 payload is a v2 one
+/// as is: its four names are those keys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSessionStartedV2 {
+    pub session: String,
+    pub thread: String,
+    /// The harness's registry key; empty when no agent session claims the
+    /// hook (an agent oxplow didn't start).
+    pub harness: String,
+    /// The session is the thread's resume session (a reattach), not new.
+    pub resumed: bool,
+}
+
+pub struct AgentSessionStarted;
+impl EventType for AgentSessionStarted {
+    const TYPE: &'static str = "agent.session.started";
+    const V: u32 = 2;
+    type Payload = AgentSessionStartedV2;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "no upcast of agent.session.started from v{from_v}"
+            ))),
+        }
+    }
 }
 
 /// `agent.session.ended@1`: the harness ended a session (`/clear`, exit).
@@ -2220,6 +2244,7 @@ mod tests {
                 ("agent.prompt.submitted", 1),
                 ("agent.session.ended", 1),
                 ("agent.session.started", 1),
+                ("agent.session.started", 2),
                 ("agent.status.changed", 1),
                 ("agent.tokens.reported", 1),
                 ("agent.tool.finished", 1),

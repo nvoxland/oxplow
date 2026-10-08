@@ -958,6 +958,7 @@ mod tests {
         let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
             loop {
                 svc.acp.emit_event_for_tests(AcpEvent {
+                    agent_session_id: "ses4".into(),
                     thread_id: "thr3".into(),
                     generation: 1,
                     body: AcpEventBody::Status {
@@ -976,6 +977,7 @@ mod tests {
         .expect("ws frame within timeout");
         let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
         assert_eq!(v["channel"], "acp");
+        assert_eq!(v["payload"]["agentSessionId"], "ses4");
         assert_eq!(v["payload"]["threadId"], "thr3");
         assert_eq!(v["payload"]["type"], "status");
         assert_eq!(v["payload"]["status"], "running");

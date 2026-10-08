@@ -50,6 +50,7 @@ impl LspProvider {
         self.worktrees
             .resolve_strict(Some(&stream.to_string()))
             .await
+            .map(|r| r.into_local_path())
             .map_err(|e| CodeIntelError::Failed(e.to_string()))
     }
 

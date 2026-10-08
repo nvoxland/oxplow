@@ -34,6 +34,8 @@ import { EmptyState } from "../Prompts/EmptyState.js";
 
 interface Props {
   thread: Thread;
+  /** The ACP agent session (`ses3`) it shows. */
+  sessionId: string;
   /** The stream's worktree, to show paths relative to it. */
   worktreePath?: string;
   visible: boolean;
@@ -46,14 +48,15 @@ interface Props {
 }
 
 /**
- * An ACP thread: the agent's conversation as structured items (messages,
- * tool calls with diffs, the plan, permission cards, policy notices) and
- * a prompt box. It replaces the terminal for `agent: acp` threads.
+ * An ACP agent session: the agent's conversation as structured items
+ * (messages, tool calls with diffs, the plan, permission cards, policy
+ * notices) and a prompt box. It is a `chat` session's tab, where a
+ * terminal session shows its PTY.
  *
  * oxplow never sends the agent anything on its own: only the person's
  * Enter sends (see AcpPromptBox).
  */
-export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage }: Props) {
+export function AcpAgentView({ thread, sessionId, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage }: Props) {
   const threadId = thread.id;
   const [state, setState] = useState<AcpViewState>(initialState);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -66,36 +69,36 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
     setOpening(true);
     setOpenError(null);
     try {
-      const snap = await acpOpenSession(threadId);
+      const snap = await acpOpenSession(sessionId);
       setState((s) => mergeSnapshot({ ...s, closedReason: null }, snap));
     } catch (err) {
       setOpenError(err instanceof Error ? err.message : String(err));
     } finally {
       setOpening(false);
     }
-  }, [threadId]);
+  }, [sessionId]);
 
   const refetch = useCallback(async () => {
     try {
-      const snap = await acpTranscript(threadId, headSeq.current);
+      const snap = await acpTranscript(sessionId, headSeq.current);
       if (snap) setState((s) => mergeSnapshot(s, snap));
     } catch {
       // The next event or reconnect retries.
     }
-  }, [threadId]);
+  }, [sessionId]);
 
   // Events first, then the snapshot, so nothing between the two is lost
   // (duplicates merge by id and seq).
   useEffect(() => {
     setState(initialState());
     const unsubscribe = subscribeAcpEvents((e) => {
-      if (e.threadId !== threadId) return;
+      if (e.agentSessionId !== sessionId) return;
       setState((s) => applyEvent(s, e));
     });
     let cancelled = false;
     void (async () => {
       try {
-        const snap = await acpTranscript(threadId, 0);
+        const snap = await acpTranscript(sessionId, 0);
         if (cancelled) return;
         if (snap) setState((s) => mergeSnapshot(s, snap));
         else void open();
@@ -109,7 +112,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
       unsubscribe();
       offReconnect();
     };
-  }, [threadId, open, refetch]);
+  }, [sessionId, open, refetch]);
 
   useEffect(() => {
     if (state.stale) void refetch();
@@ -122,7 +125,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
   // Stable, so the memoized transcript re-renders only when what it
   // shows changes.
   const report = useCallback((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)), []);
-  const cancel = useCallback(() => void acpCancel(threadId).catch(report), [threadId, report]);
+  const cancel = useCallback(() => void acpCancel(sessionId).catch(report), [sessionId, report]);
   const reportMessage = useCallback((m: string) => setActionError(m), []);
 
   const relPath = useCallback(
@@ -191,6 +194,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
       <Transcript
         items={state.items}
         threadId={threadId}
+        sessionId={sessionId}
         relPath={relPath}
         onOpenDiff={onOpenDiff}
         onOpenFile={onOpenFile}
@@ -221,7 +225,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
       )}
 
       <AcpPromptBox
-        threadId={threadId}
+        sessionId={sessionId}
         busy={busy}
         disabled={!live}
         visible={visible}
@@ -237,6 +241,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
 const Transcript = memo(function Transcript({
   items,
   threadId,
+  sessionId,
   relPath,
   onOpenDiff,
   onOpenFile,
@@ -246,6 +251,7 @@ const Transcript = memo(function Transcript({
 }: {
   items: TranscriptItem[];
   threadId: string;
+  sessionId: string;
   relPath(p: string): string;
   onOpenDiff?(spec: DiffSpec): void;
   onOpenFile?(absPath: string): void;
@@ -292,6 +298,7 @@ const Transcript = memo(function Transcript({
             <Item
               item={item}
               threadId={threadId}
+              sessionId={sessionId}
               answers={answers}
               proposals={proposals}
               onOpenPage={onOpenPage}
@@ -328,6 +335,7 @@ function decidedLine(p: Proposal): string {
 const Item = memo(function Item({
   item,
   threadId,
+  sessionId,
   answers,
   proposals,
   onOpenPage,
@@ -338,6 +346,8 @@ const Item = memo(function Item({
 }: {
   item: TranscriptItem;
   threadId: string;
+  /** The ACP agent session the item is in. */
+  sessionId: string;
   /** The thread's answers by ref: a `show_lens` call renders its own. */
   answers: ReadonlyMap<string, AnswerRow>;
   /** The thread's proposals by ref: the call that made one shows it. */
@@ -434,7 +444,7 @@ const Item = memo(function Item({
                   type="button"
                   data-testid={`acp-permission-${item.requestId}-${o.id}`}
                   style={o.kind.startsWith("allow") ? primaryButton : smallButton}
-                  onClick={() => void acpRespondPermission(threadId, item.requestId, o.id).catch(onError)}
+                  onClick={() => void acpRespondPermission(sessionId, item.requestId, o.id).catch(onError)}
                 >
                   {o.name}
                 </button>

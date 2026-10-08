@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use oxplow_db::{Database, SqliteAgentSessionStore, SqliteStreamStore, SqliteThreadStore};
 use oxplow_domain::stores::ThreadStore as _;
-use oxplow_domain::{AgentKind, DomainError, StreamKind};
+use oxplow_domain::{DomainError, StreamKind};
 use oxplow_session::{SessionError, StreamService, WorkspaceLayout};
 use tempfile::tempdir;
 
@@ -52,53 +52,40 @@ impl TestEnv {
 }
 
 fn service(project: &Path) -> StreamService {
-    service_running(project, AgentKind::Claude, None)
+    service_over(project, Database::in_memory())
 }
 
-/// A service whose new threads run `agent` (and `acp_agent`).
-fn service_running(project: &Path, agent: AgentKind, acp_agent: Option<&str>) -> StreamService {
-    let db = Database::in_memory();
-    let acp_agent = acp_agent.map(str::to_string);
+fn service_over(project: &Path, db: Database) -> StreamService {
     StreamService::new(
         WorkspaceLayout::for_project(project),
         Arc::new(GitProvider),
         Arc::new(SqliteStreamStore::new(db.clone())),
-        Arc::new(SqliteThreadStore::new(db.clone())),
-        Arc::new(SqliteAgentSessionStore::new(db)),
-        Arc::new(move || (agent, acp_agent.clone())),
+        Arc::new(SqliteThreadStore::new(db)),
     )
 }
 
-/// tsk970: a stream's seeded thread runs the project's default agent, not
-/// always Claude.
+/// A stream's seeded thread opens with no agent session: the person opens
+/// its sessions.
 #[tokio::test]
-async fn the_seeded_thread_runs_the_projects_default_agent() {
+async fn the_seeded_thread_has_no_agent_session() {
     let parent = tempdir().unwrap();
     let project = parent.path().join("project");
     std::fs::create_dir(&project).unwrap();
     init_repo(&project);
     let db = Database::in_memory();
-    let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
-    let svc = StreamService::new(
-        WorkspaceLayout::for_project(&project),
-        Arc::new(GitProvider),
-        Arc::new(SqliteStreamStore::new(db.clone())),
-        thread_store.clone(),
-        Arc::new(SqliteAgentSessionStore::new(db.clone())),
-        Arc::new(|| (AgentKind::Acp, Some("fake".to_string()))),
-    );
+    let svc = service_over(&project, db.clone());
     let primary = svc.ensure_primary().await.unwrap();
-    let threads = thread_store.list_for_stream(&primary.id).await.unwrap();
+    let threads = SqliteThreadStore::new(db.clone())
+        .list_for_stream(&primary.id)
+        .await
+        .unwrap();
     assert_eq!(threads.len(), 1);
-    let session = SqliteAgentSessionStore::new(db)
-        .newest_for_thread(threads[0].id)
+    use oxplow_domain::stores::AgentSessionStore as _;
+    assert!(SqliteAgentSessionStore::new(db)
+        .list_open_for_thread(&threads[0].id)
         .await
         .unwrap()
-        .unwrap();
-    assert_eq!(
-        (session.harness, session.acp_agent.as_deref()),
-        (AgentKind::Acp, Some("fake"))
-    );
+        .is_empty());
 }
 
 fn make_service() -> (StreamService, TestEnv) {

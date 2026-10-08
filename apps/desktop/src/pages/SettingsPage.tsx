@@ -7,7 +7,6 @@ import {
   setAgents,
   setAgentPromptAppend,
   subscribeOxplowEvents,
-  type AgentKind,
 } from "../api.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import type { EffectiveSetting } from "../tauri-bridge/generated/bindings.js";
@@ -22,7 +21,8 @@ import { SettingsSlotSections } from "../lens/SettingsSlotSections.js";
 import { AiSection } from "../components/AiSection.js";
 import { ProposalCard } from "../components/Proposals/ProposalCard.js";
 import { decide, proposalForSetting, useProposals, type Proposal } from "../proposals.js";
-import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
+import { useAgentHarnesses } from "../useAgentHarnesses.js";
+import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { onSettingsSection, scrollToSettingsSection, SETTINGS_SECTIONS, takeSettingsSection } from "./settingsSections.js";
 
 export interface SettingsPageProps {
@@ -47,7 +47,11 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     return onSettingsSection(scrollToSettingsSection);
   }, []);
   const [promptAppend, setPromptAppend] = useState("");
-  const [agents, setAgentsState] = useState<AgentKind[]>(["claude"]);
+  const harnesses = useAgentHarnesses();
+  // The enabled harnesses in priority order; `null` until edited, which
+  // shows what the project has (every harness when `agents:` names none).
+  const [editedAgents, setAgentsState] = useState<string[] | null>(null);
+  const agents = editedAgents ?? harnesses.filter((h) => h.enabled).map((h) => h.id);
   const [opencodeModel, setOpencodeModel] = useState("");
   const [settings, setSettings] = useState<EffectiveSetting[]>([]);
   const [search, setSearch] = useState("");
@@ -64,8 +68,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     void getConfig()
       .then((config) => {
         setPromptAppend(config.agentPromptAppend ?? "");
-        setAgentsState(config.agents?.length ? config.agents : ["claude"]);
-        setOpencodeModel(config.agentModels?.opencode ?? "");
+        const opencode = config.agentConfig?.opencode as { model?: string } | undefined;
+        setOpencodeModel(opencode?.model ?? "");
         setLoaded(true);
       })
       .catch((e) => {
@@ -94,7 +98,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       if (agents.length === 0) {
         throw new Error("Enable at least one agent.");
       }
-      await setAgents(agents);
+      if (editedAgents) await setAgents(editedAgents);
       await setAgentModel("opencode", opencodeModel.trim() || null);
       await setAgentPromptAppend(promptAppend);
       setSavedMessage("Saved. Agent prompt applies to newly-started sessions.");
@@ -153,9 +157,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
         <Section title="Agents" id="settings-agents">
           <Hint>
-            Enabled agents for this project. The first enabled agent is the default for new threads.
+            Enabled agents for this project. The first enabled agent is the default for new sessions.
           </Hint>
-          <AgentPicker agents={agents} onChange={setAgentsState} disabled={!loaded || saving} />
+          <AgentPicker harnesses={harnesses} agents={agents} onChange={setAgentsState} disabled={!loaded || saving} />
           {agents.includes("opencode") ? (
             <div style={{ marginTop: 10 }}>
               <Hint>
@@ -270,18 +274,23 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   );
 }
 
-const ALL_AGENTS: AgentKind[] = ALL_AGENT_KINDS;
-
+/// The registered harnesses, the enabled ones first in their order.
 function AgentPicker({
+  harnesses,
   agents,
   onChange,
   disabled,
 }: {
-  agents: AgentKind[];
-  onChange(next: AgentKind[]): void;
+  harnesses: HarnessListing[];
+  agents: string[];
+  onChange(next: string[]): void;
   disabled: boolean;
 }) {
-  function setEnabled(agent: AgentKind, enabled: boolean) {
+  const ordered = [
+    ...agents.flatMap((id) => harnesses.filter((h) => h.id === id)),
+    ...harnesses.filter((h) => !agents.includes(h.id)),
+  ];
+  function setEnabled(agent: string, enabled: boolean) {
     if (enabled) {
       onChange(agents.includes(agent) ? agents : [...agents, agent]);
       return;
@@ -289,7 +298,7 @@ function AgentPicker({
     onChange(agents.filter((a) => a !== agent));
   }
 
-  function move(agent: AgentKind, direction: -1 | 1) {
+  function move(agent: string, direction: -1 | 1) {
     const index = agents.indexOf(agent);
     const nextIndex = index + direction;
     if (index < 0 || nextIndex < 0 || nextIndex >= agents.length) return;
@@ -300,7 +309,7 @@ function AgentPicker({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {ALL_AGENTS.map((agent) => {
+      {ordered.map(({ id: agent, title }) => {
         const enabled = agents.includes(agent);
         return (
           <label key={agent} style={agentRowStyle}>
@@ -310,7 +319,7 @@ function AgentPicker({
               disabled={disabled || (enabled && agents.length === 1)}
               onChange={(event) => setEnabled(agent, event.target.checked)}
             />
-            <span style={{ minWidth: 64 }}>{agentLabel(agent)}</span>
+            <span style={{ minWidth: 64 }}>{title}</span>
             {enabled ? (
               <>
                 <button
@@ -340,7 +349,7 @@ function AgentPicker({
 
 /** Where a person-only setting's direct control is, if the page has one. */
 function controlFor(key: string): string | null {
-  if (["agents", "agentModels", "acpAgents", "agentPromptAppend"].includes(key)) return "settings-agents";
+  if (["agents", "agentConfig", "acpAgents", "agentPromptAppend"].includes(key)) return "settings-agents";
   if (key === "ai" || key.startsWith("ai.")) return "settings-ai";
   if (key === "lsp") return "settings-lsp";
   if (key === "extensions") return "settings-extensions";

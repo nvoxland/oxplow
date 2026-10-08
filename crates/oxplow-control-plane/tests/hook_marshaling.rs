@@ -66,10 +66,8 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
     services.thread_store.upsert(&thread).await.unwrap();
     services
         .agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::of(
-            thread.id,
-            oxplow_domain::AgentKind::Claude,
-            None,
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread.id, "claude",
         ))
         .await
         .unwrap();
@@ -331,6 +329,87 @@ async fn session_end_clear_for_stale_session_keeps_newer_token() {
     .await;
     assert_eq!(resp.status(), 200);
     assert_eq!(resume_session_id(&svc, tid).await, "newer-session");
+}
+
+/// Open another agent session on `thread`, newer than its first.
+async fn open_second_session(
+    services: &Services,
+    thread: ThreadId,
+) -> oxplow_domain::AgentSessionId {
+    services
+        .agent_session_store
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread, "claude",
+        ))
+        .await
+        .unwrap()
+        .id
+}
+
+/// The agent session each logged event of `ty` was anchored to.
+async fn anchored_sessions(
+    services: &Services,
+    ty: &str,
+) -> Vec<Option<oxplow_domain::AgentSessionId>> {
+    services
+        .event_log_store
+        .read_after(0, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.envelope.event_type == ty)
+        .map(|e| e.envelope.anchors.agent_session_id)
+        .collect()
+}
+
+/// A hook's `X-Oxplow-Session` names the session it came from, though
+/// another session in its thread is newer; one naming no session of the
+/// thread is ignored (the thread's session with a turn running takes it).
+#[tokio::test]
+async fn the_session_header_lands_on_the_hook() {
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let first = session_of(&svc, tid).await;
+    open_second_session(&svc, tid).await;
+    let post = |session: &str| {
+        reqwest::Client::new()
+            .post(hook_url(&cp, "UserPromptSubmit"))
+            .header("authorization", format!("Bearer {}", cp.hook_token))
+            .header("x-oxplow-thread", tid.to_string())
+            .header("x-oxplow-session", session.to_string())
+            .json(&serde_json::json!({ "prompt": "go" }))
+            .send()
+    };
+    assert_eq!(post(&first.to_string()).await.unwrap().status(), 200);
+    assert_eq!(post("ses999").await.unwrap().status(), 200);
+    assert_eq!(
+        anchored_sessions(&svc, "agent.prompt.submitted").await,
+        vec![Some(first), Some(first)]
+    );
+}
+
+/// An export's `X-Oxplow-Session` anchors its event to that session.
+#[tokio::test]
+async fn the_session_header_lands_on_an_export() {
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let first = session_of(&svc, tid).await;
+    open_second_session(&svc, tid).await;
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/metrics", cp.otlp_base_url()))
+        .header("authorization", format!("Bearer {}", cp.hook_token))
+        .header("content-type", "application/x-protobuf")
+        .header("x-oxplow-thread", tid.to_string())
+        .header("x-oxplow-session", first.to_string())
+        .body(otlp_claude_body("claude-opus-4-8", 100, 20))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        anchored_sessions(&svc, "agent.tokens.reported").await,
+        vec![Some(first)]
+    );
 }
 
 #[tokio::test]

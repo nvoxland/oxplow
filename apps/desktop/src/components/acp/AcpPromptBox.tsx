@@ -4,7 +4,8 @@ import { acpPrompt } from "../../api.js";
 import { subscribeAgentInput } from "../../agent-input-bus.js";
 
 interface Props {
-  threadId: string;
+  /** The ACP agent session (`ses3`) it prompts. */
+  sessionId: string;
   /** A turn is in flight: Enter does nothing (prompts are never queued). */
   busy: boolean;
   /** No live session (starting, stopped, failed to open). */
@@ -15,7 +16,7 @@ interface Props {
 }
 
 /**
- * The prompt box of an ACP thread — the ONLY place that sends an ACP
+ * The prompt box of an ACP session — the ONLY place that sends an ACP
  * agent a prompt, and only on the person's Enter / Send. Nothing else in
  * the renderer may call `acpPrompt` (no-agent-input-automation.test.ts).
  *
@@ -27,7 +28,7 @@ interface Props {
  * and nothing else — never the transcript above it.
  */
 export function AcpPromptBox({
-  threadId,
+  sessionId,
   busy,
   disabled,
   visible,
@@ -52,7 +53,7 @@ export function AcpPromptBox({
     if (!canSend) return;
     setSending(true);
     try {
-      await acpPrompt(threadId, draft);
+      await acpPrompt(sessionId, draft);
       setDraft("");
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));

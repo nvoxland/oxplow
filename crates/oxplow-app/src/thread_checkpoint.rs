@@ -20,42 +20,30 @@ use oxplow_domain::refs::build::{snapshot_ref, system_source, thread_ref, turn_r
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::{AgentTurnId, DomainError, Envelope, StoredEvent, ThreadId};
 
+use oxplow_domain::agent::registry::HarnessRegistry;
+
 use crate::event_pump::AsyncEventConsumer;
 use crate::sql_gateway::SqlGateway;
 
 /// The consumer's name (its checkpoint key; what callers settle on).
 pub const NAME: &str = "thread.checkpoint";
 
-/// Tools that can change the worktree, lowercased, across the harnesses
-/// oxplow runs: file edits, shell commands, subagents (which run their own
-/// tools) and oxplow's own commands. Every other call only reads or talks.
-const WRITING_TOOLS: &[&str] = &[
-    // Claude Code
-    "write",
-    "edit",
-    "multiedit",
-    "notebookedit",
-    "bash",
-    "agent",
-    "task",
-    // Codex
-    "apply_patch",
-    "shell",
-    "exec_command",
-    // opencode
-    "patch",
-    // oxplow
-    "mcp__oxplow__run_command",
-];
-
-/// Whether a call to `tool` could have changed the worktree.
-pub fn can_write(tool: &str) -> bool {
-    WRITING_TOOLS.contains(&tool.to_ascii_lowercase().as_str())
+/// Whether a call to `tool` could have changed the worktree: oxplow's own
+/// commands, or a tool a registered harness says writes
+/// (`AgentHarness::writing_tools`), in any case.
+pub fn can_write(harnesses: &HarnessRegistry, tool: &str) -> bool {
+    let tool = tool.to_ascii_lowercase();
+    tool == "mcp__oxplow__run_command"
+        || harnesses
+            .all()
+            .iter()
+            .any(|h| h.writing_tools().contains(&tool.as_str()))
 }
 
 pub struct ThreadCheckpointConsumer {
     pub log: SqliteEventLogStore,
     pub sql: SqlGateway,
+    pub harnesses: HarnessRegistry,
 }
 
 impl ThreadCheckpointConsumer {
@@ -97,7 +85,7 @@ impl ThreadCheckpointConsumer {
             .rows;
         let n = rows
             .iter()
-            .filter(|row| matches!(row.first(), Some(SqlCell::Text(t)) if can_write(t)))
+            .filter(|row| matches!(row.first(), Some(SqlCell::Text(t)) if can_write(&self.harnesses, t)))
             .count();
         Ok(u32::try_from(n).unwrap_or(u32::MAX))
     }
@@ -168,6 +156,7 @@ pub(crate) mod tests {
             kind,
             thread_id: Some(thread),
             stream_id: None,
+            agent_session_id: None,
             session_id: Some("s".into()),
             payload_json: "{}".into(),
             prompt: Some("go".into()),
@@ -264,13 +253,28 @@ pub(crate) mod tests {
         assert_eq!(asked.writing_tools, 0);
     }
 
+    /// A tool counts as writing when any registered harness says it
+    /// writes — one only Codex declares too — in any case; oxplow's own
+    /// commands always do. With no harness registered, only they do.
     #[test]
-    fn tool_names_match_across_harnesses_and_case() {
+    fn writing_tools_are_the_registered_harnesses_union() {
+        let r = HarnessRegistry::new(std::sync::Arc::new(|| "claude".into()));
+        for (entry, id) in [
+            ("oxplow:claude-code", "claude"),
+            ("oxplow:codex-cli", "codex"),
+        ] {
+            r.register(oxplow_harnesses::built_in(entry, id, id).unwrap());
+        }
         for tool in ["Edit", "bash", "apply_patch", "mcp__oxplow__run_command"] {
-            assert!(can_write(tool), "{tool}");
+            assert!(can_write(&r, tool), "{tool}");
         }
         for tool in ["Read", "Grep", "WebFetch", "mcp__oxplow__query_sql"] {
-            assert!(!can_write(tool), "{tool}");
+            assert!(!can_write(&r, tool), "{tool}");
         }
+        r.unregister("codex");
+        assert!(!can_write(&r, "apply_patch"));
+        let none = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        assert!(!can_write(&none, "Edit"));
+        assert!(can_write(&none, "mcp__oxplow__run_command"));
     }
 }

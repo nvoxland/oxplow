@@ -435,7 +435,7 @@ fn parse_json_reply(text: &str) -> Result<Value, AiComputeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai_service::{ProviderConfig, ProviderKind, RoleBinding};
+    use crate::ai_service::{ProviderConfig, RoleBinding};
 
     async fn with_model(svc: &crate::Services, role: Role, reply: Value) {
         with_provider(svc, role, "m", reply).await
@@ -448,7 +448,7 @@ mod tests {
             .save_provider(
                 ProviderConfig {
                     id: provider.into(),
-                    kind: ProviderKind::OpenaiCompatible,
+                    kind: "openai_compatible".into(),
                     base_url: Some(base),
                 },
                 None,

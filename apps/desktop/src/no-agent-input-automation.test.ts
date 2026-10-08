@@ -71,6 +71,13 @@ describe("no agent input automation", () => {
     expect(hits).toEqual([]);
   });
 
+  // Starting a session only opens its slot: the picker never types into
+  // the agent it starts, nor drafts a prompt for it.
+  test("the session picker sends the agent nothing", () => {
+    const text = readFileSync(join(SRC_DIR, "pages", "NewSessionPage.tsx"), "utf8");
+    expect(text).not.toMatch(/\b(acpPrompt|forwardTerminalInput|insertIntoAgent|submitHumanPrompt)\b/);
+  });
+
   // A failing extension's repair (P7.C3): the person presses Repair with
   // the Agent, which fills the agent's input with one mention line and
   // sends nothing. Only that button may call it — nothing runs it on a

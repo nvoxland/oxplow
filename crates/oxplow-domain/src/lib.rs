@@ -32,7 +32,6 @@ pub mod vocabulary;
 pub mod when;
 pub mod work_items;
 
-pub use agent::AgentKind;
 pub use commands::{
     namespace_of, Access, Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec,
     CommandUi, Confirm, InputValidator, Invoker, Invokers, Lifecycle, MenuPlace, OpRef, Preview,
@@ -52,7 +51,7 @@ pub use ids::{
     UsageEventId,
 };
 pub use json::Json;
-pub use stream::{Stream, StreamKind};
+pub use stream::{HostId, Stream, StreamKind};
 pub use thread::{Thread, ThreadNote, ThreadStatus};
 pub use time::Timestamp;
 pub use tree_diff::{diff_trees, ChangeStatus, FileChange};

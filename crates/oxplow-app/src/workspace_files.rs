@@ -112,6 +112,7 @@ impl WorkspaceFiles {
         self.router
             .resolve_strict(stream_id)
             .await
+            .map(|r| r.into_local_path())
             .map_err(|e| WorkspaceError::NoStream(e.to_string()))
     }
 
@@ -128,7 +129,7 @@ impl WorkspaceFiles {
         stream_id: Option<&str>,
         relative_path: String,
     ) -> Result<Vec<WorkspaceEntry>, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.router.resolve(stream_id).await.into_local_path();
         let statuses = self.statuses(&root).await;
         Self::blocking(move || list_workspace_entries(&root, &relative_path, &statuses)).await
     }
@@ -149,7 +150,7 @@ impl WorkspaceFiles {
         stream_id: Option<&str>,
         generated: &oxplow_config::GeneratedConfig,
     ) -> Result<Vec<WorkspaceIndexedFile>, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.router.resolve(stream_id).await.into_local_path();
         let filter = Self::filter_for(&root, generated);
         let statuses = self.statuses(&root).await;
         Self::blocking(move || {
@@ -169,7 +170,7 @@ impl WorkspaceFiles {
         query: String,
         limit: usize,
     ) -> Result<Vec<TextSearchHit>, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.router.resolve(stream_id).await.into_local_path();
         let filter = Self::filter_for(&root, generated);
         Self::blocking(move || {
             search_workspace_text(&root, &query, limit, &|path| {
@@ -184,7 +185,7 @@ impl WorkspaceFiles {
         stream_id: Option<&str>,
         relative_path: String,
     ) -> Result<WorkspaceFile, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.router.resolve(stream_id).await.into_local_path();
         Self::blocking(move || read_workspace_file(&root, &relative_path)).await
     }
 

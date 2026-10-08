@@ -185,7 +185,7 @@ macro_rules! oxplow_command_table {
                 // terminal — the agent-spawn path needs plugin_runtime
                 "open_terminal_session" => $crate::commands::terminal::open_terminal_session { pane_target: String, cols: u16, rows: u16 },
                 // acp — opening a session needs plugin_runtime (oxplow's MCP endpoint)
-                "acp_open_session" => $crate::commands::acp::acp_open_session { thread_id: ::oxplow_domain::ThreadId },
+                "acp_open_session" => $crate::commands::acp::acp_open_session { session_id: ::oxplow_domain::AgentSessionId },
             }
             svc {
             }
@@ -199,12 +199,13 @@ macro_rules! oxplow_command_table {
                 // threads
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 list_acp_agents => $crate::commands::threads::list_acp_agents {} -> Vec<::oxplow_app::acp::agents::AcpAgentListing>,
+                list_agent_harnesses => $crate::commands::threads::list_agent_harnesses {} -> Vec<::oxplow_app::harnesses::HarnessListing>,
                 // acp sessions (tsk281) — UI-only; acp_prompt is the prompt box's Enter
-                acp_prompt => $crate::commands::acp::acp_prompt { thread_id: ::oxplow_domain::ThreadId, text: String } -> (),
-                acp_cancel => $crate::commands::acp::acp_cancel { thread_id: ::oxplow_domain::ThreadId } -> (),
-                acp_respond_permission => $crate::commands::acp::acp_respond_permission { thread_id: ::oxplow_domain::ThreadId, request_id: String, option_id: Option<String> } -> (),
-                acp_transcript => $crate::commands::acp::acp_transcript { thread_id: ::oxplow_domain::ThreadId, since_seq: u64 } -> Option<::oxplow_app::acp::manager::AcpSnapshot>,
-                acp_close_session => $crate::commands::acp::acp_close_session { thread_id: ::oxplow_domain::ThreadId } -> (),
+                acp_prompt => $crate::commands::acp::acp_prompt { session_id: ::oxplow_domain::AgentSessionId, text: String } -> (),
+                acp_cancel => $crate::commands::acp::acp_cancel { session_id: ::oxplow_domain::AgentSessionId } -> (),
+                acp_respond_permission => $crate::commands::acp::acp_respond_permission { session_id: ::oxplow_domain::AgentSessionId, request_id: String, option_id: Option<String> } -> (),
+                acp_transcript => $crate::commands::acp::acp_transcript { session_id: ::oxplow_domain::AgentSessionId, since_seq: u64 } -> Option<::oxplow_app::acp::manager::AcpSnapshot>,
+                acp_close_session => $crate::commands::acp::acp_close_session { session_id: ::oxplow_domain::AgentSessionId } -> (),
                 list_closed_threads => $crate::commands::threads::list_closed_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
@@ -344,9 +345,9 @@ macro_rules! oxplow_command_table {
                 // config
                 get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
                 set_agent_prompt_append => $crate::commands::config::set_agent_prompt_append { text: String } -> ::oxplow_config::OxplowConfig,
-                set_agents => $crate::commands::config::set_agents { agents: Vec<::oxplow_config::AgentKind> } -> ::oxplow_config::OxplowConfig,
+                set_agents => $crate::commands::config::set_agents { agents: Vec<String> } -> ::oxplow_config::OxplowConfig,
                 set_generated => $crate::commands::config::set_generated { generated: ::oxplow_config::GeneratedConfig } -> ::oxplow_config::OxplowConfig,
-                set_agent_model => $crate::commands::config::set_agent_model { agent: ::oxplow_config::AgentKind, model: Option<String> } -> ::oxplow_config::OxplowConfig,
+                set_agent_model => $crate::commands::config::set_agent_model { agent: String, model: Option<String> } -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,
                 // lsp
                 list_installed_lsp_packages => $crate::commands::lsp::list_installed_lsp_packages {} -> Vec<$crate::commands::lsp::InstalledLspPackage>,
@@ -360,7 +361,7 @@ macro_rules! oxplow_command_table {
                 close_terminal_session => $crate::commands::terminal::close_terminal_session { session_id: String } -> (),
                 terminal_session_cwd => $crate::commands::terminal::terminal_session_cwd { session_id: String } -> Option<String>,
                 terminate_terminal_session => $crate::commands::terminal::terminate_terminal_session { session_id: String } -> (),
-                lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { thread_id: ::oxplow_domain::ThreadId, pane: Option<String> } -> Option<String>,
+                lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { session_id: ::oxplow_domain::AgentSessionId } -> Option<String>,
                 // snapshot
                 list_file_snapshots => $crate::commands::snapshot::list_file_snapshots { path: String } -> Vec<::oxplow_db::FileSnapshot>,
                 list_snapshots_for_stream => $crate::commands::snapshot::list_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::Snapshot>,

@@ -15,6 +15,21 @@ intent:
     - name: a person bookmarks a page for their thread
       input: { command: oxplow.bookmark.set, input: { ref: "page:git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thread:thr1" } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+# The agent harnesses, ACP agents and AI providers oxplow runs: core's
+# built-ins, many of each at once (every one declared here is active).
+implementations:
+  - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude }
+  - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex }
+  - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode }
+  - { capability: agent_harness, id: acp, entry: "oxplow:acp", title: ACP }
+  - { capability: acp_adapter, id: claude, entry: "oxplow:acp-adapter", config: { command: claude-agent-acp, systemPrompt: meta } }
+  - { capability: acp_adapter, id: gemini, entry: "oxplow:acp-adapter", config: { command: gemini, args: [--acp] } }
+  - { capability: acp_adapter, id: codex, entry: "oxplow:acp-adapter", config: { command: codex-acp } }
+  - { capability: ai_provider, id: anthropic, entry: "oxplow:anthropic" }
+  - { capability: ai_provider, id: openai, entry: "oxplow:openai-compatible", title: OpenAI, config: { baseUrl: "https://api.openai.com/v1" } }
+  - { capability: ai_provider, id: openai_compatible, entry: "oxplow:openai-compatible" }
+  - { capability: ai_provider, id: openrouter, entry: "oxplow:openrouter" }
+  - { capability: ai_provider, id: typesafe, entry: "oxplow:typesafe" }
 commands:
   # agent_input.write — the window's; a person's only (oxplow never types for the agent).
   - name: agent.draft
@@ -28,6 +43,23 @@ commands:
     op: draft
     invokers: { human: true, agent: false, lens: false }
     ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " }, when: "threadShown" }
+  # agent_sessions.write
+  - name: agent_session.close
+    summary: "Close an agent session (`agent_session:ses3`): its open turn ends and its process — the terminal agent or ACP agent — stops. An agent's waits for a person."
+    scope: agent_sessions.write
+    op: close
+    confirm: destructive
+    invokers: { human: true, agent: true, lens: true }
+  - name: agent_session.open
+    summary: "Open an agent session on a thread (`thread:thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. `harness` (default: the project's first enabled agent), `acp_agent` for an ACP one, `title`. An agent opens one only in its own stream."
+    scope: agent_sessions.write
+    op: open
+    invokers: { human: true, agent: true, lens: true }
+  - name: agent_session.rename
+    summary: "Rename an agent session (`agent_session:ses3`)."
+    scope: agent_sessions.write
+    op: rename
+    invokers: { human: true, agent: true, lens: true }
   # bookmarks.write — a person's navigation, not the agent's.
   - name: bookmark.set
     summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
@@ -407,12 +439,12 @@ commands:
     invokers: { human: true, agent: true, lens: true }
   # threads.write
   - name: thread.close
-    summary: "Close a thread (`thread:thr12`) — history, reopenable. Its open effort closes, and an ACP thread's agent session stops with it. An agent closes only its own thread."
+    summary: "Close a thread (`thread:thr12`) — history, reopenable. Its open effort and its agent sessions close, and their processes stop. An agent closes only its own thread."
     scope: threads.write
     op: close
     invokers: { human: true, agent: true, lens: true }
   - name: thread.create
-    summary: "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`), running the same agent. It becomes the stream's writer when it has none, else joins the queue."
+    summary: "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`). It has no agent session yet (`oxplow.agent_session.open`). It becomes the stream's writer when it has none, else joins the queue."
     scope: threads.write
     op: create
     invokers: { human: true, agent: true, lens: true }

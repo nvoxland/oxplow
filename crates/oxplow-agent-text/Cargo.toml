@@ -1,0 +1,16 @@
+[package]
+name = "oxplow-agent-text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+oxplow-domain = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+
+[lints]
+workspace = true

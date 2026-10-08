@@ -1,6 +1,6 @@
 //! Agent turns (`agent_turn` rows and their `agent.turn.*` events) and
-//! agent status, which is read from the log: a thread's status is its
-//! newest `agent.status.changed`.
+//! agent status, which is read from the log: an agent session's status is
+//! its newest `agent.status.changed`.
 
 use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 
@@ -56,33 +56,41 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
     })
 }
 
-/// The anchors agent activity on `thread` carries (P3.3): the thread, its
-/// stream, its agent session, the thread's open turn and its open effort
-/// (at most one).
-pub fn activity_anchors_tx(conn: &Connection, thread: ThreadId) -> Result<Anchors, DomainError> {
+/// The anchors agent activity in agent session `session` on `thread`
+/// carries (P3.3): the thread, its stream, the session, the session's open
+/// turn and the thread's open effort (at most one). `None` is activity no
+/// session claims (a hook from an agent oxplow didn't start).
+pub fn activity_anchors_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    session: Option<AgentSessionId>,
+) -> Result<Anchors, DomainError> {
     let mut anchors = anchors_for_thread_tx(conn, thread)?;
-    anchors.agent_session_id =
-        crate::agent_session_store::newest_for_thread_tx(conn, thread)?.map(|s| s.id);
-    anchors.turn_id = open_turn_ids_tx(conn, thread)?.first().map(|t| t.value());
+    anchors.agent_session_id = session;
+    anchors.turn_id = open_turn_ids_in_tx(conn, thread, session)?
+        .first()
+        .map(|t| t.value());
     anchors.effort_id = crate::effort_store::open_for_thread_tx(conn, thread)
         .map_err(crate::database::map_sql_err)?;
     Ok(anchors)
 }
 
-/// The turn on `thread` that something measured at `at` happened in: the
-/// newest one started at or before `at` — the one whose span holds it, or
+/// The turn of agent session `session` on `thread` that something measured
+/// at `at` happened in: the newest one started at or before `at` — the one whose span holds it, or
 /// the last before it when it fell between turns. `None` before the
 /// thread's first turn. What places a report that arrives after its turn
 /// ended (an agent's telemetry export).
 pub fn turn_at_tx(
     conn: &Connection,
     thread: ThreadId,
+    session: Option<AgentSessionId>,
     at: Timestamp,
 ) -> Result<Option<AgentTurnId>, DomainError> {
     conn.query_row(
-        "SELECT id FROM agent_turn WHERE thread_id = ?1 AND started_at <= ?2
+        "SELECT id FROM agent_turn
+          WHERE thread_id = ?1 AND agent_session_id IS ?3 AND started_at <= ?2
           ORDER BY started_at DESC, id DESC LIMIT 1",
-        params![thread.value(), ts_to_string(at)],
+        params![thread.value(), ts_to_string(at), session.map(|s| s.value())],
         |r| r.get::<_, i64>(0),
     )
     .optional()
@@ -90,7 +98,8 @@ pub fn turn_at_tx(
     .map_err(map_sql_err)
 }
 
-/// The turn on `thread` a report covering `from..to` measured (tsk900):
+/// The turn of agent session `session` on `thread` a report covering
+/// `from..to` measured:
 /// the one whose span (an open turn's runs to `to`) overlaps the window
 /// most, the earlier on a tie; when none overlaps, [`turn_at_tx`] at `to`.
 /// A telemetry export is stamped with when it was collected, so its window
@@ -98,20 +107,26 @@ pub fn turn_at_tx(
 pub fn turn_for_window_tx(
     conn: &Connection,
     thread: ThreadId,
+    session: Option<AgentSessionId>,
     from: Timestamp,
     to: Timestamp,
 ) -> Result<Option<AgentTurnId>, DomainError> {
     let mut stmt = conn
         .prepare(
             "SELECT id, started_at, ended_at FROM agent_turn
-              WHERE thread_id = ?1 AND started_at <= ?3
+              WHERE thread_id = ?1 AND agent_session_id IS ?4 AND started_at <= ?3
                 AND (ended_at IS NULL OR ended_at >= ?2)
               ORDER BY started_at, id",
         )
         .map_err(map_sql_err)?;
     let spans = stmt
         .query_map(
-            params![thread.value(), ts_to_string(from), ts_to_string(to)],
+            params![
+                thread.value(),
+                ts_to_string(from),
+                ts_to_string(to),
+                session.map(|s| s.value())
+            ],
             |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
@@ -139,7 +154,7 @@ pub fn turn_for_window_tx(
     }
     match best {
         Some((id, _)) => Ok(Some(AgentTurnId::new(id))),
-        None => turn_at_tx(conn, thread, to),
+        None => turn_at_tx(conn, thread, session, to),
     }
 }
 
@@ -189,9 +204,33 @@ pub fn open_turn_ids_tx(
     Ok(rows.into_iter().map(AgentTurnId::new).collect())
 }
 
+/// The open turns of agent session `session` on `thread`, newest first;
+/// `None` is the turns no session claims.
+pub fn open_turn_ids_in_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    session: Option<AgentSessionId>,
+) -> Result<Vec<AgentTurnId>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM agent_turn
+              WHERE thread_id = ?1 AND agent_session_id IS ?2 AND ended_at IS NULL
+              ORDER BY started_at DESC, id DESC",
+        )
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map(params![thread.value(), session.map(|s| s.value())], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map_err(map_sql_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sql_err)?;
+    Ok(rows.into_iter().map(AgentTurnId::new).collect())
+}
+
 /// The thread's open turns that harness session `session` opened, newest
 /// first.
-pub fn open_session_turn_ids_tx(
+pub fn open_harness_turn_ids_tx(
     conn: &Connection,
     thread: ThreadId,
     session: &str,
@@ -213,17 +252,19 @@ pub fn open_session_turn_ids_tx(
     Ok(rows.into_iter().map(AgentTurnId::new).collect())
 }
 
-/// Open a turn on `thread` and log `agent.turn.started`, in the caller's
-/// transaction. The turn starts at its stream's current snapshot.
+/// Open a turn in agent session `agent_session` on `thread` and log
+/// `agent.turn.started`, in the caller's transaction (`session` is the
+/// harness's own session id). The turn starts at its stream's current snapshot.
 pub fn open_turn_tx(
     conn: &Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
+    agent_session: Option<AgentSessionId>,
     prompt: &str,
     session: Option<&str>,
     started_at: Timestamp,
 ) -> Result<AgentTurnId, DomainError> {
-    let anchors = activity_anchors_tx(conn, thread)?;
+    let anchors = activity_anchors_tx(conn, thread, agent_session)?;
     conn.execute(
         "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, session_id, started_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -295,19 +336,20 @@ pub fn close_turn_tx(
     id: AgentTurnId,
     end: &TurnEnd<'_>,
 ) -> Result<Option<ThreadId>, DomainError> {
-    let thread: Option<i64> = conn
+    let closed: Option<(i64, Option<i64>)> = conn
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer)
               WHERE id = ?1 AND ended_at IS NULL
-              RETURNING thread_id",
+              RETURNING thread_id, agent_session_id",
             params![id.value(), ts_to_string(end.at), end.answer],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
         .map_err(map_sql_err)?;
-    let Some(thread) = thread.map(ThreadId::new) else {
+    let Some((thread, session)) = closed else {
         return Ok(None);
     };
+    let (thread, session) = (ThreadId::new(thread), session.map(AgentSessionId::new));
     let env = ev
         .typed::<AgentTurnEnded>(&AgentTurnEndedV2 {
             turn: turn_ref(id),
@@ -318,7 +360,7 @@ pub fn close_turn_tx(
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
-            ..activity_anchors_tx(conn, thread)?
+            ..activity_anchors_tx(conn, thread, session)?
         })
         .with_subject([turn_ref(id), thread_ref(thread)]);
     ev.append(conn, &env)?;
@@ -327,16 +369,18 @@ pub fn close_turn_tx(
 
 // -- Agent status ------------------------------------------------------
 
-/// One `agent.status.changed` row as the thread's status, read at the
-/// type's newest version.
+/// One `agent.status.changed` row (`thread_id, agent_session_id, v,
+/// payload, at`) as its session's status, read at the type's newest
+/// version.
 fn row_to_status(
     vocabulary: &Vocabulary,
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<AgentStatus> {
     let thread: i64 = row.get(0)?;
-    let v: u32 = row.get(1)?;
-    let payload: String = row.get(2)?;
-    let at: String = row.get(3)?;
+    let session: Option<i64> = row.get(1)?;
+    let v: u32 = row.get(2)?;
+    let payload: String = row.get(3)?;
+    let at: String = row.get(4)?;
     let decode = || -> Result<AgentStatus, DomainError> {
         let value = serde_json::from_str(&payload)
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
@@ -345,6 +389,7 @@ fn row_to_status(
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
         Ok(AgentStatus {
             thread_id: ThreadId::new(thread),
+            agent_session_id: session.map(AgentSessionId::new),
             state: p.state.into(),
             detail: p.detail,
             updated_at: string_to_ts(&at)?,
@@ -353,36 +398,45 @@ fn row_to_status(
     decode().map_err(map_err_text)
 }
 
-/// The thread's current status: its newest `agent.status.changed`.
+/// Agent session `session`'s current status on `thread` (`None`: the
+/// activity no session claims): its newest `agent.status.changed`.
 pub fn last_status_tx(
     conn: &Connection,
     vocabulary: &Vocabulary,
     thread: ThreadId,
+    session: Option<AgentSessionId>,
 ) -> Result<Option<AgentStatus>, DomainError> {
     conn.query_row(
-        "SELECT thread_id, v, payload, at FROM event_log
-          WHERE thread_id = ?1 AND type = ?2
+        "SELECT thread_id, agent_session_id, v, payload, at FROM event_log
+          WHERE thread_id = ?1 AND agent_session_id IS ?3 AND type = ?2
           ORDER BY seq DESC LIMIT 1",
-        params![thread.value(), AgentStatusChanged::TYPE],
+        params![
+            thread.value(),
+            AgentStatusChanged::TYPE,
+            session.map(|s| s.value())
+        ],
         |r| row_to_status(vocabulary, r),
     )
     .optional()
     .map_err(map_sql_err)
 }
 
-/// Every existing thread's current status.
+/// The current status of every open session of an existing thread, and of
+/// each thread's unclaimed activity, by thread then session.
 fn all_statuses_tx(
     conn: &Connection,
     vocabulary: &Vocabulary,
 ) -> Result<Vec<AgentStatus>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT e.thread_id, e.v, e.payload, e.at
+            "SELECT e.thread_id, e.agent_session_id, e.v, e.payload, e.at
                FROM event_log e JOIN threads th ON th.id = e.thread_id
+               LEFT JOIN agent_session s ON s.id = e.agent_session_id
               WHERE e.seq IN (SELECT MAX(seq) FROM event_log
                                WHERE type = ?1 AND thread_id IS NOT NULL
-                               GROUP BY thread_id)
-              ORDER BY e.thread_id",
+                               GROUP BY thread_id, agent_session_id)
+                AND (e.agent_session_id IS NULL OR s.closed_at IS NULL)
+              ORDER BY e.thread_id, e.agent_session_id IS NOT NULL, e.agent_session_id",
         )
         .map_err(map_sql_err)?;
     let rows = stmt
@@ -391,6 +445,80 @@ fn all_statuses_tx(
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_sql_err)?;
     Ok(rows)
+}
+
+/// Log agent session `session`'s status change on `thread`, anchored to
+/// the session's open turn — or, for the status a Stop sets, to the turn
+/// that Stop closed (`turn`), so the turn's own record says how it ended.
+pub fn log_status_tx(
+    conn: &Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    session: Option<AgentSessionId>,
+    turn: Option<AgentTurnId>,
+    state: oxplow_domain::AgentStatusState,
+    detail: Option<String>,
+) -> Result<(), DomainError> {
+    use oxplow_domain::events::schema::{AgentStatusChangedV1, LoggedAgentStatus};
+    let mut anchors = activity_anchors_tx(conn, thread, session)?;
+    if let Some(turn) = turn {
+        anchors.turn_id = Some(turn.value());
+    }
+    let env = ev
+        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
+            thread: thread_ref(thread),
+            state: LoggedAgentStatus::of(state).ok_or_else(|| {
+                DomainError::Invalid(format!("{state:?} is derived, never logged"))
+            })?,
+            detail,
+        })
+        .with_anchors(anchors)
+        .with_subject([thread_ref(thread)]);
+    ev.append(conn, &env)?;
+    Ok(())
+}
+
+/// Close agent session `session`'s slot (`reason`), in the caller's
+/// transaction: its open turns end interrupted ("session closed") and it
+/// logs `stopped`. Its process is the caller's to stop once this commits.
+/// `false` when it was already closed (nothing done).
+pub fn close_session_tx(
+    conn: &Connection,
+    ev: &EventCtx<'_>,
+    session: AgentSessionId,
+    reason: oxplow_domain::agent_session::SessionCloseReason,
+    now: Timestamp,
+) -> Result<bool, DomainError> {
+    let Some(row) = crate::agent_session_store::get_tx(conn, session)? else {
+        return Ok(false);
+    };
+    if !crate::agent_session_store::close_tx(conn, session, reason, now)? {
+        return Ok(false);
+    }
+    let end = TurnEnd {
+        answer: Some("session closed"),
+        ..TurnEnd::new(now, TurnOutcome::Interrupted)
+    };
+    let mut closed = None;
+    for id in open_turn_ids_in_tx(conn, row.thread_id, Some(session))? {
+        if close_turn_tx(conn, ev, id, &end)?.is_some() && closed.is_none() {
+            closed = Some(id);
+        }
+    }
+    let stopped = oxplow_domain::AgentStatusState::Stopped;
+    let current = last_status_tx(conn, ev.vocabulary, row.thread_id, Some(session))?;
+    if current.is_none_or(|s| s.state != stopped) {
+        log_status_tx(
+            conn,
+            ev,
+            row.thread_id,
+            Some(session),
+            closed,
+            stopped,
+            Some("session closed".into()),
+        )?;
+    }
+    Ok(true)
 }
 
 /// Agent status read from the event log. There is no write side: the
@@ -409,10 +537,14 @@ impl SqliteAgentStatusStore {
 
 #[async_trait]
 impl AgentStatusStore for SqliteAgentStatusStore {
-    async fn get(&self, thread: &ThreadId) -> Result<Option<AgentStatus>, DomainError> {
+    async fn get(
+        &self,
+        thread: &ThreadId,
+        session: Option<AgentSessionId>,
+    ) -> Result<Option<AgentStatus>, DomainError> {
         let (vocabulary, thread) = (self.vocabulary.clone(), *thread);
         self.db
-            .call_mut(move |c| last_status_tx(c, &vocabulary.current(), thread))
+            .call_mut(move |c| last_status_tx(c, &vocabulary.current(), thread, session))
             .await
     }
 
@@ -471,6 +603,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                         tx,
                         &ev,
                         turn.thread_id,
+                        turn.agent_session_id,
                         &turn.prompt,
                         turn.session_id.as_deref(),
                         turn.started_at,
@@ -662,7 +795,7 @@ mod tests {
         let (db, tid) = fixture().await;
         let vocabulary = VocabularyHandle::core();
         let store = SqliteAgentStatusStore::new(db.clone(), vocabulary.clone());
-        assert!(store.get(&tid).await.unwrap().is_none());
+        assert!(store.get(&tid, None).await.unwrap().is_none());
         assert!(store.list_all().await.unwrap().is_empty());
 
         log_status(&db, &vocabulary.current(), tid, S::Running, None);
@@ -676,12 +809,150 @@ mod tests {
 
         // A fresh store over the same database (a restarted daemon) reads it.
         let store = SqliteAgentStatusStore::new(db.clone(), vocabulary);
-        let got = store.get(&tid).await.unwrap().unwrap();
+        let got = store.get(&tid, None).await.unwrap().unwrap();
         assert_eq!(got.state, S::AwaitingUser);
         assert_eq!(got.detail.as_deref(), Some("A or B?"));
         let all = store.list_all().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0], got);
+    }
+
+    /// Status is per agent session: each session's newest
+    /// `agent.status.changed` is its own, and a closed session's isn't
+    /// listed.
+    #[tokio::test]
+    async fn each_session_has_its_own_status() {
+        use oxplow_domain::AgentStatusState as S;
+        let (db, tid) = fixture().await;
+        let vocabulary = VocabularyHandle::core();
+        let open = |at| {
+            let db = db.clone();
+            async move {
+                db.transaction(move |tx| {
+                    crate::agent_session_store::insert_tx(
+                        tx,
+                        &oxplow_domain::agent_session::NewAgentSession::terminal(tid, "claude"),
+                        Timestamp::from_unix_ms(at),
+                    )
+                })
+                .await
+                .unwrap()
+                .id
+            }
+        };
+        let (a, b, c) = (open(1).await, open(2).await, open(3).await);
+        let log = |session, state| {
+            use oxplow_domain::events::schema::AgentStatusChangedV1;
+            let conn = db.conn().unwrap();
+            let vocabulary = vocabulary.current();
+            let ev = EventCtx::system(&vocabulary, "test");
+            let env = ev
+                .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
+                    thread: thread_ref(tid),
+                    state: oxplow_domain::events::schema::LoggedAgentStatus::of(state).unwrap(),
+                    detail: None,
+                })
+                .with_anchors(Anchors {
+                    agent_session_id: Some(session),
+                    ..anchors_for_thread_tx(&conn, tid).unwrap()
+                })
+                .with_subject([thread_ref(tid)]);
+            ev.append(&conn, &env).unwrap();
+        };
+        log(a, S::Running);
+        log(b, S::AwaitingUser);
+        log(a, S::Idle);
+        log(c, S::Running);
+        db.transaction(move |tx| {
+            crate::agent_session_store::close_tx(
+                tx,
+                c,
+                oxplow_domain::agent_session::SessionCloseReason::Closed,
+                Timestamp::from_unix_ms(4),
+            )
+        })
+        .await
+        .unwrap();
+        let store = SqliteAgentStatusStore::new(db.clone(), vocabulary);
+        assert_eq!(
+            store.get(&tid, Some(a)).await.unwrap().unwrap().state,
+            S::Idle
+        );
+        assert_eq!(
+            store.get(&tid, Some(b)).await.unwrap().unwrap().state,
+            S::AwaitingUser
+        );
+        let all: Vec<_> = store
+            .list_all()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| (s.agent_session_id, s.state))
+            .collect();
+        assert_eq!(all, vec![(Some(a), S::Idle), (Some(b), S::AwaitingUser)]);
+    }
+
+    /// `v_agent_status` rolls a thread's open sessions up by the same rule
+    /// as `oxplow_domain::agent::roll_up_status`, for every pair of logged
+    /// states (`stalled` is derived, never logged); `v_agent_session_status`
+    /// holds each session's own.
+    #[tokio::test]
+    async fn the_status_model_rolls_sessions_up_like_the_rule() {
+        use oxplow_domain::AgentStatusState as S;
+        let logged = [S::Idle, S::Running, S::AwaitingUser, S::Stopped, S::Error];
+        for a in logged {
+            for b in logged {
+                let (db, tid) = fixture().await;
+                let vocabulary = VocabularyHandle::core();
+                let conn = db.conn().unwrap();
+                for (at, state) in [(1, a), (2, b)] {
+                    let session = crate::agent_session_store::insert_tx(
+                        &conn,
+                        &oxplow_domain::agent_session::NewAgentSession::terminal(tid, "claude"),
+                        Timestamp::from_unix_ms(at),
+                    )
+                    .unwrap()
+                    .id;
+                    use oxplow_domain::events::schema::AgentStatusChangedV1;
+                    let vocabulary = vocabulary.current();
+                    let ev = EventCtx::system(&vocabulary, "test");
+                    let env = ev
+                        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
+                            thread: thread_ref(tid),
+                            state: oxplow_domain::events::schema::LoggedAgentStatus::of(state)
+                                .unwrap(),
+                            detail: None,
+                        })
+                        .with_anchors(Anchors {
+                            agent_session_id: Some(session),
+                            ..anchors_for_thread_tx(&conn, tid).unwrap()
+                        })
+                        .with_subject([thread_ref(tid)]);
+                    ev.append(&conn, &env).unwrap();
+                }
+                let rolled: String = conn
+                    .query_row(
+                        "SELECT state FROM v_agent_status WHERE thread_id = ?1",
+                        [tid.value()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                let expected = oxplow_domain::agent::roll_up_status([a, b]).unwrap();
+                assert_eq!(
+                    serde_json::from_value::<S>(serde_json::Value::String(rolled)).unwrap(),
+                    expected,
+                    "{a:?} + {b:?}"
+                );
+                let per_session: i64 = conn
+                    .query_row(
+                        "SELECT count(*) FROM v_agent_session_status WHERE thread_id = ?1",
+                        [tid.value()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(per_session, 2);
+            }
+        }
     }
 
     #[tokio::test]
@@ -691,11 +962,7 @@ mod tests {
             .transaction(move |tx| {
                 crate::agent_session_store::insert_tx(
                     tx,
-                    &oxplow_domain::agent_session::NewAgentSession::of(
-                        tid,
-                        oxplow_domain::AgentKind::Claude,
-                        None,
-                    ),
+                    &oxplow_domain::agent_session::NewAgentSession::terminal(tid, "claude"),
                     Timestamp::from_unix_ms(1),
                 )
             })
@@ -706,7 +973,7 @@ mod tests {
         let turn = AgentTurn {
             id: AgentTurnId::placeholder(),
             thread_id: tid,
-            agent_session_id: None,
+            agent_session_id: Some(session),
             prompt: "do the thing".into(),
             answer: None,
             session_id: Some("s1".into()),

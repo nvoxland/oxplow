@@ -12,7 +12,7 @@ const GROUPS: { title: string; matches(key: string): boolean }[] = [
   { title: "Project", matches: (k) => ["projectName", "zones", "iconTint"].includes(k) },
   {
     title: "Agents",
-    matches: (k) => ["agents", "agentModels", "acpAgents", "agentPromptAppend", "injectSessionContext"].includes(k),
+    matches: (k) => ["agents", "agentConfig", "acpAgents", "agentPromptAppend", "injectSessionContext"].includes(k),
   },
   { title: "AI", matches: (k) => k === "ai" || k.startsWith("ai.") },
   {

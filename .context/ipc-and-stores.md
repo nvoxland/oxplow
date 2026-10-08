@@ -28,8 +28,8 @@ command):
 | page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `ModelsChanged` (P8.A10) |
 | follow-ups, background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
-| terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough |
-| forgetting a stale Claude resume pointer at launch (`resume_check::forget_missing`) | agent-session state, like hook ingest's own writes of it; only that column, only while it's still the id found gone |
+| terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
+| forgetting a stale Claude resume pointer at launch (`resume_check::forget_missing`) | agent-session state (`agent_session.resume_session_id`), like hook ingest's own writes of it; only that column, only while it's still the id found gone |
 | the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
@@ -305,10 +305,12 @@ For commonly-filtered events there are scoped helpers in `apps/desktop/src/api.t
 Add a new helper any time more than one component would write the same
 filter.
 
-Config IPC includes `set_agents(agents: Vec<AgentKind>)`, which writes the
-project's ordered enabled-agent list in `.oxplow/project.yaml`. Thread creation accepts
-an optional `agent`; the command validates that the requested agent is enabled
-and otherwise uses the first configured agent.
+Config IPC includes `set_agents(agents: Vec<String>)`, which writes the
+project's ordered enabled-harness list in `.oxplow/project.yaml` (each key must
+be registered), and `set_agent_model(agent, model)`, which writes
+`agentConfig.<agent>.model`. `oxplow.agent_session.open` takes an optional
+`harness`; it must be registered and enabled, else the project's default
+runs.
 
 **Listener count:** each UI subscriber registers via
 `listen("oxplow:event", ...)` from `@tauri-apps/api/event`. Tauri 2's
@@ -508,8 +510,9 @@ listing open turns — `listAgentTurns`, `listOpenTurns`,
 `subscribeTurnEvents` no longer exist, and there is no
 `TurnChangedEvent`. If you need a "what is the agent doing right
 now" signal, use the `task` rows themselves plus
-`agent-status.changed` for the colored-dot working/waiting/idle
-state.
+`agentStatusChanged` (per agent session — it names the session; the
+renderer rolls a thread's sessions up, agent-model.md "Agent status") for
+the colored-dot working/waiting/idle state.
 
 ## Thread and stream order
 

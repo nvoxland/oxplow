@@ -378,6 +378,37 @@ pub fn recent_tx(
         .map_err(map_sql_err)
 }
 
+/// Events of agent session `session` on `thread` (`None`: the thread's
+/// activity no session claims) whose type matches `pattern`, newest first.
+pub fn recent_in_session_tx(
+    conn: &Connection,
+    pattern: &str,
+    thread: ThreadId,
+    session: Option<AgentSessionId>,
+    limit: usize,
+) -> Result<Vec<StoredEvent>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT * FROM event_log
+              WHERE thread_id = ?1 AND agent_session_id IS ?2 AND type LIKE ?3
+              ORDER BY seq DESC LIMIT ?4",
+        )
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map(
+            params![
+                thread.value(),
+                session.map(|s| s.value()),
+                pattern,
+                limit as i64
+            ],
+            row_to_event,
+        )
+        .map_err(map_sql_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sql_err)
+}
+
 /// Dead letters, `pending` only unless `all`, oldest first.
 pub fn list_dead_letters_tx(conn: &Connection, all: bool) -> Result<Vec<DeadLetter>, DomainError> {
     let sql = if all {
@@ -445,6 +476,20 @@ impl SqliteEventLogStore {
         let pattern = format!("{namespace}.%");
         self.db
             .call_mut(move |conn| recent_tx(conn, &pattern, thread, stream, limit))
+            .await
+    }
+
+    /// [`recent_in_session_tx`] under `namespace`.
+    pub async fn recent_in_session(
+        &self,
+        namespace: &str,
+        thread: ThreadId,
+        session: Option<AgentSessionId>,
+        limit: usize,
+    ) -> Result<Vec<StoredEvent>, DomainError> {
+        let pattern = format!("{namespace}.%");
+        self.db
+            .call_mut(move |conn| recent_in_session_tx(conn, &pattern, thread, session, limit))
             .await
     }
 

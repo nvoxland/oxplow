@@ -9,9 +9,9 @@ import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { AgentSessionRow } from "../agentSessions.js";
 
-interface AgentPageProps {
+interface AgentSessionPageProps {
   thread: Thread | null;
-  /** The thread's agent session; `null` while it loads or when it has none. */
+  /** The agent session the tab shows; `null` while the thread's sessions load. */
   session: AgentSessionRow | null;
   stream: Stream | null;
   visible: boolean;
@@ -26,18 +26,13 @@ interface AgentPageProps {
 }
 
 /**
- * Page wrapper for the agent terminal. Like every other page kind,
- * the agent renders inside the shared Page chrome — but configured
- * to hide the nav bar (the terminal owns its full height) and the
- * header (no title row). Tab-level non-closable behavior is enforced
- * at the host's centerTabs builder, not here.
- *
- * Wrapping in Page (instead of rendering TerminalPane directly)
- * makes the agent tab participate in the same architecture as every
- * other tab: a tab is a slot that holds a Page; the Page configures
- * what chrome it wants.
+ * An agent session's tab: its terminal (a `terminal` session) or its ACP
+ * chat (a `chat` one). Like every other page kind it renders inside the
+ * shared Page chrome — configured to hide the nav bar (the terminal owns
+ * its full height) and the header (no title row). Its tab is pinned and
+ * follows the session's row (`reconcileSessionTabs`).
  */
-export function AgentPage({
+export function AgentSessionPage({
   thread,
   session,
   stream,
@@ -46,7 +41,7 @@ export function AgentPage({
   onOpenDiff,
   onOpenSettings,
   onOpenPage,
-}: AgentPageProps) {
+}: AgentSessionPageProps) {
   // Only linkify terminal paths that are real workspace files/dirs, so dotted
   // words in agent prose (e.g. a plugin name) aren't turned into broken links.
   const isLinkablePath = useWorkspaceLinkIndex(stream?.id);
@@ -60,18 +55,19 @@ export function AgentPage({
   if (!session) {
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
-        <div style={{ padding: 12, color: "var(--muted)" }}>This thread has no agent session.</div>
+        <div style={{ padding: 12, color: "var(--muted)" }}>Loading the agent session…</div>
       </Page>
     );
   }
   // ACP sessions talk to their agent as a structured conversation, not a
-  // terminal. Keyed on the thread like the terminal below.
+  // terminal. Keyed on the session like the terminal below.
   if (session.harness === "acp") {
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
         <AcpAgentView
-          key={thread.id}
+          key={session.id}
           thread={thread}
+          sessionId={session.id}
           worktreePath={stream?.worktree_path}
           visible={visible}
           onOpenDiff={onOpenDiff}
@@ -92,16 +88,11 @@ export function AgentPage({
           *  item doesn't resolve, so the terminal kept its own height when
           *  the strip grew, was clipped, and never refit (tsk1042). */}
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          {/* Key on thread.id so switching to a different thread
-            *  remounts the terminal — the pane target alone collides
-            *  ("working" for every thread), so without the key
-            *  React reuses the same xterm + PTY session and the
-            *  user keeps seeing the old thread's transcript even
-            *  though the backend would happily attach a different
-            *  per-thread session. */}
+          {/* Keyed on the session: another session's pane is another
+            *  agent, so React must not reuse this xterm for it. */}
           <TerminalPane
-            key={thread.id}
-            paneTarget="working"
+            key={session.id}
+            paneTarget={session.id}
             visible={visible}
             worktreePath={stream?.worktree_path}
             onOpenFile={onOpenFile}
@@ -111,13 +102,13 @@ export function AgentPage({
                 ? {
                     streamId: stream.id,
                     threadId: thread.id,
-                    targetKind: "agent",
-                    targetId: thread.id,
+                    targetKind: "agent_session",
+                    targetId: session.id,
                   }
                 : undefined
             }
             onUserInterrupt={() => {
-              void recordUserInterrupt(thread.id, stream?.id ?? null);
+              void recordUserInterrupt(session.id, thread.id, stream?.id ?? null);
             }}
           />
         </div>

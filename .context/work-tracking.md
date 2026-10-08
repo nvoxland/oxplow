@@ -39,7 +39,7 @@ Use it to learn a harness's real payload shapes before depending on them.
 Besides the hooks oxplow acts on, the Claude plugin registers events it
 only observes — `SubagentStart`, `SubagentStop`, `TaskCreated`,
 `TaskCompleted`, `PreCompact` — which are acked unread until something
-needs them (`crates/oxplow-plugin/src/lib.rs` `HOOK_EVENTS`).
+needs them (`crates/oxplow-harnesses/src/claude.rs` `HOOK_EVENTS`).
 
 ## Efforts: a core bucket, a pluggable policy
 
@@ -105,8 +105,9 @@ changed, writing_tools }`**, logged by the `thread.checkpoint` consumer
 compares the turn's start snapshot with the take's (content-addressed:
 the same id means the same tree); `writing_tools` counts the turn's calls
 to tools that can change the worktree — edits, shell commands, subagents,
-`run_command` — from a per-harness name list kept in that module, so no
-policy reads tool names. The policy opens an unlinked effort with
+`run_command` — named by the registered harnesses
+(`AgentHarness::writing_tools`, their union) plus oxplow's own
+`run_command`, so no policy reads tool names. The policy opens an unlinked effort with
 `adopt_since` the turn's start when `changed` and `writing_tools > 0` and
 the thread has none open; a later item start links it (rule 1).
 
@@ -164,6 +165,17 @@ own — heavier ones included (beads as a work list).
   be none, snapshots may not, and `vcs` / `knowledge` aren't chosen. A
   person's override is `activeProviders` in `.oxplow/personal.yaml`
   (`oxplow.config.set { layer: personal }`).
+- **One active, or many at once.** Most capabilities have one active
+  implementation, chosen (the work list, the effort policy, snapshots) or
+  fixed (`vcs`, `knowledge`). A **many-capability** (`CapabilitySpec.many`:
+  `agent_harness`, `acp_adapter`, `ai_provider`) is served by every
+  implementation declared — the way collectors are — never chosen,
+  never none and never switched: each declared row is active
+  (`chosen_by = declared`), its `default` is the one used when nothing
+  names one, and a need on it is met while any is declared, a need on one
+  of its features while any of them has it (`Active::unmet`). Their
+  implementations are `oxplow-foundation`'s declarations (core's
+  built-ins, looked up by key: an agent session's `harness`).
 - **No special-casing our own implementations.** Core calls every
   implementation of an interface the same way and never branches on
   whether it is ours or compiled in. Compiled-in, scripted and
@@ -174,11 +186,18 @@ own — heavier ones included (beads as a work list).
   Core's own records (turns, efforts, the event log) stay transactional
   in core.
   `source_guards::core_never_special_cases_its_own_pieces` fails on a
-  literal `"oxplow-bundled"` outside `bundled_extensions.rs` or a
-  provider id compared with oxplow's; what's left is pinned with its
-  reason. oxplow's tasks sit behind the interface like any list
-  (`crates/oxplow-tasks`, registered by declaration, their verbs called
-  outside the transaction — [work-items.md](./work-items.md)).
+  literal `"oxplow-bundled"` or `"oxplow-foundation"` outside
+  `bundled_extensions.rs` or a provider id compared with oxplow's; what's
+  left is pinned with its reason. oxplow's tasks sit behind the interface
+  like any list (`crates/oxplow-tasks`, registered by declaration, their
+  verbs called outside the transaction — [work-items.md](./work-items.md)).
+  The agent harnesses likewise: `only_harness_implementations_name_a_harness`
+  fails on production code outside `crates/oxplow-harnesses` and
+  `crates/oxplow-harness-fake` that names a harness's own pieces
+  (`AgentKind`, its CLI's flags, env markers, metric names, tool names,
+  `CLAUDE.md`, `.claude/`), with a pinned list (`HARNESS_IMPLEMENTATION`,
+  empty) for any that must stay, each with its reason
+  ([agent-model.md](./agent-model.md) "Launching the agent").
 - **The agent's tools follow the active implementation.** An interface is
   what oxplow needs to show, link and act; it is not a funnel the agent
   must work through. Each implementation declares its agent surface (its

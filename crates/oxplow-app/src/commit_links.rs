@@ -68,7 +68,8 @@ pub async fn link_effort(svc: &crate::Services, effort: &EffortId) -> Result<(),
     let ws = svc
         .worktrees
         .resolve(Some(&thread.stream_id.to_string()))
-        .await;
+        .await
+        .into_local_path();
     // To the second, as commits are stamped.
     let since = Timestamp::from_unix_ms(effort.started_at.unix_ms() / 1000 * 1000);
     for (sha, _) in svc.git_store.commits_since(since).await? {

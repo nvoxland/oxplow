@@ -18,7 +18,8 @@ const readWorkList = mock(async (_thread: string | null) => taskReads);
 /** The calls that read the backlog, and the threads the others read. */
 const backlogReads = () => readWorkList.mock.calls.filter((c) => c[0] === null).length;
 const threadReads = () => readWorkList.mock.calls.map((c) => c[0]).filter((t) => t !== null);
-const listAgentStatuses = mock(async () => []);
+const listAgentStatuses = mock(async (): Promise<unknown[]> => []);
+const setSessionStatuses = mock((_next: unknown) => {});
 const getConfig = mock(async () => ({ generated: { exclude: [], include: [] } }));
 const getThreadState = mock(async () => ({ selectedThreadId: null, activeThreadId: null, threads: [] }));
 
@@ -63,7 +64,7 @@ function makeHandlers(threadWorkStatesRef: { current: WorkStates }) {
     setThreadStates: noop as never,
     setStreams: noop as never,
     setStream: noop as never,
-    setAgentStatuses: noop as never,
+    setSessionStatuses: setSessionStatuses as never,
     setGeneratedState: noop,
     setEnabledAgents: noop,
   };
@@ -87,6 +88,7 @@ beforeEach(() => {
   unsubCount = 0;
   readWorkList.mockClear();
   listAgentStatuses.mockClear();
+  setSessionStatuses.mockClear();
   getConfig.mockClear();
 });
 
@@ -95,8 +97,9 @@ afterEach(cleanup);
 test("subscribes to the oxplow event bus on mount", () => {
   render(<Harness workStates={{}} />);
   // tasks (models + followups), threads (v_thread), streams (v_stream),
-  // streamOrphaned, configChanged = 5 subscriptions.
-  expect(oxplowHandlers.length).toBe(5);
+  // streamOrphaned, configChanged, agent sessions (v_agent_session) = 6
+  // subscriptions.
+  expect(oxplowHandlers.length).toBe(6);
 });
 
 test("does not re-subscribe across re-renders (no churn)", () => {
@@ -111,15 +114,39 @@ test("does not re-subscribe across re-renders (no churn)", () => {
 test("unsubscribes every subscription on unmount", () => {
   const { unmount } = render(<Harness workStates={{}} />);
   unmount();
-  // 5 oxplow + workspace-context + agent-status = 7, plus 3 reconnect
-  // handlers (tasks, config, agent-status) = 10.
-  expect(unsubCount).toBe(10);
+  // 6 oxplow + workspace-context + agent-status = 8, plus 3 reconnect
+  // handlers (tasks, config, agent-status) = 11.
+  expect(unsubCount).toBe(11);
 });
 
 test("registers reconnect handlers for the core stores", () => {
   render(<Harness workStates={{}} />);
   // tasks, config, agent-status re-hydrate on a remote WS reconnect.
   expect(reconnectHandlers.length).toBe(3);
+});
+
+test("two sessions in one thread keep their own statuses", async () => {
+  const entry = (sessionId: string | null, status: string) => ({ streamId: "", threadId: "thr1", sessionId, status });
+  listAgentStatuses.mockImplementationOnce(async () => [entry("ses1", "working"), entry("ses2", "awaiting"), entry(null, "waiting")]);
+  render(<Harness workStates={{}} />);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(setSessionStatuses).toHaveBeenCalledWith({
+    ses1: entry("ses1", "working"),
+    ses2: entry("ses2", "awaiting"),
+    "thr1:unclaimed": entry(null, "waiting"),
+  });
+});
+
+test("a change to the agent sessions re-reads the statuses: a closed one's drops out", async () => {
+  render(<Harness workStates={{}} />);
+  expect(listAgentStatuses).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_agent_session"] });
+    await Promise.resolve();
+  });
+  expect(listAgentStatuses).toHaveBeenCalledTimes(2);
 });
 
 test("re-hydrates core stores on a remote reconnect", async () => {

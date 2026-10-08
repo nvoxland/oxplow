@@ -131,8 +131,8 @@ async fn forward_hook(event: &str, payload: Vec<u8>) -> Result<Vec<u8>, reqwest:
             std::env::var("OXPLOW_THREAD_ID").unwrap_or_default(),
         )
         .header(
-            "X-Oxplow-Pane",
-            std::env::var("OXPLOW_PANE").unwrap_or_default(),
+            "X-Oxplow-Session",
+            std::env::var("OXPLOW_SESSION").unwrap_or_default(),
         )
         .body(payload)
         .send()

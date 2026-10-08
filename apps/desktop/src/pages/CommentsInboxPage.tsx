@@ -9,7 +9,7 @@ import { anchorIsApprox, CommentPopover } from "../components/Comments/CommentPo
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { fileRef, wikiPageRef, workItemTabRef } from "../tabs/pageRefs.js";
+import { agentSessionRef, fileRef, wikiPageRef, workItemTabRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 
@@ -18,6 +18,8 @@ function targetRef(kind: string, id: string): TabRef | null {
   if (kind === "file") return fileRef(id);
   if (kind === "wiki") return wikiPageRef(id);
   if (kind === "work_item") return workItemTabRef(`work_item:${id}`);
+  // An agent session's terminal (its tab while the session is open).
+  if (kind === "agent_session") return agentSessionRef(id);
   return null;
 }
 
@@ -27,6 +29,7 @@ export function targetLabel(kind: string, id: string): string {
   if (kind === "file") return id;
   if (kind === "wiki") return `wiki/${id}`;
   if (kind === "work_item") return id.slice(id.indexOf(":") + 1);
+  if (kind === "agent_session") return "an agent session's terminal";
   return `${kind}:${id}`;
 }
 
@@ -168,8 +171,10 @@ export function CommentsInboxPage({
                 type="button"
                 data-testid={`comments-group-${g.kind}-${g.id}`}
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey) onOpenPage(targetRef(g.kind, g.id) ?? { id: "", kind: "agent", payload: null });
-                  else navigate(g.kind, g.id);
+                  const ref = targetRef(g.kind, g.id);
+                  if (e.metaKey || e.ctrlKey) {
+                    if (ref) onOpenPage(ref);
+                  } else navigate(g.kind, g.id);
                 }}
                 style={{
                   textAlign: "left",

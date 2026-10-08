@@ -21,7 +21,6 @@ specta-typescript = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-git = { workspace = true }
 oxplow-fs-watch = { workspace = true }
-oxplow-plugin = { workspace = true }
 tokio = { workspace = true }
 parking_lot = "0.12"
 uuid = { workspace = true }

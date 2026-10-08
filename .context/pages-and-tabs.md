@@ -13,16 +13,25 @@ pages are THE shell.
   (`components/Navigator.tsx`), not tab rows: a stream glyph with its
   thread glyphs under it. Clicking a glyph switches stream / selects
   thread; the expanded panel's right-click menus add a thread (stream
-  menu → Add thread), promote one (thread menu → Make writer), rename,
-  open settings, close or remove; `+ Add stream` at the panel's foot
+  menu → Add thread), promote one (thread menu → Make writer), open an
+  agent session (thread menu → New session…), rename, open settings,
+  close or remove; `+ Add stream` at the panel's foot
   opens the `new-stream` page. The launcher's New Thread… / New Stream…
   reach the same flows. See the Navigator row in "Modules".
 - **Each thread owns its own set of open tabs and an active tab.**
   Switching threads restores its tab set; switching streams swaps to the
-  selected thread of the new stream. The agent terminal is always
-  available per thread and survives switches.
+  selected thread of the new stream.
+- **A thread's agents are its agent sessions, one tab each.** Every open
+  `agent_session` row has a pinned tab (`agent_session:ses3`) leading the
+  thread's tabs, in the order the sessions opened: its terminal or its
+  ACP chat. The tabs follow the rows — `useThreadSessions` reads
+  `v_agent_session`, and `reconcileSessionTabs` (`tabs/sessionTabs.ts`)
+  keeps each open session's tab first and drops a closed one's. A thread
+  with no open session shows the **session picker** (`page:new-session`,
+  `NewSessionPage`), which is also where New session… lands. A process
+  survives switches; closing a session's tab closes the session.
 - A **page** is anything addressable inside a tab body — file, task,
-  wiki page, finding, dashboard, settings, agent terminal. Pages share a
+  wiki page, finding, dashboard, settings, agent session. Pages share a
   common chrome (header + collapsible Backlinks panel).
 
 ## Modules
@@ -31,7 +40,7 @@ pages are THE shell.
 |---|---|
 | `apps/desktop/src/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
-| `apps/desktop/src/tabs/pageRefs.ts` | Every tab id, built here and nowhere else: entity refs (`fileRef`, `directoryRef`, `wikiPageRef`, `taskRef`, `gitCommitRef`, `metricRef`, `lensRef`) and shell routes (`agentRef`, `indexRef(kind)`, `diffRef(spec)`, `snapshotRef`/`effortDiffRef`/`endpointDiffRef`, `dashboardRef`, …). `refFromTabId(id)` is the inverse of every constructor (via the exhaustive `ROUTES` table for `page:` ids); `pageKindOf(id)` names the kind a tab renders as; `diskFilePath(id)` is the one way to ask "which working-tree file is this tab". |
+| `apps/desktop/src/tabs/pageRefs.ts` | Every tab id, built here and nowhere else: entity refs (`fileRef`, `directoryRef`, `wikiPageRef`, `taskRef`, `gitCommitRef`, `metricRef`, `lensRef`, `agentSessionRef`) and shell routes (`newSessionRef`, `indexRef(kind)`, `diffRef(spec)`, `snapshotRef`/`effortDiffRef`/`endpointDiffRef`, `dashboardRef`, …). `refFromTabId(id)` is the inverse of every constructor (via the exhaustive `ROUTES` table for `page:` ids); `pageKindOf(id)` names the kind a tab renders as; `diskFilePath(id)` is the one way to ask "which working-tree file is this tab". |
 | `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. **`titleInBody`** (default false) says the page renders its OWN title as an `<h1>` in the body (use the exported `pageH1Style` for consistency), so the chrome (nav bar / header) suppresses the title to avoid a duplicate — the tab-strip label via `usePageTitle` is unaffected. Adopters: `MetricDetailPage`, `DiffViewPage` (tsk137). **Body layout** is chosen via `layout?: "full" \| "details"` (default `"full"`); details layout pairs a full-width center column with a 320px sticky right rail (`rightRail` prop). Below ~960px body width the rail doesn't disappear — `DetailsBody` relocates the **same panel** (card surface + tinted header band + ⋯ actions) inline to the top of the center column. Purely responsive, no manual toggle and no per-page logic — consumers just pass `rightRail`. Reads only semantic CSS variables (skin via theme). |
 | `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks/outbound/snapshots dropdowns (popovers), and an optional **comment navigator** slot (`comments` ReactNode, rendered before Backlinks). Mounted by `Page` when context or explicit `navBar` prop is present. |
 | `apps/desktop/src/components/Comments/CommentNavigator.tsx` | Self-contained per-page comment navigator for the nav bar. `useCommentsForTarget(kind,id)` → shows "Comments (N)", steps through anchored comments with ◀ ▶ (each `requestCommentReveal`s to scroll + open inline on the surface), and a dropdown lists all comments plus an **Orphaned (M)** section. Orphaned entries are clickable too: they `requestCommentReveal`, and the surfaces open the thread popover at a fallback position (no anchor to scroll to) so the comment is readable. The popover then offers a **"Relink to selection"** button (`CommentPopover.onRelink`, wired by RichTextField + MonacoCommentLayer) that re-attaches the comment to the editor's current selection — select the intended text first. (The right-click "Relink orphaned" path still exists.) Comment-bearing pages pass it via `Page`'s `commentsNav` prop (FilePage → file/path, WikiPage → wiki/slug, WorkItemPage → work_item/`<provider>:<id>`). Renders nothing when the page has no comments. Pure helpers (`partitionPageComments`, `stepComment`) live in `pageCommentNav.ts` (unit-tested) and are shared with the per-thread stepper: `CommentPopover` takes an `onStep(dir)` prop so an open comment thread shows ◀ Prev / Next ▶ buttons that scroll to + reopen the adjacent comment (wired by RichTextField + MonacoCommentLayer via `stepComment` + `requestCommentReveal`). |
@@ -73,7 +82,7 @@ extension as `lens:<slug>` pages ([extensions.md](./extensions.md), epic
 tsk275) — don't grow them; new instruments should be lenses once the
 extension host lands.
 
-- **Agent & work:** `agent`, `work_item`, `tasks`, `done-work`, `backlog`,
+- **Agent & work:** `agent_session`, `new-session`, `work_item`, `tasks`, `done-work`, `backlog`,
   `archived`, `new-task`, `new-stream`, `stream-settings`,
   `thread-settings`, `closed-threads`, `comments`, `hook-events`,
   `alerts`
@@ -94,7 +103,7 @@ extension host lands.
   `duplicate-block` stays core as the side-by-side compare page (lens
   `compare` links).
 
-`agent` is implicit per thread. There is no `change-analysis` kind.
+An agent session's tab follows its row (`reconcileSessionTabs`). There is no `change-analysis` kind.
 
 ## Tab id format
 
@@ -126,8 +135,8 @@ inverse; the round-trip test in `pageRefs.test.ts` covers every
 constructor. `newTaskRef(payload)`'s defaults deliberately aren't in the
 id (stable id → one form tab), so a history reopen starts empty.
 
-There are no sentinel ids: the agent tab is `AGENT_TAB_ID`
-(`page:agent`), and "is this the editor's working-tree file" is
+There are no sentinel tab ids (`HOME_TAB` in `App.tsx` means "nothing
+chosen", never a tab), and "is this the editor's working-tree file" is
 `diskFilePath(id)` (null for a pinned revision such as
 `file:src/a.rs@git:HEAD`, which is a read-only viewer tab).
 
@@ -148,7 +157,8 @@ moved into the project DB and started fresh again) — see the decision in [refs
 | ext-page | `page:ext.<extension>.<page>` (`extPageRef`) — an extension's `pages:` entry, its lens full-page (`ExtensionPageView` resolves the page from the stream's extensions, so a restored tab opens too, and titles the tab with the page's manifest `title` through `LensPage`'s `title`). Not a named route: `PageKind` includes `ExtensionPageKind`, and `refFromTabId` / `pageKindOf` recognise the `ext.` head (the page id, which has no `.`, follows the last one). Params ride the id (`?ref=`) into the lens's `initialParams`: a ref of an extension's kind (`acme_pr:12`, P8.D7, extensions.md "Ref kinds") opens its kind's page this way | `page:ext.github.open-prs`, `page:ext.acme.pr?ref=acme_pr:12` |
 | symbols | `page:symbols[?path=<p>]` — one file's outline, or the project's symbols (filtered) | `page:symbols?path=src/lib.rs` |
 | symbol | `symbol:<path>/<name>@snap:<id>` (`v_symbol.ref`, `symbolRef(ref)`) — never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it through `v_symbol` and opens its file at the name's line (`openSymbol`, P6.E3) | `symbol:src/lib.rs/Widget::spin@snap:12` |
-| agent | `page:agent` (`AGENT_TAB_ID`) | `page:agent` |
+| agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal or ACP chat | `agent_session:ses3` |
+| new-session | `page:new-session` (`newSessionRef()`) — the session picker | `page:new-session` |
 | index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `problems`, `closed-threads`, `new-stream`, `new-task` | `page:tasks` |
 | diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
 | diff-view | `page:diff-view?snapshot=<N>` \| `?effort=<effortId>` \| `?start=<tok>&end=<tok>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `page:diff-view?effort=eff42` |
@@ -613,7 +623,8 @@ bookmark/backlinks all work the same way. `nav` is the slot's
 navigation (`navOpen`, `navOpenFile`, `navOpenDiff`, `navRevealCommit`,
 `slotId`): closures bind to the *slot's* current ref, so a back-stack
 page (still mounted, hidden) that navigates mutates the slot exactly as
-the visible page would. `handleOpenPage` special-cases only `agent`,
+the visible page would. `handleOpenPage` special-cases only `agent_session`
+(activate its tab — it exists while the session is open),
 `file` and `diff`; every other kind is "push the ref, activate it".
 
 - `fileSessions[stream.id]` is now a **content + dirty-state cache**
@@ -627,12 +638,20 @@ the visible page would. `handleOpenPage` special-cases only `agent`,
 - `closePageTab` is the unified close path; it removes the ref from
   `threadPageTabs`, drops history + page-title state, and (for
   file tabs) closes the entry in `fileSessions`.
-- The agent tab is the only special-case at the centerTabs level —
-  it sits at slot 0, is `closable: false`, and uses `AgentPage`
-  (`apps/desktop/src/pages/AgentPage.tsx`) which wraps `TerminalPane`
-  inside `Page` chrome configured with `showNavBar={false}` and
-  `showHeader={false}`. A future cleanup may move the agent ref into
-  `threadPageTabs` too; today centerTabs prepends it deterministically.
+- Agent sessions' tabs are ordinary page tabs in `threadPageTabs`
+  (`pageRenderers.agent_session` → `AgentSessionPage`, which wraps
+  `TerminalPane` or `AcpAgentView` in `Page` chrome with
+  `showNavBar={false}` and `showHeader={false}`). They are **pinned**
+  (`TabRef.pinned`, `CenterTab.pinned`): they lead the strip, are never
+  dragged or dropped on, the bulk closes skip them, and the tab cap never
+  counts or evicts them. Their × arms an inline confirm ("Close
+  session") — a process ends, so it can't be an Undo toast — and runs
+  `oxplow.agent_session.close`; the tab goes when the row closes. The
+  right-click menu adds Rename…, an `InlinePromptStrip` in the strip's
+  header. Each tab carries its own status dot and question (the
+  session's status); the thread glyph and stream dot roll them up.
+  When nothing is chosen (`HOME_TAB`), a thread shows its home tab —
+  its first session's, else the picker (`homeTabOf`).
 
 This is the architectural rule for new tab kinds: add a `PageKind`
 (entity or route), add a `pageRefs.ts` constructor **and** its `ROUTES`
@@ -665,8 +684,9 @@ kinds slot in without re-discovering the layout.
 - **`threadCenterActive: Record<string, string>`** — per-thread
   active tab id. Switching threads restores each thread's last
   active tab. Mutated by `setCenterActive` (which writes into the
-  per-thread map for the current thread). `AGENT_TAB_ID` (`page:agent`)
-  is the default fallback when nothing else is selected.
+  per-thread map for the current thread). `HOME_TAB` (nothing chosen)
+  falls back to the thread's home tab: its first agent session's, else
+  the session picker.
 - **`threadPageMru: Record<string, string[]>`** — per-thread tab
   recency, most-recently-used first. In-memory (like
   `threadCenterActive`); rebuilt as tabs are activated. A `centerActive`
@@ -678,8 +698,8 @@ kinds slot in without re-discovering the layout.
   least-recently-used victims and `closePageTab`s them. The **active
   tab and any dirty file tab are protected** (a soft cap never discards
   unsaved work — best-effort, so if every non-active tab is dirty the
-  count can sit above 15). The pinned Agent tab is outside
-  `threadPageTabs`, so it's never counted or evicted. Eviction routes
+  count can sit above 15). Pinned tabs (agent sessions') are never
+  counted or evicted (`selectLruEvictions`' `pinned`). Eviction routes
   through `closePageTab` (not the dirty-file undo-toast path) — protected
   dirty files never reach it, so evictions are silent and toast-free.
 
@@ -779,7 +799,7 @@ tab × / right-click menu close
        ├→ remove from threadPageTabs
        ├→ drop threadPageHistory entry
        ├→ drop pageTitles entry
-       └→ snap centerActive to AGENT_TAB_ID if it was the closed tab
+       └→ snap centerActive to HOME_TAB (the thread's home tab) if it was the closed tab
 ```
 
 ## Persistence across restart
@@ -833,10 +853,6 @@ Snapshots are the only path for cross-restart fidelity.
 
 ## Known follow-ups + invariants
 
-- **Agent ref doesn't live in threadPageTabs yet.** It's the only
-  special case in `centerTabs`. Lifting it would need a
-  closable=false flag on the unified-tab record (or a
-  per-PageKind table).
 - **fileSessions close on closePageTab is not refcounted.** If the
   same file is open in two threads of the same stream and one
   thread closes its tab, the buffer is dropped for both. Should be
@@ -855,7 +871,9 @@ Snapshots are the only path for cross-restart fidelity.
 
 ## Adding a new tab kind: checklist
 
-1. Extend `PageKind` in `tabs/tabState.ts`.
+1. Extend `PageKind` in `tabs/tabState.ts`. Decide whether its tab is
+   `pinned` (leads the strip, never evicted, not dragged) — today only an
+   agent session's is.
 2. Add a `pageRefs.ts` helper (`fooRef(...)`) and document the id
    format in the table above.
 3. Build a `*Page` component in `apps/desktop/src/pages/` that

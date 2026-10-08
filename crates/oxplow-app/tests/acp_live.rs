@@ -36,11 +36,7 @@ async fn a_real_adapter_answers_a_prompt() {
     let stream = svc.streams.ensure_primary().await.unwrap();
     // An ACP thread names a known ACP agent; the session below launches the
     // adapter under test whatever the thread names.
-    svc.config
-        .write()
-        .unwrap()
-        .agents
-        .push(oxplow_domain::AgentKind::Acp);
+    svc.config.write().unwrap().agents.push("acp".into());
     let created = svc
         .commands
         .run(
@@ -59,11 +55,19 @@ async fn a_real_adapter_answers_a_prompt() {
     let thread: oxplow_domain::ThreadId =
         serde_json::from_value(created.result["id"].clone()).unwrap();
 
-    let host = Arc::new(ServicesAcpHost::new(&svc, Some(stream.id)));
+    let session = svc
+        .agent_session_store
+        .newest_for_thread(thread)
+        .await
+        .unwrap()
+        .expect("the thread has its session")
+        .id;
+    let host = Arc::new(ServicesAcpHost::new(&svc, Some(stream.id), session));
     svc.acp
         .open(
             host,
             SessionSpec {
+                session_id: session,
                 thread_id: thread,
                 agent: "live".into(),
                 cwd: root.clone(),
@@ -76,13 +80,14 @@ async fn a_real_adapter_answers_a_prompt() {
                 program: program.into(),
                 args: words.map(str::to_string).collect(),
                 env: vec![],
+                env_remove: vec![],
             },
         )
         .await
         .unwrap();
     let mut rx = svc.acp.subscribe();
     svc.acp
-        .submit_human_prompt(&thread, "Reply with the single word: pong".into())
+        .submit_human_prompt(&session, "Reply with the single word: pong".into())
         .await
         .unwrap();
     tokio::time::timeout(Duration::from_secs(180), async {
@@ -97,12 +102,12 @@ async fn a_real_adapter_answers_a_prompt() {
     })
     .await
     .expect("the turn ended");
-    let items = svc.acp.transcript(&thread, 0).unwrap().items;
+    let items = svc.acp.transcript(&session, 0).unwrap().items;
     assert!(
         items
             .iter()
             .any(|i| matches!(&i.body, ItemBody::Agent { text } if !text.trim().is_empty())),
         "no reply: {items:?}"
     );
-    svc.acp.close(&thread).unwrap();
+    svc.acp.close(&session).unwrap();
 }

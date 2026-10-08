@@ -66,12 +66,13 @@ async fn root_for(
     named: Option<&str>,
 ) -> Result<std::path::PathBuf, CommandError> {
     match named {
-        None => Ok(worktrees.resolve(None).await),
+        None => Ok(worktrees.resolve(None).await.into_local_path()),
         Some(raw) => {
             let stream: StreamId = ref_id(raw, "stream", "/stream")?;
             worktrees
                 .resolve_strict(Some(&stream.to_string()))
                 .await
+                .map(|root| root.into_local_path())
                 .map_err(|e| invalid("/stream", e.to_string()))
         }
     }
@@ -173,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn an_install_lands_in_the_named_stream_or_the_primary_checkout() {
         let fx = services_with_effort().await;
-        let primary = fx.svc.worktrees.resolve(None).await;
+        let primary = fx.svc.worktrees.resolve(None).await.into_local_path();
         let named = stream_ref(fx.svc.streams.list_streams().await.unwrap()[0].id);
         assert_eq!(
             root_for(&fx.svc.worktrees, Some(&named)).await.unwrap(),

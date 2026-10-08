@@ -24,7 +24,6 @@ oxplow-config = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-git = { workspace = true }
 oxplow-fs-watch = { workspace = true }
-oxplow-plugin = { workspace = true }
 oxplow-code-metrics = { workspace = true }
 oxplow-code-deps = { workspace = true }
 tokio = { workspace = true }

@@ -28,6 +28,12 @@ describe("dropFromMru", () => {
 });
 
 describe("selectLruEvictions", () => {
+  test("a pinned tab (an agent session's) is never evicted and isn't counted", () => {
+    // 2 unpinned tabs over a cap of 1 → one goes; the pinned session stays.
+    expect(selectLruEvictions(["s1", "a", "b"], ["b", "a", "s1"], { max: 1, protect: [], pinned: ["s1"] })).toEqual(["a"]);
+    expect(selectLruEvictions(["s1", "s2", "a"], ["a"], { max: 1, protect: [], pinned: ["s1", "s2"] })).toEqual([]);
+  });
+
   test("nothing to evict when within the cap", () => {
     expect(selectLruEvictions(["a", "b"], ["b", "a"], { max: 5, protect: [] })).toEqual([]);
   });

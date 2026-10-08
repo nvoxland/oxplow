@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { querySql, type AgentKind } from "./api.js";
+import { querySql } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { threadIdOf, threadRowId } from "./modelIds.js";
@@ -20,7 +20,8 @@ export interface AgentSessionRow {
   threadId: string;
   /** `terminal`, `chat` or `action`. */
   kind: string;
-  harness: AgentKind;
+  /** The harness's key. */
+  harness: string;
   /** For an `acp` session, the ACP agent's name. */
   acpAgent: string | null;
   /** What the person called it; empty until renamed. */
@@ -36,7 +37,7 @@ export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow
     id: `ses${Number(at(row, "id"))}`,
     threadId: threadIdOf(Number(at(row, "thread_id"))),
     kind: String(at(row, "kind")),
-    harness: String(at(row, "harness")) as AgentKind,
+    harness: String(at(row, "harness")),
     acpAgent: at(row, "acp_agent") == null ? null : String(at(row, "acp_agent")),
     title: String(at(row, "title") ?? ""),
     openedAt: String(at(row, "opened_at")),

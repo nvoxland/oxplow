@@ -69,6 +69,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
                 read_only: true,
             },
         ],
+        config_schema: None,
     },
     BuiltIn {
         entry: "oxplow:commit-or-switch",
@@ -78,6 +79,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &[],
         id_pattern: None,
         fields: &[],
+        config_schema: None,
     },
     BuiltIn {
         entry: "oxplow:snapshots",
@@ -87,8 +89,103 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &["contents"],
         id_pattern: None,
         fields: &[],
+        config_schema: None,
     },
+    // Agent harnesses: what runs in an agent session.
+    harness(
+        "oxplow:claude-code",
+        "Claude Code",
+        &["terminal", "permission_prompts", "resume"],
+    ),
+    harness("oxplow:codex-cli", "Codex", &["terminal", "resume"]),
+    harness("oxplow:opencode", "opencode", &["terminal"]),
+    harness(
+        "oxplow:acp",
+        "An ACP agent",
+        &["structured_transcript", "permission_prompts", "resume"],
+    ),
+    // An ACP agent's program, as data (its preset or a project's).
+    BuiltIn {
+        entry: "oxplow:acp-adapter",
+        capability: "acp_adapter",
+        provider: None,
+        title: "An ACP agent's program",
+        features: &[],
+        id_pattern: None,
+        fields: &[],
+        config_schema: Some(ACP_ADAPTER_CONFIG),
+    },
+    // AI model providers: what a role's model is called through.
+    ai_provider("oxplow:anthropic", "Anthropic", &["decide_native"], None),
+    ai_provider(
+        "oxplow:openai-compatible",
+        "An OpenAI-compatible API",
+        &[],
+        Some(OPENAI_COMPATIBLE_CONFIG),
+    ),
+    ai_provider("oxplow:openrouter", "OpenRouter", &[], None),
+    ai_provider("oxplow:typesafe", "TypeSafe", &["decide_native"], None),
 ];
+
+/// An agent harness built-in.
+const fn harness(
+    entry: &'static str,
+    title: &'static str,
+    features: &'static [&'static str],
+) -> BuiltIn {
+    BuiltIn {
+        entry,
+        capability: "agent_harness",
+        provider: None,
+        title,
+        features,
+        id_pattern: None,
+        fields: &[],
+        config_schema: None,
+    }
+}
+
+/// An AI provider built-in.
+const fn ai_provider(
+    entry: &'static str,
+    title: &'static str,
+    features: &'static [&'static str],
+    config_schema: Option<&'static str>,
+) -> BuiltIn {
+    BuiltIn {
+        entry,
+        capability: "ai_provider",
+        provider: None,
+        title,
+        features,
+        id_pattern: None,
+        fields: &[],
+        config_schema,
+    }
+}
+
+/// An ACP adapter's declaration: the program that speaks ACP, and whether
+/// the system prompt rides `_meta.systemPrompt.append` on `session/new`
+/// (`meta`) or goes ahead of the first prompt (`prompt`).
+const ACP_ADAPTER_CONFIG: &str = r#"{
+  "type": "object",
+  "required": ["command"],
+  "additionalProperties": false,
+  "properties": {
+    "command": { "type": "string", "minLength": 1 },
+    "args": { "type": "array", "items": { "type": "string" } },
+    "env": { "type": "object", "additionalProperties": { "type": "string" } },
+    "systemPrompt": { "enum": ["meta", "prompt"] }
+  }
+}"#;
+
+/// An OpenAI-compatible provider's declaration: its API's base URL, when
+/// the declaration fixes one (else the instance in AI settings gives it).
+const OPENAI_COMPATIBLE_CONFIG: &str = r#"{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": { "baseUrl": { "type": "string", "minLength": 1 } }
+}"#;
 
 /// One built-in implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +204,9 @@ pub struct BuiltIn {
     pub id_pattern: Option<&'static str>,
     /// Its own fields (a work list's, kept in `native`).
     pub fields: &'static [BuiltInField],
+    /// The JSON Schema a declaration's `config:` must meet; `None` takes
+    /// no config.
+    pub config_schema: Option<&'static str>,
 }
 
 /// A built-in's field, as core's table declares it.
@@ -191,6 +291,9 @@ pub struct Implementation {
     pub fields: Value,
     /// What its items' own ids look like (a work list's), when it says.
     pub id_pattern: Option<String>,
+    /// What its declaration configures (`config:`, checked against its
+    /// built-in's schema): an ACP adapter's command, a provider's base URL.
+    pub config: Value,
 }
 
 impl Implementation {
@@ -220,6 +323,7 @@ impl Implementation {
             fields: Value::Array(Vec::new()),
             // Nothing in text is none's: it keeps no items.
             id_pattern: None,
+            config: Value::Object(Default::default()),
         }
     }
 }
@@ -371,6 +475,7 @@ impl CapabilityRegistry {
                         features: built_in_features(b),
                         fields: built_in_fields(b),
                         id_pattern: b.id_pattern.map(str::to_string),
+                        config: Value::Object(Default::default()),
                     })
                 }),
         );
@@ -442,6 +547,15 @@ impl CapabilityRegistry {
                 wanted: None,
             };
         };
+        if spec.many {
+            // Every declared one serves; the default is the one used when
+            // nothing names one.
+            return Resolved {
+                id: spec.default.into(),
+                chosen_by: ChosenBy::Default,
+                wanted: None,
+            };
+        }
         let (wanted, chosen_by) = if !spec.choosable {
             (spec.default.to_string(), ChosenBy::Default)
         } else if let Some(id) = config.personal_active_providers.get(capability) {
@@ -473,7 +587,30 @@ impl CapabilityRegistry {
     /// What's active under `config`, for checking needs.
     pub fn snapshot(&self, config: &OxplowConfig) -> Active {
         let mut by_capability = std::collections::BTreeMap::new();
+        let all = self.implementations();
         for spec in capability::CAPABILITIES {
+            if spec.many {
+                // Met while any implementation is declared; a feature while
+                // any of them has it.
+                let served: Vec<&Implementation> =
+                    all.iter().filter(|i| i.capability == spec.id).collect();
+                if served.is_empty() {
+                    continue;
+                }
+                let mut features: Vec<String> = served
+                    .iter()
+                    .filter_map(|i| i.features.as_object())
+                    .flat_map(|m| {
+                        m.iter()
+                            .filter(|(_, v)| v.as_bool() == Some(true))
+                            .map(|(k, _)| k.clone())
+                    })
+                    .collect();
+                features.sort();
+                features.dedup();
+                by_capability.insert(spec.id.to_string(), (spec.default.to_string(), features));
+                continue;
+            }
             let id = self.active(config, spec.id);
             let features = self
                 .get(spec.id, &id)
@@ -569,7 +706,13 @@ impl CapabilityRegistry {
         for spec in capability::CAPABILITIES {
             let resolved = self.resolve(config, spec.id);
             for i in all.iter().filter(|i| i.capability == spec.id) {
-                let active = i.id == resolved.id;
+                // Many serve at once: every declared one is active.
+                let active = spec.many || i.id == resolved.id;
+                let chosen_by = if spec.many {
+                    Some("declared".to_string())
+                } else {
+                    active.then(|| resolved.chosen_by.as_str().to_string())
+                };
                 rows.push(CapabilityProvider {
                     capability: i.capability.clone(),
                     provider: i.id.clone(),
@@ -579,7 +722,7 @@ impl CapabilityRegistry {
                     title: i.title.clone(),
                     source: i.source.as_str().into(),
                     available: true,
-                    chosen_by: active.then(|| resolved.chosen_by.as_str().to_string()),
+                    chosen_by,
                     capability_title: spec.title.into(),
                     choosable: spec.choosable,
                     optional: spec.optional,
@@ -644,6 +787,8 @@ fn restate(
 /// (the first statement) isn't a switch.
 fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<CapabilitySwitchedV1> {
     now.iter()
+        // Many serve at once: nothing is chosen, so nothing switches.
+        .filter(|(capability, _)| !capability::spec(capability).is_some_and(|s| s.many))
         .filter_map(|(capability, resolved)| {
             let from = before
                 .iter()
@@ -675,6 +820,7 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
                     features: built_in_features(b),
                     fields: built_in_fields(b),
                     id_pattern: b.id_pattern.map(str::to_string),
+                    config: d.config.clone(),
                 })
             })
         })
@@ -685,7 +831,7 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
 /// consented extension's that's offered — what it needs is active, and,
 /// when an implementation lists it, that implementation is the active one.
 /// A name another extension already took is left out (logged).
-pub fn agent_text(svc: &crate::Services) -> oxplow_plugin::AgentText {
+pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentText {
     let project_dir = svc.worktrees.project_dir();
     let extensions =
         crate::advisories::consented(&svc.approvals, &svc.extension_catalog.get(project_dir));
@@ -696,11 +842,15 @@ pub fn agent_text(svc: &crate::Services) -> oxplow_plugin::AgentText {
 }
 
 /// Rewrite the skills and commands of the agent runtimes already on disk
-/// to what's offered now: at boot (an agent that outlived an upgrade,
-/// tsk376), when the extensions change, and on a switch.
+/// to what's offered now, each registered harness its own: at boot (an
+/// agent that outlived an upgrade, tsk376), when the extensions change, and
+/// on a switch.
 pub fn refresh_agent_text(svc: &crate::Services) {
-    if let Err(error) = oxplow_plugin::refresh_skills(&svc.layout.project_dir, &agent_text(svc)) {
-        tracing::warn!(%error, "refreshing the agent's skills failed");
+    let text = agent_text(svc);
+    for harness in svc.harnesses.all() {
+        if let Err(error) = harness.refresh_text(&svc.layout.project_dir, &text) {
+            tracing::warn!(%error, harness = harness.id(), "refreshing the agent's skills failed");
+        }
     }
 }
 
@@ -744,10 +894,10 @@ pub fn offered_text(
     config: &OxplowConfig,
     extensions: &[crate::extensions::Extension],
     read: impl Fn(&str, &str) -> Option<String>,
-) -> oxplow_plugin::AgentText {
+) -> oxplow_domain::agent::text::AgentText {
     use crate::extensions::skills::SkillKind;
     let active = registry.snapshot(config);
-    let mut text = oxplow_plugin::AgentText::core();
+    let mut text = oxplow_agent_text::core_text();
     for ext in extensions.iter().filter(|e| e.enabled) {
         for skill in &ext.skills {
             let owner = ext
@@ -770,7 +920,7 @@ pub fn offered_text(
             let Some(body) = read(&ext.name, &skill.file) else {
                 continue;
             };
-            let item = oxplow_plugin::Text {
+            let item = oxplow_domain::agent::text::Text {
                 name: skill.name.clone(),
                 body,
             };
@@ -789,6 +939,9 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
     let extensions = svc.extension_catalog.get(&svc.layout.project_dir);
     let declared = declared_by(&extensions);
     crate::work_items::register_built_ins(&svc.work_items, &declared, &svc.db);
+    crate::harnesses::register_built_ins(&svc.harnesses, &declared);
+    crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
+    crate::ai_service::register_built_ins(svc.ai.providers(), &declared);
     svc.capabilities.set_declared(declared);
     let config = crate::config_service::read_config(&svc.config);
     svc.capabilities.publish(&config, &svc.db).await
@@ -808,6 +961,7 @@ mod tests {
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
+            config: Value::Object(Default::default()),
         }
     }
 
@@ -907,11 +1061,96 @@ mod tests {
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
+            config: Value::Object(Default::default()),
         };
         r.set_external(issues.clone(), true);
         assert_eq!(r.active(&c, "work_items"), "issues");
         r.set_external(issues, false);
         assert_eq!(r.active(&c, "work_items"), NONE);
+    }
+
+    /// A capability many implementations serve: every declared one is
+    /// active (`declared`), the default is the one used when nothing names
+    /// one, and nothing is ever a switch.
+    #[tokio::test]
+    async fn a_many_capability_marks_every_row_active_and_never_switches() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let c = config(&[], &[]);
+        svc.capabilities.set_declared(vec![
+            builtin("agent_harness", "claude", "oxplow:claude-code"),
+            builtin("agent_harness", "codex", "oxplow:codex-cli"),
+        ]);
+        svc.capabilities.publish(&c, &svc.db).await.unwrap();
+        svc.capabilities
+            .set_declared(vec![builtin("agent_harness", "codex", "oxplow:codex-cli")]);
+        svc.capabilities.publish(&c, &svc.db).await.unwrap();
+        let rows = svc
+            .sql
+            .query_sql(
+                "SELECT provider, active, chosen_by FROM v_capability_provider
+                  WHERE capability = 'agent_harness' ORDER BY provider",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&rows.rows).unwrap(),
+            serde_json::json!([["codex", 1, "declared"]])
+        );
+        let resolved = svc.capabilities.resolve(&c, "agent_harness");
+        assert_eq!(
+            (resolved.id.as_str(), resolved.chosen_by),
+            ("claude", ChosenBy::Default)
+        );
+        let switched = svc
+            .db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM event_log WHERE type = 'capability.switched'
+                       AND json_extract(payload, '$.capability') = 'agent_harness'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(switched, 0);
+    }
+
+    /// A need on a many-capability is met when any implementation is
+    /// declared, and a need on one of its features when any declares it.
+    #[test]
+    fn a_feature_need_on_a_many_capability_is_met_by_the_union() {
+        let r = registry(false);
+        let c = config(&[], &[]);
+        let needs = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            r.snapshot(&c).unmet(&needs(&["agent_harness"])),
+            needs(&["agent_harness"])
+        );
+        let with = |id: &str, features: Value| Implementation {
+            features,
+            ..builtin("agent_harness", id, "oxplow:claude-code")
+        };
+        r.set_declared(vec![
+            with("claude", serde_json::json!({ "terminal": true })),
+            with("api", serde_json::json!({ "programmatic": true })),
+        ]);
+        let snap = r.snapshot(&c);
+        assert!(snap
+            .unmet(&needs(&[
+                "agent_harness",
+                "agent_harness.programmatic",
+                "agent_harness.terminal"
+            ]))
+            .is_empty());
+        assert_eq!(
+            snap.unmet(&needs(&["agent_harness.resume"])),
+            needs(&["agent_harness.resume"])
+        );
     }
 
     /// With `oxplow-bundled` disabled, nothing declares the optional
@@ -1140,6 +1379,7 @@ mod tests {
                 features: serde_json::json!({ "comments": false, "links": true, "ordering": true }),
                 fields: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
+                config: serde_json::json!({}),
             },
             true,
         );
@@ -1176,6 +1416,7 @@ mod tests {
                 features: Value::Null,
                 fields: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
+                config: serde_json::json!({}),
             },
             true,
         );
@@ -1203,7 +1444,7 @@ mod tests {
         refresh_agent_text(svc);
         assert_eq!(
             std::fs::read_to_string(skills.join("oxplow-extension/SKILL.md")).unwrap(),
-            oxplow_plugin::AgentText::core()
+            oxplow_agent_text::core_text()
                 .skill_body("oxplow-extension")
                 .unwrap()
         );

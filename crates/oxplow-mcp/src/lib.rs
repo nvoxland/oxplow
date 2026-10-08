@@ -809,7 +809,12 @@ impl OxplowMcp {
                        person on this machine has approved its current script."
     )]
     async fn list_collectors(&self) -> Result<CallToolResult, McpError> {
-        let root = self.services.worktrees.resolve(None).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(None)
+            .await
+            .into_local_path();
         let list = oxplow_app::collector_runner::list_collectors(
             &oxplow_app::collector_runner::Collectors::of(&self.services, &root),
         )
@@ -865,7 +870,12 @@ impl OxplowMcp {
         let stream = self
             .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
         let preview = oxplow_app::collector_runner::preview_collector(
             &oxplow_app::collector_runner::Collectors::of(&self.services, &root),
             &p.owner,
@@ -1054,7 +1064,12 @@ impl OxplowMcp {
         let stream = self
             .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
         let layer = self.services.sql.clone();
         let commands = self.services.commands.as_ref();
         let review = match (p.git_url.as_deref(), p.name.as_deref()) {
@@ -1112,7 +1127,12 @@ impl OxplowMcp {
         let stream = self
             .stream_or_callers(&caller_of(&extensions), params.0.stream_id.clone())
             .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
         let listed = self.services.listed_extensions(&root).await;
         match &params.0.name {
             Some(name) => {
@@ -1144,7 +1164,12 @@ impl OxplowMcp {
         let stream = self
             .stream_or_callers(&caller_of(&extensions), params.0.stream_id.clone())
             .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
         let lenses: Vec<oxplow_app::extensions::Lens> = self
             .services
             .extension_catalog
@@ -1211,7 +1236,12 @@ impl OxplowMcp {
         let stream = self
             .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
         let lens = self
             .services
             .extension_catalog
@@ -1237,7 +1267,12 @@ impl OxplowMcp {
         let stream = self
             .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
         let overrides = p
             .params
             .unwrap_or_default()
@@ -1289,7 +1324,12 @@ impl OxplowMcp {
         let stream = self
             .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
         let overrides = p
             .params
             .unwrap_or_default()
@@ -1342,7 +1382,12 @@ impl OxplowMcp {
         let stream = self
             .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
         let report = oxplow_sdk::check(
             &root,
             &p.name,
@@ -1451,7 +1496,12 @@ impl OxplowMcp {
         let sid = self
             .stream_or_callers(&caller_of(&extensions), params.0.stream_id)
             .await;
-        let ws = self.services.worktrees.resolve(sid.as_deref()).await;
+        let ws = self
+            .services
+            .worktrees
+            .resolve(sid.as_deref())
+            .await
+            .into_local_path();
         let scopes = self
             .services
             .git
@@ -3044,7 +3094,7 @@ impl OxplowMcp {
                 .await
                 .map_err(domain_err)?;
         }
-        let ws = self.services.worktrees.resolve(sid).await;
+        let ws = self.services.worktrees.resolve(sid).await.into_local_path();
         let entries = self
             .services
             .trees
@@ -3071,7 +3121,8 @@ impl OxplowMcp {
             .services
             .worktrees
             .resolve(p.stream_id.as_deref())
-            .await;
+            .await
+            .into_local_path();
         let bytes = self
             .services
             .trees
@@ -4738,13 +4789,13 @@ mod tests {
 
     /// Point the in-memory services' `role` at a mock provider at `base`.
     fn assign_mock_role(services: &Services, base: String, role: &str) {
-        use oxplow_app::ai_service::{ProviderConfig, ProviderKind, Role, RoleBinding};
+        use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
         services
             .ai
             .save_provider(
                 ProviderConfig {
                     id: "mock".into(),
-                    kind: ProviderKind::OpenaiCompatible,
+                    kind: "openai_compatible".into(),
                     base_url: Some(base),
                 },
                 None,

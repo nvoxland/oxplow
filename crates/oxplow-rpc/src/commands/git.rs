@@ -37,7 +37,11 @@ pub async fn git_change_scopes(
     svc: &Services,
     stream_id: Option<String>,
 ) -> Result<ChangeScopes, IpcError> {
-    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    let ws = svc
+        .worktrees
+        .resolve(stream_id.as_deref())
+        .await
+        .into_local_path();
     svc.git
         .change_scopes(&ws)
         .await

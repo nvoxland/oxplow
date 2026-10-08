@@ -82,13 +82,16 @@ pub fn activity_of(event: &StoredEvent) -> Option<Activity> {
 /// How far back a status derivation reads.
 pub const RECENT_ACTIVITY: usize = 200;
 
-/// `thread`'s recent activity from the event log, for [`derive_thread_status`].
+/// The recent activity of agent session `session` on `thread` (`None`:
+/// the thread's activity no session claims), for
+/// [`derive_session_status`].
 pub async fn recent_activity(
     log: &oxplow_db::SqliteEventLogStore,
     thread: ThreadId,
+    session: Option<oxplow_domain::AgentSessionId>,
 ) -> Result<Vec<Activity>, oxplow_domain::DomainError> {
     Ok(log
-        .recent("agent", Some(thread), None, RECENT_ACTIVITY)
+        .recent_in_session("agent", thread, session, RECENT_ACTIVITY)
         .await?
         .iter()
         .filter_map(activity_of)
@@ -136,12 +139,12 @@ pub const AGENT_DEAD_AFTER_MS: i64 = 5 * 60 * 1000;
 /// so a single long turn that emits no hooks between tool calls (just
 /// streaming tokens) would wrongly degrade to `Stalled`. Callers that
 /// can observe terminal liveness should prefer
-/// [`derive_thread_status_with_activity`].
-pub fn derive_thread_status(events: &[Activity], now: Timestamp) -> AgentStatusState {
-    derive_thread_status_with_activity(events, None, now)
+/// [`derive_session_status_with_activity`].
+pub fn derive_session_status(events: &[Activity], now: Timestamp) -> AgentStatusState {
+    derive_session_status_with_activity(events, None, now)
 }
 
-/// Like [`derive_thread_status`], but folds in the thread's most recent
+/// Like [`derive_session_status`], but folds in the thread's most recent
 /// PTY output timestamp (`last_output_at`) when deciding whether a
 /// `Running` turn has gone silent.
 ///
@@ -159,7 +162,7 @@ pub fn derive_thread_status(events: &[Activity], now: Timestamp) -> AgentStatusS
 /// open-tool rule), the turn degrades to `Stalled` exactly as before
 /// (tsk130 intact). `last_output_at = None` reproduces the old
 /// hook-only behavior.
-pub fn derive_thread_status_with_activity(
+pub fn derive_session_status_with_activity(
     events: &[Activity],
     last_output_at: Option<Timestamp>,
     now: Timestamp,
@@ -338,7 +341,7 @@ mod tests {
 
     #[test]
     fn empty_log_is_idle() {
-        assert_eq!(derive_thread_status(&[], at(10)), AgentStatusState::Idle);
+        assert_eq!(derive_session_status(&[], at(10)), AgentStatusState::Idle);
     }
 
     #[test]
@@ -348,7 +351,7 @@ mod tests {
             ev(HookKind::Stop, 2, "{}"),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Idle
         );
     }
@@ -360,7 +363,7 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Running
         );
     }
@@ -375,7 +378,7 @@ mod tests {
             ev(HookKind::Stop, 3, "{}"),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Running
         );
     }
@@ -389,7 +392,7 @@ mod tests {
             ev(HookKind::Stop, 4, "{}"),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Idle
         );
     }
@@ -404,7 +407,7 @@ mod tests {
             ev(HookKind::UserPromptSubmit, 1, "{}"),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Idle
         );
     }
@@ -417,7 +420,7 @@ mod tests {
             ev(HookKind::Interrupt, 3, "{}"),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Idle
         );
     }
@@ -433,7 +436,7 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::AwaitingUser
         );
     }
@@ -448,7 +451,7 @@ mod tests {
             ev(HookKind::PostToolUse, 3, r#"{"tool_name":"ExitPlanMode"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Running
         );
     }
@@ -463,7 +466,7 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS + 1)),
+            derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS + 1)),
             AgentStatusState::Stalled
         );
     }
@@ -475,7 +478,7 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS)),
+            derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS)),
             AgentStatusState::Running
         );
     }
@@ -489,7 +492,7 @@ mod tests {
         // window — the user once watched this sit "Working" for ~1h.
         let events = [ev(HookKind::UserPromptSubmit, 1, "{}")];
         assert_eq!(
-            derive_thread_status(&events, at(1 + AGENT_DEAD_AFTER_MS + 1)),
+            derive_session_status(&events, at(1 + AGENT_DEAD_AFTER_MS + 1)),
             AgentStatusState::Stalled
         );
     }
@@ -505,7 +508,7 @@ mod tests {
             ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Edit"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(3 + AGENT_DEAD_AFTER_MS + 1)),
+            derive_session_status(&events, at(3 + AGENT_DEAD_AFTER_MS + 1)),
             AgentStatusState::Stalled
         );
     }
@@ -516,7 +519,7 @@ mod tests {
         // (the model is composing the next step).
         let events = [ev(HookKind::UserPromptSubmit, 1, "{}")];
         assert_eq!(
-            derive_thread_status(&events, at(1 + AGENT_DEAD_AFTER_MS)),
+            derive_session_status(&events, at(1 + AGENT_DEAD_AFTER_MS)),
             AgentStatusState::Running
         );
     }
@@ -534,12 +537,12 @@ mod tests {
         ];
         // Past the short death threshold, but under the long stall one.
         assert_eq!(
-            derive_thread_status(&events, at(2 + AGENT_DEAD_AFTER_MS + 1)),
+            derive_session_status(&events, at(2 + AGENT_DEAD_AFTER_MS + 1)),
             AgentStatusState::Running
         );
         // Past the long stall threshold it finally degrades.
         assert_eq!(
-            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS + 1)),
+            derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS + 1)),
             AgentStatusState::Stalled
         );
     }
@@ -553,7 +556,7 @@ mod tests {
             ev(HookKind::Stop, 2, "{}"),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
+            derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
             AgentStatusState::Idle
         );
     }
@@ -567,7 +570,7 @@ mod tests {
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
+            derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
             AgentStatusState::AwaitingUser
         );
     }
@@ -588,7 +591,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::AwaitingUser
         );
     }
@@ -608,7 +611,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
+            derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
             AgentStatusState::AwaitingUser
         );
     }
@@ -631,7 +634,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Running
         );
     }
@@ -651,13 +654,13 @@ mod tests {
         let now = at(3 + AGENT_STALL_AFTER_MS + 1);
         // Hook-only view (no output): would wrongly read as Stalled.
         assert_eq!(
-            derive_thread_status(&events, now),
+            derive_session_status(&events, now),
             AgentStatusState::Stalled
         );
         // With output advancing right up to `now`, it stays Running.
         let last_output = at(now.unix_ms() - 1000);
         assert_eq!(
-            derive_thread_status_with_activity(&events, Some(last_output), now),
+            derive_session_status_with_activity(&events, Some(last_output), now),
             AgentStatusState::Running
         );
     }
@@ -675,7 +678,7 @@ mod tests {
         let last_output = at(100);
         let now = at(last_output.unix_ms() + AGENT_DEAD_AFTER_MS + 1);
         assert_eq!(
-            derive_thread_status_with_activity(&events, Some(last_output), now),
+            derive_session_status_with_activity(&events, Some(last_output), now),
             AgentStatusState::Stalled
         );
     }
@@ -688,7 +691,7 @@ mod tests {
         let last_output = at(1 + AGENT_DEAD_AFTER_MS); // hook is stale by now
         let now = at(last_output.unix_ms() + AGENT_DEAD_AFTER_MS); // exactly at threshold
         assert_eq!(
-            derive_thread_status_with_activity(&events, Some(last_output), now),
+            derive_session_status_with_activity(&events, Some(last_output), now),
             AgentStatusState::Running
         );
     }
@@ -702,7 +705,7 @@ mod tests {
         let stale_output = at(50);
         let now = at(stale_output.unix_ms() + AGENT_DEAD_AFTER_MS + 1);
         assert_eq!(
-            derive_thread_status_with_activity(&events, Some(stale_output), now),
+            derive_session_status_with_activity(&events, Some(stale_output), now),
             AgentStatusState::Stalled
         );
     }
@@ -726,7 +729,7 @@ mod tests {
             ev(HookKind::PreToolUse, 4, r#"{"tool_name":"Edit"}"#),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
+            derive_session_status(&events, at(10)),
             AgentStatusState::Running
         );
     }
@@ -750,14 +753,14 @@ mod tests {
             ev(HookKind::Stop, 3, "{}"),
         ];
         assert_eq!(
-            derive_thread_status(&parked, at(10_000_000)),
+            derive_session_status(&parked, at(10_000_000)),
             AgentStatusState::AwaitingUser,
             "never stalls while waiting on the person"
         );
         let mut answered = parked.to_vec();
         answered.push(ev(HookKind::UserPromptSubmit, 4, "{}"));
         assert_eq!(
-            derive_thread_status(&answered, at(5)),
+            derive_session_status(&answered, at(5)),
             AgentStatusState::Running
         );
     }

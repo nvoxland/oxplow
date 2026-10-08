@@ -15,6 +15,7 @@
 import {
   Activity,
   Bell,
+  Bot,
   Archive,
   BarChart3,
   BookOpen,
@@ -119,11 +120,12 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "symbol":
       return Braces;
 
+    case "agent_session":
+      return Bot;
+    case "new-session":
+      return Plus;
+
     // Literal-id index pages (kind === id).
-    case "agent":
-      // The agent tab is always present and unambiguous; an icon
-      // there just makes the tab wider without adding info.
-      return null;
     case "tasks":
       return CheckSquare;
     case "done-work":
@@ -211,6 +213,10 @@ export function pageKindLabel(kind: string): string {
       return "new item";
     case "new-stream":
       return "new stream";
+    case "agent_session":
+      return "agent session";
+    case "new-session":
+      return "new session";
     case "closed-threads":
       return "threads";
     case "lens":

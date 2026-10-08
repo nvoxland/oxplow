@@ -8,9 +8,10 @@ use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
 use oxplow_domain::stores::AgentSessionStore;
-use oxplow_domain::{AgentKind, AgentSessionId, DomainError, ThreadId, Timestamp};
+use oxplow_domain::{AgentSessionId, DomainError, ThreadId, Timestamp};
 
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
+use oxplow_domain::vocabulary::VocabularyHandle;
 
 const COLUMNS: &str = "id, thread_id, kind, harness, acp_agent, title, resume_session_id, host,
                        opened_at, closed_at, closed_reason, updated_at";
@@ -36,7 +37,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
         id: AgentSessionId::new(row.get("id")?),
         thread_id: ThreadId::new(row.get("thread_id")?),
         kind: SessionKind::parse(&kind).ok_or_else(|| invalid("kind", &kind))?,
-        harness: AgentKind::parse(&harness).ok_or_else(|| invalid("harness", &harness))?,
+        harness,
         acp_agent: row.get("acp_agent")?,
         title: row.get("title")?,
         resume_session_id: row.get("resume_session_id")?,
@@ -108,6 +109,55 @@ pub fn newest_for_thread_tx(
         [thread.value()],
     )?
     .pop())
+}
+
+/// The agent session a report on `thread` came from, by what the sender
+/// said, in order: the session it named (`X-Oxplow-Session`; refused when
+/// it is another thread's), the session whose resume id is the harness's
+/// session id `harness_session` (an open one first, then the newest), the
+/// thread's newest open session (one with an open turn first; logged,
+/// since every process oxplow starts names its session), or none — a report
+/// from an agent oxplow didn't start.
+pub fn resolve_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    named: Option<AgentSessionId>,
+    harness_session: Option<&str>,
+) -> Result<Option<AgentSession>, DomainError> {
+    if let Some(id) = named {
+        match get_tx(conn, id)? {
+            Some(s) if s.thread_id == thread => return Ok(Some(s)),
+            _ => {
+                tracing::warn!(%id, %thread, "a report named a session not on its thread; ignored")
+            }
+        }
+    }
+    if let Some(sid) = harness_session.filter(|s| !s.is_empty()) {
+        if let Some(s) = query(
+            conn,
+            "WHERE thread_id = ?1 AND resume_session_id = ?2
+             ORDER BY closed_at IS NULL DESC, opened_at DESC, id DESC LIMIT 1",
+            params![thread.value(), sid],
+        )?
+        .pop()
+        {
+            return Ok(Some(s));
+        }
+    }
+    let newest = query(
+        conn,
+        "WHERE thread_id = ?1 AND closed_at IS NULL
+         ORDER BY EXISTS (SELECT 1 FROM agent_turn t
+                           WHERE t.agent_session_id = agent_session.id AND t.ended_at IS NULL) DESC,
+                  opened_at DESC, id DESC
+         LIMIT 1",
+        [thread.value()],
+    )?
+    .pop();
+    if let Some(s) = &newest {
+        tracing::warn!(session = %s.id, %thread, "a report named no session; took the thread's newest");
+    }
+    Ok(newest)
 }
 
 /// Open a session on its thread at `now`.
@@ -216,11 +266,43 @@ pub fn set_title_tx(
 #[derive(Clone)]
 pub struct SqliteAgentSessionStore {
     db: Database,
+    vocabulary: VocabularyHandle,
 }
 
 impl SqliteAgentSessionStore {
+    /// A store with its own core schema registry; `Services` shares one
+    /// via [`Self::with_vocabulary`].
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self::with_vocabulary(db, VocabularyHandle::core())
+    }
+
+    pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
+        Self { db, vocabulary }
+    }
+
+    /// Close every open session of `thread` (`reason`) in one transaction —
+    /// their open turns end and each logs `stopped` — and return them: their
+    /// processes are the caller's to stop.
+    pub async fn close_for_thread(
+        &self,
+        thread: ThreadId,
+        reason: SessionCloseReason,
+    ) -> Result<Vec<AgentSessionId>, DomainError> {
+        let vocabulary = self.vocabulary.clone();
+        self.db
+            .transaction(move |tx| {
+                let vocabulary = vocabulary.current();
+                let ev = crate::event_log_store::EventCtx::system(&vocabulary, "agent_sessions");
+                let now = Timestamp::now();
+                let mut closed = Vec::new();
+                for s in list_open_for_thread_tx(tx, thread)? {
+                    if crate::agent_stores::close_session_tx(tx, &ev, s.id, reason, now)? {
+                        closed.push(s.id);
+                    }
+                }
+                Ok(closed)
+            })
+            .await
     }
 
     /// The thread's most recently opened session, open or not.
@@ -286,7 +368,7 @@ mod tests {
         let conn = fixture();
         let opened = insert_tx(
             &conn,
-            &NewAgentSession::of(ThreadId::new(1), AgentKind::Acp, Some("gemini".into())),
+            &NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
             at(1),
         )
         .unwrap();
@@ -318,17 +400,17 @@ mod tests {
     fn a_thread_lists_its_open_sessions_oldest_first() {
         let conn = fixture();
         let thread = ThreadId::new(1);
-        let open = |ms, harness| {
-            insert_tx(&conn, &NewAgentSession::of(thread, harness, None), at(ms))
+        let open = |ms, harness: &str| {
+            insert_tx(&conn, &NewAgentSession::terminal(thread, harness), at(ms))
                 .unwrap()
                 .id
         };
-        let a = open(1, AgentKind::Claude);
-        let b = open(2, AgentKind::Codex);
-        let c = open(3, AgentKind::Claude);
+        let a = open(1, "claude");
+        let b = open(2, "codex");
+        let c = open(3, "claude");
         insert_tx(
             &conn,
-            &NewAgentSession::of(ThreadId::new(2), AgentKind::Claude, None),
+            &NewAgentSession::terminal(ThreadId::new(2), "claude"),
             at(4),
         )
         .unwrap();
@@ -351,24 +433,21 @@ mod tests {
         );
     }
 
+    /// A harness is a key, stored as given: any one an extension declares.
     #[test]
-    fn every_harness_round_trips() {
+    fn any_harness_key_round_trips() {
         let conn = fixture();
-        for harness in [
-            AgentKind::Claude,
-            AgentKind::Codex,
-            AgentKind::Opencode,
-            AgentKind::Acp,
+        for new in [
+            NewAgentSession::terminal(ThreadId::new(1), "codex"),
+            NewAgentSession::terminal(ThreadId::new(1), "someones-harness"),
+            NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
         ] {
-            let acp = (harness == AgentKind::Acp).then(|| "gemini".to_string());
-            let s = insert_tx(
-                &conn,
-                &NewAgentSession::of(ThreadId::new(1), harness, acp.clone()),
-                at(1),
-            )
-            .unwrap();
+            let s = insert_tx(&conn, &new, at(1)).unwrap();
             let back = get_tx(&conn, s.id).unwrap().unwrap();
-            assert_eq!((back.harness, back.acp_agent), (harness, acp));
+            assert_eq!(
+                (back.kind, back.harness, back.acp_agent),
+                (new.kind, new.harness, new.acp_agent)
+            );
         }
     }
 
@@ -377,7 +456,7 @@ mod tests {
         let conn = fixture();
         let s = insert_tx(
             &conn,
-            &NewAgentSession::of(ThreadId::new(2), AgentKind::Claude, None),
+            &NewAgentSession::terminal(ThreadId::new(2), "claude"),
             at(1),
         )
         .unwrap();

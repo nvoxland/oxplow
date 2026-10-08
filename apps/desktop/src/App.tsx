@@ -4,10 +4,14 @@ import { flushSync } from "react-dom";
 import {
   closeThread,
   createThread,
+  openAgentSession,
+  closeAgentSession,
+  renameAgentSession,
   getThreadState,
   getConfig,
   createWorkspaceDirectory,
   type AgentStatus,
+  type AgentStatusEntry,
   createWorkspaceFile,
   deleteWorkspacePath,
   getCurrentStream,
@@ -32,7 +36,6 @@ import {
   runCommandForCall,
   runCommandInBackground,
   type ThreadState,
-  type AgentKind,
   type SqlCell,
   type Stream,
   type WorkspaceContext,
@@ -99,9 +102,14 @@ import { DiffViewPage } from "./pages/DiffViewPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
-import { AgentPage } from "./pages/AgentPage.js";
-import { agentLabel, sessionLabel } from "./agentKinds.js";
+import { AgentSessionPage } from "./pages/AgentSessionPage.js";
+import { NewSessionPage } from "./pages/NewSessionPage.js";
+import { InlinePromptStrip } from "./components/InlinePromptStrip.js";
+import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
+import { sessionLabel } from "./agentKinds.js";
+import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { useThreadSessions } from "./agentSessions.js";
+import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { TerminalPage } from "./pages/TerminalPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
@@ -141,7 +149,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -253,38 +261,47 @@ async function isWorkspaceDir(streamId: string, path: string): Promise<boolean> 
   }
 }
 
+/** No tab chosen: the thread's home tab shows — its first agent session's,
+ *  else the session picker (`homeTabOf`). */
+const HOME_TAB = "";
+
+/** The tab a thread falls back to: its first agent session's, else the
+ *  session picker, else its first tab. */
+function homeTabOf(tabs: TabRef[]): string {
+  return (
+    tabs.find((t) => t.kind === "agent_session")?.id ??
+    tabs.find((t) => t.kind === "new-session")?.id ??
+    tabs[0]?.id ??
+    HOME_TAB
+  );
+}
+
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
-  const [enabledAgents, setEnabledAgents] = useState<AgentKind[]>(["claude"]);
+  const harnesses = useAgentHarnesses();
   // Mirror of threadStates for subscription callbacks that need the
   // latest map without re-subscribing when it changes (see
   // useBackendSubscriptions). Kept current on every render.
   const threadStatesRef = useRef(threadStates);
   threadStatesRef.current = threadStates;
 
-  useEffect(() => {
-    let cancelled = false;
-    void getConfig()
-      .then((config) => {
-        if (!cancelled && config.agents?.length) setEnabledAgents(config.agents);
-      })
-      .catch((e) => logUi("warn", "failed to load project config", { error: String(e) }));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
   const [threadWorkStates, setThreadWorkStates] = useState<Record<string, WorkList>>({});
   const threadWorkStatesRef = useRef(threadWorkStates);
   threadWorkStatesRef.current = threadWorkStates;
   const [backlogState, setBacklogState] = useState<WorkList | null>(null);
   // The active work list: what it can do and its own fields.
   const workListProfile = useWorkListProfile();
-  const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
-  // Parallel to agentStatuses: the question each thread is waiting on, set
-  // only while that thread's status is "awaiting". Feeds the rail dot's
-  // tooltip so a thread parked on your answer says WHAT it's asking.
-  const [agentQuestions, setAgentQuestions] = useState<Record<string, string | undefined>>({});
+  // Each agent session's status (`sessionStatusKey`). A thread's dot is its
+  // sessions' roll-up, and its question (the rail dot's tooltip) the one
+  // the awaiting session asks.
+  const [sessionStatuses, setSessionStatuses] = useState<Record<string, AgentStatusEntry>>({});
+  // The agent session whose tab's Rename… strip is open.
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const { statuses: agentStatuses, questions: agentQuestions } = useMemo(
+    () => threadStatuses(Object.values(sessionStatuses)),
+    [sessionStatuses],
+  );
   const [stream, setStream] = useState<Stream | null>(null);
   // Per-thread active center tab. The map is the source of truth; `centerActive`
   // and `setCenterActive` below are derived helpers so existing handler code
@@ -473,7 +490,7 @@ export function App() {
       // thread restores its prior tab; only initial entry uses the file-session
       // selected path as a heuristic.
       if (nextThread) {
-        const seeded = nextSession.selectedPath ? fileRef(nextSession.selectedPath).id : AGENT_TAB_ID;
+        const seeded = nextSession.selectedPath ? fileRef(nextSession.selectedPath).id : HOME_TAB;
         setThreadCenterActive((prev) => (
           prev[nextThread.id] !== undefined ? prev : { ...prev, [nextThread.id]: seeded }
         ));
@@ -533,7 +550,7 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [next.id]: state }));
       const thread = state.threads.find((candidate) => candidate.id === state.selectedThreadId);
       if (thread) {
-        const seeded = AGENT_TAB_ID;
+        const seeded = HOME_TAB;
         setThreadCenterActive((prev) => (
           prev[thread.id] !== undefined ? prev : { ...prev, [thread.id]: seeded }
         ));
@@ -825,10 +842,11 @@ export function App() {
     }
   }
 
-  async function handleCreateThread(title: string, agent?: AgentKind, acpAgent?: string | null) {
+  async function handleCreateThread(title: string) {
     if (!stream) return;
     try {
-      const next = await createThread(stream.id, title, agent, acpAgent);
+      // It opens on the session picker: a thread names no agent.
+      const { state: next } = await createThread(stream.id, title);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
       const thread = next.threads.find((candidate) => candidate.id === next.selectedThreadId);
       if (thread) {
@@ -847,7 +865,7 @@ export function App() {
     try {
       const next = await promoteThread(stream.id, threadId);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-      setCenterActive(AGENT_TAB_ID);
+      setCenterActive(HOME_TAB);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -930,21 +948,19 @@ export function App() {
     [threadStates, stream],
   );
   const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
-  // The selected thread's agent session: the first one open.
+  // The selected thread's open agent sessions: its session tabs follow them.
   const selectedThreadSessions = useThreadSessions(selectedThread?.id ?? null);
-  const selectedSession = selectedThreadSessions?.[0] ?? null;
   const selectedThreadId = selectedThread?.id ?? null;
-  // Derived from the per-thread map. When no thread is selected, fall back to
-  // a sentinel that keeps existing UI selectors happy (they all default to
-  // the agent tab eventually).
+  // Derived from the per-thread map; `HOME_TAB` when nothing was chosen
+  // (the thread's home tab shows — `effectiveCenterActive`).
   const centerActive = selectedThreadId
-    ? threadCenterActive[selectedThreadId] ?? readPersistedCenterActive() ?? AGENT_TAB_ID
-    : AGENT_TAB_ID;
+    ? threadCenterActive[selectedThreadId] ?? readPersistedCenterActive() ?? HOME_TAB
+    : HOME_TAB;
   const setCenterActive = useCallback(
     (next: string | ((prev: string) => string)) => {
       if (!selectedThreadId) return;
       setThreadCenterActive((prev) => {
-        const current = prev[selectedThreadId] ?? readPersistedCenterActive() ?? AGENT_TAB_ID;
+        const current = prev[selectedThreadId] ?? readPersistedCenterActive() ?? HOME_TAB;
         const value = typeof next === "function" ? next(current) : next;
         if (value === current) return prev;
         return { ...prev, [selectedThreadId]: value };
@@ -965,12 +981,9 @@ export function App() {
     const out: Record<string, AgentStatus> = {};
     for (const s of streams) {
       const threads = threadStates[s.id]?.threads ?? [];
-      const anyWorking = threads.some((t) => agentStatuses[t.id] === "working");
-      // Working (busy) outranks awaiting (needs you) outranks waiting so
-      // a stream whose thread parked on your answer shows the blue dot
-      // even from a collapsed rail.
-      const anyAwaiting = threads.some((t) => agentStatuses[t.id] === "awaiting");
-      out[s.id] = anyWorking ? "working" : anyAwaiting ? "awaiting" : "waiting";
+      // The threads' roll-up: what you owe (an answer, a dead turn) shows
+      // even from a collapsed rail, ahead of work in flight.
+      out[s.id] = rollUpAgentStatus(threads.flatMap((t) => agentStatuses[t.id] ?? [])) ?? "waiting";
     }
     return out;
   }, [streams, threadStates, agentStatuses]);
@@ -1017,24 +1030,24 @@ export function App() {
     if (!stream) return;
     if (!restoredStreamsRef.current.has(stream.id)) return;
     centerActiveValidatedRef.current = true;
-    if (centerActive === AGENT_TAB_ID) return;
+    if (centerActive === HOME_TAB) return;
     const session = fileSessions[stream.id];
     const activeFile = diskFilePath(centerActive);
     if (activeFile !== null) {
-      if (!session || !session.files[activeFile]) setCenterActive(AGENT_TAB_ID);
+      if (!session || !session.files[activeFile]) setCenterActive(HOME_TAB);
       return;
     }
     if (pageKindOf(centerActive) === "diff") {
-      if (!diffTabs.some((tab) => tab.id === centerActive)) setCenterActive(AGENT_TAB_ID);
+      if (!diffTabs.some((tab) => tab.id === centerActive)) setCenterActive(HOME_TAB);
       return;
     }
     // Page tabs (tasks, plan-work, git-history, …) — validate
-    // against the per-thread page-tab list. Reset to agent only when
-    // the page wasn't restored. The previous unknown-id fall-through
+    // against the per-thread page-tab list. Reset to the home tab only
+    // when the page wasn't restored. The previous unknown-id fall-through
     // unconditionally reset every page id, clobbering the user's
     // first click after startup.
     const pageTabs = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-    if (!pageTabs.some((ref) => ref.id === centerActive)) setCenterActive(AGENT_TAB_ID);
+    if (!pageTabs.some((ref) => ref.id === centerActive)) setCenterActive(HOME_TAB);
   }, [stream, fileSessions, centerActive, diffTabs, selectedThreadId, threadPageTabs]);
 
   // Restore previously-open file tabs the first time each stream becomes
@@ -1129,10 +1142,8 @@ export function App() {
     setThreadStates,
     setStreams,
     setStream,
-    setAgentStatuses,
-    setAgentQuestions,
+    setSessionStatuses,
     setGeneratedState,
-    setEnabledAgents,
   });
 
   useEffect(() => {
@@ -1403,13 +1414,15 @@ export function App() {
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => {
-    const ids = new Set([AGENT_TAB_ID]);
+    const ids = new Set<string>();
     for (const path of currentSession.openOrder) ids.add(fileRef(path).id);
     for (const tab of diffTabs) ids.add(tab.id);
     for (const ref of pageTabsForActiveThread) ids.add(ref.id);
     return ids;
   }, [currentSession.openOrder, diffTabs, pageTabsForActiveThread]);
-  const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : AGENT_TAB_ID;
+  const effectiveCenterActive = availableCenterIds.has(centerActive)
+    ? centerActive
+    : homeTabOf(pageTabsForActiveThread);
 
   // Feed the stall watchdog (logger.ts) the coarse "what's on screen"
   // context so a `main thread stalled` WARN names the active page + the
@@ -1642,22 +1655,22 @@ export function App() {
       return next;
     });
     // `threadPageTabs` is the unified source of truth for the order of
-    // EVERY non-agent tab (files, diffs, dashboards, snapshots, wiki,
-    // tasks, …) — the strip renders `[agent, ...threadPageTabs]`. So
-    // reorder it with the full ordered id list (minus the pinned agent),
-    // not just the non-file/diff subset; splitting file/diff out here
-    // would shove them to the end on every drag/promote. The
-    // fileSessions/diffTabs reorders above are just bookkeeping for
-    // their own registries.
+    // EVERY tab (agent sessions, files, diffs, dashboards, snapshots,
+    // wiki, tasks, …) — the strip renders `threadPageTabs`. So reorder it
+    // with the full ordered id list, not just the non-file/diff subset;
+    // splitting file/diff out here would shove them to the end on every
+    // drag/promote. The fileSessions/diffTabs reorders above are just
+    // bookkeeping for their own registries. Pinned tabs never move (the
+    // strip won't drag them), and `reconcileSessionTabs` keeps them first.
     if (selectedThread?.id) {
       const threadId = selectedThread.id;
-      const orderedNonAgent = orderedIds.filter((id) => id !== AGENT_TAB_ID);
+      const ordered = orderedIds;
       setThreadPageTabs((prev) => {
         const current = prev[threadId] ?? [];
         if (current.length === 0) return prev;
         const byId = new Map(current.map((ref) => [ref.id, ref] as const));
         const next: TabRef[] = [];
-        for (const id of orderedNonAgent) {
+        for (const id of ordered) {
           const ref = byId.get(id);
           if (ref) next.push(ref);
         }
@@ -1675,6 +1688,18 @@ export function App() {
 
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
+  // A thread's agent-session tabs follow its open sessions (their rows):
+  // each open one's tab leads, a closed one's goes, and a thread with none
+  // shows the session picker.
+  useEffect(() => {
+    if (!selectedThreadId || selectedThreadSessions === null) return;
+    setThreadPageTabs((prev) => {
+      const current = prev[selectedThreadId] ?? [];
+      const next = reconcileSessionTabs(current, selectedThreadSessions);
+      return next === current ? prev : { ...prev, [selectedThreadId]: next };
+    });
+  }, [selectedThreadId, selectedThreadSessions, threadPageTabs]);
+
   const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
 
   const handleOpenPage = useCallback((ref: TabRef) => {
@@ -1682,8 +1707,9 @@ export function App() {
     // below — it fires whenever `effectiveCenterActive` resolves to a
     // new TabRef, regardless of which handler caused the activation.
     switch (ref.kind) {
-      case "agent":
-        setCenterActive(AGENT_TAB_ID);
+      case "agent_session":
+        // Its tab is there while it's open (`reconcileSessionTabs`).
+        setCenterActive(ref.id);
         return;
       case "symbol":
         void openSymbol((ref.payload as { ref: string }).ref);
@@ -1783,7 +1809,7 @@ export function App() {
     // prior page). Diffs require their spec to be pre-registered
     // in `diffTabs`; the helper that initiates the navigation
     // (handleOpenDiffInTab) is responsible for that.
-    if (ref.kind === "agent") {
+    if (ref.kind === "agent_session") {
       handleOpenPage(ref);
       return;
     }
@@ -2060,7 +2086,7 @@ export function App() {
       const next = dropFromMru(cur, id);
       return next === cur ? prev : { ...prev, [selectedThreadId]: next };
     });
-    setCenterActive((current) => (current === id ? AGENT_TAB_ID : current));
+    setCenterActive((current) => (current === id ? HOME_TAB : current));
     // GC the per-page snapshot so closed tabs don't leak forever.
     if (selectedThreadId) {
       const pageKey = `${selectedThreadId}::${id}`;
@@ -2171,7 +2197,7 @@ export function App() {
           } else {
             setThreadPageTabs((prev) => withoutTab(prev, thread, ref.id));
             setThreadCenterActive((prev) =>
-              prev[thread] === ref.id ? { ...prev, [thread]: AGENT_TAB_ID } : prev,
+              prev[thread] === ref.id ? { ...prev, [thread]: HOME_TAB } : prev,
             );
           }
           return { ref: ref.id, closed: true };
@@ -2275,51 +2301,34 @@ export function App() {
     handleOpenPageRef.current = handleOpenPage;
   }, [handleOpenPage]);
 
+  // The terminal link provider hands us absolute paths (resolved against
+  // stream.worktree_path); the open-file path takes a workspace-relative
+  // one, so trim the worktree prefix when present.
+  const openTerminalPath = useCallback(
+    (absPath: string, line?: number, column?: number) => {
+      if (!stream) return;
+      const wt = stream.worktree_path.endsWith("/") ? stream.worktree_path.slice(0, -1) : stream.worktree_path;
+      const rel = absPath.startsWith(wt + "/") ? absPath.slice(wt.length + 1) : absPath;
+      if (typeof line === "number" && line > 0) {
+        void handleNavigateToLocation({ path: rel, line, column: column ?? 1 });
+      } else {
+        void handleOpenFile(rel);
+      }
+    },
+    // handleNavigateToLocation / handleOpenFile are plain functions over state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stream],
+  );
+
   const centerTabs: CenterTab[] = useMemo(() => {
-    const tabs: CenterTab[] = [
-      {
-        id: AGENT_TAB_ID,
-        label: selectedSession ? sessionLabel(selectedSession) : "Agent",
-        closable: false,
-        agentStatus: agentThreadStatus,
-        render: () => (
-          <AgentPage
-            thread={selectedThread}
-            session={selectedSession}
-            stream={stream}
-            visible={effectiveCenterActive === AGENT_TAB_ID}
-            onOpenFile={(absPath, line, column) => {
-              if (!stream) return;
-              // The terminal link provider hands us absolute paths
-              // (resolved against stream.worktree_path). The rest of
-              // the app's open-file path takes a workspace-relative
-              // path, so trim the worktree prefix when present.
-              const wt = stream.worktree_path.endsWith("/")
-                ? stream.worktree_path.slice(0, -1)
-                : stream.worktree_path;
-              const rel = absPath.startsWith(wt + "/")
-                ? absPath.slice(wt.length + 1)
-                : absPath;
-              if (typeof line === "number" && line > 0) {
-                void handleNavigateToLocation({ path: rel, line, column: column ?? 1 });
-              } else {
-                void handleOpenFile(rel);
-              }
-            }}
-            onOpenDiff={handleOpenDiff}
-            onOpenSettings={() => handleOpenPage(indexRef("settings"))}
-            onOpenPage={handleOpenPage}
-          />
-        ),
-      },
-    ];
+    const tabs: CenterTab[] = [];
     // File tabs live in `threadPageTabs` like every other page kind;
     // the page-tab loop's `ref.kind === "file"` branch handles the
     // render. fileSessions owns the file content + dirty state, but
     // tab membership and order are driven by the unified list.
     // The unified-chrome wrap loop below applies to every tab pushed
-    // after this index — every per-thread page tab (notes, files,
-    // diffs, tasks, etc.). Only the agent at index 0 is excluded.
+    // after this index — every per-thread page tab (agent sessions,
+    // notes, files, diffs, tasks, etc.).
     // Diffs live in `threadPageTabs` like every other page kind; the
     // standalone diffTabs array is just the spec registry indexed by
     // id, looked up by the diff render branch below.
@@ -2332,7 +2341,7 @@ export function App() {
     // After the loop we tag non-current tabs as hidden so they don't
     // appear in the strip.
     const perThreadHistoryForBuilder = selectedThreadId ? threadPageHistory[selectedThreadId] ?? {} : {};
-    const stripVisibleIds = new Set<string>([AGENT_TAB_ID]);
+    const stripVisibleIds = new Set<string>();
     for (const slotRef of pageTabsForThread) stripVisibleIds.add(slotRef.id);
     // Tab ids must be unique across the whole rendered list — they
     // back React keys, the active-tab lookup, and the close-button
@@ -2344,7 +2353,7 @@ export function App() {
     // current ref, which can happen when the same ref appears in
     // back+current after a malformed history transition) only
     // contributes one tab to the render.
-    const renderedTabIds = new Set<string>([AGENT_TAB_ID]);
+    const renderedTabIds = new Set<string>();
     // One renderer per page kind. `Record<PageKind, …>` makes the table
     // exhaustive: a kind without a renderer (or a renderer for a kind that
     // no longer exists) is a compile error, not a blank tab.
@@ -2430,8 +2439,60 @@ export function App() {
       };
     };
     const pageRenderers: Record<PageKind, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
-      // The agent tab is slot 0 above; it is never a page tab.
-      agent: () => null,
+      agent_session: (ref) => {
+        const sessionId = (ref.payload as { sessionId: string }).sessionId;
+        const session = selectedThreadSessions?.find((candidate) => candidate.id === sessionId) ?? null;
+        const status = sessionStatuses[sessionId];
+        const label = session ? session.title || sessionLabel(harnesses, session) : "Agent";
+        return {
+          id: ref.id,
+          label,
+          closable: true,
+          pinned: true,
+          closeConfirm: "Close session",
+          agentStatus: status?.status ?? "waiting",
+          question: status?.question,
+          contextMenu: [
+            {
+              id: "agent-session.rename",
+              label: "Rename…",
+              enabled: !!session,
+              run: () => setRenamingSessionId(sessionId),
+            },
+          ],
+          render: () => (
+            <AgentSessionPage
+              thread={selectedThread}
+              session={session}
+              stream={stream}
+              visible={effectiveCenterActive === ref.id}
+              onOpenFile={openTerminalPath}
+              onOpenDiff={handleOpenDiff}
+              onOpenSettings={() => handleOpenPage(indexRef("settings"))}
+              onOpenPage={handleOpenPage}
+            />
+          ),
+        };
+      },
+      "new-session": (ref) => ({
+        id: ref.id,
+        label: "New session",
+        closable: true,
+        render: () => (
+          <NewSessionPage
+            thread={selectedThread}
+            harnesses={harnesses}
+            onStart={async (harness, acpAgent) => {
+              if (!selectedThread) return;
+              const opened = await openAgentSession(selectedThread.id, harness, acpAgent);
+              // The picker gives way to the session's tab (it follows the
+              // row once the model re-reads).
+              closePageTab(ref.id);
+              setCenterActive(agentSessionRef(opened.id).id);
+            }}
+          />
+        ),
+      }),
       diff: (ref, nav) => {
         // Diff that arrived via in-tab navigation. Look up the
         // registered spec; skip if missing (the registration path is
@@ -3182,6 +3243,10 @@ export function App() {
   }, [
     selectedThread,
     agentThreadStatus,
+    selectedThreadSessions,
+    sessionStatuses,
+    harnesses,
+    openTerminalPath,
     effectiveCenterActive,
     stream,
     currentSession.openOrder,
@@ -3266,12 +3331,22 @@ export function App() {
           streamStatuses={streamStatuses}
           agentStatuses={agentStatuses}
           agentQuestions={agentQuestions}
-          enabledAgents={enabledAgents}
           onSwitchStream={handleSwitch}
           onSelectThread={handleSelectThread}
-          onCreateThread={async (streamId, title, agent, acpAgent) => {
+          onCreateThread={async (streamId, title) => {
             if (streamId !== stream?.id) await handleSwitch(streamId);
-            await handleCreateThread(title, agent, acpAgent);
+            await handleCreateThread(title);
+          }}
+          onNewSession={async (streamId, threadId) => {
+            if (streamId !== stream?.id) await handleSwitch(streamId);
+            await handleSelectThread(streamId, threadId);
+            // Into that thread's tabs, not the one selected when the menu opened.
+            const picker = newSessionRef();
+            setThreadPageTabs((prev) => {
+              const current = prev[threadId] ?? [];
+              return current.some((t) => t.id === picker.id) ? prev : { ...prev, [threadId]: [...current, picker] };
+            });
+            setThreadCenterActive((prev) => ({ ...prev, [threadId]: picker.id }));
           }}
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onRenameStream={handleRenameStreamById}
@@ -3326,9 +3401,39 @@ export function App() {
                   closePageTab(id);
                 }
                 else if (id.startsWith("diff:")) closeDiffTab(id);
+                else if (pageKindOf(id) === "agent_session") {
+                  // Closing a session's tab closes the session (the strip
+                  // armed it first); its tab goes when its row closes.
+                  const ref = refFromTabId(id);
+                  const sessionId = (ref?.payload as { sessionId?: string } | undefined)?.sessionId;
+                  if (sessionId) {
+                    void closeAgentSession(sessionId, true).catch((e: unknown) =>
+                      recordOpError({ label: "Close session", message: e instanceof Error ? e.message : String(e) }),
+                    );
+                  }
+                }
                 else closePageTab(id);
               }}
               onReorder={handleReorderCenterTabs}
+              header={renamingSessionId ? (
+                <InlinePromptStrip
+                  testId="rename-session"
+                  message="Rename the agent session"
+                  confirmLabel="Rename"
+                  fields={[{
+                    key: "title",
+                    initialValue: selectedThreadSessions?.find((c) => c.id === renamingSessionId)?.title ?? "",
+                  }]}
+                  onCancel={() => setRenamingSessionId(null)}
+                  onSubmit={(values) => {
+                    const sessionId = renamingSessionId;
+                    setRenamingSessionId(null);
+                    void renameAgentSession(sessionId, values.title ?? "").catch((e: unknown) =>
+                      recordOpError({ label: "Rename session", message: e instanceof Error ? e.message : String(e) }),
+                    );
+                  }}
+                />
+              ) : undefined}
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
           {/* Generic comment layer for every plain-DOM page. Mounted once

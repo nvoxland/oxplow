@@ -20,7 +20,10 @@ members = [
     "crates/oxplow-daemon-sim",
     "crates/oxplow-dev",
     "crates/oxplow-tauri-ipc",
-    "crates/oxplow-plugin",
+    "crates/oxplow-agent-text",
+    "crates/oxplow-ai-providers",
+    "crates/oxplow-harnesses",
+    "crates/oxplow-harness-fake",
     "crates/oxplow-control-plane",
     "crates/oxplow-code-metrics",
     "crates/oxplow-code-dup",
@@ -171,6 +174,7 @@ oxplow-collect-plugin = { path = "crates/oxplow-collect-plugin" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-tasks = { path = "crates/oxplow-tasks" }
 oxplow-ai = { path = "crates/oxplow-ai" }
+oxplow-ai-providers = { path = "crates/oxplow-ai-providers" }
 oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
 oxplow-provider-protocol = { path = "crates/oxplow-provider-protocol" }
 oxplow-provider-fake = { path = "crates/oxplow-provider-fake" }
@@ -192,7 +196,9 @@ oxplow-rpc = { path = "crates/oxplow-rpc" }
 oxplow-daemon = { path = "crates/oxplow-daemon" }
 oxplow-daemon-sim = { path = "crates/oxplow-daemon-sim" }
 oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }
-oxplow-plugin = { path = "crates/oxplow-plugin" }
+oxplow-agent-text = { path = "crates/oxplow-agent-text" }
+oxplow-harnesses = { path = "crates/oxplow-harnesses" }
+oxplow-harness-fake = { path = "crates/oxplow-harness-fake" }
 oxplow-sdk = { path = "crates/oxplow-sdk" }
 oxplow-control-plane = { path = "crates/oxplow-control-plane" }
 

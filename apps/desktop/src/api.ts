@@ -4,6 +4,7 @@ import type {
   BegunSignIn,
   ChangeScopes,
   ExtensionChange,
+  HookEnvelope,
   OpOutcome,
   OxplowConfig,
   OxplowEvent,
@@ -38,6 +39,7 @@ import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { IpcCallError, ipcErrorCode, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
+  HarnessListing,
   CatalogPrompt,
   EffectiveSetting,
   PanelPlacement,
@@ -277,8 +279,8 @@ export type { OpOutcome, RemoteBranchEntry, MergeReadiness } from "./tauri-bridg
 // Stream / Thread come straight from the Tauri bindings — the
 // renderer reads the flat shape (working_pane / talking_pane /
 // custom_prompt) directly; no synthesis happens at the boundary.
-import type { AgentKind, Stream, Thread } from "./tauri-bridge/index.js";
-export type { AgentKind, Stream, Thread };
+import type { Stream, Thread } from "./tauri-bridge/index.js";
+export type { Stream, Thread };
 
 export interface ThreadState {
   selectedThreadId: string | null;
@@ -948,41 +950,47 @@ export async function listAcpAgents(): Promise<AcpAgentListing[]> {
   return unwrap(await commands.listAcpAgents());
 }
 
+/// The registered agent harnesses in priority order: the session picker's
+/// and Settings' (`agentKinds.ts`).
+export async function listAgentHarnesses(): Promise<HarnessListing[]> {
+  return unwrap(await commands.listAgentHarnesses());
+}
+
 // ---- ACP sessions (tsk281) --------------------------------------------
 // A structured agent conversation instead of a terminal. `acpPrompt` is
 // the prompt box's Enter and nothing else: oxplow never sends an agent
 // input on its own (guarded by no-agent-input-automation.test.ts).
 
 /** Start the thread's ACP agent (or reattach) and return its session. */
-export async function acpOpenSession(threadId: string): Promise<AcpSnapshot> {
-  return unwrap(await commands.acpOpenSession(threadId));
+export async function acpOpenSession(sessionId: string): Promise<AcpSnapshot> {
+  return unwrap(await commands.acpOpenSession(sessionId));
 }
 
 /** Send what the person typed. Only `AcpPromptBox` calls this. */
-export async function acpPrompt(threadId: string, text: string): Promise<void> {
-  unwrap(await commands.acpPrompt(threadId, text));
+export async function acpPrompt(sessionId: string, text: string): Promise<void> {
+  unwrap(await commands.acpPrompt(sessionId, text));
 }
 
-export async function acpCancel(threadId: string): Promise<void> {
-  unwrap(await commands.acpCancel(threadId));
+export async function acpCancel(sessionId: string): Promise<void> {
+  unwrap(await commands.acpCancel(sessionId));
 }
 
 /** Answer a permission card; `optionId: null` cancels it. */
 export async function acpRespondPermission(
-  threadId: string,
+  sessionId: string,
   requestId: string,
   optionId: string | null,
 ): Promise<void> {
-  unwrap(await commands.acpRespondPermission(threadId, requestId, optionId));
+  unwrap(await commands.acpRespondPermission(sessionId, requestId, optionId));
 }
 
 /** The session plus items changed after `sinceSeq`; null when none is open. */
-export async function acpTranscript(threadId: string, sinceSeq: number): Promise<AcpSnapshot | null> {
-  return unwrap(await commands.acpTranscript(threadId, sinceSeq));
+export async function acpTranscript(sessionId: string, sinceSeq: number): Promise<AcpSnapshot | null> {
+  return unwrap(await commands.acpTranscript(sessionId, sinceSeq));
 }
 
-export async function acpCloseSession(threadId: string): Promise<void> {
-  unwrap(await commands.acpCloseSession(threadId));
+export async function acpCloseSession(sessionId: string): Promise<void> {
+  unwrap(await commands.acpCloseSession(sessionId));
 }
 
 export function subscribeAcpEvents(listener: (event: AcpEvent) => void): () => void {
@@ -1047,7 +1055,8 @@ export async function getConfig(): Promise<OxplowConfig> {
   return unwrap(await commands.getConfig());
 }
 
-export async function setAgents(agents: AgentKind[]): Promise<OxplowConfig> {
+/// The enabled agent harnesses, by key, in priority order.
+export async function setAgents(agents: string[]): Promise<OxplowConfig> {
   return unwrap(await commands.setAgents(agents));
 }
 
@@ -1061,11 +1070,11 @@ export async function setGenerated(
   return unwrap(await commands.setGenerated(generated));
 }
 
-/// Set (or clear, with null/blank) the launch-model override for one
-/// agent — `agentModels.<agent>` in .oxplow/project.yaml. Only opencode consumes
-/// the override today (`opencode -m provider/model`).
+/// Set (or clear, with null/blank) one harness's launch model —
+/// `agentConfig.<agent>.model` in .oxplow/project.yaml, which its launch
+/// reads.
 export async function setAgentModel(
-  agent: AgentKind,
+  agent: string,
   model: string | null,
 ): Promise<OxplowConfig> {
   return unwrap(await commands.setAgentModel(agent, model));
@@ -1310,19 +1319,55 @@ export async function getThreadState(streamId: string): Promise<ThreadState> {
 }
 
 
-export async function createThread(
-  streamId: string,
-  title: string,
-  agent?: AgentKind,
+/** A new thread on the stream: it has no agent session (open one with
+ *  `openAgentSession`). The thread and the stream's state after. */
+export async function createThread(streamId: string, title: string): Promise<{ thread: Thread; state: ThreadState }> {
+  const thread = (await runCommand("oxplow.thread.create", { stream: streamRef(streamId), title })).result as Thread;
+  return { thread, state: await getThreadState(streamId) };
+}
+
+/** What `oxplow.agent_session.open` answers: the new session's row. */
+export interface AgentSessionRecord {
+  /** `ses3`. */
+  id: string;
+  /** `thr1`. */
+  thread_id: string;
+  kind: string;
+  /** The harness's key. */
+  harness: string;
+  acp_agent: string | null;
+  title: string;
+}
+
+/** An agent session's ref (`agent_session:ses3`). */
+const sessionRef = (id: string) => `agent_session:${id}`;
+
+/** Open an agent session on a thread: it only adds the slot (the tab
+ *  starts its process when it mounts). No harness: the project's default. */
+export async function openAgentSession(
+  threadId: string,
+  harness?: string,
   acpAgent?: string | null,
-): Promise<ThreadState> {
-  await runCommand("oxplow.thread.create", {
-    stream: streamRef(streamId),
-    title,
-    ...(agent ? { agent } : {}),
-    ...(acpAgent ? { acp_agent: acpAgent } : {}),
-  });
-  return getThreadState(streamId);
+  title?: string,
+): Promise<AgentSessionRecord> {
+  return (
+    await runCommand("oxplow.agent_session.open", {
+      thread: threadRef(threadId),
+      ...(harness ? { harness } : {}),
+      ...(acpAgent ? { acp_agent: acpAgent } : {}),
+      ...(title ? { title } : {}),
+    })
+  ).result as AgentSessionRecord;
+}
+
+/** Close an agent session: its process stops. Destructive — the caller
+ *  has the person confirm first (`confirmed`). */
+export async function closeAgentSession(sessionId: string, confirmed: boolean): Promise<void> {
+  await runCommand("oxplow.agent_session.close", { session: sessionRef(sessionId) }, confirmed);
+}
+
+export async function renameAgentSession(sessionId: string, title: string): Promise<void> {
+  await runCommand("oxplow.agent_session.rename", { session: sessionRef(sessionId), title });
 }
 
 export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {
@@ -2358,6 +2403,8 @@ export type AgentStatus = "working" | "waiting" | "stalled" | "awaiting";
 export interface AgentStatusEntry {
   streamId: string;
   threadId: string;
+  /** The agent session (`ses3`); `null` for activity no session claims. */
+  sessionId: string | null;
   status: AgentStatus;
   /// What the agent is waiting on (its question, a permission), present only when `status` is
   /// "awaiting". Surfaced as the rail dot's tooltip so you can see what
@@ -2380,24 +2427,27 @@ export function collapseAgentStatusState(raw: string | undefined): AgentStatus {
   return "waiting";
 }
 
-/// Synthesize an Interrupt hook for `threadId`. Used by the agent
-/// terminal's Escape handler — Claude Code cancels the in-flight turn
-/// on Escape but does not emit a Stop/Interrupt hook itself, so the
-/// working-dot would stay Running until the next user prompt.
-/// Posting an Interrupt envelope here closes any open agent_turn and
-/// flips the derived status back to Idle immediately.
-export async function recordUserInterrupt(threadId: string, streamId: string | null): Promise<void> {
-  unwrap(
-    await commands.ingestHookEvent({
-      kind: "interrupt",
-      thread_id: threadId,
-      stream_id: streamId,
-      session_id: null,
-      payload_json: JSON.stringify({ source: "user-escape" }),
-      prompt: null,
-      decision: null,
-    }),
-  );
+/// The Interrupt hook the agent terminal's Escape synthesizes for agent
+/// session `sessionId` (on `threadId`). Claude Code cancels the in-flight
+/// turn on Escape but does not emit a Stop/Interrupt hook itself, so the
+/// working-dot would stay Running until the next user prompt. Posting this
+/// closes the session's open agent_turn and flips its derived status back
+/// to Idle immediately.
+export function userInterruptEnvelope(sessionId: string, threadId: string, streamId: string | null): HookEnvelope {
+  return {
+    kind: "interrupt",
+    thread_id: threadId,
+    stream_id: streamId,
+    agent_session_id: sessionId,
+    session_id: null,
+    payload_json: JSON.stringify({ source: "user-escape" }),
+    prompt: null,
+    decision: null,
+  };
+}
+
+export async function recordUserInterrupt(sessionId: string, threadId: string, streamId: string | null): Promise<void> {
+  unwrap(await commands.ingestHookEvent(userInterruptEnvelope(sessionId, threadId, streamId)));
 }
 
 export async function listAgentStatuses(_streamId?: string): Promise<AgentStatusEntry[]> {
@@ -2414,6 +2464,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
     return {
       streamId: "",
       threadId: row.thread_id,
+      sessionId: row.agent_session_id,
       // detail is what it waits on only while awaiting; other
       // states reuse detail for markers ("boot"/"interrupt") the dot
       // shouldn't surface, so scope the tooltip to the awaiting state.
@@ -2574,6 +2625,7 @@ export function subscribeAgentStatus(
     onEvent({
       streamId: "",
       threadId,
+      sessionId: (event.agentSessionId as string | null | undefined) ?? null,
       status,
       question: status === "awaiting" ? (detail ?? undefined) : undefined,
     });

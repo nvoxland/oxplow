@@ -14,6 +14,7 @@
 //! [`CommandBus::external_commands`] is pinned by a test, so every
 //! `External` command is a reviewed choice, not a shortcut.
 
+pub mod agent_session;
 pub mod bookmark;
 pub mod comment;
 pub mod compose;

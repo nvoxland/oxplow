@@ -490,6 +490,7 @@ mod tests {
             kind,
             thread_id: Some(f.thread),
             stream_id: None,
+            agent_session_id: None,
             session_id: None,
             payload_json: payload.to_string(),
             prompt: Some("go".into()),
@@ -1109,6 +1110,7 @@ mod tests {
                             kind,
                             thread_id: Some(thread),
                             stream_id: None,
+                            agent_session_id: None,
                             session_id: None,
                             payload_json: "{}".into(),
                             prompt: Some(prompt.into()),
@@ -1208,7 +1210,7 @@ mod tests {
             ("file", "file:DEV.md", "DEV.md"),
             ("file", "file:DEV.md", "DEV.md"),
             ("settings", "page:settings", "Settings"),
-            ("agent", "page:agent", "Agent"),
+            ("agent_session", "agent_session:ses1", "Claude"),
         ] {
             f.svc
                 .page_visit_store

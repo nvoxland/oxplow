@@ -245,6 +245,10 @@ Things I keep forgetting. Read this before adding any UI.
   task permanently) push a toast without `onUndo` so the user
   still sees confirmation feedback even if they can't undo. Don't
   block the renderer with a centered confirm modal.
+- **Closing an agent session's tab is an inline confirm**, not an Undo
+  toast: its × arms ("Close session") and the second click closes the
+  session (`oxplow.agent_session.close`, destructive) — a stopped
+  process can't be undone. Rename… is on the tab's right-click menu.
 - **Closing a dirty file tab** is fire-and-undo: the close completes
   immediately and a toast offers Undo (which restores both the saved
   buffer and the unsaved draft). See `App.tsx` →
@@ -717,7 +721,10 @@ declaring *what it is* and mounting the generic layer.
   input and never sends. `compact` is the one-line form (rail sections,
   the ACP transcript). A loading state isn't an empty one: "Starting the
   agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what an agent can't do
-  (AI providers, keys, consent): say who does it instead. Its root
+  (AI providers, keys, consent): say who does it instead. The session
+  picker (`NewSessionPage`, a thread with no agent session) offers **no**
+  prompts — there is no agent here yet to hand one to — only the agent
+  choice and Start, which opens the slot and nothing else. Its root
   carries `data-empty-state`, which is how a test tells an `EmptyState`
   from plain copy (`components/Prompts/emptyStates.test.tsx` mounts the
   surfaces that mount cheaply); there is no second empty-copy helper.
