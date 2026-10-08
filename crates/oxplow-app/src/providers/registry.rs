@@ -957,14 +957,7 @@ impl Instance {
         // that thread (tsk1041, tsk1058); otherwise an agent's thread
         // anchors what it did.
         let mut anchors = match actor {
-            Actor::Agent {
-                thread_id,
-                stream_id,
-            } => oxplow_domain::Anchors {
-                thread_id: *thread_id,
-                stream_id: *stream_id,
-                ..Default::default()
-            },
+            Actor::Agent { .. } => actor.anchors(),
             _ => oxplow_domain::Anchors::default(),
         };
         if filed_on.is_some() {

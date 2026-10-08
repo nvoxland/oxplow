@@ -760,6 +760,7 @@ mod tests {
 
     fn agent(fx: &crate::test_fixtures::EffortFixture) -> Actor {
         Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         }

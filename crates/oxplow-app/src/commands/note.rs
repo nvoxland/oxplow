@@ -137,6 +137,7 @@ mod tests {
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         }
@@ -175,6 +176,7 @@ mod tests {
             .commands
             .run(
                 &Actor::Agent {
+                    session_id: None,
                     thread_id: Some(thread.id),
                     stream_id: None,
                 },
@@ -202,6 +204,7 @@ mod tests {
         let second =
             crate::test_fixtures::new_thread(&fx.svc, oxplow_domain::StreamId::new(1), "q").await;
         let queued = Actor::Agent {
+            session_id: None,
             thread_id: Some(second.id),
             stream_id: None,
         };
@@ -279,6 +282,7 @@ mod tests {
         let other =
             crate::test_fixtures::new_thread(&fx.svc, oxplow_domain::StreamId::new(1), "o").await;
         let stranger = Actor::Agent {
+            session_id: None,
             thread_id: Some(other.id),
             stream_id: None,
         };

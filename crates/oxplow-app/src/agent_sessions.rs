@@ -9,6 +9,7 @@ use std::sync::Arc;
 use oxplow_domain::AgentSessionId;
 
 use crate::acp::manager::AcpManager;
+use crate::session_auth::SessionAuth;
 use crate::terminal_sessions::{agent_pane_key, TerminalSessionRegistry};
 
 /// Stops what runs in an agent session, whichever kind it is.
@@ -16,17 +17,28 @@ use crate::terminal_sessions::{agent_pane_key, TerminalSessionRegistry};
 pub struct SessionProcesses {
     acp: Arc<AcpManager>,
     terminals: TerminalSessionRegistry,
+    auth: Arc<SessionAuth>,
 }
 
 impl SessionProcesses {
-    pub fn new(acp: Arc<AcpManager>, terminals: TerminalSessionRegistry) -> Self {
-        Self { acp, terminals }
+    pub fn new(
+        acp: Arc<AcpManager>,
+        terminals: TerminalSessionRegistry,
+        auth: Arc<SessionAuth>,
+    ) -> Self {
+        Self {
+            acp,
+            terminals,
+            auth,
+        }
     }
 
     /// Stop agent session `session`'s process: its ACP agent (closed from
-    /// this moment) or its PTY (killed on the runtime right after).
-    /// Nothing running is fine — there is nothing to stop.
+    /// this moment) or its PTY (killed on the runtime right after), and
+    /// retire its bearer. Nothing running is fine — there is nothing to
+    /// stop.
     pub fn kill(&self, session: AgentSessionId) {
+        self.auth.revoke(session);
         let _ = self.acp.close(&session);
         let terminals = self.terminals.clone();
         tokio::spawn(async move {

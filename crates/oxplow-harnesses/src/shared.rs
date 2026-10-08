@@ -18,25 +18,6 @@ pub fn shell_escape(s: &str) -> String {
     format!("'{escaped}'")
 }
 
-/// `K='v' …` ahead of the command, or nothing.
-pub fn env_prefix(env: &[(String, String)]) -> String {
-    if env.is_empty() {
-        return String::new();
-    }
-    let parts: Vec<String> = env
-        .iter()
-        .map(|(k, v)| {
-            assert!(
-                k.bytes()
-                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'),
-                "invalid env var name: {k}"
-            );
-            format!("{k}={}", shell_escape(v))
-        })
-        .collect();
-    format!("{} ", parts.join(" "))
-}
-
 /// What to exec, plus a preflight to run before it.
 ///
 /// With a resolved absolute path there's nothing to check — PATH is out of
@@ -165,10 +146,25 @@ pub fn write_commands(commands_dir: &Path, commands: &[Text]) -> io::Result<()> 
 }
 
 /// `value` as pretty JSON, newline-terminated, at `path`.
+/// Write `value` as pretty JSON, readable by its owner only: a runtime
+/// file may hold the session's bearer.
 pub fn write_json(path: &Path, value: &serde_json::Value) -> io::Result<()> {
     let mut s = serde_json::to_string_pretty(value).map_err(io::Error::other)?;
     s.push('\n');
-    fs::write(path, s)
+    fs::write(path, s)?;
+    owner_only(path)
+}
+
+/// Make `path` readable and writable by its owner alone.
+#[cfg(unix)]
+fn owner_only(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn owner_only(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]

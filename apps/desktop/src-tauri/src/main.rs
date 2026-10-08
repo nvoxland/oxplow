@@ -122,18 +122,6 @@ async fn forward_hook(event: &str, payload: Vec<u8>) -> Result<Vec<u8>, reqwest:
         .post(url)
         .header("Authorization", format!("Bearer {token}"))
         .header("Content-Type", "application/json")
-        .header(
-            "X-Oxplow-Stream",
-            std::env::var("OXPLOW_STREAM_ID").unwrap_or_default(),
-        )
-        .header(
-            "X-Oxplow-Thread",
-            std::env::var("OXPLOW_THREAD_ID").unwrap_or_default(),
-        )
-        .header(
-            "X-Oxplow-Session",
-            std::env::var("OXPLOW_SESSION").unwrap_or_default(),
-        )
         .body(payload)
         .send()
         .await?;

@@ -9,7 +9,7 @@ use specta::Type;
 
 use crate::events::schema::ActorKind;
 use crate::events::validate_type_name;
-use crate::ids::{StreamId, ThreadId};
+use crate::ids::{AgentSessionId, StreamId, ThreadId};
 use crate::{DomainError, EventId};
 
 /// Which surfaces may invoke a command.
@@ -349,8 +349,12 @@ impl CommandSpec {
 pub enum Actor {
     Human,
     Agent {
-        /// The agent's thread, when the transport carried it (the MCP
-        /// identity middleware supplies it from `X-Oxplow-Thread`).
+        /// The agent session acting, when it came through one — over MCP,
+        /// the session whose bearer the request carried. Two sessions on
+        /// one thread are two actors.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<AgentSessionId>,
+        /// The agent's thread: its session's, over MCP.
         thread_id: Option<ThreadId>,
         stream_id: Option<StreamId>,
     },
@@ -474,11 +478,22 @@ impl Actor {
         }
     }
 
+    /// The agent session acting (through a lens chain too, like
+    /// [`Self::thread_id`]).
+    pub fn session_id(&self) -> Option<AgentSessionId> {
+        match self {
+            Actor::Agent { session_id, .. } => *session_id,
+            Actor::Lens { on_behalf_of, .. } => on_behalf_of.session_id(),
+            _ => None,
+        }
+    }
+
     /// The anchors every event this actor causes carries.
     pub fn anchors(&self) -> crate::events::Anchors {
         crate::events::Anchors {
             thread_id: self.thread_id(),
             stream_id: self.stream_id(),
+            agent_session_id: self.session_id(),
             ..crate::events::Anchors::default()
         }
     }
@@ -836,6 +851,7 @@ mod tests {
     #[test]
     fn actors_know_their_invoker_source_and_kind() {
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(ThreadId::new(3)),
             stream_id: None,
         };
@@ -861,10 +877,43 @@ mod tests {
         assert_eq!(effect.kind(), ActorKind::Effect);
     }
 
+    /// An agent's session is its own and anchors what it causes; a lens
+    /// acting for it carries it too. A recorded actor from before sessions
+    /// (no `session_id`) reads as one with none, and one with none writes
+    /// none.
+    #[test]
+    fn an_agents_session_anchors_what_it_causes() {
+        let agent = Actor::Agent {
+            session_id: Some(AgentSessionId::new(5)),
+            thread_id: Some(ThreadId::new(3)),
+            stream_id: Some(StreamId::new(1)),
+        };
+        assert_eq!(agent.session_id(), Some(AgentSessionId::new(5)));
+        assert_eq!(
+            agent.anchors().agent_session_id,
+            Some(AgentSessionId::new(5))
+        );
+        let lens = Actor::Lens {
+            lens_id: "acme/blocked".into(),
+            on_behalf_of: Box::new(agent),
+        };
+        assert_eq!(lens.session_id(), Some(AgentSessionId::new(5)));
+        let old: Actor = serde_json::from_value(
+            serde_json::json!({"kind": "agent", "thread_id": "thr3", "stream_id": "str1"}),
+        )
+        .unwrap();
+        assert_eq!(old.session_id(), None);
+        assert!(serde_json::to_value(&old)
+            .unwrap()
+            .get("session_id")
+            .is_none());
+    }
+
     /// Only a person confirms — directly or through a lens they used.
     #[test]
     fn only_a_person_may_confirm() {
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: None,
             stream_id: None,
         };

@@ -14,7 +14,7 @@ use oxplow_domain::agent::harness::{
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
 
-use super::shared::{env_prefix, in_shell, program_and_guard, runtime, shell_escape, write_skills};
+use super::shared::{in_shell, program_and_guard, runtime, shell_escape, write_skills};
 use super::Named;
 
 pub(super) struct Opencode(pub(super) Named);
@@ -75,9 +75,9 @@ impl AgentHarness for Opencode {
                     &input.workspace.to_string_lossy(),
                     input.resume.filter(|r| !r.is_empty()),
                     program.as_deref(),
-                    &env,
                     model,
                 ),
+                env,
             },
             resume_dropped: false,
         })
@@ -214,21 +214,14 @@ fn split_frontmatter_description(asset: &str) -> (Option<String>, String) {
 
 /// `opencode -m <model>`, resuming `resume` with a fallback to a fresh
 /// session when the id is stale.
-fn command(
-    cwd: &str,
-    resume: Option<&str>,
-    program: Option<&str>,
-    env: &[(String, String)],
-    model: &str,
-) -> String {
-    let prefix = env_prefix(env);
+fn command(cwd: &str, resume: Option<&str>, program: Option<&str>, model: &str) -> String {
     let (prog, guard) = program_and_guard(program, "opencode");
     let base = format!("{prog} -m {}", shell_escape(model));
-    let fresh = format!("{prefix}exec {base}");
+    let fresh = format!("exec {base}");
     let command = match resume {
         None => fresh,
         Some(id) => format!(
-            "{prefix}{base} -s {} || {{ echo '[oxplow] saved resume id was stale; starting a fresh opencode session' >&2; {fresh}; }}",
+            "{base} -s {} || {{ echo '[oxplow] saved resume id was stale; starting a fresh opencode session' >&2; {fresh}; }}",
             shell_escape(id)
         ),
     };
@@ -253,9 +246,6 @@ fn config_content(
                 "enabled": true,
                 "headers": {
                     "Authorization": "Bearer {env:OXPLOW_HOOK_TOKEN}",
-                    "X-Oxplow-Thread": "{env:OXPLOW_THREAD_ID}",
-                    "X-Oxplow-Stream": "{env:OXPLOW_STREAM_ID}",
-                    "X-Oxplow-Session": "{env:OXPLOW_SESSION}",
                 },
             },
         },
@@ -281,12 +271,12 @@ mod tests {
             Some("be terse"),
             &serde_json::json!({ "model": "anthropic/claude-sonnet-4-6" }),
         );
-        let LaunchSpec::Pty { command } = &l.launch.spec else {
-            panic!("not a PTY launch")
-        };
+        let (command, env) = crate::test_launch::pty(&l.launch);
+        assert_eq!(env["OXPLOW_HOOK_TOKEN"], "secret-bearer");
+        assert_eq!(env["OXPLOW_SESSION"], "ses3");
+        assert!(env["OPENCODE_CONFIG_CONTENT"].contains("oxplow-hooks.js"));
+        assert!(!command.contains("OXPLOW_") && !command.contains("OPENCODE_CONFIG"));
         for want in [
-            "OXPLOW_SESSION=",
-            "OPENCODE_CONFIG_CONTENT=",
             "anthropic/claude-sonnet-4-6",
             " -s ",
             "sess-w",
@@ -302,7 +292,7 @@ mod tests {
 
     #[test]
     fn with_no_model_configured_it_runs_the_default() {
-        let cmd = command("/repo", None, None, &[], DEFAULT_MODEL);
+        let cmd = command("/repo", None, None, DEFAULT_MODEL);
         assert!(cmd.contains("exec opencode") && cmd.contains(DEFAULT_MODEL));
         assert!(!cmd.contains(" -s "));
     }
@@ -318,14 +308,11 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(v["mcp"]["oxplow"]["type"], "remote");
         assert_eq!(v["mcp"]["oxplow"]["url"], "http://127.0.0.1:9/mcp");
-        // opencode interpolates {env:VAR} itself: the token isn't baked in.
+        // opencode interpolates {env:VAR} itself: the bearer isn't baked
+        // in, and it's the whole of who the calls come from.
         assert_eq!(
-            v["mcp"]["oxplow"]["headers"]["Authorization"],
-            "Bearer {env:OXPLOW_HOOK_TOKEN}"
-        );
-        assert_eq!(
-            v["mcp"]["oxplow"]["headers"]["X-Oxplow-Session"],
-            "{env:OXPLOW_SESSION}"
+            v["mcp"]["oxplow"]["headers"],
+            serde_json::json!({ "Authorization": "Bearer {env:OXPLOW_HOOK_TOKEN}" })
         );
         assert_eq!(
             v["plugin"][0],
@@ -346,12 +333,12 @@ mod tests {
         let paths = write_runtime(tmp.path(), &oxplow_agent_text::core_text()).unwrap();
         assert!(paths.prompts_dir.is_dir());
         let js = fs::read_to_string(&paths.hooks_plugin).unwrap();
-        // The bridge reads its routing identity from env, posts the
+        // The bridge posts with the session's bearer from env, sends the
         // Claude-shaped lifecycle events, and maps tool names so the
         // write guard matches.
         assert!(js.contains("OXPLOW_HOOK_BASE_URL"));
         assert!(js.contains("OXPLOW_HOOK_TOKEN"));
-        assert!(js.contains("X-Oxplow-Thread"));
+        assert!(!js.contains("X-Oxplow"));
         for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] {
             assert!(js.contains(event), "missing {event}");
         }

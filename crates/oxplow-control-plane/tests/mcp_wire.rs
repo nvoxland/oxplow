@@ -52,9 +52,9 @@ async fn post(
 
 #[tokio::test]
 async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
-    let (cp, _services, _root, _dir) = boot().await;
+    let (cp, services, _root, _dir) = boot().await;
     let url = cp.mcp_endpoint_url();
-    let token = cp.hook_token.clone();
+    let token = common::bearer(&services, writer_thread(&services).await.id).await;
     let client = reqwest::Client::new();
 
     let (session, init) = post(
@@ -142,30 +142,34 @@ async fn mcp_rejects_a_missing_bearer_token() {
     assert_eq!(resp.status(), 401);
 }
 
-/// The identity headers oxplow's harness configs send (`X-Oxplow-Thread` /
-/// `X-Oxplow-Stream`) reach the tools through rmcp's request parts: a
-/// `run_command` over the wire is audited to that thread, and a session
-/// that sends none may not write.
-#[tokio::test]
-async fn run_command_over_http_is_audited_to_the_thread_in_the_headers() {
+/// The primary stream's writer thread, which the in-memory project has.
+async fn writer_thread(services: &oxplow_app::Services) -> oxplow_domain::Thread {
     use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-    let (cp, services, root, _dir) = boot().await;
-    let url = cp.mcp_endpoint_url();
-    let token = cp.hook_token.clone();
     let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-    let thread = services
+    services
         .thread_store
         .list_for_stream(&stream.id)
         .await
         .unwrap()
         .into_iter()
         .next()
-        .expect("primary stream has a writer thread");
+        .expect("primary stream has a writer thread")
+}
+
+/// A `run_command` over the wire runs as the session its bearer was
+/// minted for: it's audited to that session's thread, and headers naming
+/// another thread change nothing.
+#[tokio::test]
+async fn run_command_over_http_is_audited_to_the_bearers_thread() {
+    let (cp, services, root, _dir) = boot().await;
+    let url = cp.mcp_endpoint_url();
+    let thread = writer_thread(&services).await;
+    let token = common::bearer(&services, thread.id).await;
     let client = reqwest::Client::builder()
         .default_headers({
             let mut h = reqwest::header::HeaderMap::new();
-            h.insert("x-oxplow-thread", thread.id.to_string().parse().unwrap());
-            h.insert("x-oxplow-stream", stream.id.to_string().parse().unwrap());
+            h.insert("x-oxplow-thread", "thr999".parse().unwrap());
+            h.insert("x-oxplow-stream", "str999".parse().unwrap());
             h
         })
         .build()
@@ -219,47 +223,41 @@ async fn run_command_over_http_is_audited_to_the_thread_in_the_headers() {
         .find(|e| e.envelope.event_type == "command.executed")
         .expect("command.executed logged");
     assert_eq!(executed.envelope.source, format!("agent:{}", thread.id));
+    // The run is the bearer's session's: its audit row and its event say so.
+    use oxplow_domain::stores::AgentSessionStore as _;
+    let session = services
+        .agent_session_store
+        .list_open_for_thread(&thread.id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap()
+        .id;
+    assert_eq!(executed.envelope.anchors.agent_session_id, Some(session));
+    let audit = oxplow_db::command_audit_store::SqliteCommandAuditStore::new(services.db.clone())
+        .get(executed_audit_id(&executed.envelope))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(audit.session_id, Some(session));
+}
 
-    // The same call from a session with no identity headers is refused.
-    let anon = reqwest::Client::new();
-    let (session, _) = post(
-        &anon,
-        &url,
-        &token,
-        None,
-        json!({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {},
-                "clientInfo": {"name": "mcp-wire-test", "version": "0"}
-            }
-        }),
-    )
-    .await;
-    let session = session.unwrap();
-    post(
-        &anon,
-        &url,
-        &token,
-        Some(&session),
-        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-    )
-    .await;
-    let (_, call) = post(
-        &anon,
-        &url,
-        &token,
-        Some(&session),
-        json!({
-            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {"name": "run_command", "arguments": {
-                "id": "oxplow.config.set", "input": {"key": "zones", "value": []}
-            }}
-        }),
-    )
-    .await;
-    let call = call.unwrap();
-    let text = call.to_string();
-    assert!(text.contains("thread identity"), "{call}");
+/// The audit row a `command.executed` names.
+fn executed_audit_id(envelope: &oxplow_domain::events::Envelope) -> i64 {
+    envelope.payload["audit_id"].as_i64().unwrap()
+}
+
+/// A bearer no session holds is refused before MCP sees the request.
+#[tokio::test]
+async fn mcp_rejects_a_bearer_of_no_session() {
+    let (cp, _services, _root, _dir) = boot().await;
+    let resp = reqwest::Client::new()
+        .post(cp.mcp_endpoint_url())
+        .bearer_auth("not-a-session-token")
+        .header("Accept", "application/json, text/event-stream")
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
 }

@@ -258,6 +258,7 @@ mod tests {
         let thread = oxplow_domain::refs::build::thread_ref(fx.thread);
         let input = json!({ "ref": "file:src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };

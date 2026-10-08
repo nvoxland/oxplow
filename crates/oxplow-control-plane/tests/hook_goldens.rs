@@ -125,15 +125,14 @@ async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> Tas
 
 async fn post(
     cp: &ControlPlane,
+    svc: &Services,
     event: &str,
     thread: ThreadId,
     body: serde_json::Value,
 ) -> serde_json::Value {
     let resp = reqwest::Client::new()
         .post(format!("{}/{}", cp.hook_base_url(), event))
-        .header("authorization", format!("Bearer {}", cp.hook_token))
-        .header("x-oxplow-thread", thread.to_string())
-        .header("x-oxplow-stream", "str1")
+        .bearer_auth(common::bearer(svc, thread).await)
         .json(&body)
         .send()
         .await
@@ -150,10 +149,11 @@ fn edit(path: &std::path::Path) -> serde_json::Value {
 async fn write_guard_denies() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Queued).await;
-    let with_path = post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
+    let with_path = post(&cp, &svc, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
     golden("pre_tool_write_guard_path", &with_path, &root);
     let no_path = post(
         &cp,
+        &svc,
         "PreToolUse",
         tid,
         serde_json::json!({ "tool_name": "Write", "tool_input": {} }),
@@ -167,11 +167,11 @@ async fn write_guard_denies() {
 async fn allowed_edit_and_post_tool_ack() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
-    let allowed = post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
+    let allowed = post(&cp, &svc, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
     golden("pre_tool_allowed", &allowed, &root);
     let mut after = edit(&root.join("src/x.rs"));
     after["tool_response"] = serde_json::json!({ "success": true });
-    let ack = post(&cp, "PostToolUse", tid, after).await;
+    let ack = post(&cp, &svc, "PostToolUse", tid, after).await;
     golden("post_tool_edit_ack", &ack, &root);
 }
 
@@ -183,14 +183,16 @@ async fn stop_ack() {
     seed_task(&svc, tid, "ship the thing").await;
     post(
         &cp,
+        &svc,
         "UserPromptSubmit",
         tid,
         serde_json::json!({ "prompt": "do it", "session_id": "s1" }),
     )
     .await;
-    post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
+    post(&cp, &svc, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
     let stop = post(
         &cp,
+        &svc,
         "Stop",
         tid,
         serde_json::json!({ "session_id": "s1", "last_assistant_message": "Shipped." }),
@@ -205,9 +207,9 @@ async fn prompt_context_first_then_deduped() {
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     seed_task(&svc, tid, "ship the thing").await;
     let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
-    let first = post(&cp, "UserPromptSubmit", tid, prompt()).await;
+    let first = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_first", &first, &root);
-    let second = post(&cp, "UserPromptSubmit", tid, prompt()).await;
+    let second = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_second", &second, &root);
 }
 

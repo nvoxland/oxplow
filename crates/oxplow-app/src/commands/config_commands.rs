@@ -424,6 +424,7 @@ mod tests {
 
     fn agent() -> Actor {
         Actor::Agent {
+            session_id: None,
             thread_id: Some(ThreadId::new(1)),
             stream_id: None,
         }

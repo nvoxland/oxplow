@@ -17,6 +17,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use oxplow_app::ref_resolver::{self, RefSummary};
+use oxplow_app::session_auth::Principal;
 use oxplow_app::Services;
 use oxplow_domain::comment::CommentThread;
 use oxplow_domain::stores::{CommentStore, ThreadNoteStore, ThreadStore};
@@ -49,50 +50,45 @@ pub struct OxplowMcp {
 
 // ---------- caller identity ----------
 
-/// Who is calling: the agent thread (and stream) behind an MCP request.
+/// Who is calling: the agent session, thread and stream behind an MCP
+/// request.
 ///
-/// Every harness carries it on the HTTP request — `X-Oxplow-Thread` /
-/// `X-Oxplow-Stream` headers (ACP, opencode, Claude's per-thread MCP
-/// config) or `?thread=…&stream=…` on the endpoint URL (Codex, whose
-/// config has no per-session headers). rmcp hands the request's
-/// `http::request::Parts` to tools through the call's `Extensions`;
-/// [`caller_of`] reads them. A transport that carries neither (stdio) is
-/// an anonymous agent: it may read, and `run_command` refuses to write.
+/// The control plane admits an MCP request only with an agent session's
+/// bearer and puts that session's [`Principal`] in the request's
+/// extensions (`.context/agent-model.md` "Caller identity"); rmcp hands the
+/// request's `http::request::Parts` to tools through the call's
+/// `Extensions`, and [`caller_of`] reads the principal there. Nothing the
+/// request says about itself — a header, the URL — names the caller. A
+/// transport with no HTTP parts (stdio, a unit test) is an anonymous
+/// agent: it may read, and `run_command` refuses to write.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct McpCaller {
+    pub session_id: Option<oxplow_domain::AgentSessionId>,
     pub thread_id: Option<oxplow_domain::ThreadId>,
     pub stream_id: Option<oxplow_domain::StreamId>,
 }
 
 impl McpCaller {
     pub fn from_parts(parts: &http::request::Parts) -> Self {
-        let header = |name: &str| {
-            parts
-                .headers
-                .get(name)
-                .and_then(|v| v.to_str().ok())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-        };
-        let query = |key: &str| {
-            parts.uri.query().and_then(|q| {
-                q.split('&').find_map(|pair| {
-                    let (k, v) = pair.split_once('=')?;
-                    (k == key && !v.is_empty()).then(|| v.to_string())
-                })
-            })
-        };
-        let thread = header("x-oxplow-thread").or_else(|| query("thread"));
-        let stream = header("x-oxplow-stream").or_else(|| query("stream"));
+        parts
+            .extensions
+            .get::<Principal>()
+            .map(Self::of)
+            .unwrap_or_default()
+    }
+
+    /// The caller a session's bearer stands for.
+    pub fn of(principal: &Principal) -> Self {
         Self {
-            thread_id: thread.and_then(|t| t.parse().ok()),
-            stream_id: stream.and_then(|s| s.parse().ok()),
+            session_id: Some(principal.session),
+            thread_id: Some(principal.thread),
+            stream_id: Some(principal.stream),
         }
     }
 
     pub fn actor(&self) -> oxplow_domain::Actor {
         oxplow_domain::Actor::Agent {
+            session_id: self.session_id,
             thread_id: self.thread_id,
             stream_id: self.stream_id,
         }
@@ -109,9 +105,9 @@ pub fn caller_of(extensions: &rmcp::model::Extensions) -> McpCaller {
 }
 
 /// What `run_command` says to a caller with no thread identity.
-const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (no X-Oxplow-Thread \
-    header or ?thread= on the endpoint URL), so it may not run commands; oxplow's own harness \
-    configs set it — reconnect through one";
+const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (it didn't come \
+    through an agent session's bearer), so it may not run commands; oxplow's own harness \
+    configs connect with one — reconnect through one";
 
 // ---------- request shapes ----------
 
@@ -3204,6 +3200,7 @@ impl OxplowMcp {
             }
         }
         Ok(oxplow_domain::Actor::Agent {
+            session_id: caller.session_id,
             thread_id: Some(thread_id),
             stream_id: Some(thread.stream_id),
         })
@@ -4064,12 +4061,26 @@ mod tests {
         assert_eq!(get(&server).await, serde_json::Value::Null);
     }
 
-    fn parts_with(headers: &[(&str, &str)], uri: &str) -> http::request::Parts {
-        let mut b = http::Request::builder().uri(uri);
+    /// A request's parts as the control plane passes them on: the
+    /// session's principal in its extensions, plus whatever `headers` it
+    /// carried (which name nobody).
+    fn parts_as(
+        thread: oxplow_domain::ThreadId,
+        stream: oxplow_domain::StreamId,
+        headers: &[(&str, &str)],
+    ) -> http::request::Parts {
+        let mut b = http::Request::builder().uri("http://h/mcp");
         for (k, v) in headers {
             b = b.header(*k, *v);
         }
-        b.body(()).unwrap().into_parts().0
+        let mut parts = b.body(()).unwrap().into_parts().0;
+        parts.extensions.insert(Principal {
+            session: oxplow_domain::AgentSessionId::new(1),
+            thread,
+            stream,
+            harness: "claude".into(),
+        });
+        parts
     }
 
     /// The identity of the primary stream's writer thread — what oxplow's
@@ -4085,10 +4096,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("primary stream must have a writer thread");
-        extensions_for(parts_with(
-            &[("x-oxplow-thread", &thread.id.to_string())],
-            "http://h/mcp",
-        ))
+        extensions_for(parts_as(thread.id, stream.id, &[]))
     }
 
     fn extensions_for(parts: http::request::Parts) -> rmcp::model::Extensions {
@@ -4098,26 +4106,25 @@ mod tests {
     }
 
     #[test]
-    fn mcp_caller_reads_the_identity_headers_then_the_url_query() {
-        let c = McpCaller::from_parts(&parts_with(
-            &[("x-oxplow-thread", "thr3"), ("x-oxplow-stream", "str2")],
-            "http://h/mcp",
+    fn mcp_caller_is_the_bearers_session_whatever_the_request_says() {
+        let c = McpCaller::from_parts(&parts_as(
+            oxplow_domain::ThreadId::new(3),
+            oxplow_domain::StreamId::new(2),
+            &[("x-oxplow-thread", "thr9"), ("x-oxplow-stream", "str9")],
         ));
+        assert_eq!(c.session_id, Some(oxplow_domain::AgentSessionId::new(1)));
         assert_eq!(c.thread_id, Some(oxplow_domain::ThreadId::new(3)));
         assert_eq!(c.stream_id, Some(oxplow_domain::StreamId::new(2)));
         assert_eq!(c.actor().source(), "agent:thr3");
-        // Codex has no per-session headers: the identity rides the URL.
-        let c = McpCaller::from_parts(&parts_with(&[], "http://h/mcp?thread=thr5&stream=str1"));
-        assert_eq!(c.thread_id, Some(oxplow_domain::ThreadId::new(5)));
-        assert_eq!(c.stream_id, Some(oxplow_domain::StreamId::new(1)));
-        // Headers win over the query; garbage is anonymous.
-        let c = McpCaller::from_parts(&parts_with(
-            &[("x-oxplow-thread", "thr9")],
-            "http://h/mcp?thread=thr5",
-        ));
-        assert_eq!(c.thread_id, Some(oxplow_domain::ThreadId::new(9)));
-        let c = McpCaller::from_parts(&parts_with(&[("x-oxplow-thread", "nope")], "http://h/mcp"));
-        assert_eq!(c, McpCaller::default());
+        // Headers or a query alone, with no principal, are nobody.
+        let bare = http::Request::builder()
+            .uri("http://h/mcp?thread=thr5&stream=str1")
+            .header("x-oxplow-thread", "thr5")
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+        assert_eq!(McpCaller::from_parts(&bare), McpCaller::default());
         assert_eq!(
             caller_of(&rmcp::model::Extensions::new()),
             McpCaller::default()
@@ -4198,6 +4205,7 @@ mod tests {
         let err = server
             .run_command_as(
                 &McpCaller {
+                    session_id: None,
                     thread_id: Some(oxplow_domain::ThreadId::new(999)),
                     stream_id: None,
                 },
@@ -4209,6 +4217,7 @@ mod tests {
         let err = server
             .run_command_as(
                 &McpCaller {
+                    session_id: None,
                     thread_id: Some(thread.id),
                     stream_id: Some(oxplow_domain::StreamId::new(999)),
                 },
@@ -4220,6 +4229,7 @@ mod tests {
         server
             .run_command_as(
                 &McpCaller {
+                    session_id: None,
                     thread_id: Some(thread.id),
                     stream_id: None,
                 },
@@ -4230,6 +4240,7 @@ mod tests {
         let err = server
             .run_command_as(
                 &McpCaller {
+                    session_id: None,
                     thread_id: None,
                     stream_id: None,
                 },
@@ -4256,13 +4267,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("primary stream must have a writer thread");
-        let parts = parts_with(
-            &[
-                ("x-oxplow-thread", &thread.id.to_string()),
-                ("x-oxplow-stream", &stream.id.to_string()),
-            ],
-            "http://h/mcp",
-        );
+        let parts = parts_as(thread.id, stream.id, &[]);
         let out = server
             .run_command(
                 extensions_for(parts),
@@ -4297,6 +4302,7 @@ mod tests {
         let out = server
             .run_command_as(
                 &McpCaller {
+                    session_id: None,
                     thread_id: Some(thread.id),
                     stream_id: Some(stream.id),
                 },
@@ -4371,6 +4377,7 @@ mod tests {
         let other_id = services.stream_store.upsert(&other).await.unwrap();
         let thread = new_thread(&services, other_id, "t").await;
         let caller = McpCaller {
+            session_id: None,
             thread_id: Some(thread.id),
             stream_id: None,
         };
@@ -4413,12 +4420,7 @@ mod tests {
         other.worktree_path = elsewhere.path().to_string_lossy().into_owned();
         let other_id = services.stream_store.upsert(&other).await.unwrap();
         let thread = new_thread(&services, other_id, "t").await;
-        let caller = || {
-            extensions_for(parts_with(
-                &[("x-oxplow-thread", &thread.id.to_string())],
-                "http://h/mcp",
-            ))
-        };
+        let caller = || extensions_for(parts_as(thread.id, other_id, &[]));
         let listed = text_payload(
             server
                 .list_extensions(

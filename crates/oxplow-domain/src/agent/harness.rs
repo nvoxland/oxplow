@@ -96,8 +96,13 @@ pub struct LaunchInput<'a> {
 /// How the session's process is started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchSpec {
-    /// A shell command run in a PTY (`sh -lc <command>`).
-    Pty { command: String },
+    /// A shell command run in a PTY (`sh -lc <command>`), with `env` set
+    /// in its environment. Anything secret (the session's bearer) goes in
+    /// `env`, never in `command`, whose text any process can list.
+    Pty {
+        command: String,
+        env: Vec<(String, String)>,
+    },
     /// An ACP agent's program, spoken to over its stdio.
     Acp {
         program: PathBuf,

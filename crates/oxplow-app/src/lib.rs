@@ -117,6 +117,7 @@ pub mod ref_resolver;
 pub mod resume_check;
 pub mod scope_calls;
 pub mod semantic_catalog;
+pub mod session_auth;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;
@@ -513,6 +514,9 @@ pub struct Services {
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
     /// The agent harnesses the project's extensions declare, by key.
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
+    /// Each agent session's bearer: who a hook, an export or an MCP call
+    /// comes from (`.context/agent-model.md` "Caller identity").
+    pub session_auth: Arc<session_auth::SessionAuth>,
     /// The ACP adapters they declare, in declaration order
     /// (`acp::agents` layers the project's `acpAgents:` over them).
     pub acp_adapters: oxplow_domain::agent::registry::AcpAdapterRegistry,
@@ -1207,8 +1211,12 @@ impl Services {
             commands.add_op(command).expect("vcs ops register");
         }
         let acp = Arc::new(acp::manager::AcpManager::new());
-        let session_processes =
-            agent_sessions::SessionProcesses::new(acp.clone(), terminal_sessions.clone());
+        let session_auth = Arc::new(session_auth::SessionAuth::new());
+        let session_processes = agent_sessions::SessionProcesses::new(
+            acp.clone(),
+            terminal_sessions.clone(),
+            session_auth.clone(),
+        );
         let link_deps = link_check::LinkDeps {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
@@ -1527,6 +1535,7 @@ impl Services {
             commands,
             work_items,
             harnesses,
+            session_auth,
             acp_adapters,
             capabilities,
             providers,

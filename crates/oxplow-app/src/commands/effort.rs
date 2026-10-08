@@ -366,6 +366,7 @@ mod tests {
 
     fn agent(fx: &crate::test_fixtures::EffortFixture) -> Actor {
         Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
         }
@@ -479,6 +480,7 @@ mod tests {
         // An agent with no thread has no stream, so it reaches no thread —
         // never all of them.
         let threadless = Actor::Agent {
+            session_id: None,
             thread_id: None,
             stream_id: None,
         };

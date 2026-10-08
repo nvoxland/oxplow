@@ -362,6 +362,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         .commands
         .run(
             &Actor::Agent {
+                session_id: None,
                 thread_id: Some(ThreadId::new(fx.thread.value())),
                 stream_id: None,
             },
@@ -470,6 +471,7 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     first_read(&fx).await;
     let provider = fx.svc.work_items.get("fake").unwrap();
     let actor = Actor::Agent {
+        session_id: None,
         thread_id: Some(ThreadId::new(fx.thread.value())),
         stream_id: None,
     };
@@ -684,6 +686,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
     assert!(named.starts_with("work_item:fake:"), "{named}");
     assert_eq!(thread_of(named).await, json!([[fx.thread.value()]]));
     let agent = Actor::Agent {
+        session_id: None,
         thread_id: Some(fx.thread),
         stream_id: None,
     };
@@ -827,6 +830,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     // Delete is destructive: an agent's run is proposed, never dry-run
     // through the process.
     let agent = Actor::Agent {
+        session_id: None,
         thread_id: Some(ThreadId::new(fx.thread.value())),
         stream_id: None,
     };
@@ -2724,6 +2728,7 @@ async fn a_named_instance_says_which_provider_it_is() {
     assert!(taken.to_string().contains("already"), "{taken}");
     // An agent can't: instances are a person's (`extensionInstances`).
     let agent = Actor::Agent {
+        session_id: None,
         thread_id: Some(fx.thread),
         stream_id: None,
     };
@@ -2914,6 +2919,7 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
 
     // An agent has no path to the machine's file.
     let agent = Actor::Agent {
+        session_id: None,
         thread_id: Some(fx.thread),
         stream_id: None,
     };
@@ -2953,6 +2959,7 @@ async fn a_global_instance_is_turned_off_in_one_project() {
     assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
 
     let agent = Actor::Agent {
+        session_id: None,
         thread_id: Some(fx.thread),
         stream_id: None,
     };
