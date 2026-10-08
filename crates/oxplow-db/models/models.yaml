@@ -1182,7 +1182,7 @@
     - { not_null: page }
     - { relationships: { column: page, to: knowledge_page, field: ref } }
 - name: model
-  version: 1
+  version: 2
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
   columns:
     - { name: view, type: TEXT, doc: "The view to query (`v_work_item`)." }
