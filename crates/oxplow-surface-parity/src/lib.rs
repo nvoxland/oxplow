@@ -555,7 +555,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "extension_effects_between",
-        "an effort review's Extension Changes (P8.C7); an agent runs `oxplow plugin check --effects`",
+        "an effort review's Extension Changes (P8.C7); an agent runs `oxplow extension check --effects`",
     ),
     ui(
         "vcs_head",

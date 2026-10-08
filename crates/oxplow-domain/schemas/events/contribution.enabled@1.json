@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`contribution.enabled@1` (P7.C1): a person enabled a disabled contribution\nagain on this machine (`oxplow.contribution.enable`).",
+  "properties": {
+    "contribution": {
+      "type": "string"
+    },
+    "extension": {
+      "description": "`extension:<extension>`.",
+      "type": "string"
+    },
+    "kind": {
+      "description": "`provider`, `collector` or `effect`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "extension",
+    "contribution",
+    "kind"
+  ],
+  "title": "ContributionEnabledV1",
+  "type": "object"
+}

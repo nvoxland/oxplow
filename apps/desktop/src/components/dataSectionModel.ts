@@ -64,8 +64,8 @@ export interface ProgramRowModel {
   bundled: boolean;
 }
 
-/// A program the project's config would run (an `exec` collector or collection
-/// plugin): unapproved ones don't run until a person approves them here.
+/// A program the project's config would run (an `exec` collector, an ACP
+/// agent, an extension's provider, effect or component): unapproved ones don't run until a person approves them here.
 /// A shared extension's advisories are shown as what they'd say.
 export function programRow(p: ProjectProgram): ProgramRowModel {
   if (p.kind === "advisories") {

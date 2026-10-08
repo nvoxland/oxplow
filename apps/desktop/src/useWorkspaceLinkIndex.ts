@@ -18,7 +18,7 @@ function toWorkspaceRelative(path: string): string | null {
  * Maintains an in-memory set of the stream's workspace file paths plus their
  * ancestor directories, refreshed on workspace changes. Returns a stable
  * predicate the terminal link provider uses so dotted words in prose (e.g. a
- * plugin name like `oxplow.junit`) aren't linkified as files.
+ * collector name like `oxplow.junit`) aren't linkified as files.
  *
  * Deliberately conservative — returns `true` (link it) until the index has
  * loaded, and for anything it can't classify (absolute/`~` paths), so it never

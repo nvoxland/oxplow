@@ -35,7 +35,7 @@ section for the column.
 > and stores them (`effort_observation_row`, read as `v_effort_observation`);
 > the panel and MCP `list_effort_observations` read those stored rows
 > (`SqliteEffortEvidenceStore::list_observations`, tsk862) — the evidence is
-> computed once. `EffortObservation` is that row. Everything below about the **collector plugins**, the
+> computed once. `EffortObservation` is that row. Everything below about the **report collectors**, the
 > **hybrid ingestion** seam, and the **nudges** is unchanged — only the storage
 > moved. (One micro-change: a *report-less* run — analyzer/tests ran but produced
 > no parseable report — no longer leaves a "ran-record" row; the report-less
@@ -67,7 +67,7 @@ section for the column.
     - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
     - { id: lint.clippy, records: analysis, entry: "oxplow:clippy", report: { path: target/clippy.json }, trigger: { on_run: analysis } }
   ```
-- **Parsers — `oxplow-collect-plugin`** (`crates/oxplow-collect-plugin/`).
+- **Parsers — `oxplow-script`** (`crates/oxplow-script/`).
   A parser turns report text into a **typed output** for its kind
   (coverage = per-file `{ instrumented, covered }` line-sets; tests =
   `TestReport { suites → cases }`; analysis = `AnalysisReport { findings }`,
@@ -94,8 +94,8 @@ section for the column.
 - **`testing:` block** (`TestingConfig`, `crates/oxplow-config/src/lib.rs`):
   `command`, `fastCommand`, `runPatterns`, `analysisPatterns`,
   `agentHint` — how the project's tests run, read by the detector and the
-  agent prompt. Human-only (its hint steers every agent). The old
-  `collection:` block (with `reports:` and `plugins:`) is gone: the file
+  agent prompt. Human-only (its hint steers every agent). The
+  `collection:` block is gone: the file
   rejects it as an unknown key (`a_collection_block_is_an_unknown_key`).
 
   **`fastCommand` (tsk171)** is the coverage-free counterpart to
@@ -140,12 +140,12 @@ hook + MCP wiring):
   collector's run (`collector_run` + `collector.synced`, through the
   collector runner's `RunLog`, deduped per detected run) and counts toward
   its health — the third failed parse in a row disables it (P7.C2,
-  `plugin_health`); an `exec` parser nobody approved records
+  `contribution_health`); an `exec` parser nobody approved records
   `needs_approval` and doesn't run. A test run only reads `on_run: test`
   collectors, an analyzer run only `on_run: analysis` ones. What they
   parsed merges by kind (`RunReports`): JUnit reports into one
   suite/case tree embedded in the `test-run` payload (`suites`) — the
-  `junit.jq` plugin takes each `<testcase>` from its IMMEDIATE parent
+  `junit.jq` parser takes each `<testcase>` from its IMMEDIATE parent
   `<testsuite>`'s direct children (NOT a recursive descent), so a NESTED
   testsuite (bun emits file-suite → describe-suite → testcase) doesn't
   double-count a case under both levels (tsk361); coverage
@@ -328,7 +328,7 @@ Both paths classify by the collector's `records:` (its parser's kind), not a
 format-name heuristic. Trust tier rides in `source`: in-process tiers
 (jaq/Starlark) are deterministic and do no I/O → `post-tool-bash` /
 `coverage-report` / `analysis-report`; an `exec` parser can do I/O, so its
-output is tagged `plugin-exec:<collector ids>` (`trust`) so the UI can mark it
+output is tagged `exec:<collector ids>` (`trust`) so the UI can mark it
 lower-trust. The `provenance` column stays `observed` vs `asserted`.
 
 The `static-analysis` payload is `{ command?, analyzer?, findings:[…],
@@ -456,23 +456,23 @@ Prefer `observed` over `asserted` wherever oxplow can compute or parse the
 fact itself — that's the difference between an understanding surface and a
 dashboard of numbers nobody trusts.
 
-## Pluggable parsers (collector plugins)
+## Pluggable parsers (report collectors)
 
 Report parsing is a **two-layer** design so a new format is a report
-collector + a small script, never a Rust change (`crates/oxplow-collect-plugin/`):
+collector + a small script, never a Rust change (`crates/oxplow-script/`):
 
 1. **Container parse (host-owned).** The host reads the report file(s) and, per
    the collector's declared `input`, normalizes the bytes into a generic JSON
    value via shipped helpers. Scripts never touch the filesystem — that's what
    keeps an in-process parse deterministic and `observed`-eligible.
-2. **Field mapping (plugin-owned).** A *collector* maps that value into its
+2. **Field mapping (collector-owned).** A *collector* maps that value into its
    kind's typed output. There is **never a formless observation** — every
    collector declares a `kind` (`coverage` | `test` | `analysis`) with
    a fixed output schema. The genericity is in this uniform definition mechanism
    over typed kinds, so a future kind (perf, structure-map, …) is a new
-   `CollectorKind` plus plugins that target it — not a new subsystem.
+   `CollectorKind` plus parsers that target it — not a new subsystem.
    (`analysis` was added exactly this way: a new `CollectorKind`, the
-   `AnalysisReport` typed output, and bundled clippy/eslint jaq plugins — no
+   `AnalysisReport` typed output, and bundled clippy/eslint jaq parsers — no
    new store, IPC, or subsystem.) The metric substrate's author-able
    producers are not a `CollectorKind`: they are **fact collectors** (a
    `collectors:` entry with `facts:`, P7.B3 — they were a `gauge` kind
@@ -529,10 +529,10 @@ with multiple MB through `cat`, and it had no budget to break out of it.
 >    *sandbox* budget instead: one layer down, and **intermittent** rather than
 >    total. The real parse takes ~2.8s against a 5s budget, so it failed only
 >    under load — `metric_capture` showed **11 `done` (196 facts each) against 7
->    `failed`**, i.e. ~39% of runs silently lost their coverage. The lcov plugin
+>    `failed`**, i.e. ~39% of runs silently lost their coverage. The lcov parser
 >    was also quadratic per file (`+= [$n]` in a `reduce` copies the growing array
 >    — one 4783-line file cost ~11M element copies); it's `map`-based and linear
->    now, pinned by `lcov_plugin_cost_stays_linear_in_lines_per_file`.
+>    now, pinned by `lcov_parser_cost_stays_linear_in_lines_per_file`.
 >
 > The lesson for any new budget: **size it against a whole-workspace report in a
 > DEBUG build** (the interpreter runs ~6x slower there, and that's what developers
@@ -552,7 +552,7 @@ transform (all yield a JSON value): `text` (raw string), `json`, `xml`
 records, each key→array), `lines` (array of strings). `exec` always receives
 raw content on stdin (ignores `input`).
 
-**Starlark host builtins.** Beyond the pre-parsed `input`, a Starlark plugin
+**Starlark host builtins.** Beyond the pre-parsed `input`, a Starlark script
 can call the layer-1 helpers directly as globals —
 `parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath` — so it can
 self-parse raw text (set `input: text` and parse inside `transform`). These are
@@ -593,7 +593,7 @@ the `ai_*` builtins, and an entity collector has no `files()`:
     comment markers, comment-aware via the grammar.
   Per-language knowledge (grammars, extensions, comment scanning) lives in
   `oxplow-code-metrics`; metrics are defined once on these capabilities (the
-  `plugins/metrics/code/*.star` set). Adding a language → no metric changes.
+  `metrics/code/*.star` set in `oxplow-script`). Adding a language → no metric changes.
 
 **Output schemas** the transform must produce:
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…], "branchesFound"?: <n>, "branchesHit"?: <n>, "functionsFound"?: <n>, "functionsHit"?: <n> } } }` — branch/function are optional **counts** (a line holds several branches; functions are named), default 0 = "no such data for this file" (tsk123). lcov emits them from `BRF`/`BRH`/`FNF`/`FNH`; jacoco from the sourcefile `<counter type="BRANCH"/"METHOD">`; cobertura branch from per-line `condition-coverage="H% (a/b)"` (direct `<lines>` only, so method `<lines>` don't double-count) and function from `<method>` `line-rate`.
@@ -601,7 +601,7 @@ the `ai_*` builtins, and an entity collector has no `files()`:
 - analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
 - fact collector: `{ "facts": [ { "measure", "value", "subject"?, "path"?, "line"?, "rule"?, "num"?, "den"?, "dims"? } ] }` and nothing else — `facts_of` refuses any other output (the old `samples`/`findings` channels are gone, P7.B3). See [metrics.md](./metrics.md). Facts are the durable atomic grain of the inverted substrate (epic tsk12): each is bound to a defined `measure` (which must be in the collector's `facts:` allow-list) and re-aggregated by a metric *spec* at read time. `num`/`den` are optional ratio components (a `ratio` spec re-derives Σnum/Σden). `rule` populates the fact's `rule` column (the `oxplow.rule` dimension — the per-language idiom collectors tag each `oxplow.ast_hit` fact with the idiom slug there). A fact on an **undefined** measure — or one outside the collector's `facts:` — is a declare-to-collect violation: the run **fails**, naming the measure, and writes nothing (tsk1029; it used to drop the fact behind a run reported "ok"). A measure not yet in the catalog makes the run reseed it once first, so an extension added while oxplow runs is never failed by its collector winning the race with the catalog's reseed.
 
-The two bundled analysis plugins are the canonical templates: `clippy.jq`
+The two bundled analysis parsers are the canonical templates: `clippy.jq`
 (`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps
 `reason=="compiler-message"`, picks the primary span, maps `level` →
 severity) and `eslint.jq` (`input: json`; severity `2`→error / `1`→warning,
@@ -644,9 +644,9 @@ self-parse raw `format: text`). For `exec`, `entry` is the program to spawn
 (executable, with a shebang); it gets the raw report on stdin (so it takes no
 `format`) and must print the kind's JSON to stdout.
 
-The bundled parsers in `src/plugins/*.jq` are the canonical templates; each
-is pinned by tests of its output over a real report
-(`crates/oxplow-collect-plugin/src/lib.rs`).
+The bundled parsers in `crates/oxplow-config/src/parsers/*.jq` are the
+canonical templates; each is pinned by tests of its output over a real
+report (`crates/oxplow-script/src/lib.rs`).
 
 ### Report-derived RATIO metrics (a fact collector, not the ride-along)
 
@@ -658,7 +658,7 @@ The fact engine reads the report, parses it per `format` (`parse_report`) and
 hands it to the jaq/starlark script as `input.report`; the script returns a
 `{facts:[{measure, value, num, den}]}` ratio fact. tsk126 dogfoods this as
 the `repo.scan_type_coverage` collector → `repo.type_coverage`
-(`oxplow/plugins/type_coverage.jq`, `format: text` +
+(`oxplow/collectors/type_coverage.jq`, `format: text` +
 `[… | try fromjson catch null][0]` so a missing report yields no facts rather
 than failing the collector. **jaq gotcha:** `"" | fromjson` emits *nothing*
 (no error, so `try … catch` never fires) where jq raises; a script whose

@@ -1,8 +1,9 @@
 /**
- * Each plugin contribution's health on this machine (P7.C1–C3,
+ * Each extension contribution's health on this machine (P7.C1–C3,
  * `.context/extensions.md` → "Health, disable and repair"): read from
- * `v_plugin_health`. Three failures in a row disable a provider instance
- * or collector until a person runs `oxplow.plugin.enable` (Enable Again); the
+ * `v_contribution_health`. Three failures in a row disable a provider
+ * instance, collector or effect until a person runs
+ * `oxplow.contribution.enable` (Enable Again); the
  * disable files a repair work item, which Repair with the Agent mentions
  * in the agent's input — filled, never sent.
  */
@@ -16,10 +17,10 @@ import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { personCommands, type PersonCommands } from "./personCommands.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
-/** One contribution's `v_plugin_health` row. */
-export interface PluginHealth {
+/** One contribution's `v_contribution_health` row. */
+export interface ContributionHealth {
   /** The extension. */
-  plugin: string;
+  extension: string;
   /** Its provider's or collector's id. */
   contribution: string;
   /** `provider` or `collector`. */
@@ -48,12 +49,12 @@ export interface HealthLine {
   repairItem: string | null;
 }
 
-export function pluginHealthFromResult(result: SqlQueryResult): PluginHealth[] {
+export function contributionHealthFromResult(result: SqlQueryResult): ContributionHealth[] {
   return result.rows.map((row) => {
     const at = (name: string) => row[result.columns.indexOf(name)] ?? null;
     const text = (name: string) => (at(name) == null ? null : String(at(name)));
     return {
-      plugin: String(at("plugin")),
+      extension: String(at("extension")),
       contribution: String(at("contribution")),
       kind: String(at("kind")),
       state: String(at("state")),
@@ -69,13 +70,13 @@ export function pluginHealthFromResult(result: SqlQueryResult): PluginHealth[] {
 }
 
 /** One extension's contributions. */
-export function healthOf(rows: readonly PluginHealth[], extension: string): PluginHealth[] {
-  return rows.filter((h) => h.plugin === extension);
+export function healthOf(rows: readonly ContributionHealth[], extension: string): ContributionHealth[] {
+  return rows.filter((h) => h.extension === extension);
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-export function healthLine(h: PluginHealth): HealthLine {
+export function healthLine(h: ContributionHealth): HealthLine {
   if (h.state === "disabled") {
     return { text: `Disabled: ${h.reason ?? "no reason recorded"}`, tone: "error", canEnable: true, repairItem: h.repairItem };
   }
@@ -111,33 +112,33 @@ export function repairWithAgent(repairItem: string, insert: (text: string) => vo
   insert(repairMention(repairItem));
 }
 
-/** Enable Again: `oxplow.plugin.enable` as the person. */
-export async function enableAgain(h: PluginHealth, commands: PersonCommands = personCommands): Promise<boolean> {
-  return !!(await commands.run(`Enable ${h.plugin}/${h.contribution}`, "oxplow.plugin.enable", {
-    plugin: h.plugin,
+/** Enable Again: `oxplow.contribution.enable` as the person. */
+export async function enableAgain(h: ContributionHealth, commands: PersonCommands = personCommands): Promise<boolean> {
+  return !!(await commands.run(`Enable ${h.extension}/${h.contribution}`, "oxplow.contribution.enable", {
+    extension: h.extension,
     kind: h.kind,
     contribution: h.contribution,
   }));
 }
 
 /** Every contribution's health, and what was read. */
-export async function readPluginHealth(): Promise<{ health: PluginHealth[]; reads: Reads }> {
+export async function readContributionHealth(): Promise<{ health: ContributionHealth[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT plugin, contribution, kind, state, reason, consecutive_failures, last_error, mean_ms,
+    `SELECT extension, contribution, kind, state, reason, consecutive_failures, last_error, mean_ms,
             dead_letters, fresh, repair_item
-       FROM v_plugin_health ORDER BY plugin, contribution`,
+       FROM v_contribution_health ORDER BY extension, contribution`,
     [],
     1_000,
   );
-  return { health: pluginHealthFromResult(res), reads: res.reads };
+  return { health: contributionHealthFromResult(res), reads: res.reads };
 }
 
 /** Every contribution's health, re-read when it changes. */
-export function usePluginHealth(): PluginHealth[] {
-  const [health, setHealth] = useState<PluginHealth[]>([]);
+export function useContributionHealth(): ContributionHealth[] {
+  const [health, setHealth] = useState<ContributionHealth[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const load = useCallback(() => {
-    void readPluginHealth()
+    void readContributionHealth()
       .then((r) => {
         setHealth(r.health);
         setReads(r.reads);

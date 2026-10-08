@@ -63,7 +63,7 @@ pub struct Anchors {
 pub struct Envelope {
     pub id: EventId,
     /// The event's name, `namespace.name[.name]` (`work_item.transitioned`,
-    /// `agent.tool.finished`). Plugins emit only under their own namespace.
+    /// `agent.tool.finished`). Extensions emit only under their own namespace.
     #[serde(rename = "type")]
     pub event_type: String,
     /// The schema version of `event_type`; the payload validates against

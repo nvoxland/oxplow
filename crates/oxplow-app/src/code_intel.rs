@@ -59,7 +59,7 @@ impl LspProvider {
     /// server to install, like a missing server's.
     fn language_of(&self, path: &str) -> Result<String, CodeIntelError> {
         self.sessions.language_for_path(path).ok_or_else(|| {
-            match oxplow_code_metrics::plugin::language_for_path(path) {
+            match oxplow_code_metrics::language::language_for_path(path) {
                 Some(language) => CodeIntelError::NoProvider(
                     LspSessionError::NoConfig(language.name().to_string()).to_string(),
                 ),

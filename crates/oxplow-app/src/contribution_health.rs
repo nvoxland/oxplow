@@ -1,11 +1,11 @@
-//! One failure policy for every plugin contribution (P7.C1): a provider
+//! One failure policy for every extension contribution (P7.C1): a provider
 //! instance, a collector, an effect (P8.D11).
 //!
-//! [`PluginHealth`] keeps each contribution's `plugin_health` row (V135,
-//! read as `v_plugin_health`). A failure counts; [`FAILURES_TO_DISABLE`]
-//! in a row disable it — the row and `plugin.disabled@1` commit together
+//! [`ContributionHealth`] keeps each contribution's `contribution_health` row (V135,
+//! read as `v_contribution_health`). A failure counts; [`FAILURES_TO_DISABLE`]
+//! in a row disable it — the row and `contribution.disabled@1` commit together
 //! — and it stays off, across restarts, until a person runs
-//! `oxplow.plugin.enable` (`plugin.enabled@1`). A success starts the count over.
+//! `oxplow.contribution.enable` (`contribution.enabled@1`). A success starts the count over.
 //! What "off" means is the contribution's: the provider registry stops
 //! the instance; a collector's scheduler skips it; an effect stops
 //! reacting (`effect_triggers`).
@@ -14,11 +14,12 @@ use oxplow_domain::vocabulary::VocabularyHandle;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use oxplow_db::plugin_health_store::{self as store, PluginHealthRow, PluginKey};
+use oxplow_db::contribution_health_store::{self as store, ContributionHealthRow, ContributionKey};
 use oxplow_db::Database;
 use oxplow_domain::events::schema::{
-    PluginDisabled, PluginDisabledV1, PluginEnabled, PluginEnabledV1,
+    ContributionDisabled, ContributionDisabledV1, ContributionEnabled, ContributionEnabledV1,
 };
+use oxplow_domain::refs::build::extension_ref;
 use oxplow_domain::{CommandError, DomainError, Envelope, Invokers};
 use serde::Deserialize;
 
@@ -27,22 +28,22 @@ use crate::commands::{Handler, HandlerOutput, Invocation};
 /// Failures in a row that disable a contribution.
 pub const FAILURES_TO_DISABLE: i64 = 3;
 /// The command a person runs to enable a disabled contribution again.
-pub const ENABLE: &str = "oxplow.plugin.enable";
+pub const ENABLE: &str = "oxplow.contribution.enable";
 /// What a disable is logged as.
-const SOURCE: &str = "system:plugins";
+const SOURCE: &str = "system:extensions";
 
 /// What a counted failure means.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
     /// Try again later: `failures` in a row so far.
     Backoff { failures: i64 },
-    /// It's off now, for this reason (logged as `plugin.disabled@1`).
+    /// It's off now, for this reason (logged as `contribution.disabled@1`).
     Disabled { reason: String },
 }
 
-/// The policy over `plugin_health`. A cheap handle: clone it.
+/// The policy over `contribution_health`. A cheap handle: clone it.
 #[derive(Clone)]
-pub struct PluginHealth {
+pub struct ContributionHealth {
     db: Database,
     vocabulary: VocabularyHandle,
 }
@@ -53,7 +54,7 @@ pub const SCHEDULER_TICK_MS: i64 = 60_000;
 
 /// When a scheduled contribution should have run again by: its last run —
 /// or now, when it's due and runs now — plus its interval, plus one
-/// scheduler tick. Past it, `v_plugin_health.fresh` says it missed its
+/// scheduler tick. Past it, `v_contribution_health.fresh` says it missed its
 /// schedule.
 pub fn next_due_ms(last_ms: Option<i64>, every_ms: i64, now_ms: i64) -> i64 {
     let ran = match last_ms {
@@ -67,33 +68,28 @@ fn now() -> String {
     oxplow_domain::Timestamp::now().to_string()
 }
 
-fn disabled_event(key: &PluginKey, reason: &str) -> Envelope {
-    Envelope::typed::<PluginDisabled>(
+fn disabled_event(key: &ContributionKey, reason: &str) -> Envelope {
+    Envelope::typed::<ContributionDisabled>(
         SOURCE,
-        &PluginDisabledV1 {
-            plugin: plugin_ref(&key.plugin),
+        &ContributionDisabledV1 {
+            extension: extension_ref(&key.extension),
             contribution: key.contribution.clone(),
             kind: key.kind.to_string(),
             reason: reason.to_string(),
         },
     )
-    .with_subject([plugin_ref(&key.plugin)])
+    .with_subject([extension_ref(&key.extension)])
 }
 
-/// `plugin:<extension>`.
-pub fn plugin_ref(plugin: &str) -> String {
-    format!("plugin:{plugin}")
-}
-
-impl PluginHealth {
+impl ContributionHealth {
     pub fn new(db: Database, vocabulary: VocabularyHandle) -> Self {
         Self { db, vocabulary }
     }
 
     /// Count a failure. The [`FAILURES_TO_DISABLE`]th in a row disables it
-    /// (unless it already is), with the row and `plugin.disabled@1` in one
+    /// (unless it already is), with the row and `contribution.disabled@1` in one
     /// transaction.
-    pub async fn failed(&self, key: &PluginKey, error: &str) -> Result<Verdict, DomainError> {
+    pub async fn failed(&self, key: &ContributionKey, error: &str) -> Result<Verdict, DomainError> {
         let (key, error, vocabulary) = (key.clone(), error.to_string(), self.vocabulary.clone());
         self.db
             .transaction(move |tx| {
@@ -126,7 +122,7 @@ impl PluginHealth {
     /// joins its average.
     pub async fn succeeded(
         &self,
-        key: &PluginKey,
+        key: &ContributionKey,
         took: Option<Duration>,
     ) -> Result<(), DomainError> {
         let key = key.clone();
@@ -140,13 +136,13 @@ impl PluginHealth {
     /// failures (a provider that no longer answers with its approved
     /// declarations). Logged once: already disabled, nothing changes.
     /// Forget `key`: its contribution is gone (a removed provider instance).
-    pub async fn forget(&self, key: &PluginKey) -> Result<(), DomainError> {
-        store::SqlitePluginHealthStore::new(self.db.clone())
+    pub async fn forget(&self, key: &ContributionKey) -> Result<(), DomainError> {
+        store::SqliteContributionHealthStore::new(self.db.clone())
             .remove(key)
             .await
     }
 
-    pub async fn disable(&self, key: &PluginKey, reason: &str) -> Result<(), DomainError> {
+    pub async fn disable(&self, key: &ContributionKey, reason: &str) -> Result<(), DomainError> {
         let (key, reason, vocabulary) = (key.clone(), reason.to_string(), self.vocabulary.clone());
         self.db
             .transaction(move |tx| {
@@ -164,22 +160,22 @@ impl PluginHealth {
             .await
     }
 
-    /// A person enabled it again (`oxplow.plugin.enable`, logged as `source`):
-    /// `ok`, its count starting over, and `plugin.enabled@1`.
-    pub async fn enable(&self, key: &PluginKey, source: &str) -> Result<(), DomainError> {
+    /// A person enabled it again (`oxplow.contribution.enable`, logged as `source`):
+    /// `ok`, its count starting over, and `contribution.enabled@1`.
+    pub async fn enable(&self, key: &ContributionKey, source: &str) -> Result<(), DomainError> {
         let (key, source, vocabulary) = (key.clone(), source.to_string(), self.vocabulary.clone());
         self.db
             .transaction(move |tx| {
                 store::enable_tx(tx, &key, &now())?;
-                let event = Envelope::typed::<PluginEnabled>(
+                let event = Envelope::typed::<ContributionEnabled>(
                     source.clone(),
-                    &PluginEnabledV1 {
-                        plugin: plugin_ref(&key.plugin),
+                    &ContributionEnabledV1 {
+                        extension: extension_ref(&key.extension),
                         contribution: key.contribution.clone(),
                         kind: key.kind.to_string(),
                     },
                 )
-                .with_subject([plugin_ref(&key.plugin)]);
+                .with_subject([extension_ref(&key.extension)]);
                 oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &event).map(|_| ())
             })
             .await
@@ -190,7 +186,7 @@ impl PluginHealth {
     /// (manual, not approved, disabled).
     pub async fn set_next_due(
         &self,
-        plans: Vec<(PluginKey, Option<i64>)>,
+        plans: Vec<(ContributionKey, Option<i64>)>,
     ) -> Result<(), DomainError> {
         self.db
             .transaction(move |tx| {
@@ -205,7 +201,10 @@ impl PluginHealth {
     }
 
     /// Why it's disabled, when it is.
-    pub async fn disabled_reason(&self, key: &PluginKey) -> Result<Option<String>, DomainError> {
+    pub async fn disabled_reason(
+        &self,
+        key: &ContributionKey,
+    ) -> Result<Option<String>, DomainError> {
         Ok(self
             .get(key)
             .await?
@@ -213,13 +212,16 @@ impl PluginHealth {
             .map(|r| r.reason.unwrap_or_default()))
     }
 
-    pub async fn get(&self, key: &PluginKey) -> Result<Option<PluginHealthRow>, DomainError> {
+    pub async fn get(
+        &self,
+        key: &ContributionKey,
+    ) -> Result<Option<ContributionHealthRow>, DomainError> {
         let key = key.clone();
         self.db.read(move |c| store::get_tx(c, &key)).await
     }
 }
 
-/// Which kind of contribution `oxplow.plugin.enable` names.
+/// Which kind of contribution `oxplow.contribution.enable` names.
 #[derive(Deserialize, schemars::JsonSchema, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Kind {
@@ -242,21 +244,21 @@ impl Kind {
 #[serde(deny_unknown_fields)]
 struct EnableInput {
     /// The extension.
-    plugin: String,
+    extension: String,
     /// `provider`, `collector` or `effect`: two kinds may share an id.
     kind: Kind,
     /// Its provider's, collector's or effect's id.
     contribution: String,
 }
 
-/// `plugin.enable { plugin, kind, contribution }`: a person turns a contribution
-/// back on on this machine, clearing an automatic disable. A provider
+/// `oxplow.contribution.enable { extension, kind, contribution }`: a person
+/// turns a contribution back on on this machine, clearing an automatic disable. A provider
 /// instance starts again when the project's config enables it; a
 /// collector runs at its next trigger. Human
-/// only (an agent can't undo what stopped a failing plugin); logs
-/// `plugin.enabled@1`.
+/// only (an agent can't undo what stopped a failing contribution); logs
+/// `contribution.enabled@1`.
 pub fn enable_op(
-    health: PluginHealth,
+    health: ContributionHealth,
     providers: Weak<crate::providers::ProviderRegistry>,
 ) -> crate::commands::ops::Op {
     crate::commands::ops::Op::new(
@@ -268,7 +270,7 @@ pub fn enable_op(
             let (health, providers) = (health.clone(), providers.clone());
             Box::pin(async move {
                 let EnableInput {
-                    plugin,
+                    extension,
                     kind,
                     contribution,
                 } = serde_json::from_value(input).map_err(|e| CommandError::Invalid {
@@ -278,9 +280,9 @@ pub fn enable_op(
                 let providers = providers.upgrade().ok_or_else(|| CommandError::Failed {
                     message: "the provider registry is gone".into(),
                 })?;
-                let instance = format!("{plugin}/{contribution}");
-                let key = PluginKey {
-                    plugin,
+                let instance = format!("{extension}/{contribution}");
+                let key = ContributionKey {
+                    extension,
                     contribution,
                     kind: kind.as_str(),
                 };
@@ -321,9 +323,9 @@ pub fn enable_op(
 mod tests {
     use super::*;
 
-    fn key() -> PluginKey {
-        PluginKey {
-            plugin: "tracker".into(),
+    fn key() -> ContributionKey {
+        ContributionKey {
+            extension: "tracker".into(),
             contribution: "fake".into(),
             kind: "provider",
         }
@@ -351,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn three_failures_in_a_row_disable_until_enabled() {
         let db = Database::in_memory();
-        let h = PluginHealth::new(db.clone(), VocabularyHandle::core());
+        let h = ContributionHealth::new(db.clone(), VocabularyHandle::core());
         let k = key();
         assert_eq!(
             h.failed(&k, "a").await.unwrap(),
@@ -380,15 +382,15 @@ mod tests {
             h.failed(&k, "e").await.unwrap(),
             Verdict::Disabled { .. }
         ));
-        let disabled = events(&db, "plugin.disabled").await;
+        let disabled = events(&db, "contribution.disabled").await;
         assert_eq!(disabled.len(), 1);
-        assert_eq!(disabled[0]["plugin"], "plugin:tracker");
+        assert_eq!(disabled[0]["extension"], "extension:tracker");
         assert_eq!(disabled[0]["contribution"], "fake");
         assert_eq!(h.disabled_reason(&k).await.unwrap(), Some(reason));
 
         h.enable(&k, "human").await.unwrap();
         assert_eq!(h.disabled_reason(&k).await.unwrap(), None);
-        assert_eq!(events(&db, "plugin.enabled").await.len(), 1);
+        assert_eq!(events(&db, "contribution.enabled").await.len(), 1);
         assert_eq!(
             h.failed(&k, "f").await.unwrap(),
             Verdict::Backoff { failures: 1 }
@@ -396,13 +398,13 @@ mod tests {
     }
 
     /// P7 review (tsk721): a provider and a collector with the same
-    /// `<plugin>/<id>` are two contributions with two health rows.
+    /// `<extension>/<id>` are two contributions with two health rows.
     #[tokio::test]
     async fn a_provider_and_a_collector_named_alike_have_their_own_health() {
         let db = Database::in_memory();
-        let h = PluginHealth::new(db.clone(), VocabularyHandle::core());
+        let h = ContributionHealth::new(db.clone(), VocabularyHandle::core());
         let provider = key();
-        let collector = PluginKey {
+        let collector = ContributionKey {
             kind: "collector",
             ..key()
         };

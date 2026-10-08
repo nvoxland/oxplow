@@ -692,7 +692,7 @@ mod tests {
             .await,
             json!([["collector:acme-pr/prs", synced[0][0], 12, 1]])
         );
-        // What a preview (and `oxplow plugin test`) shows: the events it
+        // What a preview (and `oxplow extension test`) shows: the events it
         // would emit, stored nowhere.
         let root = svc.layout.project_dir.clone();
         let preview = collector_runner::preview_collector(
@@ -855,7 +855,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT count(*) FROM v_plugin_health WHERE consecutive_failures > 0"
+                "SELECT count(*) FROM v_contribution_health WHERE consecutive_failures > 0"
             )
             .await,
             json!([[0]])

@@ -196,7 +196,8 @@ pub fn set_credential(
 /// Every declared collector under `root`, with its last run and consent.
 pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListing>, DomainError> {
     let runs = ctx.store.list_runs().await?;
-    let health = crate::plugin_health::PluginHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
+    let health =
+        crate::contribution_health::ContributionHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
     let mut out = Vec::new();
     for ext in ctx.catalog.get(ctx.root).iter().cloned() {
         let ext_dir = ctx.root.join(&ext.path);
@@ -227,7 +228,7 @@ pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListin
                 })
                 .collect();
             let disabled = health
-                .disabled_reason(&plugin_key(&ext.name, &spec.id))
+                .disabled_reason(&contribution_key(&ext.name, &spec.id))
                 .await?;
             out.push(CollectorListing {
                 owner: ext.name.clone(),
@@ -295,12 +296,14 @@ pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)
         .iter()
         .map(|l| {
             let due = scheduled_every_ms(l)
-                .map(|every| crate::plugin_health::next_due_ms(last_run_ms(l), every, now));
-            (plugin_key(&l.owner, &l.spec.id), due)
+                .map(|every| crate::contribution_health::next_due_ms(last_run_ms(l), every, now));
+            (contribution_key(&l.owner, &l.spec.id), due)
         })
         .collect();
-    let health =
-        crate::plugin_health::PluginHealth::new(state.db.clone(), state.vocabulary.clone());
+    let health = crate::contribution_health::ContributionHealth::new(
+        state.db.clone(),
+        state.vocabulary.clone(),
+    );
     if let Err(e) = health.set_next_due(plans).await {
         tracing::warn!(error = ?e, "recording the collectors' next due times failed");
     }
@@ -569,7 +572,7 @@ pub struct RefusingOracle;
 
 const REFUSED: &str = "a review runs no model: `ai_*` calls are refused";
 
-impl oxplow_collect_plugin::AiOracle for RefusingOracle {
+impl oxplow_script::AiOracle for RefusingOracle {
     fn classify(&self, _: &str, _: &[String]) -> Result<serde_json::Value, String> {
         Err(REFUSED.into())
     }
@@ -646,10 +649,10 @@ pub async fn derive_collector(
     layer: &crate::sql_gateway::SqlGateway,
     script: String,
     spec: &CollectorSpec,
-    oracle: std::sync::Arc<dyn oxplow_collect_plugin::AiOracle>,
+    oracle: std::sync::Arc<dyn oxplow_script::AiOracle>,
     event: Option<&StoredEvent>,
     rows: Option<Vec<serde_json::Value>>,
-    budget: oxplow_collect_plugin::SandboxBudget,
+    budget: oxplow_script::SandboxBudget,
 ) -> Result<ScriptOutput, String> {
     let rows = match (rows, &spec.input) {
         (Some(rows), _) => rows,
@@ -670,11 +673,9 @@ pub async fn derive_collector(
     }
     let runtime = spec.runtime;
     let value = tokio::task::spawn_blocking(move || {
-        use oxplow_collect_plugin::runtime::{
-            run_jaq, run_sandboxed_excluding, run_starlark_with_ai,
-        };
+        use oxplow_script::runtime::{run_jaq, run_sandboxed_excluding, run_starlark_with_ai};
         // The time its `ai_*` calls wait on a model isn't the script's.
-        let host = std::sync::Arc::new(oxplow_collect_plugin::AiHost::new(oracle));
+        let host = std::sync::Arc::new(oxplow_script::AiHost::new(oracle));
         let clock = host.clock();
         run_sandboxed_excluding(&budget, &clock, move || match runtime {
             CollectorRuntime::Jaq => run_jaq(&script, &input),
@@ -749,7 +750,7 @@ pub enum RunCollectorError {
     /// It ran (or tried to) and failed; recorded as its run.
     Failed(String),
     /// Failures disabled it on this machine (P7.C2) until a person runs
-    /// `oxplow.plugin.enable`. Nothing ran.
+    /// `oxplow.contribution.enable`. Nothing ran.
     Disabled(String),
     /// Oxplow's own storage failed.
     Storage(DomainError),
@@ -901,17 +902,17 @@ pub fn event_input(e: &StoredEvent) -> serde_json::Value {
     })
 }
 
-/// A collector's `plugin_health` key: owner / id, kind `collector`.
-pub fn plugin_key(owner: &str, id: &str) -> oxplow_db::PluginKey {
-    oxplow_db::PluginKey {
-        plugin: owner.to_string(),
+/// A collector's `contribution_health` key: owner / id, kind `collector`.
+pub fn contribution_key(owner: &str, id: &str) -> oxplow_db::ContributionKey {
+    oxplow_db::ContributionKey {
+        extension: owner.to_string(),
         contribution: id.to_string(),
         kind: "collector",
     }
 }
 
-/// Run one collector end to end, under the plugin failure policy
-/// (P7.C2, [`crate::plugin_health`]): a disabled one doesn't run (its
+/// Run one collector end to end, under the contribution failure policy
+/// (P7.C2, [`crate::contribution_health`]): a disabled one doesn't run (its
 /// reason as [`RunCollectorError::Disabled`]); a failed run counts — the
 /// third in a row disables it — and a good one starts the count over.
 pub async fn run_collector(
@@ -921,8 +922,9 @@ pub async fn run_collector(
     trigger: RunTrigger,
     source: &str,
 ) -> Result<CollectorRunReport, RunCollectorError> {
-    let health = crate::plugin_health::PluginHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
-    let key = plugin_key(owner, id);
+    let health =
+        crate::contribution_health::ContributionHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
+    let key = contribution_key(owner, id);
     if let Some(reason) = health
         .disabled_reason(&key)
         .await
@@ -930,7 +932,7 @@ pub async fn run_collector(
     {
         return Err(RunCollectorError::Disabled(format!(
             "collector `{owner}/{id}` is disabled: {reason}. A person can enable it again \
-             (`oxplow.plugin.enable`, Settings → Extensions)."
+             (`oxplow.contribution.enable`, Settings → Extensions)."
         )));
     }
     let started = std::time::Instant::now();
@@ -1196,9 +1198,12 @@ pub struct RunRecord<'a> {
 }
 
 impl RunLog {
-    /// The plugin failure policy, over this log's database.
-    pub fn health(&self) -> crate::plugin_health::PluginHealth {
-        crate::plugin_health::PluginHealth::new(self.db.clone(), self.vocabulary.clone())
+    /// The contribution failure policy, over this log's database.
+    pub fn health(&self) -> crate::contribution_health::ContributionHealth {
+        crate::contribution_health::ContributionHealth::new(
+            self.db.clone(),
+            self.vocabulary.clone(),
+        )
     }
 
     /// Whether collector `owner/id` already ran for the event at `seq` (its
@@ -1441,7 +1446,7 @@ pub struct EntityPreview {
 
 /// Run a collector and return what it would store (see [`CollectorPreview`]).
 /// `rows` stand in for a derived collector's `input` rows (an example's
-/// fixture, `oxplow plugin test`).
+/// fixture, `oxplow extension test`).
 pub async fn preview_collector(
     ctx: &Collectors<'_>,
     owner: &str,
@@ -1578,7 +1583,7 @@ async fn produce(
                     std::sync::Arc::new(oracle),
                     event,
                     rows,
-                    oxplow_collect_plugin::SandboxBudget::default(),
+                    oxplow_script::SandboxBudget::default(),
                 )
                 .await
             }
@@ -1680,16 +1685,18 @@ impl CollectorRunner {
             .iter()
             .any(|c| c.owner == owner && c.key == id)
         {
-            let health =
-                crate::plugin_health::PluginHealth::new(self.db.clone(), self.vocabulary.clone());
+            let health = crate::contribution_health::ContributionHealth::new(
+                self.db.clone(),
+                self.vocabulary.clone(),
+            );
             if let Some(reason) = health
-                .disabled_reason(&plugin_key(owner, id))
+                .disabled_reason(&contribution_key(owner, id))
                 .await
                 .map_err(RunCollectorError::Storage)?
             {
                 return Err(RunCollectorError::Disabled(format!(
                     "collector `{owner}/{id}` is disabled: {reason}. A person can enable it \
-                     again (`oxplow.plugin.enable`, Settings → Extensions)."
+                     again (`oxplow.contribution.enable`, Settings → Extensions)."
                 )));
             }
             let facts = self
@@ -1857,7 +1864,7 @@ async fn exec_approved(
 
 /// A run's output as the writes it makes, coerced to the declared columns.
 /// Publish every entity the enabled `extensions` declare, empty — what a
-/// throwaway oxplow (`oxplow plugin test`, P7.C6) does so the models and
+/// throwaway oxplow (`oxplow extension test`, P7.C6) does so the models and
 /// lenses over them run before any collector has. Never on a project's
 /// own database: an empty publish replaces what was collected.
 pub async fn publish_declared_empty(
@@ -2479,7 +2486,7 @@ pub(crate) mod tests {
 
     /// P7.C2: three failed runs in a row disable a collector; then
     /// `oxplow.collector.sync` refuses it naming the reason, and a person's
-    /// `oxplow.plugin.enable` lets it run again. An agent can't enable it.
+    /// `oxplow.contribution.enable` lets it run again. An agent can't enable it.
     #[tokio::test]
     async fn a_collector_failing_three_runs_is_disabled_until_a_person_enables_it() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -2515,7 +2522,7 @@ pub(crate) mod tests {
         assert!(bad.disabled.is_some());
         assert!(due_collectors(&listings, i64::MAX).is_empty());
 
-        let enable = json!({ "plugin": "work", "kind": "collector", "contribution": "bad" });
+        let enable = json!({ "extension": "work", "kind": "collector", "contribution": "bad" });
         let agent = oxplow_domain::Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,
@@ -2523,7 +2530,12 @@ pub(crate) mod tests {
         let denied = fx
             .svc
             .commands
-            .run(&agent, crate::plugin_health::ENABLE, enable.clone(), false)
+            .run(
+                &agent,
+                crate::contribution_health::ENABLE,
+                enable.clone(),
+                false,
+            )
             .await;
         assert!(
             matches!(denied, Err(CommandError::Denied { .. })),
@@ -2533,7 +2545,7 @@ pub(crate) mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                crate::plugin_health::ENABLE,
+                crate::contribution_health::ENABLE,
                 enable,
                 false,
             )
@@ -2611,19 +2623,19 @@ pub(crate) mod tests {
         assert!(fresh);
     }
 
-    /// `v_plugin_health`'s `next_due_at` and `fresh` for a contribution.
+    /// `v_contribution_health`'s `next_due_at` and `fresh` for a contribution.
     pub(crate) async fn due_and_fresh(
         svc: &crate::Services,
-        plugin: &str,
+        extension: &str,
         contribution: &str,
     ) -> (Option<String>, bool) {
-        let (plugin, contribution) = (plugin.to_string(), contribution.to_string());
+        let (extension, contribution) = (extension.to_string(), contribution.to_string());
         svc.db
             .read(move |c| {
                 c.query_row(
-                    "SELECT next_due_at, fresh FROM v_plugin_health
-                     WHERE plugin = ?1 AND contribution = ?2",
-                    [plugin, contribution],
+                    "SELECT next_due_at, fresh FROM v_contribution_health
+                     WHERE extension = ?1 AND contribution = ?2",
+                    [extension, contribution],
                     |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
                 )
                 .map_err(oxplow_db::map_sql_err)

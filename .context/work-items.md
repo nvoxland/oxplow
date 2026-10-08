@@ -342,7 +342,7 @@ keeps nothing. It has every feature, takes any item's ref and any id
 (`sink`), and the interface reads empty, so nothing that writes work
 items is refused or retried while no list is active and no screen or
 skill explains it. The typed client's `create` returns `None` for it
-(`plugin_repair` files nothing); an effect's automatic retry is never
+(`contribution_repair` files nothing); an effect's automatic retry is never
 sent to a sink (`safe_to_resend`: the list it was meant for went
 away). **Loose ids.** A work list declares what its ids look
 like (`WorkItemsProvider::id_pattern`, a regex matched whole: oxplow's

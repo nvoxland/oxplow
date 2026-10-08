@@ -1,4 +1,4 @@
-# Language plugins — one cohesive bundle per language
+# Language support — one cohesive bundle per language
 
 Oxplow's understanding of source code is **language-aware**, and everything
 it knows about a language is meant to live in **one cohesive, well-isolated
@@ -7,15 +7,15 @@ architecture and the rules for changing it.
 
 ## The registry (source of truth for identity-level facets)
 
-`crates/oxplow-code-metrics/src/plugin.rs` holds a `LanguagePlugin` per
-language and a `registry()` over them. A `LanguagePlugin` answers *"what does
+`crates/oxplow-code-metrics/src/language.rs` holds a `LanguageSupport` per
+language and a `registry()` over them. A `LanguageSupport` answers *"what does
 oxplow know about language X?"*:
 
 | Field | Meaning |
 |---|---|
 | `language` | the canonical, workspace-wide `Language` (the single identity — see below) |
 | `display_name` | human-facing name (`"C++"`, `"C#"`) |
-| `extensions` | file extensions it claims — **the single source of truth** for `plugin::language_for_path` |
+| `extensions` | file extensions it claims — **the single source of truth** for `language::language_for_path` |
 | `lsp_mason_package` | curated Mason LSP server suggestion, if oxplow ships one |
 | `unit_kinds` | the code units it exposes (function / class / module / package) for navigation + metric roll-ups |
 | `analysis_spec()` | → its `LanguageSpec` node tables in `spec.rs` |
@@ -39,23 +39,23 @@ just share the one identity:
 | Facet | Where it lives | Why there |
 |---|---|---|
 | Identity (`Language`, `language_from_name`, `language_from_lsp_id`, `name`, `tag`) | `oxplow-code-metrics/src/spec.rs` | the one source of truth; re-exported widely |
-| Registry bundle (extensions, LSP hint, unit kinds, display name) | `oxplow-code-metrics/src/plugin.rs` | the cross-cutting facets, co-located |
+| Registry bundle (extensions, LSP hint, unit kinds, display name) | `oxplow-code-metrics/src/language.rs` | the cross-cutting facets, co-located |
 | Static-analysis tables (`LanguageSpec`: function/decision/container kinds, visibility) | `oxplow-code-metrics/src/spec.rs` | drives complexity/markers/container metrics |
 | AST-merge tables (`MergeSpec`, `KeyStrategy`) | `oxplow-git/src/ast_merge.rs` (`merge_spec(lang) -> Option<&MergeSpec>`) | merge-specific identity keys; `None` ⇒ language analysed but not merged (e.g. C#) |
 | Import/zone extraction | `oxplow-code-deps` | depends on the code-metrics grammar table |
-| Idiom metrics (`oxplow.<lang>.*` built-in fact collectors) | `oxplow-collect-plugin/src/plugins/metrics/<lang>/*.star` | need the Starlark runtime; key off `Language` |
+| Idiom metrics (`oxplow.<lang>.*` built-in fact collectors) | `oxplow-script/src/metrics/<lang>/*.star` | need the Starlark runtime; key off `Language` |
 | Editor language id, file icons | `apps/desktop/src/editor-language.ts` (Monaco ids) | renderer-only; Monaco's own id space |
-| LSP suggestion mirror | `apps/desktop/src/lspSuggestions.ts` | hand-mirrored from `plugin::mason_suggestion` |
+| LSP suggestion mirror | `apps/desktop/src/lspSuggestions.ts` | hand-mirrored from `language::mason_suggestion` |
 
 The rule: **a language's identity flows through the one `Language` enum; each
 subsystem keeps its own spec table keyed off it.** New cross-cutting facets
-belong on `LanguagePlugin`, not in a new per-subsystem map.
+belong on `LanguageSupport`, not in a new per-subsystem map.
 
 ## Decision: compiled-in Rust + tree-sitter (tsk323)
 
 Language support **ships with oxplow, compiled in, using tree-sitter**. There
 is deliberately **no dynamic grammar loading** and **no user-authored
-*language* plugins**. The grammars are workspace Cargo deps; the specs are
+*language* definitions**. The grammars are workspace Cargo deps; the specs are
 static tables. This keeps analysis fast, safe (no native-code loading
 surface), and each language's behavior reviewable in-tree.
 
@@ -107,20 +107,20 @@ were removed in tsk309; a per-package/-language view is lens or agent work.
    `language_from_lsp_id()` if the server uses non-obvious ids.
 3. **Analysis spec** — add a `LanguageSpec` static in `spec.rs` (function /
    decision / container / parameter node kinds + a `VisibilityStrategy`).
-4. **Registry bundle** — add a `LanguagePlugin` entry in `plugin.rs`
+4. **Registry bundle** — add a `LanguageSupport` entry in `language.rs`
    (display name, extensions, LSP suggestion, unit kinds). The
    `registry_has_exactly_one_entry_per_language` test enforces coverage.
 5. **Merge (optional)** — if the language should structurally auto-merge, add
    a `MergeSpec` + `merge_spec` arm in `oxplow-git/src/ast_merge.rs`; omit it
    and the merge tier simply skips the language (`merge_spec` ⇒ `None`).
 6. **Idiom metrics (optional)** — add `oxplow.<lang>.*` fact-collector scripts under
-   `oxplow-collect-plugin/src/plugins/metrics/<lang>/`.
+   `oxplow-script/src/metrics/<lang>/`.
 7. **Renderer (optional)** — Monaco id / icon in `editor-language.ts`;
    LSP suggestion mirror in `lspSuggestions.ts`.
 
 ## Status
 
-Part of the unified language-plugin epic (tsk320). Live: the single
+Part of the unified language-support epic (tsk320). Live: the single
 `Language` enum (tsk321), the registry bundle (tsk322), the LSP symbol surface
 (tsk324), and generic unit listing — `list_units` + the `list_code_units` MCP
 tool (tsk325). **Still open:** exercising `unit_kinds` against the

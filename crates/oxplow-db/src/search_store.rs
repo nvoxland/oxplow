@@ -8,7 +8,7 @@
 //! above body); snippets via `snippet()`.
 //!
 //! Two writers drive it from `oxplow-app`: a kind indexed from a model
-//! (tasks, comments, notes, wiki pages, a plugin's searchable kind) is
+//! (tasks, comments, notes, wiki pages, an extension's searchable kind) is
 //! restated by its asset (`kind_search`, [`restate_kind_tx`]: only the
 //! entries that changed are written); file
 //! contents are upserted by the `search.index` consumer (`indexer`). See

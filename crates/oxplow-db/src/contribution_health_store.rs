@@ -1,6 +1,6 @@
-//! `plugin_health` (V135, P7.C1): each plugin contribution's health on this
+//! `contribution_health` (V135, P7.C1): each extension contribution's health on this
 //! machine — a provider instance, a collector. The policy (when a failure
-//! disables, what gets logged) is the app's `plugin_health.rs`; these are
+//! disables, what gets logged) is the app's `contribution_health.rs`; these are
 //! its row updates, each runnable on a caller's transaction so a
 //! transition commits with its event.
 
@@ -11,21 +11,21 @@ use crate::database::map_sql_err;
 use crate::Database;
 use oxplow_domain::DomainError;
 
-/// Which contribution: `plugin` (the extension), its `kind` (`provider`,
+/// Which contribution: its `extension`, its `kind` (`provider`,
 /// `collector`) and `contribution` (that provider's or collector's id) —
 /// all three: a provider and a collector may share an id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PluginKey {
-    pub plugin: String,
+pub struct ContributionKey {
+    pub extension: String,
     pub contribution: String,
     pub kind: &'static str,
 }
 
-/// One `plugin_health` row.
+/// One `contribution_health` row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct PluginHealthRow {
-    pub plugin: String,
+pub struct ContributionHealthRow {
+    pub extension: String,
     pub contribution: String,
     pub kind: String,
     /// `ok`, `failing` or `disabled`.
@@ -39,21 +39,21 @@ pub struct PluginHealthRow {
     pub updated_at: String,
     /// The repair work item filed when it was last disabled.
     pub repair_item: Option<String>,
-    /// The last `plugin.disabled` the repair consumer handled.
+    /// The last `contribution.disabled` the repair consumer handled.
     pub repair_seq: Option<i64>,
 }
 
-const SELECT: &str = "SELECT plugin, contribution, kind, state, reason, consecutive_failures,
+const SELECT: &str = "SELECT extension, contribution, kind, state, reason, consecutive_failures,
         last_ok_at, last_error, mean_ms, next_due_at, updated_at, repair_item, repair_seq
-        FROM plugin_health";
+        FROM contribution_health";
 
-/// The row a [`PluginKey`] names, its parameters `:plugin`, `:kind`,
+/// The row a [`ContributionKey`] names, its parameters `:extension`, `:kind`,
 /// `:contribution`.
-const KEY: &str = "plugin = :plugin AND kind = :kind AND contribution = :contribution";
+const KEY: &str = "extension = :extension AND kind = :kind AND contribution = :contribution";
 
-fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PluginHealthRow> {
-    Ok(PluginHealthRow {
-        plugin: r.get(0)?,
+fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ContributionHealthRow> {
+    Ok(ContributionHealthRow {
+        extension: r.get(0)?,
         contribution: r.get(1)?,
         kind: r.get(2)?,
         state: r.get(3)?,
@@ -70,10 +70,13 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PluginHealthRow> {
 }
 
 /// The row for `key`, if it has one.
-pub fn get_tx(c: &Connection, key: &PluginKey) -> Result<Option<PluginHealthRow>, DomainError> {
+pub fn get_tx(
+    c: &Connection,
+    key: &ContributionKey,
+) -> Result<Option<ContributionHealthRow>, DomainError> {
     c.query_row(
         &format!("{SELECT} WHERE {KEY}"),
-        named_params! { ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution },
+        named_params! { ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution },
         row,
     )
     .optional()
@@ -81,13 +84,13 @@ pub fn get_tx(c: &Connection, key: &PluginKey) -> Result<Option<PluginHealthRow>
 }
 
 /// Make sure `key` has a row (state `ok`).
-fn ensure(c: &Connection, key: &PluginKey, now: &str) -> Result<(), DomainError> {
+fn ensure(c: &Connection, key: &ContributionKey, now: &str) -> Result<(), DomainError> {
     c.execute(
-        "INSERT INTO plugin_health (plugin, contribution, kind, state, updated_at)
-         VALUES (:plugin, :contribution, :kind, 'ok', :now)
-         ON CONFLICT (plugin, kind, contribution) DO NOTHING",
+        "INSERT INTO contribution_health (extension, contribution, kind, state, updated_at)
+         VALUES (:extension, :contribution, :kind, 'ok', :now)
+         ON CONFLICT (extension, kind, contribution) DO NOTHING",
         named_params! {
-            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
             ":now": now,
         },
     )
@@ -99,14 +102,14 @@ fn ensure(c: &Connection, key: &PluginKey, now: &str) -> Result<(), DomainError>
 /// contribution stays disabled.
 pub fn failed_tx(
     c: &Connection,
-    key: &PluginKey,
+    key: &ContributionKey,
     error: &str,
     now: &str,
 ) -> Result<i64, DomainError> {
     ensure(c, key, now)?;
     c.query_row(
         &format!(
-            "UPDATE plugin_health SET
+            "UPDATE contribution_health SET
                consecutive_failures = consecutive_failures + 1,
                last_error = :error,
                state = CASE WHEN state = 'disabled' THEN 'disabled' ELSE 'failing' END,
@@ -115,7 +118,7 @@ pub fn failed_tx(
              RETURNING consecutive_failures"
         ),
         named_params! {
-            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
             ":error": error, ":now": now,
         },
         |r| r.get(0),
@@ -128,14 +131,14 @@ pub fn failed_tx(
 /// average.
 pub fn succeeded_tx(
     c: &Connection,
-    key: &PluginKey,
+    key: &ContributionKey,
     took_ms: Option<f64>,
     now: &str,
 ) -> Result<(), DomainError> {
     ensure(c, key, now)?;
     c.execute(
         &format!(
-            "UPDATE plugin_health SET
+            "UPDATE contribution_health SET
                consecutive_failures = 0,
                state = CASE WHEN state = 'disabled' THEN 'disabled' ELSE 'ok' END,
                last_ok_at = :now,
@@ -146,7 +149,7 @@ pub fn succeeded_tx(
              WHERE {KEY}"
         ),
         named_params! {
-            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
             ":took": took_ms, ":now": now,
         },
     )
@@ -157,18 +160,18 @@ pub fn succeeded_tx(
 /// Disable it, saying why.
 pub fn disable_tx(
     c: &Connection,
-    key: &PluginKey,
+    key: &ContributionKey,
     reason: &str,
     now: &str,
 ) -> Result<(), DomainError> {
     ensure(c, key, now)?;
     c.execute(
         &format!(
-            "UPDATE plugin_health SET state = 'disabled', reason = :reason, updated_at = :now
+            "UPDATE contribution_health SET state = 'disabled', reason = :reason, updated_at = :now
              WHERE {KEY}"
         ),
         named_params! {
-            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
             ":reason": reason, ":now": now,
         },
     )
@@ -177,16 +180,16 @@ pub fn disable_tx(
 }
 
 /// A person enabled it again: `ok`, its failure count starting over.
-pub fn enable_tx(c: &Connection, key: &PluginKey, now: &str) -> Result<(), DomainError> {
+pub fn enable_tx(c: &Connection, key: &ContributionKey, now: &str) -> Result<(), DomainError> {
     ensure(c, key, now)?;
     c.execute(
         &format!(
-            "UPDATE plugin_health SET state = 'ok', reason = NULL, consecutive_failures = 0,
+            "UPDATE contribution_health SET state = 'ok', reason = NULL, consecutive_failures = 0,
                updated_at = :now
              WHERE {KEY}"
         ),
         named_params! {
-            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
             ":now": now,
         },
     )
@@ -198,7 +201,7 @@ pub fn enable_tx(c: &Connection, key: &PluginKey, now: &str) -> Result<(), Domai
 /// schedule — then a contribution without a row gets none).
 pub fn set_next_due_tx(
     c: &Connection,
-    key: &PluginKey,
+    key: &ContributionKey,
     next_due_at: Option<&str>,
     now: &str,
 ) -> Result<(), DomainError> {
@@ -206,9 +209,9 @@ pub fn set_next_due_tx(
         ensure(c, key, now)?;
     }
     c.execute(
-        &format!("UPDATE plugin_health SET next_due_at = :due WHERE {KEY}"),
+        &format!("UPDATE contribution_health SET next_due_at = :due WHERE {KEY}"),
         named_params! {
-            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
             ":due": next_due_at,
         },
     )
@@ -216,18 +219,20 @@ pub fn set_next_due_tx(
     .map_err(map_sql_err)
 }
 
-/// Record that the `plugin.disabled` at `seq` was handled, filing or
+/// Record that the `contribution.disabled` at `seq` was handled, filing or
 /// commenting on `repair_item`.
 pub fn set_repair_tx(
     c: &Connection,
-    key: &PluginKey,
+    key: &ContributionKey,
     repair_item: &str,
     seq: i64,
 ) -> Result<(), DomainError> {
     c.execute(
-        &format!("UPDATE plugin_health SET repair_item = :item, repair_seq = :seq WHERE {KEY}"),
+        &format!(
+            "UPDATE contribution_health SET repair_item = :item, repair_seq = :seq WHERE {KEY}"
+        ),
         named_params! {
-            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
             ":item": repair_item, ":seq": seq,
         },
     )
@@ -236,28 +241,31 @@ pub fn set_repair_tx(
 }
 
 #[derive(Clone)]
-pub struct SqlitePluginHealthStore {
+pub struct SqliteContributionHealthStore {
     db: Database,
 }
 
-impl SqlitePluginHealthStore {
+impl SqliteContributionHealthStore {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
 
-    pub async fn get(&self, key: &PluginKey) -> Result<Option<PluginHealthRow>, DomainError> {
+    pub async fn get(
+        &self,
+        key: &ContributionKey,
+    ) -> Result<Option<ContributionHealthRow>, DomainError> {
         let key = key.clone();
         self.db.read(move |c| get_tx(c, &key)).await
     }
 
     /// Forget `key`'s row: its contribution is gone.
-    pub async fn remove(&self, key: &PluginKey) -> Result<(), DomainError> {
+    pub async fn remove(&self, key: &ContributionKey) -> Result<(), DomainError> {
         let key = key.clone();
         self.db
             .transaction(move |c| {
                 c.execute(
-                    &format!("DELETE FROM plugin_health WHERE {KEY}"),
-                    named_params! { ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution },
+                    &format!("DELETE FROM contribution_health WHERE {KEY}"),
+                    named_params! { ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution },
                 )
                 .map_err(map_sql_err)?;
                 Ok(())
@@ -265,11 +273,11 @@ impl SqlitePluginHealthStore {
             .await
     }
 
-    pub async fn list(&self) -> Result<Vec<PluginHealthRow>, DomainError> {
+    pub async fn list(&self) -> Result<Vec<ContributionHealthRow>, DomainError> {
         self.db
             .read(|c| {
                 let mut st = c
-                    .prepare(&format!("{SELECT} ORDER BY plugin, contribution"))
+                    .prepare(&format!("{SELECT} ORDER BY extension, contribution"))
                     .map_err(map_sql_err)?;
                 let rows = st.query_map([], row).map_err(map_sql_err)?;
                 rows.collect::<rusqlite::Result<_>>().map_err(map_sql_err)
@@ -282,9 +290,9 @@ impl SqlitePluginHealthStore {
 mod tests {
     use super::*;
 
-    fn key() -> PluginKey {
-        PluginKey {
-            plugin: "tracker".into(),
+    fn key() -> ContributionKey {
+        ContributionKey {
+            extension: "tracker".into(),
             contribution: "fake".into(),
             kind: "provider",
         }
@@ -295,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn failures_count_and_a_disable_sticks_until_enabled() {
         let db = Database::in_memory();
-        let store = SqlitePluginHealthStore::new(db.clone());
+        let store = SqliteContributionHealthStore::new(db.clone());
         let k = key();
         let n = db
             .transaction({
@@ -353,8 +361,8 @@ mod tests {
         );
     }
 
-    /// `v_plugin_health` counts the contribution's pending dead letters
-    /// (by its consumer, or events about its plugin) and marks an overdue
+    /// `v_contribution_health` counts the contribution's pending dead letters
+    /// (by its consumer, or events about its extension) and marks an overdue
     /// schedule unfresh.
     #[tokio::test]
     async fn the_view_counts_dead_letters_and_marks_a_missed_schedule() {
@@ -364,7 +372,7 @@ mod tests {
             let k = k.clone();
             move |tx| {
                 set_next_due_tx(tx, &k, Some("2000-01-01T00:00:00.000000Z"), "t1")?;
-                for (seq, subject) in [(1, "[\"plugin:tracker\"]"), (2, "[]"), (3, "[]")] {
+                for (seq, subject) in [(1, "[\"extension:tracker\"]"), (2, "[]"), (3, "[]")] {
                     tx.execute(
                         "INSERT INTO event_log (seq, id, type, v, at, source, subject, payload)
                          VALUES (?1, 'e' || ?1, 'x.y', 1, 't', 's', ?2, '{}')",
@@ -391,9 +399,11 @@ mod tests {
         .unwrap();
         let (letters, fresh): (i64, i64) = db
             .read(|c| {
-                c.query_row("SELECT dead_letters, fresh FROM v_plugin_health", [], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
-                })
+                c.query_row(
+                    "SELECT dead_letters, fresh FROM v_contribution_health",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
                 .map_err(map_sql_err)
             })
             .await

@@ -231,7 +231,7 @@ commands:
     invokers: { human: true, agent: false, lens: false }
     confirm: always
   # extensions.enable
-  - name: plugin.enable
+  - name: contribution.enable
     summary: "Enable a disabled extension provider, collector or effect on this machine again, clearing an automatic disable (a provider's process restarts, a system the bus doesn't own)."
     scope: extensions.enable
     op: enable

@@ -35,11 +35,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
-use oxplow_collect_plugin::SandboxBudget;
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
+use oxplow_script::runtime::{run_sandboxed, run_starlark};
+use oxplow_script::SandboxBudget;
 use rmcp::model::ClientJsonRpcMessage;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::RunningService;

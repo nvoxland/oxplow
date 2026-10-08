@@ -275,7 +275,7 @@ pub struct Assets {
     /// The materialized models registered from the model registry
     /// ([`Assets::sync_models`]), by view.
     models: Arc<tokio::sync::Mutex<BTreeMap<String, ModelAsset>>>,
-    /// The searchable plugin ref kinds whose index is registered
+    /// The searchable extension ref kinds whose index is registered
     /// ([`Assets::sync_search_kinds`], `kind_search`), by kind.
     pub(crate) search_kinds:
         Arc<tokio::sync::Mutex<BTreeMap<String, crate::kind_search::SearchableKind>>>,

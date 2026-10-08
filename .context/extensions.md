@@ -38,7 +38,7 @@ oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
 > - **Current (P1, 2026-09-28/29):** manifest v2 with `intent`,
 >   `sharing` and the stable/experimental split (tsk413), the textual
 >   v1→v2 migrator (tsk414, removed with the v1 reader in tsk865), the
->   per-root catalog cache (tsk415, tsk390) and the SDK: `oxplow plugin
+>   per-root catalog cache (tsk415, tsk390) and the SDK: `oxplow extension
 >   new|check|test` (tsk416; "The SDK").
 >
 > When a piece ships, move it from "target" to "current" here, in the
@@ -327,7 +327,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       worktree (`live: false`), toasts that it shows once the stream is
       merged (`KEPT_IN_STREAM`; Keep This does the same).
       It creates the extension if missing
-      (with the same v2 manifest `oxplow plugin new` writes —
+      (with the same v2 manifest `oxplow extension new` writes —
       `extensions::scaffold_manifest`, so a saved lens starts as a
       checkable extension with an `intent` to fill in), refuses to
       overwrite a lens, and refuses git-installed extensions.
@@ -393,9 +393,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   hiding the extension's lenses. Settings → Data shows each source
   (runtime, schedule, row counts or failure, Approve & Run / Sync Now);
   Settings → Extensions keeps each extension's source credentials.
-- **Settings shows what `plugin check` finds** (tsk1039). Loading can't
+- **Settings shows what `extension check` finds** (tsk1039). Loading can't
   catch a lens whose SQL fails (it never runs the SQL), so Settings →
-  Extensions runs `validate_extension` — the same dry run `oxplow plugin
+  Extensions runs `validate_extension` — the same dry run `oxplow extension
   check` prints — for each enabled project extension, on open and on
   `extensionsChanged`, and lists its errors with the load errors, once
   each. Bundled extensions are checked where they're built.
@@ -555,7 +555,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   extension: `event_types:` ("Event types"), `ref_kinds:` ("Ref kinds")
   and `effects:` ("Effects"), through one swappable vocabulary. A change
   is reviewed by its rows, collector outputs and effects at any revision,
-  on the CLI (`plugin check --effects`) and in an effort's review
+  on the CLI (`extension check --effects`) and in an effort's review
   ("Reviewing by effect"). Models declare keys and may materialize on a
   clock or incrementally ([semantic-layer.md](./semantic-layer.md)).
   Installs and updates are the `oxplow.extension.install` / `oxplow.extension.update`
@@ -642,7 +642,7 @@ engine: ">=0.7"          # the oxplow it targets; required when shared
 intent:                  # required
   purpose: What question it answers, or what job it does
   origin: effort:eff42   # the thread/effort ref that created it, or null
-  examples:              # inputs → expected outputs; fixtures for `plugin test`
+  examples:              # inputs → expected outputs; fixtures for `extension test`
     - { name: …, input: {…}, expect: … }
 # stable kinds (permanent API)
 measures:    [...]   # same schema as .oxplow/project.yaml
@@ -717,12 +717,12 @@ version the file declares.
 ## The SDK
 
 `crates/oxplow-sdk` (P1.14, tsk416; target §10.5) is the one
-implementation behind three doors: the `oxplow plugin new|check|test`
+implementation behind three doors: the `oxplow extension new|check|test`
 CLI, the RPC/MCP `validate_extension`, and `save_lens`'s manifest. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
-- **`scaffold(root, kind, name, origin)`** (`plugin new <kind> <name>`)
+- **`scaffold(root, kind, name, origin)`** (`extension new <kind> <name>`)
   writes `oxplow/extensions/<name>/extension.yaml` (v2, `sharing:
   private`, an `intent` whose `origin` is the ref passed with `--origin`,
   one example) and, but for a bare extension, that example's fixture
@@ -742,7 +742,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
     event;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and a non-ref origin. **What
-  it writes passes `check` with no warnings and `plugin test` clean**
+  it writes passes `check` with no warnings and `extension test` clean**
   (a provider once a program replaces its stub) —
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
   to loading in a real oxplow: the lens's row action names a registered
@@ -780,14 +780,14 @@ and one calling MCP read identical `file:line: what — fix` lines.
   its own unpublished model. It returns a `CheckReport { ok, errors,
   warnings, dry_run, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.
-- **`scaffold(…, Kind::Provider, …)`** (`plugin new provider <name>`,
+- **`scaffold(…, Kind::Provider, …)`** (`extension new provider <name>`,
   P5.D5) adds a `providers:` entry (id = the name with `_` for `-`,
   capability `work_items`), `provider.json` (create / update /
   transition, the core `work_item.recorded@2`, an object config
   schema), a stub `bin/provider` that exits 1, `fixtures/basic.yaml`
   invoking `create` and expecting `{ ref: $any }`, and
   `fixtures/provider-<id>.yaml` (`config: {}`).
-- **`plugin_test::test_extension(root, name, layer, bless)`** (`plugin
+- **`extension_test::test_extension(root, name, layer, bless)`** (`extension
   test <name> [--bless] [--json]`, P5.D5) runs `check` and then, per
   declared provider, the conformance kit ([providers.md](./providers.md)
   "The conformance kit"): its handshake against its declarations, its
@@ -799,7 +799,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   Without providers, intent examples aren't run (a warning: nothing
   declares a runtime). `TestReport { ok, errors, warnings, blessed, ran
   }`; `render` prints it like `check`'s. Exit 0 / 1 / 2 as `check`.
-- **The CLI** is `apps/desktop/src-tauri/src/plugin_cli.rs`, dispatched
+- **The CLI** is `apps/desktop/src-tauri/src/extension_cli.rs`, dispatched
   by `main.rs` before Tauri boots exactly like `oxplow hook`. It takes a
   bare name (under `--root` or the cwd) or the extension folder's path
   (the project is read off `…/oxplow/extensions/<name>`). `check` opens
@@ -843,13 +843,13 @@ for. A questions file is a list of `{ question, skill, reaches: { sql } |
   global `ai.yaml`, keychain read only), given only the skill text and
   the catalog (every `v_model` view and every command an agent may run),
   what it would reach for first; it must pick the same model or command.
-- **An extension's own** `questions.yaml` runs in `oxplow plugin test`:
+- **An extension's own** `questions.yaml` runs in `oxplow extension test`:
   `skill` is a markdown file in the extension, SQL runs on the test's
   throwaway oxplow, and a command is one on its bus — core's or the
   extension's own `commands:` — or one of its providers' `<id>.<name>`
   (schema from its declarations).
 
-**`oxplow plugin test <name>`** (P5.D5, P7.C6; `plugin_test.rs`) runs on
+**`oxplow extension test <name>`** (P5.D5, P7.C6; `extension_test.rs`) runs on
 **a throwaway oxplow** (`Host`): a temp project with a copy of the
 project's `oxplow/extensions/`, `Services::in_memory` over it, every
 declared entity published empty (`collector_runner::publish_declared_empty`
@@ -1211,12 +1211,12 @@ version as `before` when it replaces one (`review_update`), else none
 report (`effects: None` — its errors say why, and it can't be
 installed). Settings → Extensions shows `EffectReport.lines` —
 `extension_effects::summary` (P8.C5), the one wording the install
-review, `plugin check --effects` and an effort's review share:
+review, `extension check --effects` and an effort's review share:
 collectors' and providers' grants first — "now reaches x (was y)", a
 provider command added (destructive) — then models with their readers,
 lenses, the config keys) and each changed lens's text before and after,
 side by side (`EffectDiff`; no line diff yet). Model rows, collector
-dry runs, `plugin check --effects` and the effort-review view followed
+dry runs, `extension check --effects` and the effort-review view followed
 in P8.C (below).
 
 **An extension at any revision** (P8.C1). `extension_at(trees, ws, rev,
@@ -1294,7 +1294,7 @@ shapes); the earlier side is only *read* (`read_side`: its models'
 overlay and its lenses rendered on it) — what it was, not whether it
 was right.
 
-**`oxplow plugin check <name> --effects [--against <rev>]`** (P8.C6).
+**`oxplow extension check <name> --effects [--against <rev>]`** (P8.C6).
 The same review on the CLI: `oxplow_sdk::check(…, against)` — the check
 and its effects with one throwaway oxplow's command registry — loads the
 extension at git `HEAD` (or `--against`) — `extension_tree_at` through a
@@ -1505,7 +1505,7 @@ in the library — one number, bumped when a message's shape changes), and
 `connect` rejects a host speaking another. One app is one library
 version. `componentClient.test.ts` drives the served file against the
 real `createBridgeHost` and the real `init` (`initMessage`, which
-`CustomComponentViz` posts), so the two can't drift (tsk856). `oxplow plugin new
+`CustomComponentViz` posts), so the two can't drift (tsk856). `oxplow extension new
 component <name>` scaffolds a private extension — the component, its
 `viz: custom` lens and a bundle using the library — that checks and
 tests clean (`just_works.rs`). The reference is in
@@ -1610,7 +1610,7 @@ whole). It reads only the events' **envelopes** (tsk886): the type says
 the verdict (`oxplow_bundled.accepted` / `.changes_requested`) and the
 subject what it was about — the effort first, then its work item, then
 each claim and decision an acceptance took unchecked (any makes it
-forced). Retention keeps envelopes and a plugin's payloads go after 30
+forced). Retention keeps envelopes and an extension's payloads go after 30
 days at most, so a verdict a decorator shows must not live in its
 payload. It shows; it never acts.
 `STABLE_KINDS` lists `ui.decorators`; a shared extension may declare
@@ -1685,7 +1685,7 @@ itself) files has no `author` — it isn't the person's; its
 **Retention** (P8.D5) is the namespace's window for payloads and large
 content (data-model.md "event_log" retention): either omitted part is the
 default, and a longer one is a load error. The reactor records it in
-`plugin_event_retention`, which keeps it after the extension is gone.
+`extension_event_retention`, which keeps it after the extension is gone.
 
 **Loading** checks each type the way the vocabulary registers it (a
 scratch `register_declared`): a core or foreign namespace, a schema file
@@ -1742,7 +1742,7 @@ the run or not at all. A run whose events aren't allowed fails whole
 `project` or `built-in` collector's (no extension, no namespace), a type
 the collector's own `trigger.on` names (its run would trigger itself),
 and more than `MAX_RUN_EVENTS` (100) a run. A fact collector doesn't
-emit. A preview (`CollectorPreview.events`) and a `plugin test` example
+emit. A preview (`CollectorPreview.events`) and a `extension test` example
 (`expect: { events: [{ type, payload? }] }`) show what would be logged;
 a review's dry run counts them per type ("2 pr; emits 2 acme_pr.merged").
 
@@ -1776,7 +1776,7 @@ extension's own declared ones, and **another extension's**
   nor its own: accepted, kept on `Extension.subscriptions`
   (`ForeignSubscription { by, event_type, declared_at }`), and a
   **warning** at load ("…another extension's event type; it runs once an
-  enabled extension registers that type") — which is all `oxplow plugin
+  enabled extension registers that type") — which is all `oxplow extension
   check` says, since a check sees one extension;
 - **unknown** — a core namespace's type that doesn't exist, its own
   namespace's that it doesn't declare, a name that isn't a type's: an
@@ -1796,7 +1796,7 @@ owner's new version plus upcast. A subscriber still **appends** only its
 own types (`own_events` is unchanged), and the effects' loop guard
 already counts every extension's runs.
 
-**Health is the extension's errors, not `plugin_health`** — a refused
+**Health is the extension's errors, not `contribution_health`** — a refused
 declaration is a load problem, like a model's contract drift, not a
 failing run that counts toward a disable.
 
@@ -1844,7 +1844,7 @@ engine reads as syntax), a `resolve` that isn't one of its models with `ref` and
 
 **Registering** is the vocabulary reactor's: core kinds plus each
 extension's, built by one constructor (`extension_ref_kinds::kind_spec`,
-which `plugin test` uses too), so `validate_ref`, `[[acme_pr:12]]` and
+which `extension test` uses too), so `validate_ref`, `[[acme_pr:12]]` and
 `[[pr:12]]` know them while the extension is installed and not after. A
 kind's namespace is a string prefix, so one may hold another's (`acme`'s
 `acme_` holds `acme-pr`'s `acme_pr_`): a kind in both is **the more
@@ -1854,7 +1854,7 @@ Otherwise a kind two extensions both declare is an error on each, and
 neither registers it. A `wikilink:` that is one of the extension's own
 kinds is refused at load and costs only the sugar (both kinds load), so no name is both a
 kind and a sugar, and both resolvers read a sugar before a kind's own
-name (`canonical_wikilink`, `pluginWikilinkRef`). A **`wikilink:` prefix** another extension also uses (as
+name (`canonical_wikilink`, `extensionWikilinkRef`). A **`wikilink:` prefix** another extension also uses (as
 its prefix, or as its kind) is an error on each and **costs only the
 sugar** (P10): `[[pr:…]]` links neither, but each namespaced kind still
 registers and links as `[[acme_pr:…]]`, so installing one extension never
@@ -1876,10 +1876,10 @@ helpers consult and `useRefKinds` subscribes to:
   (`extPageRef` carries params; `ExtensionPageView` hands them to the
   lens as `initialParams`);
 - `preprocessWikilinks` turns `[[acme_pr:12]]` / `[[pr:12]]` into a link
-  when the id matches the kind's pattern (`pluginWikilinkRef`, as the
+  when the id matches the kind's pattern (`extensionWikilinkRef`, as the
   backend's `canonical_wikilink` does), `urlTransform` lets the kind's
   scheme through, and the link's text becomes its title from the
-  `resolve` model (`usePluginRefTitle`) unless the author labelled it.
+  `resolve` model (`useExtensionRefTitle`) unless the author labelled it.
 
 **Searchable kinds** (P9.D3, `kind_search.rs`). `searchable: <model>`
 names one of the extension's models with `ref`, `title` and `body`
@@ -1908,10 +1908,10 @@ routed; the row shows the kind's icon and label).
   (a hit must be something that opens), with a warning in the log.
 - Entries are project-global (`stream_id` NULL): a model is.
 
-**Revisioned plugin kinds: designed, not built** (deferred in P10 by
-decision — nothing first-party has revisions to read). Today a plugin
+**Revisioned extension kinds: designed, not built** (deferred in P10 by
+decision — nothing first-party has revisions to read). Today an extension's
 kind's ref takes no `@rev`: a revision is read by its reader (`git:`,
-`snap:` — the VCS and snapshot stores), and no plugin kind has one. The
+`snap:` — the VCS and snapshot stores), and no extension's kind has one. The
 design, so building it is filling in, not deciding:
 
 - **The declaration:** `revisioned: true` on the kind. The loader then
@@ -2261,7 +2261,7 @@ capability / feature, and the entry is a file in the
 extension that parses and defines `transform` (`check_starlark`), and
 it declares at most `MAX_EXAMPLES` (10) examples. The
 script's text is kept on the `ExtensionCommand` (not serialized).
-`check_extension` (Settings → Extensions, `oxplow plugin check`) runs
+`check_extension` (Settings → Extensions, `oxplow extension check`) runs
 `check_commands`: with a running oxplow's registry, each example is
 dry-run (`dry_run`) — `compose_calls`, its `sql.read` calls answered by the
 example's `answers` or through the check's `SqlGateway` (its overlay
@@ -2363,13 +2363,13 @@ project's), plus:
 
 Every contribution that runs — a provider instance, a collector, an effect
 (P8.D11, kind `effect`, V150) — shares one failure policy
-(`plugin_health.rs`, the `plugin_health` table read as
-`v_plugin_health`):
+(`contribution_health.rs`, the `contribution_health` table read as
+`v_contribution_health`):
 
 - **Counting.** A failed run or call counts; a good one starts the count
   over. A refused input, a missing approval, or a cancel isn't a failure.
 - **Disabling.** The third failure in a row disables it on this machine
-  and logs `plugin.disabled@1` (the row and the event commit together). A
+  and logs `contribution.disabled@1` (the row and the event commit together). A
   provider instance stops. A disabled collector doesn't run: the
   scheduler, the `collector.triggers` consumer and the snapshot sweep skip
   it, and `oxplow.collector.sync` refuses it with its reason (`Invalid` at
@@ -2378,11 +2378,11 @@ Every contribution that runs — a provider instance, a collector, an effect
   included, a lost race to another delivery not; `skipped` and `proposed`
   never do, and a reaction whose commands ran starts the count over. Nothing cascades: a lens over its view still runs, carrying a
   warning (`LensRun.warnings`) that its rows aren't refreshing.
-- **Repairing.** The `plugin.repair` pump consumer files a work item on
-  the active work-items provider, as the system: title `Repair <plugin>
-  <contribution>: <reason>`, body the repair prompt (`plugin_repair::render`,
+- **Repairing.** The `contribution.repair` pump consumer files a work item on
+  the active work-items provider, as the system: title `Repair <extension>
+  <contribution>: <reason>`, body the repair prompt (`contribution_repair::render`,
   golden `crates/oxplow-app/tests/fixtures/repair-prompt.md`: what failed,
-  its intent and declaration, its recent failures, what `plugin check`
+  its intent and declaration, its recent failures, what `extension check`
   reports, its intent examples, `engine:` against the running oxplow, and
   what to do). It goes to the active tracker like every item (tsk1058).
   When that tracker can't take it — not running, or the very contribution
@@ -2391,17 +2391,17 @@ Every contribution that runs — a provider instance, a collector, an effect
   filed in oxplow's list instead. A later
   disable while the item is open comments on it;
   once it's done or canceled the next disable files a new one
-  (`plugin_health.repair_item`, `v_plugin_health.repair_item` while open).
+  (`contribution_health.repair_item`, `v_contribution_health.repair_item` while open).
   oxplow never sends it to an agent.
-- **Enabling.** Only a person: `oxplow.plugin.enable { plugin, kind,
+- **Enabling.** Only a person: `oxplow.contribution.enable { extension, kind,
   contribution }` (human-only). It names the kind — a provider and a
   collector may share an id; there must be a failed one of that kind (or
   a provider instance the registry knows).
 - **In the app (C3).** Settings → Extensions shows one health line per
-  contribution under its extension (`pluginHealth.ts`, live over
-  `v_plugin_health`): `OK` with its average time, a missed schedule and
+  contribution under its extension (`contributionHealth.ts`, live over
+  `v_contribution_health`): `OK` with its average time, a missed schedule and
   undelivered events; `Failing (N in a row): <error>`; or `Disabled:
-  <reason>` with **Enable Again** (`oxplow.plugin.enable` through
+  <reason>` with **Enable Again** (`oxplow.contribution.enable` through
   `personCommands`) and, while its repair item is open, **Repair with
   the Agent** — one line in the agent's input, `Repair the extension
   described in [oxplow ref <repair item>] — read it first.`, never sent
@@ -2410,11 +2410,11 @@ Every contribution that runs — a provider instance, a collector, an effect
   lists the pending dead letters (`delivery.ts`, live over
   `v_event_dead_letter`) with Retry and Discard (`InlineConfirm`); the
   rail's Alerts shows "N events couldn't be delivered" while any wait.
-- **For agents.** `questions/plugins.yaml` and the extension skill's
-  "Health and repair" section: read `v_plugin_health`,
+- **For agents.** `questions/extensions.yaml` and the extension skill's
+  "Health and repair" section: read `v_contribution_health`,
   `v_collector_run` and `v_event_dead_letter`, read the repair item
   first, fix, check, test, `oxplow.collector.sync` — and ask the person to
-  Enable Again (an agent can't run `oxplow.plugin.enable`).
+  Enable Again (an agent can't run `oxplow.contribution.enable`).
 
 ## Implementations
 

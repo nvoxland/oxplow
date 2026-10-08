@@ -1,7 +1,7 @@
 //! `extension.yaml`, manifest version 2 (`.context/extensions.md`).
 //!
 //! A v2 manifest declares every contribution as data, carries the
-//! plugin's **intent**, says whether it is **private** or **shared**, and
+//! extension's **intent**, says whether it is **private** or **shared**, and
 //! names the kinds it uses; unknown keys are errors. Kinds have a
 //! lifecycle: the stable ones are permanent API, the experimental ones
 //! may appear only in a private extension. A manifest without
@@ -30,7 +30,7 @@ pub enum Sharing {
 }
 
 /// One acceptance example: an input and what the extension should make
-/// of it. Fixtures for `oxplow plugin test`; data here.
+/// of it. Fixtures for `oxplow extension test`; data here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(deny_unknown_fields)]
 pub struct IntentExample {

@@ -704,7 +704,7 @@ pub struct EffectReport {
     /// What its dry runs didn't get to (`collector <id>`, `effect <id>`):
     /// the review stops running scripts at its deadline.
     pub out_of_time: Vec<String>,
-    /// The report as lines ([`summary`]): what the install review, `plugin
+    /// The report as lines ([`summary`]): what the install review, `extension
     /// check --effects` and an effort's review say, in one wording.
     pub lines: Vec<String>,
 }

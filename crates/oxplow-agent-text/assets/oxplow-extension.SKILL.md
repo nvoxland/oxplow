@@ -11,10 +11,10 @@ Lenses live in **extensions**: folders of plain files in the repo. The user
 can use a lens themselves, share it with their team by committing it, or
 publish the extension for anyone.
 
-You build them with your normal file tools. `oxplow plugin new <kind>
+You build them with your normal file tools. `oxplow extension new <kind>
 <name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
 an intent, one example and its fixture, and a working starter for the
-kind; then edit. Each passes `check` and `plugin test` as written, so a
+kind; then edit. Each passes `check` and `extension test` as written, so a
 failure after your edit is yours:
 - `lens` — a lens over open tasks with a row action (Start);
 - `collector` — a Starlark collector of an entity, a model over it
@@ -234,7 +234,7 @@ empty: Nothing is waiting on you.
   src="/component-lib/oxplow-component.js">` before its own plain script
   (no modules: a sandboxed frame can't load them), and the script calls
   `oxplow.connect().then((component) => …)` for `component.run`,
-  `onUpdate`, `query`, `invoke` and `navigate`. `oxplow plugin new
+  `onUpdate`, `query`, `invoke` and `navigate`. `oxplow extension new
   component <name>` scaffolds a working one; `docs/guide/lenses.md` has
   the reference.
 - **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
@@ -293,7 +293,7 @@ empty: Nothing is waiting on you.
 end: after each file you write or change. It is cheap, and the message
 names the file and line and says what to change.
 
-1. `validate_extension(name, stream_id)` (MCP), or `oxplow plugin check
+1. `validate_extension(name, stream_id)` (MCP), or `oxplow extension check
    <name>` from the worktree, is the same check and the same report:
    - manifest errors (YAML, unknown keys, a name/folder mismatch, a
      missing `intent`, an experimental kind in a `shared` extension, a
@@ -322,8 +322,8 @@ names the file and line and says what to change.
    stream won't see yours until it's merged.
 4. An extension with a **provider** (`providers:` — a program that
    connects an outside system, such as an issue tracker; private
-   extensions only) is tested with `oxplow plugin test <name>`:
-   `oxplow plugin new provider <name>` scaffolds one (its `provider.json`
+   extensions only) is tested with `oxplow extension test <name>`:
+   `oxplow extension new provider <name>` scaffolds one (its `provider.json`
    declarations, a stub `bin/provider` to replace, and the fixtures).
    The test runs `check`, then the provider: its `initialize` must equal
    `provider.json`, its `check` must accept `fixtures/provider-<id>.yaml`'s
@@ -365,7 +365,7 @@ names the file and line and says what to change.
    instead of `command`: https only (http on loopback), its host in
    `network`, and `auth` one of the provider's `credentials` (sent as the
    bearer token).
-5. **`oxplow plugin test <name>`** runs every intent example on a
+5. **`oxplow extension test <name>`** runs every intent example on a
    throwaway oxplow (empty data, your extension's entities published
    empty and its models and commands loaded — never the project's
    database). Give each example a fixture, `fixtures/<example>.yaml`, with
@@ -386,7 +386,7 @@ names the file and line and says what to change.
    - a provider: `input: { command, input }` (below).
    Give a command's own `examples:` `answers:` too, so they don't depend
    on the project's data.
-6. `oxplow plugin test` also runs the extension's `questions.yaml`, if it
+6. `oxplow extension test` also runs the extension's `questions.yaml`, if it
    has one: questions an agent should be able to answer with it, each
    `{ question, skill, reaches: { sql } or { command, input }, shape:
    { columns } }`. `skill` is a markdown file in the extension (a
@@ -549,7 +549,7 @@ to a read-only SQL query:
   level (`check` says so at the collector's line otherwise); it gets
   `{"rows": [...]}` and returns the same `{"entities": ...}` shape. It
   must handle **no rows** — return an empty list, don't index `rows[0]`
-  — because a fresh project, a `plugin test` throwaway and a filter that
+  — because a fresh project, a `extension test` throwaway and a filter that
   matches nothing all give it none; with `sync: replace` an entity it
   leaves out is emptied.
 - **Approval.** It runs sandboxed (no network, files, env or credentials),
@@ -596,8 +596,8 @@ to a read-only SQL query:
 
 ## Health and repair
 
-oxplow keeps each provider's and collector's health on this machine in
-`v_plugin_health` (`plugin`, `contribution`, `kind`, `state` = `ok` |
+oxplow keeps each provider's, collector's and effect's health on this machine
+in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` |
 `failing` | `disabled`, `reason`, `last_error`, `dead_letters`, `fresh`,
 `repair_item`). Each collector's last run is in `v_collector_run`
 (`status`, `last_run_at`, `error`).
@@ -611,9 +611,9 @@ oxplow keeps each provider's and collector's health on this machine in
   failure comments on the open item. When the user asks you to repair an
   extension, read that item first.
 - **Fix it, then prove it.** Change the script or declaration, run
-  `oxplow plugin check` and `oxplow plugin test`, then `oxplow.collector.sync`
+  `oxplow extension check` and `oxplow extension test`, then `oxplow.collector.sync`
   (`run_collector`) — a refusal while it's disabled is expected.
-- **You can't enable it again.** `oxplow.plugin.enable` is the user's: tell them
+- **You can't enable it again.** `oxplow.contribution.enable` is the user's: tell them
   to press **Enable Again** in Settings → Extensions once your fix is in.
 - **Undelivered events** (a consumer that failed on an event) are in
   `v_event_dead_letter` (`state = 'pending'`); the user retries or

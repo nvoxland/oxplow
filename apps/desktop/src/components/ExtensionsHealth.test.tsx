@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 // P7.C3: a disabled contribution shows why; Enable Again runs
-// `oxplow.plugin.enable` as the person; Repair with the Agent fills the agent's
+// `oxplow.contribution.enable` as the person; Repair with the Agent fills the agent's
 // input with one mention and sends nothing.
 
 const realApi = await import("../api.js");
@@ -16,15 +16,15 @@ mock.module("../api.js", () => ({
 }));
 const { HealthRow } = await import("./ExtensionsSection.js");
 const { subscribeAgentInput } = await import("../agent-input-bus.js");
-import type { PluginHealth } from "../pluginHealth.js";
+import type { ContributionHealth } from "../contributionHealth.js";
 
 afterEach(() => {
   ran.length = 0;
   cleanup();
 });
 
-const disabled: PluginHealth = {
-  plugin: "tracker",
+const disabled: ContributionHealth = {
+  extension: "tracker",
   contribution: "issues",
   kind: "collector",
   state: "disabled",
@@ -44,11 +44,11 @@ test("a disabled contribution shows its reason", () => {
   );
 });
 
-test("Enable Again runs plugin.enable through the person's commands", async () => {
+test("Enable Again runs oxplow.contribution.enable through the person's commands", async () => {
   const view = render(<HealthRow health={disabled} />);
   fireEvent.click(view.getByTestId("extension-enable-tracker-issues"));
   await waitFor(() => expect(ran).toHaveLength(1));
-  expect(ran[0]).toEqual({ name: "oxplow.plugin.enable", input: { plugin: "tracker", kind: "collector", contribution: "issues" }, confirmed: false });
+  expect(ran[0]).toEqual({ name: "oxplow.contribution.enable", input: { extension: "tracker", kind: "collector", contribution: "issues" }, confirmed: false });
 });
 
 test("Repair with the Agent fills the agent input and runs nothing", () => {

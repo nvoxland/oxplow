@@ -29,7 +29,7 @@ members = [
     "crates/oxplow-code-dup",
     "crates/oxplow-code-deps",
     "crates/oxplow-coverage",
-    "crates/oxplow-collect-plugin",
+    "crates/oxplow-script",
     "crates/oxplow-surface-parity",
     "crates/oxplow-sdk",
     "crates/oxplow-ai",
@@ -170,7 +170,7 @@ oxplow-code-metrics = { path = "crates/oxplow-code-metrics" }
 oxplow-code-dup = { path = "crates/oxplow-code-dup" }
 oxplow-code-deps = { path = "crates/oxplow-code-deps" }
 oxplow-coverage = { path = "crates/oxplow-coverage" }
-oxplow-collect-plugin = { path = "crates/oxplow-collect-plugin" }
+oxplow-script = { path = "crates/oxplow-script" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-tasks = { path = "crates/oxplow-tasks" }
 oxplow-ai = { path = "crates/oxplow-ai" }

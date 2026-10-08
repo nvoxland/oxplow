@@ -253,7 +253,7 @@ each one's columns and types equal the migration view it replaced),
 `v_model*` are models over the registry, and `CATALOG` /
 `SemanticLayer::describe_schema` are gone. Views are dropped before the
 migrations and compiled after them at every writable open; a read-only
-open (`oxplow plugin check`) uses what the last open compiled.
+open (`oxplow extension check`) uses what the last open compiled.
 
 ### Materialized models (P7.B2)
 
@@ -270,7 +270,7 @@ changed contract recreates it empty for the first recompute to fill.
 `source()`s an `m_*` table — its own or another's ("a model may not read
 itself"); it reads a materialized model through `ref()`. A query's own
 SQL can't read one either: the read contract refuses it, naming the
-model over it. `plugin check` (the read-only `Pass::Check`) creates the
+model over it. `extension check` (the read-only `Pass::Check`) creates the
 temp view only, never the table; a table no published model reads goes
 after the extensions' pass (`drop_orphaned_tables`).
 
@@ -357,9 +357,9 @@ the last good rows in place, keeps its retry flag, and is recorded in
 `asset_failure` (V152) until a recompute succeeds: `v_asset` (v3) shows
 its `failed_at` and `error`. (A materialized model's `key()` test reads
 its table, which by construction holds each key once — so a duplicate
-key shows as the asset's failure, not a failed test.) `plugin test`'s
+key shows as the asset's failure, not a failed test.) `extension test`'s
 incremental check reports an append that fails on its fixture. A row that appears
-*below* the watermark is the case nothing at run time can see; `plugin
+*below* the watermark is the case nothing at run time can see; `extension
 test` checks each incremental model against a full refill (P8.B5).
 `asset_state` (V143) records each recompute's `mode` (`full` /
 `incremental`), the `watermark` it reached and the `row_count`;
@@ -613,7 +613,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   MCP. **Every query goes through the SQL gateway** (P4.1, tsk486):
   `Services.sql`, `crates/oxplow-app/src/sql_gateway.rs` — MCP and IPC
   `query_sql`, lenses, advisories, entity metrics, extension checks
-  (`validate_extension`, `oxplow plugin check`) and source inputs alike.
+  (`validate_extension`, `oxplow extension check`) and source inputs alike.
   It takes one `SqlQuery { sql, params (positional | named), limit,
   timeout }`; `check(sql)` prepares without running. Mechanics
   (`SemanticLayer` in `crates/oxplow-db/src/semantic_layer.rs`):
@@ -753,7 +753,7 @@ extension's own declared event types, logged with the run (P9.D2;
   the run wrote the report — or by hand (`oxplow.collector.sync`, which records
   in a thread). The collection service runs it and merges its output into
   the run (`.context/collection.md`); its run, health and consent are any
-  collector's (`collector_run`, `collector.synced@1`, `plugin_health`, a
+  collector's (`collector_run`, `collector.synced@1`, `contribution_health`, a
   project program's approval).
 
 **Owners.** An extension (its name), `project` (`.oxplow/project.yaml`'s
@@ -809,10 +809,10 @@ needs_approval), last_run_at, error, row_counts_json, cursor_json,
 last_event_id`. The UI refreshes when `v_collector_run` changes
 (`collectorRan`); the in-memory `SourceSynced` is gone.
 
-**Health (P7.C2).** Collectors share the plugin failure policy
+**Health (P7.C2).** Collectors share the contribution failure policy
 ([extensions.md](./extensions.md) "Health, disable and repair"): three
-failed runs in a row disable one (`plugin_health`, key owner / id, kind
-`collector`); then nothing runs it until a person's `oxplow.plugin.enable`, and
+failed runs in a row disable one (`contribution_health`, key owner / id, kind
+`collector`); then nothing runs it until a person's `oxplow.contribution.enable`, and
 a lens over its view warns that its rows aren't refreshing.
 
 **`on:` triggers** (`collector_triggers.rs`, the `collector.triggers`
@@ -898,7 +898,7 @@ entities from data already in the semantic layer:
 |---|---|
 | Parse/validate declarations (`CollectorSpec`, `Trigger`) | `crates/oxplow-config/src/collectors.rs` |
 | Fact collectors: `FactCollector`, `fact_collectors()`, `run_collector_by_key`, `run_snapshot_collectors` / `run_effort_collectors` / `run_event_collectors` | `crates/oxplow-app/src/metrics_service.rs` |
-| Fact-collector script host (`TreeHost`, `run_fact_starlark`, `facts_of`, `parse_report`) | `crates/oxplow-collect-plugin/src/lib.rs`, `runtime.rs` |
+| Fact-collector script host (`TreeHost`, `run_fact_starlark`, `facts_of`, `parse_report`) | `crates/oxplow-script/src/lib.rs`, `runtime.rs` |
 | Consent (`approve_reviewed`), exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `oxplow.collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |

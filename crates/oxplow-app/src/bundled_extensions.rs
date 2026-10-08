@@ -2465,7 +2465,7 @@ mod tests {
         ]]))
         .await;
         // tsk886: the verdict is state. Its payload expires with the
-        // plugin's 30 days, but what the chip shows is in the envelope
+        // extension default's 30 days, but what the chip shows is in the envelope
         // (type and subject), which is kept.
         let later = oxplow_domain::Timestamp::from_unix_ms(
             oxplow_domain::Timestamp::now().unix_ms() + 31 * oxplow_db::event_retention::DAY_MS,

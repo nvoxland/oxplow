@@ -1248,7 +1248,7 @@ mod tests {
     }
 
     /// tsk1039: a misspelled model names the one it most likely meant —
-    /// an agent's lens query and `plugin check` read the same error.
+    /// an agent's lens query and `extension check` read the same error.
     #[tokio::test]
     async fn an_unknown_model_suggests_the_nearest_one() {
         let (_db, sl) = seeded().await;

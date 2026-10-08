@@ -199,7 +199,7 @@ pub fn bundle_problems(
 /// What one of a bundle's pages asks for that the bundle's CSP refuses
 /// silently or that ends the component: an inline `<script>` or event
 /// handler, a `type="module"` script, a load from outside the bundle
-/// (`src`, `srcset`, a stylesheet), a `<base>`, a nested frame, a plugin,
+/// (`src`, `srcset`, a stylesheet), a `<base>`, a nested frame, an `<object>` or `<embed>`,
 /// a form, a refresh; and, for its `index.html`, never loading the client
 /// library. A link (`<a href>`) is a navigation, not a load, and isn't one.
 pub fn page_problems(html: &str, index: bool) -> Vec<String> {
@@ -236,8 +236,8 @@ pub fn page_problems(html: &str, index: bool) -> Vec<String> {
         let refused = match tag.name.as_str() {
             "base" => Some("a <base> — the frame's CSP refuses one (`base-uri 'none'`)"),
             "iframe" | "frame" => Some("a <iframe> — the frame's CSP refuses a nested frame"),
-            "object" => Some("an <object> — the frame's CSP refuses plugins"),
-            "embed" => Some("an <embed> — the frame's CSP refuses plugins"),
+            "object" => Some("an <object> — the frame's CSP refuses embedded objects"),
+            "embed" => Some("an <embed> — the frame's CSP refuses embedded objects"),
             "form" => {
                 Some("a <form> — the frame's CSP refuses submitting one (`form-action 'none'`)")
             }

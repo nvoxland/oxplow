@@ -1,4 +1,4 @@
-# JUnit test plugin (input: xml → explicit element tree).
+# JUnit test parser (input: xml → explicit element tree).
 # <testsuite name="S"> … <testcase classname="C" name="N" time="T"> with an
 # optional <failure>/<error> (→ failed) or <skipped> (→ skipped) child;
 # otherwise passed. Tolerant of the

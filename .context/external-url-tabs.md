@@ -5,7 +5,7 @@ tab — when external links open inside oxplow instead of the OS browser,
 how the spawned webview window is sandboxed, and where each invariant
 is enforced. Read this before changing anything that loosens the
 lockdown (adding new schemes, broadening the capability, exposing
-extra plugins, etc.).
+extra Tauri plugins, etc.).
 
 ## Why open external links in-app at all
 
@@ -25,7 +25,7 @@ host renderer. Each external URL opens as its own
 oxplow webview entirely. The new window inherits the `external-url`
 capability (defined in
 `apps/desktop/src-tauri/capabilities/external-url.json`), which
-explicitly grants **zero oxplow commands and zero plugin permissions**
+explicitly grants **zero oxplow commands and zero Tauri plugin permissions**
 — it behaves like a sandboxed browser tab.
 
 `apps/desktop/src/pages/ExternalUrlPage.tsx` is no longer a webview
@@ -40,7 +40,7 @@ content lives in the spawned window, isolated from the main webview.
 |---|---|---|
 | Scheme allowlist (renderer) | `apps/desktop/src/external-url-allowlist.ts` | Only http(s) URLs reach the bridge call. Anything else (file:, javascript:, data:, blob:, custom protocols) returns a structured rejection that surfaces a refusal in `ExternalUrlPage` instead of opening a window. |
 | Scheme allowlist (Rust) | `crates/oxplow-tauri-ipc/src/commands/webview.rs` (`open_external_url`) | Re-validates `http://` / `https://` prefix before constructing the `WebviewWindowBuilder`. The renderer can't smuggle a non-http(s) URL through the IPC. |
-| Capability scope | `apps/desktop/src-tauri/capabilities/external-url.json` | `permissions: []` — no `core:default`, no plugin defaults, no oxplow commands. The window glob `ext-url-*` matches the label format `open_external_url` assigns. |
+| Capability scope | `apps/desktop/src-tauri/capabilities/external-url.json` | `permissions: []` — no `core:default`, no Tauri plugin defaults, no oxplow commands. The window glob `ext-url-*` matches the label format `open_external_url` assigns. |
 | Capability listing | `apps/desktop/src-tauri/tauri.conf.json` `app.security.capabilities` | Capabilities are listed explicitly so a stray file in `capabilities/` cannot widen the surface — the directory's auto-enable behavior is bypassed. |
 | Window labelling | `format!("ext-url-{uuid}")` | The label namespace is fixed; the capability glob (`ext-url-*`) only matches windows the IPC command itself created. |
 | OS browser | `tauri-plugin-shell` capability `shell:allow-open`, through `apps/desktop/src/tauri-bridge/systemBrowser.ts` (`openInSystemBrowser`, http(s) only) | Only the URL-open intent is granted; arbitrary `shell:execute` is restricted to the git/typescript-language-server allowlist in `oxplow-windows.json`. A provider's sign-in page opens here, never in the in-app window: the person's sessions live in their browser and services refuse embedded webviews (RFC 8252). |

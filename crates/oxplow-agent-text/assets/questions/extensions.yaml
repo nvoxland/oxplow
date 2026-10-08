@@ -5,15 +5,15 @@
   skill: oxplow-extension
   reaches:
     sql: >-
-      SELECT plugin, contribution, kind, state, reason, last_error
-      FROM v_plugin_health WHERE state <> 'ok'
-  shape: { columns: [plugin, contribution, kind, state, reason, last_error] }
+      SELECT extension, contribution, kind, state, reason, last_error
+      FROM v_contribution_health WHERE state <> 'ok'
+  shape: { columns: [extension, contribution, kind, state, reason, last_error] }
 - question: Which repair work item describes this disabled collector?
   skill: oxplow-extension
   reaches:
     sql: >-
-      SELECT repair_item FROM v_plugin_health
-      WHERE plugin = 'tracker' AND contribution = 'issues'
+      SELECT repair_item FROM v_contribution_health
+      WHERE extension = 'tracker' AND contribution = 'issues'
   shape: { columns: [repair_item] }
 - question: When did each collector last run, and did it fail?
   skill: oxplow-extension

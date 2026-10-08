@@ -18,7 +18,7 @@ export interface ExternalUrlPageProps {
  * Security stance preserved by the new model:
  * - The URL is gated through `classifyExternalUrl` before any open
  *   call; non-http(s) renders a refusal in this page.
- * - The opened window inherits zero oxplow commands and zero plugin
+ * - The opened window inherits zero oxplow commands and zero Tauri plugin
  *   permissions — it's effectively a browser tab.
  * - Cookies/storage isolation is provided by Tauri's per-window
  *   webview context, replacing the Electron `partition` mechanism.

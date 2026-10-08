@@ -5,7 +5,7 @@
 //! **Golden schemas.** Every registered core type's JSON Schema is
 //! checked in at `crates/oxplow-domain/schemas/events/<type>@<v>.json`.
 //! A test regenerates each schema from its Rust type and fails if the
-//! file differs: a published `type@v` is a contract consumers (plugins,
+//! file differs: a published `type@v` is a contract consumers (extensions,
 //! lenses, the agent) were written against, so a change is a **new
 //! version** (`V + 1`, with an `upcast` from the version before), never an
 //! edit. Run the test with `OXPLOW_BLESS=1` to write a new golden.
@@ -14,7 +14,7 @@
 //! [`CORE_NAMESPACES`] (`.context/data-model.md` "event_log"). An
 //! extension declares types (a JSON Schema each, not a Rust type —
 //! [`DeclaredEventType`]) only under its own namespace
-//! ([`plugin_namespace`]); declaring into a core namespace, or under
+//! ([`extension_namespace`]); declaring into a core namespace, or under
 //! another extension's, is refused.
 
 use std::collections::{BTreeMap, HashMap};
@@ -28,7 +28,7 @@ use serde_json::Value;
 use super::{validate_type_name, Envelope};
 use crate::DomainError;
 
-/// The namespaces core owns (§5.3). Plugin types may not use them.
+/// The namespaces core owns (§5.3). Extension types may not use them.
 pub const CORE_NAMESPACES: &[&str] = &[
     "agent",
     "capability",
@@ -46,7 +46,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "lens",
     "config",
     "provider",
-    "plugin",
+    "contribution",
     "ui",
     "file",
 ];
@@ -95,7 +95,7 @@ pub struct DeclaredEventType {
 
 /// The namespace an extension's types live under: its name, `-` read as
 /// `_` (a type name is snake_case).
-pub fn plugin_namespace(extension: &str) -> String {
+pub fn extension_namespace(extension: &str) -> String {
     extension.replace('-', "_")
 }
 
@@ -211,8 +211,10 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<CodeDiagnosticsChanged>()
             .expect("core type registers");
-        r.register::<PluginEnabled>().expect("core type registers");
-        r.register::<PluginDisabled>().expect("core type registers");
+        r.register::<ContributionEnabled>()
+            .expect("core type registers");
+        r.register::<ContributionDisabled>()
+            .expect("core type registers");
         r.register::<LensShown>().expect("core type registers");
         r.register::<LensKeptAtV1>().expect("core type registers");
         r.register::<LensKept>().expect("core type registers");
@@ -264,7 +266,7 @@ impl EventSchemaRegistry {
                 "extension `{extension}` may not declare `{event_type}`: `{ns}` is a core namespace"
             )));
         }
-        let own = plugin_namespace(extension);
+        let own = extension_namespace(extension);
         if ns != own {
             return Err(DomainError::Invalid(format!(
                 "extension `{extension}` may only declare types under `{own}.*`, not `{event_type}`"
@@ -354,7 +356,7 @@ impl EventSchemaRegistry {
     }
 
     /// Who registered `type@v`: `Some(None)` for core, `Some(Some(extension))`
-    /// for a plugin, `None` when unregistered.
+    /// for an extension's, `None` when unregistered.
     pub fn owner(&self, event_type: &str, v: u32) -> Option<Option<&str>> {
         self.by_version
             .get(&(event_type.to_string(), v))
@@ -423,7 +425,7 @@ impl EventSchemaRegistry {
 /// The namespace of `event_type` when it could be an extension's: a
 /// well-formed type name outside core's namespaces. An extension that
 /// reacts to such a type, not its own, names its owner by it.
-pub fn plugin_type_namespace(event_type: &str) -> Option<&str> {
+pub fn extension_type_namespace(event_type: &str) -> Option<&str> {
     validate_type_name(event_type).ok()?;
     let ns = namespace_of(event_type);
     (!CORE_NAMESPACES.contains(&ns)).then_some(ns)
@@ -1492,10 +1494,10 @@ impl EventType for AgentStatusChanged {
     type Payload = AgentStatusChangedV1;
 }
 
-/// `test.run.recorded@1`: a test run was captured (`run:<capture>`).
+/// `test.run.recorded@2`: a test run was captured (`run:<capture>`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct TestRunRecordedV1 {
+pub struct TestRunRecordedV2 {
     pub run: String,
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1508,15 +1510,16 @@ pub struct TestRunRecordedV1 {
     pub skipped: Option<u64>,
     /// A test report was found and parsed (else the run is command-only).
     pub report_parsed: bool,
-    /// Who produced it: `post-tool-bash`, `plugin-exec:<name>`, `mcp`.
+    /// Who produced it: `post-tool-bash`, `exec:<collector ids>` (an `exec`
+    /// collector's program parsed its report), `mcp`.
     pub source: String,
 }
 
 pub struct TestRunRecorded;
 impl EventType for TestRunRecorded {
     const TYPE: &'static str = "test.run.recorded";
-    const V: u32 = 1;
-    type Payload = TestRunRecordedV1;
+    const V: u32 = 2;
+    type Payload = TestRunRecordedV2;
 }
 
 /// `test.coverage.recorded@1`: a coverage report was captured.
@@ -1926,48 +1929,48 @@ impl EventType for CodeDiagnosticsChanged {
     type Payload = CodeDiagnosticsChangedV1;
 }
 
-/// `plugin.disabled@1` (P7.C1): one of a plugin's contributions — a
-/// provider instance, a collector — was stopped on this machine after
+/// `contribution.disabled@1` (P7.C1): one of an extension's contributions —
+/// a provider instance, a collector, an effect — was stopped on this machine after
 /// repeated failures (or a provider whose handshake no longer matches what
 /// was approved), and stays off until a person enables it again
-/// (`oxplow.plugin.enable`).
+/// (`oxplow.contribution.enable`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct PluginDisabledV1 {
-    /// `plugin:<extension>`.
-    pub plugin: String,
-    /// The contribution within it: a provider's id, a collector's id.
+pub struct ContributionDisabledV1 {
+    /// `extension:<extension>`.
+    pub extension: String,
+    /// The contribution within it: a provider's, collector's or effect's id.
     pub contribution: String,
-    /// `provider` or `collector`.
+    /// `provider`, `collector` or `effect`.
     pub kind: String,
     /// What stopped it.
     pub reason: String,
 }
 
-pub struct PluginDisabled;
-impl EventType for PluginDisabled {
-    const TYPE: &'static str = "plugin.disabled";
+pub struct ContributionDisabled;
+impl EventType for ContributionDisabled {
+    const TYPE: &'static str = "contribution.disabled";
     const V: u32 = 1;
-    type Payload = PluginDisabledV1;
+    type Payload = ContributionDisabledV1;
 }
 
-/// `plugin.enabled@1` (P7.C1): a person enabled a disabled contribution
-/// again on this machine (`oxplow.plugin.enable`).
+/// `contribution.enabled@1` (P7.C1): a person enabled a disabled contribution
+/// again on this machine (`oxplow.contribution.enable`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct PluginEnabledV1 {
-    /// `plugin:<extension>`.
-    pub plugin: String,
+pub struct ContributionEnabledV1 {
+    /// `extension:<extension>`.
+    pub extension: String,
     pub contribution: String,
-    /// `provider` or `collector`.
+    /// `provider`, `collector` or `effect`.
     pub kind: String,
 }
 
-pub struct PluginEnabled;
-impl EventType for PluginEnabled {
-    const TYPE: &'static str = "plugin.enabled";
+pub struct ContributionEnabled;
+impl EventType for ContributionEnabled {
+    const TYPE: &'static str = "contribution.enabled";
     const V: u32 = 1;
-    type Payload = PluginEnabledV1;
+    type Payload = ContributionEnabledV1;
 }
 
 /// `knowledge.page.written@1`: a knowledge page's row and edges were
@@ -2262,6 +2265,8 @@ mod tests {
                 ("command.proposed", 1),
                 ("command.proposed", 2),
                 ("config.changed", 2),
+                ("contribution.disabled", 1),
+                ("contribution.enabled", 1),
                 ("effect.result", 1),
                 ("effect.result", 2),
                 ("effect.result", 3),
@@ -2284,12 +2289,10 @@ mod tests {
                 ("lens.kept", 1),
                 ("lens.kept", 2),
                 ("lens.shown", 1),
-                ("plugin.disabled", 1),
-                ("plugin.enabled", 1),
                 ("snapshot.taken", 1),
                 ("snapshot.taken", 2),
                 ("test.coverage.recorded", 1),
-                ("test.run.recorded", 1),
+                ("test.run.recorded", 2),
                 ("thread.checkpoint", 1),
                 ("ui.op_failed", 1),
                 ("vcs.commit.indexed", 1),
@@ -2468,7 +2471,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plugin_declares_types_only_under_its_own_namespace() {
+    fn an_extension_declares_types_only_under_its_own_namespace() {
         let mut r = EventSchemaRegistry::core();
         // The namespace is the extension's name with `-` read as `_`.
         r.register_declared("acme-review", declared::<AcmeDecided>())
@@ -2483,14 +2486,17 @@ mod tests {
             .unwrap_err();
         assert!(core.to_string().contains("core namespace"), "{core}");
         let foreign = r
-            .register_declared("other-plugin", declared::<AcmeDecided>())
+            .register_declared("other-extension", declared::<AcmeDecided>())
             .unwrap_err();
-        assert!(foreign.to_string().contains("other_plugin.*"), "{foreign}");
+        assert!(
+            foreign.to_string().contains("other_extension.*"),
+            "{foreign}"
+        );
         let dup = r
             .register_declared("acme-review", declared::<AcmeDecided>())
             .unwrap_err();
         assert!(dup.to_string().contains("already registered"), "{dup}");
-        // Core can't register into a plugin namespace either, and a
+        // Core can't register into an extension's namespace either, and a
         // second registration of the same type@v collides.
         assert!(r.register::<AcmeDecided>().is_err());
         assert!(r.register::<WorkItemStateChanged>().is_err());

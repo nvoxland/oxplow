@@ -43,7 +43,7 @@ export function AgentSessionPage({
   onOpenPage,
 }: AgentSessionPageProps) {
   // Only linkify terminal paths that are real workspace files/dirs, so dotted
-  // words in agent prose (e.g. a plugin name) aren't turned into broken links.
+  // words in agent prose (e.g. a collector name) aren't turned into broken links.
   const isLinkablePath = useWorkspaceLinkIndex(stream?.id);
   if (!thread) {
     return (

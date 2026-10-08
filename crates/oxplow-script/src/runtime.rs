@@ -115,7 +115,7 @@ impl SandboxBudget {
 ///    gives up, reports a failure, and is free to try again — so a retry (the
 ///    coverage ride-along has one) means *two* workers on the same input, not
 ///    one. That's how a 5s budget on a 4-ish-second parse produced 142 threads.
-/// 2. **It is not a defence against a hostile plugin.** An infinite script
+/// 2. **It is not a defence against a hostile script.** An infinite script
 ///    detaches and spins forever; the budget only hides it from the caller. Real
 ///    containment needs a step-limited interpreter or a child process we can
 ///    kill. Until then this is a *diagnostic* ceiling for honest-but-slow
@@ -231,7 +231,7 @@ pub fn run_jaq(program: &str, input: &Value) -> Result<Value, CollectError> {
     // depend on pure extras like `split_`/`matches`/`pow`; we only filter the
     // ones that read host state. A `Fun` is `(name, arity, impl)`, so `f.0` is
     // the name. None of these are referenced by jaq-std defs, so removing them
-    // doesn't break the library — a plugin calling them just fails to compile.
+    // doesn't break the library — a program calling them just fails to compile.
     const IMPURE_JAQ_FUNS: &[&str] = &["env", "now", "localtime", "input", "inputs"];
     let funs = jaq_core::funs()
         .chain(jaq_std::funs().filter(|f| !IMPURE_JAQ_FUNS.contains(&f.0)))
@@ -264,7 +264,7 @@ pub fn run_jaq(program: &str, input: &Value) -> Result<Value, CollectError> {
 }
 
 /// Native Starlark builtins exposing the layer-1 container-parse helpers, so a
-/// Starlark plugin can parse raw text itself (e.g. `input: text` + bespoke
+/// Starlark script can parse raw text itself (e.g. `input: text` + bespoke
 /// logic) instead of relying only on the host pre-parse. Each returns a real
 /// Starlark value — starlark implements `AllocValue` for `serde_json::Value`,
 /// so `heap.alloc(...)` does the conversion. (jaq can't call host functions,
@@ -557,7 +557,7 @@ pub fn check_starlark(path: &str, script: &str) -> Result<(), String> {
     }
 }
 
-/// Run a Starlark plugin against `input`. The plugin must define
+/// Run a Starlark script against `input`. The script must define
 /// `def transform(input): … return <object>`; the host appends a call that
 /// JSON-encodes the result, so the return value crosses back as JSON. The
 /// `json` stdlib extension and the container-parse helpers
@@ -614,7 +614,7 @@ pub(crate) fn run_starlark_inner(
         serde_json::to_string(&input_doc).map_err(|e| CollectError::Runtime(e.to_string()))?;
     let source = format!("{script}\njson.encode(transform(json.decode({input_literal})))\n");
 
-    let ast = AstModule::parse("plugin.star", source, &Dialect::Standard)
+    let ast = AstModule::parse("transform.star", source, &Dialect::Standard)
         .map_err(|e| CollectError::Runtime(format!("starlark parse: {e}")))?;
     let globals = GlobalsBuilder::extended_by(&[LibraryExtension::Json])
         .with(collect_helpers)
@@ -1024,7 +1024,7 @@ mod tests {
     /// garbled, the script must still emit one report with no facts.
     #[test]
     fn jaq_type_coverage_script_tolerates_a_missing_report() {
-        let program = include_str!("../../../oxplow/plugins/type_coverage.jq");
+        let program = include_str!("../../../oxplow/collectors/type_coverage.jq");
         for input in [
             json!({}),
             json!({ "report": null }),
@@ -1057,7 +1057,7 @@ mod tests {
     #[test]
     fn jaq_impure_builtins_are_unavailable() {
         // Determinism/trust guarantee: env/now/input must not resolve, so a
-        // plugin can't read the host environment or clock (which would make
+        // program can't read the host environment or clock (which would make
         // `observed` output non-deterministic/leaky).
         for prog in ["env", "now", "input"] {
             assert!(
@@ -1210,7 +1210,7 @@ def transform(input):
 
     #[test]
     fn coverage_json_carries_branch_and_function_counts() {
-        // tsk123: the plugins emit camelCase branch/function counts; they
+        // tsk123: the parsers emit camelCase branch/function counts; they
         // deserialize onto the typed FileCoverage.
         let v = json!({ "files": { "x": {
             "instrumented": [1, 2], "covered": [1],

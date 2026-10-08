@@ -360,7 +360,7 @@ impl AiCompute {
     }
 }
 
-/// [`AiCompute`] as a collector's `ai_*` oracle (`oxplow_collect_plugin`),
+/// [`AiCompute`] as a collector's `ai_*` oracle (`oxplow_script`),
 /// recording as `caller` (`collector:<owner>/<id>`). The script runs on a
 /// worker thread outside the runtime; each call blocks it on the runtime
 /// the oracle was made on.
@@ -391,7 +391,7 @@ impl CollectorOracle {
     }
 }
 
-impl oxplow_collect_plugin::AiOracle for CollectorOracle {
+impl oxplow_script::AiOracle for CollectorOracle {
     fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
         self.run(self.compute.classify(&self.caller, text, labels))
     }

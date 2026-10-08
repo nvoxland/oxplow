@@ -61,7 +61,7 @@ which is that oxplow steers and never drives a doing-agent.
 A cloned or pulled repo is **untrusted** (decided 2026-09-27, tsk331 /
 tsk162). Its committed config can name programs:
 
-- `exec` collectors (the project's fact collectors) and collection plugins in
+- `exec` collectors (the project's fact and report collectors) in
   `.oxplow/project.yaml`;
 - `exec` sources in `oxplow/extensions/*/extension.yaml`;
 - advisories in a shared extension (committed or git-installed): SQL whose
@@ -76,7 +76,7 @@ None of these run until a person approves that program on their machine.
 
 - **What an approval covers.** It is bound to a hash of what runs
   (tsk347):
-  - the program's content, plus for a project collector or plugin every file in its
+  - the program's content, plus for a project collector every file in its
     directory (a helper it sources), unless that's the project root;
   - its args, plus the content of any arg that names a file, read where
     the program runs (an ACP agent from its stream's worktree), so
@@ -126,7 +126,7 @@ A new way for config to start a program must go through the same gate.
 > **Superseded direction (2026-09-28, epic tsk393).** The target is now
 > anchors + an event
 > log + SQL models, with capabilities and commands as the act side, and
-> everything pluggable through declared plugin kinds. The section below
+> everything pluggable through the kinds of contribution an extension declares. The section below
 > describes the current code, which that epic moves away from phase by
 > phase.
 

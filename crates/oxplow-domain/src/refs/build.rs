@@ -45,6 +45,11 @@ pub fn lens_ref(id: &str) -> String {
     format!("lens:{id}")
 }
 
+/// An extension, by its name.
+pub fn extension_ref(name: &str) -> String {
+    format!("extension:{name}")
+}
+
 pub fn effort_ref(id: EffortId) -> String {
     format!("effort:{id}")
 }

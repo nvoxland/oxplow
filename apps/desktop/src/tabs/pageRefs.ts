@@ -280,7 +280,7 @@ export function extPageRef(extension: string, page: string, params?: Record<stri
 
 /** The page that opens a ref of an extension's kind: the page its
  *  `ref_kinds:` entry names, given `?ref=`. Null for any other ref. */
-function pluginRefPage(ref: string, kind: string): TabRef | null {
+function extensionRefPage(ref: string, kind: string): TabRef | null {
   const info = refKindInfo(kind);
   if (!info) return null;
   const ext = extPageOf(splitParams(info.page.slice("page:".length)).head);
@@ -305,7 +305,7 @@ export function searchHitTarget(hit: { kind: string; ref_id: string }): { page: 
     case "note":
       return null;
     default: {
-      const page = pluginRefPage(`${hit.kind}:${hit.ref_id}`, hit.kind);
+      const page = extensionRefPage(`${hit.kind}:${hit.ref_id}`, hit.kind);
       return page ? { page } : null;
     }
   }
@@ -650,7 +650,7 @@ export function refFromTabId(id: string): TabRef | null {
       return extPageRef(ext.extension, ext.page, Object.keys(extParams).length ? extParams : undefined);
     }
     default:
-      return pluginRefPage(id, kind);
+      return extensionRefPage(id, kind);
   }
 }
 

@@ -1,4 +1,4 @@
-//! `oxplow plugin test` (P5.D5, P7.C6; `.context/extensions.md` "The
+//! `oxplow extension test` (P5.D5, P7.C6; `.context/extensions.md` "The
 //! SDK"; `.context/providers.md` "The conformance kit"). Everything runs
 //! on a throwaway oxplow — an in-memory one over a copy of the project's
 //! `oxplow/extensions/` ([`Host`]) — so it never touches the project's
@@ -44,7 +44,7 @@ use crate::conformance::{first_mismatch, normalize, ReferenceClient};
 use crate::throwaway::Host;
 use crate::SdkError;
 
-/// What `plugin test` found.
+/// What `extension test` found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestReport {
@@ -68,7 +68,7 @@ pub struct TestReport {
 /// Run every test of extension `name` under `root`. `bless` writes the
 /// golden transcripts instead of comparing them. A provider's credentials
 /// and declared `env` come from this process's environment, as for a
-/// person running `oxplow plugin test`.
+/// person running `oxplow extension test`.
 pub async fn test_extension(root: &Path, name: &str, bless: bool) -> Result<TestReport, SdkError> {
     test_extension_in(root, name, bless, host::process_env()).await
 }
@@ -606,7 +606,7 @@ async fn collector_example(
     }
     if !spec.runtime.is_derived() {
         report.warnings.push(format!(
-            "{shown}:1: example `{example}` runs exec collector `{id}`, which `plugin test` \
+            "{shown}:1: example `{example}` runs exec collector `{id}`, which `extension test` \
              doesn't run (it needs a person's approval) — fix: none; run it from Settings → Data"
         ));
         return;
@@ -1236,7 +1236,7 @@ fn transcript(
     }
     let Ok(golden) = std::fs::read_to_string(dir.join(&file)) else {
         report.errors.push(format!(
-            "{shown}:1: no golden transcript — fix: run `oxplow plugin test <name> --bless` and \
+            "{shown}:1: no golden transcript — fix: run `oxplow extension test <name> --bless` and \
              commit it"
         ));
         return;
@@ -1534,13 +1534,13 @@ commands:
         );
     }
 
-    /// P7.C6: `plugin test` runs every kind's examples on a throwaway
+    /// P7.C6: `extension test` runs every kind's examples on a throwaway
     /// oxplow — a lens's rows, a starlark collector's typed entities from
     /// its fixture rows, a command's composition against the real
     /// registry — and its questions may name its own commands. An exec
     /// collector's example isn't run (it needs a person's approval).
     #[tokio::test(flavor = "multi_thread")]
-    async fn plugin_test_runs_every_kinds_examples() {
+    async fn extension_test_runs_every_kinds_examples() {
         let dir = tempfile::tempdir().unwrap();
         tally(
             dir.path(),
@@ -1643,7 +1643,7 @@ after:
     /// grow with arrivals (a row lands below the watermark, unseen) fails
     /// at the model's line; one that does passes.
     #[tokio::test(flavor = "multi_thread")]
-    async fn plugin_test_checks_incremental_models_against_a_full_refill() {
+    async fn extension_test_checks_incremental_models_against_a_full_refill() {
         let dir = tempfile::tempdir().unwrap();
         visits(dir.path(), 1, 2);
         let report = test_extension(dir.path(), "visits", false).await.unwrap();

@@ -32,7 +32,7 @@ use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
 use oxplow_db::ref_kind_store::RefKindRow;
 use oxplow_db::Database;
-use oxplow_domain::events::schema::{plugin_namespace, EventSchemaRegistry};
+use oxplow_domain::events::schema::{extension_namespace, EventSchemaRegistry};
 use oxplow_domain::refs::kind::{core_kinds, KindRegistry};
 use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 use oxplow_domain::DomainError;
@@ -210,7 +210,7 @@ fn build_tx(
     let mut by_namespace: HashMap<String, Vec<&str>> = HashMap::new();
     for d in declared.iter().filter(|d| declares(&d.types)) {
         by_namespace
-            .entry(plugin_namespace(&d.extension))
+            .entry(extension_namespace(&d.extension))
             .or_default()
             .push(&d.extension);
     }
@@ -219,7 +219,7 @@ fn build_tx(
         extension, types, ..
     } in declared
     {
-        let namespace = plugin_namespace(extension);
+        let namespace = extension_namespace(extension);
         let others: Vec<&str> = by_namespace
             .get(&namespace)
             .into_iter()
@@ -319,7 +319,7 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
     // holds `acme-pr`'s `acme_pr_`). A kind in two is the more specific
     // one's (tsk933): the other extension's declaration of it is refused,
     // naming whose it is, and only the owner's counts below.
-    let namespace = |e: &str| format!("{}_", oxplow_domain::events::schema::plugin_namespace(e));
+    let namespace = |e: &str| format!("{}_", oxplow_domain::events::schema::extension_namespace(e));
     let declaring: Vec<(&str, String)> = declared
         .iter()
         .map(|d| (d.extension.as_str(), namespace(&d.extension)))
@@ -604,7 +604,7 @@ mod tests {
             svc.db
                 .read(|tx| {
                     tx.query_row(
-                        "SELECT payload_days, content_days FROM plugin_event_retention \
+                        "SELECT payload_days, content_days FROM extension_event_retention \
                          WHERE namespace = 'acme_pr'",
                         [],
                         |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
@@ -793,7 +793,7 @@ mod tests {
             .db
             .read(|tx| {
                 tx.query_row(
-                    "SELECT payload_days, content_days FROM plugin_event_retention \
+                    "SELECT payload_days, content_days FROM extension_event_retention \
                      WHERE namespace = 'acme_pr'",
                     [],
                     |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
@@ -933,7 +933,7 @@ mod tests {
         );
         write(&root, "oxplow/extensions/beta/pull.sh", "#!/bin/sh\n");
 
-        // Loading alone (what `oxplow plugin check` sees): no error, and a
+        // Loading alone (what `oxplow extension check` sees): no error, and a
         // warning for each subscription.
         let loaded = crate::extensions::load_extensions(&root)
             .into_iter()

@@ -196,7 +196,7 @@ record `input_hash` NULL.
 An **entity collector** (a starlark derived source) calls `ai_classify(text,
 labels)`, `ai_score(text, levels)`, `ai_summarize(text, focus = None)`
 and `ai_extract(text, schema, instructions = "")` — Starlark builtins
-(`crates/oxplow-collect-plugin/src/ai.rs`) answered by the run's
+(`crates/oxplow-script/src/ai.rs`) answered by the run's
 `AiHost` in `Evaluator::extra` (the same pattern as a fact collector's
 `TreeHost`). The host holds
 a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,

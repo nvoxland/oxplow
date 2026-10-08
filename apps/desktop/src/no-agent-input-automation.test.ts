@@ -83,7 +83,7 @@ describe("no agent input automation", () => {
   // sends nothing. Only that button may call it — nothing runs it on a
   // disable, a refresh or an event.
   test("repairWithAgent is only referenced by the Extensions settings button", () => {
-    const allowed = new Set(["pluginHealth.ts", join("components", "ExtensionsSection.tsx")]);
+    const allowed = new Set(["contributionHealth.ts", join("components", "ExtensionsSection.tsx")]);
     const hits = sourceFiles()
       .filter((rel) => !allowed.has(rel))
       .filter((rel) => /\brepairWithAgent\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));

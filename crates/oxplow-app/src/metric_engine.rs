@@ -1262,7 +1262,7 @@ impl FoldMemo {
 /// while it's on, so it's "off — how to turn it on"; anything else isn't a
 /// metric (tsk1046). Every read and write of a metric by key says this.
 pub fn missing_metric(key: &str) -> String {
-    if oxplow_collect_plugin::builtin_metrics::builtin_metrics()
+    if oxplow_script::builtin_metrics::builtin_metrics()
         .iter()
         .any(|m| m.key == key)
     {

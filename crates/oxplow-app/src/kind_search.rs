@@ -1,5 +1,5 @@
 //! Search kinds whose rows come from a model (P9.D3, tsk864;
-//! `.context/refs.md` "Searchable kinds"): a plugin kind declared
+//! `.context/refs.md` "Searchable kinds"): an extension's kind declared
 //! `searchable: <model>` has that model's rows (`ref`, `title`, `body`)
 //! in the site-wide index (`search_fts`) under its kind, so the launcher
 //! finds `[[pr:12]]` by its title; core's tasks, comments, thread notes and
@@ -20,7 +20,7 @@
 //! is (re)registered, and a kind that is gone — its extension removed,
 //! its `searchable:` dropped — leaves the index with its entries.
 //!
-//! A plugin kind is bounded: at most [`MAX_ROWS`] rows, each body cut at
+//! An extension's kind is bounded: at most [`MAX_ROWS`] rows, each body cut at
 //! [`MAX_BODY`] bytes; core's aren't. A row whose `ref` isn't one of the
 //! kind's (`<kind>:<id>`, the id matching its pattern) is skipped. A
 //! recompute writes only the entries whose title or body changed, were
@@ -72,7 +72,7 @@ pub(crate) struct SearchableKind {
     /// The view's SQL as compiled: an edit of the model changes it — and
     /// what the index holds — without touching the tables (tsk851).
     sql: String,
-    /// What a row's `ref` is up to its id: `<kind>:` for a plugin kind,
+    /// What a row's `ref` is up to its id: `<kind>:` for an extension's kind,
     /// the canonical ref's for core's (`work_item:oxplow:`).
     ref_prefix: String,
     id_pattern: String,
@@ -268,7 +268,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
 }
 
 impl Assets {
-    /// Keep one search index per searchable plugin kind (see the module):
+    /// Keep one search index per searchable extension kind (see the module):
     /// new or changed ones (re)registered, gone ones stopped and their
     /// entries removed — also those of a kind that went while oxplow
     /// wasn't running (an `asset_state` row with no kind behind it). A
@@ -760,7 +760,7 @@ ref_kinds:
 }
 
 /// Core's kinds (tsk864): tasks, comments, thread notes and wiki pages,
-/// indexed from `v_search_<kind>` by the same assets as a plugin kind.
+/// indexed from `v_search_<kind>` by the same assets as an extension's kind.
 #[cfg(test)]
 mod core_tests {
     use std::future::Future;

@@ -1,5 +1,5 @@
 [package]
-name = "oxplow-collect-plugin"
+name = "oxplow-script"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 # Typed output contracts (CoverageReport / TestReport) are reused from the
-# pure-parse crate so a plugin's output is the same shape oxplow already stores.
+# pure-parse crate so a collector's output is the same shape oxplow already stores.
 oxplow-coverage = { workspace = true }
 # The bundled parsers' table (name, what each records, its report format
 # and program) is the config's: one table for the check and the runtime.
@@ -23,7 +23,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 # Error type for native Starlark helper builtins (#[starlark_module] fns).
 anyhow = { workspace = true }
-# Container-parse helpers exposed to plugins (layer 1): XML/JSON/text → JSON.
+# Container-parse helpers exposed to scripts (layer 1): XML/JSON/text → JSON.
 quick-xml = { workspace = true }
 regex = { workspace = true }
 sxd-document = { workspace = true }

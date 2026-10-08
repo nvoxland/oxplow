@@ -1664,12 +1664,14 @@ fn subscribes(
     declared: &[crate::extension_event_types::EventTypeDecl],
     event_type: &str,
 ) -> Subscribes {
-    use oxplow_domain::events::schema::{is_core_type, plugin_namespace, plugin_type_namespace};
+    use oxplow_domain::events::schema::{
+        extension_namespace, extension_type_namespace, is_core_type,
+    };
     if is_core_type(event_type) || declared.iter().any(|d| d.event_type == event_type) {
         return Subscribes::Known;
     }
-    match plugin_type_namespace(event_type) {
-        Some(ns) if ns != plugin_namespace(extension) => Subscribes::Foreign,
+    match extension_type_namespace(event_type) {
+        Some(ns) if ns != extension_namespace(extension) => Subscribes::Foreign,
         _ => Subscribes::Unknown,
     }
 }
@@ -1872,7 +1874,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     Some((entry, Some(script)))
                         if c.runtime == oxplow_config::collectors::CollectorRuntime::Starlark =>
                     {
-                        match oxplow_collect_plugin::runtime::check_starlark(entry, &script) {
+                        match oxplow_script::runtime::check_starlark(entry, &script) {
                             Ok(()) => ext.collectors.push(c),
                             Err(e) => ext.errors.push(at(
                                 &file,
@@ -2862,8 +2864,8 @@ async fn disabled_sources(
             };
             let reason = layer
                 .query_sql(
-                    "SELECT reason FROM v_plugin_health
-                      WHERE plugin = ?1 AND contribution = ?2 AND state = 'disabled'",
+                    "SELECT reason FROM v_contribution_health
+                      WHERE extension = ?1 AND contribution = ?2 AND state = 'disabled'",
                     vec![SqlCell::Text(ext.name.clone()), SqlCell::Text(c.id.clone())],
                     Some(1),
                 )
@@ -3926,7 +3928,7 @@ pub fn save_lens(
     }
     std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
     if !manifest.exists() {
-        // The same v2 manifest `oxplow plugin new` writes, so a lens saved
+        // The same v2 manifest `oxplow extension new` writes, so a lens saved
         // from Explore Data starts as a checkable extension with an intent.
         std::fs::write(
             &manifest,
@@ -3999,7 +4001,7 @@ fn lens_file_yaml(spec: &LensSpec) -> Result<String, DomainError> {
 }
 
 /// What a scaffolded `extension.yaml` says. One template for
-/// `oxplow plugin new` and `save_lens`, so every new extension starts
+/// `oxplow extension new` and `save_lens`, so every new extension starts
 /// with an intent and passes `check`.
 pub struct ManifestScaffold<'a> {
     pub name: &'a str,
@@ -5221,9 +5223,9 @@ empty: No items.
             .await
             .unwrap();
         db.transaction(|tx| {
-            oxplow_db::plugin_health_store::disable_tx(
+            oxplow_db::contribution_health_store::disable_tx(
                 tx,
-                &crate::collector_runner::plugin_key("gh", "prs"),
+                &crate::collector_runner::contribution_key("gh", "prs"),
                 "3 failures in a row; the last: boom",
                 "t",
             )

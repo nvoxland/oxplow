@@ -5,15 +5,15 @@ import {
   enableAgain,
   healthLine,
   healthOf,
-  pluginHealthFromResult,
+  contributionHealthFromResult,
   repairMention,
   repairWithAgent,
-  type PluginHealth,
-} from "./pluginHealth.js";
+  type ContributionHealth,
+} from "./contributionHealth.js";
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 const COLUMNS = [
-  "plugin",
+  "extension",
   "contribution",
   "kind",
   "state",
@@ -31,12 +31,12 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
     columns: COLUMNS,
     rows,
     truncated: false,
-    reads: { models: ["v_plugin_health"], tables: [], measures: [] },
+    reads: { models: ["v_contribution_health"], tables: [], measures: [] },
     freshness: {},
   }) as unknown as SqlQueryResult;
 
-const health = (over: Partial<PluginHealth>): PluginHealth => ({
-  plugin: "tracker",
+const health = (over: Partial<ContributionHealth>): ContributionHealth => ({
+  extension: "tracker",
   contribution: "issues",
   kind: "collector",
   state: "ok",
@@ -51,7 +51,7 @@ const health = (over: Partial<PluginHealth>): PluginHealth => ({
 });
 
 test("rows read as health", () => {
-  const [h] = pluginHealthFromResult(
+  const [h] = contributionHealthFromResult(
     result([["tracker", "issues", "collector", "disabled", "3 failures", 3, "boom", 12.5, 2, 0, "work_item:oxplow:tsk9"]]),
   );
   expect(h).toEqual(
@@ -69,7 +69,7 @@ test("rows read as health", () => {
 });
 
 test("an extension's health is its contributions'", () => {
-  const rows = [health({}), health({ plugin: "other" }), health({ contribution: "prs" })];
+  const rows = [health({}), health({ extension: "other" }), health({ contribution: "prs" })];
   expect(healthOf(rows, "tracker").map((h) => h.contribution)).toEqual(["issues", "prs"]);
 });
 
@@ -115,7 +115,7 @@ test("Repair with the Agent fills the agent input with the mention, and only tha
   expect(inserted).toEqual(["Repair the extension described in [oxplow ref work_item:issues:ENG-12] — read it first."]);
 });
 
-test("Enable Again runs plugin.enable as the person", async () => {
+test("Enable Again runs oxplow.contribution.enable as the person", async () => {
   const runs: unknown[][] = [];
   const commands = {
     run: async (label: string, command: string, input: unknown) => {
@@ -124,5 +124,5 @@ test("Enable Again runs plugin.enable as the person", async () => {
     },
   } as unknown as PersonCommands;
   await enableAgain(health({ state: "disabled" }), commands);
-  expect(runs).toEqual([["Enable tracker/issues", "oxplow.plugin.enable", { plugin: "tracker", kind: "collector", contribution: "issues" }]]);
+  expect(runs).toEqual([["Enable tracker/issues", "oxplow.contribution.enable", { extension: "tracker", kind: "collector", contribution: "issues" }]]);
 });

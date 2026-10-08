@@ -204,7 +204,7 @@ impl Language {
     }
 }
 
-/// Resolve a language by name (the string a `metrics:` plugin passes to
+/// Resolve a language by name (the string a metric script passes to
 /// `ast_query`). Accepts common aliases; case-insensitive.
 pub fn language_from_name(name: &str) -> Option<Language> {
     Some(match name.trim().to_ascii_lowercase().as_str() {
@@ -223,9 +223,9 @@ pub fn language_from_name(name: &str) -> Option<Language> {
     })
 }
 
-// Path-extension → language resolution lives in [`crate::plugin`] now: the
-// per-language `LanguagePlugin::extensions` is the single source of truth
-// (`plugin::language_for_path`). See `.context/language-plugins.md`.
+// Path-extension → language resolution lives in [`crate::language`] now: the
+// per-language `LanguageSupport::extensions` is the single source of truth
+// (`language::language_for_path`). See `.context/language-support.md`.
 
 /// Resolve an LSP `languageId` (the string a language server / editor
 /// uses to label a buffer, e.g. `"typescriptreact"`) to the canonical

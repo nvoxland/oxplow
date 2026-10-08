@@ -20,7 +20,7 @@ export interface ExtensionRowModel {
 }
 
 /** `ext`'s row; `checked` is what its check (`validate_extension`, the dry
- *  run `oxplow plugin check` prints) found — a lens whose SQL fails passes
+ *  run `oxplow extension check` prints) found — a lens whose SQL fails passes
  *  loading, so its errors show only there (tsk1039). Each error once. */
 export function extensionRowModel(ext: Extension, checked: string[] = []): ExtensionRowModel {
   const errors = [...new Set([...ext.errors, ...checked])];

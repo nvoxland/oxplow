@@ -51,10 +51,10 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     for link in classify_wikilinks(world.kinds, body) {
         match (&link.reference, &link.canonical) {
             // A kind the vocabulary knows with no typed probe here: a
-            // plugin kind is checked against its `resolve` model, any
+            // kind an extension declares is checked against its `resolve` model, any
             // other is a link as it stands (tsk894).
             (None, Some(canonical)) => {
-                if let Some(reason) = unresolved_plugin_ref(world, canonical) {
+                if let Some(reason) = unresolved_extension_ref(world, canonical) {
                     out.push(LinkWarning {
                         target: link.raw.clone(),
                         reason,
@@ -239,11 +239,11 @@ fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -
         .unwrap_or(false)
 }
 
-/// `Some(reason)` when `canonical` is of a plugin kind whose `resolve`
+/// `Some(reason)` when `canonical` is of an extension's kind whose `resolve`
 /// model has no row for it (`v_ref_kind.resolve`, by its `ref` column).
 /// A kind with no `resolve` model, or one that can't be read, isn't
 /// probed.
-fn unresolved_plugin_ref(
+fn unresolved_extension_ref(
     world: &LinkWorld<'_>,
     canonical: &oxplow_domain::refs::grammar::CanonicalRef,
 ) -> Option<String> {

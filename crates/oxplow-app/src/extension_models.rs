@@ -241,9 +241,9 @@ mod tests {
             .is_err());
     }
 
-    /// P4.9 (tsk494): `validate_extension` (what `oxplow plugin check`
+    /// P4.9 (tsk494): `validate_extension` (what `oxplow extension check`
     /// runs) catches a breaking change at a published version before it
-    /// is published, and a plugin's `source()` of a core table.
+    /// is published, and an extension's `source()` of a core table.
     #[tokio::test]
     async fn validate_catches_a_breaking_change_and_a_foreign_source() {
         let f = crate::test_fixtures::services_with_effort().await;

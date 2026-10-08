@@ -48,12 +48,12 @@ platforms = [
 workspace-members = [
     "oxplow-code-dup",
     "oxplow-code-metrics",
-    "oxplow-collect-plugin",
     "oxplow-coverage",
     "oxplow-domain",
     "oxplow-provider-fake",
     "oxplow-provider-mcp",
     "oxplow-provider-protocol",
+    "oxplow-script",
 ]
 third-party = [
     { name = "block2" },

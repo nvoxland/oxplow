@@ -56,7 +56,7 @@ Things I keep forgetting. Read this before adding any UI.
   request when it mounts. A page that shows state from outside any model
   refreshes on the event that says it changed (Integrations and Data on
   `approvalsChanged`, sent when a person approves a program). Integrations
-  also re-reads when an instance's health is recorded (`v_plugin_health`,
+  also re-reads when an instance's health is recorded (`v_contribution_health`,
   through `useRerunOnChange`): Enable's own `configChanged` can be read
   before the instance has started, and nothing else says it finished
   (tsk1053).
@@ -911,7 +911,7 @@ no caller may bypass the bus to write to the terminal.
 - **Repair with the Agent** (P7.C3, Settings → Extensions, on a disabled
   contribution with an open repair item) is the same gesture: it fills
   the input with `Repair the extension described in [oxplow ref <item>]
-  — read it first.` (`pluginHealth.ts` → `repairWithAgent`). The brief
+  — read it first.` (`contributionHealth.ts` → `repairWithAgent`). The brief
   itself is the work item's body, not the inserted line — a one-line
   mention is all `insertIntoAgent` can carry.
 - **Visual feedback**: drop target shows a dashed accent border +

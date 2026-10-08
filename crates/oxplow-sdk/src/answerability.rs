@@ -2,7 +2,7 @@
 //! "Answerability"): can an agent that reads the right skill answer the
 //! questions a capability exists for?
 //!
-//! A questions file (`crates/oxplow-plugin/assets/questions/<capability>.yaml`,
+//! A questions file (`crates/oxplow-agent-text/assets/questions/<capability>.yaml`,
 //! or an extension's own `questions.yaml`) lists entries:
 //!
 //! ```yaml

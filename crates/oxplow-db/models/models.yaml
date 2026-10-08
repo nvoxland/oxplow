@@ -707,7 +707,7 @@
   tests:
     - { not_null: event_type }
 - name: ref_kind
-  version: 1
+  version: 2
   key: [kind]
   description: "Every kind of ref the running vocabulary knows: core's, and those extensions declare (`ref_kinds:`, with how to show one). A removed extension's kinds leave with it."
   columns:
@@ -720,16 +720,16 @@
     - { name: "resolve", type: "TEXT", doc: "The view whose `title` names one, by its `ref` column; NULL for a core kind." }
     - { name: "page", type: "TEXT", doc: "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind." }
     - { name: "icon", type: "TEXT", doc: "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind." }
-    - { name: "searchable", type: "TEXT", doc: "The view whose rows (`ref`, `title`, `body`) the site-wide search indexes under the kind; NULL for a core kind (core indexes its own) and for a plugin kind that isn't searchable." }
+    - { name: "searchable", type: "TEXT", doc: "The view whose rows (`ref`, `title`, `body`) the site-wide search indexes under the kind; NULL for a core kind (core indexes its own) and for an extension's kind that isn't searchable." }
   tests:
     - { not_null: kind }
-- name: plugin_health
+- name: contribution_health
   version: 1
-  description: "Each plugin contribution's health on this machine: a provider instance or a collector, under one failure policy — three failures in a row disable it until a person runs `oxplow.plugin.enable`."
+  description: "Each extension contribution's health on this machine: a provider instance, a collector or an effect, under one failure policy — three failures in a row disable it until a person runs `oxplow.contribution.enable`."
   columns:
-    - { name: "plugin", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "contribution", type: "TEXT", doc: "The provider's or collector's id within it." }
-    - { name: "kind", type: "TEXT", doc: "`provider` or `collector`." }
+    - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
+    - { name: "contribution", type: "TEXT", doc: "The provider's, collector's or effect's id within it." }
+    - { name: "kind", type: "TEXT", doc: "`provider`, `collector` or `effect`." }
     - { name: "state", type: "TEXT", doc: "`ok`, `failing` or `disabled`." }
     - { name: "reason", type: "TEXT", doc: "Why it's disabled." }
     - { name: "consecutive_failures", type: "INTEGER", doc: "Failures since its last success." }
@@ -738,11 +738,11 @@
     - { name: "mean_ms", type: "REAL", doc: "A moving average of its successful runs or calls, in milliseconds." }
     - { name: "next_due_at", type: "TEXT", doc: "When it should next run (a schedule's next slot), if it runs on one." }
     - { name: "updated_at", type: "TEXT", doc: "When this row last changed." }
-    - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<plugin>/<contribution>`) or of events about the plugin." }
+    - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<extension>/<contribution>`) or of events about its extension (subject `extension:<extension>`)." }
     - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed)." }
     - { name: "repair_item", type: "TEXT", doc: "The open repair work item filed when it was disabled; NULL once that item is done or canceled." }
   tests:
-    - { not_null: plugin }
+    - { not_null: extension }
 - name: snapshot
   version: 1
   description: "Snapshots: point-in-time captures of a stream's worktree, used to bracket efforts and diffs."
@@ -1273,7 +1273,7 @@
     - { unique: key }
 - name: metric_catalog
   version: 2
-  description: "The metric catalog: every metric this project can use — bundled gauges, always-on producers, entity metrics, plugin and project metrics — with whether it's enabled here. Read a metric's values with `MEASURE('<key>')` over `metric_grid()`; enable one with the `oxplow.metric.enable` command."
+  description: "The metric catalog: every metric this project can use — bundled gauges, always-on producers, entity metrics, extension and project metrics — with whether it's enabled here. Read a metric's values with `MEASURE('<key>')` over `metric_grid()`; enable one with the `oxplow.metric.enable` command."
   columns:
     - { name: key, type: TEXT, doc: "The metric key." }
     - { name: title, type: TEXT, doc: "Display name." }

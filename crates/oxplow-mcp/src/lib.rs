@@ -1365,7 +1365,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Check an extension after editing it (the same report as `oxplow plugin \
+        description = "Check an extension after editing it (the same report as `oxplow extension \
                        check`): manifest and lifecycle errors with file:line, unresolved \
                        cross-references, plus a dry run of every lens and advisory (SQL \
                        errors, `columns` keys the query doesn't return). `ok: true` means it \

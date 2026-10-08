@@ -1,5 +1,5 @@
 {
-  "plugin": "plugin:tracker",
+  "extension": "extension:tracker",
   "contribution": "fake",
   "kind": "provider"
 }

@@ -49,7 +49,7 @@ mock.module("../../api.js", () => ({
         columns: ["id", "consumer", "event_seq", "event_type", "error", "attempts", "last_failed_at"],
         rows: [
           [8, "change.analyze", 41, "snapshot.taken", "boom", 1, "t"],
-          [9, "plugin.repair", 42, "plugin.disabled", "boom", 1, "t"],
+          [9, "contribution.repair", 42, "contribution.disabled", "boom", 1, "t"],
         ],
         truncated: false,
         reads: { models: ["v_event_dead_letter"], tables: [], measures: [] },

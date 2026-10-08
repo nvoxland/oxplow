@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-# Pure data types only — report parsing lives in `oxplow-collect-plugin`.
+# Pure data types only — report parsing lives in `oxplow-script`.
 # Test-report types derive Serialize so the runtime can embed the parsed
 # suite/case tree directly in an observation payload.
 serde = { workspace = true }

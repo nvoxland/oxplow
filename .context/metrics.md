@@ -1489,7 +1489,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sample`(s);
 the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 
-> **The plan is for these to become bundled plugins** (jaq/Starlark/exec,
+> **The plan is for these to become bundled collectors** (jaq/Starlark/exec,
 > registered via `with_builtins()`) so producers are *content*, not hardcoded
 > Rust (tsk218). The hardcoded mirror helpers are the interim. The legacy
 > `effort_observation` path has already been **dropped** (tsk215) — the substrate
@@ -1711,16 +1711,16 @@ The mechanics behind those controls (unchanged by tsk117):
   (toggleable); (3) the built-in always-on producers
   (`builtin_producer_metrics()` — tokens, tests, coverage, analysis, effort
   lifecycle, nudges — listed regardless of recorded data so the user sees they
-  exist, tsk286); (4) every other seeded `metric_definition` — installed plugin
+  exist, tsk286); (4) every other seeded `metric_definition` — installed extension
   metrics and legacy rows. **Every entry is `toggleable: true` (tsk31)** — the
-  "always on" class is retired: producers/plugins can be enabled/disabled just
+  "always on" class is retired: producers/extensions can be enabled/disabled just
   like code metrics. `catalog()` reads each row's `enabled` from config
   (`config_state`): a built-in code metric is on only when a non-disabled `use:`
   resolves it — except `builtin_metrics::DEFAULT_ON` (`oxplow.todos`,
   `fn_count`, `long_functions`, `high_complexity_fns`: what fills
   `v_function`, so a new project can answer "which functions are longest";
   tsk1034), which `resolved_specs` uses unless the project mentions them;
-  producers/plugins are default-ON unless an `enabled: false` marker
+  producers/extensions are default-ON unless an `enabled: false` marker
   disables them, and so are those four.
 - **Enable/disable** via the `oxplow.metric.enable { keys, enabled }` command
   (`commands/metric.rs`; the desktop's `enable_metrics` IPC runs it as the
@@ -1729,7 +1729,7 @@ The mechanics behind those controls (unchanged by tsk117):
   undoable. Its config shape is
   default-aware (`apply_metric_enabled` + `is_default_on`): a default-OFF
   metric (built-in code metric / global def) toggles by the presence of a bare
-  `use:` entry, while a default-ON metric (producer/plugin) or a config `key:`
+  `use:` entry, while a default-ON metric (producer/extension) or a config `key:`
   definition toggles by an `enabled: false` **marker** (so disabling never
   deletes a `key:` definition). `seed_catalog` then **reconciles** the
   `metric_spec` table down to exactly the enabled set — upsert the enabled,
@@ -1851,8 +1851,8 @@ metrics:                              # the read SPEC (the chartable metric)
 - **Three metric scopes**, precedence **project > global > built-in** by key
   (collectors have three owners instead: `project`, an extension, `built-in`):
   - **built-in** — the bundled catalog
-    (`oxplow_collect_plugin::builtin_metrics()`; scripts under
-    `crates/oxplow-collect-plugin/src/plugins/metrics/<lang>/`, embedded via
+    (`oxplow_script::builtin_metrics()`; scripts under
+    `crates/oxplow-script/src/metrics/<lang>/`, embedded via
     `include_str!` in `builtin_metrics.rs`). Each authored through the **public**
     surface (`files()`/`ast_query()`) — no privileged Rust path — and verified by
     a golden test over a fixture corpus. A project activates one with
@@ -1868,7 +1868,7 @@ metrics:                              # the read SPEC (the chartable metric)
       measure `oxplow.doc_coverage`, V69, per-path; spec is a `ratio` %,
       higher-better, not a count so it's an inline `BuiltinMetric`/`NewMetricSpec`
       rather than the count-only `code_metric`/`spec()` helpers). Built via the `code_metric` helper with
-      `language: ""`; the scripts (under `plugins/metrics/code/`) sweep the
+      `language: ""`; the scripts (under `oxplow-script`'s `metrics/code/`) sweep the
       `source_files()` reader and call a capability (`code_metrics()` /
       `markers()`), so the per-language knowledge lives in `oxplow-code-metrics`,
       not the metric. See "Language-agnostic capability layer" below.
@@ -1917,7 +1917,7 @@ metrics:                              # the read SPEC (the chartable metric)
   one but not `key:`-define under it). Collectors are definition-only (declared,
   never `use:`d). The project's collectors record facts — an entity collector
   belongs in an extension.
-- Validation mirrors the plugin rules: namespaced keys, project-relative
+- Validation mirrors the extension rules: namespaced keys, project-relative
   `entry` (no `..`), known runtime/aggregation/displayKind/trigger/direction;
   `report` only on a fact collector; `entities` or `facts`, not both;
   a `key:` metric must set exactly one of `sourceMeasure`/`formula`; a `use:` with
@@ -2023,7 +2023,7 @@ one that deletes facts, `db.memo().invalidate_all()`.
   written back as the file declared it (`ProjectConfig.collectors_yaml`) — a
   parsed `CollectorSpec` isn't the declared shape.
 - **Provenance is the spine** (carried from collection.md): in-process/parsed →
-  `observed`; agent-asserted / exec-tier → `asserted` / `plugin-exec:<name>`. The
+  `observed`; agent-asserted / exec-tier → `asserted` / `exec:<name>`. The
   UI must never let an asserted number pass for a measured one.
 - **Best-effort writes**: producers swallow metric errors so they never break
   the host (collection ride-along, Stop hook). A missing sample is a logged warn,

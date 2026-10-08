@@ -4420,7 +4420,6 @@ dependencies = [
  "oxplow-code-deps",
  "oxplow-code-dup",
  "oxplow-code-metrics",
- "oxplow-collect-plugin",
  "oxplow-config",
  "oxplow-coverage",
  "oxplow-db",
@@ -4435,6 +4434,7 @@ dependencies = [
  "oxplow-provider-protocol",
  "oxplow-pty",
  "oxplow-runtime",
+ "oxplow-script",
  "oxplow-session",
  "oxplow-tasks",
  "oxplow-workspace-hack",
@@ -4505,29 +4505,6 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
-]
-
-[[package]]
-name = "oxplow-collect-plugin"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "globset",
- "jaq-core",
- "jaq-json",
- "jaq-std",
- "oxplow-code-dup",
- "oxplow-code-metrics",
- "oxplow-config",
- "oxplow-coverage",
- "quick-xml 0.42.0",
- "regex",
- "serde",
- "serde_json",
- "starlark",
- "sxd-document",
- "sxd-xpath",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -4899,12 +4876,12 @@ dependencies = [
  "futures",
  "oxplow-ai",
  "oxplow-app",
- "oxplow-collect-plugin",
  "oxplow-config",
  "oxplow-domain",
  "oxplow-oauth-redirect",
  "oxplow-oauth-sim",
  "oxplow-provider-protocol",
+ "oxplow-script",
  "oxplow-sdk",
  "reqwest",
  "rmcp",
@@ -4990,6 +4967,29 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "oxplow-script"
+version = "0.7.0"
+dependencies = [
+ "anyhow",
+ "globset",
+ "jaq-core",
+ "jaq-json",
+ "jaq-std",
+ "oxplow-code-dup",
+ "oxplow-code-metrics",
+ "oxplow-config",
+ "oxplow-coverage",
+ "quick-xml 0.42.0",
+ "regex",
+ "serde",
+ "serde_json",
+ "starlark",
+ "sxd-document",
+ "sxd-xpath",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

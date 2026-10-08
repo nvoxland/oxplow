@@ -1,4 +1,4 @@
-# The acceptance example from extension.yaml as a fixture for `oxplow plugin test`
+# The acceptance example from extension.yaml as a fixture for `oxplow extension test`
 # (input in, expected output out). Keep the two in step.
 name: basic
 input:

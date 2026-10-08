@@ -49,8 +49,8 @@ pub enum LspSessionError {
 
 /// Curated language-id → Mason package suggestion. The source of truth is
 /// now the per-language registry in `oxplow-code-metrics`
-/// (`plugin::mason_suggestion` — analysis languages carry their hint on the
-/// `LanguagePlugin` bundle, LSP-only languages fall back to a small table
+/// (`language::mason_suggestion` — analysis languages carry their hint on the
+/// `LanguageSupport` bundle, LSP-only languages fall back to a small table
 /// there). Still mirrored by `apps/desktop/src/lspSuggestions.ts` (keep the
 /// two in sync). Used to make `NoConfig` errors actionable for agents + UI.
 pub fn mason_suggestion(language: &str) -> Option<&'static str> {

@@ -1,7 +1,7 @@
-//! The per-language plugin registry — one cohesive bundle per language
+//! The per-language support registry — one cohesive bundle per language
 //! (tsk322, epic tsk320).
 //!
-//! `LanguagePlugin` is the single place that answers *"what does oxplow know
+//! `LanguageSupport` is the single place that answers *"what does oxplow know
 //! about language X?"*: its identity, file extensions, the curated LSP server
 //! suggestion, and the code units it exposes. It is the source of truth for
 //! the cross-cutting facets that used to be scattered across crates — the
@@ -10,16 +10,16 @@
 //!
 //! The static-analysis node tables (`LanguageSpec`: function/decision/
 //! container kinds) stay in [`crate::spec`] and are reached via
-//! [`LanguagePlugin::analysis_spec`]. The Tier-2 AST merge tables
+//! [`LanguageSupport::analysis_spec`]. The Tier-2 AST merge tables
 //! (`MergeSpec`) stay in `oxplow-git` (merge-specific) and the idiom-metric
-//! scripts stay in `oxplow-collect-plugin` (they need the Starlark runtime) —
+//! scripts stay in `oxplow-script` (they need the Starlark runtime) —
 //! both key off this same `Language` enum, so identity stays unified.
 //!
 //! **Compiled-in.** Language support ships with oxplow (decision tsk323): no
 //! dynamic grammar loading. Adding a language is a single, well-isolated
 //! change — one entry in this registry plus its `spec.rs` node tables (and,
 //! if it should merge, an `oxplow-git` `MergeSpec`). See
-//! `.context/language-plugins.md`.
+//! `.context/language-support.md`.
 
 use crate::spec::{language_from_lsp_id, Language, LanguageSpec};
 
@@ -54,7 +54,7 @@ impl UnitKind {
 
 /// Everything oxplow knows about one language, in one place.
 #[derive(Debug, Clone, Copy)]
-pub struct LanguagePlugin {
+pub struct LanguageSupport {
     /// Canonical identity (the single workspace-wide `Language`).
     pub language: Language,
     /// Human-facing name (e.g. `"C++"`, `"C#"`).
@@ -70,7 +70,7 @@ pub struct LanguagePlugin {
     pub unit_kinds: &'static [UnitKind],
 }
 
-impl LanguagePlugin {
+impl LanguageSupport {
     /// The static-analysis node tables for this language (complexity /
     /// container / decision-point kinds). Lives in [`crate::spec`].
     pub fn analysis_spec(&self) -> &'static LanguageSpec {
@@ -79,78 +79,78 @@ impl LanguagePlugin {
 }
 
 /// The bundled language registry — one entry per [`Language`] variant.
-static REGISTRY: &[LanguagePlugin] = &[
-    LanguagePlugin {
+static REGISTRY: &[LanguageSupport] = &[
+    LanguageSupport {
         language: Language::Rust,
         display_name: "Rust",
         extensions: &["rs"],
         lsp_mason_package: Some("rust-analyzer"),
         unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Module],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::TypeScript,
         display_name: "TypeScript",
         extensions: &["ts"],
         lsp_mason_package: Some("typescript-language-server"),
         unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Module],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::Tsx,
         display_name: "TSX",
         extensions: &["tsx"],
         lsp_mason_package: Some("typescript-language-server"),
         unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Module],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::JavaScript,
         display_name: "JavaScript",
         extensions: &["js", "mjs", "cjs", "jsx"],
         lsp_mason_package: Some("typescript-language-server"),
         unit_kinds: &[UnitKind::Function, UnitKind::Class],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::Python,
         display_name: "Python",
         extensions: &["py"],
         lsp_mason_package: Some("pyright"),
         unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Module],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::Go,
         display_name: "Go",
         extensions: &["go"],
         lsp_mason_package: Some("gopls"),
         unit_kinds: &[UnitKind::Function, UnitKind::Package],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::Java,
         display_name: "Java",
         extensions: &["java"],
         lsp_mason_package: None,
         unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Package],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::C,
         display_name: "C",
         extensions: &["c", "h"],
         lsp_mason_package: Some("clangd"),
         unit_kinds: &[UnitKind::Function],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::Cpp,
         display_name: "C++",
         extensions: &["cc", "cxx", "cpp", "hpp", "hxx"],
         lsp_mason_package: Some("clangd"),
         unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Module],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::Clojure,
         display_name: "Clojure",
         extensions: &["clj", "cljs", "cljc"],
         lsp_mason_package: None,
         unit_kinds: &[UnitKind::Function, UnitKind::Module],
     },
-    LanguagePlugin {
+    LanguageSupport {
         language: Language::CSharp,
         display_name: "C#",
         extensions: &["cs"],
@@ -159,16 +159,16 @@ static REGISTRY: &[LanguagePlugin] = &[
     },
 ];
 
-/// The bundled language registry — one [`LanguagePlugin`] per supported
+/// The bundled language registry — one [`LanguageSupport`] per supported
 /// language.
-pub fn registry() -> &'static [LanguagePlugin] {
+pub fn registry() -> &'static [LanguageSupport] {
     REGISTRY
 }
 
-/// The plugin bundle for a given language. Every `Language` variant has
+/// The support bundle for a given language. Every `Language` variant has
 /// exactly one registry entry (guarded by a test), so this never returns
 /// `None` for a valid variant.
-pub fn for_language(language: Language) -> &'static LanguagePlugin {
+pub fn for_language(language: Language) -> &'static LanguageSupport {
     registry()
         .iter()
         .find(|p| p.language == language)
@@ -280,9 +280,9 @@ mod tests {
             let matches = registry().iter().filter(|p| p.language == *lang).count();
             assert_eq!(matches, 1, "expected one registry entry for {lang:?}");
             // Every language exposes functions, and resolves to its spec.
-            let plugin = for_language(*lang);
-            assert!(plugin.unit_kinds.contains(&UnitKind::Function));
-            let _ = plugin.analysis_spec();
+            let support = for_language(*lang);
+            assert!(support.unit_kinds.contains(&UnitKind::Function));
+            let _ = support.analysis_spec();
         }
     }
 

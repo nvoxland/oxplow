@@ -1,2 +1,2 @@
-# The instance config `oxplow plugin test` checks the provider with.
+# The instance config `oxplow extension test` checks the provider with.
 config: {}

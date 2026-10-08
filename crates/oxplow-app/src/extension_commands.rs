@@ -34,7 +34,7 @@ use crate::extensions::{CommandSchemas, Extension};
 
 /// An example run of a command: its input, and the commands its script
 /// should compose, in order — or the refusal it should make (checked by
-/// `oxplow plugin check` / Settings).
+/// `oxplow extension check` / Settings).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandExample {
@@ -432,7 +432,7 @@ fn command_of(
             }
             let script = read(&entry)
                 .ok_or_else(|| at_name(format!("entry `{entry}` isn't a file in the extension")))?;
-            oxplow_collect_plugin::runtime::check_starlark(&entry, &script)
+            oxplow_script::runtime::check_starlark(&entry, &script)
                 .map_err(|e| at_name(format!("entry `{entry}` {e}")))?;
             (
                 CommandHandler::Script { entry, script },
@@ -657,7 +657,7 @@ pub fn own_events(
                     invalid(format!(
                         "the script may emit only the event types `{extension}` declares \
                          (`{}.*`); `{}` isn't one",
-                        oxplow_domain::events::schema::plugin_namespace(extension),
+                        oxplow_domain::events::schema::extension_namespace(extension),
                         e.event_type
                     ))
                 })?;
@@ -689,8 +689,8 @@ pub enum Composed {
 /// collector's runaway catch: composing a few commands is milliseconds.
 /// (A timeout detaches the worker rather than stopping it — see
 /// `run_sandboxed` — but the transaction is released.)
-pub const COMMAND_SCRIPT_BUDGET: oxplow_collect_plugin::SandboxBudget =
-    oxplow_collect_plugin::SandboxBudget::with_timeout(std::time::Duration::from_secs(5));
+pub const COMMAND_SCRIPT_BUDGET: oxplow_script::SandboxBudget =
+    oxplow_script::SandboxBudget::with_timeout(std::time::Duration::from_secs(5));
 
 /// The most examples one command may declare: `check_extension` runs
 /// each one's script.
@@ -706,7 +706,7 @@ pub fn compose_calls(
     input: Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
-    let out = oxplow_collect_plugin::scope::run_starlark_serving(
+    let out = oxplow_script::scope::run_starlark_serving(
         &COMMAND_SCRIPT_BUDGET,
         script,
         &json!({ "input": input }),
@@ -1172,7 +1172,7 @@ pub fn call_names(calls: &[CommandCall]) -> Vec<&str> {
 /// calls answered from `answers` or for real (reads only: `sql.read`
 /// through `layer`), and — when it composes — each command against
 /// `registry` (it exists, its input fits). What the script decided;
-/// nothing runs. `check`'s examples and `oxplow plugin test`'s intent
+/// nothing runs. `check`'s examples and `oxplow extension test`'s intent
 /// examples both run it.
 pub async fn dry_run(
     layer: &crate::sql_gateway::SqlGateway,

@@ -7,7 +7,7 @@
  * One process-wide list, loaded by `useRefKindsLoader` (mounted once, in
  * `App`) and re-read when `v_ref_kind` changes; the pure helpers
  * (`pageKindIconComponent`, `refFromTabId`, `preprocessWikilinks`) read
- * the current list, and components that render plugin refs subscribe with
+ * the current list, and components that render refs of extensions' kinds subscribe with
  * `useRefKinds` so they redraw when it changes.
  */
 import {
@@ -139,7 +139,7 @@ export function refKindIcon(kind: string): LucideIcon | null {
  * id must match the kind's pattern, as the backend's `canonical_wikilink`
  * checks.
  */
-export function pluginWikilinkRef(interior: string): string | null {
+export function extensionWikilinkRef(interior: string): string | null {
   const colon = interior.indexOf(":");
   if (colon <= 0) return null;
   const head = interior.slice(0, colon).toLowerCase();
@@ -167,7 +167,7 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** The extensions' ref kinds; a component that draws plugin refs reads
+/** The extensions' ref kinds; a component that draws refs of those kinds reads
  *  this so it redraws when they change. */
 export function useRefKinds(): ReadonlyMap<string, RefKind> {
   return useSyncExternalStore(
@@ -209,7 +209,7 @@ export function useRefKindsLoader(): void {
 /** The title of an extension's ref from its kind's `resolve` model
  *  (`SELECT title … WHERE ref = ?`); null while loading, or when the
  *  model has no row for it. */
-export function usePluginRefTitle(ref: string | null): string | null {
+export function useExtensionRefTitle(ref: string | null): string | null {
   const kinds = useRefKinds();
   const kind = ref ? kinds.get(parseRef(ref)?.kind ?? "") : undefined;
   const [title, setTitle] = useState<string | null>(null);

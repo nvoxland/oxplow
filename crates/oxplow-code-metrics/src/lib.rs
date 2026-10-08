@@ -8,10 +8,10 @@
 //!
 //! Languages bundled: Rust, TypeScript, TSX, JavaScript, Python, Go,
 //! Java, C, C++, Clojure, C#. Each language is declared as one cohesive
-//! [`plugin::LanguagePlugin`] in the registry (identity, extensions, LSP
+//! [`language::LanguageSupport`] in the registry (identity, extensions, LSP
 //! suggestion, unit kinds) plus its `LanguageSpec` node tables in
 //! [`spec`]. Adding a language is a single, well-isolated change — see
-//! `.context/language-plugins.md`.
+//! `.context/language-support.md`.
 //!
 //! Files in unsupported languages are silently skipped (the caller
 //! sees no findings for them).
@@ -21,13 +21,13 @@ use std::path::Path;
 use tree_sitter::Node;
 
 mod ast;
-pub mod plugin;
+pub mod language;
 mod spec;
 
 pub use ast::{ast_query, parse, query, AstQueryError, QueryMatch};
-pub use plugin::{
-    for_language as language_plugin, language_for_path, mason_suggestion, registry, LanguagePlugin,
-    UnitKind,
+pub use language::{
+    for_language as language_support, language_for_path, mason_suggestion, registry,
+    LanguageSupport, UnitKind,
 };
 pub use spec::{
     language_from_lsp_id, language_from_name, Language, LanguageSpec, VisibilityStrategy,
@@ -77,10 +77,10 @@ pub struct FunctionMetrics {
 }
 
 /// A code "unit" — the generic, language-agnostic structural element the
-/// language-plugin epic (tsk320) builds navigation / roll-ups on. One per
+/// language-support epic (tsk320) builds navigation / roll-ups on. One per
 /// function, class-like container, module/namespace, or package the file
 /// participates in. The set of kinds a language exposes is declared on its
-/// [`plugin::LanguagePlugin::unit_kinds`].
+/// [`language::LanguageSupport::unit_kinds`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeUnit {
     /// What kind of unit this is.
@@ -123,7 +123,7 @@ pub fn list_units(path: &str, source: &str) -> Vec<CodeUnit> {
 
     // Package: path-derived, only when the language declares it as a unit
     // (Go, Java). Named by the file's parent directory.
-    if plugin::for_language(lang)
+    if language::for_language(lang)
         .unit_kinds
         .contains(&UnitKind::Package)
     {

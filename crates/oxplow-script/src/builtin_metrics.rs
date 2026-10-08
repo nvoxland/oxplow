@@ -71,7 +71,7 @@ const RUST: &[BuiltinMetric] = &[
         pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
-        script: include_str!("plugins/metrics/rust/unsafe_blocks.star"),
+        script: include_str!("metrics/rust/unsafe_blocks.star"),
     },
     BuiltinMetric {
         key: "oxplow.rust.unwrap_expect_calls",
@@ -90,7 +90,7 @@ const RUST: &[BuiltinMetric] = &[
         pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
-        script: include_str!("plugins/metrics/rust/unwrap_expect_calls.star"),
+        script: include_str!("metrics/rust/unwrap_expect_calls.star"),
     },
     BuiltinMetric {
         key: "oxplow.rust.panic_macros",
@@ -109,7 +109,7 @@ const RUST: &[BuiltinMetric] = &[
         pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
-        script: include_str!("plugins/metrics/rust/panic_macros.star"),
+        script: include_str!("metrics/rust/panic_macros.star"),
     },
 ];
 
@@ -135,28 +135,28 @@ const CODE: &[BuiltinMetric] = &[
         "TODO / FIXME markers",
         "TODO/FIXME/HACK/XXX/BUG markers in comments, across all languages.",
         "lower-better",
-        include_str!("plugins/metrics/code/todos.star"),
+        include_str!("metrics/code/todos.star"),
     ),
     code_metric(
         "oxplow.fn_count",
         "function count",
         "Total functions / methods defined, across all languages.",
         "neutral",
-        include_str!("plugins/metrics/code/fn_count.star"),
+        include_str!("metrics/code/fn_count.star"),
     ),
     code_metric(
         "oxplow.high_complexity_fns",
         "high-complexity functions",
         "Functions whose cyclomatic complexity exceeds the threshold, across all languages.",
         "lower-better",
-        include_str!("plugins/metrics/code/high_complexity_fns.star"),
+        include_str!("metrics/code/high_complexity_fns.star"),
     ),
     code_metric(
         "oxplow.long_functions",
         "long functions (>60 lines)",
         "Functions longer than 60 lines, across all languages.",
         "lower-better",
-        include_str!("plugins/metrics/code/long_functions.star"),
+        include_str!("metrics/code/long_functions.star"),
     ),
     // Doc coverage is a per-file RATIO (%), not a count, so it can't use the
     // count-based `code_metric` helper (tsk125).
@@ -177,7 +177,7 @@ const CODE: &[BuiltinMetric] = &[
         pacing: IMMEDIATE,
         runtime: "starlark",
         input: "text",
-        script: include_str!("plugins/metrics/code/doc_coverage.star"),
+        script: include_str!("metrics/code/doc_coverage.star"),
     },
 ];
 
@@ -209,7 +209,7 @@ const TREE: &[BuiltinMetric] = &[BuiltinMetric {
     },
     runtime: "starlark",
     input: "text",
-    script: include_str!("plugins/metrics/code/duplicate_lines.star"),
+    script: include_str!("metrics/code/duplicate_lines.star"),
 }];
 
 const fn code_metric(
@@ -280,7 +280,7 @@ const TS: &[BuiltinMetric] = &[
         "lower-better",
         "typescript",
         None,
-        include_str!("plugins/metrics/ts/any_usage.star"),
+        include_str!("metrics/ts/any_usage.star"),
     ),
     ast_metric(
         "oxplow.ts.non_null_assertions",
@@ -289,7 +289,7 @@ const TS: &[BuiltinMetric] = &[
         "lower-better",
         "typescript",
         None,
-        include_str!("plugins/metrics/ts/non_null_assertions.star"),
+        include_str!("metrics/ts/non_null_assertions.star"),
     ),
     ast_metric(
         "oxplow.ts.console_calls",
@@ -298,7 +298,7 @@ const TS: &[BuiltinMetric] = &[
         "lower-better",
         "typescript",
         None,
-        include_str!("plugins/metrics/ts/console_calls.star"),
+        include_str!("metrics/ts/console_calls.star"),
     ),
     ast_metric(
         "oxplow.ts.ts_ignore",
@@ -307,7 +307,7 @@ const TS: &[BuiltinMetric] = &[
         "lower-better",
         "typescript",
         None,
-        include_str!("plugins/metrics/ts/ts_ignore.star"),
+        include_str!("metrics/ts/ts_ignore.star"),
     ),
 ];
 
@@ -318,7 +318,7 @@ const CLOJURE: &[BuiltinMetric] = &[ast_metric(
     "neutral",
     "clojure",
     None,
-    include_str!("plugins/metrics/clojure/defn_count.star"),
+    include_str!("metrics/clojure/defn_count.star"),
 )];
 
 const CSHARP: &[BuiltinMetric] = &[
@@ -329,7 +329,7 @@ const CSHARP: &[BuiltinMetric] = &[
         "lower-better",
         "csharp",
         None,
-        include_str!("plugins/metrics/csharp/empty_catch.star"),
+        include_str!("metrics/csharp/empty_catch.star"),
     ),
     ast_metric(
         "oxplow.csharp.blocking_async_calls",
@@ -338,7 +338,7 @@ const CSHARP: &[BuiltinMetric] = &[
         "lower-better",
         "csharp",
         None,
-        include_str!("plugins/metrics/csharp/blocking_async_calls.star"),
+        include_str!("metrics/csharp/blocking_async_calls.star"),
     ),
 ];
 

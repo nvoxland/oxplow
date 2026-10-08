@@ -8,13 +8,13 @@
 //! |---|---|---|
 //! | `agent` | 30 days | 14 days |
 //! | `test`, `code`, `collector`, `effect` | 90 days | 30 days |
-//! | a plugin's (any namespace core doesn't own) | 30 days, or its declared window | 14 days, or its declared window |
+//! | an extension's (any namespace core doesn't own) | 30 days, or its declared window | 14 days, or its declared window |
 //! | core's state (`snapshot`, `vcs`, `effort`, `work_item`, `command`, `config`, …) | kept | kept |
 //!
 //! The windows are `oxplow_domain::events::retention`'s. A project may set
 //! its own per namespace (`eventRetention`, a person's key): it replaces
-//! core's default, and for a plugin's namespace it is capped at the
-//! plugin's window (tsk947).
+//! core's default, and for an extension's namespace it is capped at the
+//! extension's window (tsk947).
 //!
 //! An expired payload is replaced by `{}` and stamped `payload_expired_at`
 //! (the column is NOT NULL); an expired body's row is deleted, and a
@@ -22,7 +22,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_domain::events::retention::{RetentionWindow, CORE_WINDOWS, PLUGIN_DEFAULT};
+use oxplow_domain::events::retention::{RetentionWindow, CORE_WINDOWS, EXTENSION_DEFAULT};
 use oxplow_domain::{DomainError, Timestamp};
 use rusqlite::{params, OptionalExtension};
 
@@ -31,22 +31,25 @@ use crate::database::{map_sql_err, ts_to_string, Database};
 pub const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// Whether an extension may declare this window: at least a day, and no
-/// longer than [`PLUGIN_DEFAULT`] — a plugin may keep its rows for less,
+/// longer than [`EXTENSION_DEFAULT`] — an extension may keep its rows for less,
 /// never more.
 pub fn check_declared(payload_days: i64, content_days: i64) -> Result<(), String> {
-    let (p, c) = (PLUGIN_DEFAULT.payload_days, PLUGIN_DEFAULT.content_days);
+    let (p, c) = (
+        EXTENSION_DEFAULT.payload_days,
+        EXTENSION_DEFAULT.content_days,
+    );
     if payload_days < 1 || content_days < 1 {
         return Err("retention windows are at least 1 day".into());
     }
     if payload_days > p {
         return Err(format!(
-            "`payload_days: {payload_days}` is longer than the {p}-day default; a plugin may \
+            "`payload_days: {payload_days}` is longer than the {p}-day default; an extension may \
              only keep its events for less"
         ));
     }
     if content_days > c {
         return Err(format!(
-            "`content_days: {content_days}` is longer than the {c}-day default; a plugin may \
+            "`content_days: {content_days}` is longer than the {c}-day default; an extension may \
              only keep its events for less"
         ));
     }
@@ -74,7 +77,7 @@ pub fn restate_declared_tx(
     for d in present {
         match d.window {
             Some((payload_days, content_days)) => conn.execute(
-                "INSERT INTO plugin_event_retention
+                "INSERT INTO extension_event_retention
                      (namespace, extension, payload_days, content_days, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT (namespace) DO UPDATE SET
@@ -85,7 +88,7 @@ pub fn restate_declared_tx(
                 params![d.namespace, d.extension, payload_days, content_days, now],
             ),
             None => conn.execute(
-                "DELETE FROM plugin_event_retention WHERE namespace = ?1",
+                "DELETE FROM extension_event_retention WHERE namespace = ?1",
                 [&d.namespace],
             ),
         }
@@ -97,7 +100,7 @@ pub fn restate_declared_tx(
 /// The namespaces the sweep expires and their windows: core's
 /// [`CORE_WINDOWS`], each replaced by the project's when it sets one; then
 /// every namespace in the log or the content store that core doesn't own,
-/// at its declared window or [`PLUGIN_DEFAULT`] — the project's when
+/// at its declared window or [`EXTENSION_DEFAULT`] — the project's when
 /// shorter, never longer.
 async fn windows(
     db: &Database,
@@ -110,7 +113,9 @@ async fn windows(
     let declared: std::collections::HashMap<String, (i64, i64)> = db
         .read(|tx| {
             let mut st = tx
-                .prepare("SELECT namespace, payload_days, content_days FROM plugin_event_retention")
+                .prepare(
+                    "SELECT namespace, payload_days, content_days FROM extension_event_retention",
+                )
                 .map_err(map_sql_err)?;
             let rows = st
                 .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))
@@ -120,11 +125,11 @@ async fn windows(
             Ok(rows)
         })
         .await?;
-    for ns in plugin_namespaces(db).await? {
-        let plugin = declared
+    for ns in extension_namespaces(db).await? {
+        let own = declared
             .get(&ns)
-            .map_or(PLUGIN_DEFAULT, |(p, c)| RetentionWindow::new(*p, *c));
-        let window = project.get(&ns).map_or(plugin, |w| w.at_most(plugin));
+            .map_or(EXTENSION_DEFAULT, |(p, c)| RetentionWindow::new(*p, *c));
+        let window = project.get(&ns).map_or(own, |w| w.at_most(own));
         out.push((ns, window));
     }
     Ok(out)
@@ -133,7 +138,7 @@ async fn windows(
 /// The namespaces with live payloads or stored bodies that core doesn't
 /// own. The log's are found by skipping through the live-payload index a
 /// namespace at a time (one probe each), never by scanning it.
-async fn plugin_namespaces(db: &Database) -> Result<Vec<String>, DomainError> {
+async fn extension_namespaces(db: &Database) -> Result<Vec<String>, DomainError> {
     db.read(|tx| {
         let mut found = std::collections::BTreeSet::new();
         let mut after = String::new();
@@ -179,7 +184,7 @@ pub struct SweepReport {
     /// Refused runs' audit rows past [`REFUSED_AUDIT_DAYS`], deleted.
     pub refused_audit_deleted: usize,
     /// A project's windows naming a namespace nothing logs (tsk985): kept
-    /// for a plugin not installed yet, and said, since a typo does nothing.
+    /// for an extension not installed yet, and said, since a typo does nothing.
     pub unused: Vec<String>,
 }
 
@@ -391,7 +396,7 @@ mod tests {
                 .map_err(crate::map_sql_err)?;
             }
             // `agentx.` sorts inside `agent%` but is another namespace — a
-            // plugin's, whose 29-day-old payload is within its 30 days.
+            // an extension's, whose 29-day-old payload is within its 30 days.
             let young = crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
                 now.unix_ms() - 29 * DAY_MS,
             ));
@@ -429,7 +434,7 @@ mod tests {
         assert_eq!(kept, "{\"a\":1}");
     }
 
-    /// P8.D5: an extension's declared window replaces the plugin default
+    /// P8.D5: an extension's declared window replaces the extension default
     /// for its namespace, and is kept when the extension goes; one present
     /// without a window goes back to the default.
     #[tokio::test]
@@ -481,7 +486,7 @@ mod tests {
                 "t",
             )?;
             let n: i64 = tx
-                .query_row("SELECT count(*) FROM plugin_event_retention", [], |r| {
+                .query_row("SELECT count(*) FROM extension_event_retention", [], |r| {
                     r.get(0)
                 })
                 .map_err(crate::map_sql_err)?;
@@ -579,10 +584,10 @@ mod tests {
         assert_eq!(report.unused, vec!["agnet".to_string()]);
     }
 
-    /// tsk947: a project can keep a plugin's events for less, never for
-    /// longer than its extension declared (or the plugin default).
+    /// tsk947: a project can keep an extension's events for less, never for
+    /// longer than its extension declared (or the extension default).
     #[tokio::test]
-    async fn a_plugin_namespace_cant_be_kept_longer_by_a_project() {
+    async fn an_extension_namespace_cant_be_kept_longer_by_a_project() {
         let db = Database::in_memory();
         let now = Timestamp::from_unix_ms(200 * DAY_MS);
         db.transaction(|tx| {
@@ -761,11 +766,11 @@ mod tests {
         assert_eq!(left, vec!["h-new", "h-test"], "test bodies keep 30 days");
     }
 
-    /// P7.B7: a plugin's namespace expires on the plugin default (payload
+    /// P7.B7: an extension's namespace expires on the extension default (payload
     /// 30 days, body 14); `collector` and `effect` payloads keep 90 days;
     /// core's state namespaces are still kept whole.
     #[tokio::test]
-    async fn plugin_namespaces_expire_on_the_default_and_collectors_keep_90_days() {
+    async fn extension_namespaces_expire_on_the_default_and_collectors_keep_90_days() {
         let db = Database::in_memory();
         let now = oxplow_domain::Timestamp::from_unix_ms(400 * DAY_MS);
         let days_ago = |d: i64| {

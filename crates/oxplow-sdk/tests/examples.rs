@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use oxplow_app::extension_catalog::ExtensionCatalog;
-use oxplow_sdk::{check, plugin_test::test_extension, render_findings, Format};
+use oxplow_sdk::{check, extension_test::test_extension, render_findings, Format};
 
 fn copy_dir(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();

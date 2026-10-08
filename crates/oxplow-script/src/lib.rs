@@ -1,4 +1,9 @@
-//! Pluggable, cross-language collection: report parsers defined as scripts
+//! The script runtimes oxplow runs what extensions and projects declare
+//! in: jaq and Starlark, sandboxed in-process, and the `exec` escape hatch
+//! (an external program). Collectors run in all three; effects and
+//! extension command handlers run Starlark ([`scope`]).
+//!
+//! Collection is cross-language: report parsers defined as scripts
 //! (a bundled set, plus a project's own report collectors' — tsk863)
 //! instead of hardcoded Rust `match` arms.
 //!
@@ -8,10 +13,10 @@
 //!    exposes normalizer helpers (`parse_xml`, `parse_json`, …) — added in a
 //!    later step. Scripts never touch the filesystem, which keeps an
 //!    in-process parse deterministic and trustworthy as `observed`.
-//! 2. **Field mapping (plugin-owned).** A *collector* maps the parsed value
+//! 2. **Field mapping (collector-owned).** A *collector* maps the parsed value
 //!    into a **typed output** for its kind — coverage line-sets or a test
 //!    suite/case tree. The typed shapes are reused verbatim from
-//!    [`oxplow_coverage`] so a plugin's output is exactly what oxplow stores.
+//!    [`oxplow_coverage`] so a collector's output is exactly what oxplow stores.
 //!
 //! **There is never a formless observation.** Every collector declares a
 //! [`CollectorKind`]; the genericity lives in this uniform definition
@@ -205,7 +210,7 @@ pub enum CollectError {
     /// The transform produced output that doesn't match the kind's schema.
     #[error("output shape error: {0}")]
     Shape(String),
-    /// An external-exec plugin failed to spawn or exited non-zero.
+    /// An `exec` collector's program failed to spawn or exited non-zero.
     #[error("exec error: {0}")]
     Exec(String),
     /// An in-process script exceeded its sandbox time budget.
@@ -282,7 +287,7 @@ enum Runner {
         input: CollectorInput,
         program: String,
     },
-    /// A Starlark `transform(input)` plugin. Same pre-parse + deserialize flow.
+    /// A Starlark `transform(input)` script. Same pre-parse + deserialize flow.
     Starlark {
         input: CollectorInput,
         script: String,
@@ -733,7 +738,7 @@ def transform(input):
         assert_eq!(out.as_test().expect("test").suites[0].name, "s");
     }
 
-    // ---- golden: bundled jaq plugins reproduce the Rust parsers exactly ----
+    // ---- golden: bundled jaq parsers reproduce the Rust parsers exactly ----
 
     const GOLD_COBERTURA: &str = r#"<?xml version="1.0"?>
 <coverage>
@@ -802,7 +807,7 @@ def transform(input):
   <testcase classname="tests.test_foo.TestBar" name="test_baz" time="0.01"/>
 </testsuite>"#;
 
-    // Committed expected values (the bundled jaq plugins are the only parser;
+    // Committed expected values (the bundled jaq parsers are the only parser;
     // these golden fixtures pin their output — no live Rust-parser oracle).
     fn cov(files: &[(&str, &[u32], &[u32])]) -> CoverageReport {
         let mut report = CoverageReport::default();
@@ -846,8 +851,8 @@ def transform(input):
     }
 
     #[test]
-    fn builtin_cobertura_plugin_produces_expected_coverage() {
-        let out = bundled("cobertura", GOLD_COBERTURA).expect("plugin runs");
+    fn builtin_cobertura_parser_produces_expected_coverage() {
+        let out = bundled("cobertura", GOLD_COBERTURA).expect("parser runs");
         let mut expected = cov(&[
             ("src/foo.rs", &[1, 2, 5], &[1, 5]),
             ("src/bar.rs", &[10], &[]),
@@ -858,8 +863,8 @@ def transform(input):
     }
 
     #[test]
-    fn builtin_lcov_plugin_produces_expected_coverage() {
-        let out = bundled("lcov", GOLD_LCOV).expect("plugin runs");
+    fn builtin_lcov_parser_produces_expected_coverage() {
+        let out = bundled("lcov", GOLD_LCOV).expect("parser runs");
         let mut expected = cov(&[
             ("src/foo.rs", &[1, 2, 5], &[1, 5]),
             ("src/bar.rs", &[10], &[]),
@@ -895,7 +900,7 @@ def transform(input):
     }
 
     #[test]
-    fn lcov_plugin_parses_a_whole_workspace_report_without_timing_out() {
+    fn lcov_parser_parses_a_whole_workspace_report_without_timing_out() {
         // tsk88: the real report here is 5.1MB / 196 files / 64k DA lines, and the
         // lcov parse landed right at the 5s SandboxBudget — so it timed out
         // intermittently under load and coverage was silently NEVER ingested for
@@ -964,7 +969,7 @@ def transform(input):
     }
 
     #[test]
-    fn lcov_plugin_cost_stays_linear_in_lines_per_file() {
+    fn lcov_parser_cost_stays_linear_in_lines_per_file() {
         // The original built each file's line lists with `.instrumented += [$n]`
         // inside a reduce — quadratic PER FILE. Doubling the lines in ONE file
         // quadrupled the work, so a single big generated file could blow any
@@ -1016,22 +1021,22 @@ def transform(input):
     }
 
     #[test]
-    fn builtin_jacoco_plugin_produces_expected_coverage() {
+    fn builtin_jacoco_parser_produces_expected_coverage() {
         let mut expected = cov(&[
             ("com/example/Foo.java", &[1, 2], &[1]),
             ("Root.java", &[7], &[7]),
         ]);
         // Foo.java counters: BRANCH 3/4, METHOD 2/2. Root.java has none → 0.
         set_bf(&mut expected, "com/example/Foo.java", 4, 3, 2, 2);
-        let out = bundled("jacoco", GOLD_JACOCO).expect("plugin runs");
+        let out = bundled("jacoco", GOLD_JACOCO).expect("parser runs");
         assert_eq!(out.as_coverage().unwrap(), &expected);
     }
 
     #[test]
-    fn builtin_junit_plugin_produces_expected_tree() {
+    fn builtin_junit_parser_produces_expected_tree() {
         use oxplow_coverage::{TestStatus, TestSuite};
 
-        let nextest = bundled("junit", GOLD_JUNIT_NEXTEST).expect("plugin runs");
+        let nextest = bundled("junit", GOLD_JUNIT_NEXTEST).expect("parser runs");
         let expected_nextest = TestReport {
             suites: vec![TestSuite {
                 name: "oxplow-app".into(),
@@ -1054,7 +1059,7 @@ def transform(input):
         };
         assert_eq!(nextest.as_test().unwrap(), &expected_nextest);
 
-        let pytest = bundled("junit", GOLD_JUNIT_PYTEST).expect("plugin runs");
+        let pytest = bundled("junit", GOLD_JUNIT_PYTEST).expect("parser runs");
         let expected_pytest = TestReport {
             suites: vec![TestSuite {
                 name: "pytest".into(),
@@ -1070,7 +1075,7 @@ def transform(input):
     }
 
     #[test]
-    fn builtin_plugins_skip_bad_fields_without_failing_the_report() {
+    fn builtin_parsers_skip_bad_fields_without_failing_the_report() {
         // A non-numeric line number is skipped; the valid lines still land
         // (the old Rust parsers were field-tolerant — keep that).
         let cobertura = r#"<coverage><packages><package><classes>
@@ -1080,7 +1085,7 @@ def transform(input):
             <line number="2" hits="0"/>
           </lines></class>
         </classes></package></packages></coverage>"#;
-        let out = bundled("cobertura", cobertura).expect("plugin still runs");
+        let out = bundled("cobertura", cobertura).expect("parser still runs");
         let f = out.as_coverage().unwrap().files.get("src/a.rs").unwrap();
         assert_eq!(
             f.instrumented.iter().copied().collect::<Vec<_>>(),
@@ -1090,7 +1095,7 @@ def transform(input):
 
         // lcov: a garbage DA line is skipped, the rest survive.
         let lcov = "SF:src/a.rs\nDA:1,3\nDA:junk\nDA:2,0\nend_of_record\n";
-        let out = bundled("lcov", lcov).expect("plugin still runs");
+        let out = bundled("lcov", lcov).expect("parser still runs");
         let f = out.as_coverage().unwrap().files.get("src/a.rs").unwrap();
         assert_eq!(
             f.instrumented.iter().copied().collect::<Vec<_>>(),
@@ -1100,12 +1105,12 @@ def transform(input):
     }
 
     #[test]
-    fn builtin_plugins_surface_malformed_input_as_error() {
+    fn builtin_parsers_surface_malformed_input_as_error() {
         assert!(bundled("cobertura", "<coverage><class").is_err());
         assert!(bundled("junit", "<testsuites><testcase").is_err());
     }
 
-    // ---- golden: bundled clippy / eslint analysis plugins ----
+    // ---- golden: bundled clippy / eslint analysis parsers ----
 
     use oxplow_coverage::{AnalysisFinding, AnalysisReport, Severity};
 
@@ -1139,8 +1144,8 @@ def transform(input):
 some plain text rustc emitted to the stream"#;
 
     #[test]
-    fn builtin_clippy_plugin_produces_expected_findings() {
-        let out = bundled("clippy", GOLD_CLIPPY).expect("plugin runs");
+    fn builtin_clippy_parser_produces_expected_findings() {
+        let out = bundled("clippy", GOLD_CLIPPY).expect("parser runs");
         let expected = AnalysisReport {
             findings: vec![
                 finding(
@@ -1186,8 +1191,8 @@ some plain text rustc emitted to the stream"#;
     ]"#;
 
     #[test]
-    fn builtin_eslint_plugin_produces_expected_findings() {
-        let out = bundled("eslint", GOLD_ESLINT).expect("plugin runs");
+    fn builtin_eslint_parser_produces_expected_findings() {
+        let out = bundled("eslint", GOLD_ESLINT).expect("parser runs");
         let expected = AnalysisReport {
             findings: vec![
                 finding(

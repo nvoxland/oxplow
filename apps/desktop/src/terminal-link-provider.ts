@@ -40,7 +40,7 @@ const URL_PREFIX_RE = /[a-zA-Z][\w+.-]*:\/?\/?$/;
  * Find file-path-shaped substrings in `line`. `validatePath`, when given, is a
  * final gate: a candidate that passes the shape heuristics but `validatePath`
  * rejects is dropped, so dotted words in prose that aren't real workspace
- * targets (e.g. a plugin name like `oxplow.junit`) don't become links. It's
+ * targets (e.g. a collector name like `oxplow.junit`) don't become links. It's
  * given the bare path (no `:line:col` suffix).
  *
  * NOTE: the memoized link provider deliberately calls this **without**

@@ -474,7 +474,7 @@ const LEGACY_MARKERS: &[&str] = &[
     "migrate_gauges",
     "gauges_to_collectors",
     "gauges_retired",
-    "plugin migrate",
+    "extension migrate",
     "hook_bridge.py",
 ];
 

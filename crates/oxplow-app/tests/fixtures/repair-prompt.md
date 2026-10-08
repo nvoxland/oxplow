@@ -23,7 +23,7 @@ entry: hot.star
 - collector `hot`: division by zero
 - collector `hot`: division by zero
 
-## What `oxplow plugin check` reports
+## What `oxplow extension check` reports
 
 - oxplow/extensions/work/extension.yaml:4: a warning
 
@@ -33,7 +33,7 @@ It targets oxplow `>=0.7`; this is oxplow 0.7.0.
 
 ## What to do
 
-1. Find why it fails: read the failures and its source, and reproduce one (`oxplow plugin test work`).
+1. Find why it fails: read the failures and its source, and reproduce one (`oxplow extension test work`).
 2. Fix it, keeping its purpose and examples.
-3. Check it: `oxplow plugin check work` and `oxplow plugin test work` must be clean.
-4. Say what you changed on this item. A person enables it again (`oxplow.plugin.enable`, Settings → Extensions); you can't.
+3. Check it: `oxplow extension check work` and `oxplow extension test work` must be clean.
+4. Say what you changed on this item. A person enables it again (`oxplow.contribution.enable`, Settings → Extensions); you can't.

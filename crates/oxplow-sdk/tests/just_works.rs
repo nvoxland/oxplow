@@ -1,6 +1,6 @@
-//! P7.C6: "just works", deterministically. For each kind `oxplow plugin
+//! P7.C6: "just works", deterministically. For each kind `oxplow extension
 //! new` makes: a temp project → scaffold → `check` (clean, no warnings) →
-//! `plugin test` (clean) → it loads in a real oxplow and does its job —
+//! `extension test` (clean) → it loads in a real oxplow and does its job —
 //! a lens's row action binds, a collector's entity and model publish, a
 //! command runs through the bus. A provider's stub is red until a real
 //! program stands behind it (the fake).
@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use oxplow_app::extension_catalog::ExtensionCatalog;
-use oxplow_sdk::{check, plugin_test::test_extension, render_findings, scaffold, Format, Kind};
+use oxplow_sdk::{check, extension_test::test_extension, render_findings, scaffold, Format, Kind};
 
 async fn project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -23,7 +23,7 @@ async fn project() -> tempfile::TempDir {
 
 /// Scaffold `kind` as `name`; `check` is clean with no warnings.
 async fn scaffolded(root: &Path, kind: &str, name: &str) {
-    let kind = Kind::parse(kind).unwrap_or_else(|| panic!("`plugin new {kind}`"));
+    let kind = Kind::parse(kind).unwrap_or_else(|| panic!("`extension new {kind}`"));
     scaffold(root, kind, name, Some("effort:eff1")).unwrap();
     let report = check(root, name, &ExtensionCatalog::new(), None, None, None)
         .await
@@ -32,7 +32,7 @@ async fn scaffolded(root: &Path, kind: &str, name: &str) {
     assert_eq!(report.warnings, Vec::<String>::new(), "{name}");
 }
 
-/// `plugin test` is clean; what ran.
+/// `extension test` is clean; what ran.
 async fn tested(root: &Path, name: &str) -> Vec<String> {
     let report = test_extension(root, name, false).await.unwrap();
     assert_eq!(report.errors, Vec::<String>::new(), "{name}");
@@ -300,7 +300,7 @@ fn fake_script(project: &Path, hooks: &str) -> String {
 async fn kit_on_a_fresh_service(
     project: &Path,
     bless: bool,
-) -> oxplow_sdk::plugin_test::TestReport {
+) -> oxplow_sdk::extension_test::TestReport {
     let kept = project.join(".oxplow");
     let entries = match std::fs::read_dir(&kept) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),

@@ -1,4 +1,4 @@
-# lcov coverage plugin (input: lcov → array of records).
+# lcov coverage parser (input: lcov → array of records).
 # Each record: { "SF": ["<path>"], "DA": ["<line>,<hits>[,…]"], … }.
 # A line is covered when hits > 0.
 # Malformed DA entries (non-numeric line) are skipped, not fatal — `tonumber?`
@@ -15,7 +15,7 @@
 #
 # `map` builds each array in a single pass, so no accumulator is ever copied.
 # Keep it that way: a `reduce` with `+=` over per-line data reintroduces the bug.
-# `lcov_plugin_parses_a_whole_workspace_report_well_inside_the_budget` pins it.
+# `lcov_parser_parses_a_whole_workspace_report_without_timing_out` pins it.
 {
   files: (
     map(

@@ -51,8 +51,8 @@ pub async fn set_credential(
     )?)
 }
 
-/// The programs the project's config would run (`exec` collectors and
-/// collection plugins) and whether this machine approved each. UI only.
+/// The programs the project's config would run (`exec` collectors,
+/// extensions' providers, effects and components) and whether this machine approved each. UI only.
 pub async fn list_project_programs(
     svc: &Services,
 ) -> Result<Vec<oxplow_app::exec_consent::ProjectProgram>, IpcError> {

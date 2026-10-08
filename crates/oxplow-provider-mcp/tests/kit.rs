@@ -1,5 +1,5 @@
 //! P7.A6: the `notes` fixture extension — an MCP server behind oxplow's
-//! adapter — passes `oxplow plugin test`: the handshake, the tool pin at
+//! adapter — passes `oxplow extension test`: the handshake, the tool pin at
 //! check, its `create` example, the read-back, and the work-items
 //! conformance suite through a throwaway host over the adapter.
 //! `OXPLOW_BLESS=1` rewrites its golden transcript.
@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use oxplow_sdk::plugin_test::test_extension;
+use oxplow_sdk::extension_test::test_extension;
 
 fn copy_dir(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
@@ -24,7 +24,7 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_notes_extension_passes_plugin_test_over_the_adapter() {
+async fn the_notes_extension_passes_extension_test_over_the_adapter() {
     let dir = tempfile::tempdir().unwrap();
     oxplow_app::vcs::GitProvider
         .init_repository(dir.path())
@@ -74,13 +74,13 @@ async fn the_notes_extension_passes_plugin_test_over_the_adapter() {
 }
 
 /// P9.B4: the same extension with its server reached by `url` — the notes
-/// served over streamable HTTP — passes `oxplow plugin test` too: the host
+/// served over streamable HTTP — passes `oxplow extension test` too: the host
 /// starts the adapter with `--url`, through the egress proxy where the OS
 /// enforces `network`. The server outlives each start of the adapter (as a
 /// real one would), so its notes' ids aren't the golden transcript's: the
 /// run blesses its own, in the throwaway copy.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_notes_extension_passes_plugin_test_with_its_server_by_url() {
+async fn the_notes_extension_passes_extension_test_with_its_server_by_url() {
     let dir = tempfile::tempdir().unwrap();
     oxplow_app::vcs::GitProvider
         .init_repository(dir.path())

@@ -443,7 +443,7 @@ test("what the person typed survives a re-read", async () => {
 
 // tsk1053: Enable's own config change can be read before the instance has
 // started, leaving the row on "Checking…". The start finishing is announced
-// only by its health being recorded (`v_plugin_health`): the row re-reads.
+// only by its health being recorded (`v_contribution_health`): the row re-reads.
 test("a row re-reads when the instance's health is recorded", async () => {
   const ready = instance.health;
   instance.health = { ...ready, state: { state: "checking" } } as typeof ready;
@@ -452,7 +452,7 @@ test("a row re-reads when the instance's health is recorded", async () => {
     await waitFor(() => expect(view.getByTestId("integration-status-tracker/fake").textContent).toContain("Checking…"));
     instance.health = ready;
     act(() => {
-      for (const l of listeners) l({ kind: "modelsChanged", models: ["v_plugin_health"] });
+      for (const l of listeners) l({ kind: "modelsChanged", models: ["v_contribution_health"] });
     });
     await waitFor(() => expect(view.getByTestId("integration-status-tracker/fake").textContent).toContain("Ready"));
   } finally {

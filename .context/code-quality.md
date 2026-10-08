@@ -13,7 +13,7 @@ for the user to install.
 > (`oxplow.high_complexity_fns`, `oxplow.long_functions`, `oxplow.fn_count` —
 > computed via the `code_metrics()` host builtin across all languages, tsk314 —
 > see [metrics.md](./metrics.md)). What remains here: the **duplication** scan
-> (`"duplication"` tool — no plugin equivalent, so it stays inherent) and the
+> (`"duplication"` tool — no script equivalent, so it stays inherent) and the
 > building blocks of the **change-analysis producer** (per-function metrics,
 > churn, import deltas, co-change), which call `oxplow-code-metrics` directly.
 > The `code_quality_scan` / `code_quality_finding` tables persist — they hold

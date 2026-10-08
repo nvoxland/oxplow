@@ -89,9 +89,9 @@ export function IntegrationsSection() {
     });
   }, [refresh]);
   // An instance starting, failing or recovering is recorded in its health
-  // (`v_plugin_health`); Enable's own config change can be read before
+  // (`v_contribution_health`); Enable's own config change can be read before
   // the start finishes, so the rows re-read on this too (tsk1053).
-  useRerunOnChange(readsOf("v_plugin_health"), () => void refresh());
+  useRerunOnChange(readsOf("v_contribution_health"), () => void refresh());
 
   if (views === null) return <div style={mutedStyle}>Loading…</div>;
   if (views.length === 0) {

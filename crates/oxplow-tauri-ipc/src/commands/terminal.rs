@@ -22,7 +22,7 @@ pub async fn open_terminal_session(
 }
 
 /// Open (or reattach to) an ACP thread's agent session. Hand-written like
-/// `open_terminal_session`: the MCP endpoint comes from the plugin runtime.
+/// `open_terminal_session`: the MCP endpoint comes from the `PluginRuntime`.
 #[tauri::command]
 #[specta::specta]
 pub async fn acp_open_session(

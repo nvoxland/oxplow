@@ -5,6 +5,6 @@ week?
 Collect them with a Starlark collector over the task data, publish a model
 over what it collects, and show the model in a lens.
 
-Start with `oxplow plugin new`. Run `oxplow plugin check stale-work` and
-`oxplow plugin test stale-work` until both are clean — no errors and no
+Start with `oxplow extension new`. Run `oxplow extension check stale-work` and
+`oxplow extension test stale-work` until both are clean — no errors and no
 warnings. Don't sync, approve or enable anything; you can't.

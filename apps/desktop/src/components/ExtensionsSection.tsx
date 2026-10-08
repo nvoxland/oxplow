@@ -7,7 +7,7 @@
 /// the person confirmed (tsk378).
 /// Each provider instance's and collector's health shows on its
 /// extension's row: a disabled one with its reason, **Enable Again**
-/// (`oxplow.plugin.enable` as the person) and **Repair with the Agent** (fills
+/// (`oxplow.contribution.enable` as the person) and **Repair with the Agent** (fills
 /// the agent's input with a mention of the repair item; never sends).
 /// Running sources is under Data (DataSection.tsx). See
 /// `.context/extensions.md` → "Health, disable and repair".
@@ -34,7 +34,7 @@ import {
 } from "../api.js";
 import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
-import { enableAgain, healthLine, healthOf, repairWithAgent, usePluginHealth, type PluginHealth } from "../pluginHealth.js";
+import { enableAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
 import { collectorRan, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
 import { EffectReportView } from "./EffectReportView.js";
@@ -50,7 +50,7 @@ export function ExtensionsSection() {
    *  where they're built). */
   const [checked, setChecked] = useState<Record<string, string[]>>({});
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
-  const health = usePluginHealth();
+  const health = useContributionHealth();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   /** An install or update waiting on the person's go-ahead. */
@@ -251,9 +251,9 @@ export function ExtensionsSection() {
 
 /// One contribution's health line; a disabled one offers Enable Again and,
 /// when its repair item is open, Repair with the Agent.
-export function HealthRow({ health }: { health: PluginHealth }) {
+export function HealthRow({ health }: { health: ContributionHealth }) {
   const line = healthLine(health);
-  const key = `${health.plugin}-${health.contribution}`;
+  const key = `${health.extension}-${health.contribution}`;
   const [enabling, setEnabling] = useState(false);
   return (
     <div data-testid={`extension-health-${key}`} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>

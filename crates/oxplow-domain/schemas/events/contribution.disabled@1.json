@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`contribution.disabled@1` (P7.C1): one of an extension's contributions —\na provider instance, a collector, an effect — was stopped on this machine after\nrepeated failures (or a provider whose handshake no longer matches what\nwas approved), and stays off until a person enables it again\n(`oxplow.contribution.enable`).",
+  "properties": {
+    "contribution": {
+      "description": "The contribution within it: a provider's, collector's or effect's id.",
+      "type": "string"
+    },
+    "extension": {
+      "description": "`extension:<extension>`.",
+      "type": "string"
+    },
+    "kind": {
+      "description": "`provider`, `collector` or `effect`.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "What stopped it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "extension",
+    "contribution",
+    "kind",
+    "reason"
+  ],
+  "title": "ContributionDisabledV1",
+  "type": "object"
+}

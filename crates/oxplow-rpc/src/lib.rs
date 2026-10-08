@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use oxplow_app::Services;
 
-/// Control-plane coordinates an agent spawn needs: where the plugin's
+/// Control-plane coordinates an agent spawn needs: where the Claude Code plugin's
 /// HTTP hooks POST to, the MCP endpoint, and the bearer token both
 /// use. The Tauri shell materializes this from its in-process control
 /// plane; the daemon from its own. Lives here (not oxplow-tauri-ipc)

@@ -13,11 +13,11 @@
 //! then holds. Every restart goes through consent again.
 //!
 //! Health is per machine. [`InstanceHealth`] is the process's state; the
-//! failure policy is the one every plugin contribution shares
-//! ([`crate::plugin_health`]): a start or call that fails (not a refused
+//! failure policy is the one every extension contribution shares
+//! ([`crate::contribution_health`]): a start or call that fails (not a refused
 //! input) counts, three in a row stop the instance and log
-//! `plugin.disabled@1`, and it stays off — across restarts, since
-//! `plugin_health` says so — until a person runs `oxplow.plugin.enable`.
+//! `contribution.disabled@1`, and it stays off — across restarts, since
+//! `contribution_health` says so — until a person runs `oxplow.contribution.enable`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -25,7 +25,7 @@ use std::sync::{Arc, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use oxplow_ai::secrets::SecretStore;
-use oxplow_db::PluginKey;
+use oxplow_db::ContributionKey;
 use oxplow_db::{Database, SqliteEventLogStore};
 use oxplow_domain::events::schema::{EventType as _, WorkItemRecorded};
 use oxplow_domain::work_items::WorkItemsRegistry;
@@ -170,7 +170,7 @@ pub enum InstanceState {
 #[serde(rename_all = "camelCase")]
 pub struct InstanceHealth {
     pub state: InstanceState,
-    /// Its failures in a row (`plugin_health`'s count, shown here).
+    /// Its failures in a row (`contribution_health`'s count, shown here).
     pub consecutive_failures: u32,
     /// RFC 3339.
     pub last_ok_at: Option<String>,
@@ -977,11 +977,11 @@ impl Instance {
 }
 
 /// Whether an instance's event may name `subject`: only its own items
-/// (`work_item:<instance id>:…`) and its extension (`plugin:<ext>`).
+/// (`work_item:<instance id>:…`) and its extension (`extension:<ext>`).
 pub fn check_subject(provider: &str, extension: &str, subject: &str) -> Result<(), String> {
     let own_item = subject.starts_with("work_item:")
         && oxplow_domain::work_items::provider_of(subject).ok() == Some(provider);
-    if own_item || subject == format!("plugin:{extension}") {
+    if own_item || subject == format!("extension:{extension}") {
         Ok(())
     } else {
         Err(format!(
@@ -1006,8 +1006,8 @@ pub struct ProviderRegistry {
     /// How many times each instance has been disabled: a start that began
     /// before a disable doesn't register what the disable stopped.
     disables: parking_lot::Mutex<BTreeMap<String, u64>>,
-    /// The failure policy instances share with every plugin contribution.
-    pub(super) plugins: crate::plugin_health::PluginHealth,
+    /// The failure policy instances share with every extension contribution.
+    pub(super) contribution_health: crate::contribution_health::ContributionHealth,
     /// This machine's global instances, re-read when their file changes.
     global: parking_lot::Mutex<GlobalFile>,
     /// Sign-ins under way, by `(instance, credential)`: a newer one for
@@ -1036,11 +1036,11 @@ fn credential_scope(deps: &HostDeps, scope: Scope) -> &str {
     }
 }
 
-/// An instance's `plugin_health` key: `<extension>/<instance id>`.
-pub(super) fn plugin_key(instance: &str) -> PluginKey {
-    let (plugin, contribution) = instance.split_once('/').unwrap_or((instance, ""));
-    PluginKey {
-        plugin: plugin.to_string(),
+/// An instance's `contribution_health` key: `<extension>/<instance id>`.
+pub(super) fn contribution_key(instance: &str) -> ContributionKey {
+    let (extension, contribution) = instance.split_once('/').unwrap_or((instance, ""));
+    ContributionKey {
+        extension: extension.to_string(),
         contribution: contribution.to_string(),
         kind: "provider",
     }
@@ -1104,8 +1104,10 @@ fn listed_or_none(ids: &[&str]) -> String {
 
 impl ProviderRegistry {
     pub fn new(deps: HostDeps, bus: &Arc<CommandBus>, work_items: WorkItemsRegistry) -> Arc<Self> {
-        let plugins =
-            crate::plugin_health::PluginHealth::new(deps.db.clone(), deps.log.vocabulary().clone());
+        let contribution_health = crate::contribution_health::ContributionHealth::new(
+            deps.db.clone(),
+            deps.log.vocabulary().clone(),
+        );
         // What this oxplow starts on: a credential change counted later is
         // one it hasn't started on.
         let global = GlobalFile {
@@ -1117,7 +1119,7 @@ impl ProviderRegistry {
             ..GlobalFile::default()
         };
         Arc::new_cyclic(|me| Self {
-            plugins,
+            contribution_health,
             deps,
             me: me.clone(),
             bus: Arc::downgrade(bus),
@@ -1585,9 +1587,11 @@ impl ProviderRegistry {
     }
 
     /// Why `instance` is automatically disabled on this machine
-    /// (`plugin_health`).
+    /// (`contribution_health`).
     async fn disabled_reason(&self, instance: &str) -> Result<Option<String>, DomainError> {
-        self.plugins.disabled_reason(&plugin_key(instance)).await
+        self.contribution_health
+            .disabled_reason(&contribution_key(instance))
+            .await
     }
 
     /// Check `ext`'s provider `spec` against `config` without enabling it
@@ -1662,7 +1666,7 @@ impl ProviderRegistry {
     /// register what it declares, under `id`: its commands' namespace and
     /// its capability provider. Consent, a matching handshake and a clean
     /// `check` come first: refused, nothing is registered (a failed start
-    /// counts as a failure, [`crate::plugin_health`]).
+    /// counts as a failure, [`crate::contribution_health`]).
     pub async fn enable_instance(
         &self,
         ext: &Extension,
@@ -1747,7 +1751,11 @@ impl ProviderRegistry {
                     h.consecutive_failures = 0;
                     h.last_ok_at = Some(now());
                 }
-                if let Err(e) = self.plugins.succeeded(&plugin_key(&name), None).await {
+                if let Err(e) = self
+                    .contribution_health
+                    .succeeded(&contribution_key(&name), None)
+                    .await
+                {
                     tracing::warn!(instance = %name, error = %e, "recording its health failed");
                 }
                 // Its items, before the first scheduled read (P7.A3) — in
@@ -2001,7 +2009,7 @@ impl ProviderRegistry {
 
     /// A person's Check / Enable / Disable on Settings → Integrations:
     /// write `extensionInstances.<instance>` through `oxplow.config.set` and, to
-    /// enable, run `oxplow.plugin.enable`. Enabling checks first: an
+    /// enable, run `oxplow.contribution.enable`. Enabling checks first: an
     /// unapproved or unconfigured instance is refused and nothing is
     /// written.
     pub async fn set_instance(
@@ -2053,11 +2061,11 @@ impl ProviderRegistry {
         // enable writes nothing, so the config never says enabled for an
         // instance that wasn't. The write then starts it (a reconcile).
         if enabled {
-            let key = plugin_key(instance);
+            let key = contribution_key(instance);
             bus.run(
                 actor,
-                crate::plugin_health::ENABLE,
-                json!({ "plugin": key.plugin, "kind": key.kind, "contribution": key.contribution }),
+                crate::contribution_health::ENABLE,
+                json!({ "extension": key.extension, "kind": key.kind, "contribution": key.contribution }),
                 false,
             )
             .await?;
@@ -2260,7 +2268,11 @@ impl ProviderRegistry {
             return Ok(());
         }
         self.health.lock().remove(instance);
-        if let Err(e) = self.plugins.forget(&plugin_key(instance)).await {
+        if let Err(e) = self
+            .contribution_health
+            .forget(&contribution_key(instance))
+            .await
+        {
             tracing::warn!(%instance, error = %e, "forgetting an instance's health failed");
         }
         if let Err(e) = oxplow_db::SqliteProviderCollectorStore::new(self.deps.db.clone())
@@ -2784,7 +2796,7 @@ impl ProviderRegistry {
         Ok(view)
     }
 
-    /// A person enabled `instance` again (`oxplow.plugin.enable`): its failure
+    /// A person enabled `instance` again (`oxplow.contribution.enable`): its failure
     /// count and backoff start over.
     pub(crate) async fn reset(&self, instance: &str) {
         if let Some(h) = self.health.lock().get_mut(instance) {
@@ -2850,7 +2862,7 @@ impl ProviderRegistry {
         running.remove(&made_by.name)
     }
 
-    /// A start or call failed: count it ([`crate::plugin_health`]); the
+    /// A start or call failed: count it ([`crate::contribution_health`]); the
     /// verdict either backs the next start off or stops the instance.
     /// `made_by` as for [`Self::start_failed`]: the count, the health and
     /// any stop are its while it runs — checked and written under the
@@ -2860,11 +2872,15 @@ impl ProviderRegistry {
         if made_by.is_some_and(|i| !is_running(&running, i)) {
             return;
         }
-        let verdict = match self.plugins.failed(&plugin_key(instance), &error).await {
+        let verdict = match self
+            .contribution_health
+            .failed(&contribution_key(instance), &error)
+            .await
+        {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(instance, error = %e, "recording a provider failure failed");
-                crate::plugin_health::Verdict::Backoff { failures: 1 }
+                crate::contribution_health::Verdict::Backoff { failures: 1 }
             }
         };
         let failures = {
@@ -2880,18 +2896,18 @@ impl ProviderRegistry {
             let excess = errors.len().saturating_sub(ERRORS_KEPT);
             errors.drain(..excess);
             h.state = InstanceState::Failing { errors };
-            if let crate::plugin_health::Verdict::Backoff { failures } = verdict {
+            if let crate::contribution_health::Verdict::Backoff { failures } = verdict {
                 h.consecutive_failures = u32::try_from(failures).unwrap_or(u32::MAX);
             }
             h.consecutive_failures
         };
         match verdict {
-            crate::plugin_health::Verdict::Disabled { reason } => {
+            crate::contribution_health::Verdict::Disabled { reason } => {
                 let removed = self.halt_locked(&mut running, instance);
                 drop(running);
                 self.halted(instance, removed, reason).await;
             }
-            crate::plugin_health::Verdict::Backoff { .. } => {
+            crate::contribution_health::Verdict::Backoff { .. } => {
                 if let Some(i) = running.get(instance) {
                     let wait = self
                         .deps
@@ -2905,14 +2921,18 @@ impl ProviderRegistry {
     }
 
     /// Stop `instance` and keep it off on this machine until a person
-    /// enables it, for `reason` (`plugin.disabled@1`) — when `made_by` is
+    /// enables it, for `reason` (`contribution.disabled@1`) — when `made_by` is
     /// given, only while it is the one running.
     pub(super) async fn disable(&self, instance: &str, made_by: Option<&Instance>, reason: String) {
         let mut running = self.running.lock().await;
         if made_by.is_some_and(|i| !is_running(&running, i)) {
             return;
         }
-        if let Err(e) = self.plugins.disable(&plugin_key(instance), &reason).await {
+        if let Err(e) = self
+            .contribution_health
+            .disable(&contribution_key(instance), &reason)
+            .await
+        {
             tracing::error!(instance, error = %e, "recording the disable failed");
         }
         let removed = self.halt_locked(&mut running, instance);
@@ -3000,8 +3020,8 @@ impl ProviderRegistry {
         }
         let instance = made_by.name.as_str();
         if let Err(e) = self
-            .plugins
-            .succeeded(&plugin_key(instance), Some(took))
+            .contribution_health
+            .succeeded(&contribution_key(instance), Some(took))
             .await
         {
             tracing::warn!(instance, error = %e, "recording its health failed");

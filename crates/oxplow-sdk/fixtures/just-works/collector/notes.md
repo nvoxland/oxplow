@@ -3,10 +3,10 @@
 Recorded 2026-10-02 with `scripts/record-just-works.sh collector`:
 Claude Code 2.1.287, its default model, `--safe-mode` (no CLAUDE.md,
 plugins, hooks, memory or MCP), the oxplow-extension skill appended to its
-system prompt, and only file tools plus `oxplow plugin …` in Bash.
+system prompt, and only file tools plus `oxplow extension …` in Bash.
 
 - **Outcome:** success in one run — 64 turns, 3.5 minutes, $2.39.
-  `oxplow plugin check` and `oxplow plugin test` on what it wrote: 0
+  `oxplow extension check` and `oxplow extension test` on what it wrote: 0
   errors, 0 warnings (`check.txt`, `test.txt`); `test` ran both of its
   intent examples (a collector over fixture rows, the lens on an empty
   project).

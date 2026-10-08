@@ -1,4 +1,4 @@
-//! `oxplow plugin new|check|test` (`.context/extensions.md` "The
+//! `oxplow extension new|check|test` (`.context/extensions.md` "The
 //! SDK"). A thin argv shell over `oxplow_sdk`: the same `check` the
 //! RPC/MCP `validate_extension` runs, printed as `file:line: what — fix`
 //! lines so an agent editing an extension from a terminal gets the same
@@ -14,7 +14,7 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow plugin new <lens|extension|provider|collector|command|effect|component> <name> [--origin <ref>] [--root <dir>]
+  oxplow extension new <lens|extension|provider|collector|command|effect|component> <name> [--origin <ref>] [--root <dir>]
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a lens with a row action; a
@@ -23,7 +23,7 @@ usage:
       commands; an effect reacting to an event; a custom component with
       its lens and bundle. Each checks clean and passes `test` as written
       (a provider once a real program replaces its stub)
-  oxplow plugin check <name|path> [--effects] [--against <rev>] [--json] [--root <dir>]
+  oxplow extension check <name|path> [--effects] [--against <rev>] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its models, commands, lenses and advisories — against the project's
       database when it has been opened in oxplow (.oxplow/local.sqlite),
@@ -32,7 +32,7 @@ usage:
       git HEAD (or --against <rev>, which implies --effects): lenses' text,
       models and their rows, collectors' outputs, providers' grants —
       writing nothing
-  oxplow plugin test <name|path> [--bless] [--json] [--root <dir>]
+  oxplow extension test <name|path> [--bless] [--json] [--root <dir>]
       on a throwaway oxplow over a copy of the project's extensions: check,
       then each intent example's fixture (a lens's rows, a collector's
       entities, a command's composition), questions.yaml, and each declared
@@ -58,11 +58,11 @@ pub fn run_to(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 
     match run_inner(args, out, err) {
         Ok(code) => code,
         Err(Failure::Usage(msg)) => {
-            let _ = writeln!(err, "oxplow plugin: {msg}\n\n{USAGE}");
+            let _ = writeln!(err, "oxplow extension: {msg}\n\n{USAGE}");
             2
         }
         Err(Failure::Sdk(e)) => {
-            let _ = writeln!(err, "oxplow plugin: {e}");
+            let _ = writeln!(err, "oxplow extension: {e}");
             1
         }
     }
@@ -159,7 +159,7 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             }
             let _ = writeln!(
                 out,
-                "next: fill in the TODOs in {}/extension.yaml, then `oxplow plugin check {}`",
+                "next: fill in the TODOs in {}/extension.yaml, then `oxplow extension check {}`",
                 made.dir, made.name
             );
             Ok(0)
@@ -212,11 +212,15 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             let (root, name) = locate(p.root.as_deref(), target);
             // A throwaway oxplow over a copy of the project's extensions:
             // the project's database is never opened.
-            let report = block_on(oxplow_sdk::plugin_test::test_extension(
+            let report = block_on(oxplow_sdk::extension_test::test_extension(
                 &root, &name, p.bless,
             ))?;
             let format = if p.json { Format::Json } else { Format::Text };
-            let _ = write!(out, "{}", oxplow_sdk::plugin_test::render(&report, format));
+            let _ = write!(
+                out,
+                "{}",
+                oxplow_sdk::extension_test::render(&report, format)
+            );
             if p.json {
                 let _ = writeln!(out);
             }
@@ -394,7 +398,7 @@ mod tests {
         bin
     }
 
-    /// `plugin test` against a fake service with nothing in it: its
+    /// `extension test` against a fake service with nothing in it: its
     /// state outlives each process (what the kit's restart re-sends
     /// against), and the golden transcript records the refs it hands out.
     fn test_on_a_fresh_service(project: &Path, args: &[&str]) -> (i32, String, String) {
@@ -415,11 +419,11 @@ mod tests {
         cli(args)
     }
 
-    /// P5.D5's red: `plugin test` on a scaffolded provider — the stub
+    /// P5.D5's red: `extension test` on a scaffolded provider — the stub
     /// fails, the fake behind it passes once blessed, and a changed
     /// golden transcript fails naming the file and line.
     #[test]
-    fn plugin_test_blesses_a_provider_then_a_changed_transcript_fails() {
+    fn extension_test_blesses_a_provider_then_a_changed_transcript_fails() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
         let (code, out, err) = cli(&["new", "provider", "fake", "--root", root]);

@@ -199,7 +199,7 @@ the parsed report is `input.report`.
 
 **C) exec (escape hatch)** — a program that prints the fact JSON to stdout:
 `runtime: exec`, `entry: oxplow/collectors/bundle-size.sh`. Lower trust (it does
-I/O) — tagged `plugin-exec:<id>`. Only the project's own collectors may be
+I/O) — tagged `exec:<id>`. Only the project's own collectors may be
 `exec` (an extension's fact collector is starlark or jaq), and it gets no
 `env` / `credentials` / `network`. Use it only when no in-process tier can
 compute it: **it won't run until the user approves it** in Settings → Data →
@@ -207,7 +207,7 @@ Programs (you can't approve it; `oxplow.collector.sync` tells you when it's wait
 and any change to the program needs approving again.
 
 The bundled collector scripts in
-`crates/oxplow-collect-plugin/src/plugins/metrics/<lang>/*.star` are the canonical
+`crates/oxplow-script/src/metrics/<lang>/*.star` are the canonical
 copy-paste templates — each emits per-item facts.
 
 ## Step 4 — scope

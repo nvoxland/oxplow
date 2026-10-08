@@ -1558,7 +1558,7 @@ pub struct CheckedModels {
 }
 
 /// Check the extensions' models without publishing anything — what
-/// `oxplow plugin check` runs, on a read-only database: the same
+/// `oxplow extension check` runs, on a read-only database: the same
 /// resolution, lineage and contract checks as [`compile_extensions`] (a
 /// changed contract at a published version fails), against temp views.
 /// An entity in `stubs` with no view yet gets an empty one first. Run it
@@ -1721,7 +1721,7 @@ fn pass(
         let source_ok = |table: &str| {
             if !table.starts_with(&own_prefix) {
                 Err(format!(
-                    "is not this extension's: a plugin model reads only its own extension's tables \
+                    "is not this extension's: an extension model reads only its own extension's tables \
                      (`{own_prefix}*`); read oxplow's data through ref()"
                 ))
             } else if !tables.contains(table) {
@@ -1815,7 +1815,7 @@ fn pass(
     }
     // Declared tests, on what published: a failure is the extension's
     // health, and the view stays. (A check proves the SQL; running the
-    // tests is `plugin test`'s.)
+    // tests is `extension test`'s.)
     for e in extensions.iter().filter(|_| mode == Pass::Publish) {
         let mine: Vec<ModelSource> = published
             .iter()
@@ -2670,7 +2670,7 @@ mod tests {
         assert_eq!(errors["acme"], Vec::<String>::new());
     }
 
-    /// P7.B2: checking an extension's on-change model (what `plugin check`
+    /// P7.B2: checking an extension's on-change model (what `extension check`
     /// runs, read-only) creates no table; publishing does, and a table no
     /// published model reads goes with the next extensions' pass.
     #[test]
@@ -2782,7 +2782,7 @@ mod tests {
     }
 
     /// A broken model fails alone — with every model reading it — and its
-    /// extension's errors say where; a plugin reads only its own tables.
+    /// extension's errors say where; an extension reads only its own tables.
     #[test]
     fn a_broken_extension_model_fails_alone() {
         let mut conn = fresh();
@@ -2990,7 +2990,7 @@ mod tests {
         );
     }
 
-    /// P4.9 (tsk494): the check `oxplow plugin check` runs works on a
+    /// P4.9 (tsk494): the check `oxplow extension check` runs works on a
     /// read-only database and writes nothing: a good model passes, and a
     /// changed contract at a published version fails naming the column.
     #[tokio::test]

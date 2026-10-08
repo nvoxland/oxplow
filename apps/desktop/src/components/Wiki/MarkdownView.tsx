@@ -33,7 +33,7 @@ import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { workItemId, workItemLabel } from "../../workItemRef.js";
 import { parseRef } from "../../refs/ref.js";
-import { pluginWikilinkRef, refKindInfo, usePluginRefTitle, useRefKinds } from "../../refKinds.js";
+import { extensionWikilinkRef, refKindInfo, useExtensionRefTitle, useRefKinds } from "../../refKinds.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 
 // Mermaid + svg-pan-zoom load lazily inside mermaidRender, so this module
@@ -384,9 +384,9 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
         return `[${display}](${itemRef})`;
       }
       // An extension's ref kind, by its kind or its `wikilink:` prefix.
-      const pluginRef = pluginWikilinkRef(target);
-      if (pluginRef) {
-        return `[${display}](${pluginRef})`;
+      const extensionRef = extensionWikilinkRef(target);
+      if (extensionRef) {
+        return `[${display}](${extensionRef})`;
       }
       if (looksLikeFilePath(target)) {
         // The target may carry a `@<version>` segment; the file:
@@ -418,7 +418,7 @@ function WikiLinkSpan({
   iconKind,
   internalSlug,
   itemRef,
-  pluginRef,
+  extensionRef,
 }: {
   anchorProps: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
   handleLinkClick: (event: React.MouseEvent<HTMLAnchorElement>) => void;
@@ -428,11 +428,11 @@ function WikiLinkSpan({
   /** A work item's ref. */
   itemRef: string | null;
   /** A ref of an extension's kind: titled from its kind's model. */
-  pluginRef: string | null;
+  extensionRef: string | null;
 }) {
   const wiki = useWikiRef(internalSlug);
   const item = useWorkItemRef(itemRef);
-  const pluginTitle = usePluginRefTitle(pluginRef);
+  const extensionTitle = useExtensionRefTitle(extensionRef);
   const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
   // The link text is swapped for the resolved title when the link was
@@ -446,8 +446,8 @@ function WikiLinkSpan({
       ? wiki.title
       : itemRef && item.title && (childrenText === workItemLabel(itemRef) || childrenText === itemRef)
         ? item.title
-        : pluginRef && pluginTitle && pluginWikilinkRef(childrenText) === pluginRef
-          ? pluginTitle
+        : extensionRef && extensionTitle && extensionWikilinkRef(childrenText) === extensionRef
+          ? extensionTitle
           : null;
   // A recognized ref whose object doesn't exist (deleted page / item, an
   // item on a list that isn't active, a stale wikilink) renders broken
@@ -882,7 +882,7 @@ export function MarkdownView({
             // `local-snapshots`. Author-supplied labels are preserved.
             const internalSlug = parsed.kind === "internal" ? parsed.slug : null;
             const itemRef = parsed.kind === "work_item" ? parsed.ref : null;
-            const pluginRef = parsed.kind === "ref" ? parsed.ref : null;
+            const extensionRef = parsed.kind === "ref" ? parsed.ref : null;
             return (
               <WikiLinkSpan
                 anchorProps={props}
@@ -891,7 +891,7 @@ export function MarkdownView({
                 iconKind={iconKind}
                 internalSlug={internalSlug}
                 itemRef={itemRef}
-                pluginRef={pluginRef}
+                extensionRef={extensionRef}
               />
             );
           },

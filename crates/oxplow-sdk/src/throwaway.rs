@@ -1,7 +1,7 @@
 //! A throwaway oxplow (P7.C6): in memory, over a copy of a project's
 //! `oxplow/extensions/`, with every declared entity published empty (as if
 //! each collector had run and found nothing), the extension models
-//! published and the commands registered as at boot. What `plugin test`
+//! published and the commands registered as at boot. What `extension test`
 //! runs everything on, and what `check` asks for a command registry when
 //! no oxplow is running. It never touches the project's own data.
 

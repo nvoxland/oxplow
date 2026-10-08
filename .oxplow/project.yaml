@@ -610,7 +610,7 @@ collectors:
 - id: repo.scan_type_coverage
   doc: TypeScript type coverage
   runtime: jaq
-  entry: oxplow/plugins/type_coverage.jq
+  entry: oxplow/collectors/type_coverage.jq
   trigger:
     on:
     - snapshot.taken

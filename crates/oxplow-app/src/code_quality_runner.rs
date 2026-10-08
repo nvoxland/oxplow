@@ -9,7 +9,7 @@
 //! substrate as bundled, language-agnostic `oxplow.{high_complexity_fns,
 //! long_functions, fn_count}` gauges, computed via the `code_metrics()` host
 //! builtin across all languages (tsk314). Duplication has no
-//! plugin equivalent — cross-file token matching can't run in Starlark — so it
+//! script equivalent — cross-file token matching can't run in Starlark — so it
 //! stays an inherent in-process feature.)
 
 use std::collections::BTreeSet;

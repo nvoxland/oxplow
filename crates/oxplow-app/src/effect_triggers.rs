@@ -219,15 +219,17 @@ impl AsyncEventConsumer for EffectTriggers {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
-        let health =
-            crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
+        let health = crate::contribution_health::ContributionHealth::new(
+            svc.db.clone(),
+            svc.vocabulary.clone(),
+        );
         let load = svc.extension_catalog.get(&svc.layout.project_dir);
         for (ext, decl) in effects_of(&load) {
             if !reacts_to(&decl, event) {
                 continue;
             }
             // Off after three failures in a row, until a person enables it.
-            let key = plugin_key(&decl);
+            let key = contribution_key(&decl);
             if !matches!(health.disabled_reason(&key).await, Ok(None)) {
                 continue;
             }
@@ -250,9 +252,9 @@ impl AsyncEventConsumer for EffectTriggers {
 }
 
 /// Its health's key: the extension, `effect`, its id.
-pub fn plugin_key(decl: &EffectDecl) -> oxplow_db::PluginKey {
-    oxplow_db::PluginKey {
-        plugin: decl.extension.clone(),
+pub fn contribution_key(decl: &EffectDecl) -> oxplow_db::ContributionKey {
+    oxplow_db::ContributionKey {
+        extension: decl.extension.clone(),
         contribution: decl.id.clone(),
         kind: "effect",
     }
@@ -283,12 +285,12 @@ pub(crate) enum Reacted {
 /// Count an attempt toward the effect's health: a run is a success, a
 /// failure a failure (three in a row disable it); nothing else counts.
 pub(crate) async fn count(
-    health: &crate::plugin_health::PluginHealth,
+    health: &crate::contribution_health::ContributionHealth,
     decl: &EffectDecl,
     reacted: &Reacted,
     took: std::time::Duration,
 ) {
-    let key = plugin_key(decl);
+    let key = contribution_key(decl);
     let counted = match reacted {
         Reacted::Ran => health.succeeded(&key, Some(took)).await,
         Reacted::Failed(reason) | Reacted::NotResent(reason) => {
@@ -437,7 +439,8 @@ pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, Do
         .db
         .read(|tx| oxplow_db::effect_run_store::person_started_tx(tx))
         .await?;
-    let health = crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
+    let health =
+        crate::contribution_health::ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut recovered = 0;
     for key in started {
         let reacted = cut_off(svc, &key).await?;
@@ -740,7 +743,8 @@ pub async fn auto_retry_due(
         .db
         .read(move |tx| oxplow_db::effect_run_store::due_retries_tx(tx, &now))
         .await?;
-    let health = crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
+    let health =
+        crate::contribution_health::ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut sent = 0;
     // One row's error is that row's (tsk932): logged, and the rest go on —
     // it is tried again on the next tick.
@@ -762,7 +766,7 @@ pub async fn auto_retry_due(
 /// One due retry (`key`, due at `due_at`): whether it was sent.
 async fn retry_one(
     svc: &Arc<Services>,
-    health: &crate::plugin_health::PluginHealth,
+    health: &crate::contribution_health::ContributionHealth,
     key: &EffectRunKey,
     due_at: &str,
     now_ms: i64,
@@ -789,7 +793,10 @@ async fn retry_one(
         // Dropped only when it is disabled; one whose health can't be
         // read is tried again next time.
         (Some((ext, decl)), Some(_)) => {
-            health.disabled_reason(&plugin_key(decl)).await?.is_none()
+            health
+                .disabled_reason(&contribution_key(decl))
+                .await?
+                .is_none()
                 && approved_now(svc, &effects::effect_program(ext, decl))
         }
         _ => false,
@@ -1056,7 +1063,7 @@ mod tests {
         let audit = svc.commands.audit_store().list_recent(1).await.unwrap();
         assert_eq!(audit[0].command, crate::commands::compose::SEQUENCE);
         assert_eq!(audit[0].scopes, [("sql.read".to_string(), 1)].into());
-        // The dry run (`plugin test`, a change's review) reads alike.
+        // The dry run (`extension test`, a change's review) reads alike.
         let (_, decl) = effects(svc).into_iter().next().unwrap();
         let reaction = effects::dry_run(
             &svc.sql,
@@ -1524,16 +1531,21 @@ mod tests {
         let human = oxplow_domain::Actor::Human;
 
         // Disabled (three failures would; here a person's record of one).
-        let health =
-            crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
+        let health = crate::contribution_health::ContributionHealth::new(
+            svc.db.clone(),
+            svc.vocabulary.clone(),
+        );
         let decl = effects(svc).into_iter().next().unwrap().1;
         health
-            .disable(&plugin_key(&decl), "off for the test")
+            .disable(&contribution_key(&decl), "off for the test")
             .await
             .unwrap();
         let refused = retry(svc, &human, &ev, true).await.unwrap_err();
         assert!(refused.to_string().contains("is disabled"), "{refused}");
-        health.enable(&plugin_key(&decl), "human").await.unwrap();
+        health
+            .enable(&contribution_key(&decl), "human")
+            .await
+            .unwrap();
 
         // Edited since it was approved: a person approves it first.
         extension(
@@ -1691,7 +1703,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT kind, state FROM v_plugin_health WHERE plugin = 'acme'"
+                "SELECT kind, state FROM v_contribution_health WHERE extension = 'acme'"
             )
             .await,
             json!([["effect", "disabled"]])
@@ -1709,16 +1721,16 @@ mod tests {
             .await
             .unwrap()
             .into_iter()
-            .find(|e| e.envelope.event_type == "plugin.disabled")
+            .find(|e| e.envelope.event_type == "contribution.disabled")
             .expect("the disable is logged");
         assert_eq!(disabled.envelope.payload["kind"], json!("effect"));
-        crate::plugin_repair::PluginRepair::new(Arc::downgrade(svc))
+        crate::contribution_repair::ContributionRepair::new(Arc::downgrade(svc))
             .handle(&disabled)
             .await
             .unwrap();
         let repair = rows(
             svc,
-            "SELECT repair_item FROM v_plugin_health WHERE plugin = 'acme'",
+            "SELECT repair_item FROM v_contribution_health WHERE extension = 'acme'",
         )
         .await;
         assert!(repair[0][0].is_string(), "a repair item is filed: {repair}");
@@ -1763,7 +1775,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT count(*) FROM v_plugin_health WHERE state != 'ok'"
+                "SELECT count(*) FROM v_contribution_health WHERE state != 'ok'"
             )
             .await,
             json!([[0]])

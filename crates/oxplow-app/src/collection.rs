@@ -21,9 +21,6 @@ use std::sync::{Arc, RwLock};
 use serde_json::json;
 use similar::{ChangeTag, TextDiff};
 
-use oxplow_collect_plugin::{
-    Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRuntime,
-};
 use oxplow_config::collectors::{CollectorSpec, Records, RunKind, Trigger};
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
@@ -31,6 +28,7 @@ use oxplow_db::{Effort, EffortStore, SqliteEffortStore, SqliteSnapshotStore, Sql
 use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, ThreadId};
+use oxplow_script::{Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRuntime};
 
 use crate::file_ref_version;
 use crate::metric_engine::threshold_state;
@@ -833,13 +831,14 @@ impl CollectionService {
         let Ok(content) = std::fs::read_to_string(&abs) else {
             return ReportRead::Missing(report.path.clone());
         };
-        let key = crate::collector_runner::plugin_key(oxplow_config::collectors::PROJECT, &spec.id);
+        let key =
+            crate::collector_runner::contribution_key(oxplow_config::collectors::PROJECT, &spec.id);
         if let Some(log) = &self.run_log {
             match log.health().disabled_reason(&key).await {
                 Ok(Some(reason)) => {
                     return ReportRead::Disabled(format!(
                         "collector `{}` is disabled: {reason}. A person can enable it again \
-                         (`oxplow.plugin.enable`, Settings → Extensions).",
+                         (`oxplow.contribution.enable`, Settings → Extensions).",
                         spec.id
                     ))
                 }
@@ -911,7 +910,7 @@ impl CollectionService {
         &self,
         id: &str,
         how: &ReportRun<'_>,
-        key: &oxplow_db::PluginKey,
+        key: &oxplow_db::ContributionKey,
         elapsed_ms: i64,
         error: Option<String>,
     ) {
@@ -1335,7 +1334,7 @@ impl CollectionService {
                     owning_val,
                     turn,
                     origin,
-                    oxplow_domain::events::schema::TestRunRecordedV1 {
+                    oxplow_domain::events::schema::TestRunRecordedV2 {
                         run: String::new(), // filled with the capture id
                         command: command.to_string(),
                         exit_code,
@@ -1383,7 +1382,7 @@ impl CollectionService {
         owning: Option<i64>,
         turn: Option<i64>,
         origin: RunOrigin<'_>,
-        payload: oxplow_domain::events::schema::TestRunRecordedV1,
+        payload: oxplow_domain::events::schema::TestRunRecordedV2,
     ) -> oxplow_db::fact_store::CaptureEvent {
         let cause = origin.cause();
         use oxplow_domain::events::schema::TestRunRecorded;
@@ -1413,7 +1412,7 @@ impl CollectionService {
                 let run = format!("run:{capture_id}");
                 let env = oxplow_domain::Envelope::typed::<TestRunRecorded>(
                     oxplow_domain::refs::build::system_source("collection"),
-                    &oxplow_domain::events::schema::TestRunRecordedV1 {
+                    &oxplow_domain::events::schema::TestRunRecordedV2 {
                         run: run.clone(),
                         ..payload.clone()
                     },
@@ -2384,7 +2383,7 @@ impl CollectionService {
             .read_run_reports(RunKind::Test, window, origin, &root)
             .await;
         // Trust tier rides in `source`: "post-tool-bash" for the plain hook /
-        // in-process parsers, "plugin-exec:<ids>" when a lower-trust program
+        // in-process parsers, "exec:<ids>" when a lower-trust program
         // parser produced the suites (mirrors the coverage path).
         let (report, source) = match reads.tests() {
             Some((r, source)) => (Some(r.clone()), source),
@@ -3807,12 +3806,12 @@ impl RunReports {
 }
 
 /// A run's `source`: `observed` from oxplow's own parse, or flagged
-/// `plugin-exec:<ids>` when a program parser contributed ([[tsk162]]).
+/// `exec:<ids>` when a program parser contributed ([[tsk162]]).
 fn trust(observed: &str, exec: &[String]) -> String {
     if exec.is_empty() {
         observed.to_string()
     } else {
-        format!("plugin-exec:{}", exec.join(","))
+        format!("exec:{}", exec.join(","))
     }
 }
 
@@ -4014,7 +4013,7 @@ mod tests {
         assert_eq!(trust("coverage-report", &[]), "coverage-report");
         assert_eq!(
             trust("coverage-report", &["tests.parse".into(), "x".into()]),
-            "plugin-exec:tests.parse,x"
+            "exec:tests.parse,x"
         );
     }
 
@@ -6944,7 +6943,7 @@ mod tests {
             let (tests, source) = reads.tests().expect("the approved program parsed");
             assert_eq!(tests.suites[0].cases.len(), 1);
             assert_eq!(
-                source, "plugin-exec:tests.parse",
+                source, "exec:tests.parse",
                 "a program's output is lower-trust"
             );
             assert_eq!(collector_run(&h, "tests.parse").await.unwrap().0, "ok");
@@ -7029,7 +7028,7 @@ mod tests {
             );
         }
 
-        /// tsk863: a report collector is held to the plugin failure policy
+        /// tsk863: a report collector is held to the contribution failure policy
         /// (P7.C2): its third failed parse in a row disables it, and a
         /// disabled one reads nothing until a person enables it.
         #[tokio::test]
@@ -7046,11 +7045,11 @@ mod tests {
                     "test",
                 )],
             );
-            let health = crate::plugin_health::PluginHealth::new(
+            let health = crate::contribution_health::ContributionHealth::new(
                 h.db.clone(),
                 oxplow_domain::vocabulary::VocabularyHandle::core(),
             );
-            let key = crate::collector_runner::plugin_key("project", "tests.junit");
+            let key = crate::collector_runner::contribution_key("project", "tests.junit");
             for n in 1..=3 {
                 assert_eq!(
                     health.disabled_reason(&key).await.unwrap(),

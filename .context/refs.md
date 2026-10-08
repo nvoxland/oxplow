@@ -70,6 +70,9 @@ capability's active provider.
 `agent:` — that name is kept for the harness registry.
 
 `config` (a config key, `config:zones`) is registered too (P2.4b, tsk450).
+`extension` (`extension:<name>`, an extension by its name) is the subject
+of a contribution's `contribution.disabled@1` / `contribution.enabled@1`
+and of an effect's `effect.result`; `build::extension_ref`.
 A `page` id is a shell route (`page:settings`) or an extension's page
 (`page:ext.<extension>.<page>`, P6.G2): its id pattern is exactly those
 two shapes, so a `.` appears only in `ext.<extension>.<page>`.
@@ -132,10 +135,10 @@ them all. The documented one is the github example's `github_pr`
 (`[[pr:12]]`, its `pr` page). A `wikilink:` prefix two extensions share
 costs only the sugar; each namespaced kind still registers.
 
-**Searchable kinds** (P9.D3). A plugin kind declared `searchable:
+**Searchable kinds** (P9.D3). An extension's kind declared `searchable:
 <model>` has that model's rows (`ref`, `title`, `body`) in the site-wide
 index under its kind — an asset per kind (`kind_search.rs`), so search
-hits carry `{ kind, ref_id }` for plugin kinds as for core ones and the
+hits carry `{ kind, ref_id }` for extensions' kinds as for core ones and the
 desktop routes them through `searchHitTarget`. Core's tasks, comments,
 thread notes and wiki pages are indexed the same way (tsk864): each an
 asset over its `v_search_<kind>` model (`kind_search::CORE_KINDS`),
@@ -160,10 +163,10 @@ nothing is left behind (the old upsert-only boot backfill kept orphans).
 files (`purge_stream_files`), and the task, note and comment models skip
 an archived thread or stream (`archived_at`), so their kinds restate
 without it; a backlog task (no thread) stays. Wiki pages belong to no
-stream (`archived_threads_and_streams_leave_search`). A plugin
-kind is never `revisioned` yet: no plugin kind has a reader for a
+stream (`archived_threads_and_streams_leave_search`). An extension's
+kind is never `revisioned` yet: none has a reader for a
 revision. The design is recorded (extensions.md "Ref kinds" →
-"Revisioned plugin kinds"): `revisioned: true`, a `rev` column on the
+"Revisioned extension kinds"): `revisioned: true`, a `rev` column on the
 `resolve` model (NULL = current), a page lens taking `rev` (`?ref=…&rev=…`),
 `[[pr:12@git:abc1234]]` through this grammar, and search entries kept
 rev-less.

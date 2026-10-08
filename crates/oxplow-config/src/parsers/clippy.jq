@@ -1,4 +1,4 @@
-# clippy / rustc analysis plugin (input: lines → array of strings).
+# clippy / rustc analysis parser (input: lines → array of strings).
 # `cargo clippy --message-format=json` emits one JSON object per line (the
 # cargo message stream). We keep only `compiler-message` entries that carry a
 # diagnostic with at least one source span, and emit one finding per message

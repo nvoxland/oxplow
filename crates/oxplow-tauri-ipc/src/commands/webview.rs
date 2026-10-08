@@ -7,7 +7,7 @@ use crate::error::IpcError;
 /// The new window inherits
 /// the `external-url` capability defined in
 /// `apps/desktop/src-tauri/capabilities/external-url.json`, which
-/// grants zero oxplow commands and zero plugin permissions.
+/// grants zero oxplow commands and zero Tauri plugin permissions.
 #[tauri::command]
 #[specta::specta]
 pub async fn open_external_url(app: tauri::AppHandle, url: String) -> Result<String, IpcError> {
@@ -33,7 +33,7 @@ pub async fn open_external_url(app: tauri::AppHandle, url: String) -> Result<Str
 }
 
 /// Read clipboard text via the OS. Routed through Rust so we don't
-/// have to grant the renderer the broader clipboard plugin permission.
+/// have to grant the renderer the broader Tauri clipboard plugin permission.
 #[tauri::command]
 #[specta::specta]
 pub async fn clipboard_read_text(app: tauri::AppHandle) -> Result<String, IpcError> {

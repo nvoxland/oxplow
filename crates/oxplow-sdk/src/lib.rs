@@ -1,8 +1,8 @@
-//! The plugin SDK (`.context/extensions.md` "The SDK"): scaffold, check and test an
+//! The extension SDK (`.context/extensions.md` "The SDK"): scaffold, check and test an
 //! extension, and the provider conformance kit
-//! ([`conformance`], [`plugin_test`]).
+//! ([`conformance`], [`extension_test`]).
 //!
-//! One library behind three callers — the `oxplow plugin new|check|test`
+//! One library behind three callers — the `oxplow extension new|check|test`
 //! CLI in the Tauri binary, the RPC/MCP `validate_extension`, and
 //! `save_lens` — so every message reads the same (`file:line: what — fix`)
 //! wherever the author meets it. For an AI author that consistency is the
@@ -11,7 +11,7 @@
 
 pub mod answerability;
 pub mod conformance;
-pub mod plugin_test;
+pub mod extension_test;
 mod throwaway;
 
 use std::path::{Path, PathBuf};
@@ -34,8 +34,8 @@ pub enum SdkError {
     Domain(#[from] DomainError),
 }
 
-/// What `plugin new` can make. Each checks clean as written and passes
-/// `plugin test` (P7.C6, `tests/just_works.rs`) — a provider once a real
+/// What `extension new` can make. Each checks clean as written and passes
+/// `extension test` (P7.C6, `tests/just_works.rs`) — a provider once a real
 /// program stands behind its stub.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -45,7 +45,7 @@ pub enum Kind {
     /// A v2 manifest only.
     Extension,
     /// A work-items provider: its declarations, a stub program to replace,
-    /// and the fixtures `plugin test` runs.
+    /// and the fixtures `extension test` runs.
     Provider,
     /// A derived (Starlark) collector of an entity, a model over it and a
     /// lens over the model.
@@ -132,7 +132,7 @@ pub fn scaffold(
         Ok(())
     };
     let ns = oxplow_app::extension_commands::command_namespace(name);
-    // The intent example, and its fixture (what `plugin test` runs).
+    // The intent example, and its fixture (what `extension test` runs).
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens | Kind::Component => (
             format!("{{ lens: {name}, params: {{ stream_id: 1 }} }}"),
@@ -245,7 +245,7 @@ pub fn scaffold(
         write(
             &format!("{rel_dir}/fixtures/basic.yaml"),
             format!(
-                "# The acceptance example from extension.yaml as a fixture for `oxplow plugin test`\n\
+                "# The acceptance example from extension.yaml as a fixture for `oxplow extension test`\n\
                  # (input in, expected output out). Keep the two in step.\n\
                  name: basic\ninput: {example_input}\nexpect: {expect}\n"
             ),
@@ -272,7 +272,7 @@ pub fn scaffold(
             make_executable(&root.join(&rel_dir).join("bin/provider"))?;
             write(
                 &format!("{rel_dir}/fixtures/provider-{provider_id}.yaml"),
-                "# The instance config `oxplow plugin test` checks the provider with.\nconfig: {}\n"
+                "# The instance config `oxplow extension test` checks the provider with.\nconfig: {}\n"
                     .to_string(),
             )?;
         }
@@ -547,7 +547,7 @@ pub enum DryRun {
 /// shape, and a dry run of its models, commands, lenses and advisories
 /// against the semantic layer — `layer` (the project's), else a fresh
 /// in-memory database. This is what `validate_extension` returns
-/// and what `oxplow plugin check` prints. `commands` (the running app's
+/// and what `oxplow extension check` prints. `commands` (the running app's
 /// registry) checks launcher command entries; without it, a throwaway
 /// oxplow's does. With `against` (a git revision), the report also says
 /// what going from it to the working tree changes ([`CheckReport::effects`]).

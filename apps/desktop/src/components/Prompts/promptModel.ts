@@ -23,7 +23,7 @@ export interface PromptGroup {
 const CAPABILITY_LABELS: Record<string, string> = {
   code_intel: "Code",
   knowledge: "Wiki",
-  plugins: "Extensions",
+  extensions: "Extensions",
   vcs: "Version control",
   work_items: "Work items",
 };

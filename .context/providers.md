@@ -5,7 +5,7 @@ docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D). This doc
 covers the protocol (D1), the fake provider (D2) and the host with its
 consent and spawn rules (D3), instances with health (D4), the
-conformance kit with `oxplow plugin test` (D5), which trackers are
+conformance kit with `oxplow extension test` (D5), which trackers are
 backends, and the MCP adapter (P7.A6).
 
 ## The protocol (`crates/oxplow-provider-protocol`)
@@ -128,7 +128,7 @@ file: items, revisions and answered keys are restored at start and kept
 after every invoke, as a real service's are — what the kit's restart
 re-sends against (tsk916). Fixtures that launch it through an
 extension (`providers/tests.rs` `write_extension`, the SDK's
-`just_works.rs`, the desktop `plugin_cli.rs`) set it to
+`just_works.rs`, the desktop `extension_cli.rs`) set it to
 `<project>/.oxplow/fake-state-$OXPLOW_PROVIDER_ID.json` — outside the
 extension folder, whose contents its consent covers — and the kit tests
 clear it before each run, since the golden transcript records the refs
@@ -286,11 +286,11 @@ in-process, behind a token check (`notes::Tokens`; `notes::only(t)`
 takes one token, the OAuth stand-in its live access tokens);
 `a_server_by_url_is_pinned_and_called` covers the pin, the calls, a
 bearer refused at check and mid-session, and a missing one, and
-`tests/kit.rs` runs `plugin test` on the fixture with its server by url) — the pin (an edited `tools.json` is refused), the mapping's
+`tests/kit.rs` runs `extension test` on the fixture with its server by url) — the pin (an edited `tools.json` is refused), the mapping's
 calls and outcomes, the read and its cursor, an undeclared event and a
 foreign ref refused; `the_pinned_tools_are_the_servers` checks the pin
 (`OXPLOW_BLESS=1` re-pins). `tests/kit.rs` runs the fixture through
-`oxplow plugin test`, the work-items suite through a throwaway host over
+`oxplow extension test`, the work-items suite through a throwaway host over
 the adapter included.
 
 ## The host (`crates/oxplow-app/src/providers/`)
@@ -431,7 +431,7 @@ One spelling everywhere, because the id is used as it stands:
 | an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the approved copy (`copies/<ext>/<provider id>/<hash>`) |
 | the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | Data → Programs' row, `declaration_effects` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
-| `plugin_health.contribution`, `provider_collector_state.instance` (the name) | |
+| `contribution_health.contribution`, `provider_collector_state.instance` (the name) | |
 | the credential accounts (`instance:<project>:<ext>/<id>:<name>`) | |
 
 Consent stays per program: its hash covers the folder, the entry, args
@@ -451,7 +451,7 @@ config entry; its credentials, named by the extension or, when the
 extension no longer declares its provider, by the copy it last ran
 (`host::last_ran_credentials`); its read checkpoints
 (`provider_collector_state`, so one added again under the id reads from
-the start); its `plugin_health` row; and any `activeProviders` choice
+the start); its `contribution_health` row; and any `activeProviders` choice
 naming its id — except, for a project's replacement of a global
 instance, what the global one now showing through has),
 and sets a credential with `set_credential` (a declared name; the
@@ -778,7 +778,7 @@ types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@2`
 or `@2` — a published version's schema never changes, since declarations
 are compared to it exactly;
 tsk548): declaring any other type — another core one such as
-`plugin.enabled`, which would clear another contribution's disable — is
+`contribution.enabled`, which would clear another contribution's disable — is
 refused when the manifest loads, and the declared schema must equal
 core's (checked at enable). Its own types are P7. A command's run
 invokes the process and hands the bus its result, its inverse (as
@@ -786,14 +786,14 @@ invokes the process and hands the bus its result, its inverse (as
 refused if a type isn't declared, a
 `work_item.recorded` names another provider's item, or a subject isn't
 one of its own refs (`check_subject`: `work_item:<id>:…` or
-`plugin:<ext>`).
+`extension:<ext>`).
 
 **Calls are bounded** (tsk549): `check` and `invoke` time out after
 `HostDeps.call_timeout` (`MachineEnv.provider_call_timeout`: 60 s in the
 app, 2 s in `Services::in_memory`); a timeout sends `$/cancel` and
 counts as a failure. A restart runs under its own `starting` lock,
 never holding `live`, so a start that hangs can't block `stop` (and
-through it reconcile, `oxplow.plugin.enable` or `set_instance`). `Peer::start`
+through it reconcile, `oxplow.contribution.enable` or `set_instance`). `Peer::start`
 refuses once the other side's stream has closed, instead of leaving a
 waiter that nothing resolves.
 
@@ -838,16 +838,16 @@ extension declares; the reason says what to add), `refused { reason }`
 `failing { errors }` (the last five) or `disabled { reason }`. A failed
 start or call counts (a refused input or a cancel doesn't); a success
 resets the count and updates `last_ok_at` and the moving-average
-`mean_invoke_ms`. The count and the disable are the policy every plugin
-contribution shares (P7.C1, `plugin_health.rs`; [extensions.md](./extensions.md)):
-the `plugin_health` row keyed `<extension>` / `<instance id>`, kind
-`provider` (`v_plugin_health`). **Three failures in a row disable the
+`mean_invoke_ms`. The count and the disable are the policy every extension
+contribution shares (P7.C1, `contribution_health.rs`; [extensions.md](./extensions.md)):
+the `contribution_health` row keyed `<extension>` / `<instance id>`, kind
+`provider` (`v_contribution_health`). **Three failures in a row disable the
 instance** — a write counts once however often it is sent again under
 its idempotency key (an effect's automatic retries, a person's retry of
 the same composition: `Instance::failed_keys`, tsk913), so one outage
 that a reaction retries through doesn't halt it: it stops, and the row (`disabled`, its reason) and
-`plugin.disabled@1 { plugin, contribution, kind, reason }` commit
-together (source `system:plugins`, subject `plugin:<extension>`). So is
+`contribution.disabled@1 { extension, contribution, kind, reason }` commit
+together (source `system:extensions`, subject `extension:<extension>`). So is
 a handshake that doesn't match the approved declarations. The row is
 what keeps it off, across reconciles and restarts, and one whose row
 can't be read stays off too (`failing`, naming the error — not knowing
@@ -857,9 +857,9 @@ flight** (tsk569): each disable bumps the instance's epoch under the
 `running` lock, and a start registers (`admit`) only if the epoch it
 began with still holds, so a concurrent reconcile can't bring back
 what was just disabled.
-Only a person turns it back on — **`oxplow.plugin.enable { plugin, kind,
+Only a person turns it back on — **`oxplow.contribution.enable { extension, kind,
 contribution }`** (human-only, `External`, not undoable; it replaced
-`provider.enable`), which marks the row `ok`, logs `plugin.enabled@1`,
+`provider.enable`), which marks the row `ok`, logs `contribution.enabled@1`,
 resets the backoff and reconciles. Settings → Integrations' Enable runs
 it before writing `extensionInstances`.
 
@@ -913,7 +913,7 @@ outcome is the view's state) and `set_provider_instance { instance,
 enabled, config }` (`ProviderRegistry::set_instance`: enabling checks
 first and refuses an unapproved or unconfigured instance, writing
 nothing, with the problem's field as `/config/<path>`; then `oxplow.config.set`
-of `extensionInstances` — to enable, `oxplow.plugin.enable` runs **first**, so
+of `extensionInstances` — to enable, `oxplow.contribution.enable` runs **first**, so
 a failed enable writes nothing and the config never says enabled for
 an instance that wasn't — then a reconcile). Each row
 shows its state, its credentials (each set into the keychain through
@@ -954,7 +954,7 @@ the instance; an unconfigured instance can't be enabled (nothing
 written) and a configured one enables, writes `extensionInstances` and
 disables again; `fail-next:3` disables it after three failures with the
 reason logged, keeps it off across a reconcile, refuses an agent's
-`oxplow.plugin.enable` and comes back on a person's; and the work-items
+`oxplow.contribution.enable` and comes back on a person's; and the work-items
 conformance suite passes through the dispatching `work_item.*` over the
 fake; `work_item.*` writes the fake's items through its process with one
 audit row (and undo dispatches again), its verbs aren't on the bus but
@@ -1008,12 +1008,12 @@ The fake declares and keeps it, which proves the host and nothing about a
 service: a real provider declares it only once its service is known to do
 a keyed write once.
 
-## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
+## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `extension_test.rs`)
 
 (The agent harnesses have their own suite over what core records of a
 session: [agent-model.md](./agent-model.md) "Observe conformance".)
 
-What `oxplow plugin test <name> [--bless] [--json]` runs for each
+What `oxplow extension test <name> [--bless] [--json]` runs for each
 provider an extension declares, after its check and its lens and
 collector examples ([extensions.md](./extensions.md) "The SDK"). The person running it runs their own program, so there is no
 approval check; credentials come from the environment (the declared
@@ -1072,9 +1072,9 @@ and the throwaway host the conformance suite runs in
   approved there and enabled with the fixture config, then
   `work_items_conformance::suite` against its `ExternalWorkItems`.
 
-The red test (`plugin_cli.rs`,
-`plugin_test_blesses_a_provider_then_a_changed_transcript_fails`)
-scaffolds `plugin new provider fake`, sees the stub fail the handshake,
+The red test (`extension_cli.rs`,
+`extension_test_blesses_a_provider_then_a_changed_transcript_fails`)
+scaffolds `extension new provider fake`, sees the stub fail the handshake,
 puts the fake behind the entry, sees the unconfigured fixture and the
 missing golden fail, blesses, passes, then edits the golden and gets
 one error at the transcript's line and pointer. The fake binary exits

@@ -21,7 +21,7 @@ pub struct RefKindRow {
     pub page: Option<String>,
     pub icon: Option<String>,
     /// The view search indexes under the kind; `None` for a core kind
-    /// (core indexes its own) and a plugin kind that isn't searchable.
+    /// (core indexes its own) and an extension's kind that isn't searchable.
     pub searchable: Option<String>,
 }
 

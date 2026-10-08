@@ -233,7 +233,7 @@ persists its own harness, so Claude and Codex sessions run concurrently.
   all ride the `OPENCODE_CONFIG_CONTENT` env var — inline opencode
   config (merged last by opencode) wiring the oxplow MCP server
   (bearer via opencode's own `{env:OXPLOW_HOOK_TOKEN}` interpolation),
-  the hook-bridge plugin, and an `instructions` entry pointing at the
+  the hook-bridge opencode plugin, and an `instructions` entry pointing at the
   per-session prompt file (opencode has no `--append-system-prompt`).
 - All agents export `OXPLOW_STREAM_ID`, `OXPLOW_THREAD_ID`,
   `OXPLOW_HOOK_TOKEN`, and `OXPLOW_SESSION` (the agent session, `ses<n>`)
@@ -508,7 +508,7 @@ one, and one that posts none (Codex) still ends.
    / Bash / mcp / Task / …) does zero work here. Persistence is
    unaffected: the event is still ingested in `handle_hook_inner`
    regardless. (The HTTP round-trip itself still fires for every tool —
-   the plugin's `PreToolUse` matcher is `"*"`; narrowing that matcher to
+   the Claude Code plugin's `PreToolUse` matcher is `"*"`; narrowing that matcher to
    the edit tools is a separate, sign-off-gated win.)
 5. For `UserPromptSubmit`: returns `additionalContext` made up of a
    live `<session-context>` block (stream + thread + writer, rebuilt
@@ -1152,7 +1152,7 @@ is `{ to: done|canceled, native_state: archived }`.
   never force-triggers any of this — there is no Stop-hook branch and
   no synthesized work item for comments.** The agent only touches
   comments when the user prompts it (typically via the
-  `/review-comments` plugin command, which just wraps these calls).
+  `/review-comments` Claude Code plugin command, which just wraps these calls).
   `comment_id` is an integer (comments use autoincrement ids). Store:
   `crates/oxplow-db/src/comment_store.rs`; an agent's mutations are
   `knowledge.*` comment commands through `run_command`, and views
@@ -1291,7 +1291,7 @@ check an oxplow item's body the same way (tsk775).
 (`check_links_in`). **Every kind the vocabulary knows is a link**
 (tsk894): a typed `Reference` (task, wiki, file, dir, commit, finding) is
 probed for existence; another known kind (an effort, another provider's
-work item, a run) is valid as it stands; a plugin kind with a `resolve`
+work item, a run) is valid as it stands; an extension's kind with a `resolve`
 model (`v_ref_kind.resolve`) is valid when that model has its `ref`
 (`[[pr:12]]` → `github_pr:12`). Only an interior matching no kind is
 "not a recognized reference". A file is looked for in the **thread's
@@ -1330,7 +1330,7 @@ effort is open before a run is recorded, and whether its diff coverage has
 a baseline (`hasStartSnapshot`).
 Report parsing is **pluggable**: a report collector names a bundled parser
 (`entry: oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>`, jq programs in
-`crates/oxplow-collect-plugin`) or its own jaq / Starlark / exec script, no
+`crates/oxplow-script`) or its own jaq / Starlark / exec script, no
 recompile (tsk863).
 When the PostToolUse hook detects a test run but no configured report was
 refreshed, it returns a one-shot nudge via `hookSpecificOutput.additionalContext`
@@ -1522,7 +1522,7 @@ Claude Code defers MCP tool schemas (surfacing them as names only until
 `ToolSearch` fetches the schema) based on its own heuristics — it is
 **not** a signal the MCP server sends. `tools/list` already reports
 every oxplow tool with full `inputSchema`; the harness picks which to
-eagerly inline vs defer. There is no MCP-spec annotation and no plugin
+eagerly inline vs defer. There is no MCP-spec annotation and no Claude Code plugin
 config knob to declare a tool "always loaded". If this ever becomes
 tunable, the wiring is `crates/oxplow-mcp/src/lib.rs` `tools/list` response +
 `crates/oxplow-mcp/src/lib.rs` tool registrations (see the historical task ledger).
@@ -1530,11 +1530,11 @@ tunable, the wiring is `crates/oxplow-mcp/src/lib.rs` `tools/list` response +
 ## Harness-injected system-reminders (not ours)
 
 A few system-reminders come from the Claude Code harness itself, not
-oxplow hooks, and are **not suppressible** from the plugin side:
+oxplow hooks, and are **not suppressible** from the Claude Code plugin side:
 
 - "The task tools haven't been used recently…" — harness nudge about
   `TaskCreate`/`TaskUpdate`. Noise in oxplow projects where tasks
-  live in `mcp__oxplow__*` tools instead. No hook, env var, or plugin
+  live in `mcp__oxplow__*` tools instead. No hook, env var, or Claude Code plugin
   config lets us silence it; it fires on its own schedule. If a future
   Claude Code release exposes a suppression hook, revisit the original ticket.
 - The file-in-IDE reminder ("The user opened the file X in the IDE.

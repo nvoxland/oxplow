@@ -23,7 +23,10 @@ pub const CAPABILITY_QUESTIONS: &[(&str, &str)] = &[
         "code_intel",
         include_str!("../assets/questions/code_intel.yaml"),
     ),
-    ("plugins", include_str!("../assets/questions/plugins.yaml")),
+    (
+        "extensions",
+        include_str!("../assets/questions/extensions.yaml"),
+    ),
 ];
 
 /// A capability question as the person sees it (P6.D2): offered with an

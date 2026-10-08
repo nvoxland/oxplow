@@ -57,7 +57,7 @@ manager owns:
 > `Option<Language>` (handles `typescriptreact`/`javascriptreact`, delegates
 > the rest to `language_from_name`; an LSP language with no analysis grammar
 > resolves to `None`). Use it whenever an LSP buffer needs tree-sitter
-> analysis — don't re-derive the mapping. Part of the unified language-plugin
+> analysis — don't re-derive the mapping. Part of the unified language-support
 > epic (tsk320).
 
 ## Installer (`crates/oxplow-app/src/lsp_installer.rs`)
@@ -117,7 +117,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `MarkedString`, 0-based positions, URIs) to them. A file's language is
   the configured server whose `extensions` cover it — an installed
   (Mason) server's come from the language registry
-  (`plugin::lsp_extensions`, set when it is registered; tsk556)
+  (`language::lsp_extensions`, set when it is registered; tsk556)
   (`LspSessionManager::language_for_path`); an uncovered file's error
   names the server to install (by the extension's language). Diagnostics
   are what the servers published (`lsp_diagnostic`), not a pull — and

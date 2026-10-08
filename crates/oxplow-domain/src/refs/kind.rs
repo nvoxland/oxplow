@@ -1,7 +1,7 @@
 //! The kind registry (`.context/refs.md`): the one list of what a
 //! ref can name. Each kind says what its ids look like, whether it takes a
 //! `@rev`, and whether its id is `<provider>:<native id>`. Core kinds are
-//! registered statically here; a plugin's `ref_kinds` register into the
+//! registered statically here; an extension's `ref_kinds` register into the
 //! same registry, and a collision is a load error.
 //!
 //! The registry validates refs; it doesn't render them. What renders a
@@ -229,7 +229,7 @@ pub fn core_kinds() -> KindRegistry {
         ),
         KindSpec::new("metric", r"^[a-z0-9_.-]+$"),
         KindSpec::new("model", r"^v_[a-z0-9_]+$"),
-        KindSpec::new("plugin", r"^[a-z0-9-]+$"),
+        KindSpec::new("extension", r"^[a-z0-9-]+$"),
         // Two or more dot segments, as `CommandSpec::validate_id` allows.
         KindSpec::new("command", r"^[a-z0-9_]+(\.[a-z0-9_]+)+$"),
         // A `.oxplow/project.yaml` key (`config.changed`'s subject).

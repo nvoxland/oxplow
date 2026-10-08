@@ -1,11 +1,11 @@
 //! Uniform data types for test/coverage results.
 //!
 //! This crate is **pure types** — the shapes a report parser produces and
-//! oxplow stores. Parsing is `oxplow-collect-plugin`'s: the bundled
+//! oxplow stores. Parsing is `oxplow-script`'s: the bundled
 //! junit/lcov/cobertura/jacoco/clippy/eslint jq programs and a project's
 //! own report collectors' scripts. Keeping
-//! these types in their own dependency-light crate lets both the plugin
-//! runtime and the app/db layers share one definition of coverage line-sets
+//! these types in their own dependency-light crate lets both the script
+//! runtime (`oxplow-script`) and the app/db layers share one definition of coverage line-sets
 //! and the test suite/case tree.
 
 use std::collections::{BTreeMap, BTreeSet};

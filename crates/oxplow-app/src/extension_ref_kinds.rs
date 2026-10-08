@@ -93,7 +93,7 @@ struct RefKindFile {
 }
 
 /// The registry's spec for `decl`: its id pattern and its `wikilink:`
-/// sugar — the one constructor the vocabulary reactor and `plugin test`
+/// sugar — the one constructor the vocabulary reactor and `extension test`
 /// register an extension's kinds with.
 pub fn kind_spec(
     decl: &RefKindDecl,
@@ -461,7 +461,7 @@ fn decl_of(
     let named = |m: String| format!("ref kind `{}`: {m}", f.kind);
     let prefix = format!(
         "{}_",
-        oxplow_domain::events::schema::plugin_namespace(extension)
+        oxplow_domain::events::schema::extension_namespace(extension)
     );
     if !oxplow_domain::refs::grammar::is_valid_kind(&f.kind)
         || !f.kind.starts_with(&prefix)

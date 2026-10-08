@@ -1,10 +1,10 @@
-//! tsk1047: `oxplow plugin test` runs a fact collector's examples offline,
+//! tsk1047: `oxplow extension test` runs a fact collector's examples offline,
 //! over the files an example gives it, and compares the facts — the walk's
 //! todo-watch collector could only be tested live.
 
 #![allow(clippy::unwrap_used)]
 
-use oxplow_sdk::plugin_test::test_extension;
+use oxplow_sdk::extension_test::test_extension;
 
 fn write(root: &std::path::Path, rel: &str, body: &str) {
     let p = root.join(rel);

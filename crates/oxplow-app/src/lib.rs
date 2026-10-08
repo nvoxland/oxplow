@@ -44,6 +44,8 @@ pub mod component_bundles;
 pub mod config_reactors;
 pub mod config_service;
 pub mod config_watch;
+pub mod contribution_health;
+pub mod contribution_repair;
 pub mod daemon_supervisor;
 pub mod dashboard_tiles;
 pub mod diagnostics;
@@ -104,8 +106,6 @@ pub mod output_activity;
 pub mod pacing;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
-pub mod plugin_health;
-pub mod plugin_repair;
 pub mod post_tool_reactors;
 pub mod producer_metrics;
 pub mod prompt_catalog;
@@ -446,7 +446,7 @@ struct MachineEnv {
     /// How long a code-intelligence request waits for its language server.
     lsp_request_timeout: std::time::Duration,
     /// The environment a provider's declared `env` is read from: this
-    /// process's, or the one a test or `plugin test` run names.
+    /// process's, or the one a test or `extension test` run names.
     host_env: providers::host::HostEnv,
 }
 
@@ -491,7 +491,7 @@ pub struct Services {
     /// change — the metric cube; `models_changed::spawn` tells them.
     pub assets: assets::Assets,
     /// Every event `type@v` the log accepts, with its schema. Core types
-    /// at boot; plugin types join when their manifests load.
+    /// at boot; extension types join when their manifests load.
     pub vocabulary: VocabularyHandle,
     /// Delivers the log to its consumers (checkpoints, dead letters).
     /// Producers `wake()` it after they commit; `boot.rs` spawns the loop.
@@ -1292,14 +1292,16 @@ impl Services {
             let router: Arc<dyn commands::ProviderRouter> = providers.clone();
             Arc::downgrade(&router)
         });
-        let plugin_health =
-            plugin_health::PluginHealth::new(db.clone(), event_log_store.vocabulary().clone());
+        let contribution_health = contribution_health::ContributionHealth::new(
+            db.clone(),
+            event_log_store.vocabulary().clone(),
+        );
         commands
-            .add_op(plugin_health::enable_op(
-                plugin_health.clone(),
+            .add_op(contribution_health::enable_op(
+                contribution_health.clone(),
                 Arc::downgrade(&providers),
             ))
-            .expect("plugin.enable's op registers");
+            .expect("contribution.enable's op registers");
         commands
             .add_op(providers::sync::sync_op(&providers))
             .expect("provider.sync's op registers");
@@ -1848,6 +1850,8 @@ mod tests {
             [
                 // The collector's own program or script (P7.B3).
                 "oxplow.collector.sync",
+                // A provider's process restarts (P7.C1; was provider.enable).
+                "oxplow.contribution.enable",
                 // A tile's SQL is checked by the semantic engine first (P8.A5).
                 "oxplow.dashboard.add_item",
                 "oxplow.dashboard.update_item",
@@ -1872,8 +1876,6 @@ mod tests {
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",
                 "oxplow.metric.rebuild",
-                // A provider's process restarts (P7.C1; was provider.enable).
-                "oxplow.plugin.enable",
                 // The provider process's collectors (P7.A3).
                 "oxplow.provider.sync",
                 // Overwrites a worktree file (P8.A9).

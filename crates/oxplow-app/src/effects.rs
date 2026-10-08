@@ -164,7 +164,7 @@ fn decl_of(
     }
     let script = read(&f.entry)
         .ok_or_else(|| named(format!("entry `{}` isn't in the extension", f.entry)))?;
-    oxplow_collect_plugin::runtime::check_starlark(&f.entry, &script)
+    oxplow_script::runtime::check_starlark(&f.entry, &script)
         .map_err(|e| named(format!("`{}` {e}", f.entry)))?;
     Ok(EffectDecl {
         id: f.id,
@@ -353,7 +353,7 @@ pub fn run_script(
     event: serde_json::Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Reaction, String> {
-    let out = oxplow_collect_plugin::scope::run_starlark_serving(
+    let out = oxplow_script::scope::run_starlark_serving(
         &crate::extension_commands::COMMAND_SCRIPT_BUDGET,
         script,
         &serde_json::json!({ "event": event }),
@@ -366,7 +366,7 @@ pub fn run_script(
 /// What `decl` would do with `event` (a fixture's, or a logged one's
 /// [`event_json`]) — its script, its scope calls answered from
 /// `answers` or for real (reads through `layer`), the commands it composes
-/// checked against `registry` — running nothing: `plugin test` and a
+/// checked against `registry` — running nothing: `extension test` and a
 /// change's review.
 pub async fn dry_run(
     layer: &crate::sql_gateway::SqlGateway,
@@ -459,7 +459,10 @@ pub fn finished_tx(
             },
         },
     )
-    .with_subject([event_ref, crate::plugin_health::plugin_ref(extension)]);
+    .with_subject([
+        event_ref,
+        oxplow_domain::refs::build::extension_ref(extension),
+    ]);
     result.cause = cause;
     oxplow_db::event_log_store::append_tx(tx, vocabulary, &result)?;
     Ok(())

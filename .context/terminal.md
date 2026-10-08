@@ -65,7 +65,7 @@ consumer. It's mounted by two page renderers:
   (`commands/terminal.rs`) early-branches on `pane_target == "shell" ||
   starts_with("shell:")` to spawn the user's `$SHELL -l` (fallback
   `/bin/sh`) rooted at `stream.worktree_path` — no agent command,
-  plugin, or system prompt. One persistent shell per (stream, terminal
+  Claude Code plugin, or system prompt. One persistent shell per (stream, terminal
   id) (session key `<stream>|<pane_target>|<mode>`, so the bare-`shell`
   default reproduces the old `<stream>|shell|<mode>` key and reattaches
   its existing PTY). No `onUserInterrupt`: Escape is an ordinary shell

@@ -138,7 +138,7 @@ export function TerminalPane({
   onOpenFile?(absPath: string, line?: number, column?: number): void;
   /// Final gate for the file-path link detector: only paths this returns true
   /// for become clickable links. Used to avoid linkifying dotted words in
-  /// prose (e.g. plugin names) that aren't real workspace files. When omitted,
+  /// prose (e.g. collector names) that aren't real workspace files. When omitted,
   /// every path-shaped token links (the prior behavior).
   isLinkablePath?(path: string): boolean;
   /// When set, the pane becomes comment-enabled: a selection on terminal

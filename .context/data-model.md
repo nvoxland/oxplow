@@ -1201,7 +1201,7 @@ authoritative list (the `core_registry_knows_every_core_type_and_version`
 test pins it). An extension's types join it as data, not Rust types:
 `register_declared(extension, DeclaredEventType { event_type, v, schema,
 summary, upcast })` (P8.D2) refuses a core namespace (`CORE_NAMESPACES`,
-§5.3), any namespace but the extension's own (`plugin_namespace`: its
+§5.3), any namespace but the extension's own (`extension_namespace`: its
 name with `-` read as `_`), a schema that doesn't compile, a duplicate
 `type@v`, v0, and a version past 1 without an upcast. The upcast is the
 extension's Starlark (`extension_event_types::starlark_upcast`:
@@ -1274,10 +1274,10 @@ can't use a BINARY index; windows in `oxplow_domain::events::retention`'s
 `test`, `code`, `collector` and `effect` 90 / 30, `ui` (op errors the
 person saw, tsk1072) 30 / 14, `file` (`file.saved`, each editor save,
 `oxplow.file.save`) 30 / 14, and every namespace core
-doesn't own — a plugin's, found by skipping through that index one
-namespace per probe, and in `event_content` — `PLUGIN_DEFAULT` 30 / 14
+doesn't own — an extension's, found by skipping through that index one
+namespace per probe, and in `event_content` — `EXTENSION_DEFAULT` 30 / 14
 (P7.B7), or the shorter window its extension declares
-(`event_types.retention`, P8.D5: kept in `plugin_event_retention`, V145,
+(`event_types.retention`, P8.D5: kept in `extension_event_retention`, V145,
 restated by the vocabulary reactor, longer than the default refused by
 `check_declared` at load, and **kept when the extension is unloaded** —
 its rows stay under the window it promised; an extension present without
@@ -1286,17 +1286,17 @@ the same namespace, which a namesake that declares nothing never speaks
 for, tsk796); core's state namespaces are kept). **A project sets its
 own windows** with the person-only key `eventRetention: { <namespace>:
 { payloadDays, contentDays } }` (tsk947): each sweep reads it, a core
-namespace's replaces the default, a plugin namespace's is capped at the
-plugin's window (`RetentionWindow::at_most`), and core state is refused
+namespace's replaces the default, an extension namespace's is capped at the
+extension's window (`RetentionWindow::at_most`), and core state is refused
 at load (`is_kept_whole`). A window is bounded (`window_problem`,
 tsk985): at least 7 days for a core namespace oxplow reads back (the
-agent policy reads a turn's tool payloads), at least a day for a
-plugin's, at most `MAX_DAYS` (36,500 — beyond about 127,000 days the
+agent policy reads a turn's tool payloads), at least a day for an
+extension's, at most `MAX_DAYS` (36,500 — beyond about 127,000 days the
 cutoff arithmetic used to wrap into the future and wipe the namespace),
 and its `contentDays` no longer than its `payloadDays`.
 `Timestamp::from_unix_ms` computes in `i128`, and the sweep clamps a
 cutoff to `MAX_DAYS` whatever reaches it. A window naming a namespace
-nothing logs is kept — a plugin may be installed later — and reported
+nothing logs is kept — an extension may be installed later — and reported
 (`SweepReport.unused`, a warning in the log). **An expired event is
 history only** (tsk501): `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
@@ -1370,7 +1370,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_models.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and open efforts' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
-| `plugin.repair` | async | `plugin.disabled` | files the contribution's repair work item on the active provider as the system, or comments on its open one; records it in `plugin_health.repair_item` (P7.C2) | boot.rs |
+| `contribution.repair` | async | `contribution.disabled` | files the contribution's repair work item on the active provider as the system, or comments on its open one; records it in `contribution_health.repair_item` (P7.C2) | boot.rs |
 | `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@1` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |
 
 **Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
@@ -1848,7 +1848,7 @@ change, as an instance starts or stops, and on each reconcile. An
 extension provider's `provider` is its **instance
 id** (P9.B1: a provider's default instance has the provider's id, a
 second instance its own — `issues_acme`), the same id its refs and
-`plugin_health.contribution` carry. Published as `v_capability_provider`;
+`contribution_health.contribution` carry. Published as `v_capability_provider`;
 see [work-items.md](./work-items.md).
 
 ### `asset_state` — the asset runner (`crates/oxplow-app/src/assets.rs`)
@@ -1894,11 +1894,11 @@ bus writes an attempt's row in its run's transaction, or claims it
 `started` first when a step runs outside it (`claim_tx` / `finish_tx`).
 See [extensions.md](./extensions.md) "Effects".
 
-### `plugin_health` — `SqlitePluginHealthStore` (`crates/oxplow-db/src/plugin_health_store.rs`)
+### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 
-V135 (P7.C1). Each plugin contribution's health on this machine, keyed
-`plugin` (the extension) + `kind` (`provider` | `collector`) +
-`contribution` (its provider's or collector's id) — V140 put `kind` in
+V135 (P7.C1). Each extension contribution's health on this machine, keyed
+`extension` + `kind` (`provider` | `collector` | `effect`) +
+`contribution` (its provider's, collector's or effect's id) — V140 put `kind` in
 the key, since a provider and a collector may share an id (tsk721):
 `state` (`ok` / `failing` /
 `disabled`), `reason`, `consecutive_failures`, `last_ok_at`,
@@ -1908,18 +1908,18 @@ the key, since a provider and a collector may share an id (tsk721):
 approved, enabled `every:` collector; `ProviderRegistry::sync_due` for a
 running instance, its earliest collector): the last run (or now, when it
 runs now) plus the interval plus one scheduler tick
-(`plugin_health::next_due_ms`); `NULL` for one off any schedule (manual,
+(`contribution_health::next_due_ms`); `NULL` for one off any schedule (manual,
 `on:`, unapproved, disabled, `syncMinutes: 0`). A rate-limited instance
-keeps its last plan (tsk722). The policy is `oxplow-app/src/plugin_health.rs`:
-three failures in a row disable it, the row and `plugin.disabled@1` in
-one transaction; `oxplow.plugin.enable` clears it (`plugin.enabled@1`).
-`v_plugin_health` adds `dead_letters` (pending dead letters of its
-consumer `extension:<plugin>/<contribution>`, or of events whose subject
-is `plugin:<plugin>`) and `fresh` (0 once `next_due_at` has passed).
+keeps its last plan (tsk722). The policy is `oxplow-app/src/contribution_health.rs`:
+three failures in a row disable it, the row and `contribution.disabled@1` in
+one transaction; `oxplow.contribution.enable` clears it (`contribution.enabled@1`).
+`v_contribution_health` adds `dead_letters` (pending dead letters of its
+consumer `extension:<extension>/<contribution>`, or of events whose subject
+is `extension:<extension>`) and `fresh` (0 once `next_due_at` has passed).
 V136 (P7.C2) adds `repair_item` (the repair work item's ref the
-`plugin.repair` consumer filed) and `repair_seq` (the last
-`plugin.disabled` it handled, so a redelivery files nothing twice);
-`v_plugin_health` v2 shows `repair_item` only while that item is open.
+`contribution.repair` consumer filed) and `repair_seq` (the last
+`contribution.disabled` it handled, so a redelivery files nothing twice);
+`v_contribution_health` shows `repair_item` only while that item is open.
 
 ### `provider_collector_state` — `SqliteProviderCollectorStore` (`crates/oxplow-db/src/provider_collector_store.rs`)
 
@@ -2100,8 +2100,8 @@ or removed in place (a `UNIQUE` index over `(kind, ref_id, COALESCE(stream_id,''
 enforces identity, treating global rows' `NULL` stream as `''`).
 
 - `kind` ∈ `task | comment | note | wiki | file`, or a **searchable
-  plugin ref kind** (`acme_pr`, P9.D3); `ref_id` is the task id, comment
-  id, note id, wiki slug, repo-relative path, or the plugin ref's id.
+  extension ref kind** (`acme_pr`, P9.D3); `ref_id` is the task id, comment
+  id, note id, wiki slug, repo-relative path, or the extension ref's id.
   Every kind but `file` is derived from a model by an asset per kind
   (`kind_search.rs`, `restate_kind_tx`: only entries added, changed or
   gone are written, by each entry's `content_hash`, V164; tsk896); core's read `v_search_work_item` (the active work list's items,

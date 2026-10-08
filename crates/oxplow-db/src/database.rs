@@ -234,7 +234,7 @@ fn require_math_functions(c: &Connection) -> Result<(), DbInitError> {
 
 impl Database {
     /// Open an existing project database **read-only**, without migrating
-    /// or writing anything — for a tool (the `oxplow plugin check` CLI)
+    /// or writing anything — for a tool (the `oxplow extension check` CLI)
     /// that may be a different oxplow version than the app that owns the
     /// file. Refuses a file whose schema version differs from this build's
     /// (its views may not match what this build would query).
@@ -1773,6 +1773,89 @@ mod tests {
                 r#"2 {"note":"thread_note:not7","thread":"thread:thr3"}"#,
                 r#"2 {"note":"thread_note:not8","thread":"thread:thr3"}"#,
             ]
+        );
+    }
+
+    /// V35: the health table, the enable command, the contribution events,
+    /// the repair consumer, `extension:` refs and the `exec:` trust tag
+    /// carry their new names.
+    #[test]
+    fn v35_rewrites_plugin_names_to_extensions_and_contributions() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(34))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO plugin_health (plugin, contribution, kind, state, updated_at)
+                 VALUES ('tracker', 'fake', 'provider', 'disabled', 't');
+               INSERT INTO plugin_event_retention (namespace, extension, payload_days, content_days, updated_at)
+                 VALUES ('acme', 'acme', 7, 3, 't');
+               INSERT INTO event_log (id, type, v, at, source, subject, payload) VALUES
+                 ('a', 'plugin.disabled', 1, 't', 'system:plugins', '["plugin:tracker"]',
+                  '{"plugin":"plugin:tracker","contribution":"fake","kind":"provider","reason":"r"}'),
+                 ('b', 'plugin.enabled', 1, 't', 'human', '["plugin:tracker"]',
+                  '{"plugin":"plugin:tracker","contribution":"fake","kind":"provider"}'),
+                 ('c', 'command.executed', 2, 't', 'human', '[]',
+                  '{"command":"oxplow.plugin.enable","actor_kind":"human","outcome":"ok","audit_id":1,"undoable":false}'),
+                 ('d', 'test.run.recorded', 1, 't', 'hook', '[]',
+                  '{"run":"run:1","command":"t","report_parsed":true,"source":"plugin-exec:tests.parse"}');
+               INSERT INTO command_audit (at, command, actor_kind, input_json, outcome, result_json) VALUES
+                 ('t', 'oxplow.plugin.enable', 'human',
+                  '{"plugin":"tracker","kind":"provider","contribution":"fake"}', 'ok',
+                  '{"plugin":"tracker","contribution":"fake","state":"ok"}');
+               INSERT INTO event_consumer_checkpoint (consumer, last_seq, updated_at)
+                 VALUES ('plugin.repair', 2, 't');
+               INSERT INTO page_ref (source_kind, source_id, target_kind, target_id, ref_type)
+                 VALUES ('wiki', 'notes', 'plugin', 'tracker', 'wikilink');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(35))
+            .run(&mut conn)
+            .unwrap();
+        let rows = |sql: &str| -> Vec<String> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            rows("SELECT extension || '/' || contribution FROM contribution_health"),
+            vec!["tracker/fake"]
+        );
+        assert_eq!(
+            rows("SELECT namespace FROM extension_event_retention"),
+            vec!["acme"]
+        );
+        assert_eq!(
+            rows(
+                "SELECT type || '@' || v || ' ' || source || ' ' || subject || ' ' || payload
+                    FROM event_log ORDER BY seq"
+            ),
+            vec![
+                r#"contribution.disabled@1 system:extensions ["extension:tracker"] {"contribution":"fake","kind":"provider","reason":"r","extension":"extension:tracker"}"#,
+                r#"contribution.enabled@1 human ["extension:tracker"] {"contribution":"fake","kind":"provider","extension":"extension:tracker"}"#,
+                r#"command.executed@2 human [] {"command":"oxplow.contribution.enable","actor_kind":"human","outcome":"ok","audit_id":1,"undoable":false}"#,
+                r#"test.run.recorded@2 hook [] {"run":"run:1","command":"t","report_parsed":true,"source":"exec:tests.parse"}"#,
+            ]
+        );
+        assert_eq!(
+            rows("SELECT command || ' ' || input_json || ' ' || result_json FROM command_audit"),
+            vec![
+                r#"oxplow.contribution.enable {"kind":"provider","contribution":"fake","extension":"tracker"} {"contribution":"fake","state":"ok","extension":"tracker"}"#
+            ]
+        );
+        assert_eq!(
+            rows("SELECT consumer || ' ' || last_seq FROM event_consumer_checkpoint"),
+            vec!["contribution.repair 2"]
+        );
+        assert_eq!(
+            rows("SELECT target_kind || ':' || target_id FROM page_ref"),
+            vec!["extension:tracker"]
         );
     }
 

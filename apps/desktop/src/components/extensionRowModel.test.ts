@@ -17,7 +17,7 @@ const ext = (over: Partial<Extension> = {}): Extension => ({
 });
 
 describe("extensionRowModel", () => {
-  // tsk1039: a lens whose SQL fails passes loading but fails `plugin check`;
+  // tsk1039: a lens whose SQL fails passes loading but fails `extension check`;
   // its row shows the check's errors too, once each.
   test("a project extension's row shows what its check found", () => {
     const m = extensionRowModel(ext({ errors: ["extension.yaml: bad"] }), [

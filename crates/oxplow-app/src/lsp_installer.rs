@@ -64,9 +64,9 @@ struct Manifest {
 
 /// The files an installed server for `language_id` covers: an install has
 /// no configured `extensions`, so they come from the language registry
-/// (`oxplow_code_metrics::plugin::lsp_extensions`).
+/// (`oxplow_code_metrics::language::lsp_extensions`).
 fn installed_extensions(language_id: &str) -> Vec<String> {
-    oxplow_code_metrics::plugin::lsp_extensions(language_id)
+    oxplow_code_metrics::language::lsp_extensions(language_id)
         .into_iter()
         .map(str::to_string)
         .collect()

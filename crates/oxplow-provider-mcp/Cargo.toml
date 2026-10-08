@@ -18,7 +18,7 @@ path = "src/bin/notes.rs"
 
 [dependencies]
 oxplow-provider-protocol = { workspace = true }
-oxplow-collect-plugin = { workspace = true }
+oxplow-script = { workspace = true }
 # The streamable-HTTP client is the adapter's (a server by `url`); the
 # server side and axum are the notes test server's.
 rmcp = { workspace = true, features = [

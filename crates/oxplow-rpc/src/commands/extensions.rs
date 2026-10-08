@@ -230,7 +230,7 @@ pub async fn run_lens_action(
 }
 
 /// Load one extension and dry-run each lens, returning every problem —
-/// the SDK's `check`, the same report `oxplow plugin check` prints.
+/// the SDK's `check`, the same report `oxplow extension check` prints.
 pub async fn validate_extension(
     svc: &Services,
     name: String,

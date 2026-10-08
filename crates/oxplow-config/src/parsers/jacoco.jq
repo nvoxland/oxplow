@@ -1,4 +1,4 @@
-# JaCoCo coverage plugin (input: xml → explicit element tree).
+# JaCoCo coverage parser (input: xml → explicit element tree).
 # <package name="P"> … <sourcefile name="F"> … <line nr="N" ci="C" mi="M"/>.
 # Path is P/F (bare F when P empty); covered when covered-instructions ci > 0.
 # Branch + function/method coverage come from the sourcefile-level

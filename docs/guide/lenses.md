@@ -262,7 +262,7 @@ oxplow.connect().then((component) => {
 //   await component.navigate("work_item:oxplow:tsk42")   // oxplow pages only
 ```
 
-`oxplow plugin new component <name>` writes all of this for you.
+`oxplow extension new component <name>` writes all of this for you.
 
 `component` also carries `props` and the theme's CSS variables
 (`tokens`). The kit stylesheet has a few classes in oxplow's look:
@@ -274,7 +274,7 @@ SVG, a `background` otherwise). They only work after `applyTheme()`. A
 request that fails rejects with `{ code, message }`. Types for the
 library are served beside it (`/component-lib/oxplow-component.d.ts`).
 
-The frame refuses some things silently, so `oxplow plugin check` reports
+The frame refuses some things silently, so `oxplow extension check` reports
 them as errors: an inline `<script>` or `onclick=` handler (put the code
 in a `.js` file), a `type="module"` script (the scripts must be plain
 scripts, since a sandboxed frame can't load modules), a script or

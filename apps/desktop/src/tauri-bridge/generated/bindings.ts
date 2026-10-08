@@ -949,12 +949,12 @@ export const commands = {
 	 *  The new window inherits
 	 *  the `external-url` capability defined in
 	 *  `apps/desktop/src-tauri/capabilities/external-url.json`, which
-	 *  grants zero oxplow commands and zero plugin permissions.
+	 *  grants zero oxplow commands and zero Tauri plugin permissions.
 	 */
 	openExternalUrl: (url: string) => typedError<string, IpcError>(__TAURI_INVOKE("open_external_url", { url })),
 	/**
 	 *  Read clipboard text via the OS. Routed through Rust so we don't
-	 *  have to grant the renderer the broader clipboard plugin permission.
+	 *  have to grant the renderer the broader Tauri clipboard plugin permission.
 	 */
 	clipboardReadText: () => typedError<string, IpcError>(__TAURI_INVOKE("clipboard_read_text")),
 	/**
@@ -994,7 +994,7 @@ export const commands = {
 	openTerminalSession: (paneTarget: string, cols: number, rows: number) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows })),
 	/**
 	 *  Open (or reattach to) an ACP thread's agent session. Hand-written like
-	 *  `open_terminal_session`: the MCP endpoint comes from the plugin runtime.
+	 *  `open_terminal_session`: the MCP endpoint comes from the `PluginRuntime`.
 	 */
 	acpOpenSession: (sessionId: AgentSessionId) => typedError<AcpSnapshot, IpcError>(__TAURI_INVOKE("acp_open_session", { sessionId })),
 	/**
@@ -1852,7 +1852,7 @@ export type CommandChange = {
 /**
  *  An example run of a command: its input, and the commands its script
  *  should compose, in order — or the refusal it should make (checked by
- *  `oxplow plugin check` / Settings).
+ *  `oxplow extension check` / Settings).
  */
 export type CommandExample = {
 	name: string,
@@ -2426,7 +2426,7 @@ export type EffectReport = {
 	 */
 	outOfTime: string[],
 	/**
-	 *  The report as lines ([`summary`]): what the install review, `plugin
+	 *  The report as lines ([`summary`]): what the install review, `extension
 	 *  check --effects` and an effort's review say, in one wording.
 	 */
 	lines: string[],
@@ -2557,7 +2557,7 @@ export type Envelope = {
 	id: EventId,
 	/**
 	 *  The event's name, `namespace.name[.name]` (`work_item.transitioned`,
-	 *  `agent.tool.finished`). Plugins emit only under their own namespace.
+	 *  `agent.tool.finished`). Extensions emit only under their own namespace.
 	 */
 	type: string,
 	/**
@@ -2644,7 +2644,7 @@ export type EventTypeDecl = {
 export type EventTypes = {
 	types: EventTypeDecl[],
 	/**
-	 *  Shorter than the plugin default (`event_retention::check_declared`);
+	 *  Shorter than the extension default (`event_retention::check_declared`);
 	 *  `None`: the default.
 	 */
 	retention: EventRetention | null,
@@ -3404,7 +3404,7 @@ export type InstanceCredential = {
 
 export type InstanceHealth = {
 	state: InstanceState,
-	// Its failures in a row (`plugin_health`'s count, shown here).
+	// Its failures in a row (`contribution_health`'s count, shown here).
 	consecutiveFailures: number,
 	// RFC 3339.
 	lastOkAt: string | null,
@@ -3472,7 +3472,7 @@ export type Intent = {
 
 /**
  *  One acceptance example: an input and what the extension should make
- *  of it. Fixtures for `oxplow plugin test`; data here.
+ *  of it. Fixtures for `oxplow extension test`; data here.
  */
 export type IntentExample = {
 	name: string,
@@ -4254,7 +4254,7 @@ export type MetricEntry = {
 	/**
 	 *  Active flag. `None`/`Some(true)` = active (a bare `use:`/`key:` entry is
 	 *  on); `Some(false)` = an explicit **disable marker** kept in config so a
-	 *  default-ON metric (producer/plugin) or a config-defined metric can be
+	 *  default-ON metric (producer/extension) or a config-defined metric can be
 	 *  turned off without deleting its definition. Not a structural field, so a
 	 *  `use:` entry may carry it (unlike measure/aggregation/filter/formula).
 	 */
@@ -4608,7 +4608,7 @@ export type OxplowConfig = {
 	/**
 	 *  How long this project keeps each event namespace's payloads and
 	 *  large content (`eventRetention: { agent: { payloadDays,
-	 *  contentDays } }`), over core's defaults; a plugin's namespace is
+	 *  contentDays } }`), over core's defaults; an extension's namespace is
 	 *  kept no longer than its own window.
 	 */
 	eventRetention: { [key in string]: RetentionWindow },
@@ -4863,7 +4863,7 @@ export type ProgramKind =
 // A program the project's config would run.
 export type ProjectProgram = {
 	kind: ProgramKind,
-	// The collector id or plugin name.
+	// The collector, agent, extension or component it belongs to.
 	name: string,
 	// Project-relative path of the program.
 	program: string,

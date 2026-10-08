@@ -261,7 +261,7 @@ async fn a_provider_must_answer_with_its_approved_declarations() {
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Disabled { .. }
     ));
-    assert_eq!(logged(&fx, "plugin.disabled").await.len(), 1);
+    assert_eq!(logged(&fx, "contribution.disabled").await.len(), 1);
 }
 
 /// P5.D4's red: an unconfigured instance can't be enabled — the check
@@ -297,7 +297,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
     let written =
         std::fs::read_to_string(oxplow_config::config_path(&fx.svc.layout.project_dir)).unwrap();
     assert!(written.contains("extensionInstances"), "{written}");
-    assert_eq!(logged(&fx, "plugin.enabled").await.len(), 1);
+    assert_eq!(logged(&fx, "contribution.enabled").await.len(), 1);
 
     // Disabling stops it.
     let view = providers
@@ -310,7 +310,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
 
 /// P5.D4's red: three failures in a row disable the instance, logged
 /// with the reason; it stays off across reconciles until a person runs
-/// `oxplow.plugin.enable`.
+/// `oxplow.contribution.enable`.
 #[tokio::test]
 async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it() {
     let (fx, _ext) = approved("fail-next:3").await;
@@ -343,9 +343,9 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
     };
     assert!(reason.contains("3 failures in a row"), "{reason}");
     assert!(!running(&fx.svc, "fake"));
-    let disabled = logged(&fx, "plugin.disabled").await;
+    let disabled = logged(&fx, "contribution.disabled").await;
     assert_eq!(disabled.len(), 1);
-    assert_eq!(disabled[0]["plugin"], "plugin:tracker");
+    assert_eq!(disabled[0]["extension"], "extension:tracker");
     assert_eq!(disabled[0]["contribution"], "fake");
     assert_eq!(disabled[0]["reason"], reason.as_str());
 
@@ -365,8 +365,8 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
                 thread_id: Some(ThreadId::new(fx.thread.value())),
                 stream_id: None,
             },
-            "oxplow.plugin.enable",
-            json!({ "plugin": "tracker", "kind": "provider", "contribution": "fake" }),
+            "oxplow.contribution.enable",
+            json!({ "extension": "tracker", "kind": "provider", "contribution": "fake" }),
             false,
         )
         .await;
@@ -381,8 +381,8 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         .commands
         .run(
             &Actor::Human,
-            "oxplow.plugin.enable",
-            json!({ "plugin": "tracker", "kind": "provider", "contribution": "fake" }),
+            "oxplow.contribution.enable",
+            json!({ "extension": "tracker", "kind": "provider", "contribution": "fake" }),
             false,
         )
         .await
@@ -1320,7 +1320,7 @@ async fn a_provider_runs_from_its_verified_copy() {
 }
 
 /// tsk548: a provider may emit only its capability's event types — a
-/// declared `plugin.enabled` (which would clear another contribution's
+/// declared `contribution.enabled` (which would clear another contribution's
 /// automatic disable) is refused when the manifest loads.
 #[tokio::test]
 async fn a_provider_cannot_declare_another_core_event_type() {
@@ -1331,10 +1331,10 @@ async fn a_provider_cannot_declare_another_core_event_type() {
     declared
         .event_types
         .push(oxplow_provider_protocol::model::EventTypeDecl {
-            event_type: "plugin.enabled".into(),
+            event_type: "contribution.enabled".into(),
             v: 1,
             schema: oxplow_domain::events::schema::schema_for::<
-                oxplow_domain::events::schema::PluginEnabled,
+                oxplow_domain::events::schema::ContributionEnabled,
             >(),
         });
     std::fs::write(
@@ -1351,7 +1351,7 @@ async fn a_provider_cannot_declare_another_core_event_type() {
         loaded
             .errors
             .iter()
-            .any(|e| e.contains("plugin.enabled@1") && e.contains("work_items")),
+            .any(|e| e.contains("contribution.enabled@1") && e.contains("work_items")),
         "{:?}",
         loaded.errors
     );
@@ -1367,10 +1367,10 @@ fn a_provider_event_names_only_its_own_refs() {
     assert!(check_subject("fake_second", "tracker", "work_item:fake_second:W-1").is_ok());
     assert!(check_subject("fake_second", "tracker", "work_item:fake:W-1").is_err());
     assert!(check_subject("fake", "tracker", "work_item:fake:W-1").is_ok());
-    assert!(check_subject("fake", "tracker", "plugin:tracker").is_ok());
+    assert!(check_subject("fake", "tracker", "extension:tracker").is_ok());
     for bad in [
         "work_item:oxplow:tsk1",
-        "plugin:other",
+        "extension:other",
         "wiki:page",
         "file:src/a.rs",
         "garbage",
@@ -1474,8 +1474,10 @@ async fn an_unreadable_disable_record_keeps_the_instance_off() {
     fx.svc
         .db
         .transaction(|c| {
-            c.execute_batch("ALTER TABLE plugin_health RENAME TO plugin_health_unreadable")
-                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            c.execute_batch(
+                "ALTER TABLE contribution_health RENAME TO contribution_health_unreadable",
+            )
+            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
         })
         .await
         .unwrap();
@@ -1541,7 +1543,7 @@ async fn approving_updated_declarations_restarts_the_instance() {
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Ready
     );
-    assert!(logged(&fx, "plugin.disabled").await.is_empty());
+    assert!(logged(&fx, "contribution.disabled").await.is_empty());
     // The restarted instance republished its capability row, with the
     // features it declares now.
     let row = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone())
@@ -1601,7 +1603,7 @@ async fn a_failed_enable_writes_no_config() {
         .transaction(|c| {
             c.execute_batch(
                 "CREATE TRIGGER refuse_enabled BEFORE INSERT ON event_log
-                 WHEN NEW.type = 'plugin.enabled'
+                 WHEN NEW.type = 'contribution.enabled'
                  BEGIN SELECT RAISE(ABORT, 'refused'); END;",
             )
             .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
@@ -2397,8 +2399,8 @@ async fn removing_an_instance_leaves_nothing_behind() {
     assert_eq!(config.active_providers.get("work_items"), None);
     assert_eq!(states.for_instance(SECOND).await.unwrap(), vec![]);
     assert_eq!(
-        oxplow_db::plugin_health_store::SqlitePluginHealthStore::new(fx.svc.db.clone())
-            .get(&registry::plugin_key(SECOND))
+        oxplow_db::contribution_health_store::SqliteContributionHealthStore::new(fx.svc.db.clone())
+            .get(&registry::contribution_key(SECOND))
             .await
             .unwrap(),
         None
@@ -4764,10 +4766,12 @@ async fn effect_runs(fx: &EffortFixture) -> serde_json::Value {
 
 /// The effect's consecutive failures, as its health counts them.
 async fn effect_failures(fx: &EffortFixture) -> i64 {
-    let health =
-        crate::plugin_health::PluginHealth::new(fx.svc.db.clone(), fx.svc.vocabulary.clone());
-    let key = oxplow_db::PluginKey {
-        plugin: EXT.into(),
+    let health = crate::contribution_health::ContributionHealth::new(
+        fx.svc.db.clone(),
+        fx.svc.vocabulary.clone(),
+    );
+    let key = oxplow_db::ContributionKey {
+        extension: EXT.into(),
         contribution: "file".into(),
         kind: "effect",
     };
@@ -5486,8 +5490,8 @@ async fn the_retry_loop_sends_a_due_retry() {
 /// extension (nothing left to count it on).
 #[tokio::test(flavor = "multi_thread")]
 async fn a_retry_that_cant_run_is_dropped() {
-    let key = oxplow_db::PluginKey {
-        plugin: EXT.into(),
+    let key = oxplow_db::ContributionKey {
+        extension: EXT.into(),
         contribution: "file".into(),
         kind: "effect",
     };
@@ -5506,7 +5510,7 @@ async fn a_retry_that_cant_run_is_dropped() {
             .join("oxplow/extensions")
             .join(EXT);
         match case {
-            "disabled" => crate::plugin_health::PluginHealth::new(
+            "disabled" => crate::contribution_health::ContributionHealth::new(
                 fx.svc.db.clone(),
                 fx.svc.vocabulary.clone(),
             )

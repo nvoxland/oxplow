@@ -464,7 +464,7 @@ impl ProviderRegistry {
                 continue;
             }
             let Some(every) = configured.get(&instance.name).and_then(|c| c.sync_every()) else {
-                plans.push((super::registry::plugin_key(&instance.name), None));
+                plans.push((super::registry::contribution_key(&instance.name), None));
                 continue;
             };
             let every_ms = every.as_millis() as i64;
@@ -477,7 +477,7 @@ impl ProviderRegistry {
                     .flatten()
                     .and_then(|s| s.last_read_at)
                     .and_then(|t| oxplow_domain::Timestamp::parse(&t).ok());
-                let planned = crate::plugin_health::next_due_ms(
+                let planned = crate::contribution_health::next_due_ms(
                     last.as_ref().map(|t| t.unix_ms()),
                     every_ms,
                     now.unix_ms(),
@@ -502,11 +502,11 @@ impl ProviderRegistry {
                     tracing::warn!(instance = %instance.name, collector = %c.name, error = %e, "a scheduled sync failed");
                 }
             }
-            plans.push((super::registry::plugin_key(&instance.name), next_due));
+            plans.push((super::registry::contribution_key(&instance.name), next_due));
         }
         // When each instance is next due, so one that misses its read
         // reads unfresh.
-        if let Err(e) = self.plugins.set_next_due(plans).await {
+        if let Err(e) = self.contribution_health.set_next_due(plans).await {
             tracing::warn!(error = ?e, "recording the instances' next due times failed");
         }
         started

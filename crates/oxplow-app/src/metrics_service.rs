@@ -22,9 +22,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use oxplow_collect_plugin::{
-    builtin_metrics, BuiltinMetric, CollectedFact, SandboxBudget, TreeHost,
-};
 use oxplow_config::collectors::{CollectorRuntime, CollectorSpec, ReportInput, Trigger};
 use oxplow_config::{
     global_config_dir, load_global_dimension_entries, load_global_measure_entries,
@@ -37,6 +34,7 @@ use oxplow_db::{
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
+use oxplow_script::{builtin_metrics, BuiltinMetric, CollectedFact, SandboxBudget, TreeHost};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -281,14 +279,14 @@ pub struct MetricCatalogEntry {
     /// `built-in` | `global` | `project`.
     pub scope: String,
     /// Active in this project's `.oxplow/project.yaml` `metrics:` block. Always `true`
-    /// for non-toggleable (always-on) producer/plugin metrics.
+    /// for non-toggleable (always-on) producer/extension metrics.
     pub enabled: bool,
     pub target: Option<f64>,
     pub trigger: String,
     /// Whether this metric can be enabled/disabled + overridden from config.
     /// `true` for the bundled code gauges (`use:`-able) and project/global
     /// `metrics:` entries; `false` for always-on producers (tokens, tests,
-    /// coverage, analysis, lifecycle, nudges) and plugin-seeded definitions —
+    /// coverage, analysis, lifecycle, nudges) and extension-seeded definitions —
     /// those are free side-bands, not opt-in compute. The real axis is
     /// always-on vs toggleable; "built-in vs hardcoded" was an artifact (tsk284).
     pub toggleable: bool,
@@ -499,7 +497,7 @@ impl MetricsService {
 
     /// The active, resolved metric SPECS for this project (built-in ∪ global ∪
     /// project, precedence project > global > built-in). Built-ins are the
-    /// bundled catalog (`oxplow_collect_plugin::builtin_metrics`); a project
+    /// bundled catalog (`oxplow_script::builtin_metrics`); a project
     /// activates one with `metrics: - use: oxplow.<lang>.<name>` and its own
     /// `key:` specs.
     fn resolved_specs(&self) -> Vec<ResolvedSpec> {
@@ -520,7 +518,7 @@ impl MetricsService {
             .filter_map(|e| e.use_key.clone().or_else(|| e.key.clone()))
             .collect();
         project.extend(
-            oxplow_collect_plugin::builtin_metrics::DEFAULT_ON
+            oxplow_script::builtin_metrics::DEFAULT_ON
                 .iter()
                 .filter(|k| !mentioned.contains(**k))
                 .map(|k| MetricEntry {
@@ -551,7 +549,7 @@ impl MetricsService {
         let health = log.health();
         let mut out = Vec::new();
         for c in collectors {
-            let key = crate::collector_runner::plugin_key(&c.owner, &c.key);
+            let key = crate::collector_runner::contribution_key(&c.owner, &c.key);
             // Failures disabled it (P7.C2): it waits for a person.
             if !matches!(health.disabled_reason(&key).await, Ok(None)) {
                 continue;
@@ -910,14 +908,14 @@ impl MetricsService {
     ///    tests, coverage, analysis, lifecycle, nudges — `toggleable: false`,
     ///    listed even with zero recorded data so the user can see they exist
     ///    (tsk286);
-    /// 4. every other seeded spec — installed plugin metrics not covered
+    /// 4. every other seeded spec — installed extension metrics not covered
     ///    above. Also `toggleable: false`.
     pub async fn catalog(&self) -> Vec<MetricCatalogEntry> {
         let resolved = self.resolved_specs();
         let by_key: std::collections::HashMap<&str, &_> =
             resolved.iter().map(|m| (m.key.as_str(), m)).collect();
         // Per-key config enabled state (tsk31): `None` = no entry, `Some(_)` = an
-        // explicit flag. Producers/plugins are default-ON (a disable marker turns
+        // explicit flag. Producers/extensions are default-ON (a disable marker turns
         // them off); built-in gauges are default-OFF (a `use:` turns them on).
         let cfg_metrics = self
             .config
@@ -1014,7 +1012,7 @@ impl MetricsService {
                 });
             }
         }
-        // Every other seeded SPEC — installed plugin metrics and anything else
+        // Every other seeded SPEC — installed extension metrics and anything else
         // in the spec catalog not covered above. Best-effort: a store read
         // error just yields the set
         // assembled so far.
@@ -1044,13 +1042,13 @@ impl MetricsService {
         out
     }
 
-    /// Whether `key` is a default-ON metric (a producer or plugin-seeded spec) —
+    /// Whether `key` is a default-ON metric (a producer or extension-seeded spec) —
     /// active unless a `enabled: false` marker disables it. Default-OFF metrics
     /// (built-in code gauges + global `metrics:` definitions) instead activate by
     /// the presence of a `use:` entry. Drives the config edit shape in
     /// [`Self::apply_metric_enabled`].
     fn is_default_on(&self, key: &str) -> bool {
-        if oxplow_collect_plugin::builtin_metrics::DEFAULT_ON.contains(&key) {
+        if oxplow_script::builtin_metrics::DEFAULT_ON.contains(&key) {
             return true;
         }
         let is_builtin_gauge = builtin_metrics().iter().any(|m| m.key == key);
@@ -1103,7 +1101,7 @@ impl MetricsService {
                 // A config `key:` definition — keep it, just flag off (never delete
                 // the user's metric).
                 Some(i) if is_key_def => metrics[i].enabled = Some(false),
-                // Producer/plugin (default-ON): set a disable marker on the entry…
+                // Producer/extension (default-ON): set a disable marker on the entry…
                 Some(i) if default_on => metrics[i].enabled = Some(false),
                 // …or write a fresh one when there's no entry yet.
                 None if default_on => metrics.push(MetricEntry {
@@ -1919,7 +1917,7 @@ impl MetricsService {
             .find(|m| m.owner == owner && m.key == key)
             .ok_or_else(|| format!("no fact collector `{owner}/{key}`"))?;
         if let Some(log) = self.run_log.as_ref() {
-            let health_key = crate::collector_runner::plugin_key(owner, key);
+            let health_key = crate::collector_runner::contribution_key(owner, key);
             if let Some(reason) = log
                 .health()
                 .disabled_reason(&health_key)
@@ -1928,7 +1926,7 @@ impl MetricsService {
             {
                 return Err(format!(
                     "collector `{owner}/{key}` is disabled: {reason}. A person can enable it \
-                     again (`oxplow.plugin.enable`, Settings → Extensions)."
+                     again (`oxplow.contribution.enable`, Settings → Extensions)."
                 ));
             }
         }
@@ -2121,7 +2119,7 @@ impl MetricsService {
 
     /// Run `owner`'s fact collector `spec` over `files` (path → content)
     /// with `input` — an example's fixture — recording nothing: what `oxplow
-    /// plugin test` runs for a fact collector's example (tsk1047). The facts
+    /// extension test` runs for a fact collector's example (tsk1047). The facts
     /// as JSON, a whole-number value as an integer.
     pub async fn preview_fact_collector(
         &self,
@@ -2258,7 +2256,7 @@ impl MetricsService {
                 std::fs::read_to_string(self.project_dir.join(&report.path)).unwrap_or_default();
             input.insert(
                 "report".into(),
-                oxplow_collect_plugin::parse_report(&report.format, &text)
+                oxplow_script::parse_report(&report.format, &text)
                     .map_err(|e| format!("collector `{}` report: {e}", c.key))?,
             );
         }
@@ -2314,10 +2312,10 @@ impl MetricsService {
             FactRun::Failed(e) => ("error", 0, Some(e.clone())),
             FactRun::Skipped => return,
         };
-        // The plugin failure policy (P7.C2): the third failure in a row
+        // The contribution failure policy (P7.C2): the third failure in a row
         // disables it.
         let health = log.health();
-        let key = crate::collector_runner::plugin_key(&c.owner, &c.key);
+        let key = crate::collector_runner::contribution_key(&c.owner, &c.key);
         let counted = match &error {
             None => {
                 health
@@ -3131,8 +3129,8 @@ impl FactRunner {
     /// Run over `input` under the fact-collector budget and read its
     /// `{"facts": [...]}`. Blocking: call it from `spawn_blocking`.
     fn run(self, input: &serde_json::Value, host: TreeHost) -> Result<Vec<CollectedFact>, String> {
-        use oxplow_collect_plugin::runtime::{run_exec, run_jaq, run_sandboxed};
-        use oxplow_collect_plugin::{facts_of, run_fact_starlark};
+        use oxplow_script::runtime::{run_exec, run_jaq, run_sandboxed};
+        use oxplow_script::{facts_of, run_fact_starlark};
         let budget = SandboxBudget::with_timeout(FACT_COLLECTOR_TIMEOUT);
         match self {
             FactRunner::Starlark(script) => run_fact_starlark(&script, input, host, &budget),
@@ -3209,10 +3207,10 @@ fn collector_fingerprint(gauge: &FactCollector, root: &Path) -> Option<String> {
 }
 
 /// Trust label: in-process tiers are `observed` under a `metric:<key>` source;
-/// the `exec` escape hatch is flagged `plugin-exec:<name>` (lower-trust).
+/// the `exec` escape hatch is flagged `exec:<name>` (lower-trust).
 fn collector_source(gauge: &FactCollector) -> String {
     if gauge.runtime == CollectorRuntime::Exec {
-        format!("plugin-exec:{}", gauge.key)
+        format!("exec:{}", gauge.key)
     } else {
         format!("metric:{}", gauge.key)
     }
@@ -5209,7 +5207,7 @@ def transform(input):
         // facts (rule-tagged); each metric is a Sum(oxplow.ast_hit) spec filtered
         // by rule. Prove every emitted-fact stream re-aggregates through its spec
         // to a positive headline (the exact per-idiom counts are pinned by the
-        // collect-plugin golden tests). One capture per gauge; idioms share the
+        // oxplow-script golden tests). One capture per gauge; idioms share the
         // measure but never collide (the spec filters by rule).
         let (svc, _dir) = fixture().await;
         seed_with_every_builtin_on(&svc).await;
@@ -6132,7 +6130,7 @@ def transform(input):
     async fn catalog_unions_always_on_producer_definitions() {
         let (svc, _dir) = fixture().await;
 
-        // Simulate a producer (or external plugin) seeding a SPEC directly, the
+        // Simulate a producer (or an extension) seeding a SPEC directly, the
         // way seed_catalog does for the always-on producers at boot (T-E2: the
         // catalog's tail sweep reads the spec catalog, not legacy definitions).
         let mut spec = oxplow_db::NewMetricSpec::base(

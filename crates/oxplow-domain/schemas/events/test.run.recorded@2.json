@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`test.run.recorded@1`: a test run was captured (`run:<capture>`).",
+  "description": "`test.run.recorded@2`: a test run was captured (`run:<capture>`).",
   "properties": {
     "command": {
       "type": "string"
@@ -45,7 +45,7 @@
       ]
     },
     "source": {
-      "description": "Who produced it: `post-tool-bash`, `plugin-exec:<name>`, `mcp`.",
+      "description": "Who produced it: `post-tool-bash`, `exec:<collector ids>` (an `exec`\ncollector's program parsed its report), `mcp`.",
       "type": "string"
     }
   },
@@ -55,6 +55,6 @@
     "report_parsed",
     "source"
   ],
-  "title": "TestRunRecordedV1",
+  "title": "TestRunRecordedV2",
   "type": "object"
 }

@@ -43,10 +43,10 @@ use serde_json::json;
 
 use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
+use crate::contribution_health::ContributionHealth;
 use crate::effect_triggers::{self, run_reaction, Reacted};
 use crate::effects::EffectDecl;
 use crate::extensions::Extension;
-use crate::plugin_health::PluginHealth;
 use crate::Services;
 
 pub const RETRY: &str = "oxplow.effect.retry";
@@ -142,22 +142,22 @@ fn outcome(effect: &str, event: &str, attempt: i64, reacted: &Reacted) -> serde_
 async fn ready(
     svc: &Arc<Services>,
     name: &str,
-) -> Result<(Extension, EffectDecl, PluginHealth), CommandError> {
+) -> Result<(Extension, EffectDecl, ContributionHealth), CommandError> {
     let (ext, decl) = effect_triggers::find_effect(svc, name).ok_or_else(|| {
         invalid(
             "/effect",
             format!("no enabled extension declares an effect `{name}`"),
         )
     })?;
-    let health = PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
+    let health = ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
     if let Some(why) = health
-        .disabled_reason(&effect_triggers::plugin_key(&decl))
+        .disabled_reason(&effect_triggers::contribution_key(&decl))
         .await?
     {
         return Err(invalid(
             "/effect",
             format!(
-                "effect `{name}` is disabled ({why}): enable it first (`oxplow.plugin.enable`, \
+                "effect `{name}` is disabled ({why}): enable it first (`oxplow.contribution.enable`, \
                  Settings → Extensions)"
             ),
         ));
@@ -308,8 +308,8 @@ pub async fn backfill(
     range: &Range,
     batch: usize,
 ) -> Result<Backfilled, CommandError> {
-    let health = PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
-    let key = effect_triggers::plugin_key(decl);
+    let health = ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
+    let key = effect_triggers::contribution_key(decl);
     let planned = {
         let (vocabulary, decl, range) = (svc.vocabulary.current(), decl.clone(), range.clone());
         svc.db
@@ -336,7 +336,7 @@ pub async fn backfill(
             );
             break;
         }
-        if in_a_row >= crate::plugin_health::FAILURES_TO_DISABLE {
+        if in_a_row >= crate::contribution_health::FAILURES_TO_DISABLE {
             out.stopped = Some(format!(
                 "{in_a_row} failures in a row; the rest wait (those that may pass are sent \
                  again by themselves)"

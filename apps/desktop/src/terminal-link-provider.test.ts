@@ -55,9 +55,9 @@ describe("findFilePathMatches", () => {
   });
 
   it("drops path-shaped tokens that validatePath rejects", () => {
-    // A plugin name in prose looks like name.ext but isn't a real file.
+    // A collector name in prose looks like name.ext but isn't a real file.
     const validate = (p: string) => p === "apps/desktop/src/App.tsx";
-    const prose = findFilePathMatches("the oxplow.junit plugin", validate);
+    const prose = findFilePathMatches("the oxplow.junit collector", validate);
     expect(prose).toEqual([]);
     const real = findFilePathMatches("see apps/desktop/src/App.tsx now", validate);
     expect(real.map((x) => x.text)).toEqual(["apps/desktop/src/App.tsx"]);

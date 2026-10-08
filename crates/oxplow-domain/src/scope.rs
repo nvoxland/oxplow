@@ -124,7 +124,7 @@ pub const SCOPES: &[Scope] = &[
         id: "extensions.enable",
         access: Access::Write,
         host: Host::Daemon,
-        summary: "Turn a disabled plugin contribution back on.",
+        summary: "Turn a disabled extension contribution back on.",
     },
     Scope {
         id: "extensions.install",

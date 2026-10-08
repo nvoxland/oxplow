@@ -1,4 +1,4 @@
-# Cobertura coverage plugin (input: xml → explicit element tree).
+# Cobertura coverage parser (input: xml → explicit element tree).
 # <class filename="X"> … <line number="N" hits="H"/>. Every line descendant
 # of a class is attributed to that class's file; covered when hits > 0.
 # Line coverage uses recursive descent (dup lines under a method AND the class's

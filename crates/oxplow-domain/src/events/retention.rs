@@ -1,9 +1,9 @@
 //! How long the event log keeps its bodies, per namespace (§5.4). The
 //! envelopes are kept; payloads and large content expire. Core's windows
-//! are below; a plugin's namespace is kept at most [`PLUGIN_DEFAULT`], or
-//! the shorter window its extension declares; a project may set its own
-//! (`eventRetention` in `.oxplow/project.yaml`, a person's key) — for a
-//! plugin namespace never longer than the plugin's. The sweep is
+//! are below; an extension's namespace is kept at most [`EXTENSION_DEFAULT`],
+//! or the shorter window its extension declares; a project may set its own
+//! (`eventRetention` in `.oxplow/project.yaml`, a person's key) — for an
+//! extension namespace never longer than the extension's. The sweep is
 //! `oxplow_db::event_retention`.
 
 use schemars::JsonSchema;
@@ -53,16 +53,16 @@ pub const CORE_WINDOWS: &[(&str, RetentionWindow)] = &[
     ("file", RetentionWindow::new(30, 14)),
 ];
 
-/// A plugin namespace's window, unless its extension declares a shorter
+/// An extension namespace's window, unless its extension declares a shorter
 /// one (`event_types.retention`, P8.D5).
-pub const PLUGIN_DEFAULT: RetentionWindow = RetentionWindow::new(30, 14);
+pub const EXTENSION_DEFAULT: RetentionWindow = RetentionWindow::new(30, 14);
 
 /// The longest window a project may set: a hundred years (tsk985).
 pub const MAX_DAYS: i64 = 36_500;
 
 /// The shortest window a project may set for one of core's expiring
 /// namespaces: oxplow reads them back (the agent policy reads a turn's
-/// tool payloads, evidence reads a run's), so a week (tsk985). A plugin's
+/// tool payloads, evidence reads a run's), so a week (tsk985). An extension's
 /// namespace may be kept for as little as a day.
 pub const MIN_CORE_DAYS: i64 = 7;
 

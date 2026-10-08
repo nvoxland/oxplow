@@ -18,7 +18,7 @@ use crate::extensions::manifest_v2::{at, entry_line, key_line, line_under};
 #[serde(rename_all = "camelCase")]
 pub struct EventTypes {
     pub types: Vec<EventTypeDecl>,
-    /// Shorter than the plugin default (`event_retention::check_declared`);
+    /// Shorter than the extension default (`event_retention::check_declared`);
     /// `None`: the default.
     pub retention: Option<EventRetention>,
 }
@@ -118,7 +118,7 @@ pub fn parse_event_types(
     };
     let mut errors = Vec::new();
     let retention = block.retention.and_then(|r| {
-        let default = oxplow_domain::events::retention::PLUGIN_DEFAULT;
+        let default = oxplow_domain::events::retention::EXTENSION_DEFAULT;
         let (p, c) = (default.payload_days, default.content_days);
         let window = EventRetention {
             payload_days: r.payload_days.unwrap_or(p as u32),
@@ -181,7 +181,7 @@ fn decl_of(
         Some(path) => {
             let script = read(path)
                 .ok_or_else(|| format!("{name}: upcast `{path}` isn't in the extension"))?;
-            oxplow_collect_plugin::runtime::check_starlark(path, &script)
+            oxplow_script::runtime::check_starlark(path, &script)
                 .map_err(|e| format!("{name}: upcast `{path}` {e}"))?;
             Some(script)
         }
@@ -204,7 +204,7 @@ fn decl_of(
 /// How long an upcast may run. It runs where an older row is read — a
 /// consumer's delivery inside the pump's transaction — so it is as tight
 /// as a command's script.
-const UPCAST_BUDGET: oxplow_collect_plugin::SandboxBudget =
+const UPCAST_BUDGET: oxplow_script::SandboxBudget =
     crate::extension_commands::COMMAND_SCRIPT_BUDGET;
 
 /// The upcast of `event_type`'s newest version: the script's
@@ -214,7 +214,7 @@ const UPCAST_BUDGET: oxplow_collect_plugin::SandboxBudget =
 pub fn starlark_upcast(event_type: &str, script: &str) -> Upcast {
     let (event_type, script) = (event_type.to_string(), script.to_string());
     Arc::new(move |from_v, payload| {
-        use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
+        use oxplow_script::runtime::{run_sandboxed, run_starlark};
         let script = script.clone();
         run_sandboxed(&UPCAST_BUDGET, move || {
             run_starlark(&script, &json!({ "from_v": from_v, "payload": payload }))

@@ -36,7 +36,7 @@ thread per stream.
 `OXPLOW_HOOK_DEBUG=<file>` appends every hook payload, as the agent sent
 it, to that file, one JSON line each (`event`, `thread`, `at`, `payload`).
 Use it to learn a harness's real payload shapes before depending on them.
-Besides the hooks oxplow acts on, the Claude plugin registers events it
+Besides the hooks oxplow acts on, the Claude Code plugin registers events it
 only observes — `SubagentStart`, `SubagentStop`, `TaskCreated`,
 `TaskCompleted`, `PreCompact` — which are acked unread until something
 needs them (`crates/oxplow-harnesses/src/claude.rs` `HOOK_EVENTS`).

@@ -213,7 +213,7 @@ pub struct MetricEntry {
     pub key: Option<String>,
     /// Active flag. `None`/`Some(true)` = active (a bare `use:`/`key:` entry is
     /// on); `Some(false)` = an explicit **disable marker** kept in config so a
-    /// default-ON metric (producer/plugin) or a config-defined metric can be
+    /// default-ON metric (producer/extension) or a config-defined metric can be
     /// turned off without deleting its definition. Not a structural field, so a
     /// `use:` entry may carry it (unlike measure/aggregation/filter/formula).
     #[serde(default)]
@@ -691,7 +691,7 @@ pub struct OxplowConfig {
     pub replacements_off: std::collections::BTreeSet<String>,
     /// How long this project keeps each event namespace's payloads and
     /// large content (`eventRetention: { agent: { payloadDays,
-    /// contentDays } }`), over core's defaults; a plugin's namespace is
+    /// contentDays } }`), over core's defaults; an extension's namespace is
     /// kept no longer than its own window.
     #[serde(rename = "eventRetention")]
     pub event_retention:
@@ -906,7 +906,7 @@ struct RawConfig {
     /// Core components that stay oxplow's own, by target: `[work_item.board]`. Listed, an extension's replacement of it (the active provider's `ui.replacements`) isn't shown.
     #[serde(rename = "replacementsOff", default)]
     replacements_off: Option<Vec<String>>,
-    /// How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). A plugin's namespace is kept no longer than its extension's window; core state (snapshot, vcs, effort, …) is kept whole.
+    /// How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). An extension's namespace is kept no longer than its window; core state (snapshot, vcs, effort, …) is kept whole.
     #[serde(rename = "eventRetention", default)]
     event_retention: Option<
         std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
@@ -2338,7 +2338,7 @@ const MEASURE_CAPTURE_SCOPES: &[&str] = &["complete", "per-path", "per-subject"]
 const DIMENSION_VALUE_TYPES: &[&str] = &["categorical", "numeric", "temporal", "entity-ref"];
 
 /// Validate the top-level `metrics:` block (the project scope). Mirrors the
-/// plugin rules: namespaced keys, `oxplow.*` reserved for built-ins,
+/// extension rules: namespaced keys, `oxplow.*` reserved for built-ins,
 /// project-relative `entryFile`, known runtime/kind/trigger. Each entry must be
 /// exactly one of the `use:` or `key:` forms. Returns the cleaned entries (the
 /// three-scope resolution happens later in [`resolve_metrics`]).
@@ -2373,7 +2373,7 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
             )));
         }
         // `oxplow.*` is reserved for built-ins; a project may `use:` one but not
-        // `key:`-define under it (mirrors the plugin-name rule).
+        // `key:`-define under it (mirrors the extension-name rule).
         if is_define && the_key.starts_with("oxplow.") {
             return Err(ConfigError::Invalid(format!(
                 "metrics[{i}] key \"{the_key}\" uses the reserved \"oxplow.\" namespace"
@@ -2632,7 +2632,7 @@ fn definition_catalog<'a>(
 
 /// The project's `use:` keys that name no definition: normally typos,
 /// which [`resolve_metrics`] skips. A **disable marker** (`enabled: false`)
-/// for a plugin metric isn't one — its key isn't a config definition, and
+/// for an extension metric isn't one — its key isn't a config definition, and
 /// `seed_catalog` prunes it from config state.
 pub fn unknown_uses(
     builtin: &[MetricEntry],
@@ -3378,7 +3378,7 @@ mod tests {
             "{err}"
         );
         // tsk985: windows are bounded — at least a week for a core
-        // namespace oxplow reads back, a day for a plugin's; at most a
+        // namespace oxplow reads back, a day for an extension's; at most a
         // hundred years; and a body is never kept longer than its payload.
         for (yaml, says) in [
             (
@@ -4827,7 +4827,7 @@ metrics:
 
     /// tsk1076: resolution runs on every event, so it reports nothing; the
     /// config's unknown `use:` keys are named once per load by
-    /// `unknown_uses`, a disable marker for a plugin key aside.
+    /// `unknown_uses`, a disable marker for an extension key aside.
     #[test]
     fn unknown_uses_names_the_typos() {
         let builtin = vec![define("oxplow.unsafe", Some(0.0))];
@@ -4887,7 +4887,7 @@ metrics:
 
     #[test]
     fn resolve_disable_marker_for_unknown_key_is_skipped_quietly() {
-        // A disable marker for a producer/plugin key (not a resolve-catalog def)
+        // A disable marker for a producer/extension key (not a resolve-catalog def)
         // is skipped without a warning — seed_catalog prunes it from config state.
         let project = vec![MetricEntry {
             use_key: Some("agent.tokens.total".into()),

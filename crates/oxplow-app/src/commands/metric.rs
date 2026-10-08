@@ -15,7 +15,7 @@
 //! `metric.enable { keys, enabled }` switches metrics on or off in this
 //! project's `.oxplow/project.yaml`. Which edit that is depends on the
 //! metric — a bundled code metric is off until a `use:` names it, a producer or
-//! plugin metric is on until an `enabled: false` marker turns it off — so
+//! extension metric is on until an `enabled: false` marker turns it off — so
 //! the command computes the new `metrics:` list with the metrics service's
 //! rule and hands it to `oxplow.config.set`'s core: validated, written after
 //! commit, logged as `config.changed`, undone by restoring the old list. The

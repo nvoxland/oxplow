@@ -1,8 +1,8 @@
 //! Layer-1 **container-parse helpers** — the host-owned, reusable functions a
-//! collection plugin uses to turn a raw report into a generic JSON value it can
+//! collector's script uses to turn a raw report into a generic JSON value it can
 //! reshape. These are the *trustworthy* half of the two-layer model: they are
 //! compiled into oxplow, do no I/O, and are shared by every script runtime
-//! (jaq / Starlark). A plugin receives values, never the filesystem — which is
+//! (jaq / Starlark). A script receives values, never the filesystem — which is
 //! what keeps an in-process parse deterministic and `observed`-eligible.
 //!
 //! All helpers return [`serde_json::Value`] (the lingua franca every runtime

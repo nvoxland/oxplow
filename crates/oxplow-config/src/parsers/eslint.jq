@@ -1,4 +1,4 @@
-# eslint analysis plugin (input: json → array of file results).
+# eslint analysis parser (input: json → array of file results).
 # `eslint -f json` emits an array of `{ filePath, messages: [ { ruleId, severity,
 # line, column, message } ] }`. eslint severity is 2 = error, 1 = warning
 # (0 = off never appears in output). One finding per message; `ruleId` may be

@@ -134,8 +134,8 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   depends only on the domain), `oxplow-agent-text` (core's skills,
   slash commands and capability questions),
   `oxplow-coverage` (pure report-parse data types),
-  `oxplow-collect-plugin` (the bundled report parsers + host parse
-  helpers + jaq/Starlark/exec transform runtimes),
+  `oxplow-script` (the jaq/Starlark/exec script runtimes collectors,
+  effects and command handlers run in, + host parse helpers),
   `oxplow-app` (Services orchestration + shared boot orchestration in
   `boot.rs`), `oxplow-rpc` (transport-neutral command cores + the
   `rpc_dispatch!` registry; no tauri deps), `oxplow-daemon` (headless
@@ -249,7 +249,7 @@ threads one process. That asymmetry is why such a failure shows up once in
 a full run and then refuses to reproduce in isolation.
 
 Prefer asserting **completion under a budget** over a wall-clock number
-(`lcov_plugin_parses_a_whole_workspace_report_without_timing_out` is the
+(`lcov_parser_parses_a_whole_workspace_report_without_timing_out` is the
 model), and make the budget generous: a wait that returns as soon as the
 event arrives costs nothing extra on a pass, while a 3 s budget for an
 FSEvents delivery or a loopback redirect failed in most full runs on a
@@ -259,7 +259,7 @@ the deadline is the thing under test, retry the scenario on a lost race
 (`a_listener_stops_when_its_time_is_up_with_nobody_waiting`). When you genuinely need a timing *ratio* — a curve-shape guard —
 min-of-N sampling is **not** enough on its own, because all N samples of a
 size can be descheduled together. Retry the whole comparison and pass on
-any clean attempt (`first_ratio_under` in `oxplow-collect-plugin`): noise
+any clean attempt (`first_ratio_under` in `oxplow-script`): noise
 only ever ADDS time, so a spike ruins one attempt while a real regression
 ruins every one — the guard stays exactly as strict, the false positives go
 to ~0.
@@ -358,7 +358,7 @@ What the hack leaves out, and why (tsk885):
 
 - **The providers stay out.** `oxplow-provider-{fake,mcp}`,
   `oxplow-provider-protocol` and the crates they're built from
-  (`oxplow-domain`, `oxplow-collect-plugin`, `oxplow-code-dup`,
+  (`oxplow-domain`, `oxplow-script`, `oxplow-code-dup`,
   `oxplow-code-metrics`, `oxplow-coverage`) are traversal-excluded and
   don't depend on the hack: a provider ships as its own binary
   (built with `-p`) and is built from its

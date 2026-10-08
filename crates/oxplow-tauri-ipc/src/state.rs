@@ -19,7 +19,7 @@ pub type RecentProjectsState = Arc<oxplow_config::RecentProjects>;
 
 /// Tauri-managed handle to the in-process control plane (axum server
 /// hosting hook + MCP routes) plus the per-spawn token. terminal.rs
-/// reads it at agent-spawn time so it can materialize the plugin dir
+/// reads it at agent-spawn time so it can materialize the Claude Code plugin dir
 /// and thread the URLs / token into the agent process env.
 ///
 /// The struct itself lives in `oxplow-rpc` (the daemon constructs the

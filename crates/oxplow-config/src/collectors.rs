@@ -1455,7 +1455,7 @@ mod tests {
   facts: [repo.rust_clone]
 - id: repo.type_coverage
   runtime: jaq
-  entry: oxplow/plugins/type_coverage.jq
+  entry: oxplow/collectors/type_coverage.jq
   report: { path: target/type-coverage.json, format: json }
   trigger: { on: [snapshot.taken] }
   facts: [repo.type_coverage]

@@ -62,7 +62,7 @@ or exact mechanics.
 
 | If you're touching… | Read first |
 |---|---|
-| Language support — the `Language` enum, `LanguagePlugin` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-plugins.md` |
+| Language support — the `Language` enum, `LanguageSupport` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-support.md` |
 | Tables, stores, work queue, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
 | How oxplow infers the agent's work (efforts, policies, no gates, hints) and the swappable-pieces direction (capabilities, work list, snapshots) | `.context/work-tracking.md` |
@@ -80,7 +80,7 @@ or exact mechanics.
 | Refs — the canonical `<kind>:<id>[@rev][#frag]` grammar, the kind registry, what replaces tab ids / `page_ref` kinds / `[[…]]` shapes | `.context/refs.md` |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
 | Knowledge (the wiki) — `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the wiki write guard | `.context/knowledge.md` |
-| External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalWorkItems`), instances and health, Settings → Integrations, the conformance kit and `oxplow plugin test` | `.context/providers.md` |
+| External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalWorkItems`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
 | Work items — `v_work_item`, the `WorkItemsProvider` capability and registry, the oxplow provider, the conformance suite | `.context/work-items.md` |
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
 | Extensions — `extension.yaml`, lenses (user/agent-built UI), slots, actions/alerts, the bundled `oxplow-bundled` extension, what moves out of core (target design) | `.context/extensions.md` |

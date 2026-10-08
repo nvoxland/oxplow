@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod extension_cli;
 mod icon_tint;
-mod plugin_cli;
 
 use oxplow_tauri_ipc::{specta_builder, windows};
 use tauri::Manager;
@@ -22,8 +22,8 @@ fn main() {
         run_hook_command(&event);
         return;
     }
-    if let Some(args) = plugin_args() {
-        std::process::exit(plugin_cli::run(&args));
+    if let Some(args) = extension_args() {
+        std::process::exit(extension_cli::run(&args));
     }
 
     init_tracing();
@@ -42,8 +42,8 @@ fn info_arg(mut args: impl Iterator<Item = String>) -> Option<String> {
         Some("--help" | "-h") => Some(
             "oxplow — opens the Oxplow app\n\n\
              Usage:\n  \
-             oxplow [--init]                     open the app (--init: set up this dir as a project)\n  \
-             oxplow plugin <new|check|test> ...  the extension SDK\n  \
+             oxplow [--init]                        open the app (--init: set up this dir as a project)\n  \
+             oxplow extension <new|check|test> ...  the extension SDK\n  \
              oxplow --version | --help"
                 .to_string(),
         ),
@@ -59,13 +59,13 @@ fn hook_event_arg() -> Option<String> {
     }
 }
 
-/// `oxplow plugin <new|check|test> …`: the SDK CLI, handled before
-/// Tauri boots (like `hook`). Everything after `plugin` is the
+/// `oxplow extension <new|check|test> …`: the SDK CLI, handled before
+/// Tauri boots (like `hook`). Everything after `extension` is the
 /// subcommand's argv.
-fn plugin_args() -> Option<Vec<String>> {
+fn extension_args() -> Option<Vec<String>> {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
-        Some("plugin") => Some(args.collect()),
+        Some("extension") => Some(args.collect()),
         _ => None,
     }
 }
@@ -444,6 +444,6 @@ mod tests {
         assert_eq!(info(&["-h"]), info(&["--help"]));
         assert_eq!(info(&[]), None);
         assert_eq!(info(&["--init"]), None);
-        assert_eq!(info(&["plugin", "--help"]), None, "the subcommand's own");
+        assert_eq!(info(&["extension", "--help"]), None, "the subcommand's own");
     }
 }

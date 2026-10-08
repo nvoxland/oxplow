@@ -1,7 +1,7 @@
 //! Generic, query-based AST access — the engine behind the metric substrate's
 //! `ast_query` builtin (epic tsk213, P3). The per-function metric
 //! walkers in [`crate`] are *one* consumer of tree-sitter; this module exposes
-//! the grammars generically so a bundled or user-authored gauge plugin can run
+//! the grammars generically so a bundled or user-authored gauge script can run
 //! an arbitrary tree-sitter S-expression query against source text and get back
 //! a flat list of matches (no Starlark recursion needed).
 
@@ -174,7 +174,7 @@ fn c() { unsafe { foo(); } }
     #[test]
     fn ast_query_works_for_csharp() {
         // C# method declarations resolve through the new `Language::CSharp`
-        // grammar (the catalog under oxplow-collect-plugin builds on this).
+        // grammar (the catalog under oxplow-script builds on this).
         let src = "class C { public void M(int x) { if (x > 0) { Do(); } } }";
         let methods = ast_query(src, "csharp", "(method_declaration) @m").expect("runs");
         assert_eq!(methods.len(), 1);

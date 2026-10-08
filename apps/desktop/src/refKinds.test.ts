@@ -3,7 +3,7 @@ import { GitPullRequest } from "lucide-react";
 
 import { linkTarget, parseMarkdownLink, preprocessWikilinks } from "./components/Wiki/MarkdownView.js";
 import { pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
-import { pluginWikilinkRef, refKindsFromResult, setRefKinds, type RefKind } from "./refKinds.js";
+import { extensionWikilinkRef, refKindsFromResult, setRefKinds, type RefKind } from "./refKinds.js";
 import { refFromTabId } from "./tabs/pageRefs.js";
 
 const ACME_PR: RefKind = {
@@ -42,28 +42,28 @@ describe("an extension's ref kind (P8.D7)", () => {
 
   test("a wikilink names one by its kind or its prefix, while installed", () => {
     setRefKinds([ACME_PR]);
-    expect(pluginWikilinkRef("pr:12")).toBe("acme_pr:12");
-    expect(pluginWikilinkRef("acme_pr:12")).toBe("acme_pr:12");
-    expect(pluginWikilinkRef("pr:twelve")).toBeNull();
+    expect(extensionWikilinkRef("pr:12")).toBe("acme_pr:12");
+    expect(extensionWikilinkRef("acme_pr:12")).toBe("acme_pr:12");
+    expect(extensionWikilinkRef("pr:twelve")).toBeNull();
     const body = preprocessWikilinks("see [[pr:12]]");
     expect(body).toBe("see [pr:12](acme_pr:12)");
     const parsed = parseMarkdownLink("acme_pr:12");
     expect(parsed).toEqual({ kind: "ref", ref: "acme_pr:12" });
     expect(linkTarget(parsed)?.id).toBe("page:ext.acme.pr?ref=acme_pr:12");
     setRefKinds([]);
-    expect(pluginWikilinkRef("pr:12")).toBeNull();
+    expect(extensionWikilinkRef("pr:12")).toBeNull();
     expect(preprocessWikilinks("see [[pr:12]]")).toContain("oxplow-invalid:");
   });
 
   test("a sugar is read before a kind's own name, as the backend reads it (tsk933)", () => {
     const beta: RefKind = { ...ACME_PR, kind: "beta_pr", extension: "beta", wikilinks: [] };
     setRefKinds([{ ...ACME_PR, wikilinks: ["beta_pr"] }, beta]);
-    expect(pluginWikilinkRef("beta_pr:1")).toBe("acme_pr:1");
+    expect(extensionWikilinkRef("beta_pr:1")).toBe("acme_pr:1");
   });
 
   test("a long id matches as the backend's does (tsk917)", () => {
     setRefKinds([ACME_PR]);
-    expect(pluginWikilinkRef(`pr:${"1".repeat(300)}`)).toBe(`acme_pr:${"1".repeat(300)}`);
+    expect(extensionWikilinkRef(`pr:${"1".repeat(300)}`)).toBe(`acme_pr:${"1".repeat(300)}`);
   });
 
   test("every character the backend spells is itself here (tsk917)", () => {

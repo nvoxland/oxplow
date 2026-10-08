@@ -43,8 +43,8 @@ struct ApprovalFile {
     /// The project these approvals are for (for a person reading it).
     #[serde(default)]
     project: String,
-    /// Approval key (`<ext>/<collector>`, `collector:<id>`, `plugin:<name>`,
-    /// `acp:<name>`) → the approved hash and its MAC.
+    /// Approval key (`<ext>/<collector>`, or [`ProjectProgram::key`]:
+    /// `collector:<id>`, `acp:<name>`, …) → the approved hash and its MAC.
     #[serde(default)]
     approved: BTreeMap<String, Approval>,
 }
@@ -234,7 +234,7 @@ pub enum ProgramKind {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectProgram {
     pub kind: ProgramKind,
-    /// The collector id or plugin name.
+    /// The collector, agent, extension or component it belongs to.
     pub name: String,
     /// Project-relative path of the program.
     pub program: String,
@@ -283,14 +283,14 @@ impl ProjectProgram {
 
     /// What its approval covers, as it would run with working dir `cwd`:
     /// - the program's content (when it's a file in the project), and for
-    ///   a collector or plugin the other files in its directory (a script
+    ///   a collector the other files in its directory (a script
     ///   sourcing a helper) unless that directory is the project root;
     /// - every arg, and the content of each arg that names a file under
     ///   `cwd` (the script an interpreter like `node` runs);
     /// - its env.
     ///
-    /// A collector or plugin names a project file, which must exist; an ACP
-    /// agent's command may be a program on PATH, covered by its name.
+    /// A collector names a project file, which must exist; an ACP agent's
+    /// command may be a program on PATH, covered by its name.
     pub fn hash_at(&self, project_dir: &Path, cwd: &Path) -> std::io::Result<String> {
         use sha2::{Digest, Sha256};
         // A provider runs in its extension folder: its args name files there.

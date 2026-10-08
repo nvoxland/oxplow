@@ -43,7 +43,7 @@ fn the_core_kinds_are_registered_and_validate_ids() {
         "page",
         "metric",
         "model",
-        "plugin",
+        "extension",
         "command",
         "finding",
         "thread_note",
@@ -111,7 +111,7 @@ fn registering_a_colliding_kind_is_an_error() {
     let dup = KindSpec::new("commit", r"^[0-9a-f]{7,40}$").expect("spec");
     let err = reg.register(dup).unwrap_err();
     assert!(err.to_string().contains("commit"), "{err}");
-    // A plugin kind with a fresh name registers.
+    // An extension's kind with a fresh name registers.
     let acme = KindSpec::new("acme_widget", r"^\d+$").expect("spec");
     reg.register(acme).unwrap();
     assert!(reg.validate(&canon("acme_widget:7")).is_ok());

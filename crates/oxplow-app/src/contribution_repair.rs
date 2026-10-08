@@ -1,27 +1,27 @@
-//! The repair work item (P7.C2): when a plugin contribution is disabled,
-//! a work item asks for it to be fixed.
+//! The repair work item (P7.C2): when an extension's contribution is
+//! disabled, a work item asks for it to be fixed.
 //!
-//! The `plugin.repair` pump consumer handles each `plugin.disabled@1`. The
+//! The `contribution.repair` pump consumer handles each `contribution.disabled@1`. The
 //! first disable files an item on the active work-items provider, as the
-//! system: title `Repair <plugin> <contribution>: <reason>`, body the repair
+//! system: title `Repair <extension> <contribution>: <reason>`, body the repair
 //! prompt ([`render`]). A later disable while that item is open comments
 //! the new failure on it; once the item is done or canceled the next
 //! disable files a new one. The item is the contribution's
-//! `plugin_health.repair_item` (`v_plugin_health` shows it while open).
+//! `contribution_health.repair_item` (`v_contribution_health` shows it while open).
 //! oxplow never sends the prompt to an agent: a person does, from the item
 //! or Settings → Extensions' Repair with the Agent.
 
 use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
-use oxplow_db::plugin_health_store::{self as store, PluginKey};
+use oxplow_db::contribution_health_store::{self as store, ContributionKey};
 use oxplow_domain::{Actor, DomainError, StoredEvent};
 
 use crate::event_pump::AsyncEventConsumer;
 use crate::Services;
 
 /// The consumer's name: its checkpoint and dead letters.
-pub const NAME: &str = "plugin.repair";
+pub const NAME: &str = "contribution.repair";
 /// The errors a prompt lists.
 const ERRORS_SHOWN: usize = 5;
 /// The longest reason a title carries.
@@ -30,9 +30,9 @@ const TITLE_REASON_MAX: usize = 80;
 /// Everything a repair prompt says.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct RepairContext {
-    pub plugin: String,
+    pub extension: String,
     pub contribution: String,
-    /// `provider` or `collector`.
+    /// `provider`, `collector` or `effect`.
     pub kind: String,
     /// What disabled it.
     pub reason: String,
@@ -65,7 +65,7 @@ pub fn title(c: &RepairContext) -> String {
     } else {
         first.to_string()
     };
-    format!("Repair {} {}: {reason}", c.plugin, c.contribution)
+    format!("Repair {} {}: {reason}", c.extension, c.contribution)
 }
 
 /// The repair prompt: what failed, what it's for, how it's declared, what
@@ -75,7 +75,7 @@ pub fn render(c: &RepairContext) -> String {
         "The {} `{}` of the extension `{}` was disabled on this machine after it kept failing:\n\n> {}\n",
         c.kind,
         c.contribution,
-        c.plugin,
+        c.extension,
         c.reason.replace('\n', "\n> ")
     );
     if let Some(purpose) = &c.purpose {
@@ -97,7 +97,7 @@ pub fn render(c: &RepairContext) -> String {
             out.push_str(&format!("- {}\n", e.replace('\n', " ")));
         }
     }
-    out.push_str("\n## What `oxplow plugin check` reports\n\n");
+    out.push_str("\n## What `oxplow extension check` reports\n\n");
     if c.check.is_empty() {
         out.push_str("Nothing: it loads cleanly.\n");
     } else {
@@ -124,20 +124,20 @@ pub fn render(c: &RepairContext) -> String {
     out.push_str(&format!(
         "\n## What to do\n\n\
          1. Find why it fails: read the failures and its source, and reproduce one \
-         (`oxplow plugin test {plugin}`).\n\
+         (`oxplow extension test {extension}`).\n\
          2. Fix it, keeping its purpose and examples.\n\
-         3. Check it: `oxplow plugin check {plugin}` and `oxplow plugin test {plugin}` must be clean.\n\
+         3. Check it: `oxplow extension check {extension}` and `oxplow extension test {extension}` must be clean.\n\
          4. Say what you changed on this item. A person enables it again \
-         (`oxplow.plugin.enable`, Settings → Extensions); you can't.\n",
-        plugin = c.plugin
+         (`oxplow.contribution.enable`, Settings → Extensions); you can't.\n",
+        extension = c.extension
     ));
     out
 }
 
 /// What's known about `key`'s contribution, for its prompt.
-pub async fn gather(svc: &Services, key: &PluginKey, reason: &str) -> RepairContext {
+pub async fn gather(svc: &Services, key: &ContributionKey, reason: &str) -> RepairContext {
     let mut c = RepairContext {
-        plugin: key.plugin.clone(),
+        extension: key.extension.clone(),
         contribution: key.contribution.clone(),
         kind: key.kind.to_string(),
         reason: reason.to_string(),
@@ -149,7 +149,7 @@ pub async fn gather(svc: &Services, key: &PluginKey, reason: &str) -> RepairCont
         "effect" => "effects",
         _ => "collectors",
     };
-    if key.plugin == oxplow_config::collectors::PROJECT {
+    if key.extension == oxplow_config::collectors::PROJECT {
         c.manifest = Some(".oxplow/project.yaml".into());
         let config = svc.config.read().map(|c| c.clone()).ok();
         c.declaration = config
@@ -161,7 +161,7 @@ pub async fn gather(svc: &Services, key: &PluginKey, reason: &str) -> RepairCont
         .extension_catalog
         .get(&svc.layout.project_dir)
         .iter()
-        .find(|e| e.name == key.plugin)
+        .find(|e| e.name == key.extension)
     {
         let manifest = format!("{}/extension.yaml", ext.path);
         c.purpose = ext.intent.as_ref().map(|i| i.purpose.clone());
@@ -198,10 +198,10 @@ fn item_yaml(list: &serde_yaml::Value, id: &str) -> Option<String> {
 
 /// Its recent failures, newest first: a collector's failed runs (its
 /// `collector.synced@1` errors), else what disabled it and its last error.
-async fn recent_errors(svc: &Services, key: &PluginKey, reason: &str) -> Vec<String> {
+async fn recent_errors(svc: &Services, key: &ContributionKey, reason: &str) -> Vec<String> {
     let mut errors = Vec::new();
     if key.kind == "collector" {
-        let subject = oxplow_domain::refs::build::collector_ref(&key.plugin, &key.contribution);
+        let subject = oxplow_domain::refs::build::collector_ref(&key.extension, &key.contribution);
         if let Ok(found) = svc
             .db
             .read(move |c| {
@@ -228,7 +228,7 @@ async fn recent_errors(svc: &Services, key: &PluginKey, reason: &str) -> Vec<Str
     }
     if key.kind == "effect" {
         // Its failed reactions (`v_effect_run`), newest first.
-        let effect = format!("{}/{}", key.plugin, key.contribution);
+        let effect = format!("{}/{}", key.extension, key.contribution);
         if let Ok(found) = svc
             .db
             .read(move |c| {
@@ -257,7 +257,7 @@ async fn recent_errors(svc: &Services, key: &PluginKey, reason: &str) -> Vec<Str
     }
     if errors.is_empty() {
         errors.push(reason.to_string());
-        let health = crate::plugin_health::PluginHealth::new(
+        let health = crate::contribution_health::ContributionHealth::new(
             svc.db.clone(),
             svc.event_log_store.vocabulary().clone(),
         );
@@ -270,11 +270,11 @@ async fn recent_errors(svc: &Services, key: &PluginKey, reason: &str) -> Vec<Str
     errors
 }
 
-pub struct PluginRepair {
+pub struct ContributionRepair {
     services: Weak<Services>,
 }
 
-impl PluginRepair {
+impl ContributionRepair {
     pub fn new(services: Weak<Services>) -> Self {
         Self { services }
     }
@@ -283,7 +283,7 @@ impl PluginRepair {
 /// Register the consumer on `svc`'s pump (boot, before it spawns).
 pub fn register(svc: &Arc<Services>) {
     svc.event_pump
-        .register_async(Arc::new(PluginRepair::new(Arc::downgrade(svc))));
+        .register_async(Arc::new(ContributionRepair::new(Arc::downgrade(svc))));
 }
 
 /// Whether `item` is still open (not done or canceled).
@@ -305,13 +305,13 @@ async fn is_open(svc: &Services, item: &str) -> Result<bool, DomainError> {
 }
 
 #[async_trait]
-impl AsyncEventConsumer for PluginRepair {
+impl AsyncEventConsumer for ContributionRepair {
     fn name(&self) -> &'static str {
         NAME
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type == "plugin.disabled"
+        event_type == "contribution.disabled"
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
@@ -320,9 +320,9 @@ impl AsyncEventConsumer for PluginRepair {
         };
         let p = &event.envelope.payload;
         let text = |f: &str| p[f].as_str().unwrap_or_default().to_string();
-        let key = PluginKey {
-            plugin: text("plugin")
-                .strip_prefix("plugin:")
+        let key = ContributionKey {
+            extension: text("extension")
+                .strip_prefix("extension:")
                 .unwrap_or_default()
                 .to_string(),
             contribution: text("contribution"),
@@ -405,7 +405,7 @@ mod tests {
 
     fn context() -> RepairContext {
         RepairContext {
-            plugin: "work".into(),
+            extension: "work".into(),
             contribution: "hot".into(),
             kind: "collector".into(),
             reason: "3 failures in a row; the last: collector `hot`: division by zero".into(),
@@ -443,18 +443,18 @@ mod tests {
     }
 
     async fn disable(svc: &Arc<Services>, reason: &str) -> StoredEvent {
-        let health = crate::plugin_health::PluginHealth::new(
+        let health = crate::contribution_health::ContributionHealth::new(
             svc.db.clone(),
             svc.event_log_store.vocabulary().clone(),
         );
-        let key = crate::collector_runner::plugin_key("work", "hot");
+        let key = crate::collector_runner::contribution_key("work", "hot");
         health.enable(&key, "human").await.unwrap();
         health.disable(&key, reason).await.unwrap();
         let events = svc.event_log_store.read_after(0, 500).await.unwrap();
         events
             .into_iter()
             .rev()
-            .find(|e| e.envelope.event_type == "plugin.disabled")
+            .find(|e| e.envelope.event_type == "contribution.disabled")
             .unwrap()
     }
 
@@ -507,7 +507,7 @@ mod tests {
             .unwrap()
             .active_providers
             .insert("work_items".into(), "tracker".into());
-        let consumer = PluginRepair::new(Arc::downgrade(&fx.svc));
+        let consumer = ContributionRepair::new(Arc::downgrade(&fx.svc));
         let event = disable(&fx.svc, "3 failures in a row; the last: boom").await;
         consumer.handle(&event).await.unwrap();
         assert!(repair_items(&fx.svc).await.is_empty());
@@ -532,7 +532,7 @@ mod tests {
             "def transform(input):\n    return 1 // 0\n",
         )
         .unwrap();
-        let consumer = PluginRepair::new(Arc::downgrade(&fx.svc));
+        let consumer = ContributionRepair::new(Arc::downgrade(&fx.svc));
 
         let first = disable(&fx.svc, "3 failures in a row; the last: boom").await;
         consumer.handle(&first).await.unwrap();
@@ -565,7 +565,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT repair_item FROM v_plugin_health WHERE plugin = 'work'",
+                "SELECT repair_item FROM v_contribution_health WHERE extension = 'work'",
                 vec![],
                 None,
             )

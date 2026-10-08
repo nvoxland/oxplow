@@ -87,7 +87,7 @@ The collector returns `{ "facts": [ { "measure", "value", "subject"?, "path"?, "
 them. Read the `oxplow-metrics` skill for the four-block model, the full builtin
 surface (`files`/`ast_query`/`code_metrics`/`regex_find`/…) and the report-derived
 + exec patterns. The bundled scripts in
-`crates/oxplow-collect-plugin/src/plugins/metrics/<lang>/` are copy-paste
+`crates/oxplow-script/src/metrics/<lang>/` are copy-paste
 templates.
 
 ## 4. Verify

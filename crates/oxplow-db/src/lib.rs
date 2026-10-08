@@ -17,6 +17,7 @@ pub mod changes;
 pub mod collector_store;
 pub mod command_audit_store;
 pub mod comment_store;
+pub mod contribution_health_store;
 pub mod dashboard_store;
 mod database;
 pub mod diagnostic_store;
@@ -34,7 +35,6 @@ pub mod models;
 pub mod page_ref_projections;
 pub mod page_ref_store;
 pub mod panel_layout_store;
-pub mod plugin_health_store;
 pub mod proposal_store;
 pub mod provider_collector_store;
 pub mod reasoning_store;
@@ -81,6 +81,9 @@ pub use collector_store::{
 };
 pub use command_audit_store::{CommandAudit, NewCommandAudit, SqliteCommandAuditStore};
 pub use comment_store::SqliteCommentStore;
+pub use contribution_health_store::{
+    ContributionHealthRow, ContributionKey, SqliteContributionHealthStore,
+};
 pub use dashboard_store::{
     Dashboard, DashboardItem, DashboardWithItems, NewDashboardItem, SqliteDashboardStore,
 };
@@ -101,7 +104,6 @@ pub use fact_store::{
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
-pub use plugin_health_store::{PluginHealthRow, PluginKey, SqlitePluginHealthStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
 pub use reasoning_store::{
