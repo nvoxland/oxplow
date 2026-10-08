@@ -12,13 +12,11 @@ use super::text::AgentText;
 use super::tool::ToolUse;
 use crate::ids::{AgentSessionId, StreamId, ThreadId};
 
-/// How a person interacts with a harness's session — flags the UI reads,
+/// How a person interacts with a harness's session — what the UI reads,
 /// never something core invokes (the Interact seam).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Interact {
     pub transcript: Transcript,
-    pub input: Input,
-    pub gate: Gate,
 }
 
 /// What the person reads.
@@ -28,24 +26,6 @@ pub enum Transcript {
     Terminal,
     /// oxplow's structured transcript (an ACP agent's).
     Structured,
-}
-
-/// Where the person's input goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Input {
-    /// Keystrokes to its PTY.
-    Keystrokes,
-    /// oxplow's prompt box.
-    Prompt,
-}
-
-/// Who asks the person to permit a tool call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Gate {
-    /// The harness's own prompt, in its terminal.
-    Harness,
-    /// oxplow's permission card.
-    Oxplow,
 }
 
 /// The session a launch is for.
@@ -147,6 +127,13 @@ pub enum HarnessError {
 
 /// One harness implementation, registered under the key an agent
 /// session's `harness` names.
+///
+/// What every harness answers: who it is, how its sessions start and are
+/// shown, how its tool calls read in oxplow's vocabulary, and how its hooks
+/// expect an answer. The rest is what a harness offers beyond that — its
+/// own instruction files, environment markers, settings, a transcript or
+/// telemetry core can read — each with a default of "none", so a harness
+/// implements only what it has.
 pub trait AgentHarness: Send + Sync {
     /// The registry key (`claude`): what `agent_session.harness` names.
     fn id(&self) -> &str;
@@ -155,32 +142,48 @@ pub trait AgentHarness: Send + Sync {
     fn interact(&self) -> Interact;
     /// How the session's process starts. Spawns only — never prompts.
     fn launch(&self, input: &LaunchInput<'_>) -> Result<Launch, HarnessError>;
-    /// The project files whose text joins oxplow's system prompt.
-    fn instruction_files(&self) -> &[&str];
-    /// Its process's markers an agent or terminal must not inherit from
-    /// oxplow's own environment (when oxplow itself runs in one).
-    fn env_markers(&self) -> &[&str];
-    /// The project settings its `launch` reads from its `agentConfig`
-    /// entry, which Settings → Agents offers for it.
-    fn settings(&self) -> &[HarnessSetting];
-    /// Rewrite the skills and commands of its runtime already on disk under
-    /// `project_dir` to `text`, creating none: an agent that outlives a
-    /// launch (running across an upgrade, or resumed) reads what's offered
-    /// now.
-    fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError>;
-    /// Its tools that can change the worktree, lowercased: file edits,
-    /// shell commands, subagents (which run their own tools). Every other
-    /// call only reads or talks.
-    fn writing_tools(&self) -> &[&str];
     /// One of its tool hooks' bodies (a PreToolUse or PostToolUse) mapped
     /// onto oxplow's vocabulary; `None` when the body names no tool.
     fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse>;
-    /// The recordable turns in a chunk of its transcript; none when it
-    /// keeps no transcript core reads.
-    fn turns(&self, transcript: &str) -> Vec<Turn>;
-    /// The token counts in one record of its telemetry export; none for a
-    /// record it doesn't recognize.
-    fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading>;
     /// `answer` in the shape its hooks expect back.
     fn render(&self, answer: &HookAnswer) -> serde_json::Value;
+
+    /// The project files whose text oxplow adds to its system prompt: the
+    /// instruction files a session of it wouldn't read by itself.
+    fn instruction_files(&self) -> &[&str] {
+        &[]
+    }
+    /// Its process's markers an agent or terminal must not inherit from
+    /// oxplow's own environment (when oxplow itself runs in one).
+    fn env_markers(&self) -> &[&str] {
+        &[]
+    }
+    /// The project settings its `launch` reads from its `agentConfig`
+    /// entry, which Settings → Agents offers for it.
+    fn settings(&self) -> &[HarnessSetting] {
+        &[]
+    }
+    /// Rewrite the skills and commands of its runtime already on disk under
+    /// `project_dir` to `text`, creating none: an agent that outlives a
+    /// launch (running across an upgrade, or resumed) reads what's offered
+    /// now. Nothing to do for a harness that keeps none on disk.
+    fn refresh_text(&self, _project_dir: &Path, _text: &AgentText) -> Result<(), HarnessError> {
+        Ok(())
+    }
+    /// Its tools that can change the worktree, lowercased: file edits,
+    /// shell commands, subagents (which run their own tools). Every other
+    /// call only reads or talks.
+    fn writing_tools(&self) -> &[&str] {
+        &[]
+    }
+    /// The recordable turns in a chunk of its transcript; none when it
+    /// keeps no transcript core reads.
+    fn turns(&self, _transcript: &str) -> Vec<Turn> {
+        Vec::new()
+    }
+    /// The token counts in one record of its telemetry export; none for a
+    /// record it doesn't recognize.
+    fn token_readings(&self, _record: &OtlpRecord<'_>) -> Vec<TokenReading> {
+        Vec::new()
+    }
 }

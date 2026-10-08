@@ -9,10 +9,9 @@ use std::path::Path;
 use serde_json::json;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
-    LaunchSpec, Transcript,
+    AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading};
 use oxplow_domain::agent::text::AgentText;
 use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
@@ -36,8 +35,6 @@ impl AgentHarness for Codex {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Terminal,
-            input: Input::Keystrokes,
-            gate: Gate::Harness,
         }
     }
 
@@ -75,14 +72,6 @@ impl AgentHarness for Codex {
         &["CLAUDE.md"]
     }
 
-    fn env_markers(&self) -> &[&str] {
-        &[]
-    }
-
-    fn settings(&self) -> &[HarnessSetting] {
-        &[]
-    }
-
     fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError> {
         let skills_dir = project_dir.join(RUNTIME_DIR_REL).join("skills");
         if skills_dir.is_dir() {
@@ -97,11 +86,6 @@ impl AgentHarness for Codex {
 
     fn writing_tools(&self) -> &[&str] {
         &["apply_patch", "shell", "exec_command"]
-    }
-
-    /// Its session format isn't read yet.
-    fn turns(&self, _: &str) -> Vec<Turn> {
-        Vec::new()
     }
 
     fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {

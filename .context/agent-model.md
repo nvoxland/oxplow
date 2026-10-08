@@ -180,9 +180,30 @@ executable, `HOME`, and a program resolver — and, when the harness reports
 `resume_dropped`, blanks the session's resume pointer. A harness never
 touches the database.
 
-The harness also names its **instruction files** (`instruction_files()`;
-`["CLAUDE.md"]` for every built-in today), which `agent_prompt` reads into the
-system prompt, and its **environment markers** (`env_markers()`), below. The
+**What a harness implements.** `AgentHarness` requires only what every
+harness answers: `id`, `title`, `interact` (what the UI shows: its own
+terminal or oxplow's structured transcript), `launch`, `tool_use` (its
+tool calls in oxplow's vocabulary, "Tool vocabulary") and `render` (a hook
+answer in its shape). Everything else is what a harness has beyond that,
+each defaulting to none: `instruction_files`, `env_markers`, `settings`,
+`refresh_text` (a runtime on disk to rewrite), `turns` (a transcript core
+reads), `token_readings` (telemetry core reads). So a harness implements
+only what it uses; adding a harness-specific feature is a defaulted method,
+not a requirement on every harness.
+
+**Resuming.** `shared::resume_or_fresh` builds the resume: a session the
+harness found on disk (Claude's transcript, `resume_state`) is `exec`'d
+directly, so its process is the agent's and its exit ends the PTY; one it
+couldn't check (opencode, or Claude with no projects dir) falls back to a
+fresh session only when it fails to start, and says so. A session found
+missing launches fresh and is dropped (`resume_dropped`).
+
+The harness also names its **instruction files** (`instruction_files()`): the
+project files a session of it wouldn't read by itself, which
+`agent_prompt` reads into the system prompt — none for Claude (Claude Code
+loads `CLAUDE.md` itself, so it would be in context twice), `CLAUDE.md` for
+Codex, opencode and ACP agents. And its **environment markers**
+(`env_markers()`), below. The
 harness config is a JSON value: the harness's `agentConfig.<key>` entry for the
 PTY harnesses (`{"model": …}` for opencode), `{program, args, env,
 systemPromptViaMeta}` from the ACP agent's entry. Where a session's `billing_pool` (plan / API credits / purchased) gets

@@ -6,14 +6,10 @@
 //! answers have a shape of its own (`{"fake": …}`) and its binary fails on
 //! any other, so a pass shows core let the harness render every answer.
 
-use std::path::Path;
-
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
-    LaunchSpec, Transcript,
+    AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
-use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading};
 use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
 
@@ -48,8 +44,6 @@ impl AgentHarness for FakeHarness {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Terminal,
-            input: Input::Keystrokes,
-            gate: Gate::Harness,
         }
     }
 
@@ -77,22 +71,6 @@ impl AgentHarness for FakeHarness {
         })
     }
 
-    fn instruction_files(&self) -> &[&str] {
-        &[]
-    }
-
-    fn env_markers(&self) -> &[&str] {
-        &[]
-    }
-
-    fn settings(&self) -> &[HarnessSetting] {
-        &[]
-    }
-
-    fn refresh_text(&self, _: &Path, _: &AgentText) -> Result<(), HarnessError> {
-        Ok(())
-    }
-
     /// Its scripted session posts one edit, `{"tool_name": "Edit",
     /// "tool_input": {"file_path": …}}`.
     fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
@@ -118,10 +96,6 @@ impl AgentHarness for FakeHarness {
 
     fn writing_tools(&self) -> &[&str] {
         &["edit"]
-    }
-
-    fn turns(&self, _: &str) -> Vec<Turn> {
-        Vec::new()
     }
 
     fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {

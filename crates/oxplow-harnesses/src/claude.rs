@@ -28,8 +28,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Endpoints, Gate, HarnessError, HarnessSetting, Input, Interact, Launch,
-    LaunchInput, LaunchSpec, Transcript,
+    AgentHarness, Endpoints, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn, UsageDelta};
 use oxplow_domain::agent::text::AgentText;
@@ -37,8 +36,8 @@ use oxplow_domain::agent::tool::ToolUse;
 use oxplow_domain::events::schema::TokenKind;
 
 use super::shared::{
-    claude_shaped_tool_use, in_shell, program_and_guard, runtime, shell_escape, write_commands,
-    write_json, write_skills,
+    claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, shell_escape,
+    write_commands, write_json, write_skills, Resume,
 };
 use super::Named;
 
@@ -74,8 +73,6 @@ impl AgentHarness for Claude {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Terminal,
-            input: Input::Keystrokes,
-            gate: Gate::Harness,
         }
     }
 
@@ -98,16 +95,24 @@ impl AgentHarness for Claude {
         // A resume id whose transcript is gone launches fresh, with no raw
         // "No conversation found" error, and core forgets the id.
         let (resume, resume_dropped) = match (input.resume.filter(|r| !r.is_empty()), input.home) {
-            (Some(id), Some(home)) if resume_state(home, &cwd, id) == ResumeState::Missing => {
-                (None, true)
-            }
-            (resume, _) => (resume, false),
+            (None, _) => (Resume::Fresh, false),
+            (Some(id), home) => match home.map(|h| resume_state(h, &cwd, id)) {
+                Some(ResumeState::Missing) => (Resume::Fresh, true),
+                Some(ResumeState::Present) => (Resume::Known(resume_args(id)), false),
+                _ => (
+                    Resume::Unchecked {
+                        args: resume_args(id),
+                        harness: "Claude",
+                    },
+                    false,
+                ),
+            },
         };
         let program =
             (input.resolve_program)("claude").or_else(|| input.home.and_then(local_install));
         Ok(Launch {
             spec: LaunchSpec::Pty {
-                command: command(&Command {
+                command: command(Command {
                     cwd: &cwd,
                     resume,
                     program: program.as_deref(),
@@ -121,16 +126,8 @@ impl AgentHarness for Claude {
         })
     }
 
-    fn instruction_files(&self) -> &[&str] {
-        &["CLAUDE.md"]
-    }
-
     fn env_markers(&self) -> &[&str] {
         MARKERS
-    }
-
-    fn settings(&self) -> &[HarnessSetting] {
-        &[]
     }
 
     fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError> {
@@ -429,16 +426,21 @@ fn local_install(home: &Path) -> Option<String> {
 /// What the `claude` command line is built from.
 struct Command<'a> {
     cwd: &'a str,
-    resume: Option<&'a str>,
+    resume: Resume<'a>,
     program: Option<&'a str>,
     plugin_dir: Option<&'a str>,
     system_prompt: Option<&'a str>,
     mcp_config: Option<&'a str>,
 }
 
-/// `claude` with its plugin, prompt and MCP config, resuming `resume`
-/// with a fallback to a fresh session when the id is stale.
-fn command(c: &Command<'_>) -> String {
+/// `claude --resume <id>`'s arguments.
+fn resume_args(id: &str) -> String {
+    format!("--resume {}", shell_escape(id))
+}
+
+/// `claude` with its plugin, prompt and MCP config, resumed as `resume`
+/// says (`shared::resume_or_fresh`).
+fn command(c: Command<'_>) -> String {
     let plugin_arg = c
         .plugin_dir
         .map(|p| format!(" --plugin-dir {}", shell_escape(p)))
@@ -454,15 +456,7 @@ fn command(c: &Command<'_>) -> String {
         .unwrap_or_default();
     let (prog, guard) = program_and_guard(c.program, "claude");
     let base = format!("{prog}{plugin_arg}{prompt_arg}{mcp_arg}");
-    let fresh = format!("exec {base}");
-    let command = match c.resume {
-        None => fresh,
-        Some(id) => format!(
-            "{base} --resume {} || {{ echo '[oxplow] saved resume id was stale; starting a fresh Claude session' >&2; {fresh}; }}",
-            shell_escape(id)
-        ),
-    };
-    in_shell(c.cwd, &guard, &command)
+    in_shell(c.cwd, &guard, &resume_or_fresh(&base, c.resume))
 }
 
 /// OTEL env that points Claude Code's OTLP metrics exporter at oxplow's
@@ -618,20 +612,59 @@ mod tests {
         assert_eq!(env["OTEL_METRIC_EXPORT_INTERVAL"], "10000");
     }
 
-    #[test]
-    fn a_fresh_session_has_no_resume() {
-        let c = Command {
+    fn run(resume: Resume<'_>) -> String {
+        command(Command {
             cwd: "/repo",
-            resume: None,
+            resume,
+            // Not found on PATH, so it carries a preflight of its own.
             program: None,
             plugin_dir: None,
             system_prompt: None,
             mcp_config: None,
-        };
-        let cmd = command(&c);
+        })
+    }
+
+    #[test]
+    fn a_fresh_session_has_no_resume() {
+        let cmd = run(Resume::Fresh);
         assert!(cmd.starts_with("sh -lc ") && cmd.contains("exec claude"));
         assert!(!cmd.contains("--resume"));
         assert!(cmd.contains("command -v claude"));
+    }
+
+    /// A session found on disk is resumed by exec, with no second process
+    /// on a failure; only one that couldn't be checked falls back to a
+    /// fresh session.
+    #[test]
+    fn a_known_resume_is_execd_and_only_an_unchecked_one_falls_back() {
+        let known = run(Resume::Known(resume_args("sess-1")));
+        let (_, resumed) = known.split_once("exit 127; }; ").unwrap();
+        assert!(resumed.starts_with("exec claude --resume"), "{known}");
+        assert!(!resumed.contains("||"), "{known}");
+        let unchecked = run(Resume::Unchecked {
+            args: resume_args("sess-1"),
+            harness: "Claude",
+        });
+        assert!(
+            unchecked.contains("--resume") && unchecked.contains("||"),
+            "{unchecked}"
+        );
+        assert!(unchecked.contains("starting a fresh one"), "{unchecked}");
+    }
+
+    /// The launch resumes by exec when Claude's transcript is there.
+    #[test]
+    fn a_present_transcript_is_resumed_by_exec() {
+        let h = harness("oxplow:claude-code", "claude");
+        let l = crate::test_launch::launch_with_home(h.as_ref(), "here", |home, cwd| {
+            let dir = home.join(".claude/projects").join(encode_cwd(cwd));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("here.jsonl"), "{}").unwrap();
+        });
+        assert!(!l.launch.resume_dropped);
+        let cmd = pty(&l.launch);
+        assert!(cmd.contains("exec '") && cmd.contains("--resume"), "{cmd}");
+        assert!(!cmd.contains("||"), "{cmd}");
     }
 
     #[test]

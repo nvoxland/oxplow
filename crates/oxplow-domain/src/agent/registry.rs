@@ -119,9 +119,7 @@ impl AcpAdapterRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::harness::{
-        Gate, HarnessError, Input, Interact, Launch, LaunchInput, Transcript,
-    };
+    use crate::agent::harness::{HarnessError, Interact, Launch, LaunchInput, Transcript};
 
     struct Fake(&'static str);
 
@@ -135,20 +133,12 @@ mod tests {
         fn interact(&self) -> Interact {
             Interact {
                 transcript: Transcript::Terminal,
-                input: Input::Keystrokes,
-                gate: Gate::Harness,
             }
         }
         fn launch(&self, _: &LaunchInput<'_>) -> Result<Launch, HarnessError> {
             Err(HarnessError::Config("a fake".into()))
         }
-        fn instruction_files(&self) -> &[&str] {
-            &[]
-        }
         fn env_markers(&self) -> &[&str] {
-            &[]
-        }
-        fn settings(&self) -> &[crate::agent::harness::HarnessSetting] {
             &[]
         }
         fn refresh_text(
@@ -157,9 +147,6 @@ mod tests {
             _: &crate::agent::text::AgentText,
         ) -> Result<(), HarnessError> {
             Ok(())
-        }
-        fn writing_tools(&self) -> &[&str] {
-            &[]
         }
         fn tool_use(&self, _: &serde_json::Value) -> Option<crate::agent::tool::ToolUse> {
             None
