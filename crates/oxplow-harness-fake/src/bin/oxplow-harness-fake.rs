@@ -31,9 +31,6 @@ impl Agent {
             .http
             .post(url)
             .bearer_auth(env("OXPLOW_HOOK_TOKEN"))
-            .header("X-Oxplow-Thread", env("OXPLOW_THREAD_ID"))
-            .header("X-Oxplow-Stream", env("OXPLOW_STREAM_ID"))
-            .header("X-Oxplow-Session", env("OXPLOW_SESSION"))
             .json(&body)
             .send()
             .await
@@ -95,8 +92,6 @@ impl Agent {
             .http
             .post(env("OXPLOW_FAKE_OTLP_URL"))
             .bearer_auth(env("OXPLOW_HOOK_TOKEN"))
-            .header("X-Oxplow-Thread", env("OXPLOW_THREAD_ID"))
-            .header("X-Oxplow-Session", env("OXPLOW_SESSION"))
             .header("Content-Type", "application/x-protobuf")
             .body(body)
             .send()

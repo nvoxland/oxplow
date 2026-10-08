@@ -129,14 +129,18 @@ async fn the_fake_harness_session_is_recorded_canonically() {
             resolve_program: &resolve,
         })
         .unwrap();
-    let LaunchSpec::Pty { command } = launch.spec else {
+    let LaunchSpec::Pty { command, env } = launch.spec else {
         panic!("the fake runs in a terminal");
     };
+    // Its identity rides the env, as a PTY spawn sets it; none of it is in
+    // the command.
+    assert!(!command.contains(&token), "{command}");
     let out = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&command)
+            .envs(env)
             .output(),
     )
     .await

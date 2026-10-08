@@ -199,7 +199,11 @@ pub async fn open_terminal_session(
         &harness_config,
     )
     .await?;
-    let LaunchSpec::Pty { command } = launch.spec else {
+    let LaunchSpec::Pty {
+        command,
+        env: launch_env,
+    } = launch.spec
+    else {
         return Err(IpcError::invalid(format!(
             "agent session {session_id} runs no terminal"
         )));
@@ -220,7 +224,10 @@ pub async fn open_terminal_session(
                 command: "sh".into(),
                 args: vec!["-lc".into(), command],
                 cwd,
-                env: oxplow_app::agent_path::base_pty_env(),
+                env: oxplow_app::agent_path::base_pty_env()
+                    .into_iter()
+                    .chain(launch_env)
+                    .collect(),
                 env_remove,
                 cols: c,
                 rows: r,
