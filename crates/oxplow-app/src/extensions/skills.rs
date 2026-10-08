@@ -13,7 +13,7 @@
 //! An implementation that lists a skill owns it: it's offered only while
 //! that implementation is the active one. Which are offered is
 //! `capabilities::agent_text`'s to say; the agent runtimes write them
-//! (`oxplow_plugin::AgentText`).
+//! (`oxplow_domain::agent::text::AgentText`).
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -66,7 +66,7 @@ pub(crate) fn parse_skills(
     let Some(items) = value.as_sequence() else {
         return (Vec::new(), vec![at(file, block, "`skills` must be a list")]);
     };
-    let core = oxplow_plugin::AgentText::core();
+    let core = oxplow_plugin::core_text();
     let mut out: Vec<SkillDecl> = Vec::new();
     let mut errors = Vec::new();
     for item in items {

@@ -9,7 +9,6 @@
 
 pub mod acp;
 pub mod advisories;
-pub mod agent_command;
 pub mod agent_context;
 pub mod agent_path;
 pub mod agent_policy;

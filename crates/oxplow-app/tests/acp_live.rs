@@ -84,6 +84,7 @@ async fn a_real_adapter_answers_a_prompt() {
                 program: program.into(),
                 args: words.map(str::to_string).collect(),
                 env: vec![],
+                env_remove: vec![],
             },
         )
         .await

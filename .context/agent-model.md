@@ -149,13 +149,37 @@ oxplow agent:
 
 ## Launching the agent
 
-`build_agent_command_for_session` in `crates/oxplow-app/src/agent_command.rs`
-constructs a shell command for the thread's assigned `AgentKind`.
+Each harness launches its own sessions: `AgentHarness::launch(&LaunchInput)`
+(`crates/oxplow-domain/src/agent/harness.rs`) writes whatever runtime files
+the agent needs and returns a `Launch { spec, resume_dropped }`. The spec is
+`LaunchSpec::Pty { command }` (a shell command for the PTY) or
+`LaunchSpec::Acp { program, args, env, system_prompt_via_meta }` (a process
+the ACP manager speaks to). The built-in harnesses live in
+`crates/oxplow-app/src/harnesses/` (`claude.rs`, `codex.rs`, `opencode.rs`,
+`acp.rs`; shared shell quoting in `shared.rs`). The caller is one function,
+`launch_session` in `crates/oxplow-rpc/src/commands/terminal.rs`, used by both
+the PTY path (`open_terminal_session`) and `acp_open_session`. It gathers the
+input — the session/thread/stream ids, the workspace and project dir, the
+control-plane endpoints, the identity env, the assembled system prompt, the
+session's resume id, the agent text, the harness config, oxplow's own
+executable, `HOME`, and a program resolver — and, when the harness reports
+`resume_dropped`, blanks the session's resume pointer. A harness never
+touches the database.
+
+The harness also names its **instruction files** (`instruction_files()`;
+`["CLAUDE.md"]` for every built-in today), which `agent_prompt` reads into the
+system prompt, and its **environment markers** (`env_markers()`), below. The
+harness config is a JSON value: `{"model": …}` from `agentModels` for the PTY
+harnesses, `{program, args, env, systemPromptViaMeta}` from the ACP agent's
+entry. Where a session's `billing_pool` (plan / API credits / purchased) gets
+derived, when token facts carry it, is here: the harness knows how it was
+launched.
 
 **What an agent inherits (tsk1032).** Every agent and terminal (PTY and
-ACP) is spawned without `agent_path::NOT_INHERITED`: Claude Code's session
-markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, …) and an oxplow agent's
-identity (`OXPLOW_HOOK_TOKEN`, `OXPLOW_THREAD_ID`, …). Otherwise oxplow run
+ACP) is spawned without `agent_path::not_inherited(&harnesses)`: an oxplow
+agent's identity (`agent_path::NOT_INHERITED`: `OXPLOW_HOOK_TOKEN`,
+`OXPLOW_THREAD_ID`, …) plus every registered harness's `env_markers()`
+(Claude Code's `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, …). Otherwise oxplow run
 from inside an agent's terminal starts child sessions — Claude Code turns
 transcript saving off, breaking resume and token counts — whose hooks point
 at the outer oxplow. It's a list, not a prefix: `CLAUDE_CONFIG_DIR`,
@@ -181,15 +205,14 @@ concurrently.
 - Codex runs `codex --cd <worktree>` or `codex resume --cd <worktree>
   <sid>`, plus CLI config overrides for oxplow MCP and lifecycle hooks.
 - opencode runs `opencode -m <model> [-s <sid>]` (with a fresh-session
-  fallback when the saved resume id is stale). The model is currently
-  hardcoded to `github-copilot/gpt-5-mini` (`OPENCODE_MODEL` in
-  `crates/oxplow-app/src/agent_command.rs`); per-project configurability
-  is a filed follow-up. Hooks, MCP, and the per-thread system prompt
+  fallback when the saved resume id is stale). The model is the harness
+  config's `model` (`agentModels.opencode`), defaulting to
+  `github-copilot/gpt-5-mini`. Hooks, MCP, and the per-thread system prompt
   all ride the `OPENCODE_CONFIG_CONTENT` env var — inline opencode
   config (merged last by opencode) wiring the oxplow MCP server
   (bearer via opencode's own `{env:OXPLOW_HOOK_TOKEN}` interpolation),
   the hook-bridge plugin, and an `instructions` entry pointing at the
-  per-thread prompt file (opencode has no `--append-system-prompt`).
+  per-session prompt file (opencode has no `--append-system-prompt`).
 - All agents export `OXPLOW_STREAM_ID`, `OXPLOW_THREAD_ID`,
   `OXPLOW_HOOK_TOKEN`, and `OXPLOW_SESSION` (the agent session, `ses<n>`)
   so hooks can identify themselves to the runtime. The OTLP exporters
@@ -209,8 +232,8 @@ mode (tsk1018): it went with the "Open in tmux" toggle and the
 
 ### The agent is spawned by absolute path, on purpose (tsk245)
 
-`AgentCommandOptions::program` carries the resolved absolute path to the CLI,
-from `agent_path::resolve_agent_program`. **Don't "simplify" it back to the bare
+A harness resolves its CLI through `LaunchInput::resolve_program` (backed by
+`agent_path::resolve_program`) and launches the absolute path. **Don't "simplify" it back to the bare
 binary name** — that is a bug that only reproduces on a GUI launch:
 
 - A **GUI-launched** app (Finder, dock, oxplow's own launcher) gets macOS's
@@ -245,10 +268,10 @@ on a user's rc file.
 
 ## Plugin hook bridge
 
-Agent-specific runtime files are materialized by `oxplow-plugin` under
-`.oxplow/runtime/` on every spawn. The rest of the app consumes only the
-provider output (`AgentCommandOptions`) instead of branching on plugin
-details.
+Agent-specific runtime files are materialized under `.oxplow/runtime/` by
+the harness's `launch` (with `oxplow-plugin`'s writers) on every spawn. The
+rest of the app consumes only the returned `Launch` instead of branching on
+harness details.
 
 - Claude writes `.oxplow/runtime/claude-plugin/`, passes it with
   `--plugin-dir`, and registers HTTP hooks for `PreToolUse`,
@@ -288,7 +311,7 @@ details.
   has no plugin namespacing, hence the `oxplow-` prefix instead of
   Claude's `/oxplow:` form. The launch model comes from
   `agentModels.opencode` in .oxplow/project.yaml (falling back to the
-  `OPENCODE_MODEL` const). Known gaps vs the Claude bridge: no
+  harness's `DEFAULT_MODEL`). Known gaps vs the Claude bridge: no
   SessionStart/SessionEnd/Notification events.
 
 Gotcha: Claude Code silently drops HTTP hooks for `SessionStart` ("HTTP hooks
@@ -430,16 +453,17 @@ one, and one that posts none (Codex) still ends.
    the thread row in its transaction anyway.)
    A second cleanup runs at **launch** for a token that's stale for any
    other reason (transcript pruned, machine moved, id rotted). Before
-   passing `--resume`, `open_terminal_session`'s direct branch probes the
-   session file via `resume_check::claude_resume_state`
-   (`crates/oxplow-app/src/resume_check.rs`): it maps the cwd to Claude's
+   passing `--resume`, the Claude harness's `launch` probes the
+   session file (`resume_state` in `crates/oxplow-app/src/harnesses/claude.rs`)
+   and reports `resume_dropped`, which `launch_session` turns into
+   `resume_check::forget_missing`: it maps the cwd to Claude's
    `$HOME/.claude/projects/<cwd-with-non-alnum→'-'>/<id>.jsonl` and, if
    the project dir exists but the `.jsonl` is gone (`Missing`), blanks the
    thread's pointer and launches fresh — so `claude --resume <stale>`
    never runs and its raw "No conversation found" error never reaches the
    terminal. Conservative by design: an absent project dir reads as
    `Unknown` (never clears), so an encoding drift can't wrongly wipe a
-   valid pointer, and the shell `||` net in `agent_command.rs` still
+   valid pointer, and the shell `||` net in the harness's command still
    covers the file-vanishes-between-check-and-exec race. Claude-only;
    codex/opencode keep just the shell net.
 3. Opens and closes `agent_turn` rows (UserPromptSubmit / Stop /

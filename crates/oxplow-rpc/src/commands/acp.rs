@@ -14,6 +14,7 @@ use oxplow_app::acp::session::{AcpError, SessionSpec};
 use oxplow_app::acp::wire::McpHttp;
 use oxplow_app::acp::{agents, manager::AcpManager};
 use oxplow_app::Services;
+use oxplow_domain::agent::harness::LaunchSpec;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{AgentKind, AgentSessionId};
 
@@ -55,8 +56,8 @@ pub async fn acp_open_session(
             "agent session {session_id} is closed"
         )));
     }
-    let (name, resume) = match (session.harness, session.acp_agent) {
-        (AgentKind::Acp, Some(name)) => (name, session.resume_session_id),
+    let (name, resume) = match (session.harness, session.acp_agent.clone()) {
+        (AgentKind::Acp, Some(name)) => (name, session.resume_session_id.clone()),
         _ => return Err(IpcError::invalid("this session doesn't run an ACP agent")),
     };
     let thread = svc
@@ -106,13 +107,45 @@ pub async fn acp_open_session(
         }],
         None => vec![],
     };
+    let harness = svc
+        .harnesses
+        .get(session.harness.as_str())
+        .map_err(|e| IpcError::invalid(e.to_string()))?;
     let system_prompt = oxplow_app::agent_prompt::assemble_acp_system_prompt(
         &project_dir,
+        harness.instruction_files(),
         &config,
         &stream,
         Some(&thread),
         &oxplow_app::capabilities::agent_text(ctx),
     );
+    // The ACP agent's program, as this project resolves it: the harness's
+    // launch makes it the session's process.
+    let program = serde_json::json!({
+        "program": program,
+        "args": agent.args,
+        "env": agent.env.clone().into_iter().collect::<Vec<_>>(),
+        "systemPromptViaMeta": agents::system_prompt_via_meta(&agent),
+    });
+    let launch = crate::commands::terminal::launch_session(
+        ctx,
+        harness.as_ref(),
+        &session,
+        &thread,
+        &stream,
+        None,
+        &program,
+    )
+    .await?;
+    let LaunchSpec::Acp {
+        program,
+        args,
+        env,
+        system_prompt_via_meta,
+    } = launch.spec
+    else {
+        return Err(IpcError::invalid("this session doesn't run an ACP agent"));
+    };
     let spec = SessionSpec {
         session_id,
         thread_id: thread.id,
@@ -121,12 +154,13 @@ pub async fn acp_open_session(
         mcp,
         resume_session_id: Some(resume).filter(|s| !s.is_empty()),
         system_prompt: Some(system_prompt),
-        system_prompt_via_meta: agents::system_prompt_via_meta(&agent),
+        system_prompt_via_meta,
     };
     let launch = Launch {
-        program: program.into(),
-        args: agent.args.clone(),
-        env: agent.env.clone().into_iter().collect(),
+        program,
+        args,
+        env,
+        env_remove: oxplow_app::agent_path::not_inherited(&svc.harnesses),
     };
     let host = Arc::new(ServicesAcpHost::new(svc, Some(stream.id), session_id));
     svc.acp.open(host, spec, launch).await.map_err(acp_err)?;

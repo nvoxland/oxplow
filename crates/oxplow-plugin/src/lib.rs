@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use thiserror::Error;
 
+use oxplow_domain::agent::text::{AgentText, Text};
 use oxplow_domain::AgentKind;
 
 const PLUGIN_DIR_REL: &str = ".oxplow/runtime/claude-plugin";
@@ -287,21 +288,6 @@ pub fn capability_prompts() -> Vec<CapabilityPrompt> {
         .collect()
 }
 
-/// The `description:` line of a `---`-fenced frontmatter block.
-fn frontmatter_description(body: &str) -> &str {
-    let Some(front) = body
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split("\n---").next())
-    else {
-        return "";
-    };
-    front
-        .lines()
-        .find_map(|l| l.strip_prefix("description:"))
-        .map(str::trim)
-        .unwrap_or("")
-}
-
 /// The file in each skill folder oxplow writes: how it tells its own
 /// from a person's when one is no longer offered.
 const SKILL_MARKER: &str = ".oxplow";
@@ -349,63 +335,19 @@ fn write_commands(commands_dir: &Path, commands: &[Text]) -> Result<(), PluginEr
     Ok(())
 }
 
-/// One piece of text for the agent: a skill (its `SKILL.md`, whose
-/// frontmatter `name:` is `name`) or a slash command (its markdown).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Text {
-    pub name: String,
-    pub body: String,
-}
-
-/// Every skill and slash command an agent runtime gets: core's, and what
-/// the project's extensions offer now (`oxplow_app::capabilities::agent_text`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AgentText {
-    pub skills: Vec<Text>,
-    pub commands: Vec<Text>,
-}
-
-impl AgentText {
-    /// Core's own skills and commands.
-    pub fn core() -> Self {
-        let text = |list: &[(&str, &str)]| {
-            list.iter()
-                .map(|(name, body)| Text {
-                    name: (*name).into(),
-                    body: (*body).into(),
-                })
-                .collect()
-        };
-        Self {
-            skills: text(OXPLOW_SKILLS),
-            commands: text(CORE_COMMANDS),
-        }
-    }
-
-    /// Every skill as `(name, description)`, the description taken from
-    /// its frontmatter: the index an agent that can't discover skill files
-    /// (an ACP agent) is given, to fetch bodies with `get_skill`.
-    pub fn skill_index(&self) -> Vec<(&str, &str)> {
-        self.skills
-            .iter()
-            .map(|s| (s.name.as_str(), frontmatter_description(&s.body)))
+/// Core's own skills and commands.
+pub fn core_text() -> AgentText {
+    let text = |list: &[(&str, &str)]| {
+        list.iter()
+            .map(|(name, body)| Text {
+                name: (*name).into(),
+                body: (*body).into(),
+            })
             .collect()
-    }
-
-    /// One skill's `SKILL.md` body by name.
-    pub fn skill_body(&self, name: &str) -> Option<&str> {
-        self.skills
-            .iter()
-            .find(|s| s.name == name)
-            .map(|s| s.body.as_str())
-    }
-
-    /// Whether `name` is taken by a skill or command already.
-    pub fn names(&self, name: &str) -> bool {
-        self.skills
-            .iter()
-            .chain(&self.commands)
-            .any(|t| t.name == name)
+    };
+    AgentText {
+        skills: text(OXPLOW_SKILLS),
+        commands: text(CORE_COMMANDS),
     }
 }
 
@@ -809,7 +751,7 @@ mod tests {
             "http://127.0.0.1:51823/hook",
             "http://127.0.0.1:51823/mcp",
             "test-token",
-            &AgentText::core(),
+            &core_text(),
         )
         .unwrap();
         assert!(paths.manifest.exists());
@@ -841,7 +783,7 @@ mod tests {
     #[test]
     fn what_is_no_longer_offered_is_removed() {
         let tmp = TempDir::new().unwrap();
-        let mut text = AgentText::core();
+        let mut text = core_text();
         text.skills.push(Text {
             name: "work-items".into(),
             body: "---\nname: work-items\ndescription: d\n---\n".into(),
@@ -858,7 +800,7 @@ mod tests {
         fs::write(skills.join("someone-elses").join("SKILL.md"), "x").unwrap();
         assert!(skills.join("work-items").join("SKILL.md").exists());
         assert!(commands.join("work-next.md").exists());
-        refresh_skills(tmp.path(), &AgentText::core()).unwrap();
+        refresh_skills(tmp.path(), &core_text()).unwrap();
         assert!(!skills.join("work-items").exists());
         assert!(!commands.join("work-next.md").exists());
         assert!(skills.join("someone-elses").exists());
@@ -877,7 +819,7 @@ mod tests {
             "http://h/hook",
             "http://h/mcp",
             "tok",
-            &AgentText::core(),
+            &core_text(),
         )
         .unwrap();
         let mut offenders = Vec::new();
@@ -911,7 +853,7 @@ mod tests {
             "http://h/hook",
             "http://h/mcp",
             "tok",
-            &AgentText::core(),
+            &core_text(),
         )
         .unwrap();
         let body = fs::read_to_string(&paths.manifest).unwrap();
@@ -982,7 +924,7 @@ mod tests {
             "http://h/hook",
             "http://h/mcp",
             "t1",
-            &AgentText::core(),
+            &core_text(),
         )
         .unwrap();
         // Second call must not error.
@@ -991,7 +933,7 @@ mod tests {
             "http://h2/hook",
             "http://h2/mcp",
             "t2",
-            &AgentText::core(),
+            &core_text(),
         )
         .unwrap();
         let body = fs::read_to_string(&p.hooks).unwrap();
@@ -1004,8 +946,7 @@ mod tests {
     fn write_codex_runtime_emits_expected_files() {
         let tmp = TempDir::new().unwrap();
         let paths =
-            write_codex_runtime(tmp.path(), "http://127.0.0.1:51823/mcp", &AgentText::core())
-                .unwrap();
+            write_codex_runtime(tmp.path(), "http://127.0.0.1:51823/mcp", &core_text()).unwrap();
         assert!(paths.manifest.exists());
         assert!(paths.hooks.exists());
         assert!(paths.oxplow_executable.exists());
@@ -1031,7 +972,7 @@ mod tests {
     /// (tsk376): every skill, with its frontmatter description.
     #[test]
     fn the_skill_index_names_every_skill_with_its_description() {
-        let text = AgentText::core();
+        let text = core_text();
         let index = text.skill_index();
         assert_eq!(index.len(), OXPLOW_SKILLS.len());
         let (name, description) = index
@@ -1059,7 +1000,7 @@ mod tests {
         let claude = tmp.path().join(PLUGIN_DIR_REL).join("skills");
         std::fs::create_dir_all(claude.join("oxplow-extension")).unwrap();
         std::fs::write(claude.join("oxplow-extension/SKILL.md"), "stale").unwrap();
-        refresh_skills(tmp.path(), &AgentText::core()).unwrap();
+        refresh_skills(tmp.path(), &core_text()).unwrap();
         for (name, body) in OXPLOW_SKILLS {
             assert_eq!(
                 std::fs::read_to_string(claude.join(name).join("SKILL.md")).unwrap(),
@@ -1073,7 +1014,7 @@ mod tests {
     #[test]
     fn write_opencode_runtime_emits_hook_bridge_plugin() {
         let tmp = TempDir::new().unwrap();
-        let paths = write_opencode_runtime(tmp.path(), &AgentText::core()).unwrap();
+        let paths = write_opencode_runtime(tmp.path(), &core_text()).unwrap();
         assert!(paths.hooks_plugin.exists());
         assert!(paths.prompts_dir.is_dir());
         let js = fs::read_to_string(&paths.hooks_plugin).unwrap();
@@ -1094,7 +1035,7 @@ mod tests {
     #[test]
     fn write_opencode_runtime_materializes_skills_with_gitignore() {
         let tmp = TempDir::new().unwrap();
-        let paths = write_opencode_runtime(tmp.path(), &AgentText::core()).unwrap();
+        let paths = write_opencode_runtime(tmp.path(), &core_text()).unwrap();
         assert_eq!(paths.skills_dir, tmp.path().join(".opencode/skills"));
         for name in [
             "oxplow-runtime",
@@ -1120,7 +1061,7 @@ mod tests {
 
     #[test]
     fn opencode_command_definitions_carry_description_and_template() {
-        let defs = opencode_command_definitions(&AgentText::core());
+        let defs = opencode_command_definitions(&core_text());
         for name in [
             "oxplow-review-comments",
             "oxplow-configure",
@@ -1143,15 +1084,15 @@ mod tests {
     #[test]
     fn write_opencode_runtime_is_idempotent() {
         let tmp = TempDir::new().unwrap();
-        write_opencode_runtime(tmp.path(), &AgentText::core()).unwrap();
-        let paths = write_opencode_runtime(tmp.path(), &AgentText::core()).unwrap();
+        write_opencode_runtime(tmp.path(), &core_text()).unwrap();
+        let paths = write_opencode_runtime(tmp.path(), &core_text()).unwrap();
         assert!(paths.hooks_plugin.exists());
     }
 
     #[test]
     fn codex_runtime_configures_hooks_and_mcp() {
         let tmp = TempDir::new().unwrap();
-        let paths = write_codex_runtime(tmp.path(), "http://h/mcp", &AgentText::core()).unwrap();
+        let paths = write_codex_runtime(tmp.path(), "http://h/mcp", &core_text()).unwrap();
         let hooks = fs::read_to_string(paths.hooks).unwrap();
         assert!(hooks.contains("PreToolUse"));
         assert!(!hooks.contains("http://"));

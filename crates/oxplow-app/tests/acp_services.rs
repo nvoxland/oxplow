@@ -380,6 +380,7 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
                 program: fake_bin(),
                 args: vec![],
                 env: vec![],
+                env_remove: vec![],
             },
         )
         .await

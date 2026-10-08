@@ -32,7 +32,6 @@
 //! limit is that version-manager shims (mise, nvm, volta installs under a
 //! versioned directory) are not on the list and still need a terminal launch.
 
-use oxplow_domain::AgentKind;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -91,11 +90,6 @@ pub fn resolve_program_in(
     from_path.or_else(|| extra.iter().map(|dir| dir.join(bin)).find(|c| c.is_file()))
 }
 
-/// [`resolve_program_in`] for an agent, against the live environment.
-pub fn resolve_agent_program(kind: AgentKind) -> Option<String> {
-    resolve_program(kind.as_str())
-}
-
 /// [`resolve_program_in`] for any program (an ACP agent's command),
 /// against the live environment plus the well-known install dirs, so a
 /// GUI-launched daemon with a thin PATH still finds it (tsk245).
@@ -137,30 +131,14 @@ pub fn augmented_path() -> Option<String> {
     augmented_path_in(std::env::var_os("PATH").as_deref(), &extra)
 }
 
-/// Variables an agent or terminal must not inherit from oxplow's own
-/// environment (tsk1032): when oxplow itself runs inside an agent (you
-/// dogfood it from an oxplow agent's terminal), that agent's session markers
-/// would make its agents child sessions — Claude Code then turns transcript
-/// saving off, which breaks resume and token counts — and the outer oxplow's
-/// identity would point their hooks at the wrong oxplow. A list, not a
-/// prefix: `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK` and the like are
-/// the person's own configuration and must pass. Oxplow sets its own
+/// oxplow's own identity, which an agent or terminal must not inherit from
+/// oxplow's environment: when oxplow itself runs inside an agent (you
+/// dogfood it from an oxplow agent's terminal), the outer oxplow's identity
+/// would point its agents' hooks at the wrong oxplow. Oxplow sets its own
 /// identity for an agent after these are removed (`OXPLOW_*` ride the
-/// agent's command).
+/// agent's command). Each harness adds its own session markers
+/// (`AgentHarness::env_markers`).
 pub const NOT_INHERITED: &[&str] = &[
-    // Claude Code's markers for a session and the processes it starts.
-    "CLAUDECODE",
-    "CLAUDE_PID",
-    "CLAUDE_EFFORT",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_CODE_SESSION_ID",
-    "CLAUDE_CODE_CHILD_SESSION",
-    "CLAUDE_CODE_SESSION_ATTENDED",
-    "CLAUDE_CODE_BRIDGE_SESSION_ID",
-    "CLAUDE_CODE_MESSAGING_SOCKET",
-    "CLAUDE_CODE_MESSAGING_TOKEN",
-    "CLAUDE_CODE_EXECPATH",
-    // An oxplow agent's identity.
     "OXPLOW_HOOK_TOKEN",
     "OXPLOW_HOOK_BASE_URL",
     "OXPLOW_STREAM_ID",
@@ -168,9 +146,20 @@ pub const NOT_INHERITED: &[&str] = &[
     "OXPLOW_SESSION",
 ];
 
-/// [`NOT_INHERITED`] as a spawn's `env_remove`.
-pub fn not_inherited() -> Vec<String> {
-    NOT_INHERITED.iter().map(|s| s.to_string()).collect()
+/// What a spawn removes from the environment: [`NOT_INHERITED`] and every
+/// registered harness's session markers. A list, not a prefix:
+/// `CLAUDE_CONFIG_DIR` and the like are the person's own configuration and
+/// pass.
+pub fn not_inherited(harnesses: &oxplow_domain::agent::registry::HarnessRegistry) -> Vec<String> {
+    let mut out: Vec<String> = NOT_INHERITED.iter().map(|s| s.to_string()).collect();
+    for id in harnesses.names() {
+        if let Ok(h) = harnesses.get(&id) {
+            out.extend(h.env_markers().iter().map(|s| s.to_string()));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// The env every agent/terminal PTY is spawned with. One place so the five
@@ -194,7 +183,14 @@ mod tests {
     /// dropped; the person's own Claude configuration passes.
     #[test]
     fn an_agent_inherits_no_session_markers_but_keeps_configuration() {
-        let dropped = not_inherited();
+        let harnesses =
+            oxplow_domain::agent::registry::HarnessRegistry::new(std::sync::Arc::new(|| {
+                "claude".into()
+            }));
+        harnesses.register(
+            crate::harnesses::built_in("oxplow:claude-code", "claude", "Claude").unwrap(),
+        );
+        let dropped = not_inherited(&harnesses);
         for marker in [
             "CLAUDECODE",
             "CLAUDE_CODE_CHILD_SESSION",

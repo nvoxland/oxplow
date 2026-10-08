@@ -14,6 +14,7 @@ pub mod acp_adapter;
 pub mod drive;
 pub mod harness;
 pub mod registry;
+pub mod text;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;

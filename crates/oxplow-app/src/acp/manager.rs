@@ -27,6 +27,9 @@ pub struct Launch {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// What it must not inherit from oxplow's environment
+    /// (`agent_path::not_inherited`).
+    pub env_remove: Vec<String>,
 }
 
 /// A session as the UI reads it.
@@ -173,7 +176,7 @@ impl AcpManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        for k in crate::agent_path::NOT_INHERITED {
+        for k in &launch.env_remove {
             cmd.env_remove(k);
         }
         if let Some(path) = crate::agent_path::augmented_path() {

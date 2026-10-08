@@ -831,7 +831,7 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
 /// consented extension's that's offered — what it needs is active, and,
 /// when an implementation lists it, that implementation is the active one.
 /// A name another extension already took is left out (logged).
-pub fn agent_text(svc: &crate::Services) -> oxplow_plugin::AgentText {
+pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentText {
     let project_dir = svc.worktrees.project_dir();
     let extensions =
         crate::advisories::consented(&svc.approvals, &svc.extension_catalog.get(project_dir));
@@ -890,10 +890,10 @@ pub fn offered_text(
     config: &OxplowConfig,
     extensions: &[crate::extensions::Extension],
     read: impl Fn(&str, &str) -> Option<String>,
-) -> oxplow_plugin::AgentText {
+) -> oxplow_domain::agent::text::AgentText {
     use crate::extensions::skills::SkillKind;
     let active = registry.snapshot(config);
-    let mut text = oxplow_plugin::AgentText::core();
+    let mut text = oxplow_plugin::core_text();
     for ext in extensions.iter().filter(|e| e.enabled) {
         for skill in &ext.skills {
             let owner = ext
@@ -916,7 +916,7 @@ pub fn offered_text(
             let Some(body) = read(&ext.name, &skill.file) else {
                 continue;
             };
-            let item = oxplow_plugin::Text {
+            let item = oxplow_domain::agent::text::Text {
                 name: skill.name.clone(),
                 body,
             };
@@ -1438,7 +1438,7 @@ mod tests {
         refresh_agent_text(svc);
         assert_eq!(
             std::fs::read_to_string(skills.join("oxplow-extension/SKILL.md")).unwrap(),
-            oxplow_plugin::AgentText::core()
+            oxplow_plugin::core_text()
                 .skill_body("oxplow-extension")
                 .unwrap()
         );

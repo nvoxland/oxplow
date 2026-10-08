@@ -78,7 +78,9 @@ impl HarnessRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::harness::{Gate, Input, Interact, Transcript};
+    use crate::agent::harness::{
+        Gate, HarnessError, Input, Interact, Launch, LaunchInput, Transcript,
+    };
 
     struct Fake(&'static str);
 
@@ -95,6 +97,15 @@ mod tests {
                 input: Input::Keystrokes,
                 gate: Gate::Harness,
             }
+        }
+        fn launch(&self, _: &LaunchInput<'_>) -> Result<Launch, HarnessError> {
+            Err(HarnessError::Config("a fake".into()))
+        }
+        fn instruction_files(&self) -> &[&str] {
+            &[]
+        }
+        fn env_markers(&self) -> &[&str] {
+            &[]
         }
     }
 
