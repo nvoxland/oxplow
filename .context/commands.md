@@ -234,6 +234,16 @@ touched), sampled or on by setting, and approvals by capability.
 
 ## The pipeline (`crates/oxplow-app/src/commands/mod.rs`)
 
+The bus is split by concern: `mod.rs` the types, the registry and the
+pipeline (`run_prepared`, `run_nested`, the read path); `record.rs` a
+run's audit row and events (`record_tx`, `audit_only`,
+`record_external`, the transaction's `Abort`); `undo.rs` undo and the
+claims that keep two undos or approvals from both applying;
+`proposals.rs` proposals (`unconfirmed`, the dry run, approve,
+decline); `steps.rs` composition — the composed tree, routing, steps;
+`ops.rs` the host capabilities' operations; `util.rs` what handlers
+share; `tests.rs` the bus's own tests.
+
 `CommandBus::run(actor, name, input, confirmed)`:
 
 First the **actor is resolved**, once (`CommandBus::resolved`): an agent
