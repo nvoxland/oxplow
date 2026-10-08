@@ -356,22 +356,43 @@ pub async fn suite(
         }
     }
 
-    // 6. What happened is in the log, naming the item: every write that
-    //    changed it logged an event about it (the provider's own kinds —
-    //    oxplow's `work_item.created` / `edited` / `transitioned`, an
-    //    external provider's `work_item.recorded`; a move to the state it
-    //    is in may log nothing).
+    // 6. What happened is in the log, in the interface's words: core logs
+    //    the same events for every list, each naming the item — its
+    //    filing, the rename, the link and the comment the features allow,
+    //    and the other item's reorder and move.
     probe.settle().await;
-    let logged = probe.event_types(&item).await.len();
-    let writes = 2
-        + CanonicalState::ALL.len()
-        + usize::from(features.links)
-        + usize::from(features.comments);
-    if logged < writes {
-        fail(
-            "events",
-            format!("{logged} events name `{item}` after {writes} writes to it"),
-        );
+    let logged = probe.event_types(&item).await;
+    let mut want = vec!["work_item.created", "work_item.edited"];
+    if features.links && linked.is_ok() {
+        want.push("work_item.linked");
+    }
+    if features.comments && commented.is_ok() {
+        want.push("work_item.commented");
+    }
+    for event_type in want {
+        if !logged.iter().any(|t| t == event_type) {
+            fail(
+                "events",
+                format!("no {event_type} names `{item}`; logged: {logged:?}"),
+            );
+        }
+    }
+    if !other.is_empty() {
+        let placed = usize::from(features.ordering) + usize::from(features.lists);
+        let edits = probe
+            .event_types(&other)
+            .await
+            .iter()
+            .filter(|t| *t == "work_item.edited")
+            .count();
+        if edits < placed {
+            fail(
+                "events",
+                format!(
+                    "{edits} work_item.edited name `{other}` after {placed} reorders and moves"
+                ),
+            );
+        }
     }
 
     // 7. Reading the provider back restates what its writes recorded:
@@ -518,6 +539,17 @@ pub async fn suite(
             probe.settle().await;
             if probe.record(r).await.is_some() {
                 fail("delete", format!("`{r}` is still a live row after delete"));
+            }
+            if !probe
+                .event_types(r)
+                .await
+                .iter()
+                .any(|t| t == "work_item.deleted")
+            {
+                fail(
+                    "events",
+                    format!("deleting `{r}` logged no work_item.deleted"),
+                );
             }
         }
     }

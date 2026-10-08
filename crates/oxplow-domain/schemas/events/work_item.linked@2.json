@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`work_item.linked@2`: a typed link from one item to another of the\nsame list.",
+  "properties": {
+    "link_type": {
+      "description": "One of the list's own link types.",
+      "type": "string"
+    },
+    "target": {
+      "description": "The item linked to.",
+      "type": "string"
+    },
+    "work_item": {
+      "description": "The item linked from (`work_item:<list>:<id>`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item",
+    "target",
+    "link_type"
+  ],
+  "title": "WorkItemLinkedV2",
+  "type": "object"
+}

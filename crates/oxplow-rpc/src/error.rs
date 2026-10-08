@@ -4,7 +4,6 @@ use thiserror::Error;
 
 use oxplow_app::lsp_installer::LspInstallerError;
 use oxplow_app::terminal_sessions::TerminalSessionError;
-use oxplow_app::TaskServiceError;
 use oxplow_domain::DomainError;
 use oxplow_session::{SessionError, ThreadError};
 
@@ -145,15 +144,6 @@ impl From<SessionError> for IpcError {
             },
             SessionError::Vcs(e) => IpcError::from(DomainError::from(e.clone())),
             SessionError::Storage(e) => IpcError::from(e.clone()),
-        }
-    }
-}
-
-impl From<TaskServiceError> for IpcError {
-    fn from(value: TaskServiceError) -> Self {
-        match value {
-            TaskServiceError::NotFound(_) => IpcError::not_found(),
-            TaskServiceError::Storage(e) => IpcError::from(e),
         }
     }
 }
@@ -335,19 +325,6 @@ mod tests {
         // Storage(NotFound) should land as NOT_FOUND, not GIT.
         let e: IpcError = SessionError::Storage(DomainError::NotFound).into();
         assert_eq!(e.code, "NOT_FOUND");
-    }
-
-    #[test]
-    fn from_task_service_not_found_maps_to_not_found() {
-        let e: IpcError = TaskServiceError::NotFound(oxplow_domain::TaskId::new(7)).into();
-        assert_eq!(e.code, "NOT_FOUND");
-    }
-
-    #[test]
-    fn from_task_service_storage_propagates() {
-        let e: IpcError = TaskServiceError::Storage(DomainError::Invalid("bad row".into())).into();
-        assert_eq!(e.code, "INVALID");
-        assert_eq!(e.message, "bad row");
     }
 
     #[test]

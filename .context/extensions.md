@@ -56,8 +56,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     contribution kinds; see "`extension.yaml`" below).
   - `lenses/<slug>.yaml` contains `title`, `description`, `query`, `viz`
     (`table` | `list` | `number` | `markdown`), `params` (`name`, `label`,
-    `default`), `columns` (`key`, `label`, `link: {kind: task | file |
-    wiki | effort-diff, from}`) and `empty`.
+    `default`), `columns` (`key`, `label`, `link: {kind: page | file |
+    wiki | effort-diff | …, from}` — a work item links as `page` by its
+    ref) and `empty`.
   - Unknown keys are errors, so typos surface instead of being ignored.
 - **Ids.** A lens id is `<extension>/<slug>`.
 - **Reading.** What the app shows is read from the **main worktree**
@@ -724,13 +725,13 @@ and one calling MCP read identical `file:line: what — fix` lines.
   - `lens` — `lenses/<name>.yaml`, open tasks in the viewer's stream, with
     a Start row action (`oxplow.work_item.transition`, a `ref` column it selects
     but doesn't show);
-  - `collector` — a Starlark collector `items` over `v_task` declaring
+  - `collector` — a Starlark collector `items` over `v_work_item` declaring
     entity `item`, a model `open_items` over `ref('item')` and a lens over
     the model; its example runs the collector over fixture rows;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
     `oxplow.work_item.comment`, with an example and a `ui.commands` entry on
     `work_item`; its intent example dry-runs it;
-  - `effect` (P8.D12) — `effects: [on-done]` on `work_item.transitioned`
+  - `effect` (P8.D12) — `effects: [on-done]` on `work_item.state_changed`
     `where: { to: done }`, whose `effects/on-done.star` composes
     `oxplow.work_item.comment`; its intent example dry-runs it on a fixture
     event;
@@ -1954,7 +1955,7 @@ confirms"):
 effects:
   - id: announce-done          # [a-z0-9-]+, unique in the extension
     summary: Note a finished item on its thread.
-    on: [work_item.transitioned]   # core types, its own, or another extension's ("Event types")
+    on: [work_item.state_changed]  # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these
     needs: [sql.read]              # the host capabilities its script calls
     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
@@ -2447,11 +2448,11 @@ only a need of the capability itself (`work_items`) isn't. `oxplow-bundled`
 declares no `work_items` need: with no list its task lenses, hint and
 skill just find nothing.
 
-**What a built-in owns.** A built-in may own MCP tools that only it
-offers (`BuiltIn.tools`: `oxplow:tasks` owns `list_tasks`, `get_task`,
-`read_task_options`); a provider instance owns its command namespace.
-They're offered and run only while their implementation is active
-(`capabilities::Active::refusal`, `.context/commands.md` step 0).
+**What an implementation owns.** A provider instance owns its command
+namespace (`<id>.*`), offered and run only while it's active
+(`capabilities::Active::refusal`, `.context/commands.md` step 0). The
+built-ins own nothing of the agent's surface: the work-item tools read
+whichever list is active.
 
 ## Skills
 
@@ -2811,8 +2812,8 @@ Capabilities added to core because the extraction needed them (tsk280),
 available to every extension:
 
 - `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.
-- `commit` and `metric` link kinds; `file` links with `line`; `task`
-  links accept a bare `v_task.id`.
+- `commit` and `metric` link kinds; `file` links with `line`. (A `task`
+  kind came and went: a work item links as `page`, by its ref.)
 - `work_item.detail.body` and `thread.plan.header` slots, with slot params checked at load.
 - Lens `launcher.category` and `hidden`.
 - Lens `actions:` as commands (P6.B1; the tsk329 registry retired).

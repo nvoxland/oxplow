@@ -4,20 +4,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::events::schema::{
-    WorkItemCreated, WorkItemCreatedV1, WorkItemDeleted, WorkItemDeletedV1, WorkItemEdited,
-    WorkItemEditedV1, WorkItemTransitioned, WorkItemTransitionedV1,
-};
-use oxplow_domain::refs::build::work_item_ref;
 use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{
-    Anchors, DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus,
-    ThreadId, Timestamp,
+    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, ThreadId,
+    Timestamp,
 };
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
-use crate::event_log_store::{anchors_for_thread_tx, EventCtx};
 use crate::page_ref_projections::{task_body_ref_types, task_edges, work_item_id, KIND_WORK_ITEM};
 use crate::page_ref_store::SqlitePageRefStore;
 
@@ -25,7 +19,7 @@ use crate::page_ref_store::SqlitePageRefStore;
 pub struct SqliteTaskStore {
     db: Database,
     page_refs: SqlitePageRefStore,
-    /// Validates the `work_item.transitioned` envelopes this store logs.
+    /// The ref kinds a task body's mentions may name.
     vocabulary: VocabularyHandle,
 }
 
@@ -53,23 +47,6 @@ impl SqliteTaskStore {
         }
     }
 
-    /// Insert a task and log its filing, in one transaction (see
-    /// [`insert_logged_tx`]). Returns its id.
-    pub async fn insert_logged(&self, item: &Task) -> Result<TaskId, DomainError> {
-        let owned = Arc::new(item.clone());
-        let vocabulary = self.vocabulary.clone();
-        let id = self
-            .db
-            .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "task_service");
-                insert_logged_tx(tx, &ev, &owned)
-            })
-            .await?;
-        self.project_body_refs(item, id).await?;
-        Ok(id)
-    }
-
     /// Re-project a task's body mentions into `page_ref` (the task-body
     /// slice; the effort slice is the effort store's).
     async fn project_body_refs(&self, item: &Task, id: TaskId) -> Result<(), DomainError> {
@@ -89,17 +66,14 @@ impl SqliteTaskStore {
     /// Move a task to another thread (or the backlog, `None`) at the end
     /// of its list. Returns the moved row.
     pub async fn move_task(&self, id: TaskId, dest: Option<ThreadId>) -> Result<Task, DomainError> {
-        let vocabulary = self.vocabulary.clone();
         let moved = self
             .db
             .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "task_service");
                 let item = get_task_tx(tx, id)?.ok_or(DomainError::NotFound)?;
                 if item.thread_id == dest {
                     return Ok(item);
                 }
-                Ok(place_task_tx(tx, &ev, id, dest, Placement::End, Timestamp::now())?.task)
+                Ok(place_task_tx(tx, id, dest, Placement::End, Timestamp::now())?.task)
             })
             .await?;
         Ok(moved)
@@ -111,13 +85,8 @@ impl SqliteTaskStore {
         id: TaskId,
         to: TaskStatus,
     ) -> Result<StatusChange, DomainError> {
-        let vocabulary = self.vocabulary.clone();
         self.db
-            .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "task_service");
-                set_status_tx(tx, &ev, id, to, Timestamp::now())
-            })
+            .transaction(move |tx| set_status_tx(tx, id, to, Timestamp::now()))
             .await
     }
 
@@ -130,48 +99,13 @@ impl SqliteTaskStore {
         status: Option<TaskStatus>,
     ) -> Result<Task, DomainError> {
         let owned = Arc::new(item.clone());
-        let vocabulary = self.vocabulary.clone();
         let after = self
             .db
-            .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "task_service");
-                update_with_status_tx(tx, &ev, &owned, status, Timestamp::now())
-            })
+            .transaction(move |tx| update_with_status_tx(tx, &owned, status, Timestamp::now()))
             .await?;
         self.project_body_refs(&after, after.id).await?;
         Ok(after)
     }
-}
-
-/// Write a status inside the caller's transaction and log
-/// `work_item.transitioned@1` when it changed — every change, and for
-/// thread-less tasks too (no stream anchor then). No dedupe key: a
-/// transactional producer's retry has already rolled back.
-fn apply_status_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    item: &Task,
-    from: TaskStatus,
-) -> Result<(), DomainError> {
-    write_status_tx(conn, item)?;
-    if from != item.status {
-        let work_item = work_item_ref(item.id);
-        let anchors = match item.thread_id {
-            Some(thread) => anchors_for_thread_tx(conn, thread)?,
-            None => Anchors::default(),
-        };
-        let env = ev
-            .typed::<WorkItemTransitioned>(&WorkItemTransitionedV1 {
-                work_item: work_item.clone(),
-                from,
-                to: item.status,
-            })
-            .with_anchors(anchors)
-            .with_subject([work_item]);
-        ev.append(conn, &env)?;
-    }
-    Ok(())
 }
 
 /// The only writer of a task's `status` / `completed_at` (with
@@ -197,101 +131,29 @@ fn write_status_tx(conn: &rusqlite::Connection, item: &Task) -> Result<(), Domai
     Ok(())
 }
 
-/// Which of a task's own fields differ between `before` and `after`, by
-/// the names `work_item.edited` uses.
-fn edited_fields(before: &Task, after: &Task) -> Vec<String> {
-    let mut fields = Vec::new();
-    if before.title != after.title {
-        fields.push("title".to_string());
-    }
-    if before.description != after.description {
-        fields.push("description".to_string());
-    }
-    if before.priority != after.priority {
-        fields.push("priority".to_string());
-    }
-    if before.parent_id != after.parent_id {
-        fields.push("parent".to_string());
-    }
-    if before.thread_id != after.thread_id {
-        fields.push("thread".to_string());
-    }
-    fields
-}
-
-/// Log `work_item.edited@1` for `fields` of `item`, anchored to the thread
-/// it is on now (none on the backlog).
-fn log_edited_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    item: &Task,
-    fields: Vec<String>,
-) -> Result<(), DomainError> {
-    let work_item = work_item_ref(item.id);
-    let anchors = match item.thread_id {
-        Some(thread) => anchors_for_thread_tx(conn, thread)?,
-        None => Anchors::default(),
-    };
-    let env = ev
-        .typed::<WorkItemEdited>(&WorkItemEditedV1 {
-            work_item: work_item.clone(),
-            fields,
-        })
-        .with_anchors(anchors)
-        .with_subject([work_item]);
-    ev.append(conn, &env)?;
-    Ok(())
-}
-
 /// Write `item`'s fields (never its status) and, when `status` is given,
 /// move the task there ([`set_status_tx`], which reads the committed
-/// status inside this transaction). An edit of the task's own fields logs
-/// `work_item.edited@1`. `NotFound` for a missing or deleted row. Returns
-/// the row as committed.
+/// status inside this transaction). `NotFound` for a missing or deleted
+/// row. Returns the row as committed.
 pub fn update_with_status_tx(
     conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
     item: &Task,
     status: Option<TaskStatus>,
     now: Timestamp,
 ) -> Result<Task, DomainError> {
-    let before = get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)?;
     if update_task_tx(conn, item).map_err(crate::database::map_sql_err)? == 0 {
         return Err(DomainError::NotFound);
     }
-    let fields = edited_fields(&before, item);
-    if !fields.is_empty() {
-        log_edited_tx(conn, ev, item, fields)?;
-    }
     if let Some(to) = status {
-        set_status_tx(conn, ev, item.id, to, now)?;
+        set_status_tx(conn, item.id, to, now)?;
     }
     get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)
 }
 
-/// Insert `item` and log `work_item.created@1` with its initial status.
-/// Returns its id.
-pub fn insert_logged_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    item: &Task,
-) -> Result<TaskId, DomainError> {
-    let id = insert_task_tx(conn, item).map_err(crate::database::map_sql_err)?;
-    let placed = Task { id, ..item.clone() };
-    let work_item = work_item_ref(id);
-    let anchors = match placed.thread_id {
-        Some(thread) => anchors_for_thread_tx(conn, thread)?,
-        None => Anchors::default(),
-    };
-    let env = ev
-        .typed::<WorkItemCreated>(&WorkItemCreatedV1 {
-            work_item: work_item.clone(),
-            status: placed.status,
-        })
-        .with_anchors(anchors)
-        .with_subject([work_item]);
-    ev.append(conn, &env)?;
-    Ok(id)
+/// Insert `item` (its `id` ignored) in the caller's transaction. Returns
+/// its id.
+pub fn insert_tx(conn: &rusqlite::Connection, item: &Task) -> Result<TaskId, DomainError> {
+    insert_task_tx(conn, item).map_err(crate::database::map_sql_err)
 }
 
 /// The next `sort_index` at the end of `thread`'s list (or the backlog's),
@@ -310,30 +172,26 @@ pub fn next_sort_index_tx(
 }
 
 /// Soft-delete task `id` at `now` in the caller's transaction — the core
-/// of `oxplow.work_item.delete`: the row's `deleted_at`, its `work_item` row, its
-/// body's `page_ref` edges dropped, and
-/// `work_item.deleted@1` logged. `NotFound` when it's missing or already
-/// deleted.
+/// of `oxplow.work_item.delete`: the row's `deleted_at`, its `work_item` row
+/// and its body's `page_ref` edges dropped. `NotFound` when it's missing
+/// or already deleted.
 pub fn soft_delete_tx(
     conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
     id: TaskId,
     now: Timestamp,
 ) -> Result<(), DomainError> {
     use rusqlite::OptionalExtension;
-    let thread: Option<i64> = conn
-        .query_row(
-            "UPDATE task SET deleted_at = ?2, updated_at = ?2
+    conn.query_row(
+        "UPDATE task SET deleted_at = ?2, updated_at = ?2
              WHERE id = ?1 AND deleted_at IS NULL
              RETURNING thread_id",
-            params![id.value(), ts_to_string(now)],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(crate::database::map_sql_err)?
-        .ok_or(DomainError::NotFound)?;
+        params![id.value(), ts_to_string(now)],
+        |r| r.get::<_, Option<i64>>(0),
+    )
+    .optional()
+    .map_err(crate::database::map_sql_err)?
+    .ok_or(DomainError::NotFound)?;
     project_work_item_tx(conn, id).map_err(crate::database::map_sql_err)?;
-    let work_item = work_item_ref(id);
     crate::page_ref_store::replace_source_for_ref_types_tx(
         conn,
         KIND_WORK_ITEM,
@@ -341,17 +199,6 @@ pub fn soft_delete_tx(
         &task_body_ref_types(),
         vec![],
     )?;
-    let anchors = match thread {
-        Some(t) => anchors_for_thread_tx(conn, ThreadId::new(t))?,
-        None => Anchors::default(),
-    };
-    let env = ev
-        .typed::<WorkItemDeleted>(&WorkItemDeletedV1 {
-            work_item: work_item.clone(),
-        })
-        .with_anchors(anchors)
-        .with_subject([work_item]);
-    ev.append(conn, &env)?;
     Ok(())
 }
 
@@ -393,11 +240,10 @@ fn list_ids_tx(
 
 /// Put task `id` in `dest`'s list (`None` = the backlog) at `place`,
 /// renumbering that list's `sort_index` — the core of `oxplow.work_item.reorder`
-/// (the same list) and `oxplow.work_item.move` (another). Logs `work_item.edited` (`thread` for a
-/// move, `position` within a list). `place` must name a task in that list.
+/// (the same list) and `oxplow.work_item.move` (another). `place` must
+/// name a task in that list.
 pub fn place_task_tx(
     conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
     id: TaskId,
     dest: Option<ThreadId>,
     place: Placement,
@@ -445,15 +291,12 @@ pub fn place_task_tx(
             }
         }
     }
-    let moved = dest != from_thread;
     item.thread_id = dest;
     item.sort_index = index as i64;
     item.updated_at = now;
     if update_task_tx(conn, &item).map_err(crate::database::map_sql_err)? == 0 {
         return Err(DomainError::NotFound);
     }
-    let field = if moved { "thread" } else { "position" };
-    log_edited_tx(conn, ev, &item, vec![field.to_string()])?;
     Ok(Placed {
         task: item,
         from_thread,
@@ -465,7 +308,6 @@ pub fn place_task_tx(
 /// transaction — the core of `oxplow.work_item.transition`.
 pub fn set_status_tx(
     conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
     id: TaskId,
     to: TaskStatus,
     now: Timestamp,
@@ -473,7 +315,7 @@ pub fn set_status_tx(
     let before = get_task_tx(conn, id)?.ok_or(DomainError::NotFound)?;
     let mut after = before.clone();
     after.set_status(to, now);
-    apply_status_tx(conn, ev, &after, before.status)?;
+    write_status_tx(conn, &after)?;
     Ok(StatusChange { before, after })
 }
 
@@ -827,19 +669,13 @@ impl TaskStore for SqliteTaskStore {
         Ok(new_id)
     }
 
-    /// Write the row's fields; an edit of the task's own fields logs
-    /// `work_item.edited@1` in the same transaction (P3.10 — every edit
-    /// reaches the log, so what reacts to edits, like the search index,
-    /// sees them all). Status is never written here.
+    /// Write the row's fields; status is never written here.
     async fn update(&self, item: &Task) -> Result<(), DomainError> {
         let item = item.clone();
         let edges_item = item.clone();
-        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "task_store");
-                update_with_status_tx(tx, &ev, &item, None, Timestamp::now()).map(|_| ())
+                update_with_status_tx(tx, &item, None, Timestamp::now()).map(|_| ())
             })
             .await?;
         {
@@ -859,12 +695,9 @@ impl TaskStore for SqliteTaskStore {
 
     /// Soft-delete the task (see [`soft_delete_tx`]).
     async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError> {
-        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "task_store");
-                match soft_delete_tx(tx, &ev, id, Timestamp::now()) {
+                match soft_delete_tx(tx, id, Timestamp::now()) {
                     // Deleting a deleted (or missing) task is a no-op here.
                     Err(DomainError::NotFound) => Ok(()),
                     other => other,
@@ -880,6 +713,7 @@ mod tests {
     use super::*;
     use crate::stream_store::SqliteStreamStore;
     use crate::thread_store::SqliteThreadStore;
+    use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 
@@ -1077,27 +911,17 @@ mod tests {
         assert_eq!(left, (0, 0), "the backlog child went with its parent");
     }
 
-    /// A deleted task can't be edited (nothing is logged or re-projected).
+    /// A deleted task can't be edited. The store logs nothing of its own:
+    /// a list's events are core's, logged by the `oxplow.work_item.*`
+    /// commands for every list alike.
     #[tokio::test]
-    async fn a_deleted_task_takes_no_edits() {
+    async fn a_deleted_task_takes_no_edits_and_the_store_logs_nothing() {
         let (store, tid) = fixture().await;
         let mut filed = item(Some(tid));
         filed.status = TaskStatus::InProgress;
-        let id = store.insert_logged(&filed).await.unwrap();
+        let id = store.insert(&filed).await.unwrap();
+        store.set_status(id, TaskStatus::Blocked).await.unwrap();
         store.soft_delete(id).await.unwrap();
-
-        let events: Vec<String> = store
-            .db
-            .call(move |c| {
-                let mut stmt = c.prepare("SELECT type FROM event_log ORDER BY seq")?;
-                let types = stmt
-                    .query_map([], |r| r.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                Ok(types)
-            })
-            .await
-            .unwrap();
-        assert_eq!(events, vec!["work_item.created", "work_item.deleted"]);
 
         let mut edit = filed.clone();
         edit.id = id;
@@ -1111,7 +935,7 @@ mod tests {
             .call(|c| c.query_row("SELECT count(*) FROM event_log", [], |r| r.get(0)))
             .await
             .unwrap();
-        assert_eq!(logged, 2, "a refused edit logs nothing");
+        assert_eq!(logged, 0);
         let live = store
             .db
             .transaction(move |c| get_task_tx(c, id))
@@ -1127,13 +951,10 @@ mod tests {
         let (store, tid) = fixture().await;
         let id = store.insert(&item(Some(tid))).await.unwrap();
         let stale = store.get(id).await.unwrap().unwrap();
-        let vocabulary = store.vocabulary.clone();
         store
             .db
             .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "test");
-                set_status_tx(tx, &ev, id, TaskStatus::Done, Timestamp::from_unix_ms(7))
+                set_status_tx(tx, id, TaskStatus::Done, Timestamp::from_unix_ms(7))
             })
             .await
             .unwrap();
@@ -1146,10 +967,9 @@ mod tests {
         assert_eq!(now.completed_at, Some(Timestamp::from_unix_ms(7)));
     }
 
-    /// Field edits and a status change commit together; the edit logs
-    /// `work_item.edited@1` naming what changed.
+    /// Field edits and a status change commit together.
     #[tokio::test]
-    async fn an_edit_with_a_status_change_logs_both() {
+    async fn an_edit_with_a_status_change_commits_both() {
         let (store, tid) = fixture().await;
         let id = store.insert(&item(Some(tid))).await.unwrap();
         let mut row = store.get(id).await.unwrap().unwrap();
@@ -1160,90 +980,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(after.title, "renamed");
+        assert_eq!(after.priority, TaskPriority::High);
         assert_eq!(after.status, TaskStatus::Blocked);
-        let events = store
-            .db
-            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
-            .await
-            .unwrap();
-        let seen: Vec<&str> = events
-            .iter()
-            .map(|e| e.envelope.event_type.as_str())
-            .collect();
-        assert_eq!(seen, vec!["work_item.edited", "work_item.transitioned"]);
-        assert_eq!(
-            events[0].envelope.payload["fields"],
-            serde_json::json!(["title", "priority"])
-        );
-        // Nothing changed: nothing logged.
-        store.update_with_status(&after, None).await.unwrap();
-        let again = store
-            .db
-            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
-            .await
-            .unwrap();
-        assert_eq!(again.len(), 2);
-    }
-
-    /// P2.6.3 (tsk455): every status change logs exactly one
-    /// `work_item.transitioned` — not only in_progress crossings, and for
-    /// thread-less tasks too. Filing a task logs `work_item.created` with
-    /// its status instead (tsk463).
-    #[tokio::test]
-    async fn every_status_change_logs_one_transition() {
-        let (store, tid) = fixture().await;
-        let loose = store.insert(&item(None)).await.unwrap();
-        store.set_status(loose, TaskStatus::Blocked).await.unwrap();
-        // Same status again: nothing to log.
-        store.set_status(loose, TaskStatus::Blocked).await.unwrap();
-
-        let attached = store.insert(&item(Some(tid))).await.unwrap();
-        store.set_status(attached, TaskStatus::Done).await.unwrap();
-
-        let mut filed = item(Some(tid));
-        filed.status = TaskStatus::Blocked;
-        let born = store.insert_logged(&filed).await.unwrap();
-
-        let events = store
-            .db
-            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 20))
-            .await
-            .unwrap();
-        let created: Vec<_> = events
-            .iter()
-            .filter(|e| e.envelope.event_type == "work_item.created")
-            .collect();
-        assert_eq!(created.len(), 1, "filing is a creation, not a transition");
-        assert_eq!(
-            created[0].envelope.payload["work_item"],
-            work_item_ref(born)
-        );
-        assert_eq!(created[0].envelope.payload["status"], "blocked");
-        let seen: Vec<(String, String, String, bool)> = events
-            .iter()
-            .filter(|e| e.envelope.event_type == "work_item.transitioned")
-            .map(|e| {
-                let p = &e.envelope.payload;
-                (
-                    p["work_item"].as_str().unwrap().to_string(),
-                    p["from"].as_str().unwrap().to_string(),
-                    p["to"].as_str().unwrap().to_string(),
-                    e.envelope.anchors.stream_id.is_some(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            seen,
-            vec![
-                (
-                    work_item_ref(loose),
-                    "ready".into(),
-                    "blocked".into(),
-                    false
-                ),
-                (work_item_ref(attached), "ready".into(), "done".into(), true),
-            ]
-        );
+        assert_eq!(store.get(id).await.unwrap().unwrap(), after);
     }
 
     /// A status change computed from the stored row: `completed_at` follows
@@ -1252,48 +991,27 @@ mod tests {
     async fn set_status_tx_derives_the_row_and_reports_the_change() {
         let (store, tid) = fixture().await;
         let id = store.insert(&item(Some(tid))).await.unwrap();
-        let vocabulary = store.vocabulary.clone();
         let change = store
             .db
             .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "test");
-                set_status_tx(
-                    tx,
-                    &ev,
-                    id,
-                    TaskStatus::InProgress,
-                    Timestamp::from_unix_ms(5),
-                )
+                set_status_tx(tx, id, TaskStatus::InProgress, Timestamp::from_unix_ms(5))
             })
             .await
             .unwrap();
         assert_eq!(change.before.status, TaskStatus::Ready);
         assert_eq!(change.after.status, TaskStatus::InProgress);
-        let vocabulary = store.vocabulary.clone();
         let done = store
             .db
             .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "test");
-                set_status_tx(tx, &ev, id, TaskStatus::Done, Timestamp::from_unix_ms(9))
+                set_status_tx(tx, id, TaskStatus::Done, Timestamp::from_unix_ms(9))
             })
             .await
             .unwrap();
         assert_eq!(done.after.completed_at, Some(Timestamp::from_unix_ms(9)));
-        let vocabulary = store.vocabulary.clone();
         let missing = store
             .db
             .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let ev = EventCtx::system(&vocabulary, "test");
-                set_status_tx(
-                    tx,
-                    &ev,
-                    TaskId::new(999),
-                    TaskStatus::Done,
-                    Timestamp::now(),
-                )
+                set_status_tx(tx, TaskId::new(999), TaskStatus::Done, Timestamp::now())
             })
             .await;
         assert!(matches!(missing, Err(DomainError::NotFound)));

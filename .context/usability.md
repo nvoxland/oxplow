@@ -876,9 +876,8 @@ no caller may bypass the bus to write to the terminal.
   - file → `@<workspace-relative path> ` (Claude reads the file
     automatically on the next prompt).
   - note → `@.oxplow/wiki/<slug>.md `.
-  - task → `[oxplow task <id>: "<title>" (<status>)] `
-    (plain-text reference; agent can fetch via
-    `oxplow__get_task`).
+  - work item → `[oxplow work_item:<provider>:<id>: "<title>" (<state>)] `
+    (plain-text reference; the agent reads it with `get_work_item`).
   - any canonical ref → `[oxplow ref <ref>] ` — **Ask About This**
     (below). The agent guide says how to read each kind.
   - Always trailing space so the user can keep typing.

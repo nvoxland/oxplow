@@ -7,7 +7,7 @@
 //! effects:
 //!   - id: announce-done          # [a-z0-9-]+, unique in the extension
 //!     summary: Note a finished item on its thread.
-//!     on: [work_item.transitioned]
+//!     on: [work_item.state_changed]
 //!     where: { to: done }        # optional: payload fields equal to these
 //!     needs: [sql.read]              # the host capabilities its script calls
 //!     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
@@ -524,7 +524,7 @@ intent: { purpose: Effects., origin: null, examples: [] }
 effects:
   - id: announce-done
     summary: Note a finished item.
-    on: [work_item.transitioned]
+    on: [work_item.state_changed]
     where: { to: done }
     entry: effects/announce.star
 ";
@@ -553,7 +553,7 @@ effects:
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let e = &ext.effects[0];
         assert_eq!(e.name(), "acme/announce-done");
-        assert_eq!(e.on, vec!["work_item.transitioned".to_string()]);
+        assert_eq!(e.on, vec!["work_item.state_changed".to_string()]);
         assert_eq!(e.filter.get("to").map(String::as_str), Some("done"));
         assert_eq!(e.declared_at, "oxplow/extensions/acme/extension.yaml:6");
     }
@@ -562,7 +562,7 @@ effects:
     fn a_broken_effect_is_an_error_at_its_line() {
         for (from, to, says) in [
             (
-                "on: [work_item.transitioned]",
+                "on: [work_item.state_changed]",
                 // A core namespace's type that doesn't exist (another
                 // extension's would be a subscription: P9.D1).
                 "on: [work_item.never]",

@@ -1951,14 +1951,11 @@ mod tests {
     }
 
     /// A task's status is the task's: moving it in and out of progress
-    /// opens and closes no effort (efforts are a policy's business). Each
-    /// change logs one `work_item.transitioned`, naming the task.
+    /// opens and closes no effort (efforts are a policy's business).
     #[tokio::test]
     async fn a_status_change_leaves_efforts_alone() {
-        let (store, db, tid, t) = fixture_with_db().await;
+        let (store, db, tid, _t) = fixture_with_db().await;
         let tasks = SqliteTaskStore::new(db.clone());
-        tasks.set_status(tid, TaskStatus::InProgress).await.unwrap();
-        // Re-issuing the same status changes nothing and logs nothing.
         tasks.set_status(tid, TaskStatus::InProgress).await.unwrap();
         assert!(store
             .find_open_for_work_item(&work_item_ref(tid))
@@ -1966,29 +1963,11 @@ mod tests {
             .unwrap()
             .is_none());
         tasks.set_status(tid, TaskStatus::Done).await.unwrap();
-
-        let all = db
-            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
+        assert!(store
+            .find_open_for_work_item(&work_item_ref(tid))
             .await
-            .unwrap();
-        let types: Vec<&str> = all.iter().map(|e| e.envelope.event_type.as_str()).collect();
-        assert_eq!(
-            types,
-            vec!["work_item.transitioned", "work_item.transitioned"]
-        );
-        let started = &all[0].envelope;
-        assert_eq!(started.subject, vec![format!("work_item:oxplow:{tid}")]);
-        assert_eq!(started.anchors.thread_id, Some(t));
-        assert_eq!(started.anchors.effort_id, None);
-        assert!(
-            started.anchors.stream_id.is_some(),
-            "the thread's stream anchors it too"
-        );
-        assert_eq!(started.source, "system:task_service");
-        assert_eq!(started.payload["from"], "ready");
-        assert_eq!(started.payload["to"], "in_progress");
-        assert_eq!(started.payload.get("effort"), None);
-        assert_eq!(all[1].envelope.payload["to"], "done");
+            .unwrap()
+            .is_none());
     }
 
     /// Every effort open and close is logged in the write's own

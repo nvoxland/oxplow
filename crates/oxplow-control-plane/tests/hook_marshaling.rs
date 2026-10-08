@@ -90,7 +90,7 @@ async fn seed_in_progress_task(services: &Services, thread_id: ThreadId) {
         note_count: 0,
         author: None,
     };
-    services.task_store.insert_logged(&task).await.unwrap();
+    services.task_store.insert(&task).await.unwrap();
 }
 
 fn hook_url(cp: &ControlPlane, event: &str) -> String {

@@ -21,7 +21,7 @@ use common::boot;
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
 use oxplow_db::EffortStore as _;
-use oxplow_domain::stores::{StreamStore, ThreadStore};
+use oxplow_domain::stores::{StreamStore, TaskStore as _, ThreadStore};
 use oxplow_domain::{
     Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus, Thread,
     ThreadId, ThreadStatus, Timestamp,
@@ -92,7 +92,7 @@ async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> Tas
     let now = Timestamp::from_unix_ms(1);
     let task = services
         .task_store
-        .insert_logged(&Task {
+        .insert(&Task {
             id: TaskId::placeholder(),
             thread_id: Some(thread_id),
             parent_id: None,

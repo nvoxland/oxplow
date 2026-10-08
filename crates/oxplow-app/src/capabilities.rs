@@ -50,7 +50,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "ordering",
             "lists",
         ],
-        tools: &["list_tasks", "get_task", "read_task_options"],
         id_pattern: Some(r"tsk\d+"),
         fields: &[
             BuiltInField {
@@ -75,7 +74,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         capability: "effort_policy",
         title: "A commit lands it, or the task switches",
         features: &[],
-        tools: &[],
         id_pattern: None,
         fields: &[],
     },
@@ -84,7 +82,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         capability: "snapshots",
         title: "Keep every version",
         features: &["contents"],
-        tools: &[],
         id_pattern: None,
         fields: &[],
     },
@@ -98,9 +95,6 @@ pub struct BuiltIn {
     pub title: &'static str,
     /// The features it has — core's to say, since it's core's code.
     pub features: &'static [&'static str],
-    /// The MCP tools only it offers (its own agent surface): offered while
-    /// it's the active implementation, hidden otherwise.
-    pub tools: &'static [&'static str],
     /// What its items' own ids look like (a work list's; a regex matched
     /// whole): how a loose id in text or a command is one of its items.
     pub id_pattern: Option<&'static str>,
@@ -193,16 +187,10 @@ pub struct Implementation {
 }
 
 impl Implementation {
-    /// What only it offers: a built-in's declared tools; a provider
-    /// instance's command namespace (`<id>.*`).
-    fn surface(&self) -> (Vec<String>, Vec<String>) {
-        match &self.source {
-            Source::BuiltIn(entry) => built_in(entry).map_or_else(Default::default, |b| {
-                (Vec::new(), b.tools.iter().map(|t| t.to_string()).collect())
-            }),
-            Source::External => (vec![format!("{}.*", self.id)], Vec::new()),
-            Source::Core | Source::None => Default::default(),
-        }
+    /// The commands only it offers: a provider instance's namespace
+    /// (`<id>.*`); nothing for core's and the built-ins.
+    fn surface(&self) -> Option<String> {
+        matches!(self.source, Source::External).then(|| format!("{}.*", self.id))
     }
 
     /// The "nothing implements it" of an optional capability: it takes
@@ -244,12 +232,11 @@ pub struct Resolved {
 pub struct Active {
     by_capability: std::collections::BTreeMap<String, (String, Vec<String>)>,
     /// What implementations that aren't active own, kept from offering:
-    /// command names (or `<namespace>.*`) and tool names.
+    /// a provider instance's command namespace (`<namespace>.*`).
     hidden_commands: Vec<Hidden>,
-    hidden_tools: Vec<Hidden>,
 }
 
-/// A command or tool its owner, not being active, keeps from offering.
+/// A command its owner, not being active, keeps from offering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Hidden {
     pattern: String,
@@ -290,18 +277,6 @@ impl Active {
         }
         let unmet = self.unmet(needs);
         (!unmet.is_empty()).then(|| needs_message(&unmet))
-    }
-
-    /// Why the MCP tool `name` isn't offered, or `None` when it is.
-    pub fn tool_refusal(&self, name: &str) -> Option<String> {
-        self.hidden_tools
-            .iter()
-            .find(|h| h.matches(name))
-            .map(|h| h.message(name))
-    }
-
-    pub fn offers_tool(&self, name: &str) -> bool {
-        self.tool_refusal(name).is_none()
     }
 
     /// The needs in `needs` it doesn't meet: a capability whose active
@@ -505,60 +480,29 @@ impl CapabilityRegistry {
                 .unwrap_or_default();
             by_capability.insert(spec.id.to_string(), (id, features));
         }
-        // What each implementation owns, kept from offering unless it's
-        // the active one: every built-in's (declared or not — the bundled
-        // extension off is the same as another one chosen) and every
-        // running instance's.
-        let mut owners: Vec<(Implementation, bool)> = BUILT_INS
+        // What a running provider instance owns — its command namespace —
+        // kept from offering unless it's the active one.
+        let hidden_commands = self
+            .external
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .map(|b| Implementation {
-                capability: b.capability.into(),
-                id: b.entry.into(),
-                title: b.title.into(),
-                extension: None,
-                source: Source::BuiltIn(b.entry),
-                features: Value::Null,
-                fields: serde_json::Value::Array(Vec::new()),
-                id_pattern: None,
-            })
-            .map(|i| {
-                let active = by_capability
+            .filter(|i| {
+                !by_capability
                     .get(&i.capability)
-                    .and_then(|(id, _)| self.get(&i.capability, id))
-                    .is_some_and(|a| a.source == i.source);
-                (i, active)
+                    .is_some_and(|(a, _)| a == &i.id)
+            })
+            .filter_map(|i| {
+                i.surface().map(|pattern| Hidden {
+                    pattern,
+                    owner: i.title.clone(),
+                    capability: i.capability.clone(),
+                })
             })
             .collect();
-        owners.extend(
-            self.external
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .iter()
-                .map(|i| {
-                    (
-                        i.clone(),
-                        by_capability
-                            .get(&i.capability)
-                            .is_some_and(|(a, _)| a == &i.id),
-                    )
-                }),
-        );
-        let mut hidden_commands = Vec::new();
-        let mut hidden_tools = Vec::new();
-        for (owner, _) in owners.iter().filter(|(_, active)| !active) {
-            let (commands, tools) = owner.surface();
-            let hide = |pattern: String| Hidden {
-                pattern,
-                owner: owner.title.clone(),
-                capability: owner.capability.clone(),
-            };
-            hidden_commands.extend(commands.into_iter().map(hide));
-            hidden_tools.extend(tools.into_iter().map(hide));
-        }
         Active {
             by_capability,
             hidden_commands,
-            hidden_tools,
         }
     }
 
@@ -1225,21 +1169,6 @@ mod tests {
         // Ordering and lists are features like the rest.
         assert!(offered.iter().any(|n| n == "oxplow.work_item.reorder"));
         assert!(!offered.iter().any(|n| n == "oxplow.work_item.move"));
-    }
-
-    /// The tools oxplow's tasks own are offered only while they're the
-    /// work list.
-    #[test]
-    fn owned_tools_follow_the_active_list() {
-        let r = registry(true);
-        assert!(r.snapshot(&config(&[], &[])).offers_tool("list_tasks"));
-        assert!(r.snapshot(&config(&[], &[])).offers_tool("query_sql"));
-        let none = r.snapshot(&config(&[("work_items", "none")], &[]));
-        assert!(!none.offers_tool("list_tasks"));
-        assert!(none.offers_tool("query_sql"));
-        // Undeclared (the bundled extension off), it isn't offered either.
-        let bare = registry(false).snapshot(&config(&[], &[]));
-        assert!(!bare.offers_tool("get_task"));
     }
 
     /// A provider instance's own commands are offered only while it's the

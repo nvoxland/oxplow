@@ -7,6 +7,7 @@ import {
   subscribeWorkspaceEvents,
   type DiffEntry,
 } from "../../api.js";
+import { coalescedRefresh } from "../../coalesced-refresh.js";
 import { WORKING, type Revision } from "../../revision.js";
 
 /** What changed: the working tree against HEAD, or any two revisions
@@ -98,11 +99,17 @@ export function useChangedFiles(source: ChangedFilesSource | null): ChangedFiles
     void refresh();
     const src = sourceRef.current;
     if (!src) return;
-    const offs = [subscribeGitRefsEvents(src.streamId, () => void refresh())];
+    // The daemon finishes every diff it's asked for, so a burst of events
+    // (an agent editing, a build writing) becomes one follow-up diff.
+    const events = coalescedRefresh(refresh);
+    const offs = [subscribeGitRefsEvents(src.streamId, events.schedule)];
     const live = src.kind === "working" || src.end === WORKING;
-    if (live) offs.push(subscribeWorkspaceEvents(src.streamId, () => void refresh()));
-    if (src.kind === "endpoints") offs.push(subscribeSnapshotEvents(src.streamId, () => void refresh()));
-    return () => offs.forEach((off) => off());
+    if (live) offs.push(subscribeWorkspaceEvents(src.streamId, events.schedule));
+    if (src.kind === "endpoints") offs.push(subscribeSnapshotEvents(src.streamId, events.schedule));
+    return () => {
+      events.cancel();
+      offs.forEach((off) => off());
+    };
   }, [refresh]);
 
   return { ...state, refresh };

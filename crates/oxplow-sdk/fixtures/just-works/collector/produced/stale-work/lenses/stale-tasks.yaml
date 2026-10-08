@@ -6,7 +6,7 @@ query: |
   ORDER BY days_idle DESC, last_touched_at ASC, id ASC
 viz: table
 columns:
-  - { key: title, label: Task, link: { kind: task, from: id } }
+  - { key: title, label: Task }
   - { key: status, label: Status }
   - { key: priority, label: Priority }
   - { key: days_idle, label: Days idle }

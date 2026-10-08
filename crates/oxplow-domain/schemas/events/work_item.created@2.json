@@ -1,0 +1,34 @@
+{
+  "$defs": {
+    "CanonicalState": {
+      "description": "The states every provider maps its own to.",
+      "enum": [
+        "todo",
+        "in_progress",
+        "blocked",
+        "done",
+        "canceled"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`work_item.created@2`: an item was filed on a work list, in `state`.",
+  "properties": {
+    "state": {
+      "$ref": "#/$defs/CanonicalState",
+      "description": "The canonical state it was filed in."
+    },
+    "work_item": {
+      "description": "`work_item:<list>:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item",
+    "state"
+  ],
+  "title": "WorkItemCreatedV2",
+  "type": "object"
+}

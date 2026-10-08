@@ -117,14 +117,14 @@ snapshot requests — runs AFTER commit, never inside the closure. Don't
 convert existing single-op methods preemptively — extract a `_tx` core
 the first time an op needs to join a transaction. Current users:
 the task-store status cores (`set_status_tx`,
-`update_with_status_tx`, `insert_logged_tx`), the effort cores
+`update_with_status_tx`, `insert_tx`), the effort cores
 (`start_tx` / `finish_tx`), `record_take`, and every `Tx` command
 handler (which runs in the bus's transaction).
 
 **Lifecycle invariant.** At most one effort is open per thread (the
 V5 unique index `idx_effort_open_per_thread`), and a task's status never
-opens or closes one: `task_store::apply_status_tx` (the core of
-`set_status_tx` / `update_with_status_tx` / `insert_logged_tx`, behind
+opens or closes one: `task_store::write_status_tx` (the core of
+`set_status_tx` / `update_with_status_tx`, behind
 `oxplow.work_item.transition` / `update` / `create`), `soft_delete` and
 `move_task` touch the task alone — `get_task_tx` sees live rows only, so
 a deleted task takes no edits. Efforts open, close and link through the
@@ -386,8 +386,8 @@ the default Work panel view — archived rows fold into the Done
 section's bucketing but aren't rendered unless the user flips the "Show
 archived (N)" toggle in the Done section header. The same header carries
 an "Archive all" action that bulk-archives every visible Done/Canceled
-row. The orchestrator's `read_task_options` blocker check treats
-archived the same as done/canceled. `parent_id` chains items under
+row. `next_work_item`'s blocker check reads the interface, where
+archived is done or canceled. `parent_id` chains items under
 epics. The `description` (markdown) is the single prose field, structured
 however the author sees fit — the model is not prompted toward any
 template, and is meant to be human-readable, wiki-formatted for
@@ -1403,11 +1403,10 @@ layer (V94). Nothing is skipped silently.
 
 **Consumers so far.** `PageRefWorkItemConsumer` (`page_ref.work_item`,
 `crates/oxplow-app/src/page_ref_consumers.rs`) re-projects a task's
-body-mention `page_ref` edges on `work_item.transitioned` through the
-`replace_source_for_ref_types_tx` core — the projection the transition
-used to run post-commit, now checkpointed and dead-lettered like any
-other consumer. Task insert/update still project inline until they log
-events of their own.
+body-mention `page_ref` edges on core's `work_item.created` /
+`work_item.edited` through the `replace_source_for_ref_types_tx` core,
+checkpointed and dead-lettered like any other consumer. The task
+store's own insert/update (not the commands') still project inline.
 
 `command_audit` (who ran which command, the input, outcome, the undo as
 `inverse_json`, `undone_by`, and `capabilities_json` — V27, the host
@@ -1421,42 +1420,21 @@ Harmless while nothing deletes audit rows; a future rebuild that must
 keep it copies the old `sqlite_sequence` row too.
 
 **Status is written only by the status core.** `update_task_tx` writes
-a task's fields, never `status` / `completed_at`; `write_status_tx`
-(inside `apply_status_tx`) is their only writer, and a status change
-reads the committed status inside its transaction (`set_status_tx`), so a
-copy read before a concurrent status change can't revert it (review of
-P2.6, tsk460). `update_with_status_tx` writes fields, logs
-`work_item.edited@1 { work_item, fields }` when title / description /
-priority / parent / thread changed (`move_task` logs `thread` too, anchored
-to the destination), then moves the status — the core of
-`oxplow.work_item.update` and `TaskService::update`. Filing a task
-(`insert_logged_tx`, the core of `oxplow.work_item.create` and
-`TaskService::create`) logs **`work_item.created@1 { work_item, status }`**;
-filing into a status is a creation
-with that status, not a `ready →` transition. Every provider's state
-change also logs core's `work_item.state_changed@1 { work_item, to }`
-([work-items.md](./work-items.md)). The `page_ref.work_item`
-pump consumer projects a task's body-mention edges on `work_item.created`
-and re-projects them on `work_item.edited` (it used to follow
-`work_item.transitioned`, whose status change moves no body edge).
+a task's fields, never `status` / `completed_at`; `write_status_tx` is
+their only writer, and a status change reads the committed status inside
+its transaction (`set_status_tx`), so a copy read before a concurrent
+status change can't revert it. `update_with_status_tx` writes fields,
+then moves the status — the core of `oxplow.work_item.update`.
 
-**Producers so far.** Every task status change (P2.6.3, tsk455 — not
-only in_progress crossings, thread-less tasks too) goes through one
-core, `task_store::apply_status_tx`, via `update_logged_tx` (an edited
-row), `insert_logged_tx` (filing straight into a status logs it as a
-change from `ready`) or `set_status_tx` (read-modify-write, the core of
-the `oxplow.work_item.transition` command). It appends `work_item.transitioned@1`
-in the same transaction as the status flip — subject
-`work_item:oxplow:tskN`, anchors `stream` (looked up from the thread
-inside the transaction; none for a backlog task) / `thread`, payload
-`{ work_item, from, to }`. Run as
-`oxplow.work_item.transition`, its source is the actor and its cause the run's
-`command.executed`; from `TaskService` directly it is
-`system:task_service`. A same-status re-issue logs
-nothing; a failed transition rolls the row back with the rest. It sets
-no dedupe key: a transactional producer's retry has already rolled back,
-so keys are for at-least-once producers. `TaskService` keeps its
-post-commit `TasksChanged` broadcast as the UI wake-up.
+**The task store logs nothing.** A work list's events are core's,
+logged by the `oxplow.work_item.*` commands for every list alike —
+`work_item.created` / `edited` / `state_changed` / `linked` /
+`commented` / `deleted`, caused by the run's `command.executed`
+([work-items.md](./work-items.md)). `TaskService` and the store's own
+async writes (tests, fixtures) log none; a write made for someone runs
+the command. The `page_ref.work_item` pump consumer projects an item's
+body-mention edges on `work_item.created` and re-projects them on
+`work_item.edited`.
 
 **Effort events.** `effort_store::start_tx` and `finish_tx` — the only
 cores that open or close an effort — append
@@ -1958,13 +1936,14 @@ Insert publishes `page-visit.changed` for renderer-side invalidation.
 
 ### The rail's Finished section
 
-Read from the models (`workItems.readRecentlyFinished`, P6.E1b): done
-tasks (`v_task.completed_at`) and the knowledge pages the thread wrote
-(`v_knowledge_touch`, over `wiki_page_thread_update`; the project view
-reads `v_knowledge_page.updated_at`), newest first. "Clear" is the
-viewer's own gesture: a per-thread cursor in this browser
-(`oxplow.finished.clearedAt`), and entries at or before it are hidden
-until something newer lands. No table, no RPC.
+The Work panel's "Finished" group is the bundled extension's
+`thread_work` model: the thread's done work items (`v_work_item.closed_at`,
+whichever list is active), the knowledge pages it wrote
+(`v_knowledge_touch`, over `wiki_page_thread_update`) and its closed
+unlinked efforts, newest first. "Clear" runs
+`oxplow_bundled.clear_finished`, which logs an event the
+`finished_cleared` model reads, so entries closed before it are hidden
+until something newer lands.
 
 ### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migrations `V22__comments.sql`, `V23__comment_resolved_at.sql`)
 

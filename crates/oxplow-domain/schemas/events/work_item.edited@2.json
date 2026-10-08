@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`work_item.edited@2`: a command changed an item's fields — not its\nstate, which is `work_item.state_changed`.",
+  "properties": {
+    "fields": {
+      "description": "The fields the command set: `title`, `body`, `parent`, `rank` (its\nplace in its list), `list` (moved to another), and\n`native.<name>` for each of the list's own fields.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "work_item": {
+      "description": "`work_item:<list>:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item",
+    "fields"
+  ],
+  "title": "WorkItemEditedV2",
+  "type": "object"
+}

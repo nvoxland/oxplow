@@ -213,7 +213,7 @@ mod tests {
             .filter(|e| e.envelope.event_type == "command.executed")
             .collect::<Vec<_>>();
         assert_eq!(executed.len(), 1);
-        for t in ["work_item.edited", "work_item.transitioned"] {
+        for t in ["work_item.edited", "work_item.state_changed"] {
             let caused = events
                 .iter()
                 .find(|e| e.envelope.event_type == t)

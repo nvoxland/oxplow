@@ -857,7 +857,8 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
 
 A metric can aggregate a semantic-layer view instead of a measure's facts.
 
-**Config.** A `metrics:` `key:` entry with `entity: v_task` plus:
+**Config.** A `metrics:` `key:` entry with `entity: v_work_item` (any
+view) plus:
 
 - `where` — which rows count;
 - `time` — optional; makes it an event metric;
@@ -892,9 +893,11 @@ The UI shows the entity aggregation (`specAggregation`).
 - A state metric gets a synthesized measure of its own key
   (`semi-additive`, `complete`), which the project-measure prune keeps.
 - The built-ins:
-  - `work.tasks_completed` (event, `v_task.completed_at`);
-  - `work.open_tasks` (state);
-  - the dimension `work.priority`.
+  - `work.tasks_completed` (event, `v_work_item.closed_at` of the done
+    items, whichever list is active);
+  - `work.open_tasks` (state: todo, in progress or blocked);
+  - the dimension `work.priority` — the `priority` field a list declares
+    (`json_extract(native, '$.priority')`), null for a list without one.
 
   They are listed in the catalog from code, so a disabled one can be
   re-enabled.

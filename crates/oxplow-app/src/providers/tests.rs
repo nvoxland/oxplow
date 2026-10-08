@@ -4604,7 +4604,7 @@ async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     std::fs::write(
         dir.join("extension.yaml"),
         manifest
-            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.transitioned]\n    where: { to: done }\n    needs: [sql.read]\n    entry: file.star\n",
+            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: file.star\n",
     )
     .unwrap();
     std::fs::write(dir.join("file.star"), script).unwrap();
@@ -4642,13 +4642,12 @@ const FILE_ON_FAKE: &str = "def transform(x):\n    return {\"commands\": [{\"nam
 /// Move the fixture's task to done (what the effect reacts to) and let
 /// the effect react.
 async fn react(fx: &TaskEffortFixture) -> oxplow_domain::StoredEvent {
-    use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
-    let env = oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
+    use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
+    let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
         "human",
-        &WorkItemTransitionedV1 {
+        &WorkItemStateChangedV1 {
             work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
-            from: oxplow_domain::TaskStatus::InProgress,
-            to: oxplow_domain::TaskStatus::Done,
+            to: oxplow_domain::work_items::CanonicalState::Done,
         },
     );
     let id = env.id.clone();
@@ -4886,15 +4885,14 @@ async fn a_rate_limited_reaction_waits_as_asked() {
 /// by themselves, but the run doesn't press on into the outage.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
-    use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
+    use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
     let fx = with_effect("", FILE_ON_FAKE).await;
     for _ in 0..5 {
-        let env = oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
+        let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
             "human",
-            &WorkItemTransitionedV1 {
+            &WorkItemStateChangedV1 {
                 work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
-                from: oxplow_domain::TaskStatus::InProgress,
-                to: oxplow_domain::TaskStatus::Done,
+                to: oxplow_domain::work_items::CanonicalState::Done,
             },
         );
         fx.svc.event_log_store.append(env).await.unwrap();
@@ -4927,16 +4925,15 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
 /// itself, as a live one is, and lands once.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
-    use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
+    use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
     let fx = with_effect("", FILE_ON_FAKE).await;
     fx.svc
         .event_log_store
-        .append(oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
+        .append(oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
             "human",
-            &WorkItemTransitionedV1 {
+            &WorkItemStateChangedV1 {
                 work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
-                from: oxplow_domain::TaskStatus::InProgress,
-                to: oxplow_domain::TaskStatus::Done,
+                to: oxplow_domain::work_items::CanonicalState::Done,
             },
         ))
         .await
@@ -5011,13 +5008,12 @@ where
     F: FnOnce(std::sync::Arc<crate::Services>, oxplow_domain::StoredEvent) -> Fut,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
-    use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
-    let env = oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
+    use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
+    let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
         "human",
-        &WorkItemTransitionedV1 {
+        &WorkItemStateChangedV1 {
             work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
-            from: oxplow_domain::TaskStatus::InProgress,
-            to: oxplow_domain::TaskStatus::Done,
+            to: oxplow_domain::work_items::CanonicalState::Done,
         },
     );
     let id = env.id.clone();

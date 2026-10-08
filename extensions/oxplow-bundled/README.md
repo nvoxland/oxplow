@@ -37,7 +37,7 @@ On an effort's page, **Commands**:
 - **Request Changes** (`oxplow.review.request_changes { ref, note? }`)
   comments a checklist — each unverified claim, each inferred decision,
   each file outside the area, and the note — and moves the item back to
-  todo (an oxplow task: ready).
+  todo.
 
 Each logs its verdict as an event (`event_types:` in the manifest):
 `oxplow_bundled.accepted { unverified, inferred, deviated }` or
@@ -50,7 +50,7 @@ its work item and — for an acceptance — every claim and decision accepted
 unchecked (any at all makes it forced). Read them in `v_event`, or react
 to one from another extension's effect (`on: [oxplow_bundled.accepted]`).
 
-Both work on any provider's item. On an oxplow task the comment and the
+Both work on any list's item. On oxplow's own tasks the comment and the
 move are one change you can undo; on another provider's item
 they run in order through the provider — if the move fails the comment
 stays — and can't be undone from oxplow. An effort with no work item is

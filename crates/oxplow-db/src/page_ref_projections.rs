@@ -334,12 +334,28 @@ pub fn note_edges(
 
 /// Edges contributed by a task's title + description text.
 pub fn task_edges(kinds: &KindRegistry, item: &Task) -> Vec<PageRefEdge> {
+    work_item_edges(
+        kinds,
+        &work_item_id(item.id),
+        &item.title,
+        &item.description,
+    )
+}
+
+/// A work item's body-mention edges — what its title and body name — for
+/// any list's item; `id` is its `<provider>:<id>`.
+pub fn work_item_edges(
+    kinds: &KindRegistry,
+    id: &str,
+    title: &str,
+    body: &str,
+) -> Vec<PageRefEdge> {
     let mut combined = String::new();
-    combined.push_str(&item.title);
+    combined.push_str(title);
     combined.push('\n');
-    combined.push_str(&item.description);
+    combined.push_str(body);
     let refs = extract(kinds, &combined);
-    let id = work_item_id(item.id);
+    let id = id.to_string();
     let mut out = Vec::new();
     for fd in refs.files_detail {
         out.push(PageRefEdge::new(

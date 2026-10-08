@@ -795,3 +795,60 @@ fn core_never_special_cases_its_own_pieces() {
         "core's special cases changed.\nunlisted (go through the capability registry instead): {unlisted:#?}\nno longer there (drop from SPECIAL_CASES): {gone:#?}"
     );
 }
+
+/// Where oxplow's own task list — one implementation of the work-item
+/// interface (`.context/work-items.md`) — may be named in production
+/// code: its store, its service and its models. Everything else reads the
+/// interface (`v_work_item` and its views, `work_item_reads`) and writes
+/// through the `work_item.*` commands, whichever list is active. Each
+/// file still here says why.
+#[rustfmt::skip]
+const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
+    ("crates/oxplow-db/src/task_store.rs", "the store"),
+    ("crates/oxplow-db/src/task_satellite.rs", "its links and comments"),
+    ("crates/oxplow-db/src/lib.rs", "exports the store"),
+    ("crates/oxplow-app/src/task_service.rs", "the service"),
+    ("crates/oxplow-app/src/commands/work_item.rs", "oxplow's verbs, dispatched in-transaction"),
+    ("crates/oxplow-app/src/lib.rs", "wires the store and service into Services"),
+    ("crates/oxplow-app/src/page_ref_backfill.rs", "the boot-time repair of the page-ref slices oxplow's tasks project when written"),
+    ("crates/oxplow-app/src/boot.rs", "hands that repair the task stores"),
+];
+
+/// Production files that name oxplow's task list (comments left out).
+fn task_implementation_readers() -> BTreeSet<String> {
+    const PATTERNS: &[&str] = &[
+        "v_task",
+        "SqliteTaskStore",
+        "TaskService",
+        "task_store",
+        "SqliteTaskNoteStore",
+        "SqliteTaskLinkStore",
+    ];
+    let mut out = BTreeSet::new();
+    for (path, text) in production_sources() {
+        let named = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .any(|line| PATTERNS.iter().any(|p| line.contains(p)));
+        if named {
+            out.insert(path);
+        }
+    }
+    out
+}
+
+/// Nothing outside oxplow's own implementation reads its task list.
+#[test]
+fn only_oxplows_implementation_names_its_task_list() {
+    let pinned: BTreeSet<String> = TASK_IMPLEMENTATION
+        .iter()
+        .map(|(f, _)| f.to_string())
+        .collect();
+    let found = task_implementation_readers();
+    let unlisted: Vec<_> = found.difference(&pinned).collect();
+    let gone: Vec<_> = pinned.difference(&found).collect();
+    assert!(
+        unlisted.is_empty() && gone.is_empty(),
+        "who names oxplow's task list changed.\nunlisted (read the work-item interface instead): {unlisted:#?}\nno longer there (drop from TASK_IMPLEMENTATION): {gone:#?}"
+    );
+}

@@ -146,6 +146,7 @@ pub mod vocabulary_reactor;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
+pub mod work_item_reads;
 pub mod work_items;
 pub mod work_items_conformance;
 pub mod workspace_files;
@@ -858,7 +859,7 @@ impl Services {
             },
         );
         let threads = ThreadService::new(thread_store.clone());
-        let tasks = TaskService::new(task_store.clone()).with_event_pump(event_pump.clone());
+        let tasks = TaskService::new(task_store.clone());
 
         let hook_ingest = HookIngestService::new(
             db.clone(),

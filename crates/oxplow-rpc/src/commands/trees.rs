@@ -4,7 +4,7 @@
 //! `snap:<id>`, `git:<rev>`). The UI's diff, file and history views read
 //! here; none of them knows where the bytes live.
 
-use oxplow_app::trees::DiffEntry;
+use oxplow_app::trees::{ChangedPath, DiffEntry};
 use oxplow_app::Services;
 use oxplow_domain::vcs::Revision;
 
@@ -45,6 +45,19 @@ pub async fn diff(
 ) -> Result<Vec<DiffEntry>, IpcError> {
     let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
     Ok(svc.trees.diff(&ws, from.as_ref(), &to).await?)
+}
+
+/// Which paths changed from `from` (nothing, when absent) to `to`, and
+/// how — no line counts, so no file is read: what the Project panel's
+/// branch and unpushed scopes filter by.
+pub async fn changed_paths(
+    svc: &Services,
+    stream_id: Option<String>,
+    from: Option<Revision>,
+    to: Revision,
+) -> Result<Vec<ChangedPath>, IpcError> {
+    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    Ok(svc.trees.changes(&ws, from.as_ref(), &to).await?)
 }
 
 /// The extensions that changed between `start` and `end` of the stream's
@@ -116,5 +129,12 @@ mod tests {
             diff,
             json!([{ "path": "a.txt", "status": "modified", "additions": 1, "deletions": 1 }])
         );
+        let paths = call(
+            "changed_paths",
+            json!({ "streamId": null, "from": format!("git:{sha}"), "to": "working" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(paths, json!([{ "path": "a.txt", "status": "modified" }]));
     }
 }

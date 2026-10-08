@@ -20,8 +20,8 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{SnapshotStorage, SnapshotTree, SqliteSnapshotStore};
-use oxplow_domain::vcs::{FileStatus, ObjectId, Revision, Vcs};
-use oxplow_domain::{ChangeStatus, DomainError};
+use oxplow_domain::vcs::{FileStatus, ObjectId, ObjectStore, Revision, Vcs};
+use oxplow_domain::{ChangeStatus, DomainError, FileChange};
 use oxplow_fs_watch::WorkspaceFilter;
 use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
@@ -39,6 +39,16 @@ pub struct DiffEntry {
     pub status: FileStatus,
     pub additions: u32,
     pub deletions: u32,
+}
+
+/// One path that differs between two revisions, without line counts:
+/// what a changed-paths view needs, found by comparing ids alone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedPath {
+    pub path: String,
+    /// `added`, `modified` or `deleted`.
+    pub status: FileStatus,
 }
 
 /// Where a path's bytes are.
@@ -190,17 +200,70 @@ impl Trees {
     }
 
     /// What changed from `from` to `to` (from nothing when `from` is
-    /// `None`), sorted by path, with line counts.
+    /// `None`), sorted by path: ids compared, no bytes read for the
+    /// changed files. Use this when the line counts aren't shown.
+    pub async fn changes(
+        &self,
+        ws: &Path,
+        from: Option<&Revision>,
+        to: &Revision,
+    ) -> Result<Vec<ChangedPath>, DomainError> {
+        let (_, _, changes) = self.compare(ws, from, to).await?;
+        Ok(changes
+            .into_iter()
+            .map(|c| ChangedPath {
+                path: c.path,
+                status: file_status(c.status),
+            })
+            .collect())
+    }
+
+    /// [`Self::changes`] with line counts. Reading and counting every
+    /// changed file is CPU-bound, so it runs as one blocking task: a big
+    /// diff never holds an async worker.
     pub async fn diff(
         &self,
         ws: &Path,
         from: Option<&Revision>,
         to: &Revision,
     ) -> Result<Vec<DiffEntry>, DomainError> {
+        let (before, after, changes) = self.compare(ws, from, to).await?;
+        let reader = self.reader(ws);
+        blocking(move || {
+            changes
+                .into_iter()
+                .map(|c| {
+                    let read = |cells: &Cells| {
+                        cells
+                            .get(&c.path)
+                            .and_then(|cell| reader.read(&cell.source))
+                    };
+                    let (old, new) = (read(&before), read(&after));
+                    let (additions, deletions) = count_lines(old.as_deref(), new.as_deref());
+                    DiffEntry {
+                        status: file_status(c.status),
+                        path: c.path,
+                        additions,
+                        deletions,
+                    }
+                })
+                .collect()
+        })
+        .await
+    }
+
+    /// Both sides' cells, in one identity space, and the paths whose ids
+    /// differ.
+    async fn compare(
+        &self,
+        ws: &Path,
+        from: Option<&Revision>,
+        to: &Revision,
+    ) -> Result<(Cells, Cells, Vec<FileChange>), DomainError> {
         let ids = |c: &Cells| -> BTreeMap<String, String> {
             c.iter().map(|(p, c)| (p.clone(), c.id.clone())).collect()
         };
-        let (before, after, changes) = match (from, to) {
+        match (from, to) {
             // Two snapshots: settle un-hashed VCS-backed rows first, so
             // equal bytes compare equal.
             (Some(Revision::Snapshot(a)), Revision::Snapshot(b)) => {
@@ -211,7 +274,7 @@ impl Trees {
                 let before = snapshot_cells(ta, &filter);
                 let after = snapshot_cells(tb, &filter);
                 let changes = oxplow_domain::diff_trees(&ids(&before), &ids(&after));
-                (before, after, changes)
+                Ok((before, after, changes))
             }
             _ => {
                 let (mut before, before_space) = match from {
@@ -223,36 +286,13 @@ impl Trees {
                 };
                 let (mut after, after_space) = self.cells(ws, to).await?;
                 if before_space.is_some_and(|s| s != after_space) {
-                    self.normalize(ws, &mut before).await?;
-                    self.normalize(ws, &mut after).await?;
+                    before = self.normalize(ws, before).await?;
+                    after = self.normalize(ws, after).await?;
                 }
                 let changes = oxplow_domain::diff_trees(&ids(&before), &ids(&after));
-                (before, after, changes)
+                Ok((before, after, changes))
             }
-        };
-        let mut out = Vec::with_capacity(changes.len());
-        for c in changes {
-            let old = match before.get(&c.path) {
-                Some(cell) => self.read(ws, &cell.source).await?,
-                None => None,
-            };
-            let new = match after.get(&c.path) {
-                Some(cell) => self.read(ws, &cell.source).await?,
-                None => None,
-            };
-            let (additions, deletions) = count_lines(old.as_deref(), new.as_deref());
-            out.push(DiffEntry {
-                path: c.path,
-                status: match c.status {
-                    ChangeStatus::Added => FileStatus::Added,
-                    ChangeStatus::Modified => FileStatus::Modified,
-                    ChangeStatus::Deleted => FileStatus::Deleted,
-                },
-                additions,
-                deletions,
-            });
         }
-        Ok(out)
     }
 
     /// `rev`'s filtered `path → Cell` tree and its identity space.
@@ -346,38 +386,61 @@ impl Trees {
     }
 
     /// Re-key snapshot-space cells into VCS ids (VCS-space cells are
-    /// already there).
-    async fn normalize(&self, ws: &Path, cells: &mut Cells) -> Result<(), DomainError> {
-        for cell in cells.values_mut() {
-            match &cell.source {
-                Source::Blob(_) => {
-                    if let Some(bytes) = self.read(ws, &cell.source).await? {
-                        cell.id = self.vcs.object_store(ws).id_of(&bytes).0;
+    /// already there). Reads and hashes, so on a blocking thread.
+    async fn normalize(&self, ws: &Path, mut cells: Cells) -> Result<Cells, DomainError> {
+        let reader = self.reader(ws);
+        blocking(move || {
+            for cell in cells.values_mut() {
+                match &cell.source {
+                    Source::Blob(_) => {
+                        if let Some(bytes) = reader.read(&cell.source) {
+                            cell.id = reader.objects.id_of(&bytes).0;
+                        }
                     }
+                    Source::Object(id) => cell.id = id.0.clone(),
+                    Source::File(_) | Source::Unreadable => {}
                 }
-                Source::Object(id) => cell.id = id.0.clone(),
-                Source::File(_) | Source::Unreadable => {}
             }
+            cells
+        })
+        .await
+    }
+
+    fn reader(&self, ws: &Path) -> Reader {
+        Reader {
+            blobs: self.blobs.clone(),
+            objects: self.vcs.object_store(ws),
         }
-        Ok(())
     }
 
     async fn read(&self, ws: &Path, source: &Source) -> Result<Option<Vec<u8>>, DomainError> {
+        let (reader, source) = (self.reader(ws), source.clone());
+        blocking(move || reader.read(&source)).await
+    }
+}
+
+/// Reads a [`Source`]'s bytes synchronously — for a blocking thread.
+struct Reader {
+    blobs: BlobStore,
+    objects: Arc<dyn ObjectStore>,
+}
+
+impl Reader {
+    fn read(&self, source: &Source) -> Option<Vec<u8>> {
         match source {
-            Source::Blob(addr) => {
-                let (blobs, addr) = (self.blobs.clone(), addr.clone());
-                blocking(move || blobs.read(&addr).ok()).await
-            }
-            Source::Object(id) => {
-                let (objects, id) = (self.vcs.object_store(ws), id.clone());
-                blocking(move || objects.read(&id)).await
-            }
-            Source::File(path) => {
-                let path = path.clone();
-                blocking(move || std::fs::read(path).ok()).await
-            }
-            Source::Unreadable => Ok(None),
+            Source::Blob(addr) => self.blobs.read(addr).ok(),
+            Source::Object(id) => self.objects.read(id),
+            Source::File(path) => std::fs::read(path).ok(),
+            Source::Unreadable => None,
         }
+    }
+}
+
+fn file_status(status: ChangeStatus) -> FileStatus {
+    match status {
+        ChangeStatus::Added => FileStatus::Added,
+        ChangeStatus::Modified => FileStatus::Modified,
+        ChangeStatus::Deleted => FileStatus::Deleted,
     }
 }
 
@@ -677,6 +740,43 @@ mod tests {
         let d = by_path(&d);
         assert_eq!(d.get("w.txt"), Some(&(FileStatus::Added, 3, 0)));
         assert!(!d.contains_key("tracked.txt"), "{d:?}");
+    }
+
+    /// `changes` is the paths-only diff: what changed and how, without
+    /// reading a byte to count lines.
+    #[tokio::test]
+    async fn changes_names_paths_and_statuses_without_counting() {
+        let f = services_with_effort().await;
+        let ws = f.svc.layout.project_dir.clone();
+        std::fs::write(ws.join("gone.txt"), "g\n").unwrap();
+        std::fs::write(ws.join("m.txt"), "a\n").unwrap();
+        let head = commit_all(&ws, "c1");
+        std::fs::remove_file(ws.join("gone.txt")).unwrap();
+        std::fs::write(ws.join("m.txt"), "b\n").unwrap();
+        std::fs::write(ws.join("new.txt"), "n\n").unwrap();
+        let c = f
+            .svc
+            .trees
+            .changes(&ws, Some(&Revision::git(head)), &Revision::Working)
+            .await
+            .unwrap();
+        assert_eq!(
+            c,
+            vec![
+                ChangedPath {
+                    path: "gone.txt".into(),
+                    status: FileStatus::Deleted
+                },
+                ChangedPath {
+                    path: "m.txt".into(),
+                    status: FileStatus::Modified
+                },
+                ChangedPath {
+                    path: "new.txt".into(),
+                    status: FileStatus::Added
+                },
+            ]
+        );
     }
 
     /// tsk177: a filtered path is out of scope on both sides — never

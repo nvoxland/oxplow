@@ -416,8 +416,8 @@ Surfaces:
   exclusively via the MCP tool surface; the UI never adds.
 - `useBackendSubscriptions` re-reads the affected thread's work on
   `followup.changed`, and every loaded thread's (and the backlog's) when
-  a task model changes (`modelsChanged` naming `v_task`, `v_task_note`,
-  `v_work_item`, `v_effort` or `v_effort_file` — `workItems.tasksChanged`).
+  a model its reads read changes (`readsChanged` over the lists' `reads`:
+  `v_work_item`, `v_work_item_comment`, …).
 
 Rendering: `WorkGroupList.tsx` renders each follow-up as an italic
 muted "↳ follow-up: <note>" line at the very top of the To Do section
@@ -703,7 +703,8 @@ each other:
    or a writer's drift is undone at the next start after a migration or
    under a new build (it doesn't rerun when neither changed).
 4. **Event-driven projection** where the write logs an event. A task
-   transition logs `work_item.transitioned` in its transaction, and
+   work-item command logs core's `work_item.created` / `edited` in its
+   transaction (`.context/work-items.md`), and
    `PageRefWorkItemConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
    re-projects the body slice through the
    `replace_source_for_ref_types_tx` core when the pump delivers it —

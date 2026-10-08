@@ -121,7 +121,12 @@ refused, naming the workspace's.
 
 **`Trees`** (`crates/oxplow-app/src/trees.rs`, `Services.trees`) reads
 any revision of a workspace: `files_at`, `read_at`, `corpus` (text files,
-for the code-quality scans) and `diff(from?, to)` with line counts.
+for the code-quality scans), `changes(from?, to)` (paths and statuses
+only: ids compared, no changed file read) and `diff(from?, to)` (the same
+with line counts). `diff` reads and counts every changed file in one
+`spawn_blocking` task: that work is CPU-bound, and on the async workers
+a branch-sized diff (thousands of files) starved the daemon's whole
+runtime, so terminal input and thread switches stalled.
 Snapshots read their blobs from the blob store and VCS-backed rows
 through the object store; the working tree reuses the head's object id
 for a file `status` calls clean and hashes the rest (`ObjectStore::id_of`). Every side honours the workspace filter
@@ -133,8 +138,13 @@ used to skip the filter, tsk552); two snapshots settle un-hashed rows
 first (`resolve_for_compare`); a mixed pair normalizes the snapshot side
 into VCS ids.
 
-The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`
-and `diff { streamId, from, to }` (UI), and MCP `read_at`. The MCP VCS
+The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`,
+`diff { streamId, from, to }` and `changed_paths` (same arguments, UI
+only), and MCP `read_at`. A view that doesn't show line counts calls
+`changed_paths`. The daemon finishes every request it gets (dropping a
+result in the UI doesn't cancel the work), so a view that refreshes on
+workspace events routes those refreshes through `coalescedRefresh`
+(debounced, single-flight) rather than starting a diff per event. The MCP VCS
 reads (`read_at`, `diff`, `vcs_blame`, `vcs_log`, `git_status`) default
 a missing `stream_id` to the caller's own stream — its header, else its
 thread's — and to the primary only for an anonymous caller (tsk555; the
@@ -157,8 +167,9 @@ in P5.C3: a link names a file; its version is the edge's pin —
 `get_workspace_status_summary`, `git_blame`, `local_blame`,
 `get_commit_detail` and `get_branch_changes`; MCP `git_diff` became
 `diff { from?, to, since_fork }`. On the desktop: the changed-files lists
-diff `head → working` (`vcsHead` + `diffRevisions`), branch scopes diff
-from `vcsMergeBase`, the rail's counts and conflicts come from
+diff `head → working` (`vcsHead` + `diffRevisions`), the Project panel's
+branch and unpushed scopes take `changedPaths` from `vcsMergeBase`,
+rerunning when the set of uncommitted paths or the refs move, the rail's counts and conflicts come from
 `vcsStatus` (`countStatus`), the commit page and dashboard stats from
 `vcsRevision`, and the blame overlay from `vcsBlame(…, WORKING)`.
 `DiffViewPage.smoke.test.tsx` renders the diff view and the commit page

@@ -64,9 +64,9 @@ There are two writers, one schema:
   (`crates/oxplow-app/src/work_items.rs`). A replay restates the same
   row. An `oxplow` record is refused (dead-lettered): those rows are the
   task cores' alone. Why one record event rather than state on each of
-  `created` / `edited` / `transitioned`: the "what happened" events stay
-  small and oxplow's own need nothing new, and the projection is one
-  upsert from one event type.
+  `created` / `edited` / `state_changed`: the "what happened" events stay
+  small and the same for every list, and the projection is one upsert
+  from one event type.
 
 ## Reading them in the UI
 
@@ -137,6 +137,19 @@ reporting). List rows and Board cards share one drag
 agent terminal reads as context refs. **New Item** files on the active
 list: title, body, a canonical starting state (todo or blocked), the
 list's editable fields and — with `hierarchy` — a parent.
+
+## Reading them for the agent
+
+The agent's work-item tools read the interface too
+(`crates/oxplow-app/src/work_item_reads.rs`, MCP `list_work_items`,
+`get_work_item`, `next_work_item`): a list's items in order, one item
+with its links and comments, and what to pick up next (an epic with its
+ready descendants, or every ready non-epic item; open `blocks` links
+hold an item). None of them belongs to an implementation, so the tool
+list never changes with a switch; with none they read empty. A source
+guard (`source_guards::only_oxplows_implementation_names_its_task_list`)
+pins the few production files that may name oxplow's task store,
+service or models.
 
 ## The capability
 
@@ -220,15 +233,39 @@ A comment's `task_note.author` names who made it (`note_author`, tsk1000):
 or `oxplow` — as a task's `author` is left empty for an effect or oxplow
 (`task_author`), neither is shown as the person's.
 
-**`work_item.state_changed@1 { work_item, to }`** is core's, logged by
-`dispatching()` for every provider alike, subject the item, anchored to
-the actor's thread: a `create` always; a `transition` or an `update`
-whose state changed (oxplow's state is read before and after in the
-bus's transaction; for an external provider, whose prior state oxplow
-can't read, one that names a state counts, `to` taken from the
-`work_item.recorded` its answer carries). An item's state opens and
-closes no effort itself; the effort policy reacts to this event
-(`.context/work-tracking.md`).
+**The interface's events are core's**, logged by `dispatching()`
+(`canonical_events` in `commands/work_item.rs`) for every list alike,
+from the verb, its input, the list's answer and the state it put the
+item in — caused by the run's `command.executed`, subject the item,
+anchored to the actor's thread. A list logs none of them itself
+(oxplow's task store logs nothing); another list's answer adds its
+`work_item.recorded`.
+
+| Verb | Events |
+|---|---|
+| `create` | `work_item.created@2 { work_item, state }`, `work_item.state_changed@1 { work_item, to }` |
+| `update` | `work_item.edited@2 { work_item, fields }` naming what the input set — `title`, `body`, `parent`, `native.<name>` — and `state_changed` when the state moved |
+| `transition` | `state_changed` when the state moved |
+| `link` | `work_item.linked@2 { work_item, target, link_type }` (subject both) |
+| `comment` | `work_item.commented@2 { work_item, comment? }` — `comment` is the list's own id for it, when the answer names one (`result.comment`; oxplow: `not<n>`, the fake: `c<n>`) |
+| `delete` | `work_item.deleted@2 { work_item }` |
+| `reorder` / `move` | `edited` naming `rank` / `list` and `rank` |
+
+Whether the state moved: oxplow's is read from `work_item` before and
+after in the bus's transaction; for an external provider, whose prior
+state oxplow can't read, a create, a transition and an update naming a
+state each count, `to` taken from the `work_item.recorded` its answer
+carries (a create with none: the state it asked for, else `todo`).
+`edited` names what the command set, not a diff: a list's prior values
+aren't readable for every list. The `@1` versions spoke oxplow's task
+list (`created { status }`, `edited` with `description` / `priority` /
+`thread` / `position`, `commented { comment: "task_note:…" }`) and
+upcast to `@2`'s words; `work_item.transitioned@1 { from, to }` (oxplow
+statuses) stays registered for the log's history but nothing logs it —
+`state_changed` replaces it. An item's state opens and closes no effort
+itself; the effort policy reacts to `state_changed`
+(`.context/work-tracking.md`). Effects and SDK templates react to these
+(`on: [work_item.state_changed]`, `where: { to: done }`).
 
 **Features reach the UI as a model**: `v_capability_provider`
 (`capability`, `provider`, `extension`, `features` JSON, `active`,
@@ -313,10 +350,10 @@ without it; links and comments follow their features and read back
 through `v_work_item_link` / `v_work_item_comment`; `reorder` follows
 `ordering` (the reordered item ranks ahead in `v_work_item.rank`) and
 `move` follows `lists` (moved to the backlog, its `thread_id` is NULL);
-every write that
-changed the item logged an event naming it (oxplow's
-`work_item.created` / `edited` / `transitioned` / `linked` /
-`commented`, an external provider's `work_item.recorded`); reading the
+the log names the item in the interface's words, whichever list —
+`work_item.created`, `edited` (the rename; the other item's reorder and
+move), `linked` and `commented` as the features allow, and `deleted`
+for each item it deletes; reading the
 provider back restates what its writes recorded — after a
 `provider.sync` (`WorkItemsProbe::sync`; nothing to read for oxplow's
 own or a provider without collectors) every item it filed is the row it

@@ -30,6 +30,6 @@ Steps:
    `oxplow.knowledge.update_comment { comment, status: "resolved" }`. Leave it open if
    you've replied but the user still needs to weigh in.
 
-File a oxplow task for any follow-up that turns into real shippable
+File a work item for any follow-up that turns into real shippable
 work (per the `oxplow-runtime` skill) rather than doing large changes
 straight from a comment reply.

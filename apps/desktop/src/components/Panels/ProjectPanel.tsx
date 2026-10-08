@@ -2,8 +2,9 @@ import { EmptyState } from "../Prompts/EmptyState.js";
 import type { CSSProperties } from "react";
 import { InlinePromptStrip } from "../InlinePromptStrip.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { coalescedRefresh, type CoalescedRefresh } from "../../coalesced-refresh.js";
 import {
-  diffRevisions,
+  changedPaths,
   vcsMergeBase,
   getChangeScopes,
   gitIgnore,
@@ -230,19 +231,13 @@ export function ProjectPanel({
     if (filterMode === "unpushed" && !scopes.upstream) setFilterMode("uncommitted");
   }, [scopes, filterMode]);
 
-  // Load paths+deletions for the currently-selected scope.
+  // Load paths+deletions for the currently-selected scope. Deletions are
+  // tracked separately so we can inject phantom rows into the tree (the
+  // filesystem no longer has them).
+  // - All: no filter.
   // - Uncommitted: read directly from the workspace index (already subscribed).
-  // - Branch/Unpushed: the working tree against where it forked from the
-  //   appropriate ref (`vcsMergeBase` → `diffRevisions`).
-  // Deletions are tracked separately so we can inject phantom rows into the
-  // tree (the filesystem no longer has them).
   useEffect(() => {
-    if (!stream) {
-      setScopedPaths(null);
-      setScopedDeletions(new Set());
-      return;
-    }
-    if (filterMode === "all") {
+    if (!stream || filterMode === "all") {
       setScopedPaths(null);
       setScopedDeletions(new Set());
       return;
@@ -250,26 +245,55 @@ export function ProjectPanel({
     if (filterMode === "uncommitted") {
       setScopedPaths(uncommittedPaths);
       setScopedDeletions(uncommittedDeletions);
-      return;
     }
+  }, [stream?.id, filterMode, uncommittedPaths, uncommittedDeletions]);
+
+  // - Branch/Unpushed: the working tree against where it forked from the
+  //   appropriate ref (`vcsMergeBase` → `changedPaths`, paths only — a
+  //   long branch is thousands of files, and line counts would make the
+  //   daemon read every one). The daemon finishes every comparison it is
+  //   asked for, so reruns are coalesced and single-flight, and they
+  //   follow the set of changed paths, not every file event: an edit to
+  //   a file that's already changed doesn't change the answer.
+  const scopeRef = filterMode === "branch" ? scopes?.branch_base
+    : filterMode === "unpushed" ? scopes?.upstream
+    : undefined;
+  const uncommittedKey = useMemo(
+    () => indexedFiles.filter((f) => f.status !== null).map((f) => `${f.status}:${f.path}`).join("\n"),
+    [indexedFiles],
+  );
+  const scopeRefresh = useRef<CoalescedRefresh | null>(null);
+  useEffect(() => {
+    if (!stream || (filterMode !== "branch" && filterMode !== "unpushed")) return;
     if (!vcsEnabled) { setScopedPaths(null); setScopedDeletions(new Set()); return; }
-    const ref = filterMode === "branch" ? scopes?.branch_base : scopes?.upstream;
-    if (!ref) { setScopedPaths([]); setScopedDeletions(new Set()); return; }
-    let cancelled = false;
-    void vcsMergeBase(stream.id, gitRevision("HEAD"), gitRevision(ref))
-      .then((base) => (base === null ? [] : diffRevisions(stream.id, base, WORKING)))
-      .then((files) => {
-        if (cancelled) return;
+    if (!scopeRef) { setScopedPaths([]); setScopedDeletions(new Set()); return; }
+    const streamId = stream.id;
+    let live = true;
+    const refresh = coalescedRefresh(async () => {
+      try {
+        const base = await vcsMergeBase(streamId, gitRevision("HEAD"), gitRevision(scopeRef));
+        const files = base === null ? [] : await changedPaths(streamId, base, WORKING);
+        if (!live) return;
         setScopedPaths(files.map((f) => f.path));
         setScopedDeletions(new Set(files.filter((f) => f.status === "deleted").map((f) => f.path)));
-      })
-      .catch(() => {
-        if (cancelled) return;
+      } catch {
+        if (!live) return;
         setScopedPaths([]);
         setScopedDeletions(new Set());
-      });
-    return () => { cancelled = true; };
-  }, [stream?.id, vcsEnabled, filterMode, scopes?.branch_base, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles]);
+      }
+    });
+    scopeRefresh.current = refresh;
+    refresh.schedule();
+    // HEAD can move without the changed set moving (a reset, a fetch).
+    const unsubscribeRefs = subscribeGitRefsEvents(streamId, refresh.schedule);
+    return () => {
+      live = false;
+      refresh.cancel();
+      unsubscribeRefs();
+      scopeRefresh.current = null;
+    };
+  }, [stream?.id, vcsEnabled, filterMode, scopeRef]);
+  useEffect(() => { scopeRefresh.current?.schedule(); }, [uncommittedKey]);
 
   const changedPathSet = useMemo(() => {
     const paths = scopedPaths ?? [];

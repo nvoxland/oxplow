@@ -1,8 +1,9 @@
 # GitHub pull requests: an example oxplow extension
 
 Pulls your repo's 100 most recent pull requests into oxplow as `v_github_pr`,
-and adds a **Pull Requests by Task** lens that matches each PR to the oxplow
-task its title mentions (`tsk42`), and a **PR Lifetimes** lens that draws
+and adds a **Pull Requests by Work Item** lens that matches each PR to the
+work item its title mentions by id (`tsk42`, `ENG-12` — whichever work list
+is active), and a **PR Lifetimes** lens that draws
 each one as a bar from when it was opened to when it was merged.
 
 A pull request is also something a ref can name: `github_pr:12`, or
