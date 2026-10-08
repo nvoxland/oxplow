@@ -1260,7 +1260,7 @@ mod tests {
         fail: Arc<std::sync::atomic::AtomicBool>,
     ) {
         use crate::commands::{Command, Handler, HandlerOutput, Invocation};
-        use oxplow_domain::{Atomicity, CommandEffect, CommandSpec, Confirm, Invokers, Lifecycle};
+        use oxplow_domain::{Access, Atomicity, CommandSpec, Confirm, Invokers, Lifecycle};
         let command = Command::new(
             CommandSpec {
                 id: "oxplow.probe.write".into(),
@@ -1271,7 +1271,7 @@ mod tests {
                 undoable: false,
                 lifecycle: Lifecycle::Stable,
                 atomicity: Atomicity::External,
-                effect: CommandEffect::Write,
+                access: Access::Write,
                 needs: Vec::new(),
                 ui: None,
                 op: None,
@@ -1344,7 +1344,7 @@ mod tests {
     async fn a_landed_steps_events_are_logged_once_across_a_retry() {
         use crate::commands::{Command, Handler, HandlerOutput, Invocation};
         use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2};
-        use oxplow_domain::{Atomicity, CommandEffect, CommandSpec, Confirm, Invokers, Lifecycle};
+        use oxplow_domain::{Access, Atomicity, CommandSpec, Confirm, Invokers, Lifecycle};
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 2}}]}\n";
@@ -1369,7 +1369,7 @@ mod tests {
                 undoable: false,
                 lifecycle: Lifecycle::Stable,
                 atomicity: Atomicity::External,
-                effect: CommandEffect::Write,
+                access: Access::Write,
                 needs: Vec::new(),
                 ui: None,
                 op: None,

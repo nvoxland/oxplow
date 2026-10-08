@@ -123,20 +123,61 @@ pub enum Atomicity {
     Dispatch,
 }
 
-/// Whether a command changes anything, and who may. A `Read` runs
-/// without an audit row or a `command.executed` event (a polling agent
-/// must not fill the log), and an agent thread that may not write can
-/// still run it. A `Write` is refused outright to an agent thread that
-/// isn't its stream's writer. A `Record` changes oxplow's own records
-/// (filing and editing tasks) and is audited like a `Write`, but any
-/// thread may run it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+/// What a run changes, and so whether it is recorded and who may make it —
+/// a scope's (`Scope::access`) and a command's (`CommandSpec::access`, the
+/// strongest among the scopes it needs). Ordered weakest first. Not where
+/// its handler runs: that is the operation's handler, in the bus's
+/// transaction or outside it (`config.write`'s `set` is one transaction,
+/// the file written after it commits; `providers.sync` commits each batch
+/// in its own).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Type,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
-pub enum CommandEffect {
+pub enum Access {
+    /// Changes only what the person sees (open a page, find in a file).
+    View,
+    /// Reads, changes nothing (`sql.read`).
     Read,
+    /// Changes oxplow's own records (filing and editing tasks): audited,
+    /// open to any thread.
+    Record,
+    /// Changes something outside oxplow's records — files, git, processes,
+    /// the configuration: audited, and an agent's only from its stream's
+    /// writer thread.
     #[default]
     Write,
-    Record,
+}
+
+impl Access {
+    /// A `View` or a `Read`: runs without an audit row or a
+    /// `command.executed` event (a polling agent must not fill the log), on
+    /// a read snapshot, can't ask for a confirmation, and any thread may
+    /// run it.
+    pub fn reads_only(self) -> bool {
+        matches!(self, Access::View | Access::Read)
+    }
+
+    /// A `Record` or a `Write`: audited, and logs `command.executed`.
+    pub fn records(self) -> bool {
+        !self.reads_only()
+    }
+
+    /// A `Write`: refused to an agent thread that isn't its stream's writer.
+    pub fn needs_writer(self) -> bool {
+        self == Access::Write
+    }
 }
 
 /// What a command declares about itself.
@@ -160,7 +201,7 @@ pub struct CommandSpec {
     pub undoable: bool,
     pub lifecycle: Lifecycle,
     pub atomicity: Atomicity,
-    pub effect: CommandEffect,
+    pub access: Access,
     /// The scopes its handler calls (`sql.read`) and the capabilities, or
     /// their features (`work_items.comments`), it needs active; unmet, it
     /// isn't offered and doesn't run (`.context/commands.md`).
@@ -724,6 +765,27 @@ fn accepted_values(root: &Value, node: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A view runs as a read does; a record is audited but open to any
+    /// thread; only a write needs the stream's writer.
+    #[test]
+    fn what_each_access_asks_of_a_run() {
+        let all = [Access::View, Access::Read, Access::Record, Access::Write];
+        let reads: Vec<bool> = all.iter().map(|a| a.reads_only()).collect();
+        assert_eq!(reads, [true, true, false, false]);
+        let records: Vec<bool> = all.iter().map(|a| a.records()).collect();
+        assert_eq!(records, [false, false, true, true]);
+        let writer: Vec<bool> = all.iter().map(|a| a.needs_writer()).collect();
+        assert_eq!(writer, [false, false, false, true]);
+        let mut sorted = all;
+        sorted.sort();
+        assert_eq!(sorted, all, "weakest first");
+        assert_eq!(Access::default(), Access::Write);
+        assert_eq!(
+            serde_json::to_value(all).unwrap(),
+            json!(["view", "read", "record", "write"])
+        );
+    }
 
     /// A refused input says what would have been accepted there, so a
     /// caller fixes it in one more call instead of one field at a time.

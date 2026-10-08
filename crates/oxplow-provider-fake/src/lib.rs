@@ -204,7 +204,7 @@ fn command(name: &str, summary: &str, input_schema: Value) -> CommandDecl {
         summary: summary.into(),
         input_schema,
         confirm: "never".into(),
-        effect: "record".into(),
+        access: "record".into(),
         undoable: false,
     }
 }

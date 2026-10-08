@@ -192,7 +192,7 @@ empty: Nothing is waiting on you.
 - **A provider's own operations** are your commands too: `commands: [{
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional
-  `instance`) and effect come from its declarations; it runs on the
+  `instance`) and access come from its declarations; it runs on the
   instance its `ref` (or `instance`) names. Its capability verbs aren't
   declared: they run as `oxplow.work_item.<verb>`.
 - **`ui.decorators`** add a label to refs:
@@ -202,7 +202,7 @@ empty: Nothing is waiting on you.
   linked cell in lens rows.
 - **`commands:`** register commands of your own, as
   `<namespace>.<area>.<verb>`: `{ name: area.verb, summary, input_schema,
-  entry: handlers/x.star, needs?: [sql.read], confirm?, effect?,
+  entry: handlers/x.star, needs?: [sql.read], confirm?, access?,
   invokers?, examples? }`. The Starlark `transform(x)` gets `{ input }`,
   reads with `scope("sql.read", { "sql": "SELECT … WHERE ref = :ref",
   "params": { "ref": x["input"]["ref"] } })` (a list of row dicts; it must
@@ -217,7 +217,7 @@ empty: Nothing is waiting on you.
   and `examples` (at most 10) are dry-run by `check`: give each
   `answers: { sql.read: [[rows of the 1st read], …] }` so it doesn't
   depend on the project's data, and `expect_commands: [...]` or `refuses:
-  <part of the reason>`. `effect: read` makes a command that only reads
+  <part of the reason>`. `access: read` makes a command that only reads
   and returns a `result` (it composes nothing). A command on a ref's menu (`ui.about`) gets `{ ref }` unless its
   `ui.input` says otherwise, so name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
   working example.

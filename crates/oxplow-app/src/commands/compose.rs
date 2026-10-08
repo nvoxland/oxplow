@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use oxplow_domain::{
-    Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
+    Access, Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -100,7 +100,7 @@ pub fn sequence_spec() -> CommandSpec {
         lifecycle: Lifecycle::Stable,
         // In the transaction, or as steps outside it: its calls decide.
         atomicity: Atomicity::Dispatch,
-        effect: CommandEffect::Write,
+        access: Access::Write,
         needs: Vec::new(),
         ui: None,
         op: None,

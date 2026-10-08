@@ -371,7 +371,7 @@ mod tests {
                 op: "open".into()
             })
         );
-        assert_eq!(spec.effect, oxplow_domain::CommandEffect::Read);
+        assert_eq!(spec.access, oxplow_domain::Access::View);
         let mut seen = fx.svc.events.subscribe_ui();
         fx.svc.client_host.register("w1", vec!["tabs.write".into()]);
         let host = fx.svc.client_host.clone();

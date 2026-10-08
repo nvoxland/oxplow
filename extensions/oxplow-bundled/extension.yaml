@@ -343,7 +343,7 @@ commands:
         thread_id: { type: [integer, string], description: "The thread's row id (v_thread.id)." }
       additionalProperties: false
     entry: handlers/clear_finished.star
-    effect: record
+    access: record
     invokers: { human: true, agent: false, lens: true }
     examples:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }

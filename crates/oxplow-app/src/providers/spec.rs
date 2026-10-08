@@ -490,13 +490,13 @@ pub fn read_pinned_tools(
 /// A provider may call the scopes that only read so far: what
 /// `host/call` answers.
 fn needs_problem(spec: &ProviderSpec) -> Option<String> {
-    use oxplow_domain::scope::{scope, EffectClass};
+    use oxplow_domain::{scope::scope, Access};
     spec.needs.iter().find_map(|need| match scope(need) {
         None => Some(format!(
             "provider `{}`: `needs`: no scope `{need}`",
             spec.id
         )),
-        Some(c) if c.class != EffectClass::Read => Some(format!(
+        Some(c) if c.access != Access::Read => Some(format!(
             "provider `{}`: `needs`: a provider may call only scopes that read (`{need}` \
              changes things)",
             spec.id
@@ -695,7 +695,7 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             ));
         }
         crate::providers::host::confirm_of(&command.confirm)
-            .and(crate::providers::host::effect_of(&command.effect))
+            .and(crate::providers::host::access_of(&command.access))
             .map_err(|e| format!("provider `{id}` command `{}`: {e}", command.name))?;
     }
     if spec.capability == WORK_ITEMS {
@@ -732,10 +732,10 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             .iter()
             .filter(|c| oxplow_domain::work_items::VERBS.contains(&c.name.as_str()))
         {
-            if command.confirm != "never" || command.effect != "record" {
+            if command.confirm != "never" || command.access != "record" {
                 return Err(format!(
                     "provider `{id}` verb `{}`: a work_items verb is `confirm: never` and \
-                     `effect: record` (the `work_item.{}` command calling it is what a person \
+                     `access: record` (the `work_item.{}` command calling it is what a person \
                      confirms)",
                     command.name, command.name
                 ));

@@ -1107,6 +1107,32 @@ export type AcceptedValues = {
 };
 
 /**
+ *  What a run changes, and so whether it is recorded and who may make it —
+ *  a scope's (`Scope::access`) and a command's (`CommandSpec::access`, the
+ *  strongest among the scopes it needs). Ordered weakest first. Not where
+ *  its handler runs: that is the operation's handler, in the bus's
+ *  transaction or outside it (`config.write`'s `set` is one transaction,
+ *  the file written after it commits; `providers.sync` commits each batch
+ *  in its own).
+ */
+export type Access = 
+// Changes only what the person sees (open a page, find in a file).
+"view" | 
+// Reads, changes nothing (`sql.read`).
+"read" | 
+/**
+ *  Changes oxplow's own records (filing and editing tasks): audited,
+ *  open to any thread.
+ */
+"record" | 
+/**
+ *  Changes something outside oxplow's records — files, git, processes,
+ *  the configuration: audited, and an agent's only from its stream's
+ *  writer thread.
+ */
+"write";
+
+/**
  *  An agent oxplow talks to over the Agent Client Protocol (tsk335): a
  *  program that speaks ACP on its stdio. Presets cover the common ones
  *  ([`acp_presets`]); `acpAgents:` in `.oxplow/project.yaml` adds or
@@ -1812,17 +1838,6 @@ export type CommandChange = {
 };
 
 /**
- *  Whether a command changes anything, and who may. A `Read` runs
- *  without an audit row or a `command.executed` event (a polling agent
- *  must not fill the log), and an agent thread that may not write can
- *  still run it. A `Write` is refused outright to an agent thread that
- *  isn't its stream's writer. A `Record` changes oxplow's own records
- *  (filing and editing tasks) and is audited like a `Write`, but any
- *  thread may run it.
- */
-export type CommandEffect = "read" | "write" | "record";
-
-/**
  *  An example run of a command: its input, and the commands its script
  *  should compose, in order — or the refusal it should make (checked by
  *  `oxplow plugin check` / Settings).
@@ -1896,7 +1911,7 @@ export type CommandSpec = {
 	undoable: boolean,
 	lifecycle: Lifecycle,
 	atomicity: Atomicity,
-	effect: CommandEffect,
+	access: Access,
 	/**
 	 *  The scopes its handler calls (`sql.read`) and the capabilities, or
 	 *  their features (`work_items.comments`), it needs active; unmet, it
@@ -2656,7 +2671,7 @@ export type ExtensionCommand = {
 	// What runs it.
 	handler: CommandHandler,
 	confirm: Confirm,
-	effect: CommandEffect,
+	access: Access,
 	invokers: Invokers,
 	/**
 	 *  The scopes its script calls, and the capabilities (or features)

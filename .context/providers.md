@@ -34,7 +34,7 @@ schemars), host → provider:
 
 | method | params → result | |
 |---|---|---|
-| `initialize` | `InitializeParams { protocol_version, host }` → `InitializeResult { protocol_version, provider, capabilities, commands, event_types, collectors, config_schema }` | what the provider is and declares: `CapabilityDecl { capability, features }`, `CommandDecl { name, summary, input_schema, confirm, effect, undoable }`, `EventTypeDecl { type, v, schema }`, `CollectorDecl { name, entity, description }` |
+| `initialize` | `InitializeParams { protocol_version, host }` → `InitializeResult { protocol_version, provider, capabilities, commands, event_types, collectors, config_schema }` | what the provider is and declares: `CapabilityDecl { capability, features }`, `CommandDecl { name, summary, input_schema, confirm, access, undoable }`, `EventTypeDecl { type, v, schema }`, `CollectorDecl { name, entity, description }` |
 | `check` | `CheckParams { config, credentials }` → `CheckResult { problems, handle? }` | validate an instance's config (credentials by name — the values stay in the keychain and reach the provider through its environment); `Problem { path, message }`; a clean check returns the opaque `Handle` the other calls carry |
 | `discover` | `{ handle }` → `DiscoverResult { entities }` | the entities the instance can read (`EntityDecl { name, description, schema }`) |
 | `invoke` | `InvokeParams { handle, command, input, idempotency_key? }` → `InvokeResult { result, events, inverse? }` | run a declared command; the host logs its `EventDraft { type, v, payload, subject }`s ("Idempotency" for the key) |
@@ -330,7 +330,7 @@ manifest, or under `lenses/`); a bad host pattern; and declarations that
 don't parse, speak another protocol version, lack the named capability,
 or — for `work_items` — lack `create` / `update` / `transition` (and
 `link` / `comment` / `delete` when its features say so), declare a verb
-that isn't `confirm: never` and `effect: record` (the `work_item.<verb>`
+that isn't `confirm: never` and `access: record` (the `work_item.<verb>`
 command running it is what a person confirms and what is gated).
 
 **Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,
@@ -746,7 +746,7 @@ implements, oxplow's own tasks included (`oxplow_tasks::OxplowTasks`) — each v
 input checked against its declared schema first) in
 `Services.work_items`, and its **other** declared commands on the bus as
 `<id>.<name>` (`External`, `Experimental`; the manifest's `invokers`,
-required like any command's; confirm / effect / undoable as declared). Its capability's verbs are never
+required like any command's; confirm / access / undoable as declared). Its capability's verbs are never
 commands of their own: `work_item.<verb>` is the one write surface
 (P7.A1). A refusal —
 unapproved, unconfigured, a handshake that doesn't match — registers

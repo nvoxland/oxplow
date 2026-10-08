@@ -10,7 +10,7 @@
 //!     entry: handlers/finish_review.star # defines transform({ input })
 //!     needs: [sql.read]                  # the scopes it calls
 //!     confirm: never                     # never | always | destructive
-//!     effect: write                      # write | record | read
+//!     access: write                      # write | record | read
 //!     invokers: { human: true, agent: true, lens: true }
 //!     examples:
 //!       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
@@ -25,7 +25,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_domain::{CommandCall, CommandEffect, CommandSpec, Confirm, InputValidator, Invokers};
+use oxplow_domain::{Access, CommandCall, CommandSpec, Confirm, InputValidator, Invokers};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -66,7 +66,7 @@ pub struct ExtensionCommand {
     /// What runs it.
     pub handler: CommandHandler,
     pub confirm: Confirm,
-    pub effect: CommandEffect,
+    pub access: Access,
     pub invokers: Invokers,
     /// The scopes its script calls, and the capabilities (or features)
     /// it needs active, as core's commands declare them
@@ -154,7 +154,7 @@ struct CommandFile {
     #[serde(default)]
     confirm: Option<String>,
     #[serde(default)]
-    effect: Option<String>,
+    access: Option<String>,
     #[serde(default)]
     invokers: Option<Invokers>,
     #[serde(default)]
@@ -348,7 +348,7 @@ fn command_of(
                 .into(),
         ));
     }
-    let (handler, input_schema, effect) = match (f.scope, f.entry) {
+    let (handler, input_schema, access) = match (f.scope, f.entry) {
         (None, None) if f.provider.is_none() => {
             return Err(at_name(
                 "has no handler: give `entry:` (a Starlark script), `scope:` + `op:` (an \
@@ -365,7 +365,7 @@ fn command_of(
             })?;
             for (given, key) in [
                 (f.input_schema.is_some(), "input_schema"),
-                (f.effect.is_some(), "effect"),
+                (f.access.is_some(), "access"),
                 (!f.examples.is_empty(), "examples"),
             ] {
                 if given {
@@ -376,7 +376,7 @@ fn command_of(
             }
             let decl = provider_ops(&provider, &op)
                 .map_err(|e| at_name(format!("`provider: {provider}`, `op: {op}`: {e}")))?;
-            let effect = crate::providers::host::effect_of(&decl.effect).map_err(at_name)?;
+            let access = crate::providers::host::access_of(&decl.access).map_err(at_name)?;
             // The manifest may ask more than the provider does, never less.
             let declared = crate::providers::host::confirm_of(&decl.confirm).map_err(at_name)?;
             if f.confirm.is_none() || stronger(declared, confirm) {
@@ -389,13 +389,13 @@ fn command_of(
                     undoable: decl.undoable,
                 },
                 Some(with_instance(decl.input_schema)),
-                effect,
+                access,
             )
         }
         (Some(scope), None) => {
-            let class = oxplow_domain::scope::scope(&scope)
+            let access = oxplow_domain::scope::scope(&scope)
                 .ok_or_else(|| at_name(format!("`scope`: no scope `{scope}`")))?
-                .class;
+                .access;
             let op = f.op.filter(|op| valid_segment(op)).ok_or_else(|| {
                 at_name(format!(
                     "`scope: {scope}` needs `op:`, the operation it runs"
@@ -403,7 +403,7 @@ fn command_of(
             })?;
             for (given, key) in [
                 (f.input_schema.is_some(), "input_schema"),
-                (f.effect.is_some(), "effect"),
+                (f.access.is_some(), "access"),
                 (!f.examples.is_empty(), "examples"),
             ] {
                 if given {
@@ -412,11 +412,7 @@ fn command_of(
                     )));
                 }
             }
-            (
-                CommandHandler::Scope { scope, op },
-                None,
-                crate::commands::ops::effect_of(class),
-            )
+            (CommandHandler::Scope { scope, op }, None, access)
         }
         (Some(_), Some(_)) => unreachable!("refused above"),
         (None, Some(entry)) => {
@@ -428,7 +424,7 @@ fn command_of(
                 .ok_or_else(|| at_name("a script's command declares `input_schema`".into()))?;
             InputValidator::compile(&input_schema)
                 .map_err(|e| at_name(format!("`input_schema` doesn't compile: {e}")))?;
-            let effect = script_effect(&f.effect, &f.confirm, &f.needs).map_err(at_name)?;
+            let access = script_access(&f.access, &f.confirm, &f.needs).map_err(at_name)?;
             if !inside(&entry) {
                 return Err(at_name(format!(
                     "entry `{entry}` must be a path inside the extension folder"
@@ -441,7 +437,7 @@ fn command_of(
             (
                 CommandHandler::Script { entry, script },
                 Some(input_schema),
-                effect,
+                access,
             )
         }
     };
@@ -468,7 +464,7 @@ fn command_of(
         input_schema,
         handler,
         confirm,
-        effect,
+        access,
         // Who may run it is said, never assumed: an omitted `invokers`
         // once meant everyone, agents included.
         invokers: f.invokers.ok_or_else(|| {
@@ -512,38 +508,38 @@ fn stronger(a: Confirm, b: Confirm) -> bool {
     rank(a) > rank(b)
 }
 
-/// A script's declared `effect` (default `write`): `read` only when it
+/// A script's declared `access` (default `write`): `read` only when it
 /// needs nothing that changes things, and is never confirmed.
-fn script_effect(
-    effect: &Option<String>,
+fn script_access(
+    access: &Option<String>,
     confirm: &Option<String>,
     needs: &[String],
-) -> Result<CommandEffect, String> {
-    let effect = match effect.as_deref() {
-        None | Some("write") => CommandEffect::Write,
-        Some("record") => CommandEffect::Record,
-        Some("read") => CommandEffect::Read,
+) -> Result<Access, String> {
+    let access = match access.as_deref() {
+        None | Some("write") => Access::Write,
+        Some("record") => Access::Record,
+        Some("read") => Access::Read,
         Some(other) => {
             return Err(format!(
-                "`effect` must be `write`, `record` or `read`, not `{other}`"
+                "`access` must be `write`, `record` or `read`, not `{other}`"
             ))
         }
     };
-    if effect == CommandEffect::Read {
-        use oxplow_domain::scope::{scope, EffectClass};
+    if access.reads_only() {
+        use oxplow_domain::scope::scope;
         if let Some(writes) = needs
             .iter()
-            .find(|n| scope(n).is_some_and(|c| c.class > EffectClass::Read))
+            .find(|n| scope(n).is_some_and(|c| c.access.records()))
         {
             return Err(format!(
-                "`effect: read` but it needs `{writes}`, which changes things"
+                "`access: read` but it needs `{writes}`, which changes things"
             ));
         }
         if confirm.as_deref().is_some_and(|c| c != "never") {
-            return Err("`effect: read`: a command that only reads is never confirmed".into());
+            return Err("`access: read`: a command that only reads is never confirmed".into());
         }
     }
-    Ok(effect)
+    Ok(access)
 }
 
 /// Two enabled extensions whose commands map to one namespace: both are
@@ -765,7 +761,7 @@ pub fn extension_command(
             Lifecycle::Experimental
         },
         atomicity: Atomicity::Dispatch,
-        effect: decl.effect,
+        access: decl.access,
         needs: decl.needs.clone(),
         ui: decl.ui.clone(),
         op: None,
@@ -786,7 +782,7 @@ pub fn extension_command(
         } => return provider_command(bus, extension, spec, provider, op, *undoable),
         CommandHandler::Script { script, .. } => script.clone(),
     };
-    let (needs, reads) = (decl.needs.clone(), decl.effect == CommandEffect::Read);
+    let (needs, reads) = (decl.needs.clone(), decl.access.reads_only());
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
     let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
@@ -802,7 +798,7 @@ pub fn extension_command(
                 {
                     Err(CommandError::Invalid {
                         field: None,
-                        message: "a command that only reads (`effect: read`) composes no \
+                        message: "a command that only reads (`access: read`) composes no \
                                   commands and logs no events — it returns a `result`"
                             .into(),
                     })
@@ -1302,7 +1298,7 @@ mod tests {
         );
         assert!(c.needs.is_empty());
         assert_eq!(c.confirm, Confirm::Never);
-        assert_eq!(c.effect, CommandEffect::Write);
+        assert_eq!(c.access, Access::Write);
         assert_eq!(c.invokers, Invokers::ALL);
         assert_eq!(c.examples.len(), 1);
         assert_eq!(
@@ -1358,9 +1354,9 @@ mod tests {
                 "define `transform`",
             ),
             (
-                entry("a.b", "    effect: sometimes\n"),
+                entry("a.b", "    access: sometimes\n"),
                 vec![("handlers/h.star", HANDLER)],
-                "`effect` must be `write`, `record` or `read`",
+                "`access` must be `write`, `record` or `read`",
             ),
             (
                 entry("a.b", "    needs: [warp_drive]\n"),
@@ -1373,9 +1369,9 @@ mod tests {
                 "label",
             ),
             (
-                entry("a.b", "    effect: often\n"),
+                entry("a.b", "    access: often\n"),
                 vec![("handlers/h.star", HANDLER)],
-                "effect",
+                "access",
             ),
             (
                 entry("a.b", "    confirm: maybe\n"),
@@ -1413,7 +1409,7 @@ mod tests {
                 "`input_schema` comes from the scope's operation",
             ),
             (
-                entry("a.b", "    effect: read\n    confirm: always\n"),
+                entry("a.b", "    access: read\n    confirm: always\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "only reads is never confirmed",
             ),
@@ -1548,7 +1544,7 @@ mod tests {
                         undoable: false,
                         lifecycle: oxplow_domain::Lifecycle::Experimental,
                         atomicity: oxplow_domain::Atomicity::Tx,
-                        effect: CommandEffect::Write,
+                        access: Access::Write,
                         needs: Vec::new(),
                         ui: None,
                         op: None,
@@ -1930,7 +1926,7 @@ mod tests {
     /// A project extension declares its own command over one of the
     /// operations oxplow's commands are backed by: nothing about
     /// oxplow's is special. Its spec is the operation's (schema, undo,
-    /// effect), the scope among its needs; one naming an operation
+    /// access), the scope among its needs; one naming an operation
     /// that isn't there isn't registered, its problem said.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_extension_declares_a_command_over_an_operation() {
@@ -1950,7 +1946,7 @@ mod tests {
         let spec = fx.svc.commands.spec("acme.page.star").expect("registered");
         let oxplows = fx.svc.commands.spec("oxplow.bookmark.set").unwrap();
         assert_eq!(spec.input_schema, oxplows.input_schema);
-        assert_eq!(spec.effect, CommandEffect::Record);
+        assert_eq!(spec.access, Access::Record);
         assert!(spec.undoable);
         assert_eq!(spec.needs, vec!["bookmarks.write".to_string()]);
         let out = fx
@@ -2005,7 +2001,7 @@ mod tests {
         assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
     }
 
-    /// `effect: read`: it reads and answers, and nothing is recorded; one
+    /// `access: read`: it reads and answers, and nothing is recorded; one
     /// that composes a command is refused.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_read_command_answers_without_a_record() {
@@ -2014,7 +2010,7 @@ mod tests {
             write_ext(
                 fx._dir.path(),
                 "my-review",
-                "  - name: work.count\n    summary: Count the work items.\n    input_schema: { type: object }\n    entry: handlers/count.star\n    invokers: { human: true, agent: true, lens: true }\n    effect: read\n    needs: [sql.read]\n",
+                "  - name: work.count\n    summary: Count the work items.\n    input_schema: { type: object }\n    entry: handlers/count.star\n    invokers: { human: true, agent: true, lens: true }\n    access: read\n    needs: [sql.read]\n",
                 &[("handlers/count.star", script)],
             );
         };
@@ -2218,7 +2214,7 @@ mod tests {
                     undoable: false,
                     lifecycle: oxplow_domain::Lifecycle::Experimental,
                     atomicity: oxplow_domain::Atomicity::Tx,
-                    effect: CommandEffect::Write,
+                    access: Access::Write,
                     needs: Vec::new(),
                     ui: None,
                     op: None,

@@ -421,7 +421,7 @@ pub fn scaffold(
 }
 
 /// A work-items provider's starting declarations: create, update and
-/// transition (`record` effect, no confirmation), the core
+/// transition (`record` access, no confirmation), the core
 /// `work_item.recorded@2` event and an empty config schema.
 fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::InitializeResult {
     use oxplow_domain::events::schema::{schema_for, EventType, WorkItemRecorded};
@@ -431,7 +431,7 @@ fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::Initial
         summary: summary.into(),
         input_schema: input,
         confirm: "never".into(),
-        effect: "record".into(),
+        access: "record".into(),
         undoable: false,
     };
     let str_prop = serde_json::json!({ "type": "string" });

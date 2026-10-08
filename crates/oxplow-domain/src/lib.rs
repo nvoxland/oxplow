@@ -34,9 +34,9 @@ pub mod work_items;
 
 pub use agent::AgentKind;
 pub use commands::{
-    namespace_of, Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandOutcome,
-    CommandSpec, CommandUi, Confirm, InputValidator, Invoker, Invokers, Lifecycle, MenuPlace,
-    OpRef, Preview, OXPLOW_NAMESPACE,
+    namespace_of, Access, Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec,
+    CommandUi, Confirm, InputValidator, Invoker, Invokers, Lifecycle, MenuPlace, OpRef, Preview,
+    OXPLOW_NAMESPACE,
 };
 pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,

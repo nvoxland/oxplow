@@ -2194,7 +2194,7 @@ commands:
     input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }
     entry: handlers/finish_review.star # defines transform(x), x = { input }
     confirm: never                     # never (default) | always | destructive; children only add
-    effect: write                      # write (default) | record | read (composes nothing, returns a result)
+    access: write                      # write (default) | record | read (composes nothing, returns a result)
     invokers: { human: true, agent: true, lens: true }   # required: who may run it (within its operation's floor, for a scope command)
     needs: [sql.read, work_items.comments]   # scopes it calls; capabilities / features it needs active
     ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
@@ -2211,22 +2211,22 @@ A command may be **backed by an operation of one of the extension's
 providers**: `provider: fake` + `op: estimate`, the operation one its
 checked-in declarations list (not a capability verb — those run as
 `oxplow.work_item.<verb>`). Its input schema (plus an optional
-`instance`), effect and undo are the declaration's, its `confirm` the
+`instance`), access and undo are the declaration's, its `confirm` the
 stronger of the manifest's and the declaration's; it runs on the
 instance its input names ([providers.md](./providers.md) "The host").
 
 A command may instead be **backed by an operation of a scope**
 ([commands.md](./commands.md) "Scopes" → "Operations"):
 `scope: bookmarks.write` + `op: set` in place of `entry:` — no
-`input_schema`, `effect` or `examples` (the operation's and its
-scope's class), the scope implied in `needs`; the bus refuses
+`input_schema`, `access` or `examples` (the operation's and its
+scope's access), the scope implied in `needs`; the bus refuses
 to register one naming an operation that isn't there. oxplow's own
 commands are declared this way in the required `oxplow-foundation`.
 
 A shared extension's commands are `Stable`, a private one's
 `Experimental`. `transform` returns `{ commands: [{ name, input }], result?, events? }`, or
 `{ refuse: "<why>" }` to decline — the run is `Invalid` with that reason
-and writes nothing (`composed` → `Composed::{Run, Refused}`). An `effect:
+and writes nothing (`composed` → `Composed::{Run, Refused}`). An `access:
 read` command composes nothing and logs no events (refused at run time
 otherwise): it reads and returns a `result`, is never confirmed and needs
 no scope that changes things; the bus runs it on a read snapshot,
@@ -2254,7 +2254,7 @@ namespace (other than `oxplow`) are both refused at load
 (`refuse_shared_namespaces`, after disabling applies). Each entry is
 checked at load, its error at its line (`entry_line`: the line whose
 `name:` is exactly that name — `a` never lands on `abc`; ids, lenses,
-and models find their lines the same way): the name, `effect`, `confirm`,
+and models find their lines the same way): the name, `access`, `confirm`,
 the schema compiles, each `needs` entry is a scope or a
 capability / feature, and the entry is a file in the
 extension that parses and defines `transform` (`check_starlark`), and
@@ -2278,7 +2278,7 @@ served on the calling thread (`run_starlark_serving`,
 
 **Running** (`extension_command`): each is a composite
 (`Handler::Compose`, atomicity `Dispatch`) `<namespace>.<name>`
-(summary "… (extension `x`)", the declared invokers / confirm / effect,
+(summary "… (extension `x`)", the declared invokers / confirm / access,
 `Lifecycle::Experimental`). Its composer runs `compose_calls`, answering
 `sql.read` on the connection it's given (`semantic_layer::read_on`: the
 `query_sql` authorizer, row cap and timeout, the read session restored —

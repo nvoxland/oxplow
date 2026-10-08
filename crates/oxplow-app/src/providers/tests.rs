@@ -1620,7 +1620,7 @@ async fn a_failed_enable_writes_no_config() {
 
 /// tsk569, P7.A1: a capability verb is run by `work_item.<verb>` (whose
 /// spec is what a person confirms), never on its own: it is
-/// `confirm: never` and `effect: record`; a provider declaring `delete`
+/// `confirm: never` and `access: record`; a provider declaring `delete`
 /// must declare the verb.
 #[test]
 fn a_capability_verb_is_record_and_never_confirms() {
@@ -1633,7 +1633,7 @@ fn a_capability_verb_is_record_and_never_confirms() {
         )
     };
     spec::check_declarations(&spec, &declared).unwrap();
-    for (field, value) in [("confirm", "always"), ("effect", "write")] {
+    for (field, value) in [("confirm", "always"), ("access", "write")] {
         let mut changed = declared.clone();
         for c in changed
             .commands
@@ -1642,7 +1642,7 @@ fn a_capability_verb_is_record_and_never_confirms() {
         {
             match field {
                 "confirm" => c.confirm = value.into(),
-                _ => c.effect = value.into(),
+                _ => c.access = value.into(),
             }
         }
         let err = spec::check_declarations(&spec, &changed).unwrap_err();

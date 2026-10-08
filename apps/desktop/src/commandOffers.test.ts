@@ -16,7 +16,7 @@ function spec(id: string, ui: Partial<CommandUi>): CommandSpec {
     undoable: false,
     lifecycle: "stable",
     atomicity: "tx",
-    effect: "write",
+    access: "write",
     needs: [],
     ui: { label: id, group: null, keywords: [], about: null, input: null, form: null, open_after: null, background: false, shortcut: null, while_typing: false, menu: null, when: null, ...ui },
   } as unknown as CommandSpec;

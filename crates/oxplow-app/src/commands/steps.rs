@@ -200,7 +200,7 @@ impl Router<'_> {
                         name: call.name.clone(),
                     })?;
             super::offered(self.active, &command.spec, &name_field)?;
-            if command.spec.effect == oxplow_domain::CommandEffect::Read {
+            if command.spec.access.reads_only() {
                 return Err(CommandError::Invalid {
                     field: Some(name_field),
                     message: format!(
@@ -267,7 +267,7 @@ fn check_tree(
             });
         }
         if let Some(thread_id) = actor.agent_thread() {
-            let gated = may_write.filter(|_| spec.effect == oxplow_domain::CommandEffect::Write);
+            let gated = may_write.filter(|_| spec.access.needs_writer());
             if let PolicyDecision::Deny { reason, .. } =
                 policy.check_command(thread_id.as_ref(), spec, gated)
             {

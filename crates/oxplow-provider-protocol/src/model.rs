@@ -79,7 +79,7 @@ pub struct CommandDecl {
     /// `never`, `always` or `destructive`.
     pub confirm: String,
     /// `write`, `read` or `record`.
-    pub effect: String,
+    pub access: String,
     pub undoable: bool,
 }
 

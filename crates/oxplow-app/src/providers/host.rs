@@ -18,7 +18,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_domain::{CommandEffect, Confirm};
+use oxplow_domain::{Access, Confirm};
 use oxplow_provider_protocol::model::{
     method, InitializeParams, InitializeResult, Party, PROTOCOL_VERSION,
 };
@@ -65,13 +65,13 @@ pub fn confirm_of(raw: &str) -> Result<Confirm, String> {
     }
 }
 
-/// The bus's `CommandEffect` for a declared `effect`.
-pub fn effect_of(raw: &str) -> Result<CommandEffect, String> {
+/// The bus's `Access` for a declared `access`.
+pub fn access_of(raw: &str) -> Result<Access, String> {
     match raw {
-        "write" => Ok(CommandEffect::Write),
-        "read" => Ok(CommandEffect::Read),
-        "record" => Ok(CommandEffect::Record),
-        other => Err(format!("effect `{other}` isn't write, read or record")),
+        "write" => Ok(Access::Write),
+        "read" => Ok(Access::Read),
+        "record" => Ok(Access::Record),
+        other => Err(format!("access `{other}` isn't write, read or record")),
     }
 }
 

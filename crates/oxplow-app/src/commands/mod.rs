@@ -343,7 +343,7 @@ impl Command {
         Ok(())
     }
 
-    /// Its confirmation decided per input. A `Read` command may not have
+    /// Its confirmation decided per input. A command that only reads may not have
     /// one (see [`Self::may_ask`]).
     /// This command with its check before the transaction ([`Precheck`]).
     pub fn with_precheck(mut self, f: Arc<Precheck>) -> Self {
@@ -361,7 +361,7 @@ impl Command {
     /// record, so nothing would resolve its proposal or carry its
     /// confirmation.
     fn may_ask(spec: &CommandSpec) -> Result<(), CommandError> {
-        if spec.effect == oxplow_domain::CommandEffect::Read {
+        if spec.access.reads_only() {
             return Err(CommandError::Invalid {
                 field: Some("/confirm".into()),
                 message: format!("`{}` only reads, so it can't need a confirmation", spec.id),
@@ -978,15 +978,12 @@ impl CommandBus {
         // oxplow's own records.
         let mut gates = Gates { may_write: None };
         if let Some(thread_id) = actor.agent_thread() {
-            use oxplow_domain::CommandEffect;
-            let may_write = match (spec.effect, &thread_id, &self.write_gate) {
-                (CommandEffect::Write | CommandEffect::Record, Some(t), Some(gate)) => {
-                    Some(gate(*t).await)
-                }
+            let may_write = match (spec.access.records(), &thread_id, &self.write_gate) {
+                (true, Some(t), Some(gate)) => Some(gate(*t).await),
                 _ => None,
             };
             gates.may_write = may_write;
-            let gated = may_write.filter(|_| spec.effect == CommandEffect::Write);
+            let gated = may_write.filter(|_| spec.access.needs_writer());
             if let PolicyDecision::Deny { reason, .. } =
                 self.policy.check_command(thread_id.as_ref(), spec, gated)
             {
@@ -1056,7 +1053,7 @@ impl CommandBus {
                 .await);
         }
         // 5a. A read runs without a record: no audit row, no event.
-        if spec.effect == oxplow_domain::CommandEffect::Read {
+        if spec.access.reads_only() {
             return self.run_read(&resolved, actor, input).await;
         }
         // 5'. A composite's steps run outside one transaction: each lands
@@ -1322,8 +1319,9 @@ impl CommandBus {
         steps::run_composed(&self.policy, ctx, parent, &steps::Composed::of(routed))
     }
 
-    /// Step 5 for a `Read` command: the handler on a plain connection,
-    /// nothing recorded. A `Read` must not write (it isn't audited).
+    /// Step 5 for a command that only reads (`View` / `Read`): the handler
+    /// on a plain connection, nothing recorded. It must not write (it isn't
+    /// audited).
     async fn run_read(
         &self,
         resolved: &Resolved,
@@ -1335,7 +1333,7 @@ impl CommandBus {
                 let handler = handler.clone();
                 let actor = actor.clone();
                 let vocabulary = self.log.vocabulary().clone();
-                // A read snapshot, always rolled back: a Read handler's
+                // A read snapshot, always rolled back: a reading handler's
                 // stray write can't land (it isn't audited).
                 self.db
                     .read_or(move |tx| {

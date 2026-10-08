@@ -51,7 +51,7 @@
         }
       },
       "confirm": "never",
-      "effect": "record",
+      "access": "record",
       "undoable": false
     },
     {
@@ -92,7 +92,7 @@
         }
       },
       "confirm": "never",
-      "effect": "record",
+      "access": "record",
       "undoable": false
     },
     {
@@ -125,7 +125,7 @@
         }
       },
       "confirm": "never",
-      "effect": "record",
+      "access": "record",
       "undoable": false
     }
   ],

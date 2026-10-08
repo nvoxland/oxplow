@@ -13,7 +13,7 @@ export function personSpec(id: string, ui: Partial<CommandUi>): CommandSpec {
     undoable: false,
     lifecycle: "stable",
     atomicity: "tx",
-    effect: "write",
+    access: "write",
     needs: [],
     op: null,
     ui: {

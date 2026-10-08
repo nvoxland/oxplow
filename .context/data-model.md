@@ -107,7 +107,7 @@ with `SQLITE_BUSY_SNAPSHOT` when another writer commits between its read
 and its first write. A pure read therefore uses `Database::read` (a
 DEFERRED snapshot that is always rolled back, no write lock), not
 `transaction` — the effort, event-by-seq, worktree and turn-signal reads
-and every `Read` command do (tsk513). **The event-log row is the one
+and every command that only reads (`View` / `Read`) do (tsk513). **The event-log row is the one
 write that belongs inside the closure**: a producer composes
 `event_log_store::append_tx(tx, &envelope)` next to its state change
 so the log and the state can never disagree (the outbox pattern; see

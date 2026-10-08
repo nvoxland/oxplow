@@ -41,12 +41,12 @@
       "additionalProperties": false,
       "description": "A command the provider runs, registered on the host's bus as\n`<provider>.<name>`.",
       "properties": {
-        "confirm": {
-          "description": "`never`, `always` or `destructive`.",
+        "access": {
+          "description": "`write`, `read` or `record`.",
           "type": "string"
         },
-        "effect": {
-          "description": "`write`, `read` or `record`.",
+        "confirm": {
+          "description": "`never`, `always` or `destructive`.",
           "type": "string"
         },
         "input_schema": {
@@ -67,7 +67,7 @@
         "summary",
         "input_schema",
         "confirm",
-        "effect",
+        "access",
         "undoable"
       ],
       "type": "object"

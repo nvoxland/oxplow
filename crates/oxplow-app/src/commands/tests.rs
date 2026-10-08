@@ -2,7 +2,7 @@
 
 use super::*;
 use oxplow_domain::events::schema::{ActorKind, ConfigChanged, ConfigChangedV2};
-use oxplow_domain::{CommandEffect, Confirm, Invokers, Lifecycle, ThreadId};
+use oxplow_domain::{Access, Confirm, Invokers, Lifecycle, ThreadId};
 use serde_json::json;
 
 fn bus() -> (Database, CommandBus) {
@@ -115,7 +115,7 @@ fn kv_spec(name: &str, invokers: Invokers, confirm: Confirm) -> CommandSpec {
         undoable: true,
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
-        effect: CommandEffect::Write,
+        access: Access::Write,
         needs: Vec::new(),
         ui: None,
         op: None,
@@ -198,7 +198,7 @@ fn agent() -> Actor {
 async fn a_read_commands_write_never_lands() {
     let (db, bus) = bus();
     let mut spec = kv_spec("oxplow.kv.sneaky", Invokers::ALL, Confirm::Never);
-    spec.effect = CommandEffect::Read;
+    spec.access = Access::Read;
     bus.register(Command::new(spec, kv_set()).unwrap()).unwrap();
     bus.run(
         &agent(),
@@ -211,37 +211,40 @@ async fn a_read_commands_write_never_lands() {
     assert_eq!(kv_value(&db, "a").await, None);
 }
 
+/// A `View` runs as a `Read` does: neither is recorded.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_read_command_is_not_recorded() {
-    let (_db, bus) = bus();
-    let mut spec = kv_spec("oxplow.kv.get", Invokers::ALL, Confirm::Never);
-    spec.effect = CommandEffect::Read;
-    bus.register(
-        Command::new(
-            spec,
-            Handler::Tx(Arc::new(|_ctx: &TxCtx<'_>, input| {
-                Ok(HandlerOutput {
-                    result: input,
-                    ..HandlerOutput::default()
-                })
-            })),
+    for access in [Access::View, Access::Read] {
+        let (_db, bus) = bus();
+        let mut spec = kv_spec("oxplow.kv.get", Invokers::ALL, Confirm::Never);
+        spec.access = access;
+        bus.register(
+            Command::new(
+                spec,
+                Handler::Tx(Arc::new(|_ctx: &TxCtx<'_>, input| {
+                    Ok(HandlerOutput {
+                        result: input,
+                        ..HandlerOutput::default()
+                    })
+                })),
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    )
-    .unwrap();
-    let out = bus
-        .run(
-            &agent(),
-            "oxplow.kv.get",
-            json!({"k": "a", "v": "1"}),
-            false,
-        )
-        .await
         .unwrap();
-    assert_eq!(out.result["k"], "a");
-    assert_eq!((out.audit_id, out.event_id), (None, None));
-    assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
-    assert!(bus.audit_store().list_recent(10).await.unwrap().is_empty());
+        let out = bus
+            .run(
+                &agent(),
+                "oxplow.kv.get",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["k"], "a");
+        assert_eq!((out.audit_id, out.event_id), (None, None), "{access:?}");
+        assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
+        assert!(bus.audit_store().list_recent(10).await.unwrap().is_empty());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -306,7 +309,7 @@ async fn a_thread_that_may_not_write_cant_write_through_a_composite() {
     // A `Record` composite isn't gated itself (it may only record), so
     // what refuses the run is its `Write` child seeing the answer.
     let mut spec = kv_spec("oxplow.kv.compose", Invokers::ALL, Confirm::Never);
-    spec.effect = CommandEffect::Record;
+    spec.access = Access::Record;
     spec.input_schema = json!({ "type": "object" });
     let parent = spec.clone();
     let weak = Arc::downgrade(&bus);
@@ -937,19 +940,22 @@ async fn registration_checks_names_atomicity_and_collisions() {
         )
         .is_err());
     assert!(bus.external_commands().is_empty());
-    // A read is never asked about: nothing would resolve its proposal.
-    let mut asking_read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Always);
-    asking_read.effect = CommandEffect::Read;
-    let err = Command::new(asking_read, kv_set()).err().unwrap();
-    assert!(err.to_string().contains("only reads"), "{err}");
-    let mut read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Never);
-    read.effect = CommandEffect::Read;
-    let err = Command::new(read, kv_set())
-        .unwrap()
-        .with_confirm_for(Arc::new(|_| Confirm::Always))
-        .err()
-        .unwrap();
-    assert!(err.to_string().contains("only reads"), "{err}");
+    // A read (or a view) is never asked about: nothing would resolve its
+    // proposal.
+    for access in [Access::View, Access::Read] {
+        let mut asking_read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Always);
+        asking_read.access = access;
+        let err = Command::new(asking_read, kv_set()).err().unwrap();
+        assert!(err.to_string().contains("only reads"), "{err}");
+        let mut read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Never);
+        read.access = access;
+        let err = Command::new(read, kv_set())
+            .unwrap()
+            .with_confirm_for(Arc::new(|_| Confirm::Always))
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("only reads"), "{err}");
+    }
 }
 
 /// One key may run several commands told apart by their `when` (VS
@@ -1323,7 +1329,7 @@ async fn a_composed_call_needs_what_a_direct_one_does() {
 async fn an_agents_stream_is_its_threads() {
     let (_db, bus) = bus();
     let mut spec = kv_spec("oxplow.kv.whoami", Invokers::ALL, Confirm::Never);
-    spec.effect = CommandEffect::Read;
+    spec.access = Access::Read;
     spec.input_schema = json!({ "type": "object" });
     bus.register(
         Command::new(
@@ -1636,7 +1642,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
         undoable: true,
         lifecycle: oxplow_domain::Lifecycle::Experimental,
         atomicity: oxplow_domain::Atomicity::Dispatch,
-        effect: oxplow_domain::CommandEffect::Write,
+        access: oxplow_domain::Access::Write,
         needs: Vec::new(),
         ui: None,
         op: None,
@@ -1803,28 +1809,30 @@ async fn an_external_composite_is_checked_and_confirmed_before_any_step_runs() {
     assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
 }
 
-/// A composite runs commands that write; a read can't join it.
+/// A composite runs commands that write; a read (or a view) can't join it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_nested_run_refuses_a_read_child() {
-    let (db, bus) = composing_bus();
-    let mut read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Never);
-    read.effect = CommandEffect::Read;
-    bus.register(Command::new(read, kv_set()).unwrap()).unwrap();
-    let err = bus
-        .run(
-            &Actor::Human,
-            "oxplow.command.sequence",
-            calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.peek", "b", "2")]),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, CommandError::Invalid { field: Some(f), message }
-            if f == "/calls/1/name" && message.contains("only reads")),
-        "{err}"
-    );
-    assert_eq!(kv_value(&db, "a").await, None);
+    for access in [Access::View, Access::Read] {
+        let (db, bus) = composing_bus();
+        let mut read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Never);
+        read.access = access;
+        bus.register(Command::new(read, kv_set()).unwrap()).unwrap();
+        let err = bus
+            .run(
+                &Actor::Human,
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.peek", "b", "2")]),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message }
+                if f == "/calls/1/name" && message.contains("only reads")),
+            "{err}"
+        );
+        assert_eq!(kv_value(&db, "a").await, None);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

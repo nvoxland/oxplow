@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use oxplow_domain::{Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers};
+use oxplow_domain::{Atomicity, CommandError, CommandSpec, Confirm, Invokers};
 use serde_json::Value;
 
 use super::{Command, ConfirmFor, Handler, Precheck};
@@ -143,15 +143,15 @@ impl Op {
     }
 
     /// The command `spec` declares, backed by this operation: its input
-    /// schema, undo and atomicity are the operation's, its effect the
-    /// scope's class, and the scope is among its needs. Its
+    /// schema, undo and atomicity are the operation's, its access the
+    /// scope's, and the scope is among its needs. Its
     /// `invokers` and `confirm` stay within the operation's floor.
     pub fn command(&self, mut spec: CommandSpec) -> Result<Command, CommandError> {
-        let class = oxplow_domain::scope::scope(&self.scope)
+        let access = oxplow_domain::scope::scope(&self.scope)
             .ok_or_else(|| CommandError::Failed {
                 message: format!("no scope `{}`", self.scope),
             })?
-            .class;
+            .access;
         self.within_floor(&spec)?;
         spec.input_schema = self.input_schema.clone();
         spec.undoable = self.undoable;
@@ -160,7 +160,7 @@ impl Op {
             Handler::External(_) => Atomicity::External,
             Handler::Compose(_) => Atomicity::Dispatch,
         };
-        spec.effect = effect_of(class);
+        spec.access = access;
         spec.unrecorded = self.unrecorded.clone();
         spec.op = Some(oxplow_domain::OpRef {
             scope: self.scope.clone(),
@@ -186,17 +186,6 @@ fn confirm_name(confirm: Confirm) -> &'static str {
         Confirm::Never => "never",
         Confirm::Always => "always",
         Confirm::Destructive => "destructive",
-    }
-}
-
-/// A command's effect, from the class of the scope behind it: only
-/// a record or a write is audited.
-pub fn effect_of(class: oxplow_domain::scope::EffectClass) -> CommandEffect {
-    use oxplow_domain::scope::EffectClass;
-    match class {
-        EffectClass::View | EffectClass::Read => CommandEffect::Read,
-        EffectClass::Record => CommandEffect::Record,
-        EffectClass::Write => CommandEffect::Write,
     }
 }
 
@@ -240,7 +229,7 @@ impl Ops {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::{CommandEffect, Lifecycle};
+    use oxplow_domain::{Access, Lifecycle};
     use serde_json::json;
 
     fn op() -> Op {
@@ -265,7 +254,7 @@ mod tests {
             undoable: false,
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
+            access: Access::Write,
             needs: vec![],
             ui: None,
             op: None,
