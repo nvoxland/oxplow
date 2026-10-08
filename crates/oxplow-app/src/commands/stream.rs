@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::thread::agent_scope;
-use super::util::{invalid, parse, schema, sql};
+use super::util::{invalid, parse, ref_id, schema, sql};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 
 pub const CREATE_WORKTREE: &str = "oxplow.stream.create_worktree";
@@ -87,18 +87,6 @@ pub struct StreamDeps {
     pub search: Arc<oxplow_db::SqliteSearchStore>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
     pub efforts: Arc<oxplow_db::SqliteEffortStore>,
-}
-
-fn stream_of(value: &str) -> Result<StreamId, CommandError> {
-    value
-        .strip_prefix("stream:")
-        .and_then(|id| id.parse().ok())
-        .ok_or_else(|| {
-            invalid(
-                "/stream",
-                format!("`{value}` isn't a stream ref (stream:<id>)"),
-            )
-        })
 }
 
 fn session(e: oxplow_session::SessionError) -> CommandError {
@@ -202,7 +190,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                 use crate::agent_status_derive::{derive_thread_status, recent_activity};
                 use oxplow_domain::stores::ThreadStore as _;
                 let input: ArchiveInput = parse(input)?;
-                let id = stream_of(&input.stream)?;
+                let id = ref_id(&input.stream, "stream", "/stream")?;
                 // Refused before anything changes: nothing below runs for a
                 // stream that can't be archived.
                 deps.streams.archivable(&id).await.map_err(session)?;
@@ -279,7 +267,7 @@ pub fn rename_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
-            let id = stream_of(&input.stream)?;
+            let id = ref_id(&input.stream, "stream", "/stream")?;
             if let Some((_, own)) = agent_scope(ctx)? {
                 if own != id {
                     return Err(CommandError::Denied {
@@ -315,7 +303,7 @@ pub fn set_prompt_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: SetPromptInput = parse(input)?;
-            let mut stream = load(ctx, stream_of(&input.stream)?)?;
+            let mut stream = load(ctx, ref_id(&input.stream, "stream", "/stream")?)?;
             let before = std::mem::replace(
                 &mut stream.custom_prompt,
                 input.prompt.filter(|p| !p.is_empty()),

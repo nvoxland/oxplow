@@ -13,6 +13,7 @@ import { workItemTabRef } from "../tabs/pageRefs.js";
 import { workItemLabel } from "../workItemRef.js";
 import { useWorkListProfile } from "../useWorkListProfile.js";
 import { workItemRefOfMention } from "../workItems.js";
+import { effortRef } from "../recordRefs.js";
 
 /** An effort as its page shows it (`v_effort`). */
 export interface EffortRecord {
@@ -91,7 +92,7 @@ export function EffortHeader({
 }) {
   const profile = useWorkListProfile();
   const row = effortRowId(effortId);
-  const ref = row === null ? effortId : `eff${row}`;
+  const ref = effortRef(row === null ? effortId : `eff${row}`);
   const [effort, setEffort] = useState<EffortRecord | null>(null);
   const [linking, setLinking] = useState(false);
   const [busy, setBusy] = useState(false);

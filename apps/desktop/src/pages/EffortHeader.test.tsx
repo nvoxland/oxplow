@@ -30,13 +30,13 @@ test("renaming the effort runs effort.update; clearing it restores the default",
   const input = view.getByTestId("effort-title") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "Rewrite the parser" } });
   fireEvent.keyDown(input, { key: "Enter" });
-  await waitFor(() => expect(ran).toEqual([["oxplow.effort.update", { effort: "eff12", title: "Rewrite the parser" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.effort.update", { effort: "effort:eff12", title: "Rewrite the parser" }]]));
 
   fireEvent.click(await waitFor(() => view.getByText("Fix the parser")));
   const again = view.getByTestId("effort-title") as HTMLInputElement;
   fireEvent.change(again, { target: { value: "" } });
   fireEvent.keyDown(again, { key: "Enter" });
-  await waitFor(() => expect(ran[1]).toEqual(["oxplow.effort.update", { effort: "eff12", title: null }]));
+  await waitFor(() => expect(ran[1]).toEqual(["oxplow.effort.update", { effort: "effort:eff12", title: null }]));
 });
 
 test("linking takes a work item; Escape cancels", async () => {
@@ -53,7 +53,7 @@ test("linking takes a work item; Escape cancels", async () => {
   fireEvent.change(again, { target: { value: "work_item:oxplow:tsk42" } });
   fireEvent.click(view.getByTestId("effort-link-prompt-submit"));
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.effort.link", { effort: "eff12", work_item: "work_item:oxplow:tsk42" }]]),
+    expect(ran).toEqual([["oxplow.effort.link", { effort: "effort:eff12", work_item: "work_item:oxplow:tsk42" }]]),
   );
   await waitFor(() => expect(view.queryByTestId("effort-link-prompt-item") === null).toBe(true));
 });
@@ -65,14 +65,14 @@ test("a linked effort shows its item and unlinks", async () => {
   fireEvent.click(await waitFor(() => view.getByTestId("effort-linked-item")));
   expect(opened).toHaveLength(1);
   fireEvent.click(view.getByTestId("effort-unlink"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.effort.link", { effort: "eff12", work_item: null }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.effort.link", { effort: "effort:eff12", work_item: null }]]));
 });
 
 test("an open effort closes; a closed one says how it closed", async () => {
   const { deps, ran } = fake(open);
   const view = render(<EffortHeader effortId="eff12" onOpenPage={() => {}} deps={deps} />);
   fireEvent.click(await waitFor(() => view.getByTestId("effort-close")));
-  await waitFor(() => expect(ran).toEqual([["oxplow.effort.close", { effort: "eff12" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.effort.close", { effort: "effort:eff12" }]]));
   cleanup();
 
   const closed = fake({ ...open, endedAt: "2026-10-06T00:00:00Z", closedBy: "commit" });

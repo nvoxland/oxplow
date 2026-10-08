@@ -14,6 +14,7 @@ import { streamRowId, threadRowId } from "../modelIds.js";
 import type { Reads, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { refFromTabId } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
+import { streamRef, threadRef } from "../recordRefs.js";
 
 export type BookmarkScope = "thread" | "stream" | "project";
 
@@ -92,8 +93,8 @@ export function useBookmarks(threadId: string | null, streamId: string | null): 
 
 /** The viewer as the commands name it: the thread, else the stream. */
 function viewerInput(viewer: BookmarkViewer): Record<string, string> {
-  if (viewer.threadId) return { thread: viewer.threadId };
-  if (viewer.streamId) return { stream: viewer.streamId };
+  if (viewer.threadId) return { thread: threadRef(viewer.threadId) };
+  if (viewer.streamId) return { stream: streamRef(viewer.streamId) };
   return {};
 }
 

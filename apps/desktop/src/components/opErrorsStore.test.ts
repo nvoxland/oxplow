@@ -117,14 +117,14 @@ describe("reportOpErrorTo", () => {
           message: "IpcCallError: query_sql: timed out after 5s",
           stderr: "timed out",
           exit_code: 1,
-          thread: "thr3",
+          thread: "thread:thr3",
           signal: "SIGTERM",
           duration_ms: 5012,
         },
       },
       // tsk1079: from no thread, it names the stream on screen, so that
       // stream's agent can read its output.
-      { name: "oxplow.ui.report_error", input: { label: "Save note", stream: "str1" } },
+      { name: "oxplow.ui.report_error", input: { label: "Save note", stream: "stream:str1" } },
     ]);
   });
 

@@ -5,6 +5,7 @@
 /// or run it and open what it made. Pure, given its deps.
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { CommandOutcome, CommandSpec } from "./tauri-bridge/generated/bindings.js";
+import { streamRef, threadRef } from "./recordRefs.js";
 
 /** Where a command is offered from: what its input's bindings take. */
 export interface OfferContext {
@@ -32,8 +33,8 @@ export interface OfferDeps {
 }
 
 const BINDINGS: Record<string, (ctx: OfferContext) => string | null | undefined> = {
-  "{{stream}}": (c) => c.streamId,
-  "{{thread}}": (c) => c.threadId,
+  "{{stream}}": (c) => (c.streamId ? streamRef(c.streamId) : null),
+  "{{thread}}": (c) => (c.threadId ? threadRef(c.threadId) : null),
   "{{ref}}": (c) => c.ref,
   "{{ref.id}}": (c) => (c.ref ? c.ref.slice(c.ref.indexOf(":") + 1) : null),
 };

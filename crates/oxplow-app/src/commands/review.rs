@@ -23,7 +23,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::util::{invalid, parse, schema};
+use super::util::{invalid, parse, ref_id, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const VERIFY_CLAIM: &str = "oxplow.effort.verify_claim";
@@ -60,13 +60,6 @@ pub struct DecisionInput {
     pub decision: String,
 }
 
-/// The id a `<kind>:<n>` ref names.
-fn id_of(item: &str, kind: &str, field: &str) -> Result<i64, CommandError> {
-    item.strip_prefix(&format!("{kind}:"))
-        .and_then(|n| n.parse().ok())
-        .ok_or_else(|| invalid(field, format!("`{item}` isn't a {kind} ref ({kind}:<id>)")))
-}
-
 fn effort_ref_of(effort: Option<i64>) -> Option<String> {
     effort.map(|e| effort_ref(oxplow_domain::EffortId::new(e)))
 }
@@ -96,7 +89,7 @@ fn set_evidence(
     evidence: Option<String>,
     inverse: CommandCall,
 ) -> Result<HandlerOutput, CommandError> {
-    let id = id_of(claim, "claim", "/claim")?;
+    let id = ref_id::<i64>(claim, "claim", "/claim")?;
     ctx.conn
         .execute(
             "UPDATE claim SET evidence_ref = ?2 WHERE id = ?1",
@@ -132,7 +125,7 @@ pub fn verify_claim_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: VerifyClaimInput = parse(input)?;
-            let id = id_of(&input.claim, "claim", "/claim")?;
+            let id = ref_id::<i64>(&input.claim, "claim", "/claim")?;
             let (effort, evidence) = claim_row(ctx, id, &input.claim)?;
             if let Some(cited) = evidence {
                 return Err(invalid(
@@ -165,7 +158,7 @@ pub fn unverify_claim_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ClaimInput = parse(input)?;
-            let id = id_of(&input.claim, "claim", "/claim")?;
+            let id = ref_id::<i64>(&input.claim, "claim", "/claim")?;
             let (effort, evidence) = claim_row(ctx, id, &input.claim)?;
             let Some(cited) = evidence else {
                 return Err(invalid(
@@ -197,7 +190,7 @@ fn review_decision(
     from: &[&str],
     to: &str,
 ) -> Result<HandlerOutput, CommandError> {
-    let id = id_of(&input.decision, "decision", "/decision")?;
+    let id = ref_id::<i64>(&input.decision, "decision", "/decision")?;
     let (effort, provenance): (Option<i64>, String) = ctx
         .conn
         .query_row(

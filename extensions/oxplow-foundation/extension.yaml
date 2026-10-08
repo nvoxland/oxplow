@@ -13,7 +13,7 @@ intent:
   origin: null
   examples:
     - name: a person bookmarks a page for their thread
-      input: { command: oxplow.bookmark.set, input: { ref: "page:git-dashboard", page_kind: git-dashboard, scope: thread, thread: thr1 } }
+      input: { command: oxplow.bookmark.set, input: { ref: "page:git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thread:thr1" } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
 commands:
   # agent_input.write — the window's; a person's only (oxplow never types for the agent).
@@ -248,7 +248,7 @@ commands:
     op: add_note
     invokers: { human: true, agent: true, lens: true }
   - name: knowledge.delete_comment
-    summary: "Delete a comment and its messages (`cmt12`). A person's, confirmed."
+    summary: "Delete a comment and its messages (`comment:cmt12`). A person's, confirmed."
     capability: knowledge.write
     op: delete_comment
     invokers: { human: true, agent: false, lens: true }
@@ -265,12 +265,12 @@ commands:
     op: link
     invokers: { human: true, agent: true, lens: true }
   - name: knowledge.relocate_comment
-    summary: "Store where a comment's quote (`cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
+    summary: "Store where a comment's quote (`comment:cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
     capability: knowledge.write
     op: relocate_comment
     invokers: { human: true, agent: false, lens: true }
   - name: knowledge.reply_comment
-    summary: "Reply on a comment (`cmt12`)."
+    summary: "Reply on a comment (`comment:cmt12`)."
     capability: knowledge.write
     op: reply_comment
     invokers: { human: true, agent: true, lens: true }
@@ -280,12 +280,12 @@ commands:
     op: resync
     invokers: { human: true, agent: true, lens: true }
   - name: knowledge.update_comment
-    summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
+    summary: "Change a comment (`comment:cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
     capability: knowledge.write
     op: update_comment
     invokers: { human: true, agent: true, lens: true }
   - name: knowledge.update_note
-    summary: "Replace a thread note's body (`not12`) — a subagent filling in the note it was given. An agent updates only its own thread's notes."
+    summary: "Replace a thread note's body (`thread_note:not12`) — a subagent filling in the note it was given. An agent updates only its own thread's notes."
     capability: knowledge.write
     op: update_note
     invokers: { human: true, agent: true, lens: true }

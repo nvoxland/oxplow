@@ -17,7 +17,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use super::util::{parse, schema};
+use super::util::{parse, ref_id, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const REPORT_ERROR: &str = "oxplow.ui.report_error";
@@ -37,10 +37,10 @@ pub struct ReportErrorInput {
     /// The process's exit code.
     #[serde(default)]
     pub exit_code: Option<i64>,
-    /// The thread it was started from (`thr3`); absent, none.
+    /// The thread it was started from (`thread:thr3`); absent, none.
     #[serde(default)]
     pub thread: Option<String>,
-    /// The stream the app was showing (`str1`), for an error from no
+    /// The stream the app was showing (`stream:str1`), for an error from no
     /// thread: its agent reads the output. A thread names its own stream,
     /// so not with `thread` (tsk1079).
     #[serde(default)]
@@ -68,12 +68,7 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
     let thread = input
         .thread
         .as_deref()
-        .map(|raw| {
-            raw.parse::<ThreadId>().map_err(|e| CommandError::Invalid {
-                field: Some("/thread".into()),
-                message: e.to_string(),
-            })
-        })
+        .map(|raw| ref_id::<ThreadId>(raw, "thread", "/thread"))
         .transpose()?;
     let stream = match input.stream.as_deref() {
         Some(_) if thread.is_some() => {
@@ -82,10 +77,7 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
                 message: "a thread names its own stream: give one or the other".into(),
             });
         }
-        Some(raw) => Some(raw.parse::<StreamId>().map_err(|e| CommandError::Invalid {
-            field: Some("/stream".into()),
-            message: e.to_string(),
-        })?),
+        Some(raw) => Some(ref_id::<StreamId>(raw, "stream", "/stream")?),
         None => None,
     };
     let mut body = Map::new();
@@ -192,7 +184,7 @@ mod tests {
                     "command": "query_sql",
                     "message": "IpcCallError: query_sql: timed out after 5s",
                     "exit_code": 1,
-                    "thread": fx.thread.to_string(),
+                    "thread": oxplow_domain::refs::build::thread_ref(fx.thread),
                     "signal": "SIGTERM",
                     "duration_ms": 5012,
                     "stderr": "timed out after 5s",
@@ -280,7 +272,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPORT_ERROR,
-                json!({ "label": "List data", "stream": stream.to_string(), "stderr": "timed out" }),
+                json!({ "label": "List data", "stream": oxplow_domain::refs::build::stream_ref(stream), "stderr": "timed out" }),
                 false,
             )
             .await
@@ -303,8 +295,8 @@ mod tests {
                 REPORT_ERROR,
                 json!({
                     "label": "x",
-                    "thread": fx.thread.to_string(),
-                    "stream": stream.to_string(),
+                    "thread": oxplow_domain::refs::build::thread_ref(fx.thread),
+                    "stream": oxplow_domain::refs::build::stream_ref(stream),
                 }),
                 false,
             )
@@ -326,7 +318,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPORT_ERROR,
-                json!({ "label": "Push", "thread": fx.thread.to_string(), "stderr": "denied" }),
+                json!({ "label": "Push", "thread": oxplow_domain::refs::build::thread_ref(fx.thread), "stderr": "denied" }),
                 false,
             )
             .await

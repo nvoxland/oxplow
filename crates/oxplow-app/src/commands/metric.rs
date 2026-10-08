@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::config_commands::{change, ConfigTarget};
-use super::util::{invalid, parse, schema, sql};
+use super::util::{invalid, parse, ref_id, schema, sql};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::metric_engine::FactFilter;
 use crate::metrics_service::MetricsService;
@@ -66,7 +66,7 @@ pub struct RecordInput {
     /// Extra dimensions, recorded on the fact.
     #[serde(default)]
     pub dims: Option<BTreeMap<String, String>>,
-    /// The stream (`str1`); defaults to the caller's, else the primary.
+    /// The stream (`stream:str1`); defaults to the caller's, else the primary.
     #[serde(default)]
     pub stream: Option<String>,
 }
@@ -124,9 +124,7 @@ fn stream_for(
     let Some(named) = named else {
         return Ok(own.unwrap_or(primary));
     };
-    let stream: StreamId = named
-        .parse()
-        .map_err(|_| invalid("/stream", format!("`{named}` is not a stream id (`str1`)")))?;
+    let stream: StreamId = ref_id(named, "stream", "/stream")?;
     match own {
         Some(own) if actor.is_agent_driven() && own != stream => Err(invalid(
             "/stream",
@@ -581,7 +579,7 @@ mod tests {
             ),
             (json!({ "key": "ci.derived", "value": 1.0 }), "formula"),
             (
-                json!({ "key": "oxplow.rust.unsafe_blocks", "value": 1.0, "stream": "str2" }),
+                json!({ "key": "oxplow.rust.unsafe_blocks", "value": 1.0, "stream": "stream:str2" }),
                 "not the caller's stream",
             ),
         ] {

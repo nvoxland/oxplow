@@ -721,7 +721,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::CLOSE,
-                serde_json::json!({ "effort": f.effort.to_string() }),
+                serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort) }),
                 false,
             )
             .await
@@ -1056,7 +1056,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::CLOSE,
-                serde_json::json!({ "effort": f.effort.to_string(), "reason": "commit" }),
+                serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort), "reason": "commit" }),
                 false,
             )
             .await

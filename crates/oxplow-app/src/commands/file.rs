@@ -10,20 +10,20 @@
 use std::sync::Arc;
 
 use oxplow_domain::events::schema::{FileSaved, FileSavedV1};
-use oxplow_domain::{CommandError, Envelope};
+use oxplow_domain::{CommandError, Envelope, StreamId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::ops::Op;
-use super::util::{parse, schema};
+use super::util::{parse, ref_id, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::workspace_files::{WorkspaceError, WorkspaceFiles};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SaveInput {
-    /// The stream whose worktree it's in (`str2`).
+    /// The stream whose worktree it's in (`stream:str2`).
     pub stream: String,
     /// Its path in the worktree.
     pub path: String,
@@ -42,12 +42,10 @@ pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
             let files = files.clone();
             Box::pin(async move {
                 let input: SaveInput = parse(input)?;
+                let stream: StreamId = ref_id(&input.stream, "stream", "/stream")?;
                 // A person saves in any stream; anyone else only in its
                 // own — an agent's tools' rule (an effect has none).
-                if !invocation.actor.may_confirm()
-                    && invocation.actor.stream_id().map(|s| s.to_string())
-                        != Some(input.stream.clone())
-                {
+                if !invocation.actor.may_confirm() && invocation.actor.stream_id() != Some(stream) {
                     return Err(CommandError::Denied {
                         reason: format!(
                             "{} saves only in its own stream's worktree, not `{}`",
@@ -58,7 +56,7 @@ pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
                 }
                 let bytes = input.content.len() as u64;
                 let saved = files
-                    .write(Some(&input.stream), input.path.clone(), input.content)
+                    .write(Some(&stream.to_string()), input.path.clone(), input.content)
                     .await
                     .map_err(|e| match e {
                         WorkspaceError::Io(_) => CommandError::Failed {
@@ -72,13 +70,13 @@ pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
                 let mut saved_event = Envelope::typed::<FileSaved>(
                     invocation.actor.source(),
                     &FileSavedV1 {
-                        stream: input.stream.clone(),
+                        stream: stream.to_string(),
                         path: saved.path.clone(),
                         bytes,
                     },
                 )
                 .with_subject([format!("file:{}", saved.path)]);
-                saved_event.anchors.stream_id = input.stream.parse().ok();
+                saved_event.anchors.stream_id = Some(stream);
                 Ok(HandlerOutput {
                     result: json!({ "path": saved.path, "bytes": bytes }),
                     events: vec![saved_event],
@@ -100,9 +98,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn save_writes_is_audited_without_its_content_and_logs_file_saved() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let stream = fx.svc.streams.list_streams().await.unwrap()[0]
-            .id
-            .to_string();
+        let stream = oxplow_domain::refs::build::stream_ref(
+            fx.svc.streams.list_streams().await.unwrap()[0].id,
+        );
         let out = fx
             .svc
             .commands
@@ -173,7 +171,7 @@ mod tests {
                         .run(
                             &actor,
                             "oxplow.file.save",
-                            json!({ "stream": stream.to_string(), "path": "notes.txt", "content": "hi" }),
+                            json!({ "stream": oxplow_domain::refs::build::stream_ref(stream), "path": "notes.txt", "content": "hi" }),
                             false,
                         )
                         .await
@@ -211,7 +209,7 @@ mod tests {
     async fn an_agent_saves_only_in_its_own_stream() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0].id;
-        let input = json!({ "stream": stream.to_string(), "path": "n.txt", "content": "x" });
+        let input = json!({ "stream": oxplow_domain::refs::build::stream_ref(stream), "path": "n.txt", "content": "x" });
         let elsewhere = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: Some(oxplow_domain::StreamId::new(99)),

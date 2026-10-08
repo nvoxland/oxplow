@@ -24,7 +24,7 @@ use std::sync::Arc;
 use oxplow_db::effort_store::{
     finish_tx, link_tx, open_for_thread_tx, retitle_tx, start_tx, ClosedBy, EffortEnd, EffortStart,
 };
-use oxplow_domain::refs::build::validate_work_item_ref;
+use oxplow_domain::refs::build::{effort_ref, thread_ref, validate_work_item_ref};
 use oxplow_domain::work_items::WorkItemsRegistry;
 
 use super::work_item::with_loose_refs;
@@ -34,7 +34,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::util::{invalid, parse, schema, sql};
+use super::util::{invalid, parse, ref_id, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const OPEN: &str = "oxplow.effort.open";
@@ -45,7 +45,7 @@ pub const UPDATE: &str = "oxplow.effort.update";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortOpenInput {
-    /// The thread doing the work (`thr3`); defaults to the caller's. An
+    /// The thread doing the work (`thread:thr3`); defaults to the caller's. An
     /// agent may name only a thread in its own stream.
     #[serde(default)]
     pub thread: Option<String>,
@@ -66,10 +66,10 @@ pub struct EffortOpenInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortCloseInput {
-    /// The effort (`eff12`).
+    /// The effort (`effort:eff12`).
     #[serde(default)]
     pub effort: Option<String>,
-    /// Or the thread (`thr3`) whose open effort it is.
+    /// Or the thread (`thread:thr3`) whose open effort it is.
     #[serde(default)]
     pub thread: Option<String>,
     /// RFC 3339: close it as of this point; what came after is left to the
@@ -95,10 +95,10 @@ pub enum CloseReason {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortLinkInput {
-    /// The effort (`eff12`).
+    /// The effort (`effort:eff12`).
     #[serde(default)]
     pub effort: Option<String>,
-    /// Or the thread (`thr3`) whose open effort it is.
+    /// Or the thread (`thread:thr3`) whose open effort it is.
     #[serde(default)]
     pub thread: Option<String>,
     /// The work item to link it to; `null` unlinks it.
@@ -108,7 +108,7 @@ pub struct EffortLinkInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortUpdateInput {
-    /// The effort (`eff12`).
+    /// The effort (`effort:eff12`).
     pub effort: String,
     /// Its own title; `null` clears it back to the default.
     pub title: Option<String>,
@@ -116,11 +116,6 @@ pub struct EffortUpdateInput {
 
 fn timestamp(raw: &str, field: &str) -> Result<Timestamp, CommandError> {
     Timestamp::parse(raw).map_err(|e| invalid(field, format!("`{raw}` isn't RFC 3339: {e}")))
-}
-
-fn thread_id(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
-    raw.parse::<ThreadId>()
-        .map_err(|e| invalid(field, e.to_string()))
 }
 
 /// `thread`, after checking it exists and — for an agent — that it's in
@@ -160,9 +155,7 @@ fn target_effort(
 ) -> Result<(EffortId, ThreadId), CommandError> {
     let (id, thread) = match (effort, thread) {
         (Some(raw), None) => {
-            let id = EffortId::try_from_str(raw).ok_or_else(|| {
-                invalid("/effort", format!("`{raw}` isn't an effort id (`eff12`)"))
-            })?;
+            let id: EffortId = ref_id(raw, "effort", "/effort")?;
             let thread: i64 = ctx
                 .conn
                 .query_row(
@@ -176,7 +169,7 @@ fn target_effort(
             (id, ThreadId::new(thread))
         }
         (None, Some(raw)) => {
-            let thread = thread_id(raw, "/thread")?;
+            let thread = ref_id(raw, "thread", "/thread")?;
             let id = open_for_thread_tx(ctx.conn, thread)
                 .map_err(sql)?
                 .ok_or_else(|| {
@@ -210,7 +203,7 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
             validate_work_item_ref(w).map_err(|e| invalid("/work_item", e.to_string()))?;
         }
         let thread = match input.thread.as_deref() {
-            Some(raw) => thread_id(raw, "/thread")?,
+            Some(raw) => ref_id(raw, "thread", "/thread")?,
             None => ctx
                 .actor
                 .thread_id()
@@ -236,8 +229,8 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
         }
         Ok(output(
             json!({
-                "effort": effort.to_string(),
-                "thread": thread.to_string(),
+                "effort": effort_ref(effort),
+                "thread": thread_ref(thread),
                 "work_item": input.work_item,
             }),
             None,
@@ -296,7 +289,7 @@ pub fn close_op() -> Op {
                 format!("effort `{id}` is already closed"),
             ));
         }
-        Ok(output(json!({ "effort": id.to_string() }), None))
+        Ok(output(json!({ "effort": effort_ref(id) }), None))
     }));
     Op::new(
         "efforts.write",
@@ -316,10 +309,10 @@ pub fn link_op(work_items: WorkItemsRegistry) -> Op {
         let (id, _) = target_effort(ctx, input.effort.as_deref(), input.thread.as_deref())?;
         let before = link_tx(ctx.conn, &ctx.events, id, input.work_item.as_deref())?;
         Ok(output(
-            json!({ "effort": id.to_string(), "work_item": input.work_item }),
+            json!({ "effort": effort_ref(id), "work_item": input.work_item }),
             Some(CommandCall {
                 name: LINK.into(),
-                input: json!({ "effort": id.to_string(), "work_item": before }),
+                input: json!({ "effort": effort_ref(id), "work_item": before }),
             }),
         ))
     }));
@@ -338,10 +331,10 @@ pub fn update_op() -> Op {
         let (id, _) = target_effort(ctx, Some(&input.effort), None)?;
         let before = retitle_tx(ctx.conn, &ctx.events, id, input.title.as_deref())?;
         Ok(output(
-            json!({ "effort": id.to_string(), "title": input.title }),
+            json!({ "effort": effort_ref(id), "title": input.title }),
             Some(CommandCall {
                 name: UPDATE.into(),
-                input: json!({ "effort": id.to_string(), "title": before }),
+                input: json!({ "effort": effort_ref(id), "title": before }),
             }),
         ))
     }));
@@ -386,7 +379,9 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let bus = &fx.svc.commands;
         let opened = bus.run(&agent(&fx), OPEN, json!({}), false).await.unwrap();
-        let effort: EffortId = opened.result["effort"].as_str().unwrap().parse().unwrap();
+        let effort: EffortId =
+            oxplow_domain::refs::build::effort_of_ref(opened.result["effort"].as_str().unwrap())
+                .unwrap();
         let row = |fx: &crate::test_fixtures::EffortFixture| {
             let svc = fx.svc.clone();
             async move { svc.effort_store.get_effort(&effort).await.unwrap().unwrap() }
@@ -396,7 +391,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 LINK,
-                json!({ "thread": fx.thread.to_string(), "work_item": ISSUES }),
+                json!({ "thread": thread_ref(fx.thread), "work_item": ISSUES }),
                 false,
             )
             .await
@@ -409,7 +404,7 @@ mod tests {
         bus.run(
             &Actor::Human,
             UPDATE,
-            json!({ "effort": effort.to_string(), "title": "Login page" }),
+            json!({ "effort": effort_ref(effort), "title": "Login page" }),
             false,
         )
         .await
@@ -418,7 +413,7 @@ mod tests {
         bus.run(
             &agent(&fx),
             CLOSE,
-            json!({ "thread": fx.thread.to_string(), "summary": "done" }),
+            json!({ "thread": thread_ref(fx.thread), "summary": "done" }),
             false,
         )
         .await
@@ -467,7 +462,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             field(
-                bus.run(&agent(&fx), OPEN, json!({ "thread": "thr2" }), false)
+                bus.run(&agent(&fx), OPEN, json!({ "thread": "thread:thr2" }), false)
                     .await
                     .unwrap_err()
             ),
@@ -481,13 +476,13 @@ mod tests {
         };
         assert_eq!(
             field(
-                bus.run(&threadless, OPEN, json!({ "thread": "thr2" }), false)
+                bus.run(&threadless, OPEN, json!({ "thread": "thread:thr2" }), false)
                     .await
                     .unwrap_err()
             ),
             "/thread"
         );
-        bus.run(&agent(&fx), OPEN, json!({ "thread": "thr3" }), false)
+        bus.run(&agent(&fx), OPEN, json!({ "thread": "thread:thr3" }), false)
             .await
             .unwrap();
         assert_eq!(
@@ -495,7 +490,7 @@ mod tests {
                 bus.run(
                     &agent(&fx),
                     CLOSE,
-                    json!({ "thread": "thr3", "as_of": "2020-01-01T00:00:00Z" }),
+                    json!({ "thread": "thread:thr3", "as_of": "2020-01-01T00:00:00Z" }),
                     false
                 )
                 .await

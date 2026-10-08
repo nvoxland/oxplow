@@ -31,6 +31,7 @@
 //! agents. Switching it (`capability.switched`) closes the open efforts
 //! (`switch`): the policy they were opened under is no longer the one.
 
+use oxplow_domain::refs::build::{effort_ref, thread_ref};
 use std::sync::{Arc, RwLock, Weak};
 
 use async_trait::async_trait;
@@ -199,7 +200,7 @@ impl EffortPolicyConsumer {
             return self
                 .run(
                     crate::commands::effort::OPEN,
-                    json!({ "thread": thread.to_string(), "work_item": item_ref }),
+                    json!({ "thread": thread_ref(thread), "work_item": item_ref }),
                 )
                 .await;
         };
@@ -209,19 +210,19 @@ impl EffortPolicyConsumer {
             Some(linked) if !self.is_under(item_ref, linked).await? => {
                 self.run(
                     crate::commands::effort::CLOSE,
-                    json!({ "effort": open.id.to_string(), "reason": "switch" }),
+                    json!({ "effort": effort_ref(open.id), "reason": "switch" }),
                 )
                 .await?;
                 self.run(
                     crate::commands::effort::OPEN,
-                    json!({ "thread": thread.to_string(), "work_item": item_ref }),
+                    json!({ "thread": thread_ref(thread), "work_item": item_ref }),
                 )
                 .await
             }
             _ => {
                 self.run(
                     crate::commands::effort::LINK,
-                    json!({ "effort": open.id.to_string(), "work_item": item_ref }),
+                    json!({ "effort": effort_ref(open.id), "work_item": item_ref }),
                 )
                 .await
             }
@@ -242,7 +243,7 @@ impl EffortPolicyConsumer {
             if let Some(SqlCell::Int(id)) = row.first() {
                 self.run(
                     crate::commands::effort::CLOSE,
-                    json!({ "effort": EffortId::new(*id).to_string(), "reason": "switch" }),
+                    json!({ "effort": effort_ref(EffortId::new(*id)), "reason": "switch" }),
                 )
                 .await?;
             }
@@ -267,7 +268,7 @@ impl EffortPolicyConsumer {
         };
         self.run(
             crate::commands::effort::OPEN,
-            json!({ "thread": thread.to_string(), "adopt_since": started }),
+            json!({ "thread": thread_ref(thread), "adopt_since": started }),
         )
         .await
     }
@@ -354,7 +355,7 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
                     Some(effort) if self.is_open(effort).await? => {
                         self.run(
                             crate::commands::effort::CLOSE,
-                            json!({ "effort": effort.to_string(), "reason": "commit" }),
+                            json!({ "effort": effort_ref(effort), "reason": "commit" }),
                         )
                         .await
                     }
@@ -493,7 +494,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::CLOSE,
-                json!({ "effort": fx.effort.to_string() }),
+                json!({ "effort": effort_ref(fx.effort) }),
                 false,
             )
             .await
@@ -571,7 +572,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": fx.effort.to_string(), "work_item": todo }),
+                json!({ "effort": effort_ref(fx.effort), "work_item": todo }),
                 false,
             )
             .await

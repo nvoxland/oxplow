@@ -18,14 +18,14 @@ use oxplow_db::comment_store::{
 use oxplow_domain::refs::build::{stream_ref, thread_ref};
 use oxplow_domain::{
     Actor, CommandCall, CommandError, CommentId, CommentIntent, CommentStatus, CommentTarget,
-    CommentThread, Confirm, Invokers, StreamId, ThreadId,
+    CommentThread, Confirm, Invokers, StreamId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::thread::agent_scope;
-use super::util::{invalid, parse, schema};
+use super::util::{invalid, parse, ref_id, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const ADD: &str = "oxplow.knowledge.add_comment";
@@ -68,7 +68,7 @@ pub struct AddInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplyInput {
-    /// The comment (`cmt12`).
+    /// The comment (`comment:cmt12`).
     pub comment: String,
     pub body: String,
 }
@@ -76,7 +76,7 @@ pub struct ReplyInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateInput {
-    /// The comment (`cmt12`).
+    /// The comment (`comment:cmt12`).
     pub comment: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<CommentIntent>,
@@ -94,7 +94,7 @@ pub struct UpdateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelocateInput {
-    /// The comment (`cmt12`).
+    /// The comment (`comment:cmt12`).
     pub comment: String,
     /// Where its quote sits in the content as rendered now (the W3C
     /// selectors array, as JSON) — its last known place when `orphaned`.
@@ -106,37 +106,8 @@ pub struct RelocateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommentInput {
-    /// The comment (`cmt12`).
+    /// The comment (`comment:cmt12`).
     pub comment: String,
-}
-
-fn comment_id(value: &str) -> Result<CommentId, CommandError> {
-    CommentId::try_from_str(value)
-        .ok_or_else(|| invalid("/comment", format!("`{value}` isn't a comment id (cmt…)")))
-}
-
-fn stream_of(value: &str) -> Result<StreamId, CommandError> {
-    value
-        .strip_prefix("stream:")
-        .and_then(|id| id.parse().ok())
-        .ok_or_else(|| {
-            invalid(
-                "/stream",
-                format!("`{value}` isn't a stream ref (stream:<id>)"),
-            )
-        })
-}
-
-fn thread_of(value: &str) -> Result<ThreadId, CommandError> {
-    value
-        .strip_prefix("thread:")
-        .and_then(|id| id.parse().ok())
-        .ok_or_else(|| {
-            invalid(
-                "/thread",
-                format!("`{value}` isn't a thread ref (thread:<id>)"),
-            )
-        })
 }
 
 /// Who wrote it: a person `user`, an agent `agent` (a lens writes as the
@@ -177,9 +148,13 @@ pub fn add_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: AddInput = parse(input)?;
-            let stream = stream_of(&input.stream)?;
+            let stream = ref_id(&input.stream, "stream", "/stream")?;
             on_own_stream(ctx, stream)?;
-            let named = input.thread.as_deref().map(thread_of).transpose()?;
+            let named = input
+                .thread
+                .as_deref()
+                .map(|t| ref_id(t, "thread", "/thread"))
+                .transpose()?;
             let thread = match agent_scope(ctx)? {
                 Some((own, _)) => {
                     if named.is_some_and(|t| t != own) {
@@ -228,7 +203,7 @@ pub fn reply_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ReplyInput = parse(input)?;
-            let id = comment_id(&input.comment)?;
+            let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
             on_own_stream(ctx, load(ctx, id)?.comment.stream_id)?;
             let (message, events) =
                 add_message_tx(ctx.conn, id, author_of(ctx.actor), &input.body)?;
@@ -252,7 +227,7 @@ pub fn update_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: UpdateInput = parse(input)?;
-            let id = comment_id(&input.comment)?;
+            let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
             let before = load(ctx, id)?.comment;
             on_own_stream(ctx, before.stream_id)?;
             let mut events = Vec::new();
@@ -309,7 +284,7 @@ pub fn delete_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: CommentInput = parse(input)?;
-            let id = comment_id(&input.comment)?;
+            let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
             load(ctx, id)?;
             let events = delete_tx(ctx.conn, id)?;
             Ok(HandlerOutput {
@@ -336,7 +311,7 @@ pub fn relocate_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RelocateInput = parse(input)?;
-            let id = comment_id(&input.comment)?;
+            let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
             let before = load(ctx, id)?.comment;
             if before.selectors_json == input.selectors_json && before.orphaned == input.orphaned {
                 return Ok(HandlerOutput {
@@ -424,7 +399,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPLY,
-                json!({ "comment": mine["comment"]["id"], "body": "ok" }),
+                json!({ "comment": format!("comment:{}", mine["comment"]["id"].as_str().unwrap()), "body": "ok" }),
                 false,
             )
             .await
@@ -451,6 +426,7 @@ mod tests {
         .unwrap();
         let id = c["comment"]["id"].as_str().unwrap().to_string();
         let cid = CommentId::try_from_str(&id).unwrap();
+        let id = format!("comment:{id}");
         let relocate = |selectors: &str, orphaned: bool| json!({ "comment": id, "selectors_json": selectors, "orphaned": orphaned });
         let run = |actor: Actor, input: Value| {
             let bus = fx.svc.commands.clone();
@@ -541,6 +517,7 @@ mod tests {
         .unwrap();
         let id = c["comment"]["id"].as_str().unwrap().to_string();
         let cid = CommentId::try_from_str(&id).unwrap();
+        let id = format!("comment:{id}");
         let out = fx
             .svc
             .commands

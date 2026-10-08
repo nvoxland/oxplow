@@ -774,7 +774,7 @@ export async function keepLensSpec(
   streamId: string | null,
 ): Promise<KeptLens> {
   const input: Record<string, unknown> = { spec, extension, slug };
-  if (streamId) input.stream = streamId;
+  if (streamId) input.stream = streamRef(streamId);
   const outcome = await runCommand("oxplow.lens.keep", input);
   return keptLens(outcome.result);
 }
@@ -1191,27 +1191,27 @@ export async function runCommandInBackground(label: string, id: string, input: u
 
 export async function vcsMerge(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
   return runAsBackgroundTask(`Merge ${rev}`, "vcs", `merge ${rev}`, () =>
-    runVcs("oxplow.vcs.merge", { stream: streamId, rev }, confirmed),
+    runVcs("oxplow.vcs.merge", { stream: streamRef(streamId), rev }, confirmed),
   );
 }
 
 export async function gitRebase(streamId: string, onto: string, confirmed: boolean): Promise<GitOpKickoff> {
   return runAsBackgroundTask(`Rebase onto ${onto}`, "vcs", `rebase ${onto}`, () =>
-    runVcs("oxplow.git.rebase", { stream: streamId, rev: onto }, confirmed),
+    runVcs("oxplow.git.rebase", { stream: streamRef(streamId), rev: onto }, confirmed),
   );
 }
 
 export async function gitCherryPick(streamId: string, rev: string): Promise<GitOpKickoff> {
   const short = rev.slice(0, 7);
   return runAsBackgroundTask(`Cherry-pick ${short}`, "vcs", `cherry-pick ${short}`, () =>
-    runVcs("oxplow.git.cherry_pick", { stream: streamId, rev }),
+    runVcs("oxplow.git.cherry_pick", { stream: streamRef(streamId), rev }),
   );
 }
 
 export async function gitRevert(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
   const short = rev.slice(0, 7);
   return runAsBackgroundTask(`Revert ${short}`, "vcs", `revert ${short}`, () =>
-    runVcs("oxplow.git.revert", { stream: streamId, rev }, confirmed),
+    runVcs("oxplow.git.revert", { stream: streamRef(streamId), rev }, confirmed),
   );
 }
 
@@ -1289,11 +1289,11 @@ export async function createStream(input:
 /** Switch the stream's workspace to `branch` (`create` makes it at the
  *  head first). The branch reconciler records it on the stream. */
 export async function vcsCheckoutBranch(streamId: string, branch: string, create = false): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.checkout_branch", { stream: streamId, name: branch, create });
+  return runVcs("oxplow.vcs.checkout_branch", { stream: streamRef(streamId), name: branch, create });
 }
 
 export async function vcsRenameBranch(streamId: string, from: string, to: string): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.rename_branch", { stream: streamId, from, to });
+  return runVcs("oxplow.vcs.rename_branch", { stream: streamRef(streamId), from, to });
 }
 
 export async function vcsDeleteBranch(
@@ -1302,16 +1302,13 @@ export async function vcsDeleteBranch(
   force: boolean,
   confirmed: boolean,
 ): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.delete_branch", { stream: streamId, name, force }, confirmed);
+  return runVcs("oxplow.vcs.delete_branch", { stream: streamRef(streamId), name, force }, confirmed);
 }
 
 export async function getThreadState(streamId: string): Promise<ThreadState> {
   return unwrap(await commands.getThreadState(streamId)) as unknown as ThreadState;
 }
 
-/** A thread command's input names threads and streams by ref. */
-const threadRef = (id: string) => `thread:${id}`;
-const streamRef = (id: string) => `stream:${id}`;
 
 export async function createThread(
   streamId: string,
@@ -1392,16 +1389,16 @@ export async function searchWorkspaceText(
 /** Throw away the workspace's changes to `paths` — destructive, so the
  *  person has confirmed. */
 export async function vcsDiscard(streamId: string, paths: string[], confirmed: boolean): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.discard", { stream: streamId, paths }, confirmed);
+  return runVcs("oxplow.vcs.discard", { stream: streamRef(streamId), paths }, confirmed);
 }
 
 export async function vcsStage(streamId: string, paths: string[]): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.stage", { stream: streamId, paths });
+  return runVcs("oxplow.vcs.stage", { stream: streamRef(streamId), paths });
 }
 
 /** Append a pattern to the workspace's `.gitignore`. */
 export async function gitIgnore(streamId: string, entry: string): Promise<OpOutcome> {
-  return runVcs("oxplow.git.ignore", { stream: streamId, entry });
+  return runVcs("oxplow.git.ignore", { stream: streamRef(streamId), entry });
 }
 
 /** A remote branch to push to or pull from; omitted = the upstream. */
@@ -1417,7 +1414,7 @@ export async function vcsPush(
 ): Promise<GitOpKickoff> {
   const where = to ? ` ${to.remote} ${to.branch}` : "";
   return runAsBackgroundTask(to ? `Push to ${to.remote}/${to.branch}` : "Push", "vcs", `push${where}`, () =>
-    runVcs("oxplow.vcs.push", { stream: streamId, ...to }, confirmed),
+    runVcs("oxplow.vcs.push", { stream: streamRef(streamId), ...to }, confirmed),
   );
 }
 
@@ -1428,13 +1425,13 @@ export async function vcsPull(
 ): Promise<GitOpKickoff> {
   const where = from ? ` ${from.remote} ${from.branch}` : "";
   return runAsBackgroundTask(from ? `Pull ${from.remote}/${from.branch}` : "Pull", "vcs", `pull${where}`, () =>
-    runVcs("oxplow.vcs.pull", { stream: streamId, ...from }, confirmed),
+    runVcs("oxplow.vcs.pull", { stream: streamRef(streamId), ...from }, confirmed),
   );
 }
 
 export async function vcsFetch(streamId: string, remote?: string): Promise<GitOpKickoff> {
   return runAsBackgroundTask("Fetch", "vcs", `fetch${remote ? ` ${remote}` : ""}`, () =>
-    runVcs("oxplow.vcs.fetch", { stream: streamId, remote: remote ?? null }),
+    runVcs("oxplow.vcs.fetch", { stream: streamRef(streamId), remote: remote ?? null }),
   );
 }
 
@@ -1445,7 +1442,7 @@ export async function vcsCommit(
   includeUntracked = true,
 ): Promise<{ success: boolean; revision: string }> {
   const outcome = await runCommand("oxplow.vcs.commit", {
-    stream: streamId,
+    stream: streamRef(streamId),
     message,
     include_untracked: includeUntracked,
   });
@@ -1516,7 +1513,7 @@ export async function createComment(input: {
 }
 
 export async function addCommentMessage(commentId: string, body: string): Promise<CommentMessage> {
-  return (await runCommand("oxplow.knowledge.reply_comment", { comment: commentId, body })).result as CommentMessage;
+  return (await runCommand("oxplow.knowledge.reply_comment", { comment: commentRef(commentId), body })).result as CommentMessage;
 }
 
 export async function listCommentsForTarget(
@@ -1531,11 +1528,11 @@ export async function listCommentsForStream(streamId: string): Promise<CommentTh
 }
 
 export async function setCommentIntent(commentId: string, intent: CommentIntent): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, intent });
+  await runCommand("oxplow.knowledge.update_comment", { comment: commentRef(commentId), intent });
 }
 
 export async function setCommentStatus(commentId: string, status: CommentStatus): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, status });
+  await runCommand("oxplow.knowledge.update_comment", { comment: commentRef(commentId), status });
 }
 
 /// Store where the renderer re-found a comment's quote (or that it is
@@ -1545,7 +1542,7 @@ export async function relocateComment(
   selectorsJson: string,
   orphaned: boolean,
 ): Promise<void> {
-  await runCommand("oxplow.knowledge.relocate_comment", { comment: commentId, selectors_json: selectorsJson, orphaned });
+  await runCommand("oxplow.knowledge.relocate_comment", { comment: commentRef(commentId), selectors_json: selectorsJson, orphaned });
 }
 
 /// Re-attach an orphaned comment to a freshly-selected span: rewrites
@@ -1555,13 +1552,13 @@ export async function relinkComment(
   quote: string,
   selectorsJson: string,
 ): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, quote, selectors_json: selectorsJson });
+  await runCommand("oxplow.knowledge.update_comment", { comment: commentRef(commentId), quote, selectors_json: selectorsJson });
 }
 
 /** The popover's delete sits behind an `InlineConfirm`, the person's
  *  confirmation (`oxplow.knowledge.delete_comment` is destructive). */
 export async function deleteComment(commentId: string): Promise<void> {
-  await runCommand("oxplow.knowledge.delete_comment", { comment: commentId }, true);
+  await runCommand("oxplow.knowledge.delete_comment", { comment: commentRef(commentId) }, true);
 }
 
 /// Subscribe to comment changes: a commit touched `v_comment` (a comment
@@ -1736,6 +1733,7 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./metricsSql.js";
 
 import type { Dashboard, DashboardWithItems } from "./tauri-bridge/index.js";
+import { commentRef, streamRef, threadRef } from "./recordRefs.js";
 export type { Dashboard, DashboardItem, DashboardWithItems } from "./tauri-bridge/index.js";
 
 // User-created dashboards (tsk138) — project-global grids of metric tiles.

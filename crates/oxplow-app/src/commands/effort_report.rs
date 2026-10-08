@@ -21,8 +21,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::thread::parse_thread_ref;
-use super::util::{failed, invalid, parse, schema};
+use super::util::{failed, invalid, parse, ref_id, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::effort_service::EffortService;
 use crate::sql_gateway::SqlGateway;
@@ -108,7 +107,11 @@ async fn report(
             ),
         ));
     }
-    let named = input.thread.as_deref().map(parse_thread_ref).transpose()?;
+    let named = input
+        .thread
+        .as_deref()
+        .map(|t| ref_id(t, "thread", "/thread"))
+        .transpose()?;
     let thread = match agents_thread(&actor, named)? {
         Some(own) => own,
         None => named.ok_or_else(|| invalid("/thread", "name the thread"))?,
@@ -159,7 +162,7 @@ async fn report(
         None => Vec::new(),
     };
     Ok(json!({
-        "effort": effort.id.to_string(),
+        "effort": oxplow_domain::refs::build::effort_ref(effort.id),
         "link_warnings": link_warnings,
     }))
 }
@@ -242,7 +245,10 @@ mod tests {
         let before = audit.list_recent(50).await.unwrap().len();
         let (task, report) = complete(&fx, json!({ "summary": "shipped it" })).await;
         assert_eq!(task["state"], "done", "{task}");
-        assert_eq!(report["effort"], json!(fx.effort.to_string()));
+        assert_eq!(
+            report["effort"],
+            json!(oxplow_domain::refs::build::effort_ref(fx.effort))
+        );
 
         let rows = audit.list_recent(50).await.unwrap();
         assert_eq!(rows.len(), before + 1, "one audit row for the whole close");

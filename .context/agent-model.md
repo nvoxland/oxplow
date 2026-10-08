@@ -1003,7 +1003,8 @@ is `{ to: done|canceled, native_state: archived }`.
   "Forking a thread" above.
 - `list_comments({ id, scope?, status? })`, then `run_command
   oxplow.knowledge.reply_comment { comment, body }` / `oxplow.knowledge.update_comment
-  { comment, status: "resolved" }` (P8.A6) — the user's
+  { comment, status: "resolved" }` (P8.A6; `comment` is the comment's
+  ref, `comment:<its id>` — `comment:cmt12`) — the user's
   threaded annotations anchored to text in pages (wiki / file / task).
   `id` is a thread id (`thr…`) or stream id (`str…`, the whole
   workspace). `scope` (`"thread"` / `"stream"`) is **optional** — when

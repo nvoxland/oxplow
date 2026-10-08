@@ -1188,7 +1188,7 @@ mod core_tests {
             }),
         )
         .await;
-        let comment = out["comment"]["id"].clone();
+        let comment = format!("comment:{}", out["comment"]["id"].as_str().unwrap());
         eventually("the comment is found", || {
             found(&svc, "doohickey", Some(stream.id), "comment")
         })

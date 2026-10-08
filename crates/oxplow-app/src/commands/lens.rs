@@ -23,7 +23,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::util::{invalid, parse, schema};
+use super::util::{invalid, parse, ref_id, schema};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
@@ -55,7 +55,7 @@ pub struct ShowInput {
     pub spec: Option<LensSpec>,
     /// Param values by name (the lens's declared params).
     pub params: Option<BTreeMap<String, Value>>,
-    /// The thread it's shown in (`thr3`); the caller's when omitted.
+    /// The thread it's shown in (`thread:thr3`); the caller's when omitted.
     pub thread: Option<String>,
 }
 
@@ -68,7 +68,7 @@ pub struct KeepInput {
     /// A lens of its own to keep (title, query, viz and what its viz
     /// needs), checked as `oxplow.lens.show` checks one.
     pub spec: Option<LensSpec>,
-    /// The stream whose worktree a `spec` goes in (`str2`): the caller's
+    /// The stream whose worktree a `spec` goes in (`stream:str2`): the caller's
     /// thread's when omitted, else the primary's. An answer goes in its
     /// own thread's.
     pub stream: Option<String>,
@@ -86,7 +86,7 @@ pub struct ShareInput {
     pub lens: String,
     /// The shared extension it moves to (created, shared, when missing).
     pub extension: String,
-    /// The stream whose worktree it's in (`str2`); the primary's when
+    /// The stream whose worktree it's in (`stream:str2`); the primary's when
     /// omitted.
     pub stream: Option<String>,
 }
@@ -134,15 +134,18 @@ fn thread_stream_tx(conn: &rusqlite::Connection, thread: i64) -> Result<Option<i
     .map_err(oxplow_db::map_sql_err)
 }
 
-/// The worktree of stream `raw` (`str2`); `Invalid` for one that isn't.
+/// The worktree of stream `raw` (`stream:str2`); `Invalid` for one that isn't.
 fn stream_root_tx(
     conn: &rusqlite::Connection,
     project_dir: &Path,
     raw: &str,
 ) -> Result<(i64, PathBuf), DomainError> {
-    let stream: oxplow_domain::StreamId = raw
-        .parse()
-        .map_err(|_| DomainError::Invalid(format!("`{raw}` isn't a stream")))?;
+    let stream: oxplow_domain::StreamId = ref_id(raw, "stream", "/stream").map_err(|e| {
+        DomainError::Invalid(match e {
+            CommandError::Invalid { message, .. } => message,
+            other => other.to_string(),
+        })
+    })?;
     let path: Option<String> = conn
         .query_row(
             "SELECT worktree_path FROM streams WHERE id = ?1",
@@ -226,9 +229,7 @@ fn show(target: LensTarget) -> Op {
         let input: ShowInput = parse(input)?;
         let thread: i64 = match input.thread.as_deref() {
             Some(raw) => {
-                let named = raw
-                    .parse::<ThreadId>()
-                    .map_err(|e| invalid("/thread", e.to_string()))?;
+                let named: ThreadId = ref_id(raw, "thread", "/thread")?;
                 // An agent shows answers in its own thread only; a person
                 // may name any.
                 if ctx.actor.is_agent_driven() && ctx.actor.thread_id() != Some(named) {
@@ -852,7 +853,7 @@ mod tests {
     #[tokio::test]
     async fn an_agent_shows_only_in_its_own_thread() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let other = format!("thr{}", fx.thread.value() + 1000);
+        let other = format!("thread:thr{}", fx.thread.value() + 1000);
         let err = fx
             .svc
             .commands
@@ -874,7 +875,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 SHOW,
-                json!({ "spec": spec(), "thread": fx.thread.to_string() }),
+                json!({ "spec": spec(), "thread": thread_ref(fx.thread) }),
                 false,
             )
             .await
@@ -1003,7 +1004,7 @@ mod tests {
                 KEEP,
                 json!({
                     "spec": spec(),
-                    "stream": stream.to_string(),
+                    "stream": oxplow_domain::refs::build::stream_ref(stream),
                     "extension": "saved",
                     "slug": "busy-tasks"
                 }),
@@ -1209,21 +1210,21 @@ mod tests {
                 json!({ "spec": spec(), "stream": stream, "extension": "kept", "slug": slug });
             async move { svc.commands.run(&actor, KEEP, input, false).await }
         };
-        let err = keep(agent(&fx), "str2", "theirs").await.unwrap_err();
+        let err = keep(agent(&fx), "stream:str2", "theirs").await.unwrap_err();
         assert!(
             matches!(&err, CommandError::Invalid { field: Some(f), message }
                 if f == "/stream" && message.contains("its own thread's stream")),
             "{err:?}"
         );
         assert!(!wt.path().join("oxplow/extensions/kept").exists());
-        let own = fx.svc.streams.list_streams().await.unwrap()[0]
-            .id
-            .to_string();
+        let own = oxplow_domain::refs::build::stream_ref(
+            fx.svc.streams.list_streams().await.unwrap()[0].id,
+        );
         // Kept in the main worktree, it shows now; in another stream's,
         // once that stream is merged.
         let mine = keep(agent(&fx), &own, "mine").await.unwrap();
         assert_eq!(mine.result["live"], json!(true));
-        let theirs = keep(Actor::Human, "str2", "theirs").await.unwrap();
+        let theirs = keep(Actor::Human, "stream:str2", "theirs").await.unwrap();
         assert_eq!(theirs.result["live"], json!(false));
         assert!(wt
             .path()
@@ -1271,7 +1272,7 @@ mod tests {
         for input in [
             json!({}),
             json!({ "answer": "answer:1", "spec": spec() }),
-            json!({ "answer": "answer:1", "stream": "str1" }),
+            json!({ "answer": "answer:1", "stream": "stream:str1" }),
         ] {
             let err = fx
                 .svc

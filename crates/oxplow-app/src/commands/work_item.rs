@@ -1037,7 +1037,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": fx.effort.to_string(), "work_item": loose }),
+                json!({ "effort": oxplow_domain::refs::build::effort_ref(fx.effort), "work_item": loose }),
                 false,
             )
             .await

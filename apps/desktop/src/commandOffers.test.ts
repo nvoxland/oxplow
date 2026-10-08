@@ -40,7 +40,7 @@ const ctx = { streamId: "str2", threadId: "thr5" };
 
 test("an input template binds the stream and thread; one that can't bind is unavailable", () => {
   expect(bindInput({ stream: "{{stream}}", thread: "{{thread}}", n: 3 }, ctx)).toEqual({
-    input: { stream: "str2", thread: "thr5", n: 3 },
+    input: { stream: "stream:str2", thread: "thread:thr5", n: 3 },
   });
   expect(bindInput(null, ctx)).toEqual({ input: {} });
   expect(bindInput({ stream: "{{stream}}" }, { streamId: null, threadId: null })).toBeNull();
@@ -82,7 +82,7 @@ test("a form opens its page; a background command runs in the background; anothe
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toEqual([
     "open page:new-task",
-    'background oxplow.vcs.pull {"stream":"str2"}',
+    'background oxplow.vcs.pull {"stream":"stream:str2"}',
     'run oxplow.dashboard.create {"title":"Untitled dashboard"}',
     "open page:custom-dashboard?id=7",
   ]);

@@ -2,7 +2,7 @@
 //! `extensions/oxplow-foundation`): a person stars a page at a scope — the
 //! thread they're in, its stream, or the project — or takes the star off.
 //! `Tx` over the bookmark store's `_tx` cores; read back through
-//! `v_bookmark`. The viewer is the thread (`thr1`) the person is in, its
+//! `v_bookmark`. The viewer is the thread (`thread:thr1`) the person is in, its
 //! stream implied; a bookmark is visible once per viewer, so setting it at
 //! another scope moves it. Each undoes to what the viewer saw before.
 
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::ops::Op;
-use super::util::{invalid, parse, schema};
+use super::util::{invalid, parse, ref_id, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 /// The capability its operations are of.
@@ -55,10 +55,10 @@ pub struct SetInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub scope: ScopeInput,
-    /// The thread the person is in (`thr1`); its stream is the stream.
+    /// The thread the person is in (`thread:thr1`); its stream is the stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The stream (`str1`), when there's no thread.
+    /// The stream (`stream:str1`), when there's no thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
 }
@@ -69,10 +69,10 @@ pub struct RemoveInput {
     /// The page's canonical ref.
     #[serde(rename = "ref")]
     pub page_ref: String,
-    /// The thread the person is in (`thr1`).
+    /// The thread the person is in (`thread:thr1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The stream (`str1`), when there's no thread.
+    /// The stream (`stream:str1`), when there's no thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
 }
@@ -84,10 +84,7 @@ fn viewer(
     stream: Option<&str>,
 ) -> Result<Viewer, CommandError> {
     let thread = thread
-        .map(|t| {
-            ThreadId::try_from_str(t)
-                .ok_or_else(|| invalid("/thread", format!("`{t}` isn't a thread id (thr…)")))
-        })
+        .map(|t| ref_id::<ThreadId>(t, "thread", "/thread"))
         .transpose()?;
     let stream = match (thread, stream) {
         (Some(t), _) => {
@@ -103,10 +100,7 @@ fn viewer(
                 invalid("/thread", format!("no thread `{t}`"))
             })?))
         }
-        (None, Some(s)) => Some(
-            StreamId::try_from_str(s)
-                .ok_or_else(|| invalid("/stream", format!("`{s}` isn't a stream id (str…)")))?,
-        ),
+        (None, Some(s)) => Some(ref_id(s, "stream", "/stream")?),
         (None, None) => None,
     };
     Ok(Viewer { thread, stream })
@@ -219,7 +213,7 @@ mod tests {
     #[tokio::test]
     async fn set_moves_and_undo_walks_it_back() {
         let fx = services_with_effort().await;
-        let thread = fx.thread.to_string();
+        let thread = oxplow_domain::refs::build::thread_ref(fx.thread);
         let set = |scope: &str| {
             json!({ "ref": "page:git-dashboard", "page_kind": "git-dashboard",
                     "label": "Git", "scope": scope, "thread": thread })
@@ -261,7 +255,7 @@ mod tests {
     #[tokio::test]
     async fn remove_undoes_and_agents_cannot_bookmark() {
         let fx = services_with_effort().await;
-        let thread = fx.thread.to_string();
+        let thread = oxplow_domain::refs::build::thread_ref(fx.thread);
         let input = json!({ "ref": "file:src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),

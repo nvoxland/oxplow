@@ -17,7 +17,6 @@
 //! person's.
 
 use crate::commands::ops::Op;
-use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
@@ -31,7 +30,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::util::{invalid, parse, schema, sql};
+use super::util::{invalid, parse, ref_id, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const CREATE: &str = "oxplow.thread.create";
@@ -94,14 +93,6 @@ pub struct ReorderInput {
     pub order: Vec<String>,
 }
 
-/// The id a `<kind>:<id>` ref names.
-fn id_of<T: FromStr>(value: &str, kind: &str, field: &str) -> Result<T, CommandError> {
-    value
-        .strip_prefix(&format!("{kind}:"))
-        .and_then(|id| id.parse().ok())
-        .ok_or_else(|| invalid(field, format!("`{value}` isn't a {kind} ref ({kind}:<id>)")))
-}
-
 fn load(ctx: &TxCtx<'_>, id: ThreadId, field: &str) -> Result<Thread, CommandError> {
     get_tx(ctx.conn, id)
         .map_err(sql)?
@@ -130,19 +121,6 @@ pub(super) fn agent_scope(ctx: &TxCtx<'_>) -> Result<Option<(ThreadId, StreamId)
     }
 }
 
-/// A `thread:<id>` ref named in an input.
-pub(super) fn parse_thread_ref(value: &str) -> Result<ThreadId, CommandError> {
-    value
-        .strip_prefix("thread:")
-        .and_then(|id| id.parse().ok())
-        .ok_or_else(|| {
-            invalid(
-                "/thread",
-                format!("`{value}` isn't a thread ref (thread:<id>)"),
-            )
-        })
-}
-
 /// The thread an actor's record goes on — a note, a decision, a claim, a
 /// test run: an agent's own (naming another, or having none, is refused),
 /// else the one a person names. `own` is the agent's thread, when the
@@ -151,7 +129,7 @@ fn record_thread(
     own: Option<Option<ThreadId>>,
     named: Option<&str>,
 ) -> Result<ThreadId, CommandError> {
-    let named = named.map(parse_thread_ref).transpose()?;
+    let named = named.map(|t| ref_id(t, "thread", "/thread")).transpose()?;
     match own {
         None => named.ok_or_else(|| invalid("/thread", "name the thread")),
         Some(None) => Err(CommandError::Denied {
@@ -245,7 +223,7 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
         false,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: CreateInput = parse(input)?;
-            let stream: StreamId = id_of(&input.stream, "stream", "/stream")?;
+            let stream: StreamId = ref_id(&input.stream, "stream", "/stream")?;
             on_own_stream(ctx, stream)?;
             let config = crate::config_service::read_config(&config);
             let (agent, acp_agent) = match &input.from {
@@ -256,7 +234,7 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                             "a fork runs its source's agent; don't name one",
                         ));
                     }
-                    let source = load(ctx, id_of(from, "thread", "/from")?, "/from")?;
+                    let source = load(ctx, ref_id(from, "thread", "/from")?, "/from")?;
                     if source.stream_id != stream {
                         return Err(invalid("/from", format!("`{from}` is on another stream")));
                     }
@@ -351,7 +329,7 @@ pub fn rename_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
-            let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
+            let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
             on_own_stream(ctx, thread.stream_id)?;
             let before = std::mem::replace(&mut thread.title, input.title);
             thread.updated_at = Timestamp::now();
@@ -374,7 +352,7 @@ pub fn set_prompt_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: SetPromptInput = parse(input)?;
-            let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
+            let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
             let before = std::mem::replace(
                 &mut thread.custom_prompt,
                 input.prompt.filter(|p| !p.is_empty()),
@@ -405,7 +383,7 @@ pub fn promote_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
+            let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
             match thread.status {
                 ThreadStatus::Closed => {
                     return Err(invalid(
@@ -457,7 +435,7 @@ pub fn demote_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
+            let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
             if thread.status != ThreadStatus::Active {
                 return Ok(unchanged(&thread));
             }
@@ -484,7 +462,7 @@ pub fn close_op(acp: Arc<crate::acp::manager::AcpManager>) -> Op {
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let id = id_of(&input.thread, "thread", "/thread")?;
+            let id = ref_id(&input.thread, "thread", "/thread")?;
             own_thread_only(ctx, id, "closes")?;
             let mut thread = load(ctx, id, "/thread")?;
             if thread.status == ThreadStatus::Closed {
@@ -537,7 +515,7 @@ pub fn reopen_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let id = id_of(&input.thread, "thread", "/thread")?;
+            let id = ref_id(&input.thread, "thread", "/thread")?;
             own_thread_only(ctx, id, "reopens")?;
             let mut thread = load(ctx, id, "/thread")?;
             if thread.status != ThreadStatus::Closed {
@@ -565,11 +543,11 @@ pub fn reorder_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ReorderInput = parse(input)?;
-            let stream: StreamId = id_of(&input.stream, "stream", "/stream")?;
+            let stream: StreamId = ref_id(&input.stream, "stream", "/stream")?;
             let mut threads = Vec::with_capacity(input.order.len());
             for (i, r) in input.order.iter().enumerate() {
                 let field = format!("/order/{i}");
-                let thread = load(ctx, id_of(r, "thread", &field)?, &field)?;
+                let thread = load(ctx, ref_id(r, "thread", &field)?, &field)?;
                 if thread.stream_id != stream {
                     return Err(invalid(
                         &field,

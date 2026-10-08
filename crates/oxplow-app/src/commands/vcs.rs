@@ -25,7 +25,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::util::{parse, schema};
+use super::util::{parse, ref_id, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 use crate::vcs::GitProvider;
@@ -102,24 +102,19 @@ where
             let op = op.clone();
             Box::pin(async move {
                 let input: I = parse(input)?;
-                let stream: StreamId =
-                    input.stream().parse().map_err(|_| CommandError::Invalid {
-                        field: Some("/stream".into()),
-                        message: format!("`{}` is not a stream id (`str1`)", input.stream()),
-                    })?;
+                let stream: StreamId = ref_id(input.stream(), "stream", "/stream")?;
                 if matches!(invocation.actor, oxplow_domain::Actor::Agent { .. })
                     && invocation.actor.stream_id() != Some(stream)
                 {
                     return Err(CommandError::Denied {
                         reason: format!(
-                            "an agent runs VCS commands on its own stream only, not `{}`",
-                            input.stream()
+                            "an agent runs VCS commands on its own stream only, not `{stream}`"
                         ),
                     });
                 }
                 let ws = target
                     .worktrees
-                    .resolve_strict(Some(input.stream()))
+                    .resolve_strict(Some(&stream.to_string()))
                     .await?;
                 let result = op(target.clone(), ws, input).await?;
                 announce(&target, stream, touched).await;
@@ -185,7 +180,7 @@ fn done() -> Result<Value, CommandError> {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommitInput {
-    /// The stream whose workspace to commit (`str1`).
+    /// The stream whose workspace to commit (`stream:str1`).
     pub stream: String,
     pub message: String,
     /// Commit untracked files too (default), not only changes to tracked
@@ -521,7 +516,8 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
-        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        let stream =
+            oxplow_domain::refs::build::stream_ref(svc.stream_store.list().await.unwrap()[0].id);
         let err = svc
             .commands
             .run(
@@ -584,7 +580,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let own = svc.stream_store.list().await.unwrap()[0].id;
-        let stream = own.to_string();
+        let stream = oxplow_domain::refs::build::stream_ref(own);
 
         let agent = |stream_id| Actor::Agent {
             thread_id: Some(f.thread),
@@ -670,7 +666,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 "oxplow.vcs.commit",
-                json!({ "stream": "str999", "message": "m" }),
+                json!({ "stream": "stream:str999", "message": "m" }),
                 false,
             )
             .await

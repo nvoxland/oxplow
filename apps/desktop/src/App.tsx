@@ -176,6 +176,7 @@ import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
 import { logUi, setUiLogContext } from "./logger.js";
+import { streamRef } from "./recordRefs.js";
 
 // Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
 // when this is exceeded, the oldest-touched tab without unsaved changes is
@@ -679,7 +680,7 @@ export function App() {
       // An audited write that logs `file.saved` (its content isn't kept
       // in the record).
       const content = current.draftContent;
-      const input = { stream: streamId, path, content };
+      const input = { stream: streamRef(streamId), path, content };
       await (call ? runCommandForCall(call, "oxplow.file.save", input) : runCommand("oxplow.file.save", input));
       mutateFileSession(streamId, (s) => markFileSaved(s, path, content));
       logUi("info", "saved file", { streamId, path });

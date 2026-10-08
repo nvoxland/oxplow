@@ -75,14 +75,14 @@ pub async fn services_with_effort() -> EffortFixture {
         .run(
             &oxplow_domain::Actor::Human,
             crate::commands::effort::OPEN,
-            serde_json::json!({ "thread": thread.to_string() }),
+            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread) }),
             false,
         )
         .await
         .unwrap();
     let effort = opened.result["effort"]
         .as_str()
-        .and_then(|e| e.parse().ok())
+        .and_then(oxplow_domain::refs::build::effort_of_ref)
         .expect("effort.open names the effort");
     EffortFixture {
         svc,

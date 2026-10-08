@@ -43,3 +43,54 @@ pub fn failed(e: impl std::fmt::Display) -> CommandError {
         message: e.to_string(),
     }
 }
+
+/// The id a `<kind>:<id>` ref names (`thread:thr3` → `thr3`) — the one way
+/// a command's input names a record (`.context/refs.md`); anything else is
+/// refused at `field`, saying the form.
+pub fn ref_body<'a>(raw: &'a str, kind: &str, field: &str) -> Result<&'a str, CommandError> {
+    raw.strip_prefix(kind)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| invalid(field, format!("`{raw}` isn't a {kind} ref ({kind}:<id>)")))
+}
+
+/// [`ref_body`], parsed: `thread:thr3` → `ThreadId(3)`.
+pub fn ref_id<T: std::str::FromStr>(raw: &str, kind: &str, field: &str) -> Result<T, CommandError> {
+    ref_body(raw, kind, field)?
+        .parse()
+        .map_err(|_| invalid(field, format!("`{raw}` isn't a {kind} ref ({kind}:<id>)")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_domain::{StreamId, ThreadId};
+
+    /// A record is named by its ref, and only by it: a bare id, another
+    /// kind's ref or an empty one is refused at the field, saying the form.
+    #[test]
+    fn a_record_is_named_by_its_ref() {
+        assert_eq!(
+            ref_id::<ThreadId>("thread:thr3", "thread", "/thread").unwrap(),
+            ThreadId::new(3)
+        );
+        assert_eq!(
+            ref_id::<StreamId>("stream:str1", "stream", "/stream").unwrap(),
+            StreamId::new(1)
+        );
+        for raw in [
+            "thr3",
+            "stream:str1",
+            "thread:",
+            "threads:thr3",
+            "thread:nope",
+        ] {
+            let err = ref_id::<ThreadId>(raw, "thread", "/thread").unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), message }
+                    if f == "/thread" && message.contains("isn't a thread ref (thread:<id>)")),
+                "{raw}: {err:?}"
+            );
+        }
+    }
+}

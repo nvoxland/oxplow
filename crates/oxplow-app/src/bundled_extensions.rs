@@ -843,7 +843,7 @@ mod tests {
         let last = serde_json::to_value(&last.rows[0][0]).unwrap();
         run(
             crate::commands::comment::UPDATE,
-            serde_json::json!({ "comment": format!("cmt{last}"), "status": "resolved" }),
+            serde_json::json!({ "comment": format!("comment:cmt{last}"), "status": "resolved" }),
         )
         .await;
         let rows = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 1)]).await;
@@ -985,7 +985,7 @@ mod tests {
         // finished.
         let opened = run(
             "oxplow.effort.open",
-            serde_json::json!({ "thread": thread, "title": "Tidy the shell scripts" }),
+            serde_json::json!({ "thread": format!("thread:{thread}"), "title": "Tidy the shell scripts" }),
         )
         .await;
         let effort = opened.result["effort"].as_str().unwrap().to_string();
@@ -1197,7 +1197,7 @@ mod tests {
                     &oxplow_domain::Actor::Human,
                     crate::commands::bookmark::SET,
                     serde_json::json!({ "ref": r, "page_kind": kind, "label": label,
-                                        "scope": scope, "thread": thread }),
+                                        "scope": scope, "thread": format!("thread:{thread}") }),
                     false,
                 )
                 .await

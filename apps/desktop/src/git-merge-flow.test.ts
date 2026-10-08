@@ -132,7 +132,7 @@ describe("vcsMerge — UI-initiated background VCS op", () => {
     const result = await awaitGitOp(await api.vcsMerge("str1", "feature", true));
 
     // The op actually ran (not silently dropped) with the right input.
-    expect(runs).toEqual([["oxplow.vcs.merge", { stream: "str1", rev: "feature" }, true]]);
+    expect(runs).toEqual([["oxplow.vcs.merge", { stream: "stream:str1", rev: "feature" }, true]]);
     // …and its outcome propagated back through the background-task row.
     expect(result.success).toBe(true);
     expect(result.log).toContain("Merge made");

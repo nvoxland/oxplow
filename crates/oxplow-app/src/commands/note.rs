@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 
 use super::comment::author_of;
 use super::thread::{acting_thread, agent_scope};
-use super::util::{invalid, parse, schema};
+use super::util::{invalid, parse, ref_id, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::LinkDeps;
 
@@ -43,7 +43,7 @@ pub struct AddInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateInput {
-    /// The note (`not12`).
+    /// The note (`thread_note:not12`).
     pub note: String,
     pub body: String,
 }
@@ -95,9 +95,7 @@ pub fn update_op(deps: LinkDeps) -> Op {
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: UpdateInput = parse(input)?;
-            let id = NoteId::try_from_str(&input.note).ok_or_else(|| {
-                invalid("/note", format!("`{}` isn't a note id (not…)", input.note))
-            })?;
+            let id: NoteId = ref_id(&input.note, "thread_note", "/note")?;
             let before = note_tx(ctx.conn, id)?
                 .ok_or_else(|| invalid("/note", format!("no thread note `{id}`")))?;
             if let Some((own, _)) = agent_scope(ctx)? {
@@ -252,7 +250,7 @@ mod tests {
             .run(&agent(&fx), ADD, json!({}), false)
             .await
             .unwrap();
-        let id = out.result["note"]["id"].as_str().unwrap().to_string();
+        let id = format!("thread_note:{}", out.result["note"]["id"].as_str().unwrap());
         let filled = fx
             .svc
             .commands

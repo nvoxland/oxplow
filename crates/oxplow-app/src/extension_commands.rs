@@ -1968,7 +1968,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "acme.page.star",
-                json!({ "ref": "page:metrics", "page_kind": "metrics", "scope": "project", "thread": fx.thread.to_string() }),
+                json!({ "ref": "page:metrics", "page_kind": "metrics", "scope": "project", "thread": oxplow_domain::refs::build::thread_ref(fx.thread) }),
                 false,
             )
             .await
