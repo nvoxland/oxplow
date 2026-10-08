@@ -153,9 +153,12 @@ oxplow agent:
   it queues the current writer) or switch to the writer thread instead.
 - **Queueing work without a prompt does nothing if the agent is
   idle.** See the first-turn caveat above.
-- **Runtime never commits.** The harness has no `git commit` path —
-  no auto-commit at Stop, no commit-point markers, no `mcp__oxplow__commit`
-  tool. Drive commits yourself via CLI / Bash / Files-panel commit.
+- **oxplow never commits on its own.** No auto-commit at Stop, no
+  commit-point markers. Commits, pushes and checkouts are the
+  `oxplow.vcs.*` commands (a person's in the app, or any agent's through
+  `run_command`) or plain `git`. Shipped oxplow takes no position on
+  whether an agent should commit or push: a person says so in their own
+  agent instructions or prompts.
 
 ## Launching the agent
 
