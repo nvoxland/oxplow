@@ -276,11 +276,6 @@ mod tests {
                     s.input
                         .clone()
                         .map(|q| (format!("collector {} input", s.id), q))
-                }))
-                .chain(ext.commands.iter().filter_map(|c| {
-                    c.input
-                        .clone()
-                        .map(|q| (format!("command {} input", c.name), q))
                 }));
             for (what, sql) in queries {
                 let reads = f
@@ -1568,7 +1563,7 @@ mod tests {
         assert_eq!(task_status(&f).await, "in_progress");
         assert!(task_notes(&f).await.is_empty());
 
-        review(
+        let ran = review(
             &f,
             &human,
             "oxplow.review.accept",
@@ -1577,6 +1572,16 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(task_status(&f).await, "done");
+        // The run's audit row says what it used: one read of the models.
+        let audit_id = ran.audit_id.unwrap();
+        let audit = f
+            .svc
+            .db
+            .read(move |c| oxplow_db::command_audit_store::get_tx(c, audit_id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(audit.capabilities, [("sql.read".to_string(), 1)].into());
         let notes = task_notes(&f).await;
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].starts_with("Review accepted"), "{}", notes[0]);

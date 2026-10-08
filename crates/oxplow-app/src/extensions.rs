@@ -5550,7 +5550,6 @@ commands:
     summary: Note a thing.
     input_schema: { type: object, required: [id], properties: { id: { type: integer } } }
     entry: handlers/note.star
-    input: \"SELECT id, label FROM v_tally_labelled WHERE id = :id\"
 ",
         );
         write(
@@ -5582,8 +5581,8 @@ commands:
 
     /// P7.C6: a check sees what the extension declares before it ever ran
     /// or published — its collectors' entities (empty stand-ins) and its
-    /// own models (compiled for the check) — from its lenses and command
-    /// inputs, on a database that has neither.
+    /// own models (compiled for the check) — from its lenses (and its
+    /// commands' examples' reads), on a database that has neither.
     #[tokio::test]
     async fn a_check_sees_the_extensions_own_models_and_unsynced_entities() {
         let dir = tempfile::tempdir().unwrap();

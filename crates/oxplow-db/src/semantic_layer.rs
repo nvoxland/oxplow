@@ -918,7 +918,7 @@ fn run_read_only(
 }
 
 /// [`SemanticLayer::run`] on `conn` — for a command's handler that reads
-/// inside its own transaction (an extension command's `input` query): one
+/// inside its own transaction (a command's `sql.read`): one
 /// read-only `SELECT`/`WITH` over the published models, under the same
 /// authorizer, row cap and timeout. The read session is restored before
 /// it returns, so the handler's writes that follow are unaffected.

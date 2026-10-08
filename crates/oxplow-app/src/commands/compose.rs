@@ -38,10 +38,16 @@ pub struct Composition {
 }
 
 /// Say what a composite runs for `input`, reading on `conn` (the run's
-/// transaction, or a read snapshot when the bus routes it). Pure: the bus
-/// may compose more than once.
-pub type Composer =
-    dyn Fn(&rusqlite::Connection, &Value) -> Result<Composition, CommandError> + Send + Sync;
+/// transaction, or a read snapshot when the bus routes it) and counting
+/// the host capabilities it calls in `trace`. Pure: the bus may compose
+/// more than once.
+pub type Composer = dyn Fn(
+        &rusqlite::Connection,
+        &crate::host_capabilities::CapabilityTrace,
+        &Value,
+    ) -> Result<Composition, CommandError>
+    + Send
+    + Sync;
 
 /// A composite's handler: its composer, and the `Tx` handler that runs
 /// what it composes in the bus's transaction (`run_nested`) when every
@@ -65,7 +71,7 @@ impl Compose {
                 calls,
                 result,
                 events,
-            } = composer(ctx.conn, &input)?;
+            } = composer(ctx.conn, ctx.trace, &input)?;
             let nested = bus.run_nested(ctx, &parent, &calls)?;
             Ok(HandlerOutput {
                 result: json!({ "result": result, "children": nested.children }),
@@ -124,7 +130,7 @@ pub fn sequence_spec() -> CommandSpec {
 
 pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
     let spec = sequence_spec();
-    let compose: Arc<Composer> = Arc::new(|_conn, input: &Value| {
+    let compose: Arc<Composer> = Arc::new(|_conn, _trace, input: &Value| {
         let input: SequenceInput =
             serde_json::from_value(input.clone()).map_err(|e| CommandError::Invalid {
                 field: None,

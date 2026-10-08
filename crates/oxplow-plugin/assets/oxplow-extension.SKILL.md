@@ -195,20 +195,24 @@ empty: Nothing is waiting on you.
   `color`) columns; a chip shows on that ref's page, a badge after a
   linked cell in lens rows.
 - **`commands:`** register commands of your own, as
-  `<extension name with - → _>.<name>`: `{ name, summary, input_schema,
-  entry: handlers/x.star, input?: "SELECT … WHERE ref = :ref", confirm?,
-  effect?, invokers?, examples? }`. The Starlark `transform(x)` gets `{
-  input, rows }` and returns `{ commands: [{ name, input }], result? }`
+  `<namespace>.<area>.<verb>`: `{ name: area.verb, summary, input_schema,
+  entry: handlers/x.star, needs?: [sql.read], confirm?, effect?,
+  invokers?, examples? }`. The Starlark `transform(x)` gets `{ input }`,
+  reads with `capability("sql.read", { "sql": "SELECT … WHERE ref = :ref",
+  "params": { "ref": x["input"]["ref"] } })` (a list of row dicts; it must
+  list `sql.read` in `needs`) and returns `{ commands: [{ name, input }],
+  result? }`
   — or `{ refuse: "why" }` to decline (the caller sees the reason);
   those core commands run as the caller, each one's own policy and
   confirmation checked first — in one transaction with one undo when they
   all touch oxplow's own records, or in order through the provider when
   one touches another provider's item (then what ran before a failure
   stays, and there's no undo). It does no I/O, has 5 s,
-  and `examples` (at most 10) are dry-run by `check`: give each `rows:`
-  (what the `input` query would return) so it doesn't depend on the
-  project's data, and `expect_commands: [...]` or `refuses: <part of the
-  reason>`. A command on a ref's menu (`ui.commands`) gets `{ ref }`, so
+  and `examples` (at most 10) are dry-run by `check`: give each
+  `answers: { sql.read: [[rows of the 1st read], …] }` so it doesn't
+  depend on the project's data, and `expect_commands: [...]` or `refuses:
+  <part of the reason>`. `effect: read` makes a command that only reads
+  and returns a `result` (it composes nothing). A command on a ref's menu (`ui.commands`) gets `{ ref }`, so
   name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
   working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a
@@ -370,12 +374,12 @@ names the file and line and says what to change.
      files: { "src/a.ts": "…" } }` (the tree its `files()` sees),
      `expect: { facts: [{ measure, value, path? }] }` — each fact is
      compared on the keys you name, in order;
-   - a command: `input: { command: <ns>.<name>, input: {...}, rows? }`,
+   - a command: `input: { command: <id>, input: {...}, answers? }`,
      `expect: { commands: [names] }` or `{ refuses: <part of the reason>
      }` — a dry run; nothing changes;
    - a provider: `input: { command, input }` (below).
-   Give a command's own `examples:` `rows:` too, so they don't depend on
-   the project's data.
+   Give a command's own `examples:` `answers:` too, so they don't depend
+   on the project's data.
 6. `oxplow plugin test` also runs the extension's `questions.yaml`, if it
    has one: questions an agent should be able to answer with it, each
    `{ question, skill, reaches: { sql } or { command, input }, shape:

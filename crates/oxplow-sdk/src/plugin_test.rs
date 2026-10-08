@@ -258,7 +258,8 @@ async fn lens_example(
 }
 
 /// Dry-run one of the extension's own `commands:` on the fixture's
-/// `input` (and `rows`): what it composes, checked against the throwaway's
+/// `input` (and `answers`, standing in for its capability calls' — per
+/// capability, in call order): what it composes, checked against the throwaway's
 /// registry, against `expect` — `{ commands: [names] }`, or `{ refuses:
 /// <part of the reason> }`. Nothing runs.
 async fn command_example(
@@ -269,13 +270,27 @@ async fn command_example(
 ) {
     use oxplow_app::extension_commands::{call_names, dry_run, Composed};
     let shown = ex.shown;
-    let rows = ex
-        .input
-        .get("rows")
-        .and_then(Value::as_array)
-        .map(|r| r.to_vec());
+    let answers = match ex.input.get("answers").cloned().map(serde_json::from_value) {
+        None => Default::default(),
+        Some(Ok(answers)) => answers,
+        Some(Err(e)) => {
+            report.errors.push(format!(
+                "{shown}:1: command `{}`: `answers` must map each capability to its answers \
+                 in call order: {e}",
+                cmd.name
+            ));
+            return;
+        }
+    };
     let input = ex.input.get("input").cloned().unwrap_or_else(|| json!({}));
-    let decided = dry_run(&host.svc.sql, cmd, &input, rows, host.svc.commands.as_ref()).await;
+    let decided = dry_run(
+        &host.svc.sql,
+        cmd,
+        &input,
+        &answers,
+        host.svc.commands.as_ref(),
+    )
+    .await;
     let problem = match (decided, ex.expect.get("refuses").and_then(Value::as_str)) {
         (Err(e), _) => Some(format!("failed: {e}")),
         (Ok(Composed::Refused(why)), Some(want)) if why.contains(want) => None,
