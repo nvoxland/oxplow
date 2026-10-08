@@ -226,7 +226,7 @@ pub struct Relationship {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ModelSource {
     pub decl: ModelDecl,
-    /// Where the SQL came from, for error locations (`models/task.sql`).
+    /// Where the SQL came from, for error locations (`models/work_item.sql`).
     pub file: String,
     pub sql: String,
     /// For a kept earlier version (named `<name>_v<version>`): what it's a
@@ -629,7 +629,7 @@ fn only_name(
     match call.args.as_slice() {
         [arg] => string_literal(arg).ok_or_else(|| {
             invalid(format!(
-                "{}: {what}() takes one quoted name, e.g. {what}('task')",
+                "{}: {what}() takes one quoted name, e.g. {what}('work_item')",
                 at(src, call.start)
             ))
         }),
@@ -2535,8 +2535,8 @@ mod tests {
         let mut conn = fresh();
         let busy = on_change(source(
             "busy",
-            "SELECT id, title FROM source('task') WHERE status = 'blocked'",
-            &["id INTEGER", "title TEXT"],
+            "SELECT ref, title FROM source('work_item') WHERE state = 'blocked'",
+            &["ref TEXT", "title TEXT"],
         ));
         compile(&mut conn, "t", std::slice::from_ref(&busy), &view).unwrap();
         let view_sql: String = conn
@@ -2550,7 +2550,7 @@ mod tests {
         assert_eq!(
             view_columns(&conn, "v_t_busy").unwrap(),
             vec![
-                ("id".to_string(), "INTEGER".to_string()),
+                ("ref".to_string(), "TEXT".to_string()),
                 ("title".to_string(), "TEXT".to_string())
             ]
         );
@@ -2564,11 +2564,14 @@ mod tests {
             .unwrap();
         assert_eq!(
             (materialize.as_deref(), input.as_str()),
-            (Some("on_change"), "task")
+            (Some("on_change"), "work_item")
         );
 
-        conn.execute("INSERT INTO m_v_t_busy VALUES (1, 'kept')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO m_v_t_busy VALUES ('work_item:oxplow:a', 'kept')",
+            [],
+        )
+        .unwrap();
         compile(&mut conn, "t", std::slice::from_ref(&busy), &view).unwrap();
         let n: i64 = conn
             .query_row("SELECT count(*) FROM v_t_busy", [], |r| r.get(0))
@@ -2585,8 +2588,8 @@ mod tests {
 
         let mut changed = on_change(source(
             "busy",
-            "SELECT id FROM source('task') WHERE status = 'blocked'",
-            &["id INTEGER"],
+            "SELECT ref FROM source('work_item') WHERE state = 'blocked'",
+            &["ref TEXT"],
         ));
         changed.decl.version = 2;
         compile(&mut conn, "t", &[changed], &view).unwrap();
@@ -2606,8 +2609,8 @@ mod tests {
             "t",
             &[on_change(source(
                 "busy",
-                "SELECT id FROM source('task')",
-                &["id INTEGER"],
+                "SELECT ref FROM source('work_item')",
+                &["ref TEXT"],
             ))],
             &view,
         )
@@ -2617,8 +2620,8 @@ mod tests {
             "t",
             &[on_change(source(
                 "busy",
-                "SELECT id FROM source('m_v_t_busy')",
-                &["id INTEGER"],
+                "SELECT ref FROM source('m_v_t_busy')",
+                &["ref TEXT"],
             ))],
             &view,
         )
@@ -2657,8 +2660,8 @@ mod tests {
                 "acme",
                 vec![source(
                     "busy",
-                    "SELECT id FROM ref('task')",
-                    &["id INTEGER"],
+                    "SELECT ref FROM ref('work_item')",
+                    &["ref TEXT"],
                 )],
             )])
             .await
@@ -2677,8 +2680,8 @@ mod tests {
             "acme",
             vec![on_change(source(
                 "busy",
-                "SELECT id FROM ref('task')",
-                &["id INTEGER"],
+                "SELECT ref FROM ref('work_item')",
+                &["ref TEXT"],
             ))],
         )];
         let tx = conn.transaction().unwrap();
@@ -2708,8 +2711,8 @@ mod tests {
                     vec![
                         source(
                             "late",
-                            "SELECT id, title FROM ref('task') WHERE status = 'blocked'",
-                            &["id INTEGER", "title TEXT"],
+                            "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
+                            &["ref TEXT", "title TEXT"],
                         ),
                         source(
                             "late_count",
@@ -2741,7 +2744,7 @@ mod tests {
                 (
                     "v_late_work_late".into(),
                     "late-work".into(),
-                    "v_task".into()
+                    "v_work_item".into()
                 ),
                 (
                     "v_late_work_late_count".into(),
@@ -2761,8 +2764,8 @@ mod tests {
                 "late-work",
                 vec![source(
                     "late",
-                    "SELECT id, title FROM ref('task') WHERE status = 'blocked'",
-                    &["id INTEGER", "title TEXT"],
+                    "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
+                    &["ref TEXT", "title TEXT"],
                 )],
             )],
         )
@@ -2772,7 +2775,7 @@ mod tests {
             vec![(
                 "v_late_work_late".into(),
                 "late-work".into(),
-                "v_task".into()
+                "v_work_item".into()
             )]
         );
         assert!(conn.prepare("SELECT * FROM v_digest_late_titles").is_err());
@@ -2789,17 +2792,17 @@ mod tests {
                 ext(
                     "raw",
                     vec![source(
-                        "tasks",
-                        "SELECT id FROM\n  source('task')",
-                        &["id INTEGER"],
+                        "items",
+                        "SELECT ref FROM\n  source('work_item')",
+                        &["ref TEXT"],
                     )],
                 ),
                 ext(
                     "shaky",
                     vec![
-                        source("bad", "SELECT nope FROM ref('task')", &["nope"]),
+                        source("bad", "SELECT nope FROM ref('work_item')", &["nope"]),
                         source("on_bad", "SELECT * FROM ref('bad')", &["nope"]),
-                        source("fine", "SELECT id FROM ref('task')", &["id INTEGER"]),
+                        source("fine", "SELECT ref FROM ref('work_item')", &["ref TEXT"]),
                         source("lost", "SELECT * FROM ref('missing')", &["x"]),
                     ],
                 ),
@@ -2815,7 +2818,7 @@ mod tests {
         .unwrap();
         let raw = errors["raw"].join("\n");
         assert!(
-            raw.contains("oxplow/extensions/raw/models/tasks.sql:2:3"),
+            raw.contains("oxplow/extensions/raw/models/items.sql:2:3"),
             "{raw}"
         );
         assert!(raw.contains("only its own extension's tables"), "{raw}");
@@ -2829,7 +2832,7 @@ mod tests {
         assert!(errors["loop"].join("\n").contains("cycle"), "{errors:?}");
         assert_eq!(
             published(&conn),
-            vec![("v_shaky_fine".into(), "shaky".into(), "v_task".into())]
+            vec![("v_shaky_fine".into(), "shaky".into(), "v_work_item".into())]
         );
     }
 
@@ -2890,14 +2893,14 @@ mod tests {
     #[test]
     fn a_deprecated_version_is_kept_beside_the_new_one_until_its_date() {
         let mut conn = fresh();
-        let v1 = source("late", "SELECT id FROM ref('task')", &["id INTEGER"]);
+        let v1 = source("late", "SELECT ref FROM ref('work_item')", &["ref TEXT"]);
         publish(&mut conn, &[ext("late-work", vec![v1])]).unwrap();
 
         let twin = |until: &str, sql: &str| {
             let mut v2 = source(
                 "late",
-                "SELECT id, title FROM ref('task')",
-                &["id INTEGER", "title TEXT"],
+                "SELECT ref, title FROM ref('work_item')",
+                &["ref TEXT", "title TEXT"],
             );
             v2.decl.version = 2;
             v2.decl.deprecated = vec![Deprecated {
@@ -2924,20 +2927,20 @@ mod tests {
         };
         let errors = publish(
             &mut conn,
-            &[twin("2999-01-01", "SELECT id FROM ref('task')")],
+            &[twin("2999-01-01", "SELECT ref FROM ref('work_item')")],
         )
         .unwrap();
         assert!(errors["late-work"].is_empty(), "{errors:?}");
         assert_eq!(
             view_columns(&conn, "v_late_work_late_v1").unwrap(),
-            vec![("id".to_string(), "INTEGER".to_string())]
+            vec![("ref".to_string(), "TEXT".to_string())]
         );
         assert_eq!(view_columns(&conn, "v_late_work_late").unwrap().len(), 2);
 
         // Its SQL must still keep v1's promise.
         let errors = publish(
             &mut conn,
-            &[twin("2999-01-01", "SELECT title FROM ref('task')")],
+            &[twin("2999-01-01", "SELECT title FROM ref('work_item')")],
         )
         .unwrap();
         assert!(
@@ -2947,7 +2950,7 @@ mod tests {
         // Past its date: gone, and said so.
         let errors = publish(
             &mut conn,
-            &[twin("2020-01-01", "SELECT id FROM ref('task')")],
+            &[twin("2020-01-01", "SELECT ref FROM ref('work_item')")],
         )
         .unwrap();
         assert!(
@@ -2958,7 +2961,7 @@ mod tests {
         );
         assert!(conn.prepare("SELECT * FROM v_late_work_late_v1").is_err());
         // A version that never published has no promise to keep.
-        let mut never = source("fresh", "SELECT id FROM ref('task')", &["id INTEGER"]);
+        let mut never = source("fresh", "SELECT ref FROM ref('work_item')", &["ref TEXT"]);
         never.decl.version = 3;
         never.decl.deprecated = vec![Deprecated {
             version: 2,
@@ -2997,16 +3000,19 @@ mod tests {
         let late = |sql: &str, cols: &[&str]| ext("late-work", vec![source("late", sql, cols)]);
         {
             let db = crate::Database::open(&path).unwrap();
-            db.compile_extension_models(vec![late("SELECT id FROM ref('task')", &["id INTEGER"])])
-                .await
-                .unwrap();
+            db.compile_extension_models(vec![late(
+                "SELECT ref FROM ref('work_item')",
+                &["ref TEXT"],
+            )])
+            .await
+            .unwrap();
         }
         let ro = crate::Database::open_read_only(&path).unwrap();
         let errors = ro
             .check_extension_models(
                 vec![late(
-                    "SELECT id FROM ref('task') WHERE status = 'done'",
-                    &["id INTEGER"],
+                    "SELECT ref FROM ref('work_item') WHERE state = 'done'",
+                    &["ref TEXT"],
                 )],
                 vec![],
             )
@@ -3017,8 +3023,8 @@ mod tests {
         let errors = ro
             .check_extension_models(
                 vec![late(
-                    "SELECT id, title FROM ref('task')",
-                    &["id INTEGER", "title TEXT"],
+                    "SELECT ref, title FROM ref('work_item')",
+                    &["ref TEXT", "title TEXT"],
                 )],
                 vec![],
             )

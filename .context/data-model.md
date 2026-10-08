@@ -445,8 +445,9 @@ on, NULL = backlog), `rank` (order on the list) and `closed_at` (when it
 first reached done or canceled; reopened, NULL). Published as
 `v_work_item`: live rows **of the active work list only** (a join on the
 active `work_items` row of `capability_provider`, so with none it's
-empty). `v_task` stays oxplow's native model — read only by oxplow's
-implementation (and `oxplow-dev`).
+empty). oxplow's tasks publish no model of their own (`v_task`,
+`v_task_link` and `v_task_note` were removed): everything reads the
+interface, and oxplow's own fields are `native_state` and `native`.
 
 **`work_item_link`** `(from_ref, to_ref, link_type, created_at)` and
 **`work_item_comment`** `(id, ref, body, author, created_at)` (V17) are

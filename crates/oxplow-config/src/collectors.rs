@@ -66,7 +66,7 @@ pub struct EntityColumn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EntityRelation {
-    /// The view it joins to, e.g. `v_task` or `v_github_review`.
+    /// The view it joins to, e.g. `v_work_item` or `v_github_review`.
     pub to: String,
     /// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
     pub on: String,
@@ -1199,7 +1199,7 @@ mod tests {
         merged_at: time
         draft: bool
       relations:
-        - { to: v_task, on: "v_my_gh_pr.title LIKE '%tsk' || v_task.id || '%'" }
+        - { to: v_work_item, on: "v_my_gh_pr.title LIKE '%' || substr(v_work_item.ref, 18) || '%'" }
 "#;
 
     #[test]
@@ -1237,7 +1237,7 @@ mod tests {
             ]
         );
         assert_eq!(e.columns[1].doc, "PR title");
-        assert_eq!(e.relations[0].to, "v_task");
+        assert_eq!(e.relations[0].to, "v_work_item");
     }
 
     /// Every trigger shape parses; an `on:` type must be registered;
@@ -1362,12 +1362,12 @@ mod tests {
 - id: hot
   runtime: starlark
   entry: collectors/hot.star
-  input: "SELECT id, title FROM v_task WHERE priority = 'high'"
+  input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
   sync: upsert
   entities:
     - name: hot_task
-      key: id
-      columns: { id: int, title: text }
+      key: ref
+      columns: { ref: text, title: text }
 "#;
 
     #[test]
@@ -1382,7 +1382,7 @@ mod tests {
         assert!(s.runtime.is_derived());
         assert_eq!(
             s.input.as_deref(),
-            Some("SELECT id, title FROM v_task WHERE priority = 'high'")
+            Some("SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'")
         );
         assert_eq!(parse(GOOD).0[0].sync, CollectorSync::Replace);
         for (from, to, needle) in [
@@ -1393,7 +1393,11 @@ mod tests {
                 "sync: upsert\n  credentials: [TOKEN]",
                 "can't take",
             ),
-            ("FROM v_task", "FROM v_my_gh_hot_task", "feed on itself"),
+            (
+                "FROM v_work_item",
+                "FROM v_my_gh_hot_task",
+                "feed on itself",
+            ),
         ] {
             let (s, e) = parse(&DERIVED.replace(from, to));
             assert!(s.is_empty(), "{to}: should be rejected");

@@ -9,8 +9,8 @@ tasks blocked in this stream". It knows the format.
 
 ## The data
 
-Everything oxplow tracks is exposed as read-only SQL views: `v_task`,
-`v_effort`, `v_thread`, `v_comment`, `v_wiki_page`, `v_effort_file`,
+Everything oxplow tracks is exposed as read-only SQL views: `v_work_item`
+(the active work list's items, whichever tracker holds them), `v_effort`, `v_thread`, `v_comment`, `v_wiki_page`, `v_effort_file`,
 `v_agent_turn`, `v_token_usage`, `v_fact`, and more.
 
 **Explore Data** (launcher → Data) lists every view with a description of each
@@ -30,15 +30,15 @@ description: Lenses for reviewing agent work
 
 ```yaml
 # oxplow/extensions/review/lenses/blocked.yaml
-title: Blocked Tasks
+title: Blocked Work
 params:
-  - { name: stream_id, label: Stream }
+  - { name: thread_id, label: Thread }
 query: |
-  SELECT id, title, updated_at FROM v_task
-  WHERE status = 'blocked' AND stream_id = :stream_id
+  SELECT ref, title, updated_at FROM v_work_item
+  WHERE state = 'blocked' AND thread_id = :thread_id
 viz: table            # table | list | number | markdown | bar | line | treemap | grid | custom
 columns:
-  - { key: title, label: Task, link: { kind: task, from: id } }
+  - { key: title, label: Item, link: { kind: page, from: ref } }
   - { key: updated_at, label: Updated }
 empty: Nothing is blocked.
 ```
@@ -47,8 +47,9 @@ empty: Nothing is blocked.
 - A param named `stream_id` or `thread_id` is filled in with the stream
   you're on and its selected thread, so "my stream" needs no hardcoded
   id. Type a value to look at another one.
-- `link.kind` is `task`, `file` (add `line: <column>` to open at a line),
-  `wiki`, `effort-diff`, `commit`, `metric`, `diff-at` or `compare`.
+- `link.kind` is `page` (any oxplow page by its ref, such as a work
+  item's), `file` (add `line: <column>` to open at a line), `wiki`,
+  `effort-diff`, `commit`, `metric`, `diff-at` or `compare`.
   - `diff-at` opens a file's diff within a change:
     `{ kind: diff-at, line: start_line, base: base_revision, head: head_revision }`
     (join `v_change` for the two revisions).
@@ -114,7 +115,7 @@ group: { by: bucket, link: { kind: page, from: bucket_page } }   # link is optio
 emphasis: is_current     # a true / non-zero value highlights the row
 depth: level             # a whole number indents the row
 columns:
-  - { key: title, link: { kind: task, from: id }, icon: status, tone: hue }
+  - { key: title, link: { kind: page, from: ref }, icon: state, tone: hue }
 actions:
   - { id: add, label: "+", command: oxplow.work_item.create, group: Ready, input: { title: New task } }
 ```
@@ -162,21 +163,25 @@ page's id as a param, so it must declare it:
 
 | Slot | Page | Param |
 |---|---|---|
-| `effort-review` | an effort's diff view | `effort_id`, `change_id` |
-| `task-detail` | a task's page | `task_id` |
-| `thread` | the Work panel (compact) | `thread_id` |
-| `commit` | a commit's page | `change_id` |
-| `uncommitted` | Uncommitted Changes | `change_id` |
-| `settings` | Settings, in a section named after the extension | none |
+| `effort.review.details` | an effort's diff view | `effort_id`, `change_id` |
+| `work_item.detail.body` | a work item's page, below its body | `ref` |
+| `work_item.detail.sidebar` | a work item's page, its side rail | `ref` |
+| `thread.plan.header` | a thread's plan, as a compact strip | `thread_id` |
+| `vcs.commit.details` | a commit's page | `change_id` |
+| `vcs.status.header` | Uncommitted Changes, above the files | `stream_id` |
+| `vcs.status.details` | Uncommitted Changes, below the files | `change_id` |
+| `vcs.history.sidebar` | Git history's side column | `stream_id` |
+| `diff.file.header` | a file diff, above the editor | `path`, `left_revision`, `right_revision`, `stream_id` |
+| `settings.section` | Settings, in a section named after the extension | none |
 
-A lens declares the params its slot passes (a `settings` lens needs none). `change_id` points at
+A lens declares the params its slot passes (a `settings.section` lens needs none). `change_id` points at
 the page's change in `v_change`, with its analysis in `v_change_file`,
 `v_change_function`, `v_change_import`, `v_change_co_change` and
 `v_change_duplicate`.
 
 ```yaml
 slots:
-  - { slot: task-detail, lens: task-tokens }
+  - { slot: work_item.detail.sidebar, lens: item-tokens }
 ```
 
 ### Turning an extension off
@@ -380,14 +385,14 @@ collectors:
   - id: hot
     runtime: starlark            # or: jaq
     entry: collectors/hot.star
-    input: "SELECT id, title FROM v_task WHERE priority = 'high'"
+    input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
     entities:
-      - { name: hot_task, key: id, columns: { id: int, title: text } }
+      - { name: hot_item, key: ref, columns: { ref: text, title: text } }
 ```
 
 ```python
 def transform(input):
-    return {"entities": {"hot_task": input["rows"]}}
+    return {"entities": {"hot_item": input["rows"]}}
 ```
 
 These scripts can't reach the network, files, environment or keychain, so

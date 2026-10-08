@@ -2167,7 +2167,7 @@ export type DashboardWithItems = {
 
 // One row of Settings → Data.
 export type DataEntity = {
-	// The view to query (`v_task`, `v_my_gh_pr`).
+	// The view to query (`v_work_item`, `v_my_gh_pr`).
 	name: string,
 	// `core`, or the extension that provides it.
 	owner: string,
@@ -2475,7 +2475,7 @@ export type EntityDecl = {
  *  tells agents and lens authors how the data connects.
  */
 export type EntityRelation = {
-	// The view it joins to, e.g. `v_task` or `v_github_review`.
+	// The view it joins to, e.g. `v_work_item` or `v_github_review`.
 	to: string,
 	// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
 	on: string,
@@ -4277,7 +4277,7 @@ export type ModelFreshness = {
 // A model's declaration and its SQL file.
 export type ModelSource = {
 	decl: ModelDecl,
-	// Where the SQL came from, for error locations (`models/task.sql`).
+	// Where the SQL came from, for error locations (`models/work_item.sql`).
 	file: string,
 	sql: string,
 	/**

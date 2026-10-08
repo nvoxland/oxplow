@@ -194,7 +194,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    columns:\n      - { name: id, type: INTEGER, doc: Task id. }\n  - name: broken\n    version: 1\n    description: Broken.\n    columns:\n      - { name: nope, doc: x }\n";
+    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n      - { name: ref, type: TEXT, doc: Work item ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    columns:\n      - { name: nope, doc: x }\n";
 
     /// P4.9 (tsk494): an extension's model publishes its view; one that
     /// doesn't compile is that extension's error in the list, not a boot
@@ -208,16 +208,16 @@ mod tests {
         write(
             &root,
             "oxplow/extensions/late/models/blocked.sql",
-            "SELECT id FROM ref('task') WHERE status = 'blocked'",
+            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             &root,
             "oxplow/extensions/late/models/broken.sql",
-            "SELECT nope FROM ref('task')",
+            "SELECT nope FROM ref('work_item')",
         );
         svc.extension_models.sync().await.unwrap();
         svc.sql
-            .query_sql("SELECT id FROM v_late_blocked", vec![], None)
+            .query_sql("SELECT ref FROM v_late_blocked", vec![], None)
             .await
             .unwrap();
         let listed = svc.listed_extensions(&root).await;
@@ -236,7 +236,7 @@ mod tests {
         svc.extension_models.sync().await.unwrap();
         assert!(svc
             .sql
-            .query_sql("SELECT id FROM v_late_blocked", vec![], None)
+            .query_sql("SELECT ref FROM v_late_blocked", vec![], None)
             .await
             .is_err());
     }
@@ -251,10 +251,10 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         let manifest = |cols: &str| {
             format!(
-                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    columns:\n{cols}"
+                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n{cols}"
             )
         };
-        let id = "      - { name: id, type: INTEGER, doc: Task id. }\n";
+        let id = "      - { name: ref, type: TEXT, doc: Work item ref. }\n";
         let title = "      - { name: title, type: TEXT, doc: Title. }\n";
         write(
             &root,
@@ -264,7 +264,7 @@ mod tests {
         write(
             &root,
             "oxplow/extensions/late/models/blocked.sql",
-            "SELECT id FROM ref('task') WHERE status = 'blocked'",
+            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
         );
         svc.extension_models.sync().await.unwrap();
         let validate = || async {
@@ -289,7 +289,7 @@ mod tests {
         write(
             &root,
             "oxplow/extensions/late/models/blocked.sql",
-            "SELECT id, title FROM ref('task') WHERE status = 'blocked'",
+            "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
         );
         let errors = validate().await;
         assert!(
@@ -299,7 +299,7 @@ mod tests {
         write(
             &root,
             "oxplow/extensions/late/models/blocked.sql",
-            "SELECT id, title FROM source('task')",
+            "SELECT ref, title FROM source('work_item')",
         );
         assert!(validate().await.contains("only its own extension's tables"));
     }

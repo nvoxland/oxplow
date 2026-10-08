@@ -1049,11 +1049,12 @@ mod tests {
     async fn never_replaces_a_core_view() {
         let db = Database::in_memory();
         let store = SqliteCollectorStore::new(db.clone());
-        // extension `task` + entity `note` would be `v_task_note`, a core view.
+        // extension `work-item` + entity `comment` would be
+        // `v_work_item_comment`, a core view.
         let t = EntityTable {
-            extension: "task".into(),
-            entity: "note".into(),
-            view: "v_task_note".into(),
+            extension: "work-item".into(),
+            entity: "comment".into(),
+            view: "v_work_item_comment".into(),
             key: "id".into(),
             description: String::new(),
             columns: vec![EntityColumn {
@@ -1069,7 +1070,7 @@ mod tests {
         );
         // The core view still works.
         SemanticLayer::new(db)
-            .query_sql("SELECT body FROM v_task_note", vec![], None)
+            .query_sql("SELECT body FROM v_work_item_comment", vec![], None)
             .await
             .unwrap();
     }

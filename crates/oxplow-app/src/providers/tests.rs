@@ -4817,19 +4817,15 @@ async fn a_lost_reply_is_sent_again_and_lands_once() {
 /// changed in between.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
-    // Reads the oxplow task that moved (the fake is the active list, so
-    // the interface doesn't show it): its own view.
-    let titled_from_the_task = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
-    let fx = with_effect("lose-reply", titled_from_the_task).await;
-    let task = oxplow_tasks::work_item_ref(fx.task);
+    // Reads something oxplow holds that can change between attempts: the
+    // fixture's thread's title (thread 1).
+    let titled_from_the_thread = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE id = 1\"})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
+    let fx = with_effect("lose-reply", titled_from_the_thread).await;
+    assert_eq!(fx.thread, ThreadId::new(1));
     let rows = fx
         .svc
         .sql
-        .query_sql(
-            &format!("SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = '{task}'"),
-            vec![],
-            None,
-        )
+        .query_sql("SELECT title FROM v_thread WHERE id = 1", vec![], None)
         .await
         .unwrap()
         .rows;
@@ -4839,14 +4835,16 @@ async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
         .to_string();
     react(&fx).await;
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    // What the effect reads changes before its retry (oxplow's task,
-    // through its own store: the fake is the active list).
-    {
-        use oxplow_tasks::TaskStore as _;
-        let mut t = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        t.title = "renamed".into();
-        fx.svc.task_store.update(&t).await.unwrap();
-    }
+    // What the effect reads changes before its retry.
+    fx.svc
+        .db
+        .transaction(|c| {
+            c.execute("UPDATE threads SET title = 'renamed' WHERE id = 1", [])
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_eq!(
         crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
             .await

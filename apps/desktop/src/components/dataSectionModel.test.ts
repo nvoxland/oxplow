@@ -14,13 +14,13 @@ test("entityRows puts core first, formats counts and flags unsynced entities", (
   const rows = entityRows(
     [
       entity("v_github_pr", "github", "declared"),
-      entity("v_task", "core", "sql"),
+      entity("v_work_item", "core", "sql"),
       entity("v_commit", "core", "sql"),
       entity("v_issues_issue", "issues", "entity"),
     ],
-    { v_task: { rows: 12345 }, v_commit: { rows: 0 }, v_issues_issue: { rows: 7 } },
+    { v_work_item: { rows: 12345 }, v_commit: { rows: 0 }, v_issues_issue: { rows: 7 } },
   );
-  expect(rows.map((r) => r.name)).toEqual(["v_commit", "v_task", "v_github_pr", "v_issues_issue"]);
+  expect(rows.map((r) => r.name)).toEqual(["v_commit", "v_work_item", "v_github_pr", "v_issues_issue"]);
   expect(rows[1]!.rows).toBe(new Intl.NumberFormat().format(12345));
   expect(rows[0]!.rows).toBe("0");
   expect(rows[2]!.rows).toBe("Not synced yet");

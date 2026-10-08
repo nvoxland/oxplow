@@ -1782,28 +1782,27 @@ mod tests {
         assert_eq!(before, after);
     }
 
-    /// How many tasks whose `work_item.rank` disagrees with
-    /// the task row — the restated rows must never fall behind `v_task`.
+    /// How many tasks whose `work_item.rank` disagrees with the task
+    /// row's `sort_index` — the restated rows must never fall behind the
+    /// task table.
     async fn stale_ranks(fx: &crate::test_fixtures::EffortFixture) -> i64 {
-        let rows = fx
-            .svc
-            .sql
-            .query_sql(
-                "SELECT count(*) FROM v_work_item w JOIN v_task t
-                   ON w.ref = 'work_item:oxplow:tsk' || t.id
-                 WHERE w.rank IS NOT t.sort_index",
-                vec![],
-                None,
-            )
+        fx.svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT count(*) FROM v_work_item w JOIN task t
+                       ON w.ref = 'work_item:oxplow:tsk' || t.id
+                     WHERE w.rank IS NOT t.sort_index",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
             .await
-            .unwrap();
-        match &rows.rows[0][0] {
-            oxplow_db::SqlCell::Int(n) => *n,
-            other => panic!("{other:?}"),
-        }
+            .unwrap()
     }
 
-    /// A list's task refs in order: a thread's, or the backlog's.
+    /// A list's work item refs in order: a thread's, or the backlog's.
     async fn list_order(
         fx: &crate::test_fixtures::EffortFixture,
         thread: Option<ThreadId>,
@@ -1812,7 +1811,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT id FROM v_task WHERE thread_id = ?1 OR (?1 IS NULL AND thread_id IS NULL) ORDER BY sort_index, created_at",
+                "SELECT ref FROM v_work_item WHERE thread_id = ?1 OR (?1 IS NULL AND thread_id IS NULL) ORDER BY rank, created_at",
                 vec![match thread {
                     Some(t) => oxplow_db::SqlCell::Int(t.value()),
                     None => oxplow_db::SqlCell::Null(()),
@@ -1824,7 +1823,7 @@ mod tests {
         rows.rows
             .iter()
             .map(|r| match &r[0] {
-                oxplow_db::SqlCell::Int(n) => work_item_ref(TaskId::new(*n)),
+                oxplow_db::SqlCell::Text(s) => s.clone(),
                 other => panic!("{other:?}"),
             })
             .collect()

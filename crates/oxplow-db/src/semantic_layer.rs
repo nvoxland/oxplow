@@ -1023,10 +1023,11 @@ mod tests {
                    VALUES (1, 'primary', 'oxplow', 'main', 'refs/heads/main', 'local', '/tmp/x', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
                    VALUES (1, 1, 'Thread', 'active', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
-                   VALUES (1, 1, 'Live task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at, deleted_at)
-                   VALUES (2, 1, 'Deleted task', 'ready', 'medium', 'agent', '2026-01-01', '2026-01-01', '2026-01-02');",
+                 INSERT INTO capability_provider (capability, provider) VALUES ('work_items', 'oxplow');
+                 INSERT INTO work_item (ref, provider, title, body, state, native_state, thread_id, created_at, updated_at)
+                   VALUES ('work_item:oxplow:a', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', 1, '2026-01-01', '2026-01-01');
+                 INSERT INTO work_item (ref, provider, title, body, state, native_state, thread_id, created_at, updated_at, deleted_at)
+                   VALUES ('work_item:oxplow:b', 'oxplow', 'Deleted item', '', 'todo', 'ready', 1, '2026-01-01', '2026-01-01', '2026-01-02');",
             )
         })
         .await
@@ -1042,14 +1043,20 @@ mod tests {
     async fn read_on_leaves_the_connection_writable() {
         let (db, _sl) = seeded().await;
         db.transaction(|tx| {
-            let read = read_on(tx, &SqlQuery::new("SELECT title FROM v_task WHERE id = 1"))?;
+            let read = read_on(
+                tx,
+                &SqlQuery::new("SELECT title FROM v_work_item WHERE ref = 'work_item:oxplow:a'"),
+            )?;
             assert_eq!(read.rows.len(), 1);
             let query_only: i64 = tx
                 .query_row("PRAGMA query_only", [], |r| r.get(0))
                 .map_err(crate::database::map_sql_err)?;
             assert_eq!(query_only, 0);
-            tx.execute("UPDATE task SET title = 'Written after' WHERE id = 1", [])
-                .map_err(crate::database::map_sql_err)?;
+            tx.execute(
+                "UPDATE work_item SET title = 'Written after' WHERE ref = 'work_item:oxplow:a'",
+                [],
+            )
+            .map_err(crate::database::map_sql_err)?;
             Ok(())
         })
         .await
@@ -1116,22 +1123,22 @@ mod tests {
     #[tokio::test]
     async fn check_sql_compiles_without_running_and_refuses_writes() {
         let (_db, sl) = seeded().await;
-        sl.check("SELECT count(*) FROM v_task e WHERE e.status = 'done'")
+        sl.check("SELECT count(*) FROM v_work_item e WHERE e.state = 'done'")
             .await
             .unwrap();
         let err = |sql: &'static str| {
             let sl = sl.clone();
             async move { sl.check(sql).await.unwrap_err().to_string() }
         };
-        let unknown = err("SELECT nope FROM v_task").await;
+        let unknown = err("SELECT nope FROM v_work_item").await;
         assert!(unknown.contains("no such column"), "{unknown}");
         // It names the model's columns, so the next query can be right.
-        assert!(unknown.contains("v_task has: "), "{unknown}");
+        assert!(unknown.contains("v_work_item has: "), "{unknown}");
         assert!(unknown.contains("title"), "{unknown}");
         // And the nearest one, when a column is close to one it has.
-        let close = err("SELECT e.titel FROM v_task e").await;
+        let close = err("SELECT e.titel FROM v_work_item e").await;
         assert!(close.contains("did you mean `title`?"), "{close}");
-        assert!(err("DELETE FROM task").await.contains("SELECT"));
+        assert!(err("DELETE FROM work_item").await.contains("SELECT"));
     }
 
     #[test]
@@ -1162,25 +1169,27 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .run(
-                SqlQuery::new("SELECT title FROM v_task WHERE status = :status AND id >= :min_id")
-                    .named(vec![
-                        ("status".into(), SqlCell::Text("in_progress".into())),
-                        ("min_id".into(), SqlCell::Int(1)),
-                        ("unused".into(), SqlCell::Int(9)),
-                    ]),
+                SqlQuery::new(
+                    "SELECT title FROM v_work_item WHERE state = :state AND created_at >= :since",
+                )
+                .named(vec![
+                    ("state".into(), SqlCell::Text("in_progress".into())),
+                    ("since".into(), SqlCell::Text("2026-01-01".into())),
+                    ("unused".into(), SqlCell::Int(9)),
+                ]),
             )
             .await
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([["Live task"]])
+            json!([["Live item"]])
         );
         // A name the query uses must be given; a positional count must match.
         let err = sl
-            .run(SqlQuery::new("SELECT title FROM v_task WHERE id = :id").named(vec![]))
+            .run(SqlQuery::new("SELECT title FROM v_work_item WHERE ref = :ref").named(vec![]))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("no value for :id"), "{err}");
+        assert!(err.to_string().contains("no value for :ref"), "{err}");
         let err = sl
             .query_sql("SELECT ?1, ?2", vec![SqlCell::Int(1)], None)
             .await
@@ -1201,21 +1210,29 @@ mod tests {
             let sl = sl.clone();
             async move { sl.run(SqlQuery::new(sql).raw(true)).await.unwrap().reads }
         };
-        let r = reads("SELECT count(*) FROM v_task").await;
-        assert_eq!((r.models, r.tables), (vec!["v_task".to_string()], vec![]));
+        let r = reads("SELECT count(*) FROM v_work_item").await;
+        assert_eq!(
+            (r.models, r.tables),
+            (vec!["v_work_item".to_string()], vec![])
+        );
         let r =
-            reads("WITH t AS (SELECT id FROM v_task) SELECT * FROM t JOIN v_thread th ON 1").await;
-        assert_eq!(r.models, vec!["v_task".to_string(), "v_thread".to_string()]);
+            reads("WITH t AS (SELECT ref FROM v_work_item) SELECT * FROM t JOIN v_thread th ON 1")
+                .await;
+        assert_eq!(
+            r.models,
+            vec!["v_thread".to_string(), "v_work_item".to_string()]
+        );
         assert!(r.tables.is_empty(), "{:?}", r.tables);
-        let r = reads("SELECT t.title FROM task t JOIN v_thread th ON th.id = t.thread_id").await;
-        assert_eq!(r.tables, vec!["task".to_string()]);
-        let r = reads("WITH c AS (SELECT title FROM task) SELECT * FROM c").await;
+        let r =
+            reads("SELECT t.title FROM work_item t JOIN v_thread th ON th.id = t.thread_id").await;
+        assert_eq!(r.tables, vec!["work_item".to_string()]);
+        let r = reads("WITH c AS (SELECT title FROM work_item) SELECT * FROM c").await;
         assert_eq!(
             r.tables,
-            vec!["task".to_string()],
+            vec!["work_item".to_string()],
             "a CTE body is the query's own SQL"
         );
-        let r = reads("SELECT j.value FROM v_task t, json_each('[1,2]') j").await;
+        let r = reads("SELECT j.value FROM v_work_item t, json_each('[1,2]') j").await;
         assert!(
             r.tables.is_empty(),
             "a table-valued function isn't a table: {:?}",
@@ -1224,10 +1241,10 @@ mod tests {
         let r = reads("SELECT name FROM sqlite_master").await;
         assert_eq!(r.tables, vec!["sqlite_master".to_string()]);
         let checked = sl
-            .check("SELECT id FROM v_task WHERE id = :id")
+            .check("SELECT ref FROM v_work_item WHERE ref = :ref")
             .await
             .unwrap();
-        assert_eq!(checked.models, vec!["v_task".to_string()]);
+        assert_eq!(checked.models, vec!["v_work_item".to_string()]);
     }
 
     /// tsk1039: a misspelled model names the one it most likely meant —
@@ -1236,12 +1253,12 @@ mod tests {
     async fn an_unknown_model_suggests_the_nearest_one() {
         let (_db, sl) = seeded().await;
         let err = sl
-            .query_sql("SELECT * FROM v_tasks", vec![], None)
+            .query_sql("SELECT * FROM v_work_items", vec![], None)
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("no such table: v_tasks"), "{err}");
-        assert!(err.contains("did you mean `v_task`?"), "{err}");
+        assert!(err.contains("no such table: v_work_items"), "{err}");
+        assert!(err.contains("did you mean `v_work_item`?"), "{err}");
         let err = sl
             .query_sql("SELECT * FROM v_zzzzzzzzz", vec![], None)
             .await
@@ -1265,29 +1282,31 @@ mod tests {
                     .to_string()
             }
         };
-        let msg = refused("SELECT * FROM task").await;
+        let msg = refused("SELECT * FROM work_item").await;
         // The table's own model comes first, before the others that read
-        // it (an index feed, v_search_task — tsk922).
+        // it (an index feed, v_search_work_item).
         assert!(
-            msg.contains("`task` is a physical table, not a published model; read v_task"),
+            msg.contains(
+                "`work_item` is a physical table, not a published model; read v_work_item"
+            ),
             "{msg}"
         );
         assert!(!msg.contains("no such table"), "{msg}");
         assert!(
-            refused("WITH c AS (SELECT title FROM task) SELECT * FROM c")
+            refused("WITH c AS (SELECT title FROM work_item) SELECT * FROM c")
                 .await
-                .contains("`task` is a physical table")
+                .contains("`work_item` is a physical table")
         );
         assert!(refused("SELECT name FROM sqlite_master")
             .await
             .contains("`sqlite_master` is a physical table"));
-        assert!(sl.check("SELECT id FROM task").await.is_err());
+        assert!(sl.check("SELECT ref FROM work_item").await.is_err());
         // Models, counts over them, table-valued functions and temp tables
         // are all fine.
         for ok in [
-            "SELECT count(*) FROM v_task",
-            "SELECT t.id FROM v_task t JOIN v_thread th ON th.id = t.thread_id",
-            "SELECT j.value FROM v_task t, json_each('[1]') j",
+            "SELECT count(*) FROM v_work_item",
+            "SELECT t.ref FROM v_work_item t JOIN v_thread th ON th.id = t.thread_id",
+            "SELECT j.value FROM v_work_item t, json_each('[1]') j",
         ] {
             sl.query_sql(ok, vec![], None)
                 .await
@@ -1305,7 +1324,7 @@ mod tests {
         // view, as the accessor of the reads inside it (P4.11).
         db.call(|c| {
             c.execute_batch(
-                "CREATE VIEW v_cte_probe AS WITH live AS (SELECT title FROM task) SELECT title FROM live",
+                "CREATE VIEW v_cte_probe AS WITH live AS (SELECT title FROM work_item) SELECT title FROM live",
             )
         })
         .await
@@ -1319,14 +1338,19 @@ mod tests {
         assert!(out.reads.tables.is_empty(), "{:?}", out.reads.tables);
         // Raw reads the table, and says so.
         let out = sl
-            .run(SqlQuery::new("SELECT count(*) FROM task").raw(true))
+            .run(SqlQuery::new("SELECT count(*) FROM work_item").raw(true))
             .await
             .unwrap();
-        assert_eq!(out.reads.tables, vec!["task".to_string()]);
+        assert_eq!(out.reads.tables, vec!["work_item".to_string()]);
         // A refusal leaves the connection writable.
-        db.call(|c| c.execute("UPDATE task SET title = 'x' WHERE id = 1", []))
-            .await
-            .unwrap();
+        db.call(|c| {
+            c.execute(
+                "UPDATE work_item SET title = 'x' WHERE ref = 'work_item:oxplow:a'",
+                [],
+            )
+        })
+        .await
+        .unwrap();
     }
 
     /// P4.5a (tsk490): a query's temp tables exist for it alone — created
@@ -1365,9 +1389,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
-        db.call(|c| c.execute("UPDATE task SET title = 'w' WHERE id = 1", []))
-            .await
-            .unwrap();
+        db.call(|c| {
+            c.execute(
+                "UPDATE work_item SET title = 'w' WHERE ref = 'work_item:oxplow:a'",
+                [],
+            )
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -1375,16 +1404,16 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .query_sql(
-                "SELECT id, title, status, stream_id FROM v_task ORDER BY id",
+                "SELECT ref, title, state, thread_id FROM v_work_item ORDER BY ref",
                 vec![],
                 None,
             )
             .await
             .unwrap();
-        assert_eq!(out.columns, vec!["id", "title", "status", "stream_id"]);
+        assert_eq!(out.columns, vec!["ref", "title", "state", "thread_id"]);
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([[1, "Live task", "in_progress", 1]])
+            json!([["work_item:oxplow:a", "Live item", "in_progress", 1]])
         );
         assert!(!out.truncated);
     }
@@ -1394,7 +1423,7 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .query_sql(
-                "SELECT title FROM v_task WHERE status = ?1",
+                "SELECT title FROM v_work_item WHERE state = ?1",
                 vec![json!("in_progress").into()],
                 None,
             )
@@ -1402,7 +1431,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([["Live task"]])
+            json!([["Live item"]])
         );
     }
 
@@ -1410,14 +1439,14 @@ mod tests {
     async fn rejects_anything_but_a_single_read() {
         let (_db, sl) = seeded().await;
         for sql in [
-            "DELETE FROM task",
-            "INSERT INTO task (title) VALUES ('x')",
-            "UPDATE task SET title = 'x'",
-            "DROP VIEW v_task",
+            "DELETE FROM work_item",
+            "INSERT INTO work_item (title) VALUES ('x')",
+            "UPDATE work_item SET title = 'x'",
+            "DROP VIEW v_work_item",
             "PRAGMA query_only = 0",
             "ATTACH DATABASE '/tmp/evil.sqlite' AS evil",
-            "SELECT 1; DELETE FROM task",
-            "WITH x AS (SELECT 1) DELETE FROM task",
+            "SELECT 1; DELETE FROM work_item",
+            "WITH x AS (SELECT 1) DELETE FROM work_item",
             "",
         ] {
             let err = sl.query_sql(sql, vec![], None).await.unwrap_err();
@@ -1428,7 +1457,7 @@ mod tests {
         }
         // Nothing was deleted.
         let out = sl
-            .run(SqlQuery::new("SELECT count(*) FROM task").raw(true))
+            .run(SqlQuery::new("SELECT count(*) FROM work_item").raw(true))
             .await
             .unwrap();
         assert_eq!(serde_json::to_value(&out.rows).unwrap(), json!([[2]]));
@@ -1461,10 +1490,12 @@ mod tests {
     async fn leaves_the_pooled_connection_writable() {
         let (db, sl) = seeded().await;
         sl.query_sql("SELECT 1", vec![], None).await.unwrap();
-        let _ = sl.query_sql("DELETE FROM task", vec![], None).await;
+        let _ = sl.query_sql("DELETE FROM work_item", vec![], None).await;
         // A failure after the authorizer is installed, and one after
         // `query_only` is on, leave nothing behind either.
-        let _ = sl.query_sql("SELECT nope FROM v_task", vec![], None).await;
+        let _ = sl
+            .query_sql("SELECT nope FROM v_work_item", vec![], None)
+            .await;
         let _ = sl.query_sql("SELECT ?1", vec![], None).await;
         let _ = sl
             .run(
@@ -1474,8 +1505,13 @@ mod tests {
             .await;
         // in_memory() has a single pooled connection, so this proves
         // query_only was reset.
-        db.call(|c| c.execute("UPDATE task SET title = 'renamed' WHERE id = 1", []))
-            .await
-            .unwrap();
+        db.call(|c| {
+            c.execute(
+                "UPDATE work_item SET title = 'renamed' WHERE ref = 'work_item:oxplow:a'",
+                [],
+            )
+        })
+        .await
+        .unwrap();
     }
 }

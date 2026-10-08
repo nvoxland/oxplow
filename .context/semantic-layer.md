@@ -546,10 +546,9 @@ and `v_model_test` are the catalog of all of them:
 |---|---|
 | `v_stream` | streams (worktrees) |
 | `v_thread` | threads within a stream |
-| `v_task` | oxplow's own tasks (one work-list implementation; everything else reads `v_work_item`), excluding deleted; carries the thread's `stream_id` |
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
-| `v_work_item` | work items from every provider (`ref`, `provider`, canonical `state`, `native_state`, `native` JSON, `parent_ref`), excluding deleted; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
+| `v_work_item` | the active work list's items (`ref`, `provider`, canonical `state`, `native_state`, `native` JSON, `parent_ref`), excluding deleted; everything reads it — oxplow's tasks have no model of their own (`v_task` was removed) and keep their own fields in `native_state` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
 | `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` ref; join `v_work_item` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
@@ -560,9 +559,9 @@ and `v_model_test` are the catalog of all of them:
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
 | `v_effort_file` | files each effort changed, with change kind, `source` (`claimed` by an edit tool or `observed` changing in one of its thread's turns, v2) and the effort's `work_item` |
-| `v_task_note` | comments on oxplow's tasks |
+| `v_work_item_comment` | comments on the active list's items (`v_task_note` was removed) |
 | `v_thread_note` | a thread's notes (`oxplow.knowledge.add_note`; V24) |
-| `v_task_link` | typed links between tasks (V74) |
+| `v_work_item_link` | typed links between the active list's items (`v_task_link` was removed) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
@@ -626,15 +625,16 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   - **The authorizer enforces the read contract** (P4.3, tsk488; it only
     recorded in P4.1). The query's own SQL — a CTE body included — may
     read models (views) and `temp.*` tables; a stored table is refused as
-    "`task` is a physical table, not a published model; read v_task",
+    "`work_item` is a physical table, not a published model; read
+    v_work_item",
     naming the models whose `source()` it is (from `model_input`), and
     never with SQLite's "no such table" (which `explain_unsynced` reads as
     an unsynced source). A table that doesn't exist at all names the
-    published model it most likely meant ("no such table: v_tasks; did you
-    mean `v_task`?", edit distance, read once the session's authorizer is
+    published model it most likely meant ("no such table: v_work_items; did
+    you mean `v_work_item`?", edit distance, read once the session's authorizer is
     off — tsk1039). An unknown column names the columns of each published
     model the query names, and the nearest one ("no such column: titel …;
-    did you mean `title`? v_task has: …"), so an agent's next query is
+    did you mean `title`? v_work_item has: …"), so an agent's next query is
     right without a discovery query (agents spent about one call in six
     guessing columns). `count(*)` over a view is allowed (SQLite reports
     its base table at top level after the view's own reads). **A read's
@@ -718,7 +718,7 @@ collectors:
           number: int          # text | int | real | bool | time
           title: { type: text, doc: PR title }
         relations:             # documented joins (not executed)
-          - { to: v_task, on: "v_github_pr.title LIKE '%tsk' || v_task.id || '%'" }
+          - { to: v_work_item, on: "v_github_pr.title LIKE '%' || substr(v_work_item.ref, length('work_item:' || v_work_item.provider || ':') + 1) || '%'" }
 ```
 
 The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`,
@@ -922,8 +922,8 @@ entities from data already in the semantic layer:
     so a failed run changes nothing.
   - A changed column set rebuilds the table.
   - The store refuses to replace a view it doesn't own: a core view, or
-    one from another extension. Extension `task` plus entity `note` can't
-    shadow `v_task_note`.
+    one from another extension. Extension `work` plus entity `item` can't
+    shadow `v_work_item`.
   - `drop_extension` removes an extension's tables, views and state.
 - **Consent.** An exec collector runs code, so it runs only after a
   person approves it.

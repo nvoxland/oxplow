@@ -3702,7 +3702,7 @@ mod tests {
         let cols: serde_json::Value = serde_json::from_str(&text_payload(
             server
                 .query_sql(Parameters(QuerySqlParams {
-                    sql: "SELECT name FROM v_model_column WHERE view = 'v_task'".into(),
+                    sql: "SELECT name FROM v_model_column WHERE view = 'v_work_item'".into(),
                     params: None,
                     limit: None,
                 }))
@@ -3714,7 +3714,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|r| r[0] == "status"));
+            .any(|r| r[0] == "state"));
     }
 
     #[tokio::test]

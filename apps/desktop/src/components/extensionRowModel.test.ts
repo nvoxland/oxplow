@@ -177,8 +177,8 @@ test("extensionCredentials lists each declared credential once per extension", (
 });
 
 test("a collector run is a v_collector_run change", () => {
-  expect(collectorRan({ kind: "modelsChanged", models: ["v_task", "v_collector_run"] })).toBe(true);
-  expect(collectorRan({ kind: "modelsChanged", models: ["v_task"] })).toBe(false);
+  expect(collectorRan({ kind: "modelsChanged", models: ["v_work_item", "v_collector_run"] })).toBe(true);
+  expect(collectorRan({ kind: "modelsChanged", models: ["v_work_item"] })).toBe(false);
   expect(collectorRan({ kind: "tasksChanged" })).toBe(false);
 });
 

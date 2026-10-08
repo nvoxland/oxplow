@@ -784,7 +784,7 @@ mod tests {
     fn spec() -> Value {
         json!({
             "title": "Busy Tasks",
-            "query": "SELECT title, id FROM v_task ORDER BY id",
+            "query": "SELECT title, ref AS id FROM v_work_item ORDER BY ref",
             "viz": "bar",
             "chart": { "x": "title", "y": "id" }
         })
@@ -839,7 +839,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("lenses/tasks.yaml"),
-            "title: Tasks\nquery: SELECT title FROM v_task\n",
+            "title: Tasks\nquery: SELECT title FROM v_work_item\n",
         )
         .unwrap();
         let worktree = tempfile::tempdir().unwrap();
@@ -943,7 +943,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let mut s = spec();
         s["params"] = json!([{ "name": "limit", "default": 5 }]);
-        s["query"] = json!("SELECT title, id FROM v_task ORDER BY id LIMIT :limit");
+        s["query"] = json!("SELECT title, ref AS id FROM v_work_item ORDER BY ref LIMIT :limit");
         let answer = fx
             .svc
             .commands
@@ -1327,7 +1327,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             mine.join("lenses/good.yaml"),
-            "title: Good\nquery: SELECT id FROM v_task\n",
+            "title: Good\nquery: SELECT ref FROM v_work_item\n",
         )
         .unwrap();
         std::fs::write(

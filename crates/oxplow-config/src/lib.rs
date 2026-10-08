@@ -3767,17 +3767,17 @@ mod tests {
 metrics:
   - key: work.done
     title: Tasks completed
-    entity: v_task
-    where: "status = 'done'"
-    time: completed_at
+    entity: v_work_item
+    where: "state = 'done'"
+    time: closed_at
   - key: work.median_prio
-    entity: v_task
+    entity: v_work_item
     aggregation: median
-    value: "e.sort_index"
+    value: "e.rank"
 dimensions:
   - key: work.prio
-    entity: v_task
-    expr: "e.priority"
+    entity: v_work_item
+    expr: "json_extract(e.native, '$.priority')"
     join: "LEFT JOIN v_thread t ON t.id = e.thread_id"
 "#;
         #[derive(Deserialize)]
@@ -3791,9 +3791,9 @@ dimensions:
         assert_eq!(
             resolved[0].entity,
             Some(EntitySpec {
-                view: "v_task".into(),
-                where_: Some("status = 'done'".into()),
-                time: Some("completed_at".into()),
+                view: "v_work_item".into(),
+                where_: Some("state = 'done'".into()),
+                time: Some("closed_at".into()),
                 value: None,
                 aggregation: "count".into(),
             })
@@ -3804,8 +3804,8 @@ dimensions:
         assert_eq!(
             rd[0].entity,
             Some(EntityDimensionSpec {
-                view: "v_task".into(),
-                expr: "e.priority".into(),
+                view: "v_work_item".into(),
+                expr: "json_extract(e.native, '$.priority')".into(),
                 join: Some("LEFT JOIN v_thread t ON t.id = e.thread_id".into()),
             })
         );
@@ -3818,22 +3818,28 @@ dimensions:
             validate_metrics(Some(e)).unwrap_err().to_string()
         };
         assert!(bad("[{key: a.b, entity: tasks}]").contains("v_*"));
-        assert!(bad("[{key: a.b, entity: v_task, aggregation: sum}]").contains("needs a `value`"));
         assert!(
-            bad("[{key: a.b, entity: v_task, aggregation: ratio, value: x}]")
+            bad("[{key: a.b, entity: v_work_item, aggregation: sum}]").contains("needs a `value`")
+        );
+        assert!(
+            bad("[{key: a.b, entity: v_work_item, aggregation: ratio, value: x}]")
                 .contains("entity aggregation")
         );
-        assert!(bad("[{key: a.b, entity: v_task, sourceMeasure: m}]").contains("can't also set"));
+        assert!(
+            bad("[{key: a.b, entity: v_work_item, sourceMeasure: m}]").contains("can't also set")
+        );
         assert!(bad("[{key: a.b, sourceMeasure: m, where: x}]").contains("without `entity`"));
         assert!(bad("[{use: a.b, time: x}]").contains("`use:` entry"));
         let dim = |yaml: &str| {
             let e: Vec<DimensionEntry> = serde_yaml::from_str(yaml).unwrap();
             validate_dimensions(Some(e)).unwrap_err().to_string()
         };
-        assert!(dim("[{key: a.b, entity: v_task}]").contains("needs an `expr`"));
+        assert!(dim("[{key: a.b, entity: v_work_item}]").contains("needs an `expr`"));
         assert!(dim("[{key: a.b, expr: x}]").contains("without `entity`"));
-        assert!(dim("[{key: a.b, entity: v_task, expr: x, promote: true}]")
-            .contains("fact dimensions only"));
+        assert!(
+            dim("[{key: a.b, entity: v_work_item, expr: x, promote: true}]")
+                .contains("fact dimensions only")
+        );
     }
     use tempfile::tempdir;
 
@@ -4239,10 +4245,10 @@ lsp:
         std::fs::write(
             cfg_path(dir.path()),
             "metrics:\n\
-             - key: work.open_bugs\n  title: Open Bugs\n  entity: v_task\n  aggregation: count\n  where: \"e.status = 'ready'\"\n  time: e.created_at\n\
-             - key: work.mean_priority\n  entity: v_task\n  aggregation: avg\n  value: e.priority_rank\n\
+             - key: work.open_bugs\n  title: Open Bugs\n  entity: v_work_item\n  aggregation: count\n  where: \"e.state = 'todo'\"\n  time: e.created_at\n\
+             - key: work.mean_priority\n  entity: v_work_item\n  aggregation: avg\n  value: e.rank\n\
              dimensions:\n\
-             - key: work.thread_title\n  label: Thread\n  entity: v_task\n  expr: t.title\n  join: LEFT JOIN v_thread t ON t.id = e.thread_id\n",
+             - key: work.thread_title\n  label: Thread\n  entity: v_work_item\n  expr: t.title\n  join: LEFT JOIN v_thread t ON t.id = e.thread_id\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
@@ -4252,7 +4258,7 @@ lsp:
         assert_eq!(reloaded.dimensions, cfg.dimensions);
         assert_eq!(
             reloaded.metrics[0].where_.as_deref(),
-            Some("e.status = 'ready'")
+            Some("e.state = 'todo'")
         );
         assert_eq!(
             reloaded.dimensions[0].join.as_deref(),

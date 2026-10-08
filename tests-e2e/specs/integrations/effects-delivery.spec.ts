@@ -21,8 +21,8 @@ async function refOf(daemon: Daemon, title: string): Promise<string> {
 async function notesOn(daemon: Daemon, title: string): Promise<number> {
   const rows = await sql(
     daemon,
-    `SELECT count(*) FROM v_task_note n JOIN v_task t ON t.id = n.task_id
-      WHERE t.title = '${title}' AND n.body = 'Noted by the suite''s effect.'`,
+    `SELECT count(*) FROM v_work_item_comment c JOIN v_work_item w ON w.ref = c.ref
+      WHERE w.title = '${title}' AND c.body = 'Noted by the suite''s effect.'`,
   );
   return Number(rows[0]?.[0]);
 }

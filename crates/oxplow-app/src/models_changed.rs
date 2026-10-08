@@ -331,15 +331,15 @@ pub fn spawn(
 mod tests {
     use super::*;
 
-    /// P4.6 (tsk491): a task edit changes the models that read `task` and
-    /// the ones that read those — no others.
+    /// P4.6 (tsk491): a work-item edit changes the models that read
+    /// `work_item` and the ones that read those — no others.
     #[tokio::test]
     async fn a_table_change_reaches_its_models_and_their_readers_only() {
         use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let lineage = Lineage::load(&f.svc.db).await.unwrap();
-        let changed = lineage.affected(&["task".to_string()]);
-        assert!(changed.contains(&"v_task".to_string()), "{changed:?}");
+        let changed = lineage.affected(&["work_item".to_string()]);
+        assert!(changed.contains(&"v_work_item".to_string()), "{changed:?}");
         assert!(!changed.contains(&"v_snapshot".to_string()), "{changed:?}");
         // Transitive: a model reading `v_test_run` changes with its inputs.
         let through = lineage.affected(&["metric_capture".to_string()]);
@@ -349,7 +349,7 @@ mod tests {
             "v_claim reads v_test_run"
         );
 
-        // End to end: a task edit is announced for v_task, with a watermark.
+        // End to end: a task edit is announced for v_work_item, with a watermark.
         let watermarks = Arc::new(ModelWatermarks::default());
         let mut rx = f.svc.events.subscribe_ui();
         spawn(
@@ -363,23 +363,24 @@ mod tests {
         let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         task.title = "renamed".into();
         f.svc.task_store.update(&task).await.unwrap();
+        crate::test_fixtures::restate_task(&f.svc, f.task).await;
         let models = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 if let Ok(OxplowEvent::ModelsChanged { models }) = rx.recv().await {
-                    if models.contains(&"v_task".to_string()) {
+                    if models.contains(&"v_work_item".to_string()) {
                         return models;
                     }
                 }
             }
         })
         .await
-        .expect("ModelsChanged for v_task");
+        .expect("ModelsChanged for v_work_item");
         assert!(!models.contains(&"v_snapshot".to_string()), "{models:?}");
-        assert_eq!(watermarks.freshness(&["v_task".to_string()]).len(), 1);
+        assert_eq!(watermarks.freshness(&["v_work_item".to_string()]).len(), 1);
         // A query's result carries its models' watermarks.
         let out = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .with_watermarks(watermarks.clone())
-            .query_sql("SELECT count(*) FROM v_task", vec![], None)
+            .query_sql("SELECT count(*) FROM v_work_item", vec![], None)
             .await
             .unwrap();
         assert_eq!(
@@ -387,7 +388,7 @@ mod tests {
                 .iter()
                 .map(|m| m.model.as_str())
                 .collect::<Vec<_>>(),
-            vec!["v_task"]
+            vec!["v_work_item"]
         );
         assert!(watermarks.freshness(&["v_snapshot".to_string()]).is_empty());
     }
@@ -552,8 +553,8 @@ mod tests {
                 sources: vec![
                     model(
                         "titles",
-                        "SELECT id, title FROM ref('task')",
-                        &[("id", "INTEGER"), ("title", "TEXT")],
+                        "SELECT ref AS id, title FROM ref('work_item')",
+                        &[("id", "TEXT"), ("title", "TEXT")],
                         true,
                     ),
                     model(
@@ -617,6 +618,7 @@ mod tests {
         for i in 0..5 {
             task.title = format!("renamed {i}");
             f.svc.task_store.update(&task).await.unwrap();
+            crate::test_fixtures::restate_task(&f.svc, f.task).await;
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
@@ -642,7 +644,7 @@ mod tests {
                     name: name.into(),
                     version,
                     description: format!("{name}."),
-                    columns: [("id", "INTEGER"), ("title", title_type)]
+                    columns: [("id", "TEXT"), ("title", title_type)]
                         .iter()
                         .map(|(n, t)| ColumnDecl {
                             name: (*n).into(),
@@ -696,14 +698,19 @@ mod tests {
                 .await
                 .unwrap()
         };
-        compile(1, "SELECT id, title FROM ref('task')", "TEXT").await;
+        compile(1, "SELECT ref AS id, title FROM ref('work_item')", "TEXT").await;
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
         assets.sync_models().await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert_eq!(rows().await, 1);
 
-        compile(2, "SELECT id, title || '' AS title FROM ref('task')", "").await;
+        compile(
+            2,
+            "SELECT ref AS id, title || '' AS title FROM ref('work_item')",
+            "",
+        )
+        .await;
         assets.sync_models().await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert_eq!(rows().await, 1, "the recreated table is refilled");
