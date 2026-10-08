@@ -57,7 +57,27 @@ pub struct EffortFixture {
     /// Keep alive: the project directory.
     pub _dir: tempfile::TempDir,
     pub thread: ThreadId,
+    /// The thread's agent session (the project's default agent).
+    pub session: oxplow_domain::AgentSessionId,
     pub effort: EffortId,
+}
+
+/// An agent session (a Claude terminal) on `thread`, as setup — written to
+/// the store, not run as a command, so it leaves no audit row behind.
+pub async fn open_session(
+    svc: &crate::Services,
+    thread: ThreadId,
+) -> oxplow_domain::AgentSessionId {
+    use oxplow_domain::stores::AgentSessionStore as _;
+    svc.agent_session_store
+        .open(&oxplow_domain::agent_session::NewAgentSession::of(
+            thread,
+            oxplow_domain::AgentKind::Claude,
+            None,
+        ))
+        .await
+        .unwrap()
+        .id
 }
 
 /// In-memory services over a fresh repo with a primary stream, its first
@@ -70,6 +90,7 @@ pub async fn services_with_effort() -> EffortFixture {
     let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
     svc.streams.ensure_primary().await.unwrap();
     let thread = ThreadId::new(1);
+    let session = open_session(&svc, thread).await;
     let opened = svc
         .commands
         .run(
@@ -88,6 +109,7 @@ pub async fn services_with_effort() -> EffortFixture {
         svc,
         _dir: dir,
         thread,
+        session,
         effort,
     }
 }
@@ -115,6 +137,7 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
     let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
     svc.streams.ensure_primary().await.unwrap();
     let thread = ThreadId::new(1);
+    let session = open_session(&svc, thread).await;
     let now = oxplow_domain::Timestamp::now();
     let task = svc
         .task_store
@@ -149,6 +172,7 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
             svc,
             _dir: dir,
             thread,
+            session,
             effort,
         },
         task,

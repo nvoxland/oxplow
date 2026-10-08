@@ -82,10 +82,6 @@ impl WorkspaceLayout {
     }
 }
 
-/// The agent (and, for `acp`, the ACP agent) a stream's seeded thread
-/// runs: the project's default, read when the thread is made (tsk970).
-pub type DefaultAgent = Arc<dyn Fn() -> (oxplow_domain::AgentKind, Option<String>) + Send + Sync>;
-
 /// Top-level service. Cheap to clone — internals are `Arc`'d.
 #[derive(Clone)]
 pub struct StreamService {
@@ -93,8 +89,6 @@ pub struct StreamService {
     vcs: Arc<dyn Vcs>,
     streams: Arc<dyn StreamStore>,
     threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
-    sessions: Arc<dyn oxplow_domain::stores::AgentSessionStore>,
-    default_agent: DefaultAgent,
 }
 
 /// Default title applied to the auto-generated thread that every
@@ -109,16 +103,12 @@ impl StreamService {
         vcs: Arc<dyn Vcs>,
         streams: Arc<dyn StreamStore>,
         threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
-        sessions: Arc<dyn oxplow_domain::stores::AgentSessionStore>,
-        default_agent: DefaultAgent,
     ) -> Self {
         Self {
             layout,
             vcs,
             streams,
             threads,
-            sessions,
-            default_agent,
         }
     }
 
@@ -139,20 +129,11 @@ impl StreamService {
         if !existing.is_empty() {
             return;
         }
-        let (agent, acp_agent) = (self.default_agent)();
+        // A thread needs no agent: the person opens its sessions.
         let thread =
             oxplow_domain::Thread::seed(*stream_id, DEFAULT_THREAD_TITLE, Timestamp::now());
-        let thread_id = match self.threads.upsert(&thread).await {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::warn!(stream_id = %stream_id, error = %e, "default thread create failed");
-                return;
-            }
-        };
-        let session =
-            oxplow_domain::agent_session::NewAgentSession::of(thread_id, agent, acp_agent);
-        if let Err(e) = self.sessions.open(&session).await {
-            tracing::warn!(stream_id = %stream_id, error = %e, "default thread's session failed");
+        if let Err(e) = self.threads.upsert(&thread).await {
+            tracing::warn!(stream_id = %stream_id, error = %e, "default thread create failed");
         }
     }
 

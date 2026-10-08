@@ -298,12 +298,11 @@ rows. Statuses: `active` (writer — may mutate the worktree) and `queued`
 [agent-model.md](./agent-model.md)'s write-guard section). Writer status
 is the thread's: every session in the writer thread may write. Exactly
 one thread per stream is `active`; the rest are `queued`. A newly-seeded
-stream ships with one thread titled `Thread` and one session on it running
-the project's default agent — `oxplow_config::default_thread_agent`, the
-same rule `oxplow.thread.create` uses when no agent is named: the first
-enabled agent, and for `acp` the project's first `acpAgents:` entry, else
-the first preset. `StreamService` reads it through the source `Services`
-gives it, so it's the config as it is when the thread is made.
+stream ships with one thread titled `Thread` and no agent session; neither
+does `oxplow.thread.create` open one. A person opens sessions
+(`oxplow.agent_session.open`, whose default agent is
+`oxplow_config::default_session_agent`: the first enabled agent, and for
+`acp` the project's first `acpAgents:` entry, else the first preset).
 The rolling `summary` field + `record_batch_summary` MCP tool were
 removed in v13 — use the task log as the source of truth instead.
 
@@ -355,7 +354,10 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   `closed_reason` (`closed`, `thread_closed`, `stream_archived`),
   `updated_at`.
 - **Lifecycle: the row is the slot, not the process.** `closed_at` is set
-  only by closing the session, its thread or its stream's archive. A
+  only by closing the session (`oxplow.agent_session.close`), its thread
+  (`thread_closed`) or its stream's archive (`stream_archived`) —
+  `agent_stores::close_session_tx`, which also ends its open turns and logs
+  `stopped`; the caller stops its process after commit. A
   harness process ending (a PTY exit, `/clear`, an ACP close) logs
   `agent.session.ended` and leaves the row open, so its tab keeps the
   ended notice and the resume id.

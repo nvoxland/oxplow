@@ -267,10 +267,16 @@ export function useBackendSubscriptions(
     const unsubscribe = subscribeAgentStatus("all", (entry) => {
       setSessionStatuses((prev) => ({ ...prev, [sessionStatusKey(entry)]: entry }));
     });
+    // A session opened or closed: re-read, so a closed one's status drops
+    // out of its thread's dot.
+    const unsubSessions = subscribeOxplowEvents((event) => {
+      if (event.kind === "modelsChanged" && event.models.includes("v_agent_session")) void seed();
+    });
     const unsubReconnect = onRemoteReconnect(() => void seed());
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubSessions();
       unsubReconnect();
     };
   }, [setSessionStatuses]);

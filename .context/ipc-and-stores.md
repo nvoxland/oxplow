@@ -28,7 +28,7 @@ command):
 | page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `ModelsChanged` (P8.A10) |
 | follow-ups, background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
-| terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough |
+| terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
 | forgetting a stale Claude resume pointer at launch (`resume_check::forget_missing`) | agent-session state (`agent_session.resume_session_id`), like hook ingest's own writes of it; only that column, only while it's still the id found gone |
 | the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |

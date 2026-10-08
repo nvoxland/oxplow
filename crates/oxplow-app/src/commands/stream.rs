@@ -83,6 +83,7 @@ pub struct StreamDeps {
     pub ref_moves: crate::ref_moves::RefMoves,
     pub threads: Arc<oxplow_db::SqliteThreadStore>,
     pub sessions: Arc<oxplow_db::SqliteAgentSessionStore>,
+    pub processes: crate::agent_sessions::SessionProcesses,
     pub log: Arc<oxplow_db::SqliteEventLogStore>,
     pub search: Arc<oxplow_db::SqliteSearchStore>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
@@ -206,7 +207,9 @@ pub fn adopt_worktree_op(deps: StreamDeps) -> Op {
 
 /// `stream.archive { stream, delete_worktree? }`: refused while an agent
 /// runs in one of its threads; its threads go with it — their open efforts
-/// close at a snapshot taken first — and its working copy when asked.
+/// close at a snapshot taken first, their agent sessions close
+/// (`stream_archived`) and their processes stop — and its working copy
+/// when asked.
 /// Destructive: a person confirms it.
 pub fn archive_op(deps: StreamDeps) -> Op {
     Op::new(
@@ -267,6 +270,20 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                     deps.efforts
                         .close(effort.id, end, oxplow_db::effort_store::ClosedBy::System)
                         .await?;
+                }
+                // Its threads' agent sessions close, and their processes stop
+                // before the working copy goes.
+                for t in &threads {
+                    let closed = deps
+                        .sessions
+                        .close_for_thread(
+                            t.id,
+                            oxplow_domain::agent_session::SessionCloseReason::StreamArchived,
+                        )
+                        .await?;
+                    for session in closed {
+                        deps.processes.kill(session);
+                    }
                 }
                 deps.streams
                     .archive_stream(&id, input.delete_worktree)

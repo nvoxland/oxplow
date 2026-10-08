@@ -710,6 +710,14 @@ thread can say what it's working on and get its own effort bucket. The
 bus's `WriteGate` applies to `Write` commands only; `Record` commands
 skip it ([commands.md](./commands.md) "Agent policy").
 
+**An agent may open a sibling agent session** in its own stream
+(`oxplow.agent_session.open`, decided 2026-10-08): the row makes the UI
+attach and start its process, and that is all — nothing types into it.
+The no-automation guards (`forward_terminal_input` UI-only,
+`submit_human_prompt`'s single caller, `no-agent-input-automation.test.ts`)
+are what keep a session an agent opened from being driven. Its close is
+destructive and waits for a person as a proposal.
+
 - **Pure rules** live in `crates/oxplow-runtime/src/policy.rs`.
   `decide_tool(ToolIntent{label, kind, paths}, PolicyFacts)` returns
   `Allow`, or `Deny { layer: WriteGuard, reason }`.

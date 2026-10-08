@@ -162,13 +162,11 @@ pub fn acp_presets() -> Vec<AcpAgentConfig> {
     ]
 }
 
-/// Presets, then the project's entries (a project entry replaces a
-/// preset of the same name), in that order.
-/// The agent a new thread runs when it names none (`oxplow.thread.create`, a
-/// stream's seeded thread; tsk970): the project's first enabled agent
+/// The agent a new agent session runs when it names none
+/// (`oxplow.agent_session.open`): the project's first enabled agent
 /// (Claude when `agents:` is empty), and for `acp` the project's own first
 /// `acpAgents:` entry, else the first preset.
-pub fn default_thread_agent(config: &OxplowConfig) -> (AgentKind, Option<String>) {
+pub fn default_session_agent(config: &OxplowConfig) -> (AgentKind, Option<String>) {
     let agent = config.agents.first().copied().unwrap_or(AgentKind::Claude);
     let acp_agent = (agent == AgentKind::Acp).then(|| {
         config
@@ -181,6 +179,8 @@ pub fn default_thread_agent(config: &OxplowConfig) -> (AgentKind, Option<String>
     (agent, acp_agent)
 }
 
+/// Presets, then the project's entries (a project entry replaces a
+/// preset of the same name), in that order.
 pub fn resolve_acp_agents(project: &[AcpAgentConfig]) -> Vec<(AcpAgentConfig, AcpAgentSource)> {
     let mut out: Vec<(AcpAgentConfig, AcpAgentSource)> = acp_presets()
         .into_iter()
@@ -3967,25 +3967,25 @@ dimensions:
     /// enabled one; an ACP thread runs the project's first `acpAgents:`
     /// entry, else the first preset.
     #[test]
-    fn a_new_threads_default_agent_is_the_projects() {
+    fn a_new_sessions_default_agent_is_the_projects() {
         let dir = tempdir().unwrap();
         let load = |yaml: &str| {
             std::fs::write(cfg_path(dir.path()), yaml).unwrap();
             load_project_config(dir.path()).unwrap()
         };
         assert_eq!(
-            default_thread_agent(&load("agents: [codex, claude]\n")),
+            default_session_agent(&load("agents: [codex, claude]\n")),
             (AgentKind::Codex, None)
         );
         assert_eq!(
-            default_thread_agent(&load(
+            default_session_agent(&load(
                 "agents: [acp]\nacpAgents:\n  - { name: fake, command: fake-acp }\n"
             )),
             (AgentKind::Acp, Some("fake".to_string()))
         );
         let preset = acp_presets().remove(0).name;
         assert_eq!(
-            default_thread_agent(&load("agents: [acp]\n")),
+            default_session_agent(&load("agents: [acp]\n")),
             (AgentKind::Acp, Some(preset))
         );
     }

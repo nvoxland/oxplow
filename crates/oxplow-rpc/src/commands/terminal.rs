@@ -671,7 +671,8 @@ mod tests {
         }
     }
 
-    /// The primary stream's writer thread's agent session.
+    /// An agent session opened, as a person does, on the primary stream's
+    /// writer thread.
     async fn first_session(ctx: &crate::RpcContext) -> oxplow_domain::agent_session::AgentSession {
         let stream = ctx.streams.ensure_primary().await.unwrap();
         let thread = ctx
@@ -680,11 +681,16 @@ mod tests {
             .await
             .unwrap()
             .expect("the primary stream has a writer thread");
-        ctx.agent_session_store
-            .newest_for_thread(thread)
-            .await
-            .unwrap()
-            .expect("its thread has a session")
+        let out = crate::dispatch(
+            "run_command",
+            json!({ "id": "oxplow.agent_session.open", "input": {
+                "thread": oxplow_domain::refs::build::thread_ref(thread),
+            }, "confirmed": false }),
+            ctx,
+        )
+        .await
+        .unwrap();
+        serde_json::from_value(out["result"].clone()).unwrap()
     }
 
     async fn open(ctx: &crate::RpcContext, pane: &str) -> Result<serde_json::Value, IpcError> {

@@ -762,9 +762,12 @@ impl Services {
     ) -> Result<Self, AppInitError> {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
-        let agent_session_store = Arc::new(SqliteAgentSessionStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
         let vocabulary = VocabularyHandle::core();
+        let agent_session_store = Arc::new(SqliteAgentSessionStore::with_vocabulary(
+            db.clone(),
+            vocabulary.clone(),
+        ));
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
@@ -850,20 +853,11 @@ impl Services {
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let config_arc = Arc::new(RwLock::new(config));
-        // A stream's seeded thread runs the project's default agent, as
-        // the config says it when the thread is made (tsk970).
         let streams = StreamService::new(
             workspace_layout,
             vcs.clone(),
             stream_store.clone(),
             thread_store.clone(),
-            agent_session_store.clone(),
-            {
-                let config = config_arc.clone();
-                Arc::new(move || {
-                    oxplow_config::default_thread_agent(&config_service::read_config(&config))
-                })
-            },
         );
         let threads = ThreadService::new(thread_store.clone());
 
@@ -1205,7 +1199,8 @@ impl Services {
         ]
         .into_iter()
         .chain(commands::review::ops())
-        .chain(commands::thread::ops(
+        .chain(commands::thread::ops(session_processes.clone()))
+        .chain(commands::agent_session::ops(
             config_arc.clone(),
             session_processes.clone(),
         ))
@@ -1233,6 +1228,7 @@ impl Services {
             ref_moves: ref_moves.clone(),
             threads: thread_store.clone(),
             sessions: agent_session_store.clone(),
+            processes: session_processes.clone(),
             log: event_log_store.clone(),
             search: search_store.clone(),
             worktrees: worktrees.clone(),

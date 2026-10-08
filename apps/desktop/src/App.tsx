@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import {
   closeThread,
   createThread,
+  openAgentSession,
   getThreadState,
   getConfig,
   createWorkspaceDirectory,
@@ -825,7 +826,9 @@ export function App() {
   async function handleCreateThread(title: string, agent?: AgentKind, acpAgent?: string | null) {
     if (!stream) return;
     try {
-      const next = await createThread(stream.id, title, agent, acpAgent);
+      const { thread: created, state: next } = await createThread(stream.id, title);
+      // The agent picked in the new-thread form runs in its first session.
+      await openAgentSession(created.id, agent, acpAgent);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
       const thread = next.threads.find((candidate) => candidate.id === next.selectedThreadId);
       if (thread) {

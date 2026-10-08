@@ -8,7 +8,8 @@
 //!   at the end of the queue;
 //! - **promote** → `active`, demoting the current writer to `queued` in
 //!   the same transaction (the partial unique index never trips);
-//! - **close** → `closed` (an ACP thread's session stops after commit);
+//! - **close** → `closed` (its agent sessions close too, and their
+//!   processes stop after commit);
 //!   **reopen** → `queued`.
 //!
 //! A thread is named by ref (`thread:thr12`), a stream by `stream:str1`.
@@ -18,13 +19,12 @@
 
 use crate::commands::ops::Op;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use oxplow_config::OxplowConfig;
 use oxplow_db::thread_store::{get_tx, list_for_stream_tx, upsert_tx};
 use oxplow_domain::refs::build::{stream_ref, thread_ref};
 use oxplow_domain::{
-    AgentKind, CommandCall, CommandError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp,
+    CommandCall, CommandError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -47,13 +47,8 @@ pub struct CreateInput {
     /// The stream (`stream:str1`).
     pub stream: String,
     pub title: String,
-    /// Its agent harness (default: the project's first enabled agent).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent: Option<AgentKind>,
-    /// For an `acp` thread, which ACP agent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acp_agent: Option<String>,
-    /// Fork this thread (`thread:thr3`): the new one runs the same agent.
+    /// Fork this thread (`thread:thr3`): the new one joins its stream.
+    /// Nothing agent-ish is copied — a thread's agents are its sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
 }
@@ -249,8 +244,9 @@ fn schema<T: JsonSchema>() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-/// `thread.create { stream, title, agent?, acp_agent?, from? }`.
-pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
+/// `thread.create { stream, title, from? }`: a thread opens with no agent
+/// session (`oxplow.agent_session.open` adds them).
+pub fn create_op() -> Op {
     Op::new(
         "threads.write",
         "create",
@@ -260,65 +256,12 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
             let input: CreateInput = parse(input)?;
             let stream: StreamId = id_of(&input.stream, "stream", "/stream")?;
             on_own_stream(ctx, stream)?;
-            let config = crate::config_service::read_config(&config);
-            let (agent, acp_agent) = match &input.from {
-                Some(from) => {
-                    if input.agent.is_some() || input.acp_agent.is_some() {
-                        return Err(invalid(
-                            "/from",
-                            "a fork runs its source's agent; don't name one".into(),
-                        ));
-                    }
-                    let source = load(ctx, id_of(from, "thread", "/from")?, "/from")?;
-                    if source.stream_id != stream {
-                        return Err(invalid("/from", format!("`{from}` is on another stream")));
-                    }
-                    let session =
-                        oxplow_db::agent_session_store::newest_for_thread_tx(ctx.conn, source.id)?;
-                    (
-                        session.as_ref().map(|s| s.harness).unwrap_or_default(),
-                        session.and_then(|s| s.acp_agent),
-                    )
+            if let Some(from) = &input.from {
+                let source = load(ctx, id_of(from, "thread", "/from")?, "/from")?;
+                if source.stream_id != stream {
+                    return Err(invalid("/from", format!("`{from}` is on another stream")));
                 }
-                None => {
-                    // Named or not, one rule for the default (tsk970).
-                    let (default_agent, default_acp) = oxplow_config::default_thread_agent(&config);
-                    let agent = input.agent.unwrap_or(default_agent);
-                    let input_acp = input.acp_agent.or_else(|| {
-                        (input.agent.is_none() && agent == AgentKind::Acp)
-                            .then_some(default_acp)
-                            .flatten()
-                    });
-                    if !config.agents.contains(&agent) {
-                        return Err(invalid(
-                            "/agent",
-                            format!("agent `{}` isn't enabled for this project", agent.as_str()),
-                        ));
-                    }
-                    let acp_agent = match (agent, input_acp) {
-                        (AgentKind::Acp, Some(name)) => {
-                            if crate::acp::agents::find(&config, &name).is_none() {
-                                return Err(invalid(
-                                    "/acp_agent",
-                                    format!("no ACP agent named `{name}`"),
-                                ));
-                            }
-                            Some(name)
-                        }
-                        (AgentKind::Acp, None) => {
-                            return Err(invalid("/acp_agent", "an ACP thread needs one".into()))
-                        }
-                        (_, Some(_)) => {
-                            return Err(invalid(
-                                "/acp_agent",
-                                "only an ACP thread names one".into(),
-                            ))
-                        }
-                        (_, None) => None,
-                    };
-                    (agent, acp_agent)
-                }
-            };
+            }
             let existing = list_for_stream_tx(ctx.conn, stream).map_err(sql)?;
             let has_writer = existing.iter().any(|t| t.status == ThreadStatus::Active);
             let next_sort = existing
@@ -348,11 +291,6 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                 archived_at: None,
             };
             thread.id = save(ctx, &thread)?;
-            oxplow_db::agent_session_store::insert_tx(
-                ctx.conn,
-                &oxplow_domain::agent_session::NewAgentSession::of(thread.id, agent, acp_agent),
-                now,
-            )?;
             Ok(result(&thread))
         })),
     )
@@ -485,9 +423,9 @@ pub fn demote_op() -> Op {
     )
 }
 
-/// `thread.close { thread }`: its open effort closes in the same
-/// transaction (by `system`), and an ACP thread's session stops once the
-/// close commits. An agent closes only its own thread. Undone by reopening
+/// `thread.close { thread }`: its open effort and its agent sessions close
+/// in the same transaction (the effort by `system`, the sessions
+/// `thread_closed`), and the sessions' processes stop once it commits. An agent closes only its own thread. Undone by reopening
 /// it (the effort stays closed).
 pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
     Op::new(
@@ -525,12 +463,22 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
                 )
                 .map_err(CommandError::from)?;
             }
-            // Every session's process stops once the close commits.
+            // Its sessions close with it, and their processes stop once the
+            // close commits.
             let sessions: Vec<_> =
                 oxplow_db::agent_session_store::list_open_for_thread_tx(ctx.conn, id)?
                     .into_iter()
                     .map(|s| s.id)
                     .collect();
+            for session in &sessions {
+                oxplow_db::agent_stores::close_session_tx(
+                    ctx.conn,
+                    &ctx.events,
+                    *session,
+                    oxplow_domain::agent_session::SessionCloseReason::ThreadClosed,
+                    now,
+                )?;
+            }
             let processes = processes.clone();
             let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> = Some(Box::new(move || {
                 for session in sessions {
@@ -618,12 +566,9 @@ pub fn reorder_op() -> Op {
 }
 
 /// The thread commands, for the bus.
-pub fn ops(
-    config: Arc<RwLock<OxplowConfig>>,
-    processes: crate::agent_sessions::SessionProcesses,
-) -> Vec<Op> {
+pub fn ops(processes: crate::agent_sessions::SessionProcesses) -> Vec<Op> {
     vec![
-        create_op(config),
+        create_op(),
         rename_op(),
         set_prompt_op(),
         promote_op(),
@@ -687,19 +632,6 @@ mod tests {
         fx.svc.thread_store.get(&id).await.unwrap().unwrap()
     }
 
-    /// The thread's agent session.
-    async fn session(
-        fx: &EffortFixture,
-        id: ThreadId,
-    ) -> oxplow_domain::agent_session::AgentSession {
-        fx.svc
-            .agent_session_store
-            .newest_for_thread(id)
-            .await
-            .unwrap()
-            .expect("the thread has a session")
-    }
-
     async fn create(fx: &EffortFixture, title: &str) -> ThreadId {
         let stream = thread(fx, fx.thread).await.stream_id;
         let out = run(
@@ -713,10 +645,11 @@ mod tests {
         serde_json::from_value::<Thread>(out.result).unwrap().id
     }
 
-    /// A new thread joins the queue behind the stream's writer; a fork runs
-    /// its source's agent.
+    /// A new thread joins the queue behind the stream's writer, with no
+    /// agent session; a fork copies none of its source's.
     #[tokio::test]
-    async fn a_new_thread_queues_behind_the_writer_and_a_fork_runs_its_sources_agent() {
+    async fn a_new_thread_queues_behind_the_writer_and_a_fork_copies_no_session() {
+        use oxplow_domain::stores::AgentSessionStore as _;
         let fx = services_with_effort().await;
         let second = create(&fx, "second").await;
         let t = thread(&fx, second).await;
@@ -731,11 +664,32 @@ mod tests {
         .await
         .unwrap();
         let fork: Thread = serde_json::from_value(fork.result).unwrap();
-        assert_eq!(
-            session(&fx, fork.id).await.harness,
-            session(&fx, fx.thread).await.harness
-        );
         assert_eq!(fork.status, ThreadStatus::Queued);
+        for id in [second, fork.id] {
+            assert!(fx
+                .svc
+                .agent_session_store
+                .list_open_for_thread(&id)
+                .await
+                .unwrap()
+                .is_empty());
+        }
+    }
+
+    /// A thread names no agent: its sessions do.
+    #[tokio::test]
+    async fn a_thread_names_no_agent() {
+        let fx = services_with_effort().await;
+        let stream = stream_ref(thread(&fx, fx.thread).await.stream_id);
+        let err = run(
+            &fx,
+            &Actor::Human,
+            CREATE,
+            json!({ "stream": stream, "title": "x", "agent": "claude" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("agent"), "{err}");
     }
 
     /// Promoting demotes the writer in the same run; undoing it promotes
@@ -959,58 +913,6 @@ mod tests {
         assert!(
             matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/order/0"),
             "{err:?}"
-        );
-    }
-
-    /// An ACP thread names a known ACP agent, and only an ACP thread names
-    /// one; a fork of it runs the same ACP agent.
-    #[tokio::test]
-    async fn an_acp_thread_names_a_known_acp_agent_and_its_fork_keeps_it() {
-        let fx = services_with_effort().await;
-        fx.svc.config.write().unwrap().agents.push(AgentKind::Acp);
-        let stream = stream_ref(thread(&fx, fx.thread).await.stream_id);
-        for (input, field) in [
-            (
-                json!({ "stream": stream, "title": "x", "agent": "acp" }),
-                "/acp_agent",
-            ),
-            (
-                json!({ "stream": stream, "title": "x", "agent": "acp", "acp_agent": "nope" }),
-                "/acp_agent",
-            ),
-            (
-                json!({ "stream": stream, "title": "x", "agent": "claude", "acp_agent": "gemini" }),
-                "/acp_agent",
-            ),
-        ] {
-            let err = run(&fx, &Actor::Human, CREATE, input).await.unwrap_err();
-            assert!(
-                matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == field),
-                "{err:?}"
-            );
-        }
-        let acp = run(
-            &fx,
-            &Actor::Human,
-            CREATE,
-            json!({ "stream": stream, "title": "g", "agent": "acp", "acp_agent": "gemini" }),
-        )
-        .await
-        .unwrap();
-        let acp: Thread = serde_json::from_value(acp.result).unwrap();
-        let fork = run(
-            &fx,
-            &Actor::Human,
-            CREATE,
-            json!({ "stream": stream, "title": "fork", "from": thread_ref(acp.id) }),
-        )
-        .await
-        .unwrap();
-        let fork: Thread = serde_json::from_value(fork.result).unwrap();
-        let fork = session(&fx, fork.id).await;
-        assert_eq!(
-            (fork.harness, fork.acp_agent.as_deref()),
-            (AgentKind::Acp, Some("gemini"))
         );
     }
 }

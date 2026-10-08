@@ -44,16 +44,15 @@ use specta::Type;
 use thiserror::Error;
 
 use oxplow_db::agent_stores::{
-    activity_anchors_tx, close_turn_tx, last_status_tx, open_harness_turn_ids_tx,
+    activity_anchors_tx, close_turn_tx, last_status_tx, log_status_tx, open_harness_turn_ids_tx,
     open_turn_ids_in_tx, open_turn_tx, TurnEnd,
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
 use oxplow_domain::events::schema::{
     AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
-    AgentSessionStarted, AgentSessionStartedV1, AgentStatusChanged, AgentStatusChangedV1,
-    AgentToolFinished, AgentToolFinishedV1, AgentToolRequested, AgentToolRequestedV1, ContentRef,
-    LoggedAgentStatus, ToolDecision as Decision,
+    AgentSessionStarted, AgentSessionStartedV1, AgentToolFinished, AgentToolFinishedV1,
+    AgentToolRequested, AgentToolRequestedV1, ContentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
@@ -316,36 +315,6 @@ fn changed(current: Option<&AgentStatus>, state: AgentStatusState, detail: Optio
         Some(c) => c.state != state || c.detail.as_deref() != detail,
         None => true,
     }
-}
-
-/// Log a status change, anchored to the thread's open turn — or, for the
-/// status a Stop sets, to the turn that Stop closed (`turn`), so the
-/// turn's own record says how it ended (`TurnSignals::awaiting_user`).
-fn log_status_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    thread: ThreadId,
-    session: Option<oxplow_domain::AgentSessionId>,
-    turn: Option<AgentTurnId>,
-    state: AgentStatusState,
-    detail: Option<String>,
-) -> Result<(), DomainError> {
-    let mut anchors = activity_anchors_tx(conn, thread, session)?;
-    if let Some(turn) = turn {
-        anchors.turn_id = Some(turn.value());
-    }
-    let env = ev
-        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-            thread: thread_ref(thread),
-            state: LoggedAgentStatus::of(state).ok_or_else(|| {
-                DomainError::Invalid(format!("{state:?} is derived, never logged"))
-            })?,
-            detail,
-        })
-        .with_anchors(anchors)
-        .with_subject([thread_ref(thread)]);
-    ev.append(conn, &env)?;
-    Ok(())
 }
 
 /// What the ingest needs of the thread and the agent session a hook came

@@ -447,6 +447,80 @@ fn all_statuses_tx(
     Ok(rows)
 }
 
+/// Log agent session `session`'s status change on `thread`, anchored to
+/// the session's open turn — or, for the status a Stop sets, to the turn
+/// that Stop closed (`turn`), so the turn's own record says how it ended.
+pub fn log_status_tx(
+    conn: &Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    session: Option<AgentSessionId>,
+    turn: Option<AgentTurnId>,
+    state: oxplow_domain::AgentStatusState,
+    detail: Option<String>,
+) -> Result<(), DomainError> {
+    use oxplow_domain::events::schema::{AgentStatusChangedV1, LoggedAgentStatus};
+    let mut anchors = activity_anchors_tx(conn, thread, session)?;
+    if let Some(turn) = turn {
+        anchors.turn_id = Some(turn.value());
+    }
+    let env = ev
+        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
+            thread: thread_ref(thread),
+            state: LoggedAgentStatus::of(state).ok_or_else(|| {
+                DomainError::Invalid(format!("{state:?} is derived, never logged"))
+            })?,
+            detail,
+        })
+        .with_anchors(anchors)
+        .with_subject([thread_ref(thread)]);
+    ev.append(conn, &env)?;
+    Ok(())
+}
+
+/// Close agent session `session`'s slot (`reason`), in the caller's
+/// transaction: its open turns end interrupted ("session closed") and it
+/// logs `stopped`. Its process is the caller's to stop once this commits.
+/// `false` when it was already closed (nothing done).
+pub fn close_session_tx(
+    conn: &Connection,
+    ev: &EventCtx<'_>,
+    session: AgentSessionId,
+    reason: oxplow_domain::agent_session::SessionCloseReason,
+    now: Timestamp,
+) -> Result<bool, DomainError> {
+    let Some(row) = crate::agent_session_store::get_tx(conn, session)? else {
+        return Ok(false);
+    };
+    if !crate::agent_session_store::close_tx(conn, session, reason, now)? {
+        return Ok(false);
+    }
+    let end = TurnEnd {
+        answer: Some("session closed"),
+        ..TurnEnd::new(now, TurnOutcome::Interrupted)
+    };
+    let mut closed = None;
+    for id in open_turn_ids_in_tx(conn, row.thread_id, Some(session))? {
+        if close_turn_tx(conn, ev, id, &end)?.is_some() && closed.is_none() {
+            closed = Some(id);
+        }
+    }
+    let stopped = oxplow_domain::AgentStatusState::Stopped;
+    let current = last_status_tx(conn, ev.vocabulary, row.thread_id, Some(session))?;
+    if current.is_none_or(|s| s.state != stopped) {
+        log_status_tx(
+            conn,
+            ev,
+            row.thread_id,
+            Some(session),
+            closed,
+            stopped,
+            Some("session closed".into()),
+        )?;
+    }
+    Ok(true)
+}
+
 /// Agent status read from the event log. There is no write side: the
 /// hook ingest logs `agent.status.changed` and that is the record.
 #[derive(Clone)]

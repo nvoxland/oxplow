@@ -1294,19 +1294,54 @@ export async function getThreadState(streamId: string): Promise<ThreadState> {
 const threadRef = (id: string) => `thread:${id}`;
 const streamRef = (id: string) => `stream:${id}`;
 
-export async function createThread(
-  streamId: string,
-  title: string,
-  agent?: AgentKind,
+/** A new thread on the stream: it has no agent session (open one with
+ *  `openAgentSession`). The thread and the stream's state after. */
+export async function createThread(streamId: string, title: string): Promise<{ thread: Thread; state: ThreadState }> {
+  const thread = (await runCommand("oxplow.thread.create", { stream: streamRef(streamId), title })).result as Thread;
+  return { thread, state: await getThreadState(streamId) };
+}
+
+/** What `oxplow.agent_session.open` answers: the new session's row. */
+export interface AgentSessionRecord {
+  /** `ses3`. */
+  id: string;
+  /** `thr1`. */
+  thread_id: string;
+  kind: string;
+  harness: AgentKind;
+  acp_agent: string | null;
+  title: string;
+}
+
+/** An agent session's ref (`agent_session:ses3`). */
+const sessionRef = (id: string) => `agent_session:${id}`;
+
+/** Open an agent session on a thread: it only adds the slot (the tab
+ *  starts its process when it mounts). No harness: the project's default. */
+export async function openAgentSession(
+  threadId: string,
+  harness?: AgentKind,
   acpAgent?: string | null,
-): Promise<ThreadState> {
-  await runCommand("oxplow.thread.create", {
-    stream: streamRef(streamId),
-    title,
-    ...(agent ? { agent } : {}),
-    ...(acpAgent ? { acp_agent: acpAgent } : {}),
-  });
-  return getThreadState(streamId);
+  title?: string,
+): Promise<AgentSessionRecord> {
+  return (
+    await runCommand("oxplow.agent_session.open", {
+      thread: threadRef(threadId),
+      ...(harness ? { harness } : {}),
+      ...(acpAgent ? { acp_agent: acpAgent } : {}),
+      ...(title ? { title } : {}),
+    })
+  ).result as AgentSessionRecord;
+}
+
+/** Close an agent session: its process stops. Destructive — the caller
+ *  has the person confirm first (`confirmed`). */
+export async function closeAgentSession(sessionId: string, confirmed: boolean): Promise<void> {
+  await runCommand("oxplow.agent_session.close", { session: sessionRef(sessionId) }, confirmed);
+}
+
+export async function renameAgentSession(sessionId: string, title: string): Promise<void> {
+  await runCommand("oxplow.agent_session.rename", { session: sessionRef(sessionId), title });
 }
 
 export async function reorderThreads(streamId: string, orderedThreadIds: string[]): Promise<void> {

@@ -11,6 +11,7 @@ use oxplow_domain::stores::AgentSessionStore;
 use oxplow_domain::{AgentKind, AgentSessionId, DomainError, ThreadId, Timestamp};
 
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
+use oxplow_domain::vocabulary::VocabularyHandle;
 
 const COLUMNS: &str = "id, thread_id, kind, harness, acp_agent, title, resume_session_id, host,
                        opened_at, closed_at, closed_reason, updated_at";
@@ -265,11 +266,43 @@ pub fn set_title_tx(
 #[derive(Clone)]
 pub struct SqliteAgentSessionStore {
     db: Database,
+    vocabulary: VocabularyHandle,
 }
 
 impl SqliteAgentSessionStore {
+    /// A store with its own core schema registry; `Services` shares one
+    /// via [`Self::with_vocabulary`].
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self::with_vocabulary(db, VocabularyHandle::core())
+    }
+
+    pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
+        Self { db, vocabulary }
+    }
+
+    /// Close every open session of `thread` (`reason`) in one transaction —
+    /// their open turns end and each logs `stopped` — and return them: their
+    /// processes are the caller's to stop.
+    pub async fn close_for_thread(
+        &self,
+        thread: ThreadId,
+        reason: SessionCloseReason,
+    ) -> Result<Vec<AgentSessionId>, DomainError> {
+        let vocabulary = self.vocabulary.clone();
+        self.db
+            .transaction(move |tx| {
+                let vocabulary = vocabulary.current();
+                let ev = crate::event_log_store::EventCtx::system(&vocabulary, "agent_sessions");
+                let now = Timestamp::now();
+                let mut closed = Vec::new();
+                for s in list_open_for_thread_tx(tx, thread)? {
+                    if crate::agent_stores::close_session_tx(tx, &ev, s.id, reason, now)? {
+                        closed.push(s.id);
+                    }
+                }
+                Ok(closed)
+            })
+            .await
     }
 
     /// The thread's most recently opened session, open or not.

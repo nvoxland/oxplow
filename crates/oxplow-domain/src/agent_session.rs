@@ -17,7 +17,9 @@ use crate::time::Timestamp;
 use crate::AgentKind;
 
 /// What kind of slot a session is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionKind {
     /// A harness in a terminal (a PTY).

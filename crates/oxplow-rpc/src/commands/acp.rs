@@ -211,32 +211,26 @@ mod tests {
     async fn opening_a_terminal_session_as_acp_is_refused() {
         let (ctx, _dir) = crate::test_support::services();
         let stream = ctx.streams.ensure_primary().await.unwrap();
-        let t = crate::dispatch(
+        let thread = ctx
+            .threads
+            .selected_or_active(&stream.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let opened = crate::dispatch(
             "run_command",
-            json!({"id": "oxplow.thread.create", "input": {
-                "stream": oxplow_domain::refs::build::stream_ref(stream.id),
-                "title": "c", "agent": "claude",
+            json!({"id": "oxplow.agent_session.open", "input": {
+                "thread": oxplow_domain::refs::build::thread_ref(thread),
+                "harness": "claude",
             }, "confirmed": false}),
             &ctx,
         )
         .await
-        .unwrap()["result"]
-            .clone();
-        let thread: oxplow_domain::ThreadId = serde_json::from_value(t["id"].clone()).unwrap();
-        let session = ctx
-            .agent_session_store
-            .newest_for_thread(thread)
+        .unwrap();
+        let session = opened["result"]["id"].as_str().unwrap().to_string();
+        let err = crate::dispatch("acp_open_session", json!({"sessionId": session}), &ctx)
             .await
-            .unwrap()
-            .unwrap()
-            .id;
-        let err = crate::dispatch(
-            "acp_open_session",
-            json!({"sessionId": session.to_string()}),
-            &ctx,
-        )
-        .await
-        .unwrap_err();
+            .unwrap_err();
         assert!(
             err.message.contains("doesn't run an ACP agent"),
             "{}",

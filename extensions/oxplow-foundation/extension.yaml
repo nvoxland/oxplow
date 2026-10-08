@@ -28,6 +28,20 @@ commands:
     op: draft
     invokers: { human: true, agent: false, lens: false }
     ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " } }
+  # agent_sessions.write
+  - name: agent_session.close
+    summary: "Close an agent session (`agent_session:ses3`): its open turn ends and its process — the terminal agent or ACP agent — stops. An agent's waits for a person."
+    capability: agent_sessions.write
+    op: close
+    confirm: destructive
+  - name: agent_session.open
+    summary: "Open an agent session on a thread (`thread:thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. `harness` (default: the project's first enabled agent), `acp_agent` for an ACP one, `title`. An agent opens one only in its own stream."
+    capability: agent_sessions.write
+    op: open
+  - name: agent_session.rename
+    summary: "Rename an agent session (`agent_session:ses3`)."
+    capability: agent_sessions.write
+    op: rename
   # bookmarks.write — a person's navigation, not the agent's.
   - name: bookmark.set
     summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
@@ -356,11 +370,11 @@ commands:
     op: record_run
   # threads.write
   - name: thread.close
-    summary: "Close a thread (`thread:thr12`) — history, reopenable. Its open effort closes, and an ACP thread's agent session stops with it. An agent closes only its own thread."
+    summary: "Close a thread (`thread:thr12`) — history, reopenable. Its open effort and its agent sessions close, and their processes stop. An agent closes only its own thread."
     capability: threads.write
     op: close
   - name: thread.create
-    summary: "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`), running the same agent. It becomes the stream's writer when it has none, else joins the queue."
+    summary: "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`). It has no agent session yet (`oxplow.agent_session.open`). It becomes the stream's writer when it has none, else joins the queue."
     capability: threads.write
     op: create
     ui: { label: "New Thread…", group: Tasks, form: new-thread }
