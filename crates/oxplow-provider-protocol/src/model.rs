@@ -19,17 +19,25 @@
 //! - `read` — [`ReadParams`] → [`ReadResult`]: run a collector, streaming
 //!   rows as `$/record` and checkpoints as `$/state` before the result.
 //!
-//! Provider → host (protocol 3): `host/call` — [`HostCallParams`] → the
-//! scope's answer: a scope the provider's manifest `needs`
-//! (`sql.read`), recorded with the `invoke` it serves.
-//! - `shutdown` — no params → `null`.
+//! - `shutdown` — no params → `null`: finish what is in flight, persist,
+//!   answer, and exit. The host waits a grace period for the process to
+//!   go before it kills it.
+//!
+//! Provider → host:
+//!
+//! - `host/call` (protocol 3) — [`HostCallParams`] → the scope's answer: a
+//!   scope the provider's manifest `needs` (`sql.read`), recorded with the
+//!   `invoke` it serves.
+//! - `host/changed` (protocol 4, a notification) — [`HostChangedParams`]:
+//!   something it reads changed at its service; the host schedules a read
+//!   of those collectors rather than waiting for the next poll.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The protocol version this crate speaks.
-pub const PROTOCOL_VERSION: &str = "3";
+pub const PROTOCOL_VERSION: &str = "4";
 
 pub mod method {
     pub const INITIALIZE: &str = "initialize";
@@ -40,6 +48,8 @@ pub mod method {
     pub const SHUTDOWN: &str = "shutdown";
     /// Provider → host: call a scope (protocol 3).
     pub const HOST_CALL: &str = "host/call";
+    /// Provider → host, a notification: what it reads changed (protocol 4).
+    pub const HOST_CHANGED: &str = "host/changed";
 }
 
 /// Who is speaking.
@@ -205,6 +215,19 @@ pub struct HostCallParams {
     pub op: Option<String>,
     #[serde(default)]
     pub args: Value,
+}
+
+/// `host/changed` (provider → host, a notification): something the
+/// provider reads changed at its service (a webhook arrived, a watch
+/// fired), so the host reads it now rather than at the next poll. Reads
+/// asked for close together are one read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HostChangedParams {
+    /// The collectors to read (their declared names); all of its
+    /// collectors when none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collectors: Option<Vec<String>>,
 }
 
 /// An event a command produced, for the host to log (its type is one

@@ -8,6 +8,12 @@
 //! `$/record`, `$/state`, by their `id`), in order, on a channel of its
 //! own that closes when its reply arrives — so a `read`'s rows can't be
 //! mistaken for another's or lost before the caller is listening.
+//!
+//! Everything is bounded ([`PeerLimits`]): a line longer than
+//! `max_line_bytes` ends the connection (what was awaited fails saying
+//! why), and the channels hold `channel_capacity` messages — a reader that
+//! falls behind slows the other side down (its writes block on the pipe)
+//! rather than growing a queue without end.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -37,7 +43,68 @@ pub enum Incoming {
 }
 
 type Pending = Arc<Mutex<HashMap<Id, oneshot::Sender<Result<Value, ProtocolError>>>>>;
-type Streams = Arc<std::sync::Mutex<HashMap<Id, mpsc::UnboundedSender<Incoming>>>>;
+type Streams = Arc<std::sync::Mutex<HashMap<Id, mpsc::Sender<Incoming>>>>;
+
+/// How much one connection holds at most.
+#[derive(Debug, Clone, Copy)]
+pub struct PeerLimits {
+    /// The longest line (one message) read; a longer one ends the
+    /// connection.
+    pub max_line_bytes: usize,
+    /// The messages each channel (what isn't a reply, and each streaming
+    /// request's notifications) holds before the reader waits.
+    pub channel_capacity: usize,
+}
+
+impl Default for PeerLimits {
+    fn default() -> Self {
+        Self {
+            max_line_bytes: 16 * 1024 * 1024,
+            channel_capacity: 1024,
+        }
+    }
+}
+
+/// One line read, at most `max` bytes before its newline.
+enum Line {
+    Text(String),
+    TooLong,
+    End,
+}
+
+async fn read_line<R: AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+    buf: &mut Vec<u8>,
+    max: usize,
+) -> Line {
+    buf.clear();
+    loop {
+        let available = match reader.fill_buf().await {
+            Ok(b) => b,
+            Err(_) => return Line::End,
+        };
+        if available.is_empty() {
+            // The stream ended; a last line without its newline still counts.
+            return match buf.is_empty() {
+                true => Line::End,
+                false => Line::Text(String::from_utf8_lossy(buf).into_owned()),
+            };
+        }
+        let (taken, done) = match available.iter().position(|b| *b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (available.len(), false),
+        };
+        let content = if done { taken - 1 } else { taken };
+        if buf.len() + content > max {
+            return Line::TooLong;
+        }
+        buf.extend_from_slice(&available[..content]);
+        reader.consume(taken);
+        if done {
+            return Line::Text(String::from_utf8_lossy(buf).into_owned());
+        }
+    }
+}
 
 /// The notifications that are about an in-flight request (its `id`).
 const ABOUT_A_REQUEST: [&str; 3] = [notify::PROGRESS, notify::RECORD, notify::STATE];
@@ -51,6 +118,13 @@ pub struct Peer {
     streams: Streams,
     next_id: Arc<AtomicU64>,
     closed: Arc<AtomicBool>,
+    /// Woken when the other side's stream ends.
+    ended: Arc<tokio::sync::Notify>,
+    /// The replies still awaited when it ended (each failed).
+    cut_off: Arc<AtomicU64>,
+    /// Its end is fully handled: every waiter failed, `cut_off` final.
+    finished: Arc<AtomicBool>,
+    capacity: usize,
 }
 
 /// A request in flight: its id (to `$/cancel` it) and its reply.
@@ -69,10 +143,24 @@ impl Call {
 }
 
 impl Peer {
-    /// Start reading `reader` (NDJSON) in the background; what isn't a
-    /// reply arrives on the returned channel, which closes with the
-    /// stream. Replies still awaited when it ends fail.
-    pub fn spawn<R, W>(reader: R, writer: W) -> (Peer, mpsc::UnboundedReceiver<Incoming>)
+    /// Start reading `reader` (NDJSON) in the background, within the
+    /// default [`PeerLimits`]; what isn't a reply arrives on the returned
+    /// channel, which closes with the stream. Replies still awaited when
+    /// it ends fail.
+    pub fn spawn<R, W>(reader: R, writer: W) -> (Peer, mpsc::Receiver<Incoming>)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        Self::spawn_with(reader, writer, PeerLimits::default())
+    }
+
+    /// [`Self::spawn`] within `limits`.
+    pub fn spawn_with<R, W>(
+        reader: R,
+        writer: W,
+        limits: PeerLimits,
+    ) -> (Peer, mpsc::Receiver<Incoming>)
     where
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
@@ -83,8 +171,12 @@ impl Peer {
             streams: Arc::default(),
             next_id: Arc::new(AtomicU64::new(1)),
             closed: Arc::new(AtomicBool::new(false)),
+            ended: Arc::new(tokio::sync::Notify::new()),
+            cut_off: Arc::new(AtomicU64::new(0)),
+            finished: Arc::new(AtomicBool::new(false)),
+            capacity: limits.channel_capacity,
         };
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(limits.channel_capacity);
         let pending = peer.pending.clone();
         let streams = peer.streams.clone();
         let responder = peer.clone();
@@ -97,8 +189,21 @@ impl Peer {
             }
         };
         tokio::spawn(async move {
-            let mut lines = BufReader::new(reader).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            let mut reader = BufReader::new(reader);
+            let mut buf = Vec::new();
+            let mut why = "the peer closed".to_string();
+            loop {
+                let line = match read_line(&mut reader, &mut buf, limits.max_line_bytes).await {
+                    Line::Text(line) => line,
+                    Line::End => break,
+                    Line::TooLong => {
+                        why = format!(
+                            "the peer sent a message over {} bytes; the connection is closed",
+                            limits.max_line_bytes
+                        );
+                        break;
+                    }
+                };
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -120,7 +225,7 @@ impl Peer {
                     }
                     Ok(Message::Error { id: None, .. }) => {}
                     Ok(Message::Request { id, method, params }) => {
-                        let _ = tx.send(Incoming::Request { id, method, params });
+                        let _ = tx.send(Incoming::Request { id, method, params }).await;
                     }
                     Ok(Message::Notification { method, params }) => {
                         let stream = ABOUT_A_REQUEST
@@ -137,10 +242,10 @@ impl Peer {
                         let message = Incoming::Notification { method, params };
                         match stream {
                             Some(stream) => {
-                                let _ = stream.send(message);
+                                let _ = stream.send(message).await;
                             }
                             None => {
-                                let _ = tx.send(message);
+                                let _ = tx.send(message).await;
                             }
                         }
                     }
@@ -157,10 +262,37 @@ impl Peer {
             responder.closed.store(true, Ordering::SeqCst);
             streams.lock().unwrap_or_else(|e| e.into_inner()).clear();
             for (_, waiter) in pending.lock().await.drain() {
-                let _ = waiter.send(Err(ProtocolError::Internal("the peer closed".into())));
+                responder.cut_off.fetch_add(1, Ordering::SeqCst);
+                let _ = waiter.send(Err(ProtocolError::Internal(why.clone())));
             }
+            // After the drain: who waits on the end sees what it cut off.
+            responder.finished.store(true, Ordering::SeqCst);
+            responder.ended.notify_waiters();
         });
         (peer, rx)
+    }
+
+    /// Once the other side's stream has ended and every reply it still
+    /// owed has failed ([`Self::calls_cut_off`] is final).
+    pub async fn closed(&self) {
+        let ended = self.ended.notified();
+        tokio::pin!(ended);
+        ended.as_mut().enable();
+        if self.finished.load(Ordering::SeqCst) {
+            return;
+        }
+        ended.await;
+    }
+
+    /// How many replies still awaited when the other side's stream ended
+    /// it failed: each caller had its own error.
+    pub fn calls_cut_off(&self) -> u64 {
+        self.cut_off.load(Ordering::SeqCst)
+    }
+
+    /// Whether `other` is a clone of this one: the same connection.
+    pub fn same_connection(&self, other: &Peer) -> bool {
+        Arc::ptr_eq(&self.closed, &other.closed)
     }
 
     /// The other side's stream has ended: no reply will come.
@@ -190,8 +322,8 @@ impl Peer {
         &self,
         method: &str,
         params: Value,
-    ) -> Result<(Call, mpsc::UnboundedReceiver<Incoming>), ProtocolError> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    ) -> Result<(Call, mpsc::Receiver<Incoming>), ProtocolError> {
+        let (tx, rx) = mpsc::channel(self.capacity);
         let call = self.start_with(method, params, Some(tx)).await?;
         Ok((call, rx))
     }
@@ -200,7 +332,7 @@ impl Peer {
         &self,
         method: &str,
         params: Value,
-        stream: Option<mpsc::UnboundedSender<Incoming>>,
+        stream: Option<mpsc::Sender<Incoming>>,
     ) -> Result<Call, ProtocolError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, reply) = oneshot::channel();

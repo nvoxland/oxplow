@@ -7,8 +7,9 @@
 //! source: a scrubbed environment (PATH, HOME, the declared `env` names,
 //! the credentials from the keychain, `OXPLOW_*` context), the egress
 //! proxy and `sandbox-exec` where the OS enforces `network`, and the
-//! process dies with its connection. After the spawn, the live
-//! `initialize` must equal the approved declarations.
+//! process ends with its connection: asked to `shutdown` first, killed
+//! once its grace is up ([`Connection::shutdown`]). After the spawn, the
+//! live `initialize` must equal the approved declarations.
 //!
 //! [`ProgramKind::Provider`]: crate::exec_consent::ProgramKind::Provider
 
@@ -100,9 +101,16 @@ pub struct Launch {
     /// What it may call of the host (`host/call`); none (the conformance
     /// kit, which has no project) answers `MethodNotFound`.
     pub host_calls: Option<Arc<HostCalls>>,
+    /// Told when it announces a change (`host/changed`), with the
+    /// collectors it names (all of them: `None`).
+    pub on_changed: Option<OnChanged>,
 }
 
-/// A running, handshaken provider. Dropping it kills the process.
+/// What a `host/changed` from the provider calls.
+pub type OnChanged = Arc<dyn Fn(Option<Vec<String>>) + Send + Sync>;
+
+/// A running, handshaken provider. Dropping it kills the process; ending
+/// it the orderly way is [`Self::shutdown`].
 pub struct Connection {
     pub peer: Peer,
     child: tokio::process::Child,
@@ -113,6 +121,34 @@ impl Connection {
     /// The process has exited (its connection is gone).
     pub fn exited(&mut self) -> bool {
         !matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// End the process the orderly way: `shutdown` (it finishes what is in
+    /// flight, persists and exits), then wait for it to go; past `grace`
+    /// it is killed. A provider with state on disk isn't cut mid-write.
+    pub async fn shutdown(mut self, grace: Duration) {
+        let ended = tokio::time::timeout(grace, async {
+            if !self.peer.is_closed() {
+                let _ = self
+                    .peer
+                    .request(method::SHUTDOWN, serde_json::Value::Null)
+                    .await;
+            }
+            let _ = self.child.wait().await;
+        })
+        .await;
+        if ended.is_err() {
+            let _ = self.child.kill().await;
+        }
+    }
+
+    /// How the process ended, once it has (it's given a moment to be
+    /// reaped after its pipes close).
+    pub async fn exit_status(&mut self) -> Option<std::process::ExitStatus> {
+        tokio::time::timeout(Duration::from_millis(500), self.child.wait())
+            .await
+            .ok()
+            .and_then(Result::ok)
     }
 }
 
@@ -250,7 +286,12 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
         proxy,
     } = spawn(launch).await?;
     let (peer, incoming) = Peer::spawn(stdout, stdin);
-    serve_incoming(peer.clone(), incoming, launch.host_calls.clone());
+    serve_incoming(
+        peer.clone(),
+        incoming,
+        launch.host_calls.clone(),
+        launch.on_changed.clone(),
+    );
     let conn = Connection {
         peer,
         child,
@@ -274,17 +315,36 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
 
 /// What the provider sends that isn't a reply: `host/call` is answered
 /// by `host_calls` (protocol 3; none — the conformance kit — answers
-/// `MethodNotFound`), any other request `MethodNotFound`, and a
-/// notification outside a read is dropped.
+/// `MethodNotFound`), any other request `MethodNotFound`; `host/changed`
+/// (protocol 4) goes to `on_changed`, and any other notification outside
+/// a read is dropped.
 pub fn serve_incoming(
     peer: Peer,
-    mut incoming: tokio::sync::mpsc::UnboundedReceiver<Incoming>,
+    mut incoming: tokio::sync::mpsc::Receiver<Incoming>,
     host_calls: Option<Arc<HostCalls>>,
+    on_changed: Option<OnChanged>,
 ) {
     tokio::spawn(async move {
         while let Some(message) = incoming.recv().await {
-            let Incoming::Request { id, method, params } = message else {
-                continue;
+            let (id, method, params) = match message {
+                Incoming::Request { id, method, params } => (id, method, params),
+                Incoming::Notification { method, params } => {
+                    if method == oxplow_provider_protocol::model::method::HOST_CHANGED {
+                        match (
+                            &on_changed,
+                            serde_json::from_value::<
+                                oxplow_provider_protocol::model::HostChangedParams,
+                            >(params),
+                        ) {
+                            (Some(changed), Ok(p)) => changed(p.collectors),
+                            (_, Err(e)) => {
+                                tracing::debug!(error = %e, "a malformed host/changed is dropped")
+                            }
+                            (None, Ok(_)) => {}
+                        }
+                    }
+                    continue;
+                }
             };
             match (&host_calls, method.as_str()) {
                 (Some(calls), oxplow_provider_protocol::model::method::HOST_CALL) => {

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`host/changed` (provider → host, a notification): something the\nprovider reads changed at its service (a webhook arrived, a watch\nfired), so the host reads it now rather than at the next poll. Reads\nasked for close together are one read.",
+  "properties": {
+    "collectors": {
+      "description": "The collectors to read (their declared names); all of its\ncollectors when none.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "title": "HostChangedParams",
+  "type": "object"
+}

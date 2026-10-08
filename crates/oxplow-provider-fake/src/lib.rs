@@ -24,6 +24,10 @@
 //! so it outlives the process as a real service's does; without, it lives
 //! in memory.
 //!
+//! Two notifications act at once: `fake/changed { collectors? }` makes
+//! it send the host `host/changed` (what a webhook would), and
+//! `fake/exit` makes it exit on its own (status 3).
+//!
 //! **Hooks**, from `OXPLOW_FAKE_HOOKS` at start or a `fake/hooks { hooks }`
 //! notification later (comma-separated). A notification **replaces** the
 //! hooks — `""` clears them — keeping only what the fake declared at
@@ -36,6 +40,11 @@
 //!   `$/cancel` meanwhile);
 //! - `crash` — drop the connection on the next request (the binary exits
 //!   with status 3);
+//! - `shutdown-file:<path>` — a `shutdown` writes `<path>` before it
+//!   answers; `ignore-shutdown` — a `shutdown` is answered and it keeps
+//!   running;
+//! - `checkpoint-at-end` — a read sends one `$/state`, after its last
+//!   record;
 //! - `bad-declarations` — `initialize` declares an extra command the
 //!   checked-in declarations don't have;
 //! - `progress` — a `read` sends `$/progress` before each record, then
@@ -129,6 +138,15 @@ pub struct Hooks {
     /// `sql.read`, `SELECT 7 AS n`, naming its key) and answers what it
     /// read beside its result (`read`).
     pub host_read: bool,
+    /// `shutdown-file:<path>`: a `shutdown` writes `<path>` before it
+    /// answers — a graceful stop, which a kill never is.
+    pub shutdown_file: Option<String>,
+    /// `ignore-shutdown`: a `shutdown` is answered and the process keeps
+    /// running, so the host must kill it.
+    pub ignore_shutdown: bool,
+    /// `checkpoint-at-end`: a read sends one `$/state`, after its last
+    /// record, rather than one per record.
+    pub checkpoint_at_end: bool,
 }
 
 impl Hooks {
@@ -158,6 +176,7 @@ impl Hooks {
                 Some(("rate-limit", ms)) => self.rate_limit_ms = ms.parse().ok(),
                 Some(("needs", name)) => self.needs = Some(name.to_string()),
                 Some(("started-file", path)) => self.started_file = Some(path.to_string()),
+                Some(("shutdown-file", path)) => self.shutdown_file = Some(path.to_string()),
                 Some(("accepts", pair)) => {
                     self.accepts = pair
                         .split_once('=')
@@ -176,6 +195,8 @@ impl Hooks {
                 None if part == "stale-read" => self.stale_read = true,
                 None if part == "stuck-cursor" => self.stuck_cursor = true,
                 None if part == "host-read" => self.host_read = true,
+                None if part == "ignore-shutdown" => self.ignore_shutdown = true,
+                None if part == "checkpoint-at-end" => self.checkpoint_at_end = true,
                 _ => {}
             }
         }
@@ -444,13 +465,31 @@ where
                 let mut world = world.lock().await;
                 world.hooks = world.hooks.replaced(spec);
             }
+            // What a webhook would tell it: say so to the host.
+            Incoming::Notification { method, params } if method == "fake/changed" => {
+                let _ = peer.notify(method::HOST_CHANGED, params).await;
+            }
+            // Its process ends on its own, as one that crashed.
+            Incoming::Notification { method, .. } if method == "fake/exit" => {
+                return Served::Crashed;
+            }
             Incoming::Notification { .. } => {}
             Incoming::Request { id, method, params } => {
                 if world.lock().await.hooks.crash {
                     return Served::Crashed;
                 }
                 if method == method::SHUTDOWN {
+                    let (file, ignore) = {
+                        let w = world.lock().await;
+                        (w.hooks.shutdown_file.clone(), w.hooks.ignore_shutdown)
+                    };
+                    if let Some(file) = file {
+                        let _ = std::fs::write(file, "shut down");
+                    }
                     let _ = peer.respond(id, Ok(Value::Null)).await;
+                    if ignore {
+                        continue;
+                    }
                     return Served::Ended;
                 }
                 let (stop_tx, stop_rx) = oneshot::channel();
@@ -758,6 +797,9 @@ async fn handle(
                     json!({ "id": id, "entity": "work_item", "row": row }),
                 )
                 .await?;
+                if hooks.checkpoint_at_end && i + 1 < total {
+                    continue;
+                }
                 let cursor = if hooks.stuck_cursor { 0 } else { rev };
                 peer.notify(
                     notify::STATE,

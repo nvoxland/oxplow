@@ -54,6 +54,10 @@ const ERRORS_KEPT: usize = 5;
 /// once); a longer one fails the call — never counted as a failure.
 pub const RATE_LIMIT_WAIT_MAX: Duration = Duration::from_secs(10);
 
+/// How long after a provider's `host/changed` the host reads: the
+/// announcements within it are one read.
+pub const CHANGED_DEBOUNCE: Duration = Duration::from_secs(1);
+
 /// How many failed writes' keys an instance remembers, so a write's
 /// re-sends count once toward its health.
 const FAILED_KEYS_KEPT: usize = 256;
@@ -81,6 +85,12 @@ pub struct HostDeps {
     /// How long a `check` or `invoke` may take before it is cancelled and
     /// counted as a failure.
     pub call_timeout: Duration,
+    /// How long a process asked to `shutdown` has to exit before it is
+    /// killed.
+    pub shutdown_grace: Duration,
+    /// The most records a read holds before its next `$/state`: one that
+    /// streams more fails, rather than buffering without end.
+    pub max_uncheckpointed: usize,
     /// This machine's global config dir, where the person's global
     /// instances are kept (`instances.yaml`); none, there are none.
     pub global_dir: Option<PathBuf>,
@@ -371,6 +381,13 @@ pub struct Instance {
         parking_lot::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// What its process may call of the host (`host/call`).
     pub(super) host_calls: Arc<host::HostCalls>,
+    /// Itself, for what outlives a call: its process's supervisor, its
+    /// announced reads.
+    this: Weak<Instance>,
+    /// The collectors its provider announced changed (`host/changed`) and
+    /// that are about to be read — every one when `Some(None)`; `None`
+    /// when no read is pending.
+    announced: parking_lot::Mutex<Option<Option<std::collections::BTreeSet<String>>>>,
 }
 
 impl Instance {
@@ -532,6 +549,7 @@ impl Instance {
             credentials,
             host_env: self.deps.host_env.clone(),
             host_calls: Some(self.host_calls.clone()),
+            on_changed: Some(self.on_changed()),
         })
         .await
         .map_err(plain)?;
@@ -624,14 +642,18 @@ impl Instance {
             return true;
         }
         // The token its process was given is the one refused.
-        let refused = {
+        let ended = {
             let mut live = self.live.lock().await;
             if live.as_ref().is_some_and(|l| l.since > called) {
                 return true;
             }
-            live.take().and_then(|l| l.given.get(&cred).cloned())
+            live.take()
         };
+        let refused = ended.as_ref().and_then(|l| l.given.get(&cred).cloned());
+        // Recorded before the process ends: a call it cuts off checks this
+        // to know why.
         self.renewed_at.lock().insert(cred.clone(), Instant::now());
+        self.end(ended).await;
         // What can't be renewed shows when it next starts (its `check`
         // names the credential); here the only question is whether to
         // try again.
@@ -699,6 +721,7 @@ impl Instance {
                 }
                 *self.not_before.lock() = None;
                 let out = (l.conn.peer.clone(), l.handle.clone());
+                self.supervise(l.conn.peer.clone());
                 *live = Some(l);
                 Ok(out)
             }
@@ -714,6 +737,18 @@ impl Instance {
 
     fn is_stopped(&self) -> bool {
         self.stopped.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Its running process's peer and handle, without starting one.
+    #[cfg(test)]
+    pub(super) async fn connection_if_running(
+        &self,
+    ) -> Option<(oxplow_provider_protocol::Peer, Handle)> {
+        self.live
+            .lock()
+            .await
+            .as_ref()
+            .map(|l| (l.conn.peer.clone(), l.handle.clone()))
     }
 
     /// Whether it has a process.
@@ -734,7 +769,125 @@ impl Instance {
 
     /// End its process; the next call starts a new one.
     pub(crate) async fn end_process(&self) {
-        self.live.lock().await.take();
+        let ended = self.live.lock().await.take();
+        self.end(ended).await;
+    }
+
+    /// End a process taken out of `live` the orderly way
+    /// ([`Connection::shutdown`]) — outside the lock, so a slow exit
+    /// holds up no caller.
+    async fn end(&self, ended: Option<Live>) {
+        if let Some(l) = ended {
+            l.conn.shutdown(self.deps.shutdown_grace).await;
+        }
+    }
+
+    /// Watch the process `peer` talks to: one that exits while it is this
+    /// instance's process — not ended by the host, which takes it out of
+    /// `live` first — is noticed at once rather than at the next call. The
+    /// exit counts toward its health, and it starts again once its
+    /// backoff is up.
+    fn supervise(&self, peer: oxplow_provider_protocol::Peer) {
+        let this = self.this.clone();
+        tokio::spawn(async move {
+            peer.closed().await;
+            if let Some(instance) = this.upgrade() {
+                instance.exited(&peer).await;
+            }
+        });
+    }
+
+    async fn exited(&self, peer: &oxplow_provider_protocol::Peer) {
+        let gone = {
+            let mut live = self.live.lock().await;
+            if self.is_stopped()
+                || !live
+                    .as_ref()
+                    .is_some_and(|l| l.conn.peer.same_connection(peer))
+            {
+                return;
+            }
+            live.take()
+        };
+        let Some(mut gone) = gone else { return };
+        let status = gone.conn.exit_status().await;
+        let how = match status.and_then(|s| s.code()) {
+            Some(code) => format!("its process exited (status {code})"),
+            None => "its process exited".to_string(),
+        };
+        let Some(registry) = self.registry.upgrade() else {
+            return;
+        };
+        // A call it cut off counts its own failure; an exit no call saw
+        // is counted here, so a process that keeps dying backs off and is
+        // disabled like one that keeps failing calls.
+        if peer.calls_cut_off() == 0 {
+            registry.call_failed(self, how).await;
+        }
+        if self.is_stopped() {
+            return;
+        }
+        let backoff = self
+            .not_before
+            .lock()
+            .and_then(|t| t.checked_duration_since(Instant::now()));
+        if let Some(wait) = backoff {
+            tokio::time::sleep(wait).await;
+        }
+        if let Err(e) = self.connection().await {
+            tracing::info!(instance = %self.name, error = %e, "restarting an exited provider failed");
+        }
+    }
+
+    /// What its provider's `host/changed` calls: [`Self::announce`].
+    fn on_changed(&self) -> host::OnChanged {
+        let this = self.this.clone();
+        Arc::new(move |collectors| {
+            if let Some(instance) = this.upgrade() {
+                instance.announce(collectors);
+            }
+        })
+    }
+
+    /// Its provider says what it reads changed: read those collectors (all
+    /// of them, for `None`) after [`CHANGED_DEBOUNCE`], through
+    /// `oxplow.provider.sync` as the system — the schedule's way, audited.
+    /// What is announced meanwhile joins the same read.
+    fn announce(&self, collectors: Option<Vec<String>>) {
+        let schedule = {
+            let mut pending = self.announced.lock();
+            let first = pending.is_none();
+            let merged = match (pending.take(), collectors) {
+                (None, None) | (Some(None), _) | (_, None) => None,
+                (None, Some(c)) => Some(c.into_iter().collect()),
+                (Some(Some(mut have)), Some(c)) => {
+                    have.extend(c);
+                    Some(have)
+                }
+            };
+            *pending = Some(merged);
+            first
+        };
+        if !schedule {
+            return;
+        }
+        let this = self.this.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(CHANGED_DEBOUNCE).await;
+            let Some(instance) = this.upgrade() else {
+                return;
+            };
+            let Some(collectors) = instance.announced.lock().take() else {
+                return;
+            };
+            if instance.is_stopped() {
+                return;
+            }
+            let Some(registry) = instance.registry.upgrade() else {
+                return;
+            };
+            registry.sync_announced(&instance.name, collectors).await;
+        });
     }
 
     /// Forget the process `peer` talks to when it died under a call, so
@@ -1610,7 +1763,9 @@ impl ProviderRegistry {
         config: Value,
     ) -> Result<(), HostError> {
         let instance = self.instance(ext, spec, id, scope, config).await?;
-        instance.start().await.map(|_| ())
+        let live = instance.start().await?;
+        live.conn.shutdown(self.deps.shutdown_grace).await;
+        Ok(())
     }
 
     async fn instance(
@@ -1623,7 +1778,7 @@ impl ProviderRegistry {
     ) -> Result<Arc<Instance>, HostError> {
         let name = spec::instance_name(&ext.name, id);
         let declared = copy_approved(&self.deps, ext, spec).await?.declared;
-        Ok(Arc::new(Instance {
+        Ok(Arc::new_cyclic(|this| Instance {
             name,
             id: id.to_string(),
             scope,
@@ -1641,6 +1796,8 @@ impl ProviderRegistry {
             not_before: parking_lot::Mutex::new(None),
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
             host_calls: host::HostCalls::new(spec.needs.clone(), self.deps.db.clone()),
+            this: this.clone(),
+            announced: parking_lot::Mutex::new(None),
         }))
     }
 
@@ -1733,6 +1890,7 @@ impl ProviderRegistry {
         self.set_state(&name, InstanceState::Checking);
         match instance.start().await {
             Ok(live) => {
+                instance.supervise(live.conn.peer.clone());
                 *instance.live.lock().await = Some(live);
                 self.admit(&bus, instance, epoch).await.map_err(&refuse)?;
                 {
@@ -1953,6 +2111,24 @@ impl ProviderRegistry {
         true
     }
 
+    /// Stop every running instance at once, each process shut down the
+    /// orderly way: what the daemon does before it exits.
+    pub async fn shutdown_all(&self) {
+        let all: Vec<Arc<Instance>> = std::mem::take(&mut *self.running.lock().await)
+            .into_values()
+            .collect();
+        let mut stopping = tokio::task::JoinSet::new();
+        for running in all {
+            let me = self.me.clone();
+            stopping.spawn(async move {
+                if let Some(registry) = me.upgrade() {
+                    registry.tear_down(running).await;
+                }
+            });
+        }
+        while stopping.join_next().await.is_some() {}
+    }
+
     /// Unregister a stopped instance and end its process.
     async fn tear_down(&self, running: Arc<Instance>) {
         self.work_items.unregister(&running.id);
@@ -1977,7 +2153,8 @@ impl ProviderRegistry {
         running
             .stopped
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        running.live.lock().await.take();
+        let ended = running.live.lock().await.take();
+        running.end(ended).await;
     }
 
     /// A person approved program `<extension>/<provider id>` as it is

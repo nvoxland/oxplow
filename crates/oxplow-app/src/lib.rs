@@ -445,6 +445,10 @@ struct MachineEnv {
     provider_copies: PathBuf,
     /// How long a provider's `check` or `invoke` may take.
     provider_call_timeout: std::time::Duration,
+    /// How long a provider asked to `shutdown` has to exit.
+    provider_shutdown_grace: std::time::Duration,
+    /// The most records a provider's read streams between checkpoints.
+    provider_max_uncheckpointed: usize,
     /// How long a code-intelligence request waits for its language server.
     lsp_request_timeout: std::time::Duration,
     /// The environment a provider's declared `env` is read from: this
@@ -754,6 +758,8 @@ impl Services {
                 .join("provider-copies")
                 .join(collector_runner::project_key(&layout.project_dir)),
             provider_call_timeout: std::time::Duration::from_secs(60),
+            provider_shutdown_grace: std::time::Duration::from_secs(5),
+            provider_max_uncheckpointed: 10_000,
             lsp_request_timeout: std::time::Duration::from_secs(30),
             host_env: providers::host::process_env(),
         };
@@ -1289,6 +1295,8 @@ impl Services {
                 backoff: machine.provider_backoff,
                 copies: machine.provider_copies.clone(),
                 call_timeout: machine.provider_call_timeout,
+                shutdown_grace: machine.provider_shutdown_grace,
+                max_uncheckpointed: machine.provider_max_uncheckpointed,
                 global_dir: machine.config_dir.clone(),
                 events: event_bus.clone(),
                 capabilities: capabilities.clone(),
@@ -1650,6 +1658,8 @@ impl Services {
             provider_copies: global_dir.join("provider-copies"),
             // A test's hung provider fails fast.
             provider_call_timeout: std::time::Duration::from_secs(2),
+            provider_shutdown_grace: std::time::Duration::from_secs(1),
+            provider_max_uncheckpointed: 100,
             lsp_request_timeout: std::time::Duration::from_secs(2),
             host_env,
         };

@@ -899,6 +899,7 @@ async fn test_provider(
         credentials: env_credentials(spec, env),
         host_env: env.clone(),
         host_calls: None,
+        on_changed: None,
     };
     let client = match ReferenceClient::start(&launch).await {
         Ok(c) => c,
