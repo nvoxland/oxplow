@@ -1,33 +1,27 @@
-//! The `work_item.*` commands (P2.6 / P5.C2 / P7.A1): the one write
-//! surface for every provider's items. Each verb is a `Dispatch` command
-//! (`.context/commands.md`): the bus routes it by the item's provider —
-//! the ref's segment, or for `create` the active one: every new item goes
-//! to the tracker the person chose (tsk1058) — to oxplow's `Tx` core in the bus's transaction, or to another
-//! provider's [`ExternalVerbs`] through its process, with **one** audit
-//! row `work_item.<verb>` either way. A provider the registry doesn't
-//! know is refused at `/ref` naming the registered ones; a parent or
-//! link target of another provider is refused at its field; a feature the
-//! provider doesn't declare (`hierarchy`, `links`, `comments`, `delete`)
-//! is refused before anything runs.
+//! The `work_item.*` commands: the one write surface for every work list's
+//! items (`.context/work-items.md`). Each verb runs outside the bus's
+//! transaction on the item's provider — the ref's segment, or for
+//! `create` the active one (every new item goes to the list the person
+//! chose) — through its [`WorkItemVerbs`], the same way for every list,
+//! oxplow's own tasks included, with **one** audit row `work_item.<verb>`.
+//! A provider the registry doesn't know is refused at `/ref` naming the
+//! registered ones; a parent or link target of another provider is refused
+//! at its field; a feature the provider doesn't declare (`hierarchy`,
+//! `links`, `comments`, `delete`, `ordering`, `lists`) is refused before
+//! anything runs.
 //!
-//! The inputs are the `v_work_item` columns, one shape for every
-//! provider: `title`, `body`, `parent_ref`, a canonical `state` and the
-//! provider's `native_state`, and `native` for its own fields — oxplow's
-//! `priority` ([`OxplowNative`]). The thread a new item is filed on is
-//! oxplow's record, not a tracker's: `create`'s common `thread`
-//! ([`filing_thread`]). `reorder` and `move` stay
-//! oxplow's own (`Tx`): they place an item in oxplow's lists.
-//!
-//! oxplow's cores: `oxplow.work_item.transition` is
-//! `task_store::set_status_tx`, run in the bus's transaction with the
-//! audit row.
+//! The inputs are the interface's (`oxplow_domain::work_items`): the
+//! `v_work_item` columns, a canonical `state` and the provider's
+//! `native_state`, and `native` for its own fields. The thread a new item
+//! is filed on is core's to resolve ([`filing_thread`]); a loose id is the
+//! active list's ([`with_loose_refs`]).
 //!
 //! What every verb did is logged in the interface's words, the same way
 //! for every list ([`canonical_events`]): `work_item.created`, `.edited`,
 //! `.state_changed`, `.linked`, `.commented` and `.deleted`, caused by the
-//! run's `command.executed`. A list logs none of them itself; another
-//! list's answer adds `work_item.recorded`. An item's state never opens
-//! or closes an effort here; the effort policy reacts to
+//! run's `command.executed`, after the list's own `work_item.recorded` —
+//! how what it wrote reaches the interface. An item's state never opens or
+//! closes an effort here; the effort policy reacts to
 //! `work_item.state_changed` (`crate::effort_policy`).
 
 use crate::commands::ops::Op;
@@ -48,7 +42,7 @@ use schemars::JsonSchema;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::{Dispatch, Handler, HandlerOutput, Invocation, Route, TxCtx, TxHandler};
+use super::{Handler, HandlerOutput, Invocation};
 
 fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
     raw.parse::<ThreadId>().map_err(|e| CommandError::Invalid {
@@ -136,11 +130,6 @@ fn canonical_ref(registry: &WorkItemsRegistry, raw: &str) -> Result<String, Stri
              list declares no id of its own"
         )),
     }
-}
-
-/// `tx` run on its input's loose ids made canonical ([`with_loose_refs`]).
-fn resolving(registry: WorkItemsRegistry, tx: Arc<TxHandler>) -> Arc<TxHandler> {
-    Arc::new(move |ctx: &TxCtx<'_>, input: Value| tx(ctx, with_loose_refs(&registry, input)?))
 }
 
 fn invalid_at(field: &str, message: String) -> CommandError {
@@ -366,53 +355,37 @@ pub(crate) fn provider_for(
     target(registry, input).ok()
 }
 
-/// A `work_item.<verb>` command: routed by `target` to oxplow's `tx` core
-/// or to the provider's process. A `create`'s `thread` is resolved here
-/// ([`filing_thread`]) for the host to anchor the item to, and the
-/// provider's inverse (a verb) is renamed back to `oxplow.work_item.<verb>`, so
-/// an undo dispatches again.
+/// A `work_item.<verb>` op: run on the provider `target` names, through
+/// its verbs. A `create`'s `thread` is resolved here ([`filing_thread`]);
+/// the provider's inverse (a verb) is renamed back to
+/// `oxplow.work_item.<verb>`, so an undo dispatches again. With `links`,
+/// the result carries the body's `link_warnings` (a create's, and an
+/// update's that sets one).
 fn dispatching(
     shape: Shape,
     registry: WorkItemsRegistry,
     verb: &'static str,
     target: Target,
-    tx: Arc<TxHandler>,
+    links: Option<LinkDeps>,
 ) -> Op {
-    let tx = logging_canonical(verb, tx);
-    // A loose id is the active list's, on every path (route, inside the
-    // transaction, through the provider).
-    let tx = resolving(registry.clone(), tx);
-    let route_registry = registry.clone();
-    let route = Arc::new(move |input: &Value| {
-        let input = with_loose_refs(&route_registry, input.clone())?;
-        target(&route_registry, &input).map(|p| match p.external {
-            None => Route::Tx,
-            Some(_) => Route::External(format!("provider `{}`", p.id)),
-        })
-    });
     let external = Arc::new(move |invocation: Invocation, input: Value| {
-        let registry = registry.clone();
+        let (registry, links) = (registry.clone(), links.clone());
         Box::pin(async move {
-            let input = with_loose_refs(&registry, input)?;
+            let mut input = with_loose_refs(&registry, input)?;
             let provider = target(&registry, &input)?;
-            let verbs = provider.external.ok_or_else(|| CommandError::Failed {
-                message: format!(
-                    "`{}` was routed outside the transaction, but provider `{}` runs inside it",
-                    spec_name(verb),
-                    provider.id
-                ),
-            })?;
-            let mut input = input;
+            let mut thread = None;
             if verb == "create" {
                 if let Value::Object(fields) = &mut input {
                     let named = fields.get("thread").and_then(Value::as_str);
-                    match filing_thread(&invocation.actor, named)? {
+                    thread = filing_thread(&invocation.actor, named)?;
+                    match thread {
                         Some(t) => fields.insert("thread".into(), Value::String(t.to_string())),
                         None => fields.remove("thread"),
                     };
                 }
             }
-            let out = verbs
+            let out = provider
+                .verbs
                 .invoke(
                     &invocation.actor,
                     verb,
@@ -438,17 +411,28 @@ fn dispatching(
                     })
                 })
                 .transpose()?;
+            let mut result = out.result;
+            let body = match verb {
+                "create" => Some(input["body"].as_str().unwrap_or_default()),
+                "update" => input["body"].as_str(),
+                _ => None,
+            };
+            if let (Some(links), Some(body), Value::Object(_)) = (&links, body, &result) {
+                let item = written_ref(verb, &input, &result);
+                result["link_warnings"] =
+                    json!(links.item_warnings(body.to_string(), thread, item).await);
+            }
             let mut events = out.events;
-            let state = external_state(verb, &input, &out.result, &events);
+            let state = external_state(verb, &input, &result, &events);
             events.extend(canonical_events(
                 &invocation.actor.source(),
                 verb,
                 &input,
-                &out.result,
+                &result,
                 state,
             ));
             Ok(HandlerOutput {
-                result: out.result,
+                result,
                 inverse,
                 events,
                 after_commit: None,
@@ -461,16 +445,9 @@ fn dispatching(
         verb,
         shape.schema,
         shape.undoable,
-        Handler::Dispatch(Dispatch {
-            route,
-            tx,
-            external,
-        }),
+        Handler::External(external),
     )
 }
-
-/// The verbs that can put an item in a state.
-const STATE_VERBS: [&str; 3] = ["create", "update", "transition"];
 
 /// The item a verb wrote: a create's from its result, else the input's
 /// `ref`.
@@ -479,52 +456,10 @@ fn written_ref(verb: &str, input: &Value, result: &Value) -> Option<String> {
     source["ref"].as_str().map(str::to_string)
 }
 
-/// A provider's core in the bus's transaction: the item's state is read
-/// before and after it runs, and the interface's events for what it did
-/// are logged with it ([`canonical_events`]).
-fn logging_canonical(verb: &'static str, tx: Arc<TxHandler>) -> Arc<TxHandler> {
-    Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
-        let state_of = |item_ref: &str| -> Result<Option<CanonicalState>, CommandError> {
-            use rusqlite::OptionalExtension;
-            let state: Option<String> = ctx
-                .conn
-                .query_row(
-                    "SELECT state FROM work_item WHERE ref = ?1 AND deleted_at IS NULL",
-                    [item_ref],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(|e| CommandError::Failed {
-                    message: e.to_string(),
-                })?;
-            Ok(state.and_then(|s| serde_json::from_value(Value::String(s)).ok()))
-        };
-        let states = STATE_VERBS.contains(&verb);
-        let before = match input["ref"].as_str() {
-            Some(item_ref) if states && verb != "create" => state_of(item_ref)?,
-            _ => None,
-        };
-        let mut out = tx(ctx, input.clone())?;
-        let state = match written_ref(verb, &input, &out.result) {
-            Some(item_ref) if states => state_of(&item_ref)?.filter(|&to| Some(to) != before),
-            _ => None,
-        };
-        out.events.extend(canonical_events(
-            &ctx.actor.source(),
-            verb,
-            &input,
-            &out.result,
-            state,
-        ));
-        Ok(out)
-    })
-}
-
-/// The state another provider's state verb put its item in, from the item
-/// its answer recorded. oxplow can't read that provider's prior state, so
-/// a create, a transition and an update naming a state each count as a
-/// change; a create its answer recorded no item for is in the state it
-/// asked for.
+/// The state a state verb put its item in, from the item its answer
+/// recorded. A provider's prior state isn't read, so a create, a
+/// transition and an update naming a state each count as a change; a
+/// create its answer recorded no item for is in the state it asked for.
 fn external_state(
     verb: &str,
     input: &Value,
@@ -692,39 +627,8 @@ pub fn transition_shape() -> Shape {
     }
 }
 
-/// oxplow's core for a verb, in the bus's transaction: the list's own
-/// answer (`oxplow_tasks::verbs`), its inverse named as the command that
-/// runs it again.
-fn answered(
-    answer: Result<oxplow_tasks::verbs::Answer, CommandError>,
-) -> Result<HandlerOutput, CommandError> {
-    let answer = answer?;
-    Ok(HandlerOutput {
-        result: answer.result,
-        inverse: answer.inverse.map(|c| CommandCall {
-            name: spec_name(&c.name),
-            input: c.input,
-        }),
-        events: Vec::new(),
-        after_commit: None,
-        unchanged: false,
-    })
-}
-
-fn tx_transition() -> Arc<TxHandler> {
-    Arc::new(|ctx: &TxCtx<'_>, input| {
-        answered(oxplow_tasks::verbs::transition_tx(ctx.conn, parse(input)?))
-    })
-}
-
 pub fn transition_op(registry: WorkItemsRegistry) -> Op {
-    dispatching(
-        transition_shape(),
-        registry.clone(),
-        "transition",
-        ref_target,
-        tx_transition(),
-    )
+    dispatching(transition_shape(), registry, "transition", ref_target, None)
 }
 
 // ---- oxplow.work_item.create ----
@@ -739,27 +643,13 @@ pub fn create_shape() -> Shape {
     }
 }
 
-/// oxplow's core: the list's `create`, filed on the thread core resolves
-/// ([`filing_thread`]). The result carries the body's `link_warnings`.
-fn tx_create(links: LinkDeps) -> Arc<TxHandler> {
-    Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let mut input: WorkItemCreateInput = parse(input)?;
-        let thread = filing_thread(ctx.actor, input.thread.as_deref())?;
-        input.thread = thread.map(|t| t.to_string());
-        let body = input.body.clone().unwrap_or_default();
-        let mut out = answered(oxplow_tasks::verbs::create_tx(ctx.conn, ctx.actor, input))?;
-        out.result["link_warnings"] = json!(links.warnings(ctx, &body, thread));
-        Ok(out)
-    })
-}
-
 pub fn create_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
     dispatching(
         create_shape(),
-        registry.clone(),
+        registry,
         "create",
         create_target,
-        tx_create(links),
+        Some(links),
     )
 }
 
@@ -774,29 +664,13 @@ pub fn update_shape() -> Shape {
     }
 }
 
-/// oxplow's core: the list's `update`. The result carries the body's
-/// `link_warnings`.
-fn tx_update(links: LinkDeps) -> Arc<TxHandler> {
-    Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let mut out = answered(oxplow_tasks::verbs::update_tx(ctx.conn, parse(input)?))?;
-        let body = out.result["description"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        let thread: Option<ThreadId> =
-            serde_json::from_value(out.result["thread_id"].clone()).unwrap_or(None);
-        out.result["link_warnings"] = json!(links.warnings(ctx, &body, thread));
-        Ok(out)
-    })
-}
-
 pub fn update_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
     dispatching(
         update_shape(),
-        registry.clone(),
+        registry,
         "update",
         update_target,
-        tx_update(links),
+        Some(links),
     )
 }
 
@@ -804,106 +678,57 @@ pub fn update_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
 
 pub const LINK: &str = "oxplow.work_item.link";
 
-fn tx_link() -> Arc<TxHandler> {
-    Arc::new(|ctx: &TxCtx<'_>, input| {
-        answered(oxplow_tasks::verbs::link_tx(
-            ctx.conn,
-            ctx.actor,
-            parse(input)?,
-        ))
-    })
-}
-
 pub fn link_op(registry: WorkItemsRegistry) -> Op {
-    dispatching(
-        Shape {
-            schema: schema_of::<WorkItemLinkInput>(),
-            undoable: false,
-        },
-        registry.clone(),
-        "link",
-        link_target,
-        tx_link(),
-    )
+    let shape = Shape {
+        schema: schema_of::<WorkItemLinkInput>(),
+        undoable: false,
+    };
+    dispatching(shape, registry, "link", link_target, None)
 }
 
 // ---- oxplow.work_item.comment ----
 
 pub const COMMENT: &str = "oxplow.work_item.comment";
 
-fn tx_comment() -> Arc<TxHandler> {
-    Arc::new(|ctx: &TxCtx<'_>, input| {
-        answered(oxplow_tasks::verbs::comment_tx(
-            ctx.conn,
-            ctx.actor,
-            parse(input)?,
-        ))
-    })
-}
-
 pub fn comment_op(registry: WorkItemsRegistry) -> Op {
-    dispatching(
-        Shape {
-            schema: schema_of::<WorkItemCommentInput>(),
-            undoable: false,
-        },
-        registry.clone(),
-        "comment",
-        comment_target,
-        tx_comment(),
-    )
+    let shape = Shape {
+        schema: schema_of::<WorkItemCommentInput>(),
+        undoable: false,
+    };
+    dispatching(shape, registry, "comment", comment_target, None)
 }
 
 // ---- oxplow.work_item.delete ----
 
 pub const DELETE: &str = "oxplow.work_item.delete";
 
-fn tx_delete() -> Arc<TxHandler> {
-    Arc::new(|ctx: &TxCtx<'_>, input| {
-        answered(oxplow_tasks::verbs::delete_tx(ctx.conn, parse(input)?))
-    })
-}
-
-/// Destructive (asks first) and not undoable; only on a provider that
-/// declares `delete`.
 pub fn delete_op(registry: WorkItemsRegistry) -> Op {
-    dispatching(
-        Shape {
-            schema: schema_of::<WorkItemDeleteInput>(),
-            undoable: false,
-        },
-        registry.clone(),
-        "delete",
-        delete_target,
-        tx_delete(),
-    )
+    let shape = Shape {
+        schema: schema_of::<WorkItemDeleteInput>(),
+        undoable: false,
+    };
+    dispatching(shape, registry, "delete", delete_target, None)
 }
 
-// ---- oxplow.work_item.reorder / oxplow.work_item.move: oxplow's lists ----
+// ---- oxplow.work_item.reorder / oxplow.work_item.move: a list's order ----
 
 pub const REORDER: &str = "oxplow.work_item.reorder";
 pub const MOVE: &str = "oxplow.work_item.move";
 
 pub fn reorder_op(registry: WorkItemsRegistry) -> Op {
-    let spec = Shape {
+    let shape = Shape {
         schema: schema_of::<WorkItemReorderInput>(),
         undoable: true,
     };
-    let tx: Arc<TxHandler> = Arc::new(|ctx: &TxCtx<'_>, input| {
-        answered(oxplow_tasks::verbs::reorder_tx(ctx.conn, parse(input)?))
-    });
-    dispatching(spec, registry, "reorder", reorder_target, tx)
+    dispatching(shape, registry, "reorder", reorder_target, None)
 }
 
 pub fn move_op(registry: WorkItemsRegistry) -> Op {
-    let spec = Shape {
+    let shape = Shape {
         schema: schema_of::<WorkItemMoveInput>(),
         undoable: true,
     };
-    let tx: Arc<TxHandler> = Arc::new(|ctx: &TxCtx<'_>, input| {
-        answered(oxplow_tasks::verbs::move_tx(ctx.conn, parse(input)?))
-    });
-    dispatching(spec, registry, "move", move_target, tx)
+    dispatching(shape, registry, "move", move_target, None)
 }
 
 #[cfg(test)]
@@ -1496,7 +1321,10 @@ mod tests {
         assert!(note.starts_with("not"), "{note}");
         let logged = events
             .iter()
-            .find(|e| e.envelope.cause == commented.event_id)
+            .find(|e| {
+                e.envelope.cause == commented.event_id
+                    && e.envelope.event_type == "work_item.commented"
+            })
             .unwrap();
         assert_eq!(
             logged.envelope.payload,
@@ -1511,7 +1339,7 @@ mod tests {
                 .filter(|e| e.envelope.cause == out.event_id)
                 .map(|e| e.envelope.event_type.as_str())
                 .collect();
-            assert_eq!(caused, vec![event_type]);
+            assert_eq!(caused, vec!["work_item.recorded", event_type]);
         }
         // Both are the item's page refs once the pump restates it from
         // the interface.
@@ -1585,7 +1413,14 @@ mod tests {
             .map(|e| (e.envelope.event_type.as_str(), e.envelope.source.as_str()))
             .collect();
         let source = format!("agent:{}", fx.thread);
-        assert_eq!(caused, vec![("work_item.state_changed", source.as_str())]);
+        assert_eq!(
+            caused,
+            vec![
+                // The list's own record, then core's event.
+                ("work_item.recorded", "provider:oxplow"),
+                ("work_item.state_changed", source.as_str()),
+            ]
+        );
         assert!(events
             .iter()
             .any(|e| e.envelope.id == executed && e.envelope.event_type == "command.executed"));
@@ -1636,6 +1471,7 @@ mod tests {
         let caused: Vec<(&str, &serde_json::Value)> = events
             .iter()
             .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
+            .filter(|e| e.envelope.event_type != "work_item.recorded")
             .map(|e| (e.envelope.event_type.as_str(), &e.envelope.payload))
             .collect();
         let item = work_item_ref(fx.task);
@@ -1771,7 +1607,14 @@ mod tests {
             .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
             .map(|e| e.envelope.event_type.as_str())
             .collect();
-        assert_eq!(caused, vec!["work_item.created", "work_item.state_changed"]);
+        assert_eq!(
+            caused,
+            vec![
+                "work_item.recorded",
+                "work_item.created",
+                "work_item.state_changed"
+            ]
+        );
         // The fixture's effort closes as the thread switches to this one.
         fx.svc
             .event_pump
@@ -1862,16 +1705,16 @@ mod tests {
         assert_eq!(before, after);
     }
 
-    /// How many tasks whose `work_item.native.sort_index` disagrees with
+    /// How many tasks whose `work_item.rank` disagrees with
     /// the task row — the restated rows must never fall behind `v_task`.
-    async fn stale_native_rows(fx: &crate::test_fixtures::EffortFixture) -> i64 {
+    async fn stale_ranks(fx: &crate::test_fixtures::EffortFixture) -> i64 {
         let rows = fx
             .svc
             .sql
             .query_sql(
                 "SELECT count(*) FROM v_work_item w JOIN v_task t
                    ON w.ref = 'work_item:oxplow:tsk' || t.id
-                 WHERE json_extract(w.native, '$.sort_index') IS NOT t.sort_index",
+                 WHERE w.rank IS NOT t.sort_index",
                 vec![],
                 None,
             )
@@ -1960,7 +1803,7 @@ mod tests {
             vec![t.clone(), c.clone(), a.clone(), b.clone()]
         );
         // Every renumbered neighbour's work_item row is restated too.
-        assert_eq!(stale_native_rows(&fx).await, 0);
+        assert_eq!(stale_ranks(&fx).await, 0);
         fx.svc
             .commands
             .run(
@@ -1975,7 +1818,7 @@ mod tests {
             list_order(&fx, Some(fx.thread)).await,
             vec![c.clone(), a.clone(), b.clone(), t.clone()]
         );
-        assert_eq!(stale_native_rows(&fx).await, 0);
+        assert_eq!(stale_ranks(&fx).await, 0);
 
         fx.svc
             .commands
@@ -1986,7 +1829,7 @@ mod tests {
             list_order(&fx, Some(fx.thread)).await,
             vec![a.clone(), b.clone(), c.clone(), t.clone()]
         );
-        assert_eq!(stale_native_rows(&fx).await, 0);
+        assert_eq!(stale_ranks(&fx).await, 0);
 
         // The anchor must be in the same list, and there's at most one.
         let other = file_on(&fx, "elsewhere", None).await;
@@ -2112,7 +1955,7 @@ mod tests {
             .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
             .map(|e| e.envelope.event_type.as_str())
             .collect();
-        assert_eq!(caused, vec!["work_item.deleted"]);
+        assert_eq!(caused, vec!["work_item.recorded", "work_item.deleted"]);
         let again = fx
             .svc
             .commands

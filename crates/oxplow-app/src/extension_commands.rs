@@ -1682,15 +1682,9 @@ mod tests {
             .find(|e| e.envelope.event_type == "work_item.state_changed")
             .expect("the child's event");
         assert_eq!(changed.envelope.cause, out.event_id, "caused by the run");
-        // One undo reverses both children.
-        fx.svc
-            .commands
-            .undo(&agent(&fx), out.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        let t = task(&fx).await;
-        assert_eq!(t.status, oxplow_tasks::TaskStatus::InProgress);
-        assert_eq!(t.title, "t");
+        // A work list's verbs run outside the transaction: the children are
+        // steps, and the run isn't undoable as a whole.
+        assert!(out.inverse.is_none());
     }
 
     /// A project extension declares its own command over one of the
@@ -1839,10 +1833,9 @@ mod tests {
             .list_pending()
             .await
             .unwrap();
-        assert_eq!(
-            pending[0].dry_run.as_ref().unwrap()["children"][0]["name"],
-            "oxplow.work_item.delete"
-        );
+        // A work list's verb runs outside the transaction: nothing of it
+        // runs, dry or not, before a person decides.
+        assert!(pending[0].dry_run.is_none());
         assert!(task(&fx).await.deleted_at.is_none(), "nothing ran");
     }
 

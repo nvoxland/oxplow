@@ -725,7 +725,8 @@ reactor on `config.changed`, P7.B6), starting enabled instances and
 stopping the rest (a config or spec change restarts one). `enable(ext,
 spec, config)` starts an instance and only then registers its capability
 provider (`ExternalWorkItems::provider`: id, declared features, and the
-`ExternalVerbs` the dispatching `work_item.*` commands call — each verb's
+`WorkItemVerbs` the `work_item.*` commands call — the trait every list
+implements, oxplow's own tasks included (`oxplow_tasks::OxplowTasks`) — each verb's
 input checked against its declared schema first) in
 `Services.work_items`, and its **other** declared commands on the bus as
 `<id>.<name>` (`External`, `Experimental`, all invokers; confirm /

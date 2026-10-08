@@ -356,6 +356,7 @@ mod tests {
         task.thread_id = Some(there.id);
         task.status = oxplow_tasks::TaskStatus::Ready;
         let foreign = fx.svc.task_store.insert(&task).await.unwrap();
+        crate::test_fixtures::restate_task(&fx.svc, foreign).await;
         let err = fx
             .svc
             .commands

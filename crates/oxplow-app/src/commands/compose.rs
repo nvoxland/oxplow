@@ -169,19 +169,19 @@ mod tests {
     use oxplow_tasks::work_item_ref;
     use oxplow_tasks::TaskStore as _;
 
-    /// Two `work_item.*` commands as one run by an agent: one audit row
-    /// naming the sequence with the children in its result, the children's
-    /// events caused by that one `command.executed`, and one undo that
-    /// reverses both.
+    /// Two `work_item.*` commands as one run by an agent: a work list's
+    /// verbs run outside the transaction, so the sequence runs them as
+    /// steps — one audit row naming the sequence with the children in its
+    /// result, the children's events caused by that one
+    /// `command.executed`, and no undo of the whole.
     #[tokio::test]
-    async fn a_sequence_of_work_item_commands_is_one_audited_undoable_run() {
+    async fn a_sequence_of_work_item_commands_is_one_audited_run_of_steps() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
         let task = work_item_ref(fx.task);
-        let before = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         let out = fx
             .svc
             .commands
@@ -204,12 +204,7 @@ mod tests {
             out.result["children"][1]["name"],
             "oxplow.work_item.transition"
         );
-        // Each child answers with its name and result only: the caller
-        // sent the inputs, and the sequence's own inverse is the undo.
-        for child in out.result["children"].as_array().unwrap() {
-            let keys: Vec<_> = child.as_object().unwrap().keys().cloned().collect();
-            assert_eq!(keys, ["name", "result"], "{child}");
-        }
+        assert!(out.inverse.is_none(), "steps aren't undoable");
 
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
             .list_recent(20)
@@ -239,14 +234,5 @@ mod tests {
                 "{t}"
             );
         }
-
-        fx.svc
-            .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        let restored = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        assert_eq!(restored.title, before.title);
-        assert_eq!(restored.status, before.status);
     }
 }

@@ -244,6 +244,13 @@ impl EventPump {
         }
     }
 
+    /// Run the in-transaction (sync) consumers — the projections — until
+    /// each has caught up with the log: what a write's caller reads right
+    /// after it (`CommandBus::run`).
+    pub async fn deliver_projections(&self) -> Result<PumpReport, DomainError> {
+        self.run_sync().await
+    }
+
     /// Run every consumer until each has caught up with the log.
     pub async fn run_once(&self) -> Result<PumpReport, DomainError> {
         let mut report = self.run_sync().await?;

@@ -8,9 +8,9 @@ use oxplow_domain::{DomainError, TaskId, ThreadId, Timestamp};
 
 use crate::model::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
-/// oxplow's task rows. It writes nothing of core's but the `work_item`
-/// row it restates ([`project_work_item_tx`]): a work item's events and
-/// page refs are core's, for every list alike.
+/// oxplow's task rows. It writes nothing of core's: what a write did
+/// reaches the work-item interface through the `work_item.recorded` its
+/// verb answers with ([`crate::verbs`]).
 #[derive(Clone)]
 pub struct SqliteTaskStore {
     db: Database,
@@ -93,7 +93,6 @@ fn write_status_tx(conn: &rusqlite::Connection, item: &Task) -> Result<(), Domai
     if rows == 0 {
         return Err(DomainError::NotFound);
     }
-    project_work_item_tx(conn, item.id).map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -138,9 +137,8 @@ pub fn next_sort_index_tx(
 }
 
 /// Soft-delete task `id` at `now` in the caller's transaction — the core
-/// of `oxplow.work_item.delete`: the row's `deleted_at`, its `work_item` row
-/// and its body's `page_ref` edges dropped. `NotFound` when it's missing
-/// or already deleted.
+/// of `oxplow.work_item.delete`: the row's `deleted_at`. `NotFound` when
+/// it's missing or already deleted.
 pub fn soft_delete_tx(
     conn: &rusqlite::Connection,
     id: TaskId,
@@ -157,7 +155,6 @@ pub fn soft_delete_tx(
     .optional()
     .map_err(map_sql_err)?
     .ok_or(DomainError::NotFound)?;
-    project_work_item_tx(conn, id).map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -176,6 +173,8 @@ pub struct Placed {
     pub task: Task,
     pub from_thread: Option<ThreadId>,
     pub from_place: Placement,
+    /// The other tasks of its new list whose place changed.
+    pub renumbered: Vec<TaskId>,
 }
 
 /// A list's live task ids in order: a thread's, or the backlog's (`None`).
@@ -235,6 +234,7 @@ pub fn place_task_tx(
         }
     };
     list.insert(index, id);
+    let mut moved = Vec::new();
     for (i, t) in list.iter().enumerate() {
         if *t != id {
             let renumbered = conn
@@ -243,10 +243,8 @@ pub fn place_task_tx(
                     params![t.value(), i as i64],
                 )
                 .map_err(map_sql_err)?;
-            // Its work_item row carries `sort_index` in `native`: restate
-            // it with the task row, so `v_work_item` never disagrees.
             if renumbered > 0 {
-                project_work_item_tx(conn, *t).map_err(map_sql_err)?;
+                moved.push(*t);
             }
         }
     }
@@ -260,6 +258,7 @@ pub fn place_task_tx(
         task: item,
         from_thread,
         from_place,
+        renumbered: moved,
     })
 }
 
@@ -276,55 +275,6 @@ pub fn set_status_tx(
     after.set_status(to, now);
     write_status_tx(conn, &after)?;
     Ok(StatusChange { before, after })
-}
-
-/// Restate task `id`'s `work_item` row (P5.C1, the oxplow provider's):
-/// every task write calls it in its own transaction, so the two never
-/// disagree. Canonical state: `ready` → `todo`; `archived` → `done` when
-/// it was completed, else `canceled`; the rest map by name. The native
-/// status stays in `native_state`, the oxplow-only fields in `native`; the
-/// interface's own columns (`thread_id`, `rank`, `closed_at`) are the
-/// task's list, sort index and close. A hard delete (a cascade from the
-/// thread or stream) is the `task` table's trigger's (V115); links and
-/// comments follow `task_link` / `task_note` by trigger (V17).
-pub(crate) fn project_work_item_tx(
-    conn: &rusqlite::Connection,
-    id: TaskId,
-) -> rusqlite::Result<()> {
-    conn.execute(
-        "INSERT INTO work_item (ref, provider, title, body, state, native_state, native,
-                                parent_ref, thread_id, rank, closed_at,
-                                created_at, updated_at, deleted_at)
-         SELECT 'work_item:oxplow:tsk' || t.id, 'oxplow', t.title, t.description,
-                CASE t.status
-                    WHEN 'ready' THEN 'todo'
-                    WHEN 'archived' THEN
-                        CASE WHEN t.completed_at IS NULL THEN 'canceled' ELSE 'done' END
-                    ELSE t.status
-                END,
-                t.status,
-                json_object('priority', t.priority, 'thread_id', t.thread_id,
-                            'sort_index', t.sort_index, 'author', t.author,
-                            'completed_at', t.completed_at),
-                CASE WHEN t.parent_id IS NULL THEN NULL
-                     ELSE 'work_item:oxplow:tsk' || t.parent_id END,
-                t.thread_id, t.sort_index,
-                CASE WHEN t.status = 'done' OR t.status = 'canceled' OR t.status = 'archived'
-                     THEN coalesce(t.completed_at, t.updated_at) END,
-                t.created_at, t.updated_at, t.deleted_at
-         FROM task t WHERE t.id = ?1
-         ON CONFLICT(ref) DO UPDATE SET
-            title = excluded.title, body = excluded.body, state = excluded.state,
-            native_state = excluded.native_state, native = excluded.native,
-            parent_ref = excluded.parent_ref, thread_id = excluded.thread_id,
-            rank = excluded.rank,
-            -- When it first closed; reopened, it's open again.
-            closed_at = CASE WHEN excluded.closed_at IS NULL THEN NULL
-                             ELSE coalesce(work_item.closed_at, excluded.closed_at) END,
-            updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
-        params![id.value()],
-    )?;
-    Ok(())
 }
 
 /// Sync core for the task-row INSERT; returns the new id.
@@ -352,7 +302,6 @@ pub(crate) fn insert_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqli
         ],
     )?;
     let id = TaskId::new(conn.last_insert_rowid());
-    project_work_item_tx(conn, id)?;
     Ok(id)
 }
 
@@ -398,7 +347,6 @@ pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqli
             item.author.map(author_to_str),
         ],
     )?;
-    project_work_item_tx(conn, item.id)?;
     Ok(rows)
 }
 
@@ -755,11 +703,11 @@ mod tests {
         assert_eq!(dangling, 0);
     }
 
-    /// The oxplow provider's `work_item` rows (P5.C1) are written with the
-    /// task rows: every live task has one, and a deleted one's is marked
-    /// deleted, or gone with a cascade.
+    /// A task's record is the item as the interface holds it: its
+    /// canonical and native state (archived rides on done or canceled), its
+    /// parent, its deletion.
     #[tokio::test]
-    async fn every_task_has_its_work_item_row() {
+    async fn a_tasks_record_is_the_item_as_the_interface_holds_it() {
         let (store, tid) = fixture().await;
         let epic = store.insert(&item(Some(tid))).await.unwrap();
         let mut child = item(None);
@@ -788,61 +736,43 @@ mod tests {
             .await
             .unwrap();
 
-        let rows = crate::db::read(&store.db, |c| {
-            let mut stmt = c.prepare(
-                "SELECT ref, provider, title, body, state, native_state, parent_ref,
-                            deleted_at IS NOT NULL
-                     FROM work_item ORDER BY ref",
-            )?;
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok(format!(
-                        "{}|{}|{}|{}|{}|{}|{}|{}",
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, String>(3)?,
-                        r.get::<_, String>(4)?,
-                        r.get::<_, String>(5)?,
-                        r.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                        r.get::<_, bool>(7)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+        let ids = [epic, child, gone, shipped, dropped];
+        let (mut rows, interface) = crate::db::read(&store.db, move |c| {
+            let rows = ids
+                .iter()
+                .map(|&id| {
+                    let w = crate::record::record_tx(c, id).unwrap();
+                    format!(
+                        "{}|{}|{}|{}|{}|{}|{}",
+                        w.item_ref,
+                        w.title,
+                        w.body,
+                        w.state.as_str(),
+                        w.native_state,
+                        w.parent_ref.unwrap_or_default(),
+                        w.deleted
+                    )
+                })
+                .collect::<Vec<_>>();
+            let interface: i64 = c.query_row("SELECT count(*) FROM work_item", [], |r| r.get(0))?;
+            Ok((rows, interface))
         })
         .await
         .unwrap();
+        rows.sort();
+        // The store writes nothing of the interface's: its verbs answer
+        // with these records.
+        assert_eq!(interface, 0);
         let r = |id: TaskId| work_item_ref(id);
         let mut expected = vec![
-            format!("{}|oxplow|ship it||in_progress|in_progress||false", r(epic)),
-            format!(
-                "{}|oxplow|renamed|the body|todo|ready|{}|false",
-                r(child),
-                r(epic)
-            ),
-            format!("{}|oxplow|ship it||todo|ready||true", r(gone)),
-            format!("{}|oxplow|ship it||done|archived||false", r(shipped)),
-            format!("{}|oxplow|ship it||canceled|archived||false", r(dropped)),
+            format!("{}|ship it||in_progress|in_progress||false", r(epic)),
+            format!("{}|renamed|the body|todo|ready|{}|false", r(child), r(epic)),
+            format!("{}|ship it||todo|ready||true", r(gone)),
+            format!("{}|ship it||done|archived||false", r(shipped)),
+            format!("{}|ship it||canceled|archived||false", r(dropped)),
         ];
         expected.sort();
         assert_eq!(rows, expected);
-
-        // A cascade (the stream or thread deleted outright) takes the
-        // work item with the task.
-        crate::db::write(&store.db, |c| c.execute("DELETE FROM threads", []))
-            .await
-            .unwrap();
-        let left: (i64, i64) = crate::db::read(&store.db, |c| {
-            c.query_row(
-                "SELECT (SELECT count(*) FROM task), (SELECT count(*) FROM work_item)",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-        })
-        .await
-        .unwrap();
-        assert_eq!(left, (0, 0), "the backlog child went with its parent");
     }
 
     /// A deleted task can't be edited. The store logs nothing of its own:

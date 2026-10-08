@@ -511,9 +511,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   the note — then transitions to `todo`. Both read one `input` query
   (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
   `v_oxplow_bundled_deviation`), compose `oxplow.work_item.comment` and
-  `oxplow.work_item.transition` — one transaction (and one undo) on oxplow's own
-  item, steps through the provider on another provider's (not undoable;
-  [commands.md](./commands.md) → "Composition", tsk713) — refuse an
+  `oxplow.work_item.transition` — as steps, every list's verbs running
+  outside the transaction (not undoable; [commands.md](./commands.md) →
+  "Composition") — refuse an
   effort without a work item by name, are `confirm: always`, and are a person's or
   a lens's — never an agent's. `questions.yaml` + `README.md` (its skill)
   say what an agent can read of the packet; a bundled extension's

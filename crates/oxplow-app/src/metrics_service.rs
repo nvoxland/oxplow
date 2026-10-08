@@ -4797,8 +4797,7 @@ def transform(input):
     #[tokio::test]
     async fn effort_finished_runs_on_effort_complete_gauges() {
         // Effort-triggered collectors run from the `collector.triggers` pump
-        // consumer on `effort.finished` (P7.B3), not a direct call from
-        // TaskService.
+        // consumer on `effort.finished` (P7.B3).
         use oxplow_domain::TaskId;
         use oxplow_tasks::TaskStore as _;
         use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
