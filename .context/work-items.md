@@ -68,6 +68,13 @@ There are two writers, one schema:
   small and the same for every list, and the projection is one upsert
   from one event type.
 
+**Page refs** for every list's item come from the interface: its body's
+mentions, its links (`work_item_link:<type>`, the list's own types) and
+its comments' mentions (`comment_*`, keyed by the item), restated by
+`work_item_refs::restate_tx` on the item's events (the
+`page_ref.work_item` consumer, after `work_items.project`) and by the
+boot repair. A list writes no page refs of its own.
+
 ## Reading them in the UI
 
 The desktop reads **only the interface**, whichever list is active —

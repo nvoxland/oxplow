@@ -476,21 +476,17 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
-    // Page-ref graph repair: re-project every existing task, link, effort,
-    // finding and note into `page_ref` — only when a migration or a new
-    // build may have left it drifted (`page_ref_backfill::needs_repair`).
+    // Page-ref graph repair: re-project every existing work item, effort,
+    // finding and thread note into `page_ref` — only when a migration or a
+    // new build may have left it drifted (`page_ref_backfill::needs_repair`).
     {
         let db = state.db.clone();
         let vocabulary = state.vocabulary.clone();
         let page_refs = state.page_ref_store.clone();
         let sources = crate::page_ref_backfill::Sources {
-            tasks: state.task_store.clone(),
-            links: state.task_link_store.clone(),
+            db: state.db.clone(),
             efforts: state.effort_store.clone(),
             findings: state.code_quality_store.clone(),
-            task_comments: std::sync::Arc::new(oxplow_db::SqliteTaskNoteStore::new(
-                state.db.clone(),
-            )),
             thread_notes: state.thread_note_store.clone(),
         };
         tokio::spawn(async move {

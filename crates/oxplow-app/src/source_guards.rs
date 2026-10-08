@@ -810,8 +810,6 @@ const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/task_service.rs", "the service"),
     ("crates/oxplow-app/src/commands/work_item.rs", "oxplow's verbs, dispatched in-transaction"),
     ("crates/oxplow-app/src/lib.rs", "wires the store and service into Services"),
-    ("crates/oxplow-app/src/page_ref_backfill.rs", "the boot-time repair of the page-ref slices oxplow's tasks project when written"),
-    ("crates/oxplow-app/src/boot.rs", "hands that repair the task stores"),
 ];
 
 /// Production files that name oxplow's task list (comments left out).

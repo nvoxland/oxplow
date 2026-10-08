@@ -759,10 +759,7 @@ impl Services {
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
         let vocabulary = VocabularyHandle::core();
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
-        let task_store = Arc::new(SqliteTaskStore::with_vocabulary(
-            db.clone(),
-            vocabulary.clone(),
-        ));
+        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
@@ -773,10 +770,12 @@ impl Services {
             db.clone(),
             (*event_log_store).clone(),
             vec![
+                // A list's records reach the interface before an item's
+                // page refs are restated from it.
+                Arc::new(work_items::WorkItemsProjection),
                 Arc::new(page_ref_consumers::PageRefWorkItemConsumer {
                     vocabulary: vocabulary.clone(),
                 }),
-                Arc::new(work_items::WorkItemsProjection),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(knowledge::WikiAttribution),
                 // The log's facts the renderer hears (P7.B6).

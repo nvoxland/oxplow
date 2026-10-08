@@ -1,4 +1,3 @@
-use oxplow_domain::vocabulary::VocabularyHandle;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -12,15 +11,13 @@ use oxplow_domain::{
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
-use crate::page_ref_projections::{task_body_ref_types, task_edges, work_item_id, KIND_WORK_ITEM};
-use crate::page_ref_store::SqlitePageRefStore;
 
+/// oxplow's task rows. It writes nothing of core's but the `work_item`
+/// row it restates ([`project_work_item_tx`]): a work item's events and
+/// page refs are core's, for every list alike.
 #[derive(Clone)]
 pub struct SqliteTaskStore {
     db: Database,
-    page_refs: SqlitePageRefStore,
-    /// The ref kinds a task body's mentions may name.
-    vocabulary: VocabularyHandle,
 }
 
 /// A status change made by [`set_status_tx`]: the row before and after.
@@ -33,34 +30,8 @@ pub struct StatusChange {
 }
 
 impl SqliteTaskStore {
-    /// A store with its own core schema registry. `Services` shares one
-    /// registry across stores via [`Self::with_vocabulary`].
     pub fn new(db: Database) -> Self {
-        Self::with_vocabulary(db, VocabularyHandle::core())
-    }
-
-    pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
-        Self {
-            page_refs: SqlitePageRefStore::new(db.clone()),
-            db,
-            vocabulary,
-        }
-    }
-
-    /// Re-project a task's body mentions into `page_ref` (the task-body
-    /// slice; the effort slice is the effort store's).
-    async fn project_body_refs(&self, item: &Task, id: TaskId) -> Result<(), DomainError> {
-        let mut placed = item.clone();
-        placed.id = id;
-        let vocabulary = self.vocabulary.current();
-        self.page_refs
-            .replace_source_for_ref_types(
-                KIND_WORK_ITEM,
-                &work_item_id(id),
-                task_body_ref_types(),
-                task_edges(&vocabulary.kinds, &placed),
-            )
-            .await
+        Self { db }
     }
 
     /// Move a task to another thread (or the backlog, `None`) at the end
@@ -103,7 +74,6 @@ impl SqliteTaskStore {
             .db
             .transaction(move |tx| update_with_status_tx(tx, &owned, status, Timestamp::now()))
             .await?;
-        self.project_body_refs(&after, after.id).await?;
         Ok(after)
     }
 }
@@ -192,13 +162,6 @@ pub fn soft_delete_tx(
     .map_err(crate::database::map_sql_err)?
     .ok_or(DomainError::NotFound)?;
     project_work_item_tx(conn, id).map_err(crate::database::map_sql_err)?;
-    crate::page_ref_store::replace_source_for_ref_types_tx(
-        conn,
-        KIND_WORK_ITEM,
-        &work_item_id(id),
-        &task_body_ref_types(),
-        vec![],
-    )?;
     Ok(())
 }
 
@@ -578,19 +541,6 @@ const SELECT_BASE: &str =
     "SELECT t.*, COALESCE((SELECT COUNT(*) FROM task_note wn WHERE wn.task_id = t.id), 0) AS note_count
      FROM task t";
 
-impl SqliteTaskStore {
-    pub async fn list_all_for_backfill(&self) -> Result<Vec<Task>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!("{} ORDER BY t.created_at ASC", SELECT_BASE);
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map([], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-}
-
 #[async_trait]
 impl TaskStore for SqliteTaskStore {
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError> {
@@ -665,31 +615,17 @@ impl TaskStore for SqliteTaskStore {
             .db
             .call(move |conn| insert_task_tx(conn, &owned))
             .await?;
-        self.project_body_refs(item, new_id).await?;
         Ok(new_id)
     }
 
     /// Write the row's fields; status is never written here.
     async fn update(&self, item: &Task) -> Result<(), DomainError> {
         let item = item.clone();
-        let edges_item = item.clone();
         self.db
             .transaction(move |tx| {
                 update_with_status_tx(tx, &item, None, Timestamp::now()).map(|_| ())
             })
             .await?;
-        {
-            let refs = &self.page_refs;
-            let vocabulary = self.vocabulary.current();
-            let edges = task_edges(&vocabulary.kinds, &edges_item);
-            refs.replace_source_for_ref_types(
-                KIND_WORK_ITEM,
-                &work_item_id(edges_item.id),
-                task_body_ref_types(),
-                edges,
-            )
-            .await?;
-        }
         Ok(())
     }
 
@@ -1125,74 +1061,5 @@ mod tests {
         latest.title = "ressurected".into();
         let err = store.update(&latest).await.unwrap_err();
         assert!(matches!(err, DomainError::NotFound));
-    }
-
-    #[tokio::test]
-    async fn insert_with_page_refs_projects_body_mentions() {
-        use crate::page_ref_store::SqlitePageRefStore;
-        let db = Database::in_memory();
-        let streams = SqliteStreamStore::new(db.clone());
-        let threads = SqliteThreadStore::new(db.clone());
-        let s = Stream {
-            id: StreamId::new(1),
-            kind: StreamKind::Primary,
-            title: "oxplow".into(),
-            branch: "main".into(),
-            branch_ref: "refs/heads/main".into(),
-            branch_source: "main".into(),
-            worktree_path: "/repo".into(),
-            working_pane: String::new(),
-            talking_pane: String::new(),
-            working_session_id: String::new(),
-            talking_session_id: String::new(),
-            custom_prompt: None,
-            created_at: ts(),
-            updated_at: ts(),
-            archived_at: None,
-        };
-        streams.upsert(&s).await.unwrap();
-        let t = Thread {
-            id: ThreadId::new(1),
-            stream_id: s.id,
-            title: "x".into(),
-            status: ThreadStatus::Active,
-            sort_index: 0,
-            pane_target: "working".into(),
-            agent: oxplow_domain::AgentKind::Claude,
-            acp_agent: None,
-            resume_session_id: String::new(),
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: ts(),
-            updated_at: ts(),
-            archived_at: None,
-        };
-        threads.upsert(&t).await.unwrap();
-
-        let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskStore::new(db.clone());
-
-        let mut it = item(Some(t.id));
-        it.description = "see [[src/app.rs]] and blocks tsk99".into();
-        let new_id = store.insert(&it).await.unwrap();
-
-        let inbound = page_refs
-            .list_backlinks("file", "src/app.rs", None)
-            .await
-            .unwrap();
-        assert!(inbound
-            .iter()
-            .any(|e| e.source_id == format!("oxplow:{new_id}")));
-
-        let mut latest = store.get(new_id).await.unwrap().unwrap();
-        latest.description = "no refs anymore".into();
-        store.update(&latest).await.unwrap();
-        let inbound = page_refs
-            .list_backlinks("file", "src/app.rs", None)
-            .await
-            .unwrap();
-        assert!(inbound.is_empty(), "expected no backlinks; got {inbound:?}");
     }
 }

@@ -2666,9 +2666,9 @@ mod tests {
         assert_eq!(
             up(
                 "work_item.commented",
-                json!({ "work_item": item, "comment": "task_note:note3" })
+                json!({ "work_item": item, "comment": "task_note:not3" })
             ),
-            json!({ "work_item": item, "comment": "note3" })
+            json!({ "work_item": item, "comment": "not3" })
         );
         let linked =
             json!({ "work_item": item, "target": "work_item:oxplow:tsk7", "link_type": "blocks" });

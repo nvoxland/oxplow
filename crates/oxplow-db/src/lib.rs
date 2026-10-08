@@ -54,6 +54,7 @@ pub mod token_usage_store;
 pub mod tool_call_store;
 pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
+pub mod work_item_refs;
 
 pub use agent_nudge_store::{
     AgentNudge, Audience, NewAgentNudge, OnceScope, SqliteAgentNudgeStore,

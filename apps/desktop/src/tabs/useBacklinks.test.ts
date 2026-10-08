@@ -63,6 +63,21 @@ describe("humanRefType", () => {
     }
   });
 
+  // A work item's comments' mentions are the item's own edges: the
+  // backlink says it's in a comment.
+  test("comment-mention ref_types read as 'comment'", () => {
+    for (const rt of [
+      "comment_file_ref",
+      "comment_dir_ref",
+      "comment_wikilink",
+      "comment_work_item_mention",
+      "comment_finding_mention",
+      "comment_commit_mention",
+    ]) {
+      expect(humanRefTypeForTest(rt, null)).toBe("comment");
+    }
+  });
+
   test("touched_file derives action from change_kind", () => {
     expect(humanRefTypeForTest("touched_file", JSON.stringify({ change_kind: "created" }))).toBe("created");
     // `updated` normalizes to "modified"

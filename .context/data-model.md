@@ -450,6 +450,9 @@ the interface's links and comments, published as `v_work_item_link` /
 `v_work_item_comment` over the active list's items. oxplow's follow
 `task_link` / `task_note` (a task's notes) by triggers, however those are
 written (V17 backfilled them; a comment's id is `task_note:<id>`).
+`link_type` is the list's own (V28 dropped V17's CHECK naming oxplow's
+six). An item's page refs are restated from these and `work_item`
+(`work_item_refs::restate_tx`, "page_ref" below).
 `capability_provider.fields_json` (V18) is an implementation's declared
 fields. Capability rows are published when services are built
 (`CapabilityRegistry::publish_now`), so the first read sees the active
@@ -1043,21 +1046,20 @@ is a canonical ref's `(kind, id)` (see `.context/refs.md`, tsk404), so
 `format!("{kind}:{id}")` is the ref and nothing needs a per-kind id
 scheme:
 - `wiki` — the slug
-- `work_item` — `oxplow:tsk<n>` (`page_ref_projections::work_item_id`)
+- `work_item` — `<provider>:<id>` (`oxplow:tsk<n>`, `issues:ENG-12`)
 - `file` — the repo-relative path
 - `dir` — the repo-relative path, no trailing slash
 - `commit` — the full sha
 - `finding` — the rowid as a string
-- `task_note` — `not<n>` (a comment on an oxplow task)
 - `thread_note` — `not<n>`
 
 V92 wiped the pre-canonical rows; the boot backfill regenerates them.
 
 **Writers own slices by `ref_type`.** A single `(source_kind,
-source_id)` can have rows from multiple owners — a task's
-body-mention edges (from `task_store`), link edges (from the
-link store), and touched-file edges (from the effort store) all
-land under `(work_item, oxplow:tskN)` but with distinct `ref_type`s.
+source_id)` can have rows from multiple owners — a work item's body,
+link and comment edges (restated from the work-item interface) and its
+effort edges (from the effort store) all land under
+`(work_item, <provider>:<id>)` but with distinct `ref_type`s.
 `SqlitePageRefStore::replace_source_for_ref_types` lets each
 writer wipe + re-insert only the rows whose `ref_type` it owns,
 so other owners' rows survive.
@@ -1071,9 +1073,10 @@ renamed the `task_…` spellings: a mention is `work_item_mention` /
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
 | `wiki_pages.rs` (`oxplow-app`) | `wiki:<slug>` | full source — uses `replace_source` |
-| `task_store::upsert` | `work_item:oxplow:<id>` body slice | `work_item_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
-| `work_satellite::SqliteTaskLinkStore` create/delete | `work_item:oxplow:<id>` link slice | `work_item_link:blocks` / `relates_to` / … |
-| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:oxplow:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_work_item_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
+| `work_item_refs::restate_tx` (`oxplow-db`), run by the `page_ref.work_item` consumer on an item's events and by the boot repair — any list's item, from `work_item` / `work_item_link` / `work_item_comment` | `work_item:<provider>:<id>` body slice | `work_item_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
+| (the same) | link slice | `work_item_link:<type>` — every type with the prefix, the list's own (V28 dropped the CHECK naming oxplow's six) |
+| (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `task_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_wikilink`, `comment_work_item_mention`, `comment_finding_mention`, `comment_commit_mention` |
+| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:<provider>:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_work_item_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
 | `commit_indexer.rs` (`oxplow-app`) | `commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
 
@@ -1090,7 +1093,8 @@ which decorate each row with a best-effort `source_label` from
 the source store) and as MCP tools of the same names.
 
 Boot-time restate: `oxplow_app::page_ref_backfill::run(...)` re-
-projects every existing task body, link and finding into the table,
+projects every work item (`work_item_refs::all_refs_tx`, deleted ones
+included — restating one clears it), effort, finding and thread note into the table,
 idempotently — the graph's repair path after a migration that resets
 `page_ref` (V92) or a writer's drift. It runs at boot only when the
 schema version or the build changed since its last run

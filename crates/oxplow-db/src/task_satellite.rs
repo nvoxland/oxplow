@@ -14,12 +14,6 @@ use oxplow_domain::{
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
-use crate::page_ref_projections::{
-    link_edge, note_edges, task_link_ref_types, work_item_id, KIND_TASK_NOTE, KIND_WORK_ITEM,
-};
-use crate::page_ref_store::{
-    replace_source_for_ref_types_tx, replace_source_tx, SqlitePageRefStore,
-};
 
 fn link_type_to_str(t: TaskLinkType) -> &'static str {
     match t {
@@ -44,11 +38,10 @@ fn str_to_link_type(s: &str) -> Result<TaskLinkType, DomainError> {
     }
 }
 
-/// A note on task `item`, with its `page_ref` edges — the core of
-/// `oxplow.work_item.comment`, composing inside the bus's transaction.
+/// A note on task `item` — the core of `oxplow.work_item.comment`,
+/// composing inside the bus's transaction.
 pub fn add_task_note_tx(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
     item: TaskId,
     body: &str,
     author: &str,
@@ -60,12 +53,6 @@ pub fn add_task_note_tx(
     )
     .map_err(crate::database::map_sql_err)?;
     let id = NoteId::new(conn.last_insert_rowid());
-    replace_source_tx(
-        conn,
-        KIND_TASK_NOTE,
-        &id.to_string(),
-        note_edges(kinds, KIND_TASK_NOTE, &id.to_string(), body),
-    )?;
     Ok(TaskNote {
         id,
         task_id: item,
@@ -75,8 +62,8 @@ pub fn add_task_note_tx(
     })
 }
 
-/// A typed link from `from` to `to`, made in `thread`, restating `from`'s
-/// link edges — the core of `oxplow.work_item.link`.
+/// A typed link from `from` to `to`, made in `thread` — the core of
+/// `oxplow.work_item.link`.
 pub fn create_link_tx(
     conn: &rusqlite::Connection,
     thread: ThreadId,
@@ -97,32 +84,14 @@ pub fn create_link_tx(
         ],
     )
     .map_err(crate::database::map_sql_err)?;
-    let link = TaskLink {
+    Ok(TaskLink {
         id: TaskLinkId::new(conn.last_insert_rowid()),
         thread_id: thread,
         from_item_id: from,
         to_item_id: to,
         link_type,
         created_at: now,
-    };
-    let mut stmt = conn
-        .prepare("SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC")
-        .map_err(crate::database::map_sql_err)?;
-    let edges = stmt
-        .query_map(params![from.value()], row_to_link)
-        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-        .map_err(crate::database::map_sql_err)?
-        .iter()
-        .map(link_edge)
-        .collect();
-    replace_source_for_ref_types_tx(
-        conn,
-        KIND_WORK_ITEM,
-        &work_item_id(from),
-        &task_link_ref_types(),
-        edges,
-    )?;
-    Ok(link)
+    })
 }
 
 // ---------------- Task comments ----------------
@@ -135,22 +104,6 @@ pub struct SqliteTaskNoteStore {
 impl SqliteTaskNoteStore {
     pub fn new(db: Database) -> Self {
         Self { db }
-    }
-
-    /// Iterate every comment's id + body for the boot-time backfill.
-    pub async fn list_all_for_backfill(&self) -> Result<Vec<(String, String)>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare("SELECT id, body FROM task_note")?;
-                let rows = stmt.query_map([], |r| {
-                    Ok((
-                        NoteId::new(r.get::<_, i64>(0)?).to_string(),
-                        r.get::<_, String>(1)?,
-                    ))
-                })?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
     }
 }
 
@@ -192,54 +145,11 @@ impl TaskNoteStore for SqliteTaskNoteStore {
 #[derive(Clone)]
 pub struct SqliteTaskLinkStore {
     db: Database,
-    page_refs: SqlitePageRefStore,
 }
 
 impl SqliteTaskLinkStore {
     pub fn new(db: Database) -> Self {
-        Self {
-            page_refs: SqlitePageRefStore::new(db.clone()),
-            db,
-        }
-    }
-
-    /// Distinct `from_item_id` values across every link row. Used
-    /// by the page-ref backfill so we can re-project each owning
-    /// task's slice exactly once.
-    pub async fn list_distinct_from_items(&self) -> Result<Vec<TaskId>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare("SELECT DISTINCT from_item_id FROM task_link")?;
-                let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
-                rows.map(|r| r.map(TaskId::new))
-                    .collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    /// Re-emit `work_item_link:*` edges for all currently-stored outgoing
-    /// links of `from_item`. Called after create/delete when
-    /// `page_refs` is attached.
-    async fn project_outgoing_links(&self, from_item: TaskId) -> Result<(), DomainError> {
-        let refs = &self.page_refs;
-        let links: Vec<TaskLink> = self
-            .db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC",
-                )?;
-                let rows = stmt.query_map(params![from_item.value()], row_to_link)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await?;
-        let edges: Vec<_> = links.iter().map(link_edge).collect();
-        refs.replace_source_for_ref_types(
-            KIND_WORK_ITEM,
-            &work_item_id(from_item),
-            task_link_ref_types(),
-            edges,
-        )
-        .await
+        Self { db }
     }
 }
 
@@ -290,24 +200,12 @@ impl TaskLinkStore for SqliteTaskLinkStore {
     }
 
     async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError> {
-        let from_item: Option<TaskId> = self
-            .db
-            .call(move |conn| {
-                let mut stmt = conn.prepare("SELECT from_item_id FROM task_link WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, i64>(0))?;
-                Ok(rows.next().transpose()?.map(TaskId::new))
-            })
-            .await?;
         self.db
             .call(move |conn| {
                 conn.execute("DELETE FROM task_link WHERE id = ?1", params![id.value()])?;
                 Ok(())
             })
-            .await?;
-        if let Some(from) = from_item {
-            self.project_outgoing_links(from).await?;
-        }
-        Ok(())
+            .await
     }
 }
 
@@ -315,12 +213,6 @@ impl TaskLinkStore for SqliteTaskLinkStore {
 mod tests {
     use super::*;
 
-    /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
-    fn tasks_kinds() -> oxplow_domain::refs::kind::KindRegistry {
-        oxplow_domain::refs::kind::core_kinds()
-            .with_work_item_ids("oxplow", r"tsk\d+")
-            .unwrap()
-    }
     use crate::stream_store::SqliteStreamStore;
     use crate::task_store::SqliteTaskStore;
     use crate::thread_store::SqliteThreadStore;
@@ -402,7 +294,7 @@ mod tests {
 
     async fn add_note(db: &Database, item: TaskId, body: &str, author: &str) -> TaskNote {
         let (body, author) = (body.to_string(), author.to_string());
-        db.transaction(move |tx| add_task_note_tx(tx, &tasks_kinds(), item, &body, &author))
+        db.transaction(move |tx| add_task_note_tx(tx, item, &body, &author))
             .await
             .unwrap()
     }
@@ -418,102 +310,50 @@ mod tests {
         assert_eq!(listed[0].body, "looking good");
     }
 
+    /// A comment and a link reach the work-item interface (its
+    /// `work_item_comment` / `work_item_link` rows, by trigger) and write
+    /// no page refs: an item's page refs are core's, restated from the
+    /// interface for every list.
     #[tokio::test]
-    async fn a_task_comment_projects_its_body() {
-        use crate::page_ref_store::SqlitePageRefStore;
-        let (db, _tid, item_id) = fixture().await;
-        let page_refs = SqlitePageRefStore::new(db.clone());
-
-        let note = add_note(&db, item_id, "blocked by tsk99 see [[src/app.rs]]", "u").await;
-        let inbound_task = page_refs
-            .list_backlinks("work_item", "oxplow:tsk99", None)
-            .await
-            .unwrap();
-        assert!(
-            inbound_task
-                .iter()
-                .any(|e| e.source_kind == "task_note" && e.source_id == note.id.to_string()),
-            "expected note to backlink tsk99; got {inbound_task:?}"
-        );
-        let inbound_file = page_refs
-            .list_backlinks("file", "src/app.rs", None)
-            .await
-            .unwrap();
-        assert!(inbound_file
-            .iter()
-            .any(|e| e.source_id == note.id.to_string()));
-    }
-
-    #[tokio::test]
-    async fn link_create_delete_projects_page_ref_slice() {
-        use crate::page_ref_store::SqlitePageRefStore;
+    async fn a_comment_and_a_link_reach_the_interface_and_write_no_page_refs() {
         let (db, tid, from_id) = fixture().await;
-        let page_refs = SqlitePageRefStore::new(db.clone());
-        let items = SqliteTaskStore::new(db.clone());
-        let mut sender = items.get(from_id).await.unwrap().unwrap();
-        sender.description = "see [[src/app.rs]]".into();
-        items.update(&sender).await.unwrap();
-
-        let to = Task {
-            id: TaskId::placeholder(),
-            thread_id: Some(tid),
-            parent_id: None,
-            title: "y".into(),
-            description: String::new(),
-            status: TaskStatus::Ready,
-            priority: TaskPriority::Medium,
-            sort_index: 1,
-            created_by: TaskActorKind::User,
-            created_at: now(),
-            updated_at: now(),
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
-        };
-        let to_id = items.insert(&to).await.unwrap();
-
-        let link = db
-            .transaction(move |tx| create_link_tx(tx, tid, from_id, to_id, TaskLinkType::Blocks))
+        let to_id = SqliteTaskStore::new(db.clone())
+            .insert(&Task {
+                id: TaskId::placeholder(),
+                thread_id: Some(tid),
+                parent_id: None,
+                title: "y".into(),
+                description: String::new(),
+                status: TaskStatus::Ready,
+                priority: TaskPriority::Medium,
+                sort_index: 1,
+                created_by: TaskActorKind::User,
+                created_at: now(),
+                updated_at: now(),
+                completed_at: None,
+                deleted_at: None,
+                note_count: 0,
+                author: Some(TaskAuthor::User),
+            })
             .await
             .unwrap();
-
-        let inbound_to = page_refs
-            .list_backlinks("work_item", &format!("oxplow:{to_id}"), None)
+        add_note(&db, from_id, "blocked by tsk99 see [[src/app.rs]]", "u").await;
+        db.transaction(move |tx| create_link_tx(tx, tid, from_id, to_id, TaskLinkType::Blocks))
             .await
             .unwrap();
-        assert!(inbound_to
-            .iter()
-            .any(|e| e.source_id == format!("oxplow:{from_id}")
-                && e.ref_type == "work_item_link:blocks"));
-
-        let inbound_file = page_refs
-            .list_backlinks("file", "src/app.rs", None)
+        let counts: (i64, i64, i64) = db
+            .call(|c| {
+                c.query_row(
+                    "SELECT (SELECT count(*) FROM work_item_comment),
+                            (SELECT count(*) FROM work_item_link),
+                            (SELECT count(*) FROM page_ref)",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+            })
             .await
             .unwrap();
-        assert!(inbound_file
-            .iter()
-            .any(|e| e.source_id == format!("oxplow:{from_id}")));
-
-        SqliteTaskLinkStore::new(db.clone())
-            .delete(link.id)
-            .await
-            .unwrap();
-        let inbound_to = page_refs
-            .list_backlinks("work_item", &format!("oxplow:{to_id}"), None)
-            .await
-            .unwrap();
-        assert!(inbound_to.is_empty(), "link backlink should clear");
-        let inbound_file = page_refs
-            .list_backlinks("file", "src/app.rs", None)
-            .await
-            .unwrap();
-        assert!(
-            inbound_file
-                .iter()
-                .any(|e| e.source_id == format!("oxplow:{from_id}")),
-            "body-mention slice must survive link deletion"
-        );
+        assert_eq!(counts, (1, 1, 0));
     }
 
     #[tokio::test]

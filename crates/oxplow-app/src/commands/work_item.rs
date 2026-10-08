@@ -1350,7 +1350,6 @@ fn tx_comment(registry: WorkItemsRegistry) -> Arc<TxHandler> {
         }
         let note = oxplow_db::task_satellite::add_task_note_tx(
             ctx.conn,
-            &ctx.events.vocabulary.kinds,
             task,
             &input.body,
             &note_author(ctx.actor),
@@ -2251,6 +2250,37 @@ mod tests {
                 .collect();
             assert_eq!(caused, vec![event_type]);
         }
+        // Both are the item's page refs once the pump restates it from
+        // the interface.
+        fx.svc.event_pump.run_once().await.unwrap();
+        let id = from.strip_prefix("work_item:").unwrap().to_string();
+        let edges: Vec<(String, String)> = fx
+            .svc
+            .db
+            .read(move |tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT ref_type, target_id FROM page_ref
+                         WHERE source_kind = 'work_item' AND source_id = ?1 ORDER BY ref_type",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(oxplow_db::map_sql_err);
+                rows
+            })
+            .await
+            .unwrap();
+        let other_id = other.strip_prefix("work_item:").unwrap();
+        assert!(
+            edges.contains(&("comment_file_ref".into(), "src/lib.rs".into())),
+            "{edges:?}"
+        );
+        assert!(
+            edges.contains(&("work_item_link:blocks".into(), other_id.into())),
+            "{edges:?}"
+        );
         let err = fx
             .svc
             .commands
