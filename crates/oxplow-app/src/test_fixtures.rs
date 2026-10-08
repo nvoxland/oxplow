@@ -136,6 +136,7 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
         })
         .await
         .unwrap();
+    restate_task(&svc, task).await;
     let effort = svc
         .effort_store
         .start(&work_item_ref(task), &thread, None)
@@ -151,6 +152,39 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
         },
         task,
     }
+}
+
+/// A task filed as a person through `oxplow.work_item.create` with
+/// `input` (on the backlog unless it names a `thread`): its id.
+pub async fn file_item(svc: &crate::Services, input: serde_json::Value) -> TaskId {
+    let out = svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            crate::commands::work_item::CREATE,
+            input,
+            false,
+        )
+        .await
+        .unwrap();
+    oxplow_tasks::task_of_work_item_ref(out.result["ref"].as_str().unwrap()).unwrap()
+}
+
+/// Restate task `task` in the work-item interface, as its list does after
+/// a write: its `work_item.recorded`, logged and projected. For a test
+/// that writes the task store directly rather than through the
+/// `oxplow.work_item.*` commands.
+pub async fn restate_task(svc: &crate::Services, task: TaskId) {
+    let record = svc
+        .db
+        .read(move |tx| oxplow_tasks::record::record_tx(tx, task))
+        .await
+        .unwrap();
+    svc.event_log_store
+        .append(oxplow_tasks::provider::recorded(record))
+        .await
+        .unwrap();
+    svc.event_pump.deliver_projections().await.unwrap();
 }
 
 /// A new thread on `stream`, made as a person through `oxplow.thread.create`.

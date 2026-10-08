@@ -9,7 +9,7 @@ use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 
 use oxplow_domain::work_items::{
-    provider_of, MoveTo, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput,
+    provider_of, List, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput,
     WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput, WorkItemTransitionInput,
     WorkItemUpdateInput,
 };
@@ -20,12 +20,14 @@ use crate::model::{Task, TaskActorKind, TaskAuthor, TaskLinkType, TaskPriority, 
 use crate::refs::{task_of_work_item_ref, work_item_ref, PROVIDER};
 use crate::store::{self, Placement};
 
-/// What a verb did: its result, and the verb (with its input) that
-/// undoes it, when one does.
+/// What a verb did: its result, the verb (with its input) that undoes it
+/// when one does, and the tasks it changed — each answered with its
+/// record ([`crate::record::record_tx`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Answer {
     pub result: Value,
     pub inverse: Option<CommandCall>,
+    pub changed: Vec<TaskId>,
 }
 
 fn invalid_at(field: &str, message: String) -> CommandError {
@@ -160,6 +162,7 @@ pub fn create_tx(
     Ok(Answer {
         result,
         inverse: None,
+        changed: vec![id],
     })
 }
 
@@ -222,6 +225,7 @@ pub fn update_tx(
             name: "update".into(),
             input: serde_json::to_value(inverse).expect("input serializes"),
         }),
+        changed: vec![id],
     })
 }
 
@@ -272,6 +276,7 @@ pub fn transition_tx(
             })
             .expect("input serializes"),
         }),
+        changed: vec![id],
     })
 }
 
@@ -318,6 +323,7 @@ pub fn link_tx(
     Ok(Answer {
         result: serde_json::to_value(&link).expect("TaskLink serializes"),
         inverse: None,
+        changed: vec![from],
     })
 }
 
@@ -340,6 +346,7 @@ pub fn comment_tx(
     Ok(Answer {
         result,
         inverse: None,
+        changed: vec![task],
     })
 }
 
@@ -356,6 +363,7 @@ pub fn delete_tx(
     Ok(Answer {
         result: json!({ "ref": input.item_ref }),
         inverse: None,
+        changed: vec![id],
     })
 }
 
@@ -382,16 +390,16 @@ fn neighbour(place: Placement) -> (Option<String>, Option<String>) {
 }
 
 /// The list `to` names: a thread's, or the backlog (`None`).
-fn move_dest(to: &MoveTo) -> Result<Option<ThreadId>, CommandError> {
+fn move_dest(to: &List) -> Result<Option<ThreadId>, CommandError> {
     match to {
-        MoveTo::Backlog => Ok(None),
-        MoveTo::Thread(raw) => parse_thread(raw, "/to/thread").map(Some),
+        List::Backlog => Ok(None),
+        List::Thread(raw) => parse_thread(raw, "/to/thread").map(Some),
     }
 }
 
 /// The `to` naming a list: a thread's, or the backlog.
-fn move_to(thread: Option<ThreadId>) -> MoveTo {
-    thread.map_or(MoveTo::Backlog, |t| MoveTo::Thread(t.to_string()))
+fn move_to(thread: Option<ThreadId>) -> List {
+    thread.map_or(List::Backlog, |t| List::Thread(t.to_string()))
 }
 
 /// Place the task in `dest`'s list, refusing a thread that doesn't exist.
@@ -456,6 +464,7 @@ pub fn reorder_tx(
             })
             .expect("input serializes"),
         }),
+        changed: std::iter::once(id).chain(placed.renumbered).collect(),
     })
 }
 
@@ -481,5 +490,6 @@ pub fn move_tx(
             })
             .expect("input serializes"),
         }),
+        changed: std::iter::once(id).chain(placed.renumbered).collect(),
     })
 }

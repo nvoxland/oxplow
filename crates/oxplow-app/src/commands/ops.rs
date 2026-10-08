@@ -81,7 +81,7 @@ impl Op {
         spec.atomicity = match self.handler {
             Handler::Tx(_) => Atomicity::Tx,
             Handler::External(_) => Atomicity::External,
-            Handler::Dispatch(_) | Handler::Compose(_) => Atomicity::Dispatch,
+            Handler::Compose(_) => Atomicity::Dispatch,
         };
         spec.effect = effect_of(class);
         if !spec.needs.contains(&self.capability) {

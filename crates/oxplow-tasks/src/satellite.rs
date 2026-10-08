@@ -314,12 +314,11 @@ mod tests {
         assert_eq!(listed[0].body, "looking good");
     }
 
-    /// A comment and a link reach the work-item interface (its
-    /// `work_item_comment` / `work_item_link` rows, by trigger) and write
-    /// no page refs: an item's page refs are core's, restated from the
-    /// interface for every list.
+    /// A comment and a link are the task's, in its record — and write
+    /// nothing of core's (no `work_item_*` rows, no page refs): what a verb
+    /// did reaches the interface through the record it answers with.
     #[tokio::test]
-    async fn a_comment_and_a_link_reach_the_interface_and_write_no_page_refs() {
+    async fn a_comment_and_a_link_are_in_the_record_and_nothing_else() {
         let (db, tid, from_id) = fixture().await;
         let to_id = SqliteTaskStore::new(db.clone())
             .insert(&Task {
@@ -356,7 +355,22 @@ mod tests {
         })
         .await
         .unwrap();
-        assert_eq!(counts, (1, 1, 0));
+        assert_eq!(counts, (0, 0, 0));
+        let record = crate::db::read(&db, move |c| {
+            Ok(crate::record::record_tx(c, from_id).unwrap())
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            record.links,
+            Some(vec![oxplow_domain::work_items::LinkRecord {
+                target: crate::refs::work_item_ref(to_id),
+                link_type: "blocks".into(),
+            }])
+        );
+        let comments = record.comments.unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].body, "blocked by tsk99 see [[src/app.rs]]");
     }
 
     #[tokio::test]

@@ -176,8 +176,9 @@ own — heavier ones included (beads as a work list).
   `source_guards::core_never_special_cases_its_own_pieces` fails on a
   literal `"oxplow-bundled"` outside `bundled_extensions.rs` or a
   provider id compared with oxplow's; what's left is pinned with its
-  reason (oxplow's tasks' own commands and `dispatching`'s
-  in-transaction route, until the tasks sit behind the interface).
+  reason. oxplow's tasks sit behind the interface like any list
+  (`crates/oxplow-tasks`, registered by declaration, their verbs called
+  outside the transaction — [work-items.md](./work-items.md)).
 - **The agent's tools follow the active implementation.** An interface is
   what oxplow needs to show, link and act; it is not a funnel the agent
   must work through. Each implementation declares its agent surface (its

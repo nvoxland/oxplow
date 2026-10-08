@@ -440,6 +440,21 @@ mod tests {
             })
             .await
             .unwrap();
+        // Its row in the interface, as its record put it there.
+        db.transaction(move |tx| {
+            use crate::event_pump::EventConsumer as _;
+            let record = oxplow_tasks::record::record_tx(tx, task_id)?;
+            crate::work_items::WorkItemsProjection.handle(
+                tx,
+                &oxplow_domain::StoredEvent {
+                    seq: 1,
+                    envelope: oxplow_tasks::provider::recorded(record),
+                    payload_expired_at: None,
+                },
+            )
+        })
+        .await
+        .unwrap();
 
         // An effort on the task that declared an impact, and one on another
         // provider's work item with a summary mention (tsk452).

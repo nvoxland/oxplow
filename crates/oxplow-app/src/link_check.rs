@@ -84,33 +84,85 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     out
 }
 
-/// What a command checks a body's links against: the project and its VCS
-/// (the database and vocabulary come with its transaction). Notes and
-/// oxplow's work items carry one.
+/// What a command checks a body's links against: the project and its
+/// VCS, and the database and vocabulary for a check outside a command's
+/// transaction (a work item's, any list's). Notes and the work-item
+/// commands carry one.
 #[derive(Clone)]
 pub struct LinkDeps {
     pub project_dir: std::path::PathBuf,
     pub vcs: std::sync::Arc<dyn oxplow_domain::vcs::Vcs>,
+    pub db: oxplow_db::Database,
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
 
 impl LinkDeps {
     /// The links in `body` that don't resolve, checked in the command's
-    /// transaction — files in `thread`'s worktree (tsk895), the primary
-    /// checkout when it has none.
+    /// transaction — files in `thread`'s worktree, the primary checkout
+    /// when it has none.
     pub fn warnings(
         &self,
         ctx: &crate::commands::TxCtx<'_>,
         body: &str,
         thread: Option<oxplow_domain::ThreadId>,
     ) -> Vec<LinkWarning> {
+        self.warnings_tx(ctx.conn, &ctx.events.vocabulary.kinds, body, thread)
+    }
+
+    /// The links in a work item's `body` that don't resolve, on a read of
+    /// its own — for any list's write, which runs outside the bus's
+    /// transaction. The worktree is `thread`'s, else the list `item` is on
+    /// as the interface holds it.
+    pub async fn item_warnings(
+        &self,
+        body: String,
+        thread: Option<oxplow_domain::ThreadId>,
+        item: Option<String>,
+    ) -> Vec<LinkWarning> {
+        let deps = self.clone();
+        let read = self
+            .db
+            .read(move |tx| {
+                use rusqlite::OptionalExtension;
+                let thread = match (thread, &item) {
+                    (Some(t), _) => Some(t),
+                    (None, Some(item)) => tx
+                        .query_row(
+                            "SELECT thread_id FROM work_item WHERE ref = ?1",
+                            [item],
+                            |r| r.get::<_, Option<i64>>(0),
+                        )
+                        .optional()
+                        .map_err(oxplow_db::map_sql_err)?
+                        .flatten()
+                        .map(oxplow_domain::ThreadId::new),
+                    (None, None) => None,
+                };
+                let vocabulary = deps.vocabulary.current();
+                Ok(deps.warnings_tx(tx, &vocabulary.kinds, &body, thread))
+            })
+            .await;
+        read.unwrap_or_else(|error| {
+            tracing::warn!(%error, "checking a work item's links failed");
+            Vec::new()
+        })
+    }
+
+    fn warnings_tx(
+        &self,
+        conn: &rusqlite::Connection,
+        kinds: &oxplow_domain::refs::kind::KindRegistry,
+        body: &str,
+        thread: Option<oxplow_domain::ThreadId>,
+    ) -> Vec<LinkWarning> {
         let root = thread
-            .and_then(|t| worktree_of_tx(ctx.conn, t))
+            .and_then(|t| worktree_of_tx(conn, t))
             .unwrap_or_else(|| self.project_dir.clone());
         let graph = self.vcs.revision_graph(&root);
         check_links_in(
             &LinkWorld {
-                conn: ctx.conn,
-                kinds: &ctx.events.vocabulary.kinds,
+                conn,
+                kinds,
                 project_dir: &root,
                 graph: &*graph,
                 this_page: None,
@@ -278,7 +330,6 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
 mod tests {
     use super::*;
     use crate::Services;
-    use oxplow_tasks::CreateTaskInput;
 
     fn git_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -335,21 +386,9 @@ mod tests {
     async fn a_task_link_checks_the_active_list() {
         let dir = git_repo();
         let services = Services::in_memory(dir.path()).unwrap();
-        let task = services
-            .tasks
-            .create(
-                None,
-                CreateTaskInput {
-                    title: "Real task".into(),
-                    description: None,
-                    parent_id: None,
-                    status: None,
-                    priority: None,
-                    author: None,
-                },
-            )
-            .await
-            .unwrap();
+        let task =
+            crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Real task" }))
+                .await;
         services
             .config
             .write()
@@ -362,7 +401,7 @@ mod tests {
             .publish(&config, &services.db)
             .await
             .unwrap();
-        let warnings = check_links(&services, &format!("See [[{}]].", task.id)).await;
+        let warnings = check_links(&services, &format!("See [[{}]].", task)).await;
         assert_eq!(warnings.len(), 1, "{warnings:?}");
     }
 
@@ -370,22 +409,10 @@ mod tests {
     async fn accepts_existing_task() {
         let dir = git_repo();
         let services = Services::in_memory(dir.path()).unwrap();
-        let task = services
-            .tasks
-            .create(
-                None,
-                CreateTaskInput {
-                    title: "Real task".into(),
-                    description: None,
-                    parent_id: None,
-                    status: None,
-                    priority: None,
-                    author: None,
-                },
-            )
-            .await
-            .unwrap();
-        let body = format!("Done in [[{}]].", task.id);
+        let task =
+            crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Real task" }))
+                .await;
+        let body = format!("Done in [[{}]].", task);
         let warnings = check_links(&services, &body).await;
         assert!(warnings.is_empty(), "got {warnings:?}");
     }

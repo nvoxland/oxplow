@@ -2062,11 +2062,10 @@ impl EventType for WorkItemRecordedAtV1 {
     type Payload = WorkItemRecordedV1;
 }
 
-/// `work_item.recorded@2`: a provider's item as it now stands — how an
-/// external provider's items reach the work-item interface (the
-/// `work_items.project` consumer upserts it by ref), with its rank, links
-/// and comments when it states them. oxplow's own tasks don't log it:
-/// their rows are written with the task, in the same transaction.
+/// `work_item.recorded@2`: a list's item as it now stands — how every
+/// list's items reach the work-item interface (the `work_items.project`
+/// consumer upserts it by ref), with its rank, links, comments and list
+/// when it states them. A list's verbs answer with it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemRecordedV2 {

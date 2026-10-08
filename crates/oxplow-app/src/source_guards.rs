@@ -804,8 +804,8 @@ fn core_never_special_cases_its_own_pieces() {
 /// whichever list is active. Each file still here says why.
 #[rustfmt::skip]
 const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
-    ("crates/oxplow-app/src/commands/work_item.rs", "oxplow's verbs, dispatched in-transaction"),
-    ("crates/oxplow-app/src/lib.rs", "wires the store and service into Services"),
+    ("crates/oxplow-app/src/work_items.rs", "the built-in factory: `oxplow:tasks` is oxplow_tasks's verbs"),
+    ("crates/oxplow-app/src/lib.rs", "wires the task stores into Services"),
 ];
 
 /// The implementation's own crate.

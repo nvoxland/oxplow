@@ -780,7 +780,9 @@ pub fn offered_text(
 /// extensions and publish the rows.
 pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
     let extensions = svc.extension_catalog.get(&svc.layout.project_dir);
-    svc.capabilities.set_declared(declared_by(&extensions));
+    let declared = declared_by(&extensions);
+    crate::work_items::register_built_ins(&svc.work_items, &declared, &svc.db);
+    svc.capabilities.set_declared(declared);
     let config = crate::config_service::read_config(&svc.config);
     svc.capabilities.publish(&config, &svc.db).await
 }
@@ -903,25 +905,6 @@ mod tests {
         assert_eq!(r.active(&c, "work_items"), "issues");
         r.set_external(issues, false);
         assert_eq!(r.active(&c, "work_items"), NONE);
-    }
-
-    /// `oxplow:tasks`'s features in core's table are what oxplow's
-    /// work-items provider does: the two can't drift.
-    #[test]
-    fn the_tasks_built_in_declares_what_the_provider_does() {
-        let provider = serde_json::to_value(crate::work_items::oxplow_provider().features).unwrap();
-        let on: Vec<&str> = provider
-            .as_object()
-            .unwrap()
-            .iter()
-            .filter(|(_, v)| v.as_bool() == Some(true))
-            .map(|(k, _)| k.as_str())
-            .collect();
-        let mut declared = built_in("oxplow:tasks").unwrap().features.to_vec();
-        declared.sort();
-        let mut on = on;
-        on.sort();
-        assert_eq!(declared, on);
     }
 
     /// With `oxplow-bundled` disabled, nothing declares the optional

@@ -447,9 +447,10 @@ implementation (and `oxplow-dev`).
 **`work_item_link`** `(from_ref, to_ref, link_type, created_at)` and
 **`work_item_comment`** `(id, ref, body, author, created_at)` (V17) are
 the interface's links and comments, published as `v_work_item_link` /
-`v_work_item_comment` over the active list's items. oxplow's follow
-`task_link` / `task_note` (a task's notes) by triggers, however those are
-written (V17 backfilled them; a comment's id is `task_note:<id>`).
+`v_work_item_comment` over the active list's items, restated from each
+list's records (a comment's id is `<item ref>#<the list's id for it>`;
+V29 re-keyed oxplow's `task_note:<n>` to `#not<n>` and dropped the
+triggers that copied `task_link` / `task_note` in).
 `link_type` is the list's own (V28 dropped V17's CHECK naming oxplow's
 six). An item's page refs are restated from these and `work_item`
 (`work_item_refs::restate_tx`, "page_ref" below).
@@ -458,22 +459,23 @@ fields. Capability rows are published when services are built
 (`CapabilityRegistry::publish_now`), so the first read sees the active
 list.
 
-The oxplow provider's rows (`work_item:oxplow:tsk<n>`) are restated from
-the `task` row by `oxplow_tasks::store::project_work_item_tx`, which every task
-write calls in its own transaction (insert, field update, status,
-soft delete) — the two never disagree. Mapping: `ready` → `todo`;
-`archived` → `done` when `completed_at` is set, else `canceled`; the rest
-by name. The interface columns: `thread_id` is the task's thread, `rank`
-its `sort_index`, `closed_at` its `completed_at` (else when it closed). (Archiving keeps `completed_at`; before V115 it cleared it, so
-V122 restored it — and `done` — for every task whose last archive the
-event log shows came `from: done`. Tasks archived before the event log
-existed have no record and stay `canceled`.) `native` carries priority, thread, sort index, author and
-`completed_at`. A task deleted by a cascade (its thread or stream
-deleted outright) never passes through the store, so a trigger
-(`work_item_follows_task_delete`) deletes its row. An external
-provider's rows arrive by projection from its events (P5.C2); its
-`thread_id` is the thread that filed it (first record), `closed_at` when
-a record first closed it.
+Every list's rows arrive by projection from its `work_item.recorded`
+records (`work_items.project`; [work-items.md](./work-items.md) "One
+writer"), oxplow's tasks' included: their verbs answer with the record
+of every task they changed (`oxplow_tasks::record::record_tx`). oxplow's
+mapping: `ready` → `todo`; `archived` → `done` when `completed_at` is
+set, else `canceled`; the rest by name. `rank` is the task's
+`sort_index`, its list (`List`) its thread. (Archiving keeps
+`completed_at`; before V115 it cleared it, so V122 restored it — and
+`done` — for every task whose last archive the event log shows came
+`from: done`. Tasks archived before the event log existed have no record
+and stay `canceled`.) `native` carries a list's declared fields (oxplow:
+`priority`, `author`; V29 dropped the rest). A row's `thread_id` is the
+list its record states, else the thread that filed it (first record);
+`closed_at` when a record first closed it. Threads and streams are
+archived, never deleted in use: a hard delete (tests) cascades oxplow's
+task rows but leaves their interface rows (V29 dropped the trigger that
+followed it).
 
 ### `symbol` + `symbol_capture` — code symbols (migration `V117__symbol.sql`, P5.C6)
 
@@ -508,8 +510,8 @@ change logs `knowledge.note.written@2` / `deleted@2` (v1 named the note
 `v_search_note` indexes it.
 
 **`task_note`** holds only the comments on oxplow's tasks
-(`oxplow.work_item.comment`; `task_id` NOT NULL, id `task_note:<id>`), which
-reach `work_item_comment` by trigger. The two shared one table, one of
+(`oxplow.work_item.comment`; `task_id` NOT NULL), which reach
+`work_item_comment` through the task's record. The two shared one table, one of
 `task_id` / `thread_id` set, until V24 moved thread notes out, keeping
 their ids and re-kinding their `page_ref` edges; both tables continue
 past every id the shared one gave out.

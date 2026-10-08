@@ -544,6 +544,7 @@ mod tests {
                 let mut t = svc.task_store.get(task).await.unwrap().unwrap();
                 t.description = text.into();
                 svc.task_store.update(&t).await.unwrap();
+                crate::test_fixtures::restate_task(&svc, task).await;
             }
         };
         for path in ["src/ui/panel.ts", "src/ui/button.ts", "crates/db/store.rs"] {
@@ -649,6 +650,7 @@ mod tests {
         t.title = "Fix the hover state".into();
         t.description = "Buttons flicker on hover.".into();
         f.svc.task_store.update(&t).await.unwrap();
+        crate::test_fixtures::restate_task(&f.svc, f.task).await;
         f.svc
             .effort_store
             .record_file(
@@ -1383,6 +1385,7 @@ mod tests {
             .set_status(f.task, oxplow_tasks::TaskStatus::Blocked)
             .await
             .unwrap();
+        crate::test_fixtures::restate_task(&f.svc, f.task).await;
         let run = crate::extensions::run_lens(
             &layer,
             &f.svc.extension_catalog,
@@ -1408,6 +1411,7 @@ mod tests {
         let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         t.description = "Fix the hover state in [[src/ui/button.ts]].".into();
         f.svc.task_store.update(&t).await.unwrap();
+        crate::test_fixtures::restate_task(&f.svc, f.task).await;
         for path in ["src/ui/button.ts", "crates/db/store.rs"] {
             f.svc
                 .effort_store

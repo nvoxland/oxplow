@@ -864,6 +864,8 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 // them.
                 links: Some(Vec::new()),
                 comments: Some(Vec::new()),
+                // It keeps no lists: the item stays where it was filed.
+                list: None,
             };
             let events = vec![recorded(&record)];
             let result = json!({ "ref": record.item_ref });

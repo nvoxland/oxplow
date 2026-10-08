@@ -3267,9 +3267,6 @@ mod tests {
     )]
 
     use super::*;
-    use oxplow_domain::time::Timestamp;
-    use oxplow_tasks::TaskStore;
-    use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
     /// tsk203: every registered tool must be classified read XOR write, so a new
     /// tool can't slip in un-annotated (a write mis-marked read is a safety bug;
@@ -3375,25 +3372,28 @@ mod tests {
         panic!("CallToolResult had no text content");
     }
 
-    fn make_task(thread_id: Option<ThreadId>, title: &str) -> Task {
-        let now = Timestamp::now();
-        Task {
-            id: oxplow_domain::TaskId::placeholder(),
-            thread_id,
-            parent_id: None,
-            title: title.into(),
-            description: String::new(),
-            status: TaskStatus::Ready,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
+    /// A task filed as a person through `oxplow.work_item.create` — on
+    /// `thread`'s list, else the backlog: its id.
+    async fn file_task(
+        services: &Services,
+        thread: Option<ThreadId>,
+        title: &str,
+    ) -> oxplow_domain::TaskId {
+        let mut input = serde_json::json!({ "title": title });
+        if let Some(t) = thread {
+            input["thread"] = serde_json::Value::String(t.to_string());
         }
+        let out = services
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.work_item.create",
+                input,
+                false,
+            )
+            .await
+            .unwrap();
+        oxplow_tasks::task_of_work_item_ref(out.result["ref"].as_str().unwrap()).unwrap()
     }
 
     #[tokio::test]
@@ -3724,16 +3724,8 @@ mod tests {
 
         // A task to use as the primary target, and another as a context
         // ancestor (e.g. an epic the row sat under).
-        let primary_task = services
-            .task_store
-            .insert(&make_task(None, "Primary item"))
-            .await
-            .unwrap();
-        let parent_task = services
-            .task_store
-            .insert(&make_task(None, "Parent epic"))
-            .await
-            .unwrap();
+        let primary_task = file_task(&services, None, "Primary item").await;
+        let parent_task = file_task(&services, None, "Parent epic").await;
 
         services
             .commands
@@ -3923,11 +3915,7 @@ mod tests {
     #[tokio::test]
     async fn the_backlog_lists_the_items_on_no_thread() {
         let (_proj, services, server) = boot();
-        let id = services
-            .task_store
-            .insert(&make_task(None, "do the thing"))
-            .await
-            .unwrap();
+        let id = file_task(&services, None, "do the thing").await;
         let r = server
             .list_work_items(Parameters(ListWorkItemsParams {
                 list: "backlog".into(),
@@ -3965,11 +3953,7 @@ mod tests {
         let (_proj, services, server) = boot();
         services.streams.ensure_primary().await.unwrap();
         let thread = ThreadId::new(1);
-        services
-            .task_store
-            .insert(&make_task(Some(thread), "on the thread"))
-            .await
-            .unwrap();
+        file_task(&services, Some(thread), "on the thread").await;
         let items = thread_context(&server, thread).await["items"].clone();
         assert_eq!(items[0]["title"], "on the thread", "{items}");
         assert!(items[0]["ref"]
@@ -4000,11 +3984,7 @@ mod tests {
     #[tokio::test]
     async fn the_work_item_tools_read_the_active_list() {
         let (_proj, services, server) = boot();
-        let id = services
-            .task_store
-            .insert(&make_task(None, "round trip"))
-            .await
-            .unwrap();
+        let id = file_task(&services, None, "round trip").await;
         let item_ref = format!("work_item:oxplow:{id}");
         let get = |server: &OxplowMcp| {
             let item_ref = item_ref.clone();
@@ -4491,11 +4471,7 @@ mod tests {
             .into_iter()
             .next()
             .unwrap();
-        let task_id = services
-            .task_store
-            .insert(&make_task(Some(thread.id), "evidence"))
-            .await
-            .unwrap();
+        let task_id = file_task(&services, Some(thread.id), "evidence").await;
         let effort = services
             .effort_store
             .start(&oxplow_tasks::work_item_ref(task_id), &thread.id, None)
@@ -4553,11 +4529,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("primary stream must have a writer thread");
-        let task_id = services
-            .task_store
-            .insert(&make_task(Some(thread.id), "open effort task"))
-            .await
-            .unwrap();
+        let task_id = file_task(&services, Some(thread.id), "open effort task").await;
         let effort = services
             .effort_store
             .start(&oxplow_tasks::work_item_ref(task_id), &thread.id, None)

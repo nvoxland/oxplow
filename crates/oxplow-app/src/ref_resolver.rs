@@ -246,7 +246,6 @@ fn excerpt(body: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::Services;
-    use oxplow_tasks::CreateTaskInput;
 
     /// A tempdir holding a real git repo with a single configured commit
     /// touching `a.rs`, so commit resolution has something to find.
@@ -284,23 +283,9 @@ mod tests {
     async fn resolves_task_title_and_status() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).unwrap();
-        let task = services
-            .tasks
-            .create(
-                None,
-                CreateTaskInput {
-                    title: "Fix the flaky test".into(),
-                    description: Some("It fails on CI only.\nSecond line.".into()),
-                    parent_id: None,
-                    status: Some(oxplow_tasks::TaskStatus::InProgress),
-                    priority: None,
-                    author: None,
-                },
-            )
-            .await
-            .unwrap();
+        let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "state": "in_progress" })).await;
 
-        let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task.id)).await;
+        let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task)).await;
         assert_eq!(summary.kind, "work_item");
         assert_eq!(summary.title.as_deref(), Some("Fix the flaky test"));
         assert_eq!(summary.detail.as_deref(), Some("in_progress"));
@@ -317,21 +302,11 @@ mod tests {
     async fn a_work_item_resolves_from_the_active_list_only() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).unwrap();
-        let task = services
-            .tasks
-            .create(
-                None,
-                CreateTaskInput {
-                    title: "Fix the flaky test".into(),
-                    description: None,
-                    parent_id: None,
-                    status: None,
-                    priority: None,
-                    author: None,
-                },
-            )
-            .await
-            .unwrap();
+        let task = crate::test_fixtures::file_item(
+            &services,
+            serde_json::json!({ "title": "Fix the flaky test" }),
+        )
+        .await;
         services
             .config
             .write()
@@ -344,7 +319,7 @@ mod tests {
             .publish(&config, &services.db)
             .await
             .unwrap();
-        let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task.id)).await;
+        let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task)).await;
         assert_eq!(summary.title, None);
     }
 
