@@ -12,7 +12,7 @@ import {
 
 const FILE_A: TabRef = { id: "file:src/a.ts", kind: "file", payload: { path: "src/a.ts" } };
 const FILE_B: TabRef = { id: "file:src/b.ts", kind: "file", payload: { path: "src/b.ts" } };
-const AGENT: TabRef = { id: "page:agent", kind: "agent", payload: null };
+const AGENT: TabRef = { id: "agent_session:ses1", kind: "agent_session", payload: { sessionId: "ses1" }, pinned: true };
 const WORK_ITEM: TabRef = { id: "work_item:oxplow:tsk123", kind: "work_item", payload: { itemId: "tsk123" } };
 
 describe("tabStore", () => {
@@ -278,7 +278,7 @@ describe("tabStore LRU eviction", () => {
     expect(state.tabs.find((t) => t.id === fileRef(1).id)).toBeUndefined();
   });
 
-  test("agent tab is never evicted even when oldest", () => {
+  test("a pinned (agent session) tab is never evicted even when oldest", () => {
     const store = createTabStore();
     store.openTab("t-1", AGENT);
     for (let i = 0; i < MAX_TABS; i++) store.openTab("t-1", fileRef(i));

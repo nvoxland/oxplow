@@ -2,11 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { leadingPinnedCount, moveToIndex, reorderToAfterPinned } from "./centerTabsReorder.js";
 
 describe("leadingPinnedCount", () => {
-  test("counts the leading run of non-closable (pinned) tabs", () => {
-    // agent pinned, rest closable
-    expect(leadingPinnedCount([false, true, true, true])).toBe(1);
-    expect(leadingPinnedCount([true, true])).toBe(0);
-    expect(leadingPinnedCount([false, false, true])).toBe(2);
+  test("counts the leading run of pinned tabs (the agent sessions')", () => {
+    expect(leadingPinnedCount([true, false, false, false])).toBe(1);
+    expect(leadingPinnedCount([false, false])).toBe(0);
+    expect(leadingPinnedCount([true, true, false])).toBe(2);
   });
 });
 

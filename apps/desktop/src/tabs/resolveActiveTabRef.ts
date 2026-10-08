@@ -1,4 +1,4 @@
-import { AGENT_TAB_ID, agentRef, diskFilePath, fileRef } from "./pageRefs.js";
+import { diskFilePath, fileRef } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
 
 /**
@@ -6,7 +6,7 @@ import type { TabRef } from "./tabState.js";
  *
  * The desktop's central page-visit recorder watches `effectiveCenterActive`
  * (a string id) and needs the corresponding TabRef to record the kind +
- * payload. Most kinds live in `pageTabs`; the agent terminal is implicit;
+ * payload. Most kinds live in `pageTabs` (agent sessions' tabs too);
  * working-tree file tabs live in a separate `fileSessions.openOrder`
  * array keyed by path (`file:<path>` with no revision).
  *
@@ -19,7 +19,6 @@ export function resolveActiveTabRef(
   pageTabs: TabRef[],
   openFilePaths: string[],
 ): TabRef | null {
-  if (activeId === AGENT_TAB_ID) return agentRef();
   const fromPage = pageTabs.find((t) => t.id === activeId);
   if (fromPage) return fromPage;
   const path = diskFilePath(activeId);

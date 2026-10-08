@@ -1210,7 +1210,7 @@ mod tests {
             ("file", "file:DEV.md", "DEV.md"),
             ("file", "file:DEV.md", "DEV.md"),
             ("settings", "page:settings", "Settings"),
-            ("agent", "page:agent", "Agent"),
+            ("agent_session", "agent_session:ses1", "Claude"),
         ] {
             f.svc
                 .page_visit_store

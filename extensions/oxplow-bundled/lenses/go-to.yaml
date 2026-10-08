@@ -25,7 +25,7 @@ query: |
     SELECT page_id AS ref, page_kind, label, visited_at,
            row_number() OVER (PARTITION BY page_id ORDER BY visited_at DESC, id DESC) AS latest
     FROM v_page_visit
-    WHERE thread_id = :thread_id AND page_kind <> 'agent'
+    WHERE thread_id = :thread_id AND page_kind <> 'agent_session'
   ),
   recent AS (
     SELECT ref, page_kind, label, row_number() OVER (ORDER BY visited_at DESC) AS ord

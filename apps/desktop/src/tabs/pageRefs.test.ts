@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  AGENT_TAB_ID,
-  agentRef,
+  agentSessionRef,
   customDashboardRef,
   dashboardRef,
   directoryRef,
@@ -19,6 +18,7 @@ import {
   lensRef,
   metricRef,
   newTaskRef,
+  newSessionRef,
   alertsRef,
   refFromTabId,
   pageKindOf,
@@ -33,10 +33,16 @@ import {
 import { parseRef } from "../refs/ref.js";
 
 describe("pageRefs", () => {
-  test("agentRef is the `page:agent` route", () => {
-    expect(agentRef().id).toBe("page:agent");
-    expect(agentRef().kind).toBe("agent");
-    expect(AGENT_TAB_ID).toBe("page:agent");
+  test("an agent session's tab is its ref, pinned; the picker is a closable route", () => {
+    expect(agentSessionRef("ses3")).toEqual({
+      id: "agent_session:ses3",
+      kind: "agent_session",
+      payload: { sessionId: "ses3" },
+      pinned: true,
+    });
+    expect(pageKindOf("agent_session:ses3")).toBe("agent_session");
+    expect(newSessionRef()).toEqual({ id: "page:new-session", kind: "new-session", payload: null });
+    expect(refFromTabId("page:agent")).toBeNull();
   });
 
   test("fileRef encodes the path with a default disk version", () => {
@@ -210,7 +216,6 @@ describe("refFromTabId", () => {
   test("index routes carry no payload", () => {
     expect(refFromTabId("page:tasks")).toEqual({ id: "page:tasks", kind: "tasks", payload: null });
     expect(refFromTabId("page:git-dashboard")).toEqual({ id: "page:git-dashboard", kind: "git-dashboard", payload: null });
-    expect(refFromTabId("page:agent")).toEqual(agentRef());
   });
 
   test("text that is not a ref, an unknown kind, or an unknown route is null (a dead row, not a broken tab)", () => {
@@ -230,7 +235,7 @@ describe("refFromTabId", () => {
     expect(diskFilePath("file:src/a%40b.ts")).toBe("src/a@b.ts");
     // A pinned revision is a read-only viewer, not the editor's file.
     expect(diskFilePath("file:src/a.ts@git:HEAD")).toBeNull();
-    expect(diskFilePath("page:agent")).toBeNull();
+    expect(diskFilePath("agent_session:ses3")).toBeNull();
     expect(diskFilePath("wiki:a")).toBeNull();
   });
 
@@ -243,7 +248,8 @@ describe("refFromTabId", () => {
   // next one to drift fails here.
   test("every ref rebuilds from its own tab id", () => {
     const refs = [
-      agentRef(),
+      agentSessionRef("ses3"),
+      newSessionRef(),
       dashboardRef("visits"),
       directoryRef("src/components"),
       externalUrlRef("https://x.test/p"),

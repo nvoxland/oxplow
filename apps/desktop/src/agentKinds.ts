@@ -32,7 +32,7 @@ export interface AgentChoice {
   label: string;
 }
 
-/// The new-thread picker's choices: each enabled terminal agent, and when
+/// The session picker's choices: each enabled terminal agent, and when
 /// ACP is enabled one per ACP agent, flagged when it can't start yet.
 export function agentChoices(enabled: AgentKind[], acpAgents: AcpAgentListing[]): AgentChoice[] {
   return enabled.flatMap((kind): AgentChoice[] => {

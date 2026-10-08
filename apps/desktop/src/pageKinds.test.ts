@@ -12,10 +12,11 @@ describe("kindForTabId", () => {
     expect(kindForTabId("dir:src/components")).toBe("dir");
     expect(kindForTabId("commit:abcdef0")).toBe("commit");
     expect(kindForTabId("finding:fnd-1")).toBe("finding");
+    expect(kindForTabId("agent_session:ses3")).toBe("agent_session");
   });
 
   test("page routes return the page name, with or without params", () => {
-    expect(kindForTabId("page:agent")).toBe("agent");
+    expect(kindForTabId("page:new-session")).toBe("new-session");
     expect(kindForTabId("page:tasks")).toBe("tasks");
     expect(kindForTabId("page:done-work")).toBe("done-work");
     expect(kindForTabId("page:dashboard?variant=visits")).toBe("dashboard");
@@ -64,10 +65,11 @@ describe("pageKindIconComponent", () => {
     }
   });
 
-  test("agent tab is intentionally iconless", () => {
-    // The agent tab is always present and unambiguous; an icon
-    // there would just widen the chip. Suppress.
-    expect(pageKindIconComponent("agent")).toBeNull();
+  test("an agent session's tab and the session picker have icons and labels", () => {
+    expect(pageKindIconComponent("agent_session")).not.toBeNull();
+    expect(pageKindIconComponent("new-session")).not.toBeNull();
+    expect(pageKindLabel("agent_session")).toBe("agent session");
+    expect(pageKindLabel("new-session")).toBe("new session");
   });
 
   test("unknown kinds return null", () => {

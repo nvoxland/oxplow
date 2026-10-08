@@ -66,11 +66,11 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
           </div>
         ) : (
           <>
-            <Section title="Agent">
+            <Section title="Agent sessions">
               <Hint>
                 {sessions && sessions.length > 0
-                  ? `This thread runs ${sessions.map(sessionLabel).join(", ")}. Agent assignment is fixed after thread creation.`
-                  : "This thread has no agent session."}
+                  ? `Open: ${sessions.map((s) => s.title || sessionLabel(s)).join(", ")}. Each has its own tab; New session… on the thread's menu adds one.`
+                  : "None open. New session… on the thread's menu starts one."}
               </Hint>
             </Section>
 

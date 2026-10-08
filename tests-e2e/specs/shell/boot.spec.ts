@@ -20,7 +20,7 @@ test("the app boots against its daemon: the shell renders and no call fails", as
   await page.goto("/");
   await expect(page.getByTestId("rail-hud")).toBeVisible();
   await expect(page.getByTestId("title-bar")).toBeVisible();
-  await expect(page.getByTestId("page-agent")).toBeVisible();
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
   expect(replies.length, "the app made its calls").toBeGreaterThan(0);
   await Promise.all(replies);
   expect(failed).toEqual([]);

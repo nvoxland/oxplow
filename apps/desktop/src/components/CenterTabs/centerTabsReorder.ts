@@ -1,12 +1,12 @@
 // Pure reorder math for CenterTabs, extracted so it's unit-testable
 // without a DOM. The strip is `[...pinned, ...reorderable]` where pinned
-// tabs (the non-closable Agent) stay at the front.
+// tabs (the agent sessions') stay at the front.
 
-/// Number of leading pinned tabs (a prefix of non-closable tabs). New
-/// promotions land right after this run.
-export function leadingPinnedCount(closableFlags: boolean[]): number {
+/// Number of leading pinned tabs. New promotions land right after this
+/// run, and a drag never lands inside it.
+export function leadingPinnedCount(pinnedFlags: boolean[]): number {
   let n = 0;
-  while (n < closableFlags.length && !closableFlags[n]) n++;
+  while (n < pinnedFlags.length && pinnedFlags[n]) n++;
   return n;
 }
 

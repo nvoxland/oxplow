@@ -126,6 +126,13 @@ export function workItemTabRef(ref: string): TabRef {
   return { id: ref, kind: "work_item", payload: { ref } };
 }
 
+/** An agent session's tab (`agent_session:ses3`): its terminal or ACP
+ *  chat. Pinned — it leads the strip and is never evicted; its tab follows
+ *  the session's row (`reconcileSessionTabs`). */
+export function agentSessionRef(sessionId: string): TabRef {
+  return { id: `agent_session:${sessionId}`, kind: "agent_session", payload: { sessionId }, pinned: true };
+}
+
 /** Single git commit page. */
 export function gitCommitRef(sha: string): TabRef {
   return { id: canonicalId("commit", sha), kind: "commit", payload: { sha } };
@@ -167,12 +174,11 @@ function lensRefFromTail(tail: string): TabRef {
 // Routes
 // ---------------------------------------------------------------------------
 
-export function agentRef(): TabRef {
-  return route("agent");
+/** The session picker: what a thread with no agent session shows
+ *  (`NewSessionPage`). Closable, not pinned. */
+export function newSessionRef(): TabRef {
+  return route("new-session");
 }
-
-/** The agent tab's id — the one tab every thread always has. */
-export const AGENT_TAB_ID: string = agentRef().id;
 
 export type IndexKind =
   | "tasks"
@@ -516,7 +522,7 @@ export function externalUrlRef(url: string): TabRef {
 /** How each route rebuilds itself from its params. Exhaustive over
  *  `RoutePageKind`, so a new route can't ship without its inverse. */
 const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> = {
-  agent: () => agentRef(),
+  "new-session": () => newSessionRef(),
   tasks: () => indexRef("tasks"),
   "done-work": () => indexRef("done-work"),
   backlog: () => indexRef("backlog"),
@@ -631,6 +637,8 @@ export function refFromTabId(id: string): TabRef | null {
       return turnRef(canonical.id);
     case "symbol":
       return symbolRef(id);
+    case "agent_session":
+      return agentSessionRef(canonical.id);
     case "lens":
       return lensRefFromTail(id.slice("lens:".length));
     case "page": {
@@ -654,9 +662,7 @@ export function pageKindOf(tabId: string): PageKind | null {
   if (canonical.kind === "page") {
     return routeNameOf(tabId) ?? (extPageOf(splitParams(tabId.slice("page:".length)).head) ? "ext-page" : null);
   }
-  // The kinds that open as a page. The manifest check mirrors this list
-  // (`manifest_v2::PAGE_KINDS`) so a launcher `{ ref }` of any other kind
-  // is a load error, not an entry the launcher drops; change both.
+  // The entity kinds that open as a page.
   const entity: readonly string[] = [
     "file",
     "dir",
@@ -669,6 +675,7 @@ export function pageKindOf(tabId: string): PageKind | null {
     "effort",
     "turn",
     "symbol",
+    "agent_session",
   ];
   return entity.includes(canonical.kind) ? (canonical.kind as PageKind) : null;
 }

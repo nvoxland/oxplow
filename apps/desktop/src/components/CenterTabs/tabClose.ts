@@ -1,8 +1,9 @@
 // Pure selection helpers for the tab strip's right-click "close" actions.
 // Kept React-free so the before/after-anchor math is unit-tested without
 // mounting CenterTabs. Both operate over the strip order (the visible,
-// drag-reorderable list) and only ever return *closable* ids — pinned
-// tabs (the Agent tab) are never close targets.
+// drag-reorderable list) and only ever return *closable* ids — the strip
+// passes a pinned tab (an agent session's) as not closable, so a bulk
+// close never ends a session.
 
 export interface ClosableTab {
   id: string;

@@ -22,7 +22,7 @@ test("a token in the URL fragment wins over the stored one", async ({ browser, b
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(`/#oxplow-token=${encodeURIComponent(daemon.token)}`);
-  await expect(page.getByTestId("page-agent")).toBeVisible();
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
   await expect(page.getByTestId("remote-banner-down")).toHaveCount(0);
   expect(errors).toEqual([]);
   await context.close();
