@@ -127,11 +127,10 @@ impl WorktreeRouter {
         Some(path)
     }
 
-    /// A stream's worktree. Every stream is local until streams record a
-    /// host.
+    /// A stream's worktree, on the host its row names.
     fn path_of(&self, stream: &Stream) -> WorktreeRoot {
         WorktreeRoot {
-            host: HostId::LOCAL,
+            host: stream.host.clone(),
             path: workspace_path(&self.project_dir, &stream.worktree_path),
         }
     }

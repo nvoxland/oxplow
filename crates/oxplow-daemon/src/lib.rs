@@ -674,6 +674,7 @@ mod tests {
                 talking_pane: String::new(),
                 working_session_id: String::new(),
                 talking_session_id: String::new(),
+                host: oxplow_domain::HostId::LOCAL,
                 custom_prompt: None,
                 created_at: ts,
                 updated_at: ts,

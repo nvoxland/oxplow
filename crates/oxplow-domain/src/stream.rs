@@ -33,6 +33,8 @@ pub struct Stream {
     pub talking_pane: String,
     pub working_session_id: String,
     pub talking_session_id: String,
+    /// The host its worktree is on.
+    pub host: HostId,
     /// Standing instructions appended to every agent system prompt
     /// when this stream is active. `None` (or empty) clears it.
     pub custom_prompt: Option<String>,
@@ -65,6 +67,7 @@ mod tests {
             talking_pane: String::new(),
             working_session_id: String::new(),
             talking_session_id: String::new(),
+            host: HostId::LOCAL,
             custom_prompt: None,
             created_at: now,
             updated_at: now,
@@ -91,8 +94,9 @@ mod tests {
 /// The host a stream's worktree is on. Every stream is on the local machine
 /// today ([`HostId::LOCAL`]); naming it keeps "local" from being assumed
 /// silently where a worktree path is reached (`WorktreeRoot::local_path`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct HostId(std::borrow::Cow<'static, str>);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[specta(transparent)]
+pub struct HostId(#[specta(type = String)] std::borrow::Cow<'static, str>);
 
 impl HostId {
     /// The machine oxplow runs on.
@@ -104,5 +108,10 @@ impl HostId {
 
     pub fn is_local(&self) -> bool {
         *self == Self::LOCAL
+    }
+
+    /// The host a stored name names.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(std::borrow::Cow::Owned(name.into()))
     }
 }

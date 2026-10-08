@@ -40,6 +40,8 @@ export const commands = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	// The host its worktree is on.
+	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
 	 *  when this stream is active. `None` (or empty) clears it.
@@ -72,6 +74,8 @@ export const commands = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	// The host its worktree is on.
+	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
 	 *  when this stream is active. `None` (or empty) clears it.
@@ -3350,6 +3354,13 @@ export type HookKind =
  */
 "notification";
 
+/**
+ *  The host a stream's worktree is on. Every stream is on the local machine
+ *  today ([`HostId::LOCAL`]); naming it keeps "local" from being assumed
+ *  silently where a worktree path is reached (`WorktreeRoot::local_path`).
+ */
+export type HostId = string;
+
 // One implementation as the extension declares it.
 export type ImplementationDecl = {
 	capability: string,
@@ -5515,6 +5526,8 @@ export type Stream = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	// The host its worktree is on.
+	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
 	 *  when this stream is active. `None` (or empty) clears it.

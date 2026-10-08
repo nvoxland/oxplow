@@ -329,6 +329,7 @@ mod tests {
                 talking_pane: String::new(),
                 working_session_id: String::new(),
                 talking_session_id: String::new(),
+                host: oxplow_domain::HostId::LOCAL,
                 custom_prompt: None,
                 created_at: ts("2026-01-01T00:00:00Z"),
                 updated_at: ts("2026-01-01T00:00:00Z"),
