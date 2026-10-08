@@ -995,6 +995,12 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
             "  - { name: item.other, summary: S., provider: other, op: estimate }\n",
             "no provider `other`",
         ),
+        // A provider's inverse names its operation: one command per
+        // operation, so the undo is the command that ran.
+        (
+            "  - { name: item.guess, summary: S., provider: fake, op: estimate, invokers: { human: true, agent: true, lens: true } }\n",
+            "`fake`'s `estimate` already backs `tracker.item.estimate`",
+        ),
     ] {
         std::fs::write(
             &manifest,

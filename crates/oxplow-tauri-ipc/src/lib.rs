@@ -237,7 +237,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_command,
             commands::generated::list_person_commands,
             commands::generated::register_client_host,
+            commands::generated::unregister_client_host,
             commands::generated::answer_client_call,
+            commands::generated::run_command_for_call,
             commands::generated::undo_command,
             commands::generated::decide_proposal,
             // log

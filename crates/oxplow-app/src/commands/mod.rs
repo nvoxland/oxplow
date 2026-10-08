@@ -655,8 +655,12 @@ impl CommandBus {
         self.providers.get().and_then(std::sync::Weak::upgrade)
     }
 
-    /// The command declared over operation `op` (its `CommandSpec::op`):
-    /// what an inverse naming an operation is a call of.
+    /// The command declared over a provider's operation `op` (its
+    /// `CommandSpec::op`): what a provider's inverse naming an operation is
+    /// a call of. There is one — an extension declares one command per
+    /// provider operation (`extension_commands::parse_commands`) — where a
+    /// host capability's operation may back several (`project.open`,
+    /// `project.open_in_new_window`), so it isn't asked for those.
     pub fn command_for_op(&self, op: &oxplow_domain::OpRef) -> Option<String> {
         self.commands
             .read()

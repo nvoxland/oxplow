@@ -9,8 +9,12 @@
 //! `answer_client_call`, which the command waits for.
 //!
 //! An agent's call acts in its own thread's tabs (never another thread's
-//! or stream's); a person's in the thread the window shows. With no
-//! window open, or one that doesn't answer in time, the run is refused.
+//! or stream's); a person's in the thread the window shows. A call goes to
+//! one window — the last registered that hosts it — and only that window
+//! answers. With no window open, one that closed (`unregister`) or one
+//! that doesn't answer in time (then forgotten until it registers again),
+//! the run is refused. What the window runs on the daemon to answer a call
+//! (Save's `oxplow.file.save`) runs as the call's actor ([`ClientHost::caller`]).
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -30,13 +34,27 @@ pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
 type Answer = tokio::sync::oneshot::Sender<Result<Value, String>>;
 
+/// An open window: its id (minted by the window when it starts) and the
+/// capabilities it hosts.
+struct Window {
+    client: String,
+    hosted: BTreeSet<String>,
+}
+
+/// A call waiting for its window: who ran it, and where the answer goes.
+struct Pending {
+    client: String,
+    actor: Actor,
+    answer: Answer,
+}
+
 /// The daemon's line to its window.
 pub struct ClientHost {
     events: EventBus,
-    /// The capabilities the open window hosts; `None` until a window
-    /// says it's there.
-    hosted: parking_lot::Mutex<Option<BTreeSet<String>>>,
-    pending: parking_lot::Mutex<HashMap<String, Answer>>,
+    /// The open windows, the most recently registered last: a call goes
+    /// to the last one that hosts its capability.
+    windows: parking_lot::Mutex<Vec<Window>>,
+    pending: parking_lot::Mutex<HashMap<String, Pending>>,
     timeout: Duration,
 }
 
@@ -48,24 +66,54 @@ impl ClientHost {
     pub fn with_timeout(events: EventBus, timeout: Duration) -> Self {
         Self {
             events,
-            hosted: parking_lot::Mutex::default(),
+            windows: parking_lot::Mutex::default(),
             pending: parking_lot::Mutex::default(),
             timeout,
         }
     }
 
-    /// The window is open and hosts `capabilities` (it says so when it
-    /// starts, and again when it reconnects).
-    pub fn register(&self, capabilities: Vec<String>) {
-        *self.hosted.lock() = Some(capabilities.into_iter().collect());
+    /// Window `client` is open and hosts `capabilities` (it says so when
+    /// it starts, and again when it reconnects). It takes the calls from
+    /// now on.
+    pub fn register(&self, client: &str, capabilities: Vec<String>) {
+        let mut windows = self.windows.lock();
+        windows.retain(|w| w.client != client);
+        windows.push(Window {
+            client: client.into(),
+            hosted: capabilities.into_iter().collect(),
+        });
     }
 
-    /// The window answers call `id`: its result, or why it couldn't.
-    /// `false` when no call is waiting under `id` (it timed out).
-    pub fn answer(&self, id: &str, answer: Result<Value, String>) -> bool {
-        match self.pending.lock().remove(id) {
-            Some(waiting) => waiting.send(answer).is_ok(),
-            None => false,
+    /// Window `client` closed: it takes no more calls, and the ones it
+    /// hadn't answered are refused now rather than when they time out.
+    pub fn unregister(&self, client: &str) {
+        self.windows.lock().retain(|w| w.client != client);
+        // Dropping a waiting call's sender answers it "closed".
+        self.pending.lock().retain(|_, p| p.client != client);
+    }
+
+    /// Window `client` answers call `id`: its result, or why it couldn't.
+    /// `false` when no call of that window's is waiting under `id` (it
+    /// timed out, or went to another window).
+    pub fn answer(&self, client: &str, id: &str, answer: Result<Value, String>) -> bool {
+        let mut pending = self.pending.lock();
+        if pending.get(id).is_none_or(|p| p.client != client) {
+            return false;
+        }
+        let waiting = pending.remove(id).expect("checked above");
+        waiting.answer.send(answer).is_ok()
+    }
+
+    /// Who ran call `id`, while it waits for window `client`'s answer: a
+    /// command the window runs to answer it runs as them
+    /// (`run_command_for_call`), never as the person at the window.
+    pub fn caller(&self, client: &str, id: &str) -> Result<Actor, CommandError> {
+        match self.pending.lock().get(id) {
+            Some(p) if p.client == client => Ok(p.actor.clone()),
+            _ => Err(CommandError::Invalid {
+                field: Some("/call".into()),
+                message: format!("no call `{id}` is waiting for this window"),
+            }),
         }
     }
 
@@ -81,13 +129,16 @@ impl ClientHost {
             message,
             retry_after_ms: None,
         };
-        match &*self.hosted.lock() {
-            None => return Err(refused("no window is open".into())),
-            Some(hosted) if !hosted.contains(capability) => {
-                return Err(refused(format!("the window doesn't host `{capability}`")))
+        let client = {
+            let windows = self.windows.lock();
+            if windows.is_empty() {
+                return Err(refused("no window is open".into()));
             }
-            Some(_) => {}
-        }
+            match windows.iter().rev().find(|w| w.hosted.contains(capability)) {
+                Some(w) => w.client.clone(),
+                None => return Err(refused(format!("the window doesn't host `{capability}`"))),
+            }
+        };
         let thread_id = match actor.agent_thread() {
             // An agent acts in its own thread; one without a thread has no
             // tabs to act in.
@@ -102,9 +153,17 @@ impl ClientHost {
         };
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.pending.lock().insert(id.clone(), tx);
+        self.pending.lock().insert(
+            id.clone(),
+            Pending {
+                client: client.clone(),
+                actor: actor.clone(),
+                answer: tx,
+            },
+        );
         self.events.emit(OxplowEvent::ClientCall {
             id: id.clone(),
+            client: client.clone(),
             thread_id,
             actor: actor.source(),
             capability: capability.into(),
@@ -116,7 +175,14 @@ impl ClientHost {
         match answered {
             Ok(Ok(Ok(result))) => Ok(result),
             Ok(Ok(Err(message))) => Err(CommandError::Failed { message }),
-            Ok(Err(_)) | Err(_) => Err(refused("the window didn't answer".into())),
+            Ok(Err(_)) => Err(refused("the window closed before it answered".into())),
+            Err(_) => {
+                // A window that doesn't answer is taken as gone until it
+                // registers again, so the next call is refused at once
+                // instead of waiting out the timeout too.
+                self.windows.lock().retain(|w| w.client != client);
+                Err(refused("the window didn't answer".into()))
+            }
         }
     }
 
@@ -256,12 +322,13 @@ mod tests {
         let events = EventBus::new();
         let mut seen = events.subscribe_ui();
         let host = Arc::new(ClientHost::new(events));
-        host.register(vec!["tabs.write".into()]);
+        host.register("w1", vec!["tabs.write".into()]);
         let window = {
             let host = host.clone();
             tokio::spawn(async move {
                 let OxplowEvent::ClientCall {
                     id,
+                    client,
                     thread_id,
                     actor,
                     capability,
@@ -275,7 +342,8 @@ mod tests {
                     (thread_id, actor.as_str(), capability.as_str(), op.as_str()),
                     (Some(ThreadId::new(3)), "agent:thr3", "tabs.write", "open")
                 );
-                assert!(host.answer(&id, Ok(json!({ "opened": input.0["ref"] }))));
+                assert_eq!(client, "w1");
+                assert!(host.answer("w1", &id, Ok(json!({ "opened": input.0["ref"] }))));
             })
         };
         let out = host
@@ -308,7 +376,7 @@ mod tests {
         );
         assert_eq!(spec.effect, oxplow_domain::CommandEffect::Read);
         let mut seen = fx.svc.events.subscribe_ui();
-        fx.svc.client_host.register(vec!["tabs.write".into()]);
+        fx.svc.client_host.register("w1", vec!["tabs.write".into()]);
         let host = fx.svc.client_host.clone();
         let window = tokio::spawn(async move {
             loop {
@@ -322,7 +390,7 @@ mod tests {
                     return (
                         thread_id,
                         input.0,
-                        host.answer(&id, Ok(json!({ "open": true }))),
+                        host.answer("w1", &id, Ok(json!({ "open": true }))),
                     );
                 }
             }
@@ -365,13 +433,80 @@ mod tests {
             }
         };
         assert!(call(agent(Some(1))).await.contains("no window is open"));
-        host.register(vec!["editor.write".into()]);
+        host.register("w1", vec!["editor.write".into()]);
         assert!(call(agent(Some(1)))
             .await
             .contains("doesn't host `tabs.write`"));
-        host.register(vec!["tabs.write".into()]);
-        assert!(call(agent(Some(1))).await.contains("didn't answer"));
+        host.register("w1", vec!["tabs.write".into()]);
         assert!(call(agent(None)).await.contains("this agent has none"));
-        assert!(!host.answer("gone", Ok(json!(null))));
+        assert!(call(agent(Some(1))).await.contains("didn't answer"));
+        // Taken as gone: the next call is refused at once, not after
+        // another timeout.
+        assert!(call(agent(Some(1))).await.contains("no window is open"));
+        assert!(!host.answer("w1", "gone", Ok(json!(null))));
+    }
+
+    /// The window that registered last takes the calls, and only it may
+    /// answer one; the call's actor is readable while it waits, by that
+    /// window only.
+    #[tokio::test]
+    async fn a_call_goes_to_one_window_and_only_it_answers() {
+        let events = EventBus::new();
+        let mut seen = events.subscribe_ui();
+        let host = Arc::new(ClientHost::new(events));
+        host.register("w1", vec!["tabs.write".into()]);
+        host.register("w2", vec!["tabs.write".into()]);
+        let window = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                let OxplowEvent::ClientCall { id, client, .. } = seen.recv().await.unwrap() else {
+                    panic!("a client call")
+                };
+                assert_eq!(client, "w2");
+                assert_eq!(host.caller("w2", &id).unwrap(), agent(Some(3)));
+                assert!(host.caller("w1", &id).is_err(), "another window's call");
+                assert!(!host.answer("w1", &id, Ok(json!("w1"))));
+                assert!(host.answer("w2", &id, Ok(json!("w2"))));
+                assert!(host.caller("w2", &id).is_err(), "answered");
+            })
+        };
+        let out = host
+            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(out, json!("w2"));
+        window.await.unwrap();
+    }
+
+    /// A window that closes takes no more calls, and the one it hadn't
+    /// answered is refused then, not when it would have timed out.
+    #[tokio::test]
+    async fn a_closed_windows_calls_are_refused_at_once() {
+        let events = EventBus::new();
+        let mut seen = events.subscribe_ui();
+        let host = Arc::new(ClientHost::new(events));
+        host.register("w1", vec!["tabs.write".into()]);
+        let closer = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                let _ = seen.recv().await.unwrap();
+                host.unregister("w1");
+            })
+        };
+        let started = std::time::Instant::now();
+        let err = host
+            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .await
+            .unwrap_err()
+            .to_string();
+        closer.await.unwrap();
+        assert!(err.contains("closed before it answered"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let err = host
+            .call(&agent(Some(3)), "tabs.write", "open", json!({}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no window is open"), "{err}");
     }
 }

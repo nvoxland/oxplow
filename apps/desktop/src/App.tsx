@@ -30,6 +30,7 @@ import {
   reorderThreads,
   switchStream,
   runCommand,
+  runCommandForCall,
   runCommandInBackground,
   type ThreadState,
   type AgentKind,
@@ -169,7 +170,7 @@ import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-re
 import { offerForShortcut } from "./keybindings.js";
 import { commandOffers, type OfferDeps } from "./commandOffers.js";
 import { setRefOfferHost } from "./components/refCommands.js";
-import { runLocally, startClientHost, type ClientCallContext, type ClientHandlers } from "./clientHost.js";
+import { runLocally, startClientHost, type ClientCallContext, type ClientCallRef, type ClientHandlers } from "./clientHost.js";
 import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
@@ -666,7 +667,9 @@ export function App() {
 
   /** Save `path`'s unsaved changes in `streamId`'s session; throws what
    *  went wrong. */
-  async function saveFile(streamId: string, path: string) {
+  /** Save `path` — for the daemon's `call` when answering one (an
+   *  agent's Save, written as the agent), else as the person. */
+  async function saveFile(streamId: string, path: string, call: ClientCallRef | null = null) {
     const current = getFileSession(streamId).files[path];
     if (!current) throw new Error(`\`${path}\` isn't open`);
     if (current.isLoading) throw new Error(`\`${path}\` is still loading`);
@@ -675,7 +678,8 @@ export function App() {
       // An audited write that logs `file.saved` (its content isn't kept
       // in the record).
       const content = current.draftContent;
-      await runCommand("oxplow.file.save", { stream: streamId, path, content });
+      const input = { stream: streamId, path, content };
+      await (call ? runCommandForCall(call, "oxplow.file.save", input) : runCommand("oxplow.file.save", input));
       mutateFileSession(streamId, (s) => markFileSaved(s, path, content));
       logUi("info", "saved file", { streamId, path });
     } catch (e) {
@@ -1392,7 +1396,7 @@ export function App() {
       if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
         const path = commandId.slice(OPEN_RECENT_PREFIX.length);
         void Promise.resolve(
-          windowHandlersRef.current["projects.write"]?.open?.({ path, new_window: true }, { threadId: null, actor: "human" }),
+          windowHandlersRef.current["projects.write"]?.open?.({ path, new_window: true }, { threadId: null, actor: "human", call: null }),
         ).catch((e: unknown) => {
           recordOpError({
             label: "Open project",
@@ -2136,7 +2140,7 @@ export function App() {
           if (path === null) throw new Error(typeof id === "string" ? `\`${id}\` isn't a file in the working tree` : "no file is shown");
           const streamId = streamOfThread(threadStates, thread);
           if (!streamId) throw new Error(`no stream has thread \`${thread}\``);
-          await saveFile(streamId, path);
+          await saveFile(streamId, path, ctx.call);
           return { saved: path };
         },
       },

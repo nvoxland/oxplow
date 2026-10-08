@@ -270,11 +270,41 @@ pub fn parse_commands(
                 line,
                 format!("command `{}` is declared twice", c.name),
             )),
+            // A provider's inverse names its operation, and maps back to
+            // the one command over it (`CommandBus::command_for_op`).
+            Ok(c) if same_provider_op(&out, &c).is_some() => {
+                let (provider, op, other) = same_provider_op(&out, &c).expect("matched");
+                errors.push(at(
+                    file,
+                    line,
+                    format!(
+                        "`{provider}`'s `{op}` already backs `{other}` — one command per provider \
+                         operation (its inverse names the operation)"
+                    ),
+                ))
+            }
             Ok(c) => out.push(c),
             Err(e) => errors.push(at(file, line, e)),
         }
     }
     (out, errors)
+}
+
+/// The provider operation `c` runs, when one of `out` already runs it:
+/// `(provider, op, that command's name)`.
+fn same_provider_op<'a>(
+    out: &'a [ExtensionCommand],
+    c: &'a ExtensionCommand,
+) -> Option<(&'a str, &'a str, &'a str)> {
+    let CommandHandler::Provider { provider, op, .. } = &c.handler else {
+        return None;
+    };
+    out.iter().find_map(|o| match &o.handler {
+        CommandHandler::Provider {
+            provider: p, op: q, ..
+        } if p == provider && q == op => Some((provider.as_str(), op.as_str(), o.name.as_str())),
+        _ => None,
+    })
 }
 
 fn command_of(

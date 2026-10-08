@@ -1141,20 +1141,40 @@ async function runAsBackgroundTask(
 
 /** The commands a person is offered — those with a `ui` they may run now
  *  (`list_person_commands`); search lists the ref-less ones. */
-/** The window says it's open and hosts `capabilities` (`clientHost.ts`). */
-export async function registerClientHost(capabilities: string[]): Promise<void> {
-  unwrap(await commands.registerClientHost(capabilities));
+/** Window `client` says it's open and hosts `capabilities` (`clientHost.ts`). */
+export async function registerClientHost(client: string, capabilities: string[]): Promise<void> {
+  unwrap(await commands.registerClientHost(client, capabilities));
 }
 
-/** The window's answer to a `clientCall`: its result, or why not. */
-export async function answerClientCall(id: string, answer: { result: unknown } | { error: string }): Promise<void> {
+/** Window `client` is closing: calls stop coming to it. */
+export async function unregisterClientHost(client: string): Promise<void> {
+  unwrap(await commands.unregisterClientHost(client));
+}
+
+/** Window `client`'s answer to a `clientCall`: its result, or why not. */
+export async function answerClientCall(
+  client: string,
+  id: string,
+  answer: { result: unknown } | { error: string },
+): Promise<void> {
   unwrap(
     await commands.answerClientCall(
+      client,
       id,
       "result" in answer ? (answer.result ?? null) : null,
       "error" in answer ? answer.error : null,
     ),
   );
+}
+
+/** Run command `name` while answering the daemon's call `call`, as whoever
+ *  made it (an agent's Save writes the file as the agent). */
+export async function runCommandForCall(
+  call: { client: string; id: string },
+  name: string,
+  input: unknown,
+): Promise<CommandOutcome> {
+  return unwrap(await commands.runCommandForCall(call.client, call.id, name, input));
 }
 
 export async function listPersonCommands(): Promise<CommandSpec[]> {

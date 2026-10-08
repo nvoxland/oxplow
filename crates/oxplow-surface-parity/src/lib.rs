@@ -157,8 +157,16 @@ pub const MANIFEST: &[Capability] = &[
         "the window says it's open and which capabilities it hosts; an agent reaches them by running their commands",
     ),
     ui(
+        "unregister_client_host",
+        "the window says it's closing; an agent's calls to it are refused from then on",
+    ),
+    ui(
         "answer_client_call",
         "the window answers a call to a capability it hosts; an agent's call is answered through `run_command`",
+    ),
+    ui(
+        "run_command_for_call",
+        "the window runs a command while answering an agent's call, as that agent; an agent runs commands through `run_command`",
     ),
     ui("undo_command", "undo is a person's (P5.A1)"),
     ui(

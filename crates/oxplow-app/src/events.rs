@@ -133,6 +133,9 @@ pub enum OxplowEvent {
     /// and answers `answer_client_call { id, … }`.
     ClientCall {
         id: String,
+        /// The window it's for (its `register_client_host` id): only that
+        /// one does it and answers.
+        client: String,
         thread_id: Option<ThreadId>,
         /// Who ran the command (`agent:thr3`, `human`).
         actor: String,

@@ -1894,6 +1894,9 @@ mod tests {
                 "efforts.write/record_decision",
                 "efforts.write/report",
                 "efforts.write/update",
+                // Anyone else than a person only in its own stream, and as
+                // a write, from its writer thread.
+                "files.write/save",
                 "knowledge.write/add_comment",
                 "knowledge.write/add_note",
                 "knowledge.write/link",

@@ -46,22 +46,32 @@ pub async fn list_person_commands(svc: &Services) -> Result<Vec<CommandSpec>, Ip
     Ok(specs)
 }
 
-/// The window is open and hosts `capabilities` (`tabs.write`, …): a
-/// command the daemon runs over one of them comes to it as a
-/// `clientCall` event (`oxplow_app::client_host`). Said when the window
-/// starts and again when it reconnects.
+/// Window `client` (an id it mints when it starts) is open and hosts
+/// `capabilities` (`tabs.write`, …): a command the daemon runs over one
+/// of them comes to it as a `clientCall` event addressed to it
+/// (`oxplow_app::client_host`). Said when the window starts and again
+/// when it reconnects.
 pub async fn register_client_host(
     svc: &Services,
+    client: String,
     capabilities: Vec<String>,
 ) -> Result<(), IpcError> {
-    svc.client_host.register(capabilities);
+    svc.client_host.register(&client, capabilities);
     Ok(())
 }
 
-/// The window's answer to client call `id`: its `result`, or the `error`
-/// it couldn't do it for.
+/// Window `client` is closing: no more calls go to it, and those it
+/// hadn't answered are refused now.
+pub async fn unregister_client_host(svc: &Services, client: String) -> Result<(), IpcError> {
+    svc.client_host.unregister(&client);
+    Ok(())
+}
+
+/// Window `client`'s answer to client call `id`: its `result`, or the
+/// `error` it couldn't do it for.
 pub async fn answer_client_call(
     svc: &Services,
+    client: String,
     id: String,
     result: Option<Json>,
     error: Option<String>,
@@ -70,8 +80,27 @@ pub async fn answer_client_call(
         Some(message) => Err(message),
         None => Ok(result.map(|r| r.0).unwrap_or(serde_json::Value::Null)),
     };
-    svc.client_host.answer(&id, answer);
+    svc.client_host.answer(&client, &id, answer);
     Ok(())
+}
+
+/// Run command `id` while window `client` answers client call `call`, as
+/// whoever ran that call — an agent's Save writes the file as the agent
+/// (its write gate and its stream), never as the person at the window.
+/// Not confirmed: a run that asks is the caller's to settle.
+pub async fn run_command_for_call(
+    svc: &Services,
+    client: String,
+    call: String,
+    id: String,
+    input: Json,
+) -> Result<CommandOutcome, IpcError> {
+    let actor = svc.client_host.caller(&client, &call)?;
+    let outcome = svc.commands.run(&actor, &id, input.0, false).await?;
+    if outcome.audit_id.is_some() {
+        svc.efforts.settle_lifecycle().await;
+    }
+    Ok(outcome)
 }
 
 /// A command's spec — what a form renders from its `input_schema`, and

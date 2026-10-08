@@ -729,12 +729,22 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	registerClientHost: (capabilities: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("register_client_host", { capabilities })),
+	registerClientHost: (client: string, capabilities: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("register_client_host", { client, capabilities })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	answerClientCall: (id: string, result: unknown | null, error: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("answer_client_call", { id, result, error })),
+	unregisterClientHost: (client: string) => typedError<null, IpcError>(__TAURI_INVOKE("unregister_client_host", { client })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	answerClientCall: (client: string, id: string, result: unknown | null, error: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("answer_client_call", { client, id, result, error })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	runCommandForCall: (client: string, call: string, id: string, input: unknown) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_command_for_call", { client, call, id, input })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -4612,7 +4622,12 @@ detail: string | null } |
  *  `input` — in `thread_id`'s tabs, or the one it shows when `None` —
  *  and answers `answer_client_call { id, … }`.
  */
-{ kind: "clientCall"; id: string; threadId: ThreadId | null; 
+{ kind: "clientCall"; id: string; 
+/**
+ *  The window it's for (its `register_client_host` id): only that
+ *  one does it and answers.
+ */
+client: string; threadId: ThreadId | null; 
 // Who ran the command (`agent:thr3`, `human`).
 actor: string; capability: string; op: string; input: unknown } | 
 /**

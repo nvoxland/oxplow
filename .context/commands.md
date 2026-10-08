@@ -141,13 +141,26 @@ transaction) and its spec carries the operation (`CommandSpec::op`):
   the window does it with its own handler, nothing sent to the daemon.
 - **A run on the daemon** (an agent's through MCP, a script's) reaches
   the window through `client_host::ClientHost`: an
-  `OxplowEvent::ClientCall { id, thread_id, actor, capability, op, input }`
-  to the project's one window, which does it and answers
-  `answer_client_call { id, result | error }`; the run waits (15 s), its
-  answer the run's result. The window says it's open — and what it hosts —
-  with `register_client_host` when it starts and on reconnect; with no
-  window, one that doesn't host it or doesn't answer, the run is
-  `Unavailable`.
+  `OxplowEvent::ClientCall { id, client, thread_id, actor, capability, op, input }`
+  addressed to one window — the last registered that hosts the
+  capability — which does it and answers `answer_client_call { client,
+  id, result | error }` (another window's answer is ignored); the run
+  waits (15 s), its answer the run's result. A window mints an id when it
+  starts and says it's open — and what it hosts — with
+  `register_client_host { client, capabilities }` then and on reconnect,
+  and `unregister_client_host` when it closes (`pagehide`), which refuses
+  its unanswered calls at once. With no window, one that doesn't host it,
+  closes or doesn't answer, the run is `Unavailable`; a window that
+  didn't answer is forgotten until it registers again, so the next call
+  is refused at once rather than waiting out another timeout.
+- **What the window runs to answer a call runs as the caller.** A
+  window handler that writes through the daemon — Save writing
+  `oxplow.file.save` — calls `run_command_for_call { client, call, id,
+  input }`, which runs as the waiting call's actor (`ClientHost::caller`;
+  only the window the call went to, only while it waits), never as the
+  person at the window: an agent's Save is the agent's write, under its
+  write gate and in its own stream (`file.save` refuses anyone but a
+  person outside their own stream), audited to it.
 - **An agent acts only in its own thread**: the call carries the agent's
   thread and the window acts in that thread's tabs — opening a file there
   reads it into its stream's session — never switching the thread or
