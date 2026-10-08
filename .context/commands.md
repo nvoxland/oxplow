@@ -248,7 +248,9 @@ instead of recursing until the stack overflows, and the whole run rolls
 back. The parent has the **one audit row** and `command.executed`
 (children are not audited separately — a child row would be an
 independently undoable unit fighting the parent's inverse); its
-`result` is `{ result, children: [{ name, input, result, inverse? }] }`;
+`result` is `{ result, children: [{ name, result }] }` — no child's
+`input` (the caller sent it) or `inverse` (the parent's is the undo):
+echoing both cost an agent filing twenty tasks 23k characters back;
 the children's events ride out on the parent's `HandlerOutput.events`,
 so they are caused by the parent's `command.executed`; their
 `after_commit`s chain in order. The inverse is the children's inverses,

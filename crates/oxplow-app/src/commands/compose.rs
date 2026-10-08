@@ -67,8 +67,17 @@ impl Compose {
                 events,
             } = composer(ctx.conn, &input)?;
             let nested = bus.run_nested(ctx, &parent, &calls)?;
+            // Each child answers with its name and result: the caller sent
+            // the inputs, and the composite's own inverse is the undo, so
+            // echoing either only costs the reader (an agent filing twenty
+            // tasks got 23k characters back).
+            let children: Vec<Value> = nested
+                .children
+                .iter()
+                .map(|c| json!({ "name": c.name, "result": c.result }))
+                .collect();
             Ok(HandlerOutput {
-                result: json!({ "result": result, "children": nested.children }),
+                result: json!({ "result": result, "children": children }),
                 inverse: nested.inverse,
                 events: nested.events.into_iter().chain(events).collect(),
                 after_commit: nested.after_commit,
@@ -189,6 +198,12 @@ mod tests {
             out.result["children"][1]["name"],
             "oxplow.work_item.transition"
         );
+        // Each child answers with its name and result only: the caller
+        // sent the inputs, and the sequence's own inverse is the undo.
+        for child in out.result["children"].as_array().unwrap() {
+            let keys: Vec<_> = child.as_object().unwrap().keys().cloned().collect();
+            assert_eq!(keys, ["name", "result"], "{child}");
+        }
 
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
             .list_recent(20)
