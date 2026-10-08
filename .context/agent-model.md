@@ -1839,19 +1839,21 @@ parked on a clarifying question stayed `Running` and degraded to
 mis-triggering a re-dispatch. Both tools are now handled identically.
 
 **User-interrupt synthetic event.** Claude Code does not reliably fire
-the `Stop` hook when the user cancels a turn with Escape (or `Ctrl-C`):
-the in-flight tool's `PostToolUse` is dropped and no `Stop` lands, so
-the reducer would otherwise stay `working` until the next prompt. The
-runtime's `sendTerminalMessage` watches the websocket input stream and,
-when it sees a bare `\x1b` or `\x03` byte (interrupt heuristic in
-`terminalInputIsInterrupt`, `crates/oxplow-runtime/src/lib.rs`), ingests a synthetic
-`Interrupt` hook for the thread that owns the terminal session. The
-ingest closes the open turn as interrupted (`agent.turn.ended{interrupted}`),
-which the reducer treats as a reset: the open tools and pending subagents
-are cleared and the thread reads as not working. The synthesis only fires when the thread is
-currently `working` so a user idly tapping Escape at a prompt is a
-no-op. Multi-byte ESC sequences (arrow keys, etc.) are explicitly
-filtered out — only the bare interrupt byte counts. See the original ticket history.
+the `Stop` hook when the user cancels a turn with Escape: the in-flight
+tool's `PostToolUse` is dropped and no `Stop` lands, so the reducer would
+otherwise stay `working` until the next prompt. The terminal pane
+(`TerminalPane.tsx`) calls `onUserInterrupt` on a plain Escape (no
+modifier), and the session page records a synthetic `Interrupt` hook for
+the session (`recordUserInterrupt`, the `ingest_hook_event` RPC). The
+ingest closes the session's open turn as interrupted
+(`agent.turn.ended{interrupted}`) and sets the status `stopped`, which the
+reducer treats as a reset: the open tools and pending subagents are
+cleared and the thread reads as not working. **Only while a turn is
+open:** with none (the agent stopped, perhaps asking a question, and the
+person's Escape closed a slash or `@` menu) the interrupt changes
+nothing, so a thread waiting on the person still is. An Escape that
+closes a menu while a turn runs can't be told from a cancel by the pane;
+it ends the turn early, and the agent's next hook reopens one.
 
 **Stall / death detection (API-error deaths).** Claude Code emits *no*
 hook at all when a turn dies on a transient API error (socket closed

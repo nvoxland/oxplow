@@ -532,6 +532,10 @@ fn record_tx(
                 status = Some((AgentStatusState::AwaitingUser, Some(message)));
             }
         }
+        // The person's Escape with no turn running closed a menu or a
+        // prompt, not a turn: nothing to end, and a thread waiting on them
+        // still is.
+        HookKind::Interrupt if applied.turn.is_none() => {}
         HookKind::Stop | HookKind::Interrupt => {
             let (answer, outcome) = if env.kind == HookKind::Stop {
                 let said = body
@@ -1756,6 +1760,54 @@ mod tests {
         let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Stopped);
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
+    }
+
+    /// The person's Escape only interrupts a turn that's running: with
+    /// none open (the agent asked a question and stopped, and Escape closed
+    /// a menu) it changes nothing, so the thread still waits on them.
+    #[tokio::test]
+    async fn an_interrupt_with_no_open_turn_changes_nothing() {
+        let (svc, tid) = fixture().await;
+        let hook = |kind, prompt: Option<&str>, payload: serde_json::Value| HookEnvelope {
+            kind,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: payload.to_string(),
+            prompt: prompt.map(str::to_string),
+            decision: None,
+            tool: None,
+        };
+        svc.ingest(hook(HookKind::UserPromptSubmit, Some("p"), json!({})))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::Stop,
+            None,
+            json!({"last_assistant_message": "Which one should I use?"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::AwaitingUser
+        );
+        let ended = of_type(&logged(&svc).await, "agent.turn.ended").len();
+        let out = svc
+            .ingest(hook(HookKind::Interrupt, None, json!({})))
+            .await
+            .unwrap();
+        assert_eq!(out.closed_turn, None);
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::AwaitingUser,
+            "still waiting on the person"
+        );
+        assert_eq!(
+            of_type(&logged(&svc).await, "agent.turn.ended").len(),
+            ended
+        );
     }
 
     #[tokio::test]
