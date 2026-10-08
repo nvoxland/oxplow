@@ -28,6 +28,7 @@ pub mod lens;
 pub mod lsp;
 pub mod metric;
 pub mod note;
+pub mod ops;
 pub mod reasoning;
 pub mod review;
 pub mod snapshot;
@@ -190,6 +191,7 @@ pub fn effect_step_key(
     format!("effect:{}:{}:{index}:{short}", run.effect, run.event_id)
 }
 
+#[derive(Clone)]
 pub enum Handler {
     /// Runs inside the bus's transaction.
     Tx(Arc<TxHandler>),
@@ -220,6 +222,7 @@ type Router = dyn Fn(&Value) -> Result<Route, CommandError> + Send + Sync;
 /// A `Dispatch` handler: the route decision and the two handlers it
 /// picks between. The route runs after the input has passed the schema,
 /// so it sees a well-formed input; its error is the caller's (`Invalid`).
+#[derive(Clone)]
 pub struct Dispatch {
     pub route: Arc<Router>,
     pub tx: Arc<TxHandler>,
@@ -250,7 +253,7 @@ struct Prepared<'a> {
     resolved: &'a Resolved,
 }
 
-type ConfirmFor = dyn Fn(&Value) -> oxplow_domain::Confirm + Send + Sync;
+pub type ConfirmFor = dyn Fn(&Value) -> oxplow_domain::Confirm + Send + Sync;
 
 /// A command's own check of an input that needs what a transaction can't
 /// do — async work, such as resolving a metric query through the metric
@@ -553,6 +556,9 @@ pub struct CommandBus {
     policy: Arc<AgentPolicy>,
     pump: Arc<EventPump>,
     commands: RwLock<Registry>,
+    /// The host capabilities' operations: what a command declared in a
+    /// manifest is backed by (`ops.rs`).
+    ops: RwLock<ops::Ops>,
     write_gate: Option<WriteGate>,
     /// What's active, for what a command needs or which implementation
     /// owns it (`capabilities::Active::refusal`); `None` offers everything.
@@ -577,6 +583,7 @@ impl CommandBus {
             policy,
             pump,
             commands: RwLock::new(Registry::default()),
+            ops: RwLock::new(ops::Ops::default()),
             write_gate: None,
             capabilities: None,
         }
@@ -629,6 +636,17 @@ impl CommandBus {
         commands: Vec<Command>,
     ) -> Result<(), CommandError> {
         self.commands.write().add(namespace, source, commands)
+    }
+
+    /// Add a host capability's operation (`ops.rs`): refused when its
+    /// capability isn't in the catalog or the op is already there.
+    pub fn add_op(&self, op: ops::Op) -> Result<(), CommandError> {
+        self.ops.write().add(op)
+    }
+
+    /// The operation `op` of host capability `capability`.
+    pub fn op(&self, capability: &str, op: &str) -> Option<Arc<ops::Op>> {
+        self.ops.read().get(capability, op)
     }
 
     /// Remove every command `source` registered (an extension disabled, a

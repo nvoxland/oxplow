@@ -1,4 +1,5 @@
-//! Bookmark commands: a person stars a page at a scope — the
+//! Bookmark operations (`bookmarks.write`; declared as commands in
+//! `extensions/oxplow-foundation`): a person stars a page at a scope — the
 //! thread they're in, its stream, or the project — or takes the star off.
 //! `Tx` over the bookmark store's `_tx` cores; read back through
 //! `v_bookmark`. The viewer is the thread (`thr1`) the person is in, its
@@ -8,27 +9,20 @@
 use std::sync::Arc;
 
 use oxplow_db::bookmark_store::{remove_tx, set_tx, Bookmark, BookmarkScope, Viewer};
-use oxplow_domain::{
-    Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-    StreamId, ThreadId,
-};
+use oxplow_domain::{CommandCall, CommandError, StreamId, ThreadId};
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::ops::Op;
+use super::{Handler, HandlerOutput, TxCtx};
 
+/// The capability its operations are of.
+pub const CAPABILITY: &str = "bookmarks.write";
+/// The commands that undo them.
 pub const SET: &str = "oxplow.bookmark.set";
 pub const REMOVE: &str = "oxplow.bookmark.remove";
-
-/// A person, or a lens acting for one: bookmarks are the person's
-/// navigation, not the agent's.
-const PEOPLE: Invokers = Invokers {
-    human: true,
-    agent: false,
-    lens: true,
-};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -153,30 +147,13 @@ fn restore(before: Option<Bookmark>, page_ref: &str, at: &Value) -> CommandCall 
     }
 }
 
-fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: PEOPLE,
-        confirm: Confirm::Never,
-        undoable: true,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
-/// `bookmark.set { ref, page_kind, label?, scope, thread?, stream? }`.
-pub fn set_command() -> Command {
-    Command::new(
-        spec(
-            SET,
-            "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another.",
-            schema::<SetInput>(),
-        ),
+/// `set { ref, page_kind, label?, scope, thread?, stream? }`.
+pub fn set_op() -> Op {
+    Op::new(
+        CAPABILITY,
+        "set",
+        schema::<SetInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let at = json!({ "thread": input.get("thread"), "stream": input.get("stream") });
             let input: SetInput = parse(input)?;
@@ -198,17 +175,15 @@ pub fn set_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.bookmark.set is a valid command")
 }
 
-/// `bookmark.remove { ref, thread?, stream? }`.
-pub fn remove_command() -> Command {
-    Command::new(
-        spec(
-            REMOVE,
-            "Take a page's bookmark off, whichever scope it's at.",
-            schema::<RemoveInput>(),
-        ),
+/// `remove { ref, thread?, stream? }`.
+pub fn remove_op() -> Op {
+    Op::new(
+        CAPABILITY,
+        "remove",
+        schema::<RemoveInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let at = json!({ "thread": input.get("thread"), "stream": input.get("stream") });
             let input: RemoveInput = parse(input)?;
@@ -223,12 +198,11 @@ pub fn remove_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.bookmark.remove is a valid command")
 }
 
-/// The bookmark commands, for the bus.
-pub fn commands() -> Vec<Command> {
-    vec![set_command(), remove_command()]
+/// The bookmark operations, for the bus.
+pub fn ops() -> Vec<Op> {
+    vec![set_op(), remove_op()]
 }
 
 #[cfg(test)]

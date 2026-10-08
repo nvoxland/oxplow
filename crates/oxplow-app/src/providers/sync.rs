@@ -24,10 +24,7 @@ use std::time::Instant;
 
 use oxplow_domain::events::schema::{WorkItemRecorded, WorkItemRecordedV2};
 use oxplow_domain::work_items::{provider_of, WorkItemRecord};
-use oxplow_domain::{
-    Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Envelope, Invokers,
-    Lifecycle,
-};
+use oxplow_domain::{Actor, CommandError, Envelope};
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::{method, CollectorDecl, ReadParams, ReadResult};
 use oxplow_provider_protocol::{Incoming, ProtocolError};
@@ -37,7 +34,7 @@ use serde_json::{json, Value};
 
 use super::registry::{Instance, ProviderRegistry, Refusal};
 use super::spec;
-use crate::commands::{Command, Handler, HandlerOutput, Invocation};
+use crate::commands::{Handler, HandlerOutput, Invocation};
 
 /// The command that reads a provider's collectors.
 pub const SYNC: &str = "oxplow.provider.sync";
@@ -544,25 +541,13 @@ struct SyncInput {
 /// `provider.sync { instance, collector? }`: read a running instance's
 /// collectors now. Any invoker; it changes oxplow's records (the items it
 /// restates), not the worktree, so any thread may run it.
-pub fn sync_command(registry: &Arc<ProviderRegistry>) -> Command {
+pub fn sync_op(registry: &Arc<ProviderRegistry>) -> crate::commands::ops::Op {
     let registry = Arc::downgrade(registry);
-    Command::new(
-        CommandSpec {
-            id: SYNC.into(),
-            summary: "Read a provider instance's collectors now (all, or one), restating the \
-                      items it tracks (runs the provider process, a system the bus doesn't own)."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(SyncInput))
-                .expect("schema serializes"),
-            invokers: Invokers::ALL,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Experimental,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Record,
-            needs: Vec::new(),
-            ui: None,
-        },
+    crate::commands::ops::Op::new(
+        "providers.sync",
+        "sync",
+        serde_json::to_value(schemars::schema_for!(SyncInput)).expect("schema serializes"),
+        false,
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let registry = registry.clone();
             Box::pin(async move {
@@ -604,7 +589,6 @@ pub fn sync_command(registry: &Arc<ProviderRegistry>) -> Command {
             })
         })),
     )
-    .expect("oxplow.provider.sync is a valid command")
 }
 
 /// Run [`ProviderRegistry::sync_due`] every minute for the app's life.

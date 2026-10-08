@@ -30,6 +30,7 @@
 //! or closes an effort here; the effort policy reacts to
 //! `work_item.state_changed` (`crate::effort_policy`).
 
+use crate::commands::ops::Op;
 use crate::link_check::LinkDeps;
 use oxplow_domain::events::schema::{
     EventType as _, WorkItemCommented, WorkItemCommentedV2, WorkItemCreated, WorkItemCreatedV2,
@@ -42,14 +43,12 @@ use oxplow_domain::work_items::{
     WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput, WorkItemTransitionInput,
     WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry, VERBS,
 };
-use oxplow_domain::{
-    Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, ThreadId,
-};
+use oxplow_domain::{CommandCall, CommandError, ThreadId};
 use schemars::JsonSchema;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::{Command, Dispatch, Handler, HandlerOutput, Invocation, Route, TxCtx, TxHandler};
+use super::{Dispatch, Handler, HandlerOutput, Invocation, Route, TxCtx, TxHandler};
 
 fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
     raw.parse::<ThreadId>().map_err(|e| CommandError::Invalid {
@@ -373,12 +372,12 @@ pub(crate) fn provider_for(
 /// provider's inverse (a verb) is renamed back to `oxplow.work_item.<verb>`, so
 /// an undo dispatches again.
 fn dispatching(
-    spec: CommandSpec,
+    shape: Shape,
     registry: WorkItemsRegistry,
     verb: &'static str,
     target: Target,
     tx: Arc<TxHandler>,
-) -> Command {
+) -> Op {
     let tx = logging_canonical(verb, tx);
     // A loose id is the active list's, on every path (route, inside the
     // transaction, through the provider).
@@ -457,15 +456,17 @@ fn dispatching(
             })
         }) as super::ExternalFuture
     });
-    Command::new(
-        spec,
+    Op::new(
+        "work_items.write",
+        verb,
+        shape.schema,
+        shape.undoable,
         Handler::Dispatch(Dispatch {
             route,
             tx,
             external,
         }),
     )
-    .expect("a work_item command registers")
 }
 
 /// The verbs that can put an item in a state.
@@ -669,37 +670,11 @@ fn spec_name(verb: &str) -> String {
     format!("oxplow.work_item.{verb}")
 }
 
-fn spec(
-    name: &str,
-    summary: &str,
-    schema: Value,
-    confirm: Confirm,
-    undoable: bool,
-    atomicity: Atomicity,
-) -> CommandSpec {
-    // The feature its verb is, if any: every work list (none included, a
-    // sink with every feature) takes the rest.
-    let needs = match name {
-        LINK => vec!["work_items.links".to_string()],
-        COMMENT => vec!["work_items.comments".to_string()],
-        DELETE => vec!["work_items.delete".to_string()],
-        REORDER => vec!["work_items.ordering".to_string()],
-        MOVE => vec!["work_items.lists".to_string()],
-        _ => Vec::new(),
-    };
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm,
-        undoable,
-        lifecycle: Lifecycle::Stable,
-        atomicity,
-        effect: oxplow_domain::CommandEffect::Record,
-        needs,
-        ui: None,
-    }
+/// What a `work_items.write` operation is beyond its handler: the input
+/// its handler reads, and whether it returns an inverse.
+pub struct Shape {
+    pub schema: Value,
+    pub undoable: bool,
 }
 
 fn schema_of<T: JsonSchema>() -> Value {
@@ -710,16 +685,11 @@ fn schema_of<T: JsonSchema>() -> Value {
 
 pub const NAME: &str = "oxplow.work_item.transition";
 
-pub fn spec_transition() -> CommandSpec {
-    spec(
-        NAME,
-        "Move a work item to a canonical state (todo, in_progress, blocked, done, canceled), \
-         optionally naming the provider's own state.",
-        schema_of::<WorkItemTransitionInput>(),
-        Confirm::Never,
-        true,
-        Atomicity::Dispatch,
-    )
+pub fn transition_shape() -> Shape {
+    Shape {
+        schema: schema_of::<WorkItemTransitionInput>(),
+        undoable: true,
+    }
 }
 
 /// oxplow's core for a verb, in the bus's transaction: the list's own
@@ -747,9 +717,9 @@ fn tx_transition() -> Arc<TxHandler> {
     })
 }
 
-pub fn command(registry: WorkItemsRegistry) -> Command {
+pub fn transition_op(registry: WorkItemsRegistry) -> Op {
     dispatching(
-        spec_transition(),
+        transition_shape(),
         registry.clone(),
         "transition",
         ref_target,
@@ -761,20 +731,12 @@ pub fn command(registry: WorkItemsRegistry) -> Command {
 
 pub const CREATE: &str = "oxplow.work_item.create";
 
-pub fn create_spec() -> CommandSpec {
-    spec(
-        CREATE,
-        "File a work item on the active tracker (the one the person chose), optionally \
-         straight into a state. `thread` is the thread it's filed on: absent, an agent's own \
-         (a person's lands on the backlog). `native` is the tracker's own fields as its create \
-         declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: \
-         the `[[…]]` links in the body that don't resolve.",
-        schema_of::<WorkItemCreateInput>(),
-        Confirm::Never,
+pub fn create_shape() -> Shape {
+    Shape {
+        schema: schema_of::<WorkItemCreateInput>(),
         // Undoing a filing would be deleting an item — not what undo is for.
-        false,
-        Atomicity::Dispatch,
-    )
+        undoable: false,
+    }
 }
 
 /// oxplow's core: the list's `create`, filed on the thread core resolves
@@ -791,38 +753,25 @@ fn tx_create(links: LinkDeps) -> Arc<TxHandler> {
     })
 }
 
-pub fn create_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
+pub fn create_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
     dispatching(
-        create_spec(),
+        create_shape(),
         registry.clone(),
         "create",
         create_target,
         tx_create(links),
     )
-    .with_ui(oxplow_domain::CommandUi {
-        label: "New Task…".into(),
-        group: Some("Tasks".into()),
-        keywords: vec!["work item".into()],
-        form: Some("page:new-task".into()),
-        ..Default::default()
-    })
 }
 
 // ---- oxplow.work_item.update ----
 
 pub const UPDATE: &str = "oxplow.work_item.update";
 
-pub fn update_spec() -> CommandSpec {
-    spec(
-        UPDATE,
-        "Edit a work item's title, body, parent or native fields and, optionally, move it to \
-         a state — all in one run (see oxplow.work_item.transition for the state's effects). On \
-         oxplow the result carries `link_warnings` for the body's `[[…]]` links.",
-        schema_of::<WorkItemUpdateInput>(),
-        Confirm::Never,
-        true,
-        Atomicity::Dispatch,
-    )
+pub fn update_shape() -> Shape {
+    Shape {
+        schema: schema_of::<WorkItemUpdateInput>(),
+        undoable: true,
+    }
 }
 
 /// oxplow's core: the list's `update`. The result carries the body's
@@ -841,9 +790,9 @@ fn tx_update(links: LinkDeps) -> Arc<TxHandler> {
     })
 }
 
-pub fn update_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
+pub fn update_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
     dispatching(
-        update_spec(),
+        update_shape(),
         registry.clone(),
         "update",
         update_target,
@@ -865,18 +814,12 @@ fn tx_link() -> Arc<TxHandler> {
     })
 }
 
-pub fn link_command(registry: WorkItemsRegistry) -> Command {
+pub fn link_op(registry: WorkItemsRegistry) -> Op {
     dispatching(
-        spec(
-            LINK,
-            "Link one work item to another of the same provider, by a link type the provider \
-             names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, \
-             replies_to).",
-            schema_of::<WorkItemLinkInput>(),
-            Confirm::Never,
-            false,
-            Atomicity::Dispatch,
-        ),
+        Shape {
+            schema: schema_of::<WorkItemLinkInput>(),
+            undoable: false,
+        },
         registry.clone(),
         "link",
         link_target,
@@ -898,16 +841,12 @@ fn tx_comment() -> Arc<TxHandler> {
     })
 }
 
-pub fn comment_command(registry: WorkItemsRegistry) -> Command {
+pub fn comment_op(registry: WorkItemsRegistry) -> Op {
     dispatching(
-        spec(
-            COMMENT,
-            "Comment on a work item (oxplow: a note shown with the task).",
-            schema_of::<WorkItemCommentInput>(),
-            Confirm::Never,
-            false,
-            Atomicity::Dispatch,
-        ),
+        Shape {
+            schema: schema_of::<WorkItemCommentInput>(),
+            undoable: false,
+        },
         registry.clone(),
         "comment",
         comment_target,
@@ -927,16 +866,12 @@ fn tx_delete() -> Arc<TxHandler> {
 
 /// Destructive (asks first) and not undoable; only on a provider that
 /// declares `delete`.
-pub fn delete_command(registry: WorkItemsRegistry) -> Command {
+pub fn delete_op(registry: WorkItemsRegistry) -> Op {
     dispatching(
-        spec(
-            DELETE,
-            "Delete a work item.",
-            schema_of::<WorkItemDeleteInput>(),
-            Confirm::Destructive,
-            false,
-            Atomicity::Dispatch,
-        ),
+        Shape {
+            schema: schema_of::<WorkItemDeleteInput>(),
+            undoable: false,
+        },
         registry.clone(),
         "delete",
         delete_target,
@@ -949,31 +884,22 @@ pub fn delete_command(registry: WorkItemsRegistry) -> Command {
 pub const REORDER: &str = "oxplow.work_item.reorder";
 pub const MOVE: &str = "oxplow.work_item.move";
 
-pub fn reorder_command(registry: WorkItemsRegistry) -> Command {
-    let spec = spec(
-        REORDER,
-        "Put a work item before or after another on its list (neither: at its end).",
-        schema_of::<WorkItemReorderInput>(),
-        Confirm::Never,
-        true,
-        Atomicity::Dispatch,
-    );
+pub fn reorder_op(registry: WorkItemsRegistry) -> Op {
+    let spec = Shape {
+        schema: schema_of::<WorkItemReorderInput>(),
+        undoable: true,
+    };
     let tx: Arc<TxHandler> = Arc::new(|ctx: &TxCtx<'_>, input| {
         answered(oxplow_tasks::verbs::reorder_tx(ctx.conn, parse(input)?))
     });
     dispatching(spec, registry, "reorder", reorder_target, tx)
 }
 
-pub fn move_command(registry: WorkItemsRegistry) -> Command {
-    let spec = spec(
-        MOVE,
-        "Move a work item to a thread's list or the backlog (at the end, or before/after an \
-         item there).",
-        schema_of::<WorkItemMoveInput>(),
-        Confirm::Never,
-        true,
-        Atomicity::Dispatch,
-    );
+pub fn move_op(registry: WorkItemsRegistry) -> Op {
+    let spec = Shape {
+        schema: schema_of::<WorkItemMoveInput>(),
+        undoable: true,
+    };
     let tx: Arc<TxHandler> = Arc::new(|ctx: &TxCtx<'_>, input| {
         answered(oxplow_tasks::verbs::move_tx(ctx.conn, parse(input)?))
     });
@@ -1638,7 +1564,6 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
         };
-        assert_eq!(spec_transition().atomicity, Atomicity::Dispatch);
         let outcome = fx
             .svc
             .commands

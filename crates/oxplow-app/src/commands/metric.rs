@@ -22,21 +22,19 @@
 //! reseed (and `v_metric_catalog`) follows `ConfigChanged` as for any
 //! config edit.
 
+use crate::commands::ops::Op;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use oxplow_db::fact_store::{get_measure_tx, get_spec_tx, record_facts_tx};
 use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
-use oxplow_domain::{
-    Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-    StreamId,
-};
+use oxplow_domain::{Actor, CommandError, StreamId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::config_commands::{change, ConfigTarget};
-use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
+use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::metric_engine::FactFilter;
 use crate::metrics_service::MetricsService;
 
@@ -122,28 +120,6 @@ fn invalid(field: &str, message: impl Into<String>) -> CommandError {
 
 fn storage(e: rusqlite::Error) -> CommandError {
     CommandError::from(oxplow_db::map_sql_err(e))
-}
-
-fn spec(
-    name: &str,
-    summary: &str,
-    input_schema: Value,
-    atomicity: Atomicity,
-    effect: CommandEffect,
-) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema,
-        invokers: Invokers::ALL,
-        confirm: Confirm::Never,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity,
-        effect,
-        needs: Vec::new(),
-        ui: None,
-    }
 }
 
 /// The stream a run acts on: the one named, else the caller's, else the
@@ -271,7 +247,7 @@ fn record_tx(
 }
 
 /// The `metric.*` commands.
-pub fn commands(target: MetricTarget) -> Vec<Command> {
+pub fn ops(target: MetricTarget) -> Vec<Op> {
     let MetricTarget {
         config: config_target,
         metrics,
@@ -280,17 +256,11 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
     } = target;
     let record = {
         let facts = facts.clone();
-        Command::new(
-            spec(
-                RECORD,
-                "Record an asserted number for a metric (provenance `asserted`): a value oxplow \
-                 didn't compute, like a CI import. The metric needs a source measure and must \
-                 not be a `count`; the fact is stamped to match the metric's own filter.",
-                serde_json::to_value(schemars::schema_for!(RecordInput))
-                    .expect("schema serializes"),
-                Atomicity::Tx,
-                CommandEffect::Write,
-            ),
+        Op::new(
+            "metrics.write",
+            "record",
+            serde_json::to_value(schemars::schema_for!(RecordInput)).expect("schema serializes"),
+            false,
             Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
                 let input: RecordInput = parse(input)?;
                 let (capture_id, measure_id) = record_tx(ctx, &input, primary_stream)?;
@@ -306,21 +276,14 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                 })
             })),
         )
-        .expect("metric.record registers")
     };
     let rebuild = {
         let metrics = metrics.clone();
-        Command::new(
-            spec(
-                REBUILD,
-                "Rebuild code metrics over the whole tree: run every gauge that needs a \
-                 baseline (every gauge with `force`) over the latest snapshot. Reports how many \
-                 ran and which failed.",
-                serde_json::to_value(schemars::schema_for!(RebuildInput))
-                    .expect("schema serializes"),
-                Atomicity::External,
-                CommandEffect::Write,
-            ),
+        Op::new(
+            "metrics.write",
+            "rebuild",
+            serde_json::to_value(schemars::schema_for!(RebuildInput)).expect("schema serializes"),
+            false,
             Handler::External(Arc::new(move |_: Invocation, input| {
                 let metrics = metrics.clone();
                 Box::pin(async move {
@@ -336,22 +299,14 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                 })
             })),
         )
-        .expect("metric.rebuild registers")
     };
     let scaffold = {
         let metrics = metrics.clone();
-        Command::new(
-            spec(
-                SCAFFOLD,
-                "A starter for a new metric; writes nothing. Returns `scriptPath` + `script` (a \
-                 Starlark gauge) and `projectYaml` (the measure, gauge and metric entries). \
-                 Write the script, then add the entries with `oxplow.config.set` on `measures`, \
-                 `gauges` and `metrics` (a gauge runs a program, so a person confirms it).",
-                serde_json::to_value(schemars::schema_for!(ScaffoldInput))
-                    .expect("schema serializes"),
-                Atomicity::Tx,
-                CommandEffect::Read,
-            ),
+        Op::new(
+            "metrics.read",
+            "scaffold",
+            serde_json::to_value(schemars::schema_for!(ScaffoldInput)).expect("schema serializes"),
+            false,
             Handler::Tx(Arc::new(move |_ctx: &TxCtx<'_>, input| {
                 let input: ScaffoldInput = parse(input)?;
                 let scaffold = metrics
@@ -363,26 +318,13 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                 })
             })),
         )
-        .expect("metric.scaffold registers")
     };
     let target = config_target;
-    let enable = Command::new(
-        CommandSpec {
-            id: ENABLE.into(),
-            summary: "Turn metrics on or off in this project (.oxplow/project.yaml `metrics:`); \
-                      logged as config.changed, undo restores the previous list."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(EnableInput))
-                .expect("schema serializes"),
-            invokers: Invokers::ALL,
-            confirm: Confirm::Never,
-            undoable: true,
-            lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::Tx,
-            effect: CommandEffect::Write,
-            needs: Vec::new(),
-            ui: None,
-        },
+    let enable = Op::new(
+        "metrics.write",
+        "enable",
+        serde_json::to_value(schemars::schema_for!(EnableInput)).expect("schema serializes"),
+        true,
         Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
             let input: EnableInput =
                 serde_json::from_value(input).map_err(|e| CommandError::Invalid {
@@ -427,8 +369,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                 super::config_commands::Layer::Project,
             )
         })),
-    )
-    .expect("metric.enable registers");
+    );
     vec![enable, record, rebuild, scaffold]
 }
 

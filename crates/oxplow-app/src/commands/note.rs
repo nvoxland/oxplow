@@ -8,21 +8,19 @@
 //! the worktree can still take notes. The result carries `link_warnings`:
 //! each `[[…]]` in the body that doesn't resolve.
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::thread_note_store::{add_thread_note_tx, note_tx, update_note_tx};
 use oxplow_domain::refs::build::thread_ref;
-use oxplow_domain::{
-    Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-    NoteId,
-};
+use oxplow_domain::{CommandCall, CommandError, NoteId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::comment::author_of;
 use super::thread::{acting_thread, agent_scope};
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::LinkDeps;
 
 pub const ADD: &str = "oxplow.knowledge.add_note";
@@ -78,34 +76,13 @@ fn schema<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-fn spec(name: &str, summary: &str, schema: Value, undoable: bool) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm: Confirm::Never,
-        undoable,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 /// `knowledge.add_note { thread?, body }`.
-pub fn add_command(deps: LinkDeps) -> Command {
-    Command::new(
-        spec(
-            ADD,
-            "Add a note to a thread — an agent's own (a finding, why it paused, context for \
-             whoever picks it up). An empty body allocates one for a subagent to fill in with \
-             `oxplow.knowledge.update_note`. Returns the note and `link_warnings` for `[[…]]` links \
-             that don't resolve.",
-            schema::<AddInput>(),
-            false,
-        ),
+pub fn add_op(deps: LinkDeps) -> Op {
+    Op::new(
+        "knowledge.write",
+        "add_note",
+        schema::<AddInput>(),
+        false,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: AddInput = parse(input)?;
             let thread = acting_thread(ctx, input.thread.as_deref())?;
@@ -124,19 +101,15 @@ pub fn add_command(deps: LinkDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.knowledge.add_note is a valid command")
 }
 
 /// `knowledge.update_note { note, body }`; undone by its previous body.
-pub fn update_command(deps: LinkDeps) -> Command {
-    Command::new(
-        spec(
-            UPDATE,
-            "Replace a thread note's body (`not12`) — a subagent filling in the note it was \
-             given. An agent updates only its own thread's notes.",
-            schema::<UpdateInput>(),
-            true,
-        ),
+pub fn update_op(deps: LinkDeps) -> Op {
+    Op::new(
+        "knowledge.write",
+        "update_note",
+        schema::<UpdateInput>(),
+        true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: UpdateInput = parse(input)?;
             let id = NoteId::try_from_str(&input.note).ok_or_else(|| {
@@ -167,12 +140,11 @@ pub fn update_command(deps: LinkDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.knowledge.update_note is a valid command")
 }
 
 /// The note commands, for the bus.
-pub fn commands(deps: LinkDeps) -> Vec<Command> {
-    vec![add_command(deps.clone()), update_command(deps)]
+pub fn ops(deps: LinkDeps) -> Vec<Op> {
+    vec![add_op(deps.clone()), update_op(deps)]
 }
 
 #[cfg(test)]

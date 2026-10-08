@@ -1,0 +1,485 @@
+manifest: 2
+name: oxplow-foundation
+# Its commands are oxplow's own: `oxplow.<area>.<verb>`.
+namespace: oxplow
+description: oxplow's own commands, declared like any extension's — each backed by an operation of a host capability. Required; it can't be disabled.
+sharing: shared
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Declare oxplow's own commands — what a person, an agent and a lens can
+    do to oxplow's records, the repository and the project — over the host
+    capabilities' operations, so nothing about them is special to core.
+  origin: null
+  examples:
+    - name: a person bookmarks a page for their thread
+      input: { command: oxplow.bookmark.set, input: { ref: "page:git-dashboard", page_kind: git-dashboard, scope: thread, thread: thr1 } }
+      expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+commands:
+  # bookmarks.write — a person's navigation, not the agent's.
+  - name: bookmark.set
+    summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
+    capability: bookmarks.write
+    op: set
+    invokers: { human: true, agent: false, lens: true }
+  - name: bookmark.remove
+    summary: "Take a page's bookmark off, whichever scope it's at."
+    capability: bookmarks.write
+    op: remove
+    invokers: { human: true, agent: false, lens: true }
+  # collectors.sync
+  - name: collector.sync
+    summary: "Run an approved collector now, refreshing what it collects (runs the collector's program or script, which the bus doesn't own). It never approves: an unapproved exec collector is refused. A project report collector (`records:`) reads its report now and records what it parses in `thread` (an agent's own): point at the report, never report numbers yourself."
+    capability: collectors.sync
+    op: sync
+  # config.read
+  - name: config.get
+    summary: "One .oxplow/project.yaml key: its doc, value schema and current value."
+    capability: config.read
+    op: get
+  - name: config.list_keys
+    summary: "Every .oxplow/project.yaml key with its doc, value schema, current value and whether only a person may set it."
+    capability: config.read
+    op: list_keys
+  # config.write
+  - name: config.set
+    summary: "Set one .oxplow/project.yaml key — or, with `layer: personal`, a person's own choice in .oxplow/personal.yaml (only `activeProviders`). The value is validated against the key's schema and the file's own rules, written to the file, and logged as config.changed; undo restores the prior value. Human-only keys need a person's confirmation."
+    capability: config.write
+    op: set
+  - name: config.unset
+    summary: "Remove one .oxplow/project.yaml key so it returns to its default (or, with `layer: personal`, a person's own choice); logged as config.changed, undo restores it."
+    capability: config.write
+    op: unset
+  # dashboards.write
+  - name: dashboard.add_item
+    summary: "Add a tile to a dashboard: `query` (pinned `sql`, checked like query_sql, shown per `display` — a lens viz, or `metric` for the metric card with its key as `metric` in `options_json`), `lens` (`lens_id`) or `text` (`options_json` `{\"text\": …}`). `options_json` may also set its size and title; `position` where it goes."
+    capability: dashboards.write
+    op: add_item
+  - name: dashboard.create
+    summary: "Create an empty dashboard (a grid of tiles); fill it with `oxplow.dashboard.add_item`."
+    capability: dashboards.write
+    op: create
+    ui: {"label": "New Dashboard…", "group": "Tasks", "input": {"title": "Untitled dashboard"}, "open_after": "page:custom-dashboard?id={{result.id}}"}
+  - name: dashboard.delete
+    summary: "Delete a dashboard and its tiles. A person's, confirmed."
+    capability: dashboards.write
+    op: delete
+    invokers: { human: true, agent: false, lens: true }
+    confirm: destructive
+  - name: dashboard.remove_item
+    summary: "Remove a tile from its dashboard (`dti7`)."
+    capability: dashboards.write
+    op: remove_item
+  - name: dashboard.rename
+    summary: "Rename a dashboard (`dsh3`)."
+    capability: dashboards.write
+    op: rename
+  - name: dashboard.reorder_items
+    summary: "Reorder a dashboard's tiles (`order`: tile ids in their new order)."
+    capability: dashboards.write
+    op: reorder_items
+  - name: dashboard.update_item
+    summary: "Change a tile's options (`dti7`); a query tile's `sql` is checked again."
+    capability: dashboards.write
+    op: update_item
+  # diagnostics.write
+  - name: ui.report_error
+    summary: "Record an operation that failed in front of the person in the app, as the app showed it, so the agent can read it in `v_op_error`. The app's own: a person's only."
+    capability: diagnostics.write
+    op: report_error
+    invokers: { human: true, agent: false, lens: false }
+  # efforts.write
+  - name: effort.close
+    summary: "Close an effort (by id, or a thread's open one), optionally as of a past point and with a summary."
+    capability: efforts.write
+    op: close
+  - name: effort.confirm_decision
+    summary: "Confirm a decision oxplow inferred from an effort (`decision:<id>`): it was made, as stated. A person's review."
+    capability: efforts.write
+    op: confirm_decision
+    invokers: { human: true, agent: false, lens: true }
+  - name: effort.dismiss_decision
+    summary: "Dismiss a decision oxplow inferred from an effort (`decision:<id>`): it wasn't made, or not like that. A person's review."
+    capability: efforts.write
+    op: dismiss_decision
+    invokers: { human: true, agent: false, lens: true }
+  - name: effort.link
+    summary: "Link an effort (by id, or a thread's open one) to a work item, or unlink it with `work_item: null`."
+    capability: efforts.write
+    op: link
+  - name: effort.open
+    summary: "Open an effort — a span of a thread's work — on a thread (yours by default), optionally linked to a work item. The thread's current effort closes first. oxplow opens efforts itself; this is for policies, people and corrections."
+    capability: efforts.write
+    op: open
+  - name: effort.record_claim
+    summary: "Record a CLAIM about your work before you report it done: \"tests pass\", \"no behavior change\", \"handles empty input\". Cite `evidence_ref` (`run:<id>`, a test name) when you have it — an unbacked claim shows as unverified for a person to check, so don't claim what you didn't verify. Returns `{ id, effort }`."
+    capability: efforts.write
+    op: record_claim
+  - name: effort.record_decision
+    summary: "Record a DECISION you made while working: a fork where you picked one approach over others without asking (where to put something, which library, what to leave out, how to read an ambiguous ask). People review these first, so record the non-obvious ones as you make them — not trivia. Attaches to `work_item`'s open effort, else your thread's. Returns `{ id, effort }`."
+    capability: efforts.write
+    op: record_decision
+  - name: effort.reopen_decision
+    summary: "Take back a review of an inferred decision (`decision:<id>`): it is unconfirmed again."
+    capability: efforts.write
+    op: reopen_decision
+    invokers: { human: true, agent: false, lens: true }
+  - name: effort.report
+    summary: "Optional: describe the thread's current (else latest) effort — a `summary` of what shipped, and any `impacts` beyond the edits (a wiki page, a work item, a commit, a finding). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
+    capability: efforts.write
+    op: report
+  - name: effort.unverify_claim
+    summary: "Take back a claim's verification (`claim:<id>`): it cites nothing again."
+    capability: efforts.write
+    op: unverify_claim
+    invokers: { human: true, agent: false, lens: true }
+  - name: effort.update
+    summary: "Set an effort's own title, or clear it back to its default with `title: null`."
+    capability: efforts.write
+    op: update
+  - name: effort.verify_claim
+    summary: "Verify a claim an agent made about its work (`claim:<id>`), citing what backs it (`reviewer` when you checked it yourself). A person's review."
+    capability: efforts.write
+    op: verify_claim
+    invokers: { human: true, agent: false, lens: true }
+  # effects.read
+  - name: effect.backfill_plan
+    summary: "How many events an `oxplow.effect.backfill` would have an effect react to: the matching ones it never reacted to, the log positions they span (pass `to_seq` to the backfill to run on just these), and how many one run reacts to (`batch`)."
+    capability: effects.read
+    op: backfill_plan
+  # effects.run
+  - name: effect.backfill
+    summary: "Have an effect react to the matching events it never reacted to — those logged before its approval, or while it waited to be approved again — oldest first, once each. The effect may call outside oxplow for every one of them. It runs as it is now; `oxplow.effect.backfill_plan` says how many events that is."
+    capability: effects.run
+    op: backfill
+    invokers: { human: true, agent: false, lens: false }
+    confirm: always
+  - name: effect.retry
+    summary: "Have an effect react again to an event its reaction to failed, as its next attempt. If the failed attempt was interrupted with a step outside oxplow under way, that step may already have run: retrying sends it again. It runs the effect as it is now, composing afresh from the event."
+    capability: effects.run
+    op: retry
+    invokers: { human: true, agent: false, lens: false }
+    confirm: always
+  # extensions.enable
+  - name: plugin.enable
+    summary: "Enable a disabled extension provider, collector or effect on this machine again, clearing an automatic disable (a provider's process restarts, a system the bus doesn't own)."
+    capability: extensions.enable
+    op: enable
+    invokers: { human: true, agent: false, lens: false }
+    lifecycle: experimental
+  # extensions.install
+  - name: extension.install
+    summary: "Install a published extension from a git repo (its root holds `extension.yaml`) into `oxplow/extensions/<name>/` of a stream's worktree, at the commit a person reviewed (`reviewed_sha`, from `review_extension`). Always a person's decision: an agent's run becomes a proposal. Refuses to overwrite — `oxplow.extension.update` does that."
+    capability: extensions.install
+    op: install
+    confirm: always
+  - name: extension.update
+    summary: "Update an installed extension to the reviewed commit of the git URL and ref it was installed from. Only for extensions installed with `oxplow.extension.install`; ones written in this repo are edited in place. Always a person's decision."
+    capability: extensions.install
+    op: update
+    confirm: always
+  # files.write
+  - name: snapshot.restore_file
+    summary: "Restore a captured file (a `file_snapshot` id) into its stream's worktree, overwriting what's at its path now. A person confirms it."
+    capability: files.write
+    op: restore_file
+    confirm: destructive
+  # hints.write
+  - name: hint.dismiss
+    summary: "Dismiss a hint raised to the person (a `v_agent_nudge` row with audience `person`)."
+    capability: hints.write
+    op: dismiss
+    invokers: { human: true, agent: false, lens: true }
+  # knowledge.write
+  - name: knowledge.add_comment
+    summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
+    capability: knowledge.write
+    op: add_comment
+  - name: knowledge.add_note
+    summary: "Add a note to a thread — an agent's own (a finding, why it paused, context for whoever picks it up). An empty body allocates one for a subagent to fill in with `oxplow.knowledge.update_note`. Returns the note and `link_warnings` for `[[…]]` links that don't resolve."
+    capability: knowledge.write
+    op: add_note
+  - name: knowledge.delete_comment
+    summary: "Delete a comment and its messages (`cmt12`). A person's, confirmed."
+    capability: knowledge.write
+    op: delete_comment
+    invokers: { human: true, agent: false, lens: true }
+    confirm: destructive
+  - name: knowledge.delete_page
+    summary: "Delete a knowledge (wiki) page and its links."
+    capability: knowledge.write
+    op: delete_page
+    confirm: destructive
+  - name: knowledge.link
+    summary: "Link a knowledge page to a page, file, directory, task or commit (added under its Related heading)."
+    capability: knowledge.write
+    op: link
+  - name: knowledge.relocate_comment
+    summary: "Store where a comment's quote (`cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
+    capability: knowledge.write
+    op: relocate_comment
+    invokers: { human: true, agent: false, lens: true }
+  - name: knowledge.reply_comment
+    summary: "Reply on a comment (`cmt12`)."
+    capability: knowledge.write
+    op: reply_comment
+  - name: knowledge.resync
+    summary: "Restate a knowledge page from its file on disk (the repair when a row and its file disagree); a missing file deletes the page."
+    capability: knowledge.write
+    op: resync
+  - name: knowledge.update_comment
+    summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
+    capability: knowledge.write
+    op: update_comment
+  - name: knowledge.update_note
+    summary: "Replace a thread note's body (`not12`) — a subagent filling in the note it was given. An agent updates only its own thread's notes."
+    capability: knowledge.write
+    op: update_note
+  - name: knowledge.write_page
+    summary: "Write a knowledge (wiki) page: its body, every [[link]] resolving, and the files you re-read against it (verified_refs) or took out (removed_refs)."
+    capability: knowledge.write
+    op: write_page
+  # lenses.show
+  - name: lens.show
+    summary: "Show the person an answer in their thread: an existing lens with params, or a lens of your own (title, query, viz). It renders beside the conversation, where they can keep it."
+    capability: lenses.show
+    op: show
+  # lenses.write
+  - name: lens.keep
+    summary: "Keep an answer from a thread, or a lens spec of your own, as a private lens (a page the person can reopen, pin and share), recording where it came from. Kept in another stream's worktree, it shows in the app once that stream is merged (`live: false`)."
+    capability: lenses.write
+    op: keep
+  - name: lens.share
+    summary: "Move a private lens into a shared extension (created shared when missing), refused unless it passes the shared checks; committing it is how the team gets it."
+    capability: lenses.write
+    op: share
+    invokers: { human: true, agent: false, lens: false }
+  # lsp.install
+  - name: lsp.install_server
+    summary: "Download and install a language server (a Mason package) and register its binary. A person's decision: an agent's run becomes a proposal."
+    capability: lsp.install
+    op: install_server
+    confirm: always
+  - name: lsp.remove_server
+    summary: "Uninstall a language server: delete its files, manifest entry and registrations. A person's decision."
+    capability: lsp.install
+    op: remove_server
+    confirm: always
+  # metrics.read
+  - name: metric.scaffold
+    summary: "A starter for a new metric; writes nothing. Returns `scriptPath` + `script` (a Starlark gauge) and `projectYaml` (the measure, gauge and metric entries). Write the script, then add the entries with `oxplow.config.set` on `measures`, `gauges` and `metrics` (a gauge runs a program, so a person confirms it)."
+    capability: metrics.read
+    op: scaffold
+  # metrics.write
+  - name: metric.enable
+    summary: "Turn metrics on or off in this project (.oxplow/project.yaml `metrics:`); logged as config.changed, undo restores the previous list."
+    capability: metrics.write
+    op: enable
+  - name: metric.rebuild
+    summary: "Rebuild code metrics over the whole tree: run every gauge that needs a baseline (every gauge with `force`) over the latest snapshot. Reports how many ran and which failed."
+    capability: metrics.write
+    op: rebuild
+  - name: metric.record
+    summary: "Record an asserted number for a metric (provenance `asserted`): a value oxplow didn't compute, like a CI import. The metric needs a source measure and must not be a `count`; the fact is stamped to match the metric's own filter."
+    capability: metrics.write
+    op: record
+  # providers.sync
+  - name: provider.sync
+    summary: "Read a provider instance's collectors now (all, or one), restating the items it tracks (runs the provider process, a system the bus doesn't own)."
+    capability: providers.sync
+    op: sync
+    lifecycle: experimental
+  # streams.write
+  - name: stream.rename
+    summary: "Rename a stream (`stream:str1`)."
+    capability: streams.write
+    op: rename
+  - name: stream.set_prompt
+    summary: "Set (or clear) the text appended to every agent prompt in a stream. A person's: it steers the agents."
+    capability: streams.write
+    op: set_prompt
+    invokers: { human: true, agent: false, lens: true }
+  # test_runs.write
+  - name: test.record_run
+    summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run is the thread's open effort's. Returns `{ recorded, observationId }`."
+    capability: test_runs.write
+    op: record_run
+  # threads.write
+  - name: thread.close
+    summary: "Close a thread (`thread:thr12`) — history, reopenable. Its open effort closes, and an ACP thread's agent session stops with it. An agent closes only its own thread."
+    capability: threads.write
+    op: close
+  - name: thread.create
+    summary: "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`), running the same agent. It becomes the stream's writer when it has none, else joins the queue."
+    capability: threads.write
+    op: create
+  - name: thread.demote
+    summary: "Move a stream's writer back into the queue, leaving the stream with no writer. A person's."
+    capability: threads.write
+    op: demote
+    invokers: { human: true, agent: false, lens: true }
+  - name: thread.promote
+    summary: "Make a thread its stream's writer (the one thread whose agent may change the worktree); the current writer joins the queue. A person's."
+    capability: threads.write
+    op: promote
+    invokers: { human: true, agent: false, lens: true }
+  - name: thread.rename
+    summary: "Rename a thread (`thread:thr12`)."
+    capability: threads.write
+    op: rename
+  - name: thread.reopen
+    summary: "Reopen a closed thread (`thread:thr12`); it joins its stream's queue. An agent reopens only its own thread."
+    capability: threads.write
+    op: reopen
+  - name: thread.reorder
+    summary: "Reorder a stream's threads (`order`: thread refs in their new order)."
+    capability: threads.write
+    op: reorder
+    invokers: { human: true, agent: false, lens: true }
+  - name: thread.set_prompt
+    summary: "Set (or clear) the text appended to a thread's agent prompt. A person's: it steers the agent."
+    capability: threads.write
+    op: set_prompt
+    invokers: { human: true, agent: false, lens: true }
+  # vcs.remote
+  - name: vcs.fetch
+    summary: "Fetch from a remote."
+    capability: vcs.remote
+    op: fetch
+    invokers: { human: true, agent: false, lens: false }
+  - name: vcs.pull
+    summary: "Pull into the stream's branch (its upstream, or a named remote branch)."
+    capability: vcs.remote
+    op: pull
+    invokers: { human: true, agent: false, lens: false }
+    ui: {"label": "Pull Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true}
+  - name: vcs.push
+    summary: "Push the stream's branch (to its upstream, or a named remote branch)."
+    capability: vcs.remote
+    op: push
+    invokers: { human: true, agent: false, lens: false }
+    ui: {"label": "Push Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true}
+  # vcs.write
+  - name: git.cherry_pick
+    summary: "Apply one commit onto the stream's branch."
+    capability: vcs.write
+    op: cherry_pick
+    invokers: { human: true, agent: false, lens: false }
+  - name: git.ignore
+    summary: "Add a pattern to the workspace's `.gitignore`."
+    capability: vcs.write
+    op: ignore
+    invokers: { human: true, agent: false, lens: false }
+  - name: git.rebase
+    summary: "Rebase the stream's branch onto a revision (rewrites its commits)."
+    capability: vcs.write
+    op: rebase
+    invokers: { human: true, agent: false, lens: false }
+    confirm: destructive
+  - name: git.revert
+    summary: "Commit the inverse of one commit onto the stream's branch."
+    capability: vcs.write
+    op: revert
+    invokers: { human: true, agent: false, lens: false }
+    confirm: destructive
+  - name: vcs.checkout_branch
+    summary: "Switch the stream's workspace to a branch (creating it with `create`)."
+    capability: vcs.write
+    op: checkout_branch
+    invokers: { human: true, agent: false, lens: false }
+  - name: vcs.commit
+    summary: "Commit the stream's changes (untracked files too, unless `include_untracked: false`); returns the new revision."
+    capability: vcs.write
+    op: commit
+    invokers: { human: true, agent: false, lens: false }
+  - name: vcs.delete_branch
+    summary: "Delete a branch (`force` even when unmerged)."
+    capability: vcs.write
+    op: delete_branch
+    invokers: { human: true, agent: false, lens: false }
+    confirm: destructive
+  - name: vcs.discard
+    summary: "Throw away the workspace's changes to paths, back to the head's version."
+    capability: vcs.write
+    op: discard
+    invokers: { human: true, agent: false, lens: false }
+    confirm: destructive
+  - name: vcs.merge
+    summary: "Merge a revision into the stream's branch; the result lists any conflicts left after oxplow's smart merge."
+    capability: vcs.write
+    op: merge
+    invokers: { human: true, agent: false, lens: false }
+    confirm: destructive
+  - name: vcs.rename_branch
+    summary: "Rename a branch."
+    capability: vcs.write
+    op: rename_branch
+    invokers: { human: true, agent: false, lens: false }
+  - name: vcs.resolve_conflict
+    summary: "Settle one conflicted path: take `ours`, `theirs`, or `auto` (smart merge)."
+    capability: vcs.write
+    op: resolve_conflict
+    invokers: { human: true, agent: false, lens: false }
+  - name: vcs.stage
+    summary: "Stage paths for the next commit."
+    capability: vcs.write
+    op: stage
+    invokers: { human: true, agent: false, lens: false }
+  # work_items.write
+  - name: work_item.comment
+    summary: "Comment on a work item (oxplow: a note shown with the task)."
+    capability: work_items.write
+    op: comment
+    needs: [work_items.comments]
+  - name: work_item.create
+    summary: "File a work item on the active tracker (the one the person chose), optionally straight into a state. `thread` is the thread it's filed on: absent, an agent's own (a person's lands on the backlog). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
+    capability: work_items.write
+    op: create
+    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "page:new-task"}
+  - name: work_item.delete
+    summary: "Delete a work item."
+    capability: work_items.write
+    op: delete
+    confirm: destructive
+    needs: [work_items.delete]
+  - name: work_item.link
+    summary: "Link one work item to another of the same provider, by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to)."
+    capability: work_items.write
+    op: link
+    needs: [work_items.links]
+  - name: work_item.move
+    summary: "Move a work item to a thread's list or the backlog (at the end, or before/after an item there)."
+    capability: work_items.write
+    op: move
+    needs: [work_items.lists]
+  - name: work_item.reorder
+    summary: "Put a work item before or after another on its list (neither: at its end)."
+    capability: work_items.write
+    op: reorder
+    needs: [work_items.ordering]
+  - name: work_item.transition
+    summary: "Move a work item to a canonical state (todo, in_progress, blocked, done, canceled), optionally naming the provider's own state."
+    capability: work_items.write
+    op: transition
+  - name: work_item.update
+    summary: "Edit a work item's title, body, parent or native fields and, optionally, move it to a state — all in one run (see oxplow.work_item.transition for the state's effects). On oxplow the result carries `link_warnings` for the body's `[[…]]` links."
+    capability: work_items.write
+    op: update
+  # worktrees.write
+  - name: stream.adopt_worktree
+    summary: "Make an existing worktree of this repository a stream. A person's."
+    capability: worktrees.write
+    op: adopt_worktree
+    invokers: { human: true, agent: false, lens: false }
+  - name: stream.archive
+    summary: "Archive a stream and its threads (`delete_worktree` also removes its working copy from disk). Refused while an agent is running in it. A person's, confirmed."
+    capability: worktrees.write
+    op: archive
+    invokers: { human: true, agent: false, lens: false }
+    confirm: destructive
+  - name: stream.create_worktree
+    summary: "Create a stream on a new worktree beside the project (`git worktree add`), on a new branch forked from `branch_source`. A person's."
+    capability: worktrees.write
+    op: create_worktree
+    invokers: { human: true, agent: false, lens: false }
+    ui: {"label": "New Stream…", "group": "Tasks", "keywords": ["worktree", "branch"], "form": "page:new-stream"}

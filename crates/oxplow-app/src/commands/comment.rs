@@ -8,6 +8,7 @@
 //! comment's anchor is `oxplow.knowledge.relocate_comment`: recorded when the
 //! anchor moved, nothing when it is where it was.
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::comment_store::{
@@ -16,29 +17,21 @@ use oxplow_db::comment_store::{
 };
 use oxplow_domain::refs::build::{stream_ref, thread_ref};
 use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, CommentId,
-    CommentIntent, CommentStatus, CommentTarget, CommentThread, Confirm, Invokers, Lifecycle,
-    StreamId, ThreadId,
+    Actor, CommandCall, CommandError, CommentId, CommentIntent, CommentStatus, CommentTarget,
+    CommentThread, StreamId, ThreadId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::thread::agent_scope;
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Handler, HandlerOutput, TxCtx};
 
 pub const ADD: &str = "oxplow.knowledge.add_comment";
 pub const REPLY: &str = "oxplow.knowledge.reply_comment";
 pub const UPDATE: &str = "oxplow.knowledge.update_comment";
 pub const DELETE: &str = "oxplow.knowledge.delete_comment";
 pub const RELOCATE: &str = "oxplow.knowledge.relocate_comment";
-
-/// A person, or a lens acting for one.
-const PEOPLE: Invokers = Invokers {
-    human: true,
-    agent: false,
-    lens: true,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -192,42 +185,13 @@ fn schema<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-fn spec(
-    name: &str,
-    summary: &str,
-    schema: Value,
-    invokers: Invokers,
-    confirm: Confirm,
-    undoable: bool,
-) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers,
-        confirm,
-        undoable,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 /// `oxplow.knowledge.add_comment`: a comment with its first message.
-pub fn add_command() -> Command {
-    Command::new(
-        spec(
-            ADD,
-            "Comment on a span of a page (its `target`), with a first message. `intent`: \
-             `note` (the agent leaves it alone) or `followup` (the agent should act on it). \
-             An agent comments on its own stream, in its own thread.",
-            schema::<AddInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            false,
-        ),
+pub fn add_op() -> Op {
+    Op::new(
+        "knowledge.write",
+        "add_comment",
+        schema::<AddInput>(),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: AddInput = parse(input)?;
             let stream = stream_of(&input.stream)?;
@@ -270,20 +234,15 @@ pub fn add_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.knowledge.add_comment is a valid command")
 }
 
 /// `knowledge.reply_comment { comment, body }`.
-pub fn reply_command() -> Command {
-    Command::new(
-        spec(
-            REPLY,
-            "Reply on a comment (`cmt12`).",
-            schema::<ReplyInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            false,
-        ),
+pub fn reply_op() -> Op {
+    Op::new(
+        "knowledge.write",
+        "reply_comment",
+        schema::<ReplyInput>(),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ReplyInput = parse(input)?;
             let id = comment_id(&input.comment)?;
@@ -297,23 +256,17 @@ pub fn reply_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.knowledge.reply_comment is a valid command")
 }
 
 /// `knowledge.update_comment { comment, intent?, status?, quote? +
 /// selectors_json? }`: its intent, open/resolved, or a relink to a new
 /// span. Undone by what each was.
-pub fn update_command() -> Command {
-    Command::new(
-        spec(
-            UPDATE,
-            "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or \
-             re-attach it to a new span (`quote` and `selectors_json` together).",
-            schema::<UpdateInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            true,
-        ),
+pub fn update_op() -> Op {
+    Op::new(
+        "knowledge.write",
+        "update_comment",
+        schema::<UpdateInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: UpdateInput = parse(input)?;
             let id = comment_id(&input.comment)?;
@@ -361,21 +314,16 @@ pub fn update_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.knowledge.update_comment is a valid command")
 }
 
 /// `knowledge.delete_comment { comment }`: it and its messages. A
 /// person's, confirmed; not undoable.
-pub fn delete_command() -> Command {
-    Command::new(
-        spec(
-            DELETE,
-            "Delete a comment and its messages (`cmt12`). A person's, confirmed.",
-            schema::<CommentInput>(),
-            PEOPLE,
-            Confirm::Destructive,
-            false,
-        ),
+pub fn delete_op() -> Op {
+    Op::new(
+        "knowledge.write",
+        "delete_comment",
+        schema::<CommentInput>(),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: CommentInput = parse(input)?;
             let id = comment_id(&input.comment)?;
@@ -388,7 +336,6 @@ pub fn delete_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.knowledge.delete_comment is a valid command")
 }
 
 /// `knowledge.relocate_comment { comment, selectors_json, orphaned }`:
@@ -396,18 +343,12 @@ pub fn delete_command() -> Command {
 /// now (or not), stores where. Not a relink — that is a person choosing a
 /// new span (`update_comment`). An anchor already where it was changes
 /// nothing and leaves no record (`HandlerOutput::unchanged`).
-pub fn relocate_command() -> Command {
-    Command::new(
-        spec(
-            RELOCATE,
-            "Store where a comment's quote (`cmt12`) sits in its page's content now \
-             (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it \
-             re-finds the quote.",
-            schema::<RelocateInput>(),
-            PEOPLE,
-            Confirm::Never,
-            false,
-        ),
+pub fn relocate_op() -> Op {
+    Op::new(
+        "knowledge.write",
+        "relocate_comment",
+        schema::<RelocateInput>(),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RelocateInput = parse(input)?;
             let id = comment_id(&input.comment)?;
@@ -427,17 +368,16 @@ pub fn relocate_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.knowledge.relocate_comment is a valid command")
 }
 
 /// The comment commands, for the bus.
-pub fn commands() -> Vec<Command> {
+pub fn ops() -> Vec<Op> {
     vec![
-        add_command(),
-        reply_command(),
-        update_command(),
-        delete_command(),
-        relocate_command(),
+        add_op(),
+        reply_op(),
+        update_op(),
+        delete_op(),
+        relocate_op(),
     ]
 }
 

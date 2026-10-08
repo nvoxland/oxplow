@@ -79,7 +79,7 @@ fn take_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
 /// oxplow's tasks over the project's database.
 struct Tasks {
     db: Database,
-    bus: CommandBus,
+    bus: Arc<CommandBus>,
     actor: Actor,
 }
 
@@ -97,12 +97,12 @@ impl Tasks {
         ));
         // No `with_capabilities`: every registered command is offered,
         // whatever the project has active.
-        let bus = CommandBus::new(
+        let bus = Arc::new(CommandBus::new(
             db.clone(),
             log,
             Arc::new(oxplow_app::agent_policy::AgentPolicy),
             pump,
-        );
+        ));
         let work_items =
             WorkItemsRegistry::new(Arc::new(|| oxplow_app::work_items::PROVIDER.to_string()));
         work_items.register(oxplow_app::work_items::oxplow_provider());
@@ -111,15 +111,17 @@ impl Tasks {
             vcs: Arc::new(oxplow_app::vcs::GitProvider),
         };
         use oxplow_app::commands::work_item as w;
-        for command in [
-            w::command(work_items.clone()),
-            w::create_command(work_items.clone(), links.clone()),
-            w::update_command(work_items.clone(), links),
-            w::link_command(work_items.clone()),
-            w::comment_command(work_items.clone()),
+        for op in [
+            w::transition_op(work_items.clone()),
+            w::create_op(work_items.clone(), links.clone()),
+            w::update_op(work_items.clone(), links),
+            w::link_op(work_items.clone()),
+            w::comment_op(work_items.clone()),
         ] {
-            bus.register(command).map_err(|e| e.to_string())?;
+            bus.add_op(op).map_err(|e| e.to_string())?;
         }
+        // Declared as oxplow's own commands in its foundation extension.
+        oxplow_app::extension_commands::register_declared(&bus);
         let actor = match thread {
             Some(t) => Actor::Agent {
                 thread_id: Some(

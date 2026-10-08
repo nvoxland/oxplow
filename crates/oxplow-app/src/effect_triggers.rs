@@ -130,22 +130,13 @@ impl EffectTriggers {
 }
 
 /// Register the consumer on `svc`'s pump (boot, before it spawns), and
-/// the commands a person runs effects with (`oxplow.effect.retry`,
-/// `oxplow.effect.backfill` and its plan): they hold `Services` as the consumer
-/// does.
+/// start the operations a person runs effects with (`oxplow.effect.retry`,
+/// `oxplow.effect.backfill` and its plan): they hold `Services` as the
+/// consumer does.
 pub fn register(svc: &Arc<Services>) {
     svc.event_pump
         .register_async(Arc::new(EffectTriggers::new(Arc::downgrade(svc))));
-    use crate::commands::effect;
-    for command in [
-        effect::retry_command(Arc::downgrade(svc)),
-        effect::backfill_command(Arc::downgrade(svc)),
-        effect::backfill_plan_command(Arc::downgrade(svc)),
-    ] {
-        svc.commands
-            .register(command)
-            .expect("the effect commands register");
-    }
+    svc.effect_services.fill(svc);
 }
 
 /// The enabled extensions' effects, in the primary worktree (where, like

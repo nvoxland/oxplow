@@ -19,6 +19,7 @@
 //! audit and `config.changed` then describe a change the file lacks —
 //! rare (a full disk), visible, and fixed by setting the key again.
 
+use crate::commands::ops::Op;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -27,15 +28,12 @@ use oxplow_config::{
     personal_value, with_personal_key, write_personal_key, write_project_key, OxplowConfig,
 };
 use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2, ConfigLayer};
-use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Envelope,
-    InputValidator, Invokers, Lifecycle,
-};
+use oxplow_domain::{Actor, CommandCall, CommandError, Confirm, Envelope, InputValidator};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput};
+use super::{Handler, HandlerOutput};
 use crate::events::EventBus;
 use crate::OxplowEvent;
 
@@ -159,23 +157,6 @@ pub struct KeyReport {
 
 fn schema_of<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
-}
-
-/// Every config write records its inverse; the reads have none.
-fn spec(name: &str, summary: &str, input_schema: Value, effect: CommandEffect) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema,
-        invokers: Invokers::ALL,
-        confirm: Confirm::Never,
-        undoable: effect == CommandEffect::Write,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect,
-        needs: Vec::new(),
-        ui: None,
-    }
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(input: Value) -> Result<T, CommandError> {
@@ -333,17 +314,14 @@ fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>, laye
 }
 
 /// The four `config.*` commands over `target`.
-pub fn commands(target: ConfigTarget) -> Vec<Command> {
+pub fn ops(target: ConfigTarget) -> Vec<Op> {
     let list = {
         let t = target.clone();
-        Command::new(
-            spec(
-                LIST_KEYS,
-                "Every .oxplow/project.yaml key with its doc, value schema, current value and \
-                 whether only a person may set it.",
-                schema_of::<NoInput>(),
-                CommandEffect::Read,
-            ),
+        Op::new(
+            "config.read",
+            "list_keys",
+            schema_of::<NoInput>(),
+            false,
             Handler::Tx(Arc::new(move |_ctx: &super::TxCtx<'_>, input| {
                 parse::<NoInput>(input)?;
                 let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
@@ -357,17 +335,14 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 })
             })),
         )
-        .expect("config.list_keys registers")
     };
     let get = {
         let t = target.clone();
-        Command::new(
-            spec(
-                GET,
-                "One .oxplow/project.yaml key: its doc, value schema and current value.",
-                schema_of::<KeyInput>(),
-                CommandEffect::Read,
-            ),
+        Op::new(
+            "config.read",
+            "get",
+            schema_of::<KeyInput>(),
+            false,
             Handler::Tx(Arc::new(move |_ctx: &super::TxCtx<'_>, input| {
                 let input: KeyInput = parse(input)?;
                 let key = known_key(&input.key)?;
@@ -378,49 +353,36 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 })
             })),
         )
-        .expect("config.get registers")
     };
     let set = {
         let t = target.clone();
-        Command::new(
-            spec(
-                SET,
-                "Set one .oxplow/project.yaml key — or, with `layer: personal`, a person's own \
-                 choice in .oxplow/personal.yaml (only `activeProviders`). The value is \
-                 validated against the key's schema and the file's own rules, written to the \
-                 file, and logged as config.changed; undo restores the prior value. Human-only \
-                 keys need a person's confirmation.",
-                schema_of::<SetInput>(),
-                CommandEffect::Write,
-            ),
+        Op::new(
+            "config.write",
+            "set",
+            schema_of::<SetInput>(),
+            true,
             Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
                 let actor = ctx.actor;
                 let input: SetInput = parse(input)?;
                 change(&t, actor, &input.key, Some(input.value), input.layer)
             })),
         )
-        .and_then(|c| c.with_confirm_for(Arc::new(confirm_for_key)))
-        .expect("config.set registers")
+        .with_confirm_for(Arc::new(confirm_for_key))
     };
     let unset = {
         let t = target;
-        Command::new(
-            spec(
-                UNSET,
-                "Remove one .oxplow/project.yaml key so it returns to its default (or, with \
-                 `layer: personal`, a person's own choice); logged as config.changed, undo \
-                 restores it.",
-                schema_of::<UnsetInput>(),
-                CommandEffect::Write,
-            ),
+        Op::new(
+            "config.write",
+            "unset",
+            schema_of::<UnsetInput>(),
+            true,
             Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
                 let actor = ctx.actor;
                 let input: UnsetInput = parse(input)?;
                 change(&t, actor, &input.key, None, input.layer)
             })),
         )
-        .and_then(|c| c.with_confirm_for(Arc::new(confirm_for_key)))
-        .expect("config.unset registers")
+        .with_confirm_for(Arc::new(confirm_for_key))
     };
     vec![list, get, set, unset]
 }
@@ -435,7 +397,7 @@ mod tests {
     use oxplow_db::{Database, SqliteEventLogStore};
     use oxplow_domain::ThreadId;
 
-    fn setup(initial_yaml: Option<&str>) -> (tempfile::TempDir, ConfigTarget, CommandBus) {
+    fn setup(initial_yaml: Option<&str>) -> (tempfile::TempDir, ConfigTarget, Arc<CommandBus>) {
         let dir = tempfile::tempdir().unwrap();
         if let Some(yaml) = initial_yaml {
             std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
@@ -454,10 +416,11 @@ mod tests {
             oxplow_domain::vocabulary::VocabularyHandle::core(),
         );
         let pump = Arc::new(EventPump::new(db.clone(), log.clone(), vec![]));
-        let bus = CommandBus::new(db, log, Arc::new(AgentPolicy), pump);
-        for c in commands(target.clone()) {
-            bus.register(c).unwrap();
+        let bus = Arc::new(CommandBus::new(db, log, Arc::new(AgentPolicy), pump));
+        for op in ops(target.clone()) {
+            bus.add_op(op).unwrap();
         }
+        crate::extension_commands::register_declared(&bus);
         (dir, target, bus)
     }
 
@@ -480,9 +443,9 @@ mod tests {
     #[test]
     fn set_is_retry_safe_and_writes_only_after_commit() {
         let (dir, target, _bus) = setup(None);
-        let set = commands(target.clone())
+        let set = ops(target.clone())
             .into_iter()
-            .find(|c| c.spec.id == SET)
+            .find(|o| o.name == "set")
             .unwrap();
         let Handler::Tx(handler) = &set.handler else {
             panic!("config.set is a Tx handler")

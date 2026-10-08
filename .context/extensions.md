@@ -2072,8 +2072,9 @@ its latest attempt's (`v_effect_run.latest`). The live consumer makes one
 attempt and never another; a failed one is sent again **by itself** only
 when that is safe (below). Otherwise a failed reaction is attempted
 again only by a person: `oxplow.effect.retry { effect, event }` (`commands/effect.rs` —
-human-only, `Confirm::Always`, `External`, registered with the consumer
-at boot) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
+human-only, `Confirm::Always`, `External`; an `effects.run` operation
+declared in `oxplow-foundation`, its services filled when the consumer
+registers at boot — `ServicesSlot`) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
 the same steps as a live reaction from the loop guard on, as the next
 attempt:
 - the reaction's latest attempt must be `failed` (`Invalid` otherwise: one
@@ -2215,6 +2216,14 @@ commands:
       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, answers: { sql.read: [[]] }, refuses: no such }
 ```
+
+A command may instead be **backed by an operation of a host capability**
+([commands.md](./commands.md) "Host capabilities" → "Operations"):
+`capability: bookmarks.write` + `op: set` in place of `entry:` — no
+`input_schema`, `effect` or `examples` (the operation's and its
+capability's class), the capability implied in `needs`; the bus refuses
+to register one naming an operation that isn't there. oxplow's own
+commands are declared this way in the required `oxplow-foundation`.
 
 A shared extension's commands are `Stable`, a private one's
 `Experimental`. `transform` returns `{ commands: [{ name, input }], result?, events? }`, or

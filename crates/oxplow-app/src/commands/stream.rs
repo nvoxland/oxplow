@@ -6,33 +6,24 @@
 //! Renaming and the prompt are `Tx` over the stream row. A stream is
 //! named by ref (`stream:str1`).
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::stream_store::{get_tx, upsert_tx};
 use oxplow_domain::refs::build::stream_ref;
-use oxplow_domain::{
-    Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-    Stream, StreamId, Timestamp,
-};
+use oxplow_domain::{CommandCall, CommandError, Stream, StreamId, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::thread::agent_scope;
-use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
+use super::{Handler, HandlerOutput, Invocation, TxCtx};
 
 pub const CREATE_WORKTREE: &str = "oxplow.stream.create_worktree";
 pub const ADOPT_WORKTREE: &str = "oxplow.stream.adopt_worktree";
 pub const ARCHIVE: &str = "oxplow.stream.archive";
 pub const RENAME: &str = "oxplow.stream.rename";
 pub const SET_PROMPT: &str = "oxplow.stream.set_prompt";
-
-/// A person, or a lens acting for one.
-const PEOPLE: Invokers = Invokers {
-    human: true,
-    agent: false,
-    lens: true,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -158,48 +149,6 @@ fn schema<T: JsonSchema>() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-fn person_external(
-    name: &str,
-    summary: &str,
-    schema: serde_json::Value,
-    confirm: Confirm,
-) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::HUMAN_ONLY,
-        confirm,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::External,
-        effect: CommandEffect::Write,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
-fn row_spec(
-    name: &str,
-    summary: &str,
-    schema: serde_json::Value,
-    invokers: Invokers,
-) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers,
-        confirm: Confirm::Never,
-        undoable: true,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 /// A new stream's capture service starts, so its edits land in snapshots.
 fn start_capture(deps: &StreamDeps, stream: &Stream) {
     if let Some(capture) = deps.snapshot_captures.register(stream) {
@@ -209,15 +158,12 @@ fn start_capture(deps: &StreamDeps, stream: &Stream) {
 }
 
 /// `stream.create_worktree { slug, title, branch, branch_source }`.
-pub fn create_worktree_command(deps: StreamDeps) -> Command {
-    Command::new(
-        person_external(
-            CREATE_WORKTREE,
-            "Create a stream on a new worktree beside the project (`git worktree add`), on a \
-             new branch forked from `branch_source`. A person's.",
-            schema::<CreateWorktreeInput>(),
-            Confirm::Never,
-        ),
+pub fn create_worktree_op(deps: StreamDeps) -> Op {
+    Op::new(
+        "worktrees.write",
+        "create_worktree",
+        schema::<CreateWorktreeInput>(),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
@@ -232,25 +178,15 @@ pub fn create_worktree_command(deps: StreamDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.stream.create_worktree is a valid command")
-    .with_ui(oxplow_domain::CommandUi {
-        label: "New Stream…".into(),
-        group: Some("Tasks".into()),
-        keywords: vec!["worktree".into(), "branch".into()],
-        form: Some("page:new-stream".into()),
-        ..Default::default()
-    })
 }
 
 /// `stream.adopt_worktree { path, title }`.
-pub fn adopt_worktree_command(deps: StreamDeps) -> Command {
-    Command::new(
-        person_external(
-            ADOPT_WORKTREE,
-            "Make an existing worktree of this repository a stream. A person's.",
-            schema::<AdoptWorktreeInput>(),
-            Confirm::Never,
-        ),
+pub fn adopt_worktree_op(deps: StreamDeps) -> Op {
+    Op::new(
+        "worktrees.write",
+        "adopt_worktree",
+        schema::<AdoptWorktreeInput>(),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
@@ -265,22 +201,18 @@ pub fn adopt_worktree_command(deps: StreamDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.stream.adopt_worktree is a valid command")
 }
 
 /// `stream.archive { stream, delete_worktree? }`: refused while an agent
 /// runs in one of its threads; its threads go with it — their open efforts
 /// close at a snapshot taken first — and its working copy when asked.
 /// Destructive: a person confirms it.
-pub fn archive_command(deps: StreamDeps) -> Command {
-    Command::new(
-        person_external(
-            ARCHIVE,
-            "Archive a stream and its threads (`delete_worktree` also removes its working copy \
-             from disk). Refused while an agent is running in it. A person's, confirmed.",
-            schema::<ArchiveInput>(),
-            Confirm::Destructive,
-        ),
+pub fn archive_op(deps: StreamDeps) -> Op {
+    Op::new(
+        "worktrees.write",
+        "archive",
+        schema::<ArchiveInput>(),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
@@ -347,19 +279,16 @@ pub fn archive_command(deps: StreamDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.stream.archive is a valid command")
 }
 
 /// `stream.rename { stream, title }`; an agent renames only its own
 /// stream. Undone by renaming it back.
-pub fn rename_command() -> Command {
-    Command::new(
-        row_spec(
-            RENAME,
-            "Rename a stream (`stream:str1`).",
-            schema::<RenameInput>(),
-            Invokers::ALL,
-        ),
+pub fn rename_op() -> Op {
+    Op::new(
+        "streams.write",
+        "rename",
+        schema::<RenameInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
             let id = stream_of(&input.stream)?;
@@ -386,20 +315,16 @@ pub fn rename_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.stream.rename is a valid command")
 }
 
 /// `stream.set_prompt { stream, prompt? }` — a person's: it steers every
 /// agent in the stream. Undone by setting it back.
-pub fn set_prompt_command() -> Command {
-    Command::new(
-        row_spec(
-            SET_PROMPT,
-            "Set (or clear) the text appended to every agent prompt in a stream. A person's: it \
-             steers the agents.",
-            schema::<SetPromptInput>(),
-            PEOPLE,
-        ),
+pub fn set_prompt_op() -> Op {
+    Op::new(
+        "streams.write",
+        "set_prompt",
+        schema::<SetPromptInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: SetPromptInput = parse(input)?;
             let mut stream = load(ctx, stream_of(&input.stream)?)?;
@@ -418,17 +343,16 @@ pub fn set_prompt_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.stream.set_prompt is a valid command")
 }
 
 /// The stream commands, for the bus.
-pub fn commands(deps: StreamDeps) -> Vec<Command> {
+pub fn ops(deps: StreamDeps) -> Vec<Op> {
     vec![
-        create_worktree_command(deps.clone()),
-        adopt_worktree_command(deps.clone()),
-        archive_command(deps),
-        rename_command(),
-        set_prompt_command(),
+        create_worktree_op(deps.clone()),
+        adopt_worktree_op(deps.clone()),
+        archive_op(deps),
+        rename_op(),
+        set_prompt_op(),
     ]
 }
 

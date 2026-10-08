@@ -12,21 +12,19 @@
 //! After a run the stream's workspace (and, when refs moved, its refs) is
 //! announced, the way the watchers would.
 
+use crate::commands::ops::Op;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxplow_domain::vcs::{ConflictChoice, OpOutcome, RemoteBranch, Vcs, VcsError};
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers, Lifecycle,
-    StreamId,
-};
+use oxplow_domain::{CommandError, DomainError, StreamId};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput, Invocation};
+use super::{Handler, HandlerOutput, Invocation};
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 use crate::vcs::GitProvider;
 use crate::worktrees::WorktreeRouter;
@@ -54,12 +52,6 @@ enum Touched {
     AllRefs,
 }
 
-const PERSON_ONLY: Invokers = Invokers {
-    human: true,
-    agent: false,
-    lens: false,
-};
-
 fn vcs_err(e: VcsError) -> CommandError {
     CommandError::from(DomainError::from(e))
 }
@@ -79,38 +71,27 @@ macro_rules! stream_input {
     };
 }
 
-/// One VCS command: parse the input, resolve the stream's workspace
-/// strictly, run `op`, announce what it touched.
-fn command<I, F, Fut>(
+/// One VCS operation of `capability`: parse the input, resolve the
+/// stream's workspace strictly, run `op`, announce what it touched.
+fn vcs_op<I, F, Fut>(
+    capability: &str,
     name: &str,
-    summary: &str,
-    confirm: Confirm,
     touched: Touched,
     target: &VcsTarget,
     op: F,
-) -> Command
+) -> Op
 where
     I: DeserializeOwned + JsonSchema + StreamInput + Send + 'static,
     F: Fn(VcsTarget, PathBuf, I) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<Value, CommandError>> + Send + 'static,
 {
-    let spec = CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: serde_json::to_value(schemars::schema_for!(I)).expect("schema serializes"),
-        invokers: PERSON_ONLY,
-        confirm,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::External,
-        effect: CommandEffect::Write,
-        needs: Vec::new(),
-        ui: None,
-    };
     let target = target.clone();
     let op = Arc::new(op);
-    Command::new(
-        spec,
+    Op::new(
+        capability,
+        name,
+        serde_json::to_value(schemars::schema_for!(I)).expect("schema serializes"),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input: Value| {
             let target = target.clone();
             let op = op.clone();
@@ -138,7 +119,6 @@ where
             })
         })),
     )
-    .unwrap_or_else(|e| panic!("{name} registers: {e:?}"))
 }
 
 async fn announce(target: &VcsTarget, stream: StreamId, touched: Touched) {
@@ -297,14 +277,12 @@ stream_input!(
     IgnoreInput
 );
 
-pub fn commands(target: VcsTarget) -> Vec<Command> {
+pub fn ops(target: VcsTarget) -> Vec<Op> {
     let t = &target;
     vec![
-        command(
-            "oxplow.vcs.commit",
-            "Commit the stream's changes (untracked files too, unless \
-             `include_untracked: false`); returns the new revision.",
-            Confirm::Never,
+        vcs_op(
+            "vcs.write",
+            "commit",
             Touched::Refs,
             t,
             |t, ws, i: CommitInput| async move {
@@ -322,10 +300,9 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 Ok(json!({ "success": true, "revision": format!("{}:{rev}", t.vcs.rev_kind()) }))
             },
         ),
-        command(
-            "oxplow.vcs.stage",
-            "Stage paths for the next commit.",
-            Confirm::Never,
+        vcs_op(
+            "vcs.write",
+            "stage",
             Touched::Workspace,
             t,
             |t, ws, i: PathsInput| async move {
@@ -333,10 +310,9 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 done()
             },
         ),
-        command(
-            "oxplow.vcs.discard",
-            "Throw away the workspace's changes to paths, back to the head's version.",
-            Confirm::Destructive,
+        vcs_op(
+            "vcs.write",
+            "discard",
             Touched::Workspace,
             t,
             |t, ws, i: PathsInput| async move {
@@ -344,10 +320,9 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 done()
             },
         ),
-        command(
-            "oxplow.vcs.fetch",
-            "Fetch from a remote.",
-            Confirm::Never,
+        vcs_op(
+            "vcs.remote",
+            "fetch",
             Touched::AllRefs,
             t,
             |t, ws, i: FetchInput| async move {
@@ -359,57 +334,38 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 )
             },
         ),
-        command(
-            "oxplow.vcs.pull",
-            "Pull into the stream's branch (its upstream, or a named remote branch).",
-            Confirm::Never,
+        vcs_op(
+            "vcs.remote",
+            "pull",
             Touched::Refs,
             t,
             |t, ws, i: RemoteBranchInput| async move {
                 let from = i.remote_branch()?;
                 outcome(t.vcs.pull(&ws, from).await.map_err(vcs_err)?)
             },
-        )
-        .with_ui(oxplow_domain::CommandUi {
-            label: "Pull Changes".into(),
-            group: Some("Git".into()),
-            input: Some(serde_json::json!({ "stream": "{{stream}}" })),
-            background: true,
-            ..Default::default()
-        }),
-        command(
-            "oxplow.vcs.push",
-            "Push the stream's branch (to its upstream, or a named remote branch).",
-            Confirm::Never,
+        ),
+        vcs_op(
+            "vcs.remote",
+            "push",
             Touched::AllRefs,
             t,
             |t, ws, i: RemoteBranchInput| async move {
                 let to = i.remote_branch()?;
                 outcome(t.vcs.push(&ws, to).await.map_err(vcs_err)?)
             },
-        )
-        .with_ui(oxplow_domain::CommandUi {
-            label: "Push Changes".into(),
-            group: Some("Git".into()),
-            input: Some(serde_json::json!({ "stream": "{{stream}}" })),
-            background: true,
-            ..Default::default()
-        }),
-        command(
-            "oxplow.vcs.merge",
-            "Merge a revision into the stream's branch; the result lists any conflicts \
-             left after oxplow's smart merge.",
-            Confirm::Destructive,
+        ),
+        vcs_op(
+            "vcs.write",
+            "merge",
             Touched::Refs,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.vcs.merge(&ws, &i.rev).await.map_err(vcs_err)?)
             },
         ),
-        command(
-            "oxplow.vcs.checkout_branch",
-            "Switch the stream's workspace to a branch (creating it with `create`).",
-            Confirm::Never,
+        vcs_op(
+            "vcs.write",
+            "checkout_branch",
             Touched::Refs,
             t,
             |t, ws, i: CheckoutInput| async move {
@@ -420,10 +376,9 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 done()
             },
         ),
-        command(
-            "oxplow.vcs.rename_branch",
-            "Rename a branch.",
-            Confirm::Never,
+        vcs_op(
+            "vcs.write",
+            "rename_branch",
             Touched::AllRefs,
             t,
             |t, ws, i: RenameBranchInput| async move {
@@ -434,10 +389,9 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 done()
             },
         ),
-        command(
-            "oxplow.vcs.delete_branch",
-            "Delete a branch (`force` even when unmerged).",
-            Confirm::Destructive,
+        vcs_op(
+            "vcs.write",
+            "delete_branch",
             Touched::AllRefs,
             t,
             |t, ws, i: DeleteBranchInput| async move {
@@ -448,10 +402,9 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 done()
             },
         ),
-        command(
-            "oxplow.vcs.resolve_conflict",
-            "Settle one conflicted path: take `ours`, `theirs`, or `auto` (smart merge).",
-            Confirm::Never,
+        vcs_op(
+            "vcs.write",
+            "resolve_conflict",
             Touched::Workspace,
             t,
             |t, ws, i: ResolveConflictInput| async move {
@@ -462,40 +415,36 @@ pub fn commands(target: VcsTarget) -> Vec<Command> {
                 done()
             },
         ),
-        command(
-            "oxplow.git.rebase",
-            "Rebase the stream's branch onto a revision (rewrites its commits).",
-            Confirm::Destructive,
+        vcs_op(
+            "vcs.write",
+            "rebase",
             Touched::Refs,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.rebase(&ws, &i.rev).await.map_err(vcs_err)?)
             },
         ),
-        command(
-            "oxplow.git.cherry_pick",
-            "Apply one commit onto the stream's branch.",
-            Confirm::Never,
+        vcs_op(
+            "vcs.write",
+            "cherry_pick",
             Touched::Refs,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.cherry_pick(&ws, &i.rev).await.map_err(vcs_err)?)
             },
         ),
-        command(
-            "oxplow.git.revert",
-            "Commit the inverse of one commit onto the stream's branch.",
-            Confirm::Destructive,
+        vcs_op(
+            "vcs.write",
+            "revert",
             Touched::Refs,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.revert(&ws, &i.rev).await.map_err(vcs_err)?)
             },
         ),
-        command(
-            "oxplow.git.ignore",
-            "Add a pattern to the workspace's `.gitignore`.",
-            Confirm::Never,
+        vcs_op(
+            "vcs.write",
+            "ignore",
             Touched::Workspace,
             t,
             |t, ws, i: IgnoreInput| async move {
