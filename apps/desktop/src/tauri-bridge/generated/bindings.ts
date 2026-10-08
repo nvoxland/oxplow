@@ -4623,6 +4623,12 @@ export type OxplowConfig = {
 	 */
 	personalActiveProviders: { [key in string]: string },
 	/**
+	 *  What a new thread starts with, a person's own (`newThreadSession`
+	 *  in `.oxplow/personal.yaml`): `ask` (the session picker), `none`, or
+	 *  an agent (`<harness>` / `<harness>:<acp agent>`). Unset means `ask`.
+	 */
+	personalNewThreadSession: string | null,
+	/**
 	 *  Core components no extension's replacement may take over
 	 *  (`replacementsOff: [work_item.board]`): oxplow's own shows there
 	 *  even when the active provider's extension replaces it.
