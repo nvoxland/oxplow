@@ -103,33 +103,16 @@ pub(crate) fn with_loose_refs(
         let Some(raw) = input.get(key).and_then(Value::as_str) else {
             continue;
         };
-        if raw.starts_with("work_item:") {
+        // A ref stays as it is; `parent_ref: ""` means no parent.
+        if raw.is_empty() || raw.starts_with("work_item:") {
             continue;
         }
-        let canonical =
-            canonical_ref(registry, raw).map_err(|m| invalid_at(&format!("/{key}"), m))?;
+        let canonical = registry
+            .loose_ref(raw)
+            .map_err(|m| invalid_at(&format!("/{key}"), m))?;
         input[key] = Value::String(canonical);
     }
     Ok(input)
-}
-
-/// The canonical ref of `raw`, a loose id of the active work list's.
-fn canonical_ref(registry: &WorkItemsRegistry, raw: &str) -> Result<String, String> {
-    let active = registry.active();
-    let pattern = registry.get(&active).ok().and_then(|p| p.id_pattern);
-    match pattern {
-        Some(p) if regex::Regex::new(&format!("^(?:{p})$")).is_ok_and(|r| r.is_match(raw)) => {
-            Ok(format!("work_item:{active}:{raw}"))
-        }
-        Some(p) => Err(format!(
-            "`{raw}` isn't a work item ref (work_item:<provider>:<id>) or an id of the active \
-             work list (`{p}`)"
-        )),
-        None => Err(format!(
-            "`{raw}` isn't a work item ref (work_item:<provider>:<id>), and the active work \
-             list declares no id of its own"
-        )),
-    }
 }
 
 fn invalid_at(field: &str, message: String) -> CommandError {
@@ -412,9 +395,9 @@ fn dispatching(
                 })
                 .transpose()?;
             let mut result = out.result;
+            // A body's links are checked when there is one to check.
             let body = match verb {
-                "create" => Some(input["body"].as_str().unwrap_or_default()),
-                "update" => input["body"].as_str(),
+                "create" | "update" => input["body"].as_str().filter(|b| !b.is_empty()),
                 _ => None,
             };
             if let (Some(links), Some(body), Value::Object(_)) = (&links, body, &result) {
@@ -1847,6 +1830,50 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string()
+    }
+
+    /// `parent_ref: ""` detaches an item from its parent, as the input
+    /// documents; undo puts the parent back.
+    #[tokio::test]
+    async fn an_empty_parent_ref_detaches_and_undo_reattaches() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let parent = work_item_ref(fx.task);
+        let child = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "child", "parent_ref": parent }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            task_row(&fx.svc, &child.result).await["parent_id"],
+            json!(fx.task)
+        );
+        let detached = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                UPDATE,
+                json!({ "ref": child.result["ref"], "parent_ref": "" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(task_row(&fx.svc, &child.result).await["parent_id"].is_null());
+        fx.svc
+            .commands
+            .undo(&Actor::Human, detached.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            task_row(&fx.svc, &child.result).await["parent_id"],
+            json!(fx.task)
+        );
     }
 
     /// P6.E1a: `oxplow.work_item.reorder` places an item before or after another

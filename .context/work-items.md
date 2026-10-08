@@ -89,8 +89,12 @@ async writes (tests) reach the interface only when restated
 provider each declared built-in names (`built_in_provider`, the factory:
 its features and id pattern from `capabilities::BUILT_INS`, its verbs
 the crate's) when services are built and at every `capabilities::refresh`,
-and unregisters `oxplow` when nothing declares it — the task data stays,
-and nothing reaches it.
+and unregisters it when nothing declares it — the task data stays, and
+nothing reaches it. A built-in whose items' refs carry a provider id
+(`BuiltIn.provider`: `oxplow:tasks` is `oxplow`, as every
+`work_item:oxplow:tsk<n>` says) is declared under that id and no other;
+`implementations.rs` refuses another, which would register a list that
+refuses its own items.
 
 **Page refs** for every list's item come from the interface: its body's
 mentions, its links (`work_item_link:<type>`, the list's own types) and
@@ -341,10 +345,11 @@ tasks `tsk\d+`, an external one its `providers:` entry's `id_pattern`).
 A work-item field (`ref`, `parent_ref`, `target`, `work_item`, and
 `reorder` / `move`'s refs) holding a loose id that matches the active
 list's is that list's item — `tsk12` is `work_item:oxplow:tsk12` while
-oxplow's tasks are active (`commands/work_item.rs` `with_loose_refs`, on
-every path: routing, the transaction, the provider; also `oxplow.effort.link` /
-`oxplow.effort.open`). One that doesn't match is `Invalid` at its field, naming
-both shapes. Free-text recognition (wikilinks, commit bodies) is still
+oxplow's tasks are active (`commands/work_item.rs` `with_loose_refs`,
+before routing, over `WorkItemsRegistry::loose_ref`, which compiles each
+list's pattern once; also `oxplow.effort.link` / `oxplow.effort.open`).
+One that doesn't match is `Invalid` at its field, naming both shapes; an
+empty `parent_ref` is left alone (it detaches). Free-text recognition (wikilinks, commit bodies) is still
 core's. The
 conformance suite runs with the provider under test active, and checks it. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and

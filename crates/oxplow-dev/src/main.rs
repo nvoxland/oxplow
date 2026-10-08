@@ -111,12 +111,8 @@ impl Tasks {
         let work_items =
             WorkItemsRegistry::new(Arc::new(|| oxplow_app::work_items::PROVIDER.to_string()));
         work_items.register(
-            oxplow_app::work_items::built_in_provider(
-                oxplow_app::work_items::BUILT_IN,
-                oxplow_app::work_items::PROVIDER,
-                &db,
-            )
-            .ok_or("oxplow's tasks aren't a built-in work list")?,
+            oxplow_app::work_items::built_in_provider(oxplow_app::work_items::BUILT_IN, &db)
+                .ok_or("oxplow's tasks aren't a built-in work list")?,
         );
         let links = oxplow_app::link_check::LinkDeps {
             project_dir: layout.project_dir.clone(),

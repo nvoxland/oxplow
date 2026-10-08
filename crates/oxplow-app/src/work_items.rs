@@ -28,19 +28,16 @@ pub const PROVIDER: &str = oxplow_domain::work_items::OXPLOW;
 /// oxplow's tasks' built-in entry (`capabilities::BUILT_INS`).
 pub const BUILT_IN: &str = "oxplow:tasks";
 
-/// A built-in work list's provider, by its entry (`capabilities::BUILT_INS`)
-/// and the id an extension declares it under: its features and ids as
-/// the built-in declares them, its verbs its own. `None` for an entry
-/// that isn't a work list.
-pub fn built_in_provider(
-    entry: &str,
-    id: &str,
-    db: &oxplow_db::Database,
-) -> Option<WorkItemsProvider> {
+/// A built-in work list's provider, by its entry (`capabilities::BUILT_INS`):
+/// registered under the provider id its refs carry, with its features and
+/// ids as the built-in declares them and its verbs its own. `None` for an
+/// entry that isn't a work list.
+pub fn built_in_provider(entry: &str, db: &oxplow_db::Database) -> Option<WorkItemsProvider> {
     let built_in = crate::capabilities::built_in(entry)?;
     if built_in.capability != "work_items" {
         return None;
     }
+    let id = built_in.provider?;
     let verbs: Arc<dyn WorkItemVerbs> = match entry {
         BUILT_IN => Arc::new(oxplow_tasks::OxplowTasks::new(db.clone())),
         _ => return None,
@@ -80,13 +77,14 @@ pub fn register_built_ins(
             .iter()
             .filter(|i| matches!(i.source, crate::capabilities::Source::BuiltIn(e) if e == b.entry))
             .collect();
-        for i in &named {
-            if let Some(provider) = built_in_provider(b.entry, &i.id, db) {
-                registry.register(provider);
+        match (named.is_empty(), b.provider) {
+            (false, _) => {
+                if let Some(provider) = built_in_provider(b.entry, db) {
+                    registry.register(provider);
+                }
             }
-        }
-        if named.is_empty() && b.entry == BUILT_IN {
-            registry.unregister(PROVIDER);
+            (true, Some(id)) => registry.unregister(id),
+            (true, None) => {}
         }
     }
 }
@@ -385,11 +383,8 @@ impl EventConsumer for WorkItemsProjection {
             .map_err(storage)?;
         }
         if let Some(links) = &item.links {
-            conn.execute(
-                "DELETE FROM work_item_link WHERE from_ref = ?1",
-                [&item.item_ref],
-            )
-            .map_err(storage)?;
+            // The set is restated whole, but a link already there keeps
+            // when it was made: only the ones the record dropped go.
             for l in links {
                 conn.execute(
                     "INSERT OR IGNORE INTO work_item_link (from_ref, to_ref, link_type, created_at)
@@ -398,6 +393,20 @@ impl EventConsumer for WorkItemsProjection {
                 )
                 .map_err(|e| DomainError::Invalid(format!("link `{}`: {e}", l.link_type)))?;
             }
+            let kept: Vec<String> = links
+                .iter()
+                .map(|l| format!("{}\n{}", l.target, l.link_type))
+                .collect();
+            conn.execute(
+                "DELETE FROM work_item_link
+                 WHERE from_ref = ?1
+                   AND to_ref || char(10) || link_type NOT IN (SELECT value FROM json_each(?2))",
+                rusqlite::params![
+                    item.item_ref,
+                    serde_json::to_string(&kept).unwrap_or_default()
+                ],
+            )
+            .map_err(storage)?;
         }
         if let Some(comments) = &item.comments {
             conn.execute(
@@ -595,6 +604,82 @@ mod tests {
     /// tsk1041: an outside tracker's item keeps the thread that filed it
     /// (the record's thread anchor, at its first record), so "This thread"
     /// lists it; a later restatement from elsewhere doesn't move it.
+    fn recorded_with_links(item_ref: &str, links: &[(&str, &str)]) -> Envelope {
+        let mut env = recorded(item_ref, "linked", false);
+        let mut payload: WorkItemRecordedV2 = serde_json::from_value(env.payload.clone()).unwrap();
+        payload.item.links = Some(
+            links
+                .iter()
+                .map(
+                    |(target, link_type)| oxplow_domain::work_items::LinkRecord {
+                        target: (*target).into(),
+                        link_type: (*link_type).into(),
+                    },
+                )
+                .collect(),
+        );
+        env.payload = serde_json::to_value(payload).unwrap();
+        env
+    }
+
+    /// `work_item:fake:W-1`'s links: `(to_ref, created_at)`.
+    async fn links(svc: &crate::Services) -> Vec<(String, String)> {
+        svc.db
+            .read(|tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT to_ref, created_at FROM work_item_link
+                         WHERE from_ref = 'work_item:fake:W-1' ORDER BY to_ref",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// A record restates an item's links whole, but a link that was
+    /// already there keeps when it was made; one the record drops goes.
+    #[tokio::test]
+    async fn a_restated_link_keeps_when_it_was_made() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let r = "work_item:fake:W-1";
+        let mut first = recorded_with_links(r, &[("work_item:fake:W-2", "blocks")]);
+        first.at = oxplow_domain::Timestamp::from_unix_ms(1_000_000);
+        svc.event_log_store.append(first).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        let before = links(svc).await;
+        assert_eq!(before.len(), 1);
+
+        let mut again = recorded_with_links(
+            r,
+            &[
+                ("work_item:fake:W-2", "blocks"),
+                ("work_item:fake:W-3", "relates_to"),
+            ],
+        );
+        again.at = oxplow_domain::Timestamp::from_unix_ms(2_000_000);
+        svc.event_log_store.append(again).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        let after = links(svc).await;
+        assert_eq!(after[0], before[0], "the kept link keeps its time");
+        assert_eq!(after[1].0, "work_item:fake:W-3");
+        assert_ne!(
+            after[1].1, before[0].1,
+            "the new link has the record's time"
+        );
+
+        let mut dropped = recorded_with_links(r, &[("work_item:fake:W-3", "relates_to")]);
+        dropped.at = oxplow_domain::Timestamp::from_unix_ms(3_000_000);
+        svc.event_log_store.append(dropped).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        let left = links(svc).await;
+        assert_eq!(left, vec![after[1].clone()]);
+    }
+
     #[tokio::test]
     async fn an_outside_item_keeps_the_thread_that_filed_it() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
