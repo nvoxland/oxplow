@@ -289,9 +289,17 @@ fn invalid(e: rusqlite::Error) -> DomainError {
 }
 
 /// A query that didn't prepare. An unknown table names the published model
-/// it most likely meant (tsk1039: `v_tree_facts` → `v_tree_fact`).
-fn prepare_failed(conn: &rusqlite::Connection, e: rusqlite::Error) -> DomainError {
+/// it most likely meant (tsk1039: `v_tree_facts` → `v_tree_fact`); an
+/// unknown column names the columns of the models `sql` reads, and the
+/// nearest one — so the next query can be right without a discovery query.
+fn prepare_failed(conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) -> DomainError {
     let msg = e.to_string();
+    let unknown_column = msg
+        .strip_prefix("no such column: ")
+        .and_then(|rest| rest.split_whitespace().next());
+    if let Some(hint) = unknown_column.and_then(|c| column_hint(conn, sql, c)) {
+        return DomainError::Invalid(format!("query_sql: {msg}; {hint}"));
+    }
     let missing = msg
         .strip_prefix("no such table: ")
         .and_then(|rest| rest.split_whitespace().next())
@@ -311,6 +319,52 @@ fn prepare_failed(conn: &rusqlite::Connection, e: rusqlite::Error) -> DomainErro
         Some(v) => DomainError::Invalid(format!("query_sql: {msg}; did you mean `{v}`?")),
         None => invalid(e),
     }
+}
+
+/// For an unknown `column` (maybe `alias.name`): the nearest column of the
+/// published models `sql` names, and each one's columns.
+fn column_hint(conn: &rusqlite::Connection, sql: &str, column: &str) -> Option<String> {
+    let views = view_names(conn).ok()?;
+    let mut named: Vec<String> = Vec::new();
+    for token in sql.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+        let token = token.to_ascii_lowercase();
+        if token.starts_with("v_") && views.contains(&token) && !named.contains(&token) {
+            named.push(token);
+        }
+    }
+    let columns: Vec<(String, Vec<String>)> = named
+        .into_iter()
+        .filter_map(|v| {
+            let stmt = conn
+                .prepare(&format!("SELECT * FROM \"{v}\" LIMIT 0"))
+                .ok()?;
+            let cols = stmt
+                .column_names()
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+            Some((v, cols))
+        })
+        .collect();
+    if columns.is_empty() {
+        return None;
+    }
+    let wanted = column.rsplit('.').next().unwrap_or(column);
+    let most = (wanted.len() / 3).max(2);
+    let nearest = columns
+        .iter()
+        .flat_map(|(_, cols)| cols)
+        .map(|c| (edit_distance(wanted, c), c))
+        .filter(|(d, _)| *d <= most)
+        .min();
+    let lists: Vec<String> = columns
+        .iter()
+        .map(|(v, cols)| format!("{v} has: {}", cols.join(", ")))
+        .collect();
+    Some(match nearest {
+        Some((_, c)) => format!("did you mean `{c}`? {}", lists.join("; ")),
+        None => lists.join("; "),
+    })
 }
 
 /// Levenshtein distance between `a` and `b`, by characters.
@@ -600,10 +654,10 @@ impl<'c> ReadSession<'c> {
     /// Why a statement didn't prepare: the authorizer's refusal, or the
     /// error itself — read once the session has ended, so naming the model
     /// it most likely meant can read the schema (tsk1039).
-    fn failed(self, conn: &rusqlite::Connection, e: rusqlite::Error) -> DomainError {
+    fn failed(self, conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) -> DomainError {
         let refused = self.refusal();
         drop(self);
-        refused.unwrap_or_else(|| prepare_failed(conn, e))
+        refused.unwrap_or_else(|| prepare_failed(conn, sql, e))
     }
 
     /// Why the authorizer refused the statement, if it did: the read
@@ -856,7 +910,7 @@ fn run_read_only(
     let session = ReadSession::open(conn, access, &query.sql)?;
     let mut stmt = match conn.prepare(&query.sql) {
         Ok(stmt) => stmt,
-        Err(e) => return Err(session.failed(conn, e)),
+        Err(e) => return Err(session.failed(conn, &query.sql, e)),
     };
     if !stmt.readonly() {
         return Err(read_only_only());
@@ -947,7 +1001,7 @@ pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<R
     {
         let stmt = match conn.prepare(&query.sql) {
             Ok(stmt) => stmt,
-            Err(e) => return Err(session.failed(conn, e)),
+            Err(e) => return Err(session.failed(conn, &query.sql, e)),
         };
         if !stmt.readonly() {
             return Err(read_only_only());
@@ -1069,9 +1123,14 @@ mod tests {
             let sl = sl.clone();
             async move { sl.check(sql).await.unwrap_err().to_string() }
         };
-        assert!(err("SELECT nope FROM v_task")
-            .await
-            .contains("no such column"));
+        let unknown = err("SELECT nope FROM v_task").await;
+        assert!(unknown.contains("no such column"), "{unknown}");
+        // It names the model's columns, so the next query can be right.
+        assert!(unknown.contains("v_task has: "), "{unknown}");
+        assert!(unknown.contains("title"), "{unknown}");
+        // And the nearest one, when a column is close to one it has.
+        let close = err("SELECT e.titel FROM v_task e").await;
+        assert!(close.contains("did you mean `title`?"), "{close}");
         assert!(err("DELETE FROM task").await.contains("SELECT"));
     }
 

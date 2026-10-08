@@ -36,7 +36,7 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 
 | Field | Meaning |
 |---|---|
-| `input_schema` | JSON Schema; the bus validates the input first and names the failing field |
+| `input_schema` | JSON Schema; the bus validates the input first and names the failing field, plus what the schema accepts there (`InputValidator::check`: an object's fields, required first, for an unknown or missing one; the choices for a bad enum value), so a caller fixes it in one more call |
 | `invokers` | which surfaces may run it: `human`, `agent`, `lens` |
 | `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A `Read` command may not ask (`Command::new` / `with_confirm_for` refuse it): it runs unrecorded, so nothing would resolve its proposal |
 | `undoable` | the handler returns an inverse call that `undo` applies |

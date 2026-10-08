@@ -477,34 +477,198 @@ impl From<DomainError> for CommandError {
 /// schema-library dependency of its own.
 pub struct InputValidator {
     validator: jsonschema::Validator,
+    schema: Value,
 }
 
 impl InputValidator {
     pub fn compile(schema: &Value) -> Result<Self, DomainError> {
         let validator = jsonschema::validator_for(schema)
             .map_err(|e| DomainError::Invariant(format!("input schema: {e}")))?;
-        Ok(Self { validator })
+        Ok(Self {
+            validator,
+            schema: schema.clone(),
+        })
     }
 
-    /// The first violation, as `Invalid { field: <JSON pointer>, … }`.
+    /// The first violation, as `Invalid { field: <JSON pointer>, … }`,
+    /// saying what the schema accepts there (the object's fields, or the
+    /// value's choices) so the caller can fix it in one more call.
     pub fn check(&self, input: &Value) -> Result<(), CommandError> {
+        use jsonschema::error::ValidationErrorKind as Kind;
         match self.validator.iter_errors(input).next() {
             None => Ok(()),
             Some(err) => {
                 let path = err.instance_path().to_string();
+                let at = schema_at(&self.schema, &path);
+                let accepted = match err.kind() {
+                    Kind::AdditionalProperties { .. } | Kind::Required { .. } => {
+                        at.and_then(|s| accepted_fields(&self.schema, s))
+                    }
+                    Kind::AnyOf { .. }
+                    | Kind::OneOfNotValid { .. }
+                    | Kind::Enum { .. }
+                    | Kind::Constant { .. } => at.and_then(|s| accepted_values(&self.schema, s)),
+                    _ => None,
+                };
                 Err(CommandError::Invalid {
                     field: if path.is_empty() { None } else { Some(path) },
-                    message: err.to_string(),
+                    message: match accepted {
+                        Some(a) => format!("{err}. {a}"),
+                        None => err.to_string(),
+                    },
                 })
             }
         }
     }
 }
 
+/// `node` with its `$ref`s followed, and an optional field's `T | null`
+/// (`anyOf` with one non-null branch) narrowed to `T`.
+fn resolved<'a>(root: &'a Value, mut node: &'a Value) -> &'a Value {
+    for _ in 0..16 {
+        if let Some(r) = node.get("$ref").and_then(Value::as_str) {
+            match r.strip_prefix('#').and_then(|p| root.pointer(p)) {
+                Some(next) => node = next,
+                None => return node,
+            }
+            continue;
+        }
+        let branches = node
+            .get("anyOf")
+            .or_else(|| node.get("oneOf"))
+            .and_then(Value::as_array);
+        let non_null: Vec<&Value> = branches
+            .into_iter()
+            .flatten()
+            .filter(|b| b.get("type").and_then(Value::as_str) != Some("null"))
+            .collect();
+        match non_null.as_slice() {
+            [only] if branches.is_some_and(|b| b.len() > 1) => node = only,
+            _ => return node,
+        }
+    }
+    node
+}
+
+/// The subschema describing the value at `instance` (a JSON pointer) in
+/// `root`, through `properties` and `items`.
+fn schema_at<'a>(root: &'a Value, instance: &str) -> Option<&'a Value> {
+    let mut node = resolved(root, root);
+    for token in instance.split('/').skip(1) {
+        let token = token.replace("~1", "/").replace("~0", "~");
+        node = match node.get("properties").and_then(|p| p.get(&token)) {
+            Some(prop) => prop,
+            None => node.get("items")?,
+        };
+        node = resolved(root, node);
+    }
+    Some(node)
+}
+
+/// "Accepted: a (required), b, c" for an object schema: the required
+/// fields first.
+fn accepted_fields(root: &Value, node: &Value) -> Option<String> {
+    let node = resolved(root, node);
+    let props = node.get("properties")?.as_object()?;
+    let required: Vec<&str> = node
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let fields: Vec<String> = required
+        .iter()
+        .filter(|k| props.contains_key(**k))
+        .map(|k| format!("{k} (required)"))
+        .chain(
+            props
+                .keys()
+                .filter(|k| !required.contains(&k.as_str()))
+                .cloned(),
+        )
+        .collect();
+    Some(format!("Accepted: {}", fields.join(", ")))
+}
+
+/// "Expected one of: …" for a schema that is a choice of literal values
+/// (`enum`, `const`, or branches of them).
+fn accepted_values(root: &Value, node: &Value) -> Option<String> {
+    fn collect(root: &Value, node: &Value, out: &mut Vec<String>) {
+        let node = resolved(root, node);
+        if let Some(values) = node.get("enum").and_then(Value::as_array) {
+            out.extend(values.iter().map(Value::to_string));
+        }
+        if let Some(value) = node.get("const") {
+            out.push(value.to_string());
+        }
+        for key in ["anyOf", "oneOf"] {
+            for branch in node
+                .get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                collect(root, branch, out);
+            }
+        }
+    }
+    let mut values = Vec::new();
+    collect(root, node, &mut values);
+    values.dedup();
+    (!values.is_empty()).then(|| format!("Expected one of: {}", values.join(", ")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A refused input says what would have been accepted there, so a
+    /// caller fixes it in one more call instead of one field at a time.
+    #[test]
+    fn an_invalid_input_names_what_is_accepted_there() {
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Create {
+            title: String,
+            #[serde(default)]
+            body: Option<String>,
+            #[serde(default)]
+            state: Option<crate::work_items::CanonicalState>,
+        }
+        let schema = serde_json::to_value(schemars::schema_for!(Create)).unwrap();
+        let v = InputValidator::compile(&schema).unwrap();
+        let message = |input: Value| match v.check(&input) {
+            Err(CommandError::Invalid { message, .. }) => message,
+            other => panic!("{other:?}"),
+        };
+
+        let unknown = message(json!({ "title": "t", "description": "d" }));
+        assert!(
+            unknown.contains("'description' was unexpected"),
+            "{unknown}"
+        );
+        assert!(
+            unknown.contains("Accepted: title (required), body, state"),
+            "{unknown}"
+        );
+
+        let missing = message(json!({ "body": "b" }));
+        assert!(
+            missing.contains("Accepted: title (required), body, state"),
+            "{missing}"
+        );
+
+        let state = message(json!({ "title": "t", "state": "ready" }));
+        assert!(
+            state.contains(
+                r#"Expected one of: "todo", "in_progress", "blocked", "done", "canceled""#
+            ),
+            "{state}"
+        );
+    }
 
     #[test]
     fn actors_know_their_invoker_source_and_kind() {

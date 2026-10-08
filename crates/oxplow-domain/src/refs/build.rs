@@ -126,13 +126,17 @@ pub fn work_item_label(r: &str) -> String {
 /// item. What a list's own ids look like is that list's to say.
 pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
     let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{r}` {why}")));
+    const SHAPE: &str = "a work item ref is `work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)";
     // `work_item` is core's kind, the same in every vocabulary: its shape
     // is checked here, no registry needed.
     let parsed = crate::refs::CanonicalRef::parse(r).map_err(|e| {
-        crate::DomainError::Invalid(format!("`{r}` is not a canonical ref: {}", e.reason()))
+        crate::DomainError::Invalid(format!(
+            "`{r}` is not a canonical ref: {}; {SHAPE}",
+            e.reason()
+        ))
     })?;
     if parsed.kind != "work_item" {
-        return invalid("is not a work_item ref");
+        return invalid(&format!("is not a work_item ref; {SHAPE}"));
     }
     let provider_ok = parsed.id.split_once(':').is_some_and(|(provider, native)| {
         !native.is_empty()
@@ -142,7 +146,7 @@ pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
     });
     if !provider_ok {
-        return invalid("names no `<provider>:<id>`");
+        return invalid(&format!("names no `<provider>:<id>`; {SHAPE}"));
     }
     if parsed.rev.is_some() || parsed.frag.is_some() {
         return invalid("names a work item with a revision or fragment");
@@ -221,6 +225,11 @@ mod tests {
         assert_eq!(work_item_label("odd"), "odd");
         for bad in ["", "tsk1", "effort:eff1", "work_item:"] {
             assert!(validate_work_item_ref(bad).is_err(), "{bad}");
+        }
+        // A wrong shape shows the right one.
+        for bad in ["work_item:oxplow/tsk1097", "oxplow:tsk1097", "effort:eff1"] {
+            let e = validate_work_item_ref(bad).unwrap_err().to_string();
+            assert!(e.contains("`work_item:<provider>:<id>`"), "{e}");
         }
         // Only the canonical spelling is a key: the open-effort index
         // compares strings, so a fragment, a revision or an escaped
