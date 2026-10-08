@@ -1,5 +1,5 @@
 //! What a person can ask (P6.D2, target §13.1): every capability's
-//! questions (`oxplow_plugin::capability_prompts`) and every enabled
+//! questions (`oxplow_agent_text::capability_prompts`) and every enabled
 //! extension's `intent.prompts`, in one list. The catalog page groups it
 //! by source; a page for a ref shows the prompts `about` that ref's kind.
 //! See `.context/extensions.md` → "The prompt catalog".
@@ -28,7 +28,7 @@ pub enum PromptSource {
 
 /// Core's prompts, then each enabled extension's, in name order.
 pub fn prompt_catalog(extensions: &[Extension]) -> Vec<CatalogPrompt> {
-    let core = oxplow_plugin::capability_prompts()
+    let core = oxplow_agent_text::capability_prompts()
         .into_iter()
         .map(|p| CatalogPrompt {
             prompt: p.prompt,

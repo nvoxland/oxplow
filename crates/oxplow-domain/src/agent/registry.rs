@@ -107,6 +107,13 @@ mod tests {
         fn env_markers(&self) -> &[&str] {
             &[]
         }
+        fn refresh_text(
+            &self,
+            _: &std::path::Path,
+            _: &crate::agent::text::AgentText,
+        ) -> Result<(), HarnessError> {
+            Ok(())
+        }
     }
 
     /// An unknown key names the registered ones; the default is read when

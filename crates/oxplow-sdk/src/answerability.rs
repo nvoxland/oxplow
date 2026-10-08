@@ -437,7 +437,7 @@ mod tests {
         };
         let mut errors = Vec::new();
         let mut asked = 0;
-        for (capability, yaml) in oxplow_plugin::CAPABILITY_QUESTIONS {
+        for (capability, yaml) in oxplow_agent_text::CAPABILITY_QUESTIONS {
             let file = format!("questions/{capability}.yaml");
             let questions = parse(yaml).unwrap_or_else(|e| panic!("{file}: {e}"));
             assert!(!questions.is_empty(), "{file} asks nothing");

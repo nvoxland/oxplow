@@ -445,7 +445,7 @@ mod tests {
             &config(),
             &stream(),
             Some(&thread()),
-            &oxplow_plugin::core_text(),
+            &oxplow_agent_text::core_text(),
         );
         assert!(full.contains("<session-context>"));
         assert!(!acp.contains("<session-context>"), "{acp}");
@@ -471,7 +471,7 @@ mod tests {
             &config(),
             &stream(),
             Some(&thread()),
-            &oxplow_plugin::core_text(),
+            &oxplow_agent_text::core_text(),
         );
         assert!(acp.contains("get_skill"), "{acp}");
         assert!(

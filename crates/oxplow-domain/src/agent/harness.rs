@@ -141,4 +141,9 @@ pub trait AgentHarness: Send + Sync {
     /// Its process's markers an agent or terminal must not inherit from
     /// oxplow's own environment (when oxplow itself runs in one).
     fn env_markers(&self) -> &[&str];
+    /// Rewrite the skills and commands of its runtime already on disk under
+    /// `project_dir` to `text`, creating none: an agent that outlives a
+    /// launch (running across an upgrade, or resumed) reads what's offered
+    /// now.
+    fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError>;
 }

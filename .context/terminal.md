@@ -86,7 +86,7 @@ the same worktree. (The shell path keeps transport in its key via
 transport.) The spawn binds the PTY to its `AgentPane { thread, session }`:
 its output stamps the session's liveness and its exit ingests a
 `SessionEnd` for the session. Agent-specific runtime files are generated
-under `.oxplow/runtime/` by `oxplow-plugin` (the Claude MCP config and the
+under `.oxplow/runtime/` by the session's harness (`oxplow-harnesses`: the Claude MCP config and the
 opencode prompt file per session); shell terminals skip that path
 entirely.
 

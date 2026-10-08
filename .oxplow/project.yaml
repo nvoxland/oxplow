@@ -75,7 +75,7 @@ zones:
 - match: crates/oxplow-session/**
   zone: session
   color: "#7c3aed"
-- match: ["crates/oxplow-plugin/**", "crates/oxplow-control-plane/**"]
+- match: ["crates/oxplow-harnesses/**", "crates/oxplow-agent-text/**", "crates/oxplow-control-plane/**"]
   zone: plugin
   color: "#c026d3"
 - match: ["crates/oxplow-code-metrics/**", "crates/oxplow-code-dup/**",

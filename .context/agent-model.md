@@ -155,7 +155,7 @@ the agent needs and returns a `Launch { spec, resume_dropped }`. The spec is
 `LaunchSpec::Pty { command }` (a shell command for the PTY) or
 `LaunchSpec::Acp { program, args, env, system_prompt_via_meta }` (a process
 the ACP manager speaks to). The built-in harnesses live in
-`crates/oxplow-app/src/harnesses/` (`claude.rs`, `codex.rs`, `opencode.rs`,
+`crates/oxplow-harnesses/` (`claude.rs`, `codex.rs`, `opencode.rs`,
 `acp.rs`; shared shell quoting in `shared.rs`). The caller is one function,
 `launch_session` in `crates/oxplow-rpc/src/commands/terminal.rs`, used by both
 the PTY path (`open_terminal_session`) and `acp_open_session`. It gathers the
@@ -266,12 +266,18 @@ directories that no fixed list can guess, so a GUI-launched agent can still miss
 was deliberately not taken here — it costs a subprocess per launch and can hang
 on a user's rc file.
 
-## Plugin hook bridge
+## Harness runtimes
 
-Agent-specific runtime files are materialized under `.oxplow/runtime/` by
-the harness's `launch` (with `oxplow-plugin`'s writers) on every spawn. The
-rest of the app consumes only the returned `Launch` instead of branching on
-harness details.
+Each harness in `crates/oxplow-harnesses` writes its own runtime files under
+`.oxplow/runtime/` in its `launch`, on every spawn, from the agent text it's
+handed (`oxplow-agent-text`'s `core_text` plus what extensions offer,
+`capabilities::agent_text`). The rest of the app consumes only the returned
+`Launch` instead of branching on harness details. `refresh_text` rewrites
+the skills and commands of a runtime already on disk, creating none:
+`capabilities::refresh_agent_text` calls it on every registered harness at
+boot, on an extension change and on a `capability.switched`. The crate
+depends only on the domain; core's text and the capability questions live in
+`oxplow-agent-text`, which the app and the SDK read.
 
 - Claude writes `.oxplow/runtime/claude-plugin/`, passes it with
   `--plugin-dir`, and registers HTTP hooks for `PreToolUse`,
@@ -301,12 +307,12 @@ harness details.
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
   turn lifecycle.
   Skills + slash commands ship too: opencode only discovers SKILL.md
-  from fixed locations (no config key), so `write_opencode_runtime`
+  from fixed locations (no config key), so the opencode harness's launch
   materializes the offered skills (`capabilities::agent_text`) into
   `<project>/.opencode/skills/<name>/` — each dir carries a `*`
   .gitignore so the generated files never land in commits. The offered
   commands ride `OPENCODE_CONFIG_CONTENT`'s inline `command` key
-  (`oxplow_plugin::opencode_command_definitions(&text)`, frontmatter
+  (`command_definitions` in `opencode.rs`, frontmatter
   description + body template) as `/oxplow-review-comments` etc. — opencode
   has no plugin namespacing, hence the `oxplow-` prefix instead of
   Claude's `/oxplow:` form. The launch model comes from
@@ -454,7 +460,7 @@ one, and one that posts none (Codex) still ends.
    A second cleanup runs at **launch** for a token that's stale for any
    other reason (transcript pruned, machine moved, id rotted). Before
    passing `--resume`, the Claude harness's `launch` probes the
-   session file (`resume_state` in `crates/oxplow-app/src/harnesses/claude.rs`)
+   session file (`resume_state` in `crates/oxplow-harnesses/src/claude.rs`)
    and reports `resume_dropped`, which `launch_session` turns into
    `resume_check::forget_missing`: it maps the cwd to Claude's
    `$HOME/.claude/projects/<cwd-with-non-alnum→'-'>/<id>.jsonl` and, if
@@ -520,8 +526,8 @@ site, so a timed-out PreToolUse deny is still caught there.
 
 **Sessions.** `AgentKind::Acp` sessions name an ACP agent in
 `agent_session.acp_agent`. `AgentKind::is_terminal()` is false for them:
-`open_terminal_session` refuses them, and `write_agent_runtime` returns
-`PluginError::NotTerminal`.
+`open_terminal_session` refuses them: their harness launches a
+`LaunchSpec::Acp`, not a PTY command.
 
 **Configuration.** Agents come from `oxplow_config::acp_presets()`:
 - claude: `claude-agent-acp`;
@@ -1235,18 +1241,18 @@ triggers the same flow on demand.
 
 ## Collection command & skill
 
-The `/oxplow:configure` command (asset `crates/oxplow-plugin/assets/configure.md`)
+The `/oxplow:configure` command (asset `crates/oxplow-agent-text/assets/configure.md`)
 sets up the **collection** subsystem (see `.context/collection.md`): it has
 the agent instrument the project's test tooling to emit standard-format
 reports at stable paths, then records the `testing:` block and one report
 collector per report (`collectors:` with `records:`) in
 `.oxplow/project.yaml`. The standing `oxplow-collection` skill
-(`crates/oxplow-plugin/assets/oxplow-collection.SKILL.md`) loads when a task
+(`crates/oxplow-agent-text/assets/oxplow-collection.SKILL.md`) loads when a task
 closes and on `/oxplow:configure`; it tells the agent to run the tests
 before completing (so a report exists) and — critically — to **never parse
 or report coverage numbers itself**, because oxplow parses the report
-deterministically (`observed`). Both are wired in `write_plugin`
-(`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
+deterministically (`observed`). Both are core text (`core_text` in
+`crates/oxplow-agent-text/src/lib.rs`), which every harness writes. The ingestion side (PostToolUse test
 detector, the report collectors a detected run reads, `oxplow.collector.sync` for
 one run by hand, `oxplow.test.record_run`, and the `list_effort_observations` /
 `get_open_effort` MCP reads) is documented in `.context/collection.md`.

@@ -2,13 +2,21 @@
 //! (`oxplow hook <event>`) and its MCP server, hooks and OTEL exporter ride
 //! `--config` overrides; the MCP identity rides the URL's query string.
 
+use std::fs;
+use std::io;
 use std::path::Path;
+
+use serde_json::json;
 
 use oxplow_domain::agent::harness::{
     AgentHarness, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
+use oxplow_domain::agent::text::AgentText;
 
-use super::shared::{env_prefix, in_shell, program_and_guard, shell_escape, toml_string};
+use super::shared::{
+    env_prefix, in_shell, program_and_guard, runtime, shell_escape, toml_string, write_json,
+    write_skills,
+};
 use super::Named;
 
 pub(super) struct Codex(pub(super) Named);
@@ -34,8 +42,13 @@ impl AgentHarness for Codex {
         let ep = input.endpoints;
         // Its plugin manifest, hooks file and skills, on disk; the hooks and
         // MCP server it runs with ride the overrides below.
-        oxplow_plugin::write_codex_runtime(input.project_dir, &ep.mcp_endpoint_url, input.text)
-            .map_err(|e| HarnessError::Runtime(e.to_string()))?;
+        write_runtime(
+            input.project_dir,
+            &ep.mcp_endpoint_url,
+            input.oxplow_executable,
+            input.text,
+        )
+        .map_err(runtime)?;
         let ids = input.session;
         let (thread, stream, session) = (
             ids.thread.to_string(),
@@ -78,6 +91,86 @@ impl AgentHarness for Codex {
     fn env_markers(&self) -> &[&str] {
         &[]
     }
+
+    fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError> {
+        let skills_dir = project_dir.join(RUNTIME_DIR_REL).join("skills");
+        if skills_dir.is_dir() {
+            write_skills(&skills_dir, &text.skills).map_err(runtime)?;
+        }
+        Ok(())
+    }
+}
+
+const RUNTIME_DIR_REL: &str = ".oxplow/runtime/codex-plugin";
+
+/// Codex's hook events, each run as `oxplow hook <event>`.
+const HOOK_EVENTS: &[&str] = &[
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "UserPromptSubmit",
+    "SessionStart",
+    "Stop",
+];
+
+/// Whether a hook event takes a per-tool matcher.
+fn per_tool(event: &str) -> bool {
+    matches!(event, "PreToolUse" | "PermissionRequest" | "PostToolUse")
+}
+
+/// Materialize the Codex plugin layout (manifest, command hooks, MCP
+/// config, skills) under `.oxplow/runtime/codex-plugin/`. Idempotent.
+fn write_runtime(
+    project_dir: &Path,
+    mcp_endpoint_url: &str,
+    oxplow_executable: &Path,
+    text: &AgentText,
+) -> io::Result<()> {
+    let runtime_dir = project_dir.join(RUNTIME_DIR_REL);
+    let manifest_dir = runtime_dir.join(".codex-plugin");
+    let hooks_dir = runtime_dir.join("hooks");
+    fs::create_dir_all(&manifest_dir)?;
+    fs::create_dir_all(&hooks_dir)?;
+    write_json(
+        &manifest_dir.join("plugin.json"),
+        &json!({
+            "name": "oxplow",
+            "version": "0.0.0",
+            "description": "Forwards Codex lifecycle hooks into the oxplow runtime.",
+            "skills": "./skills/"
+        }),
+    )?;
+    write_json(
+        &hooks_dir.join("hooks.json"),
+        &hooks_json(oxplow_executable),
+    )?;
+    fs::write(
+        runtime_dir.join("mcp-config.toml"),
+        format!(
+            "[mcp_servers.oxplow]\nurl = {}\nbearer_token_env_var = \"OXPLOW_HOOK_TOKEN\"\n\n",
+            toml_string(mcp_endpoint_url)
+        ),
+    )?;
+    write_skills(&runtime_dir.join("skills"), &text.skills)
+}
+
+fn hooks_json(oxplow_executable: &Path) -> serde_json::Value {
+    let mut hooks = serde_json::Map::new();
+    for event in HOOK_EVENTS {
+        let entry = json!({
+            "type": "command",
+            "command": hook_command(oxplow_executable, event),
+            "timeout": 30,
+            "statusMessage": "Syncing oxplow runtime",
+        });
+        let outer = if per_tool(event) {
+            json!([{ "matcher": "*", "hooks": [entry] }])
+        } else {
+            json!([{ "hooks": [entry] }])
+        };
+        hooks.insert(event.to_string(), outer);
+    }
+    json!({ "hooks": serde_json::Value::Object(hooks) })
 }
 
 /// `codex --cd <cwd>` with its overrides, or `codex resume` for `resume`.
@@ -134,16 +227,9 @@ fn config_overrides(
         ),
         "mcp_servers.oxplow.bearer_token_env_var=\"OXPLOW_HOOK_TOKEN\"".into(),
     ];
-    for event in [
-        "PreToolUse",
-        "PermissionRequest",
-        "PostToolUse",
-        "UserPromptSubmit",
-        "SessionStart",
-        "Stop",
-    ] {
+    for event in HOOK_EVENTS {
         let command = hook_command(oxplow_executable, event);
-        let matcher = if matches!(event, "PreToolUse" | "PermissionRequest" | "PostToolUse") {
+        let matcher = if per_tool(event) {
             "matcher=\"*\","
         } else {
             ""
@@ -199,7 +285,8 @@ fn hook_command(oxplow_executable: &Path, event: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harnesses::test_launch::{harness, launch_in};
+    use crate::test_launch::{harness, launch_in};
+    use tempfile::TempDir;
 
     #[test]
     fn launch_builds_the_command_and_env() {
@@ -258,5 +345,52 @@ mod tests {
         assert!(cmd.starts_with("sh -lc "));
         assert!(cmd.contains("exec codex") && cmd.contains("--cd") && cmd.contains("/repo"));
         assert!(!cmd.contains(" resume "));
+    }
+
+    #[test]
+    fn write_runtime_emits_expected_files() {
+        let tmp = TempDir::new().unwrap();
+        let text = oxplow_agent_text::core_text();
+        write_runtime(tmp.path(), "http://h/mcp", Path::new("/bin/oxplow"), &text).unwrap();
+        let dir = tmp.path().join(RUNTIME_DIR_REL);
+        assert!(dir.join(".codex-plugin/plugin.json").exists());
+        for skill in &text.skills {
+            assert!(
+                dir.join("skills")
+                    .join(&skill.name)
+                    .join("SKILL.md")
+                    .exists(),
+                "missing skill {}",
+                skill.name
+            );
+        }
+        let hooks = fs::read_to_string(dir.join("hooks/hooks.json")).unwrap();
+        assert!(hooks.contains("PreToolUse"));
+        assert!(!hooks.contains("http://"));
+        assert!(hooks.contains("'/bin/oxplow' hook "));
+        let mcp = fs::read_to_string(dir.join("mcp-config.toml")).unwrap();
+        assert!(mcp.contains("[mcp_servers.oxplow]"));
+        assert!(mcp.contains("url = \"http://h/mcp\""));
+        assert!(mcp.contains("OXPLOW_HOOK_TOKEN"));
+    }
+
+    /// A refresh rewrites a runtime already on disk and creates none.
+    #[test]
+    fn refresh_text_rewrites_only_runtimes_already_on_disk() {
+        let tmp = TempDir::new().unwrap();
+        let h = harness("oxplow:codex-cli", "codex");
+        let text = oxplow_agent_text::core_text();
+        h.refresh_text(tmp.path(), &text).unwrap();
+        assert!(!tmp.path().join(RUNTIME_DIR_REL).exists());
+        let skills = tmp.path().join(RUNTIME_DIR_REL).join("skills");
+        fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
+        fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
+        h.refresh_text(tmp.path(), &text).unwrap();
+        for skill in &text.skills {
+            assert_eq!(
+                fs::read_to_string(skills.join(&skill.name).join("SKILL.md")).unwrap(),
+                skill.body
+            );
+        }
     }
 }

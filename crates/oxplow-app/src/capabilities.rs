@@ -842,11 +842,18 @@ pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentTex
 }
 
 /// Rewrite the skills and commands of the agent runtimes already on disk
-/// to what's offered now: at boot (an agent that outlived an upgrade,
-/// tsk376), when the extensions change, and on a switch.
+/// to what's offered now, each registered harness its own: at boot (an
+/// agent that outlived an upgrade, tsk376), when the extensions change, and
+/// on a switch.
 pub fn refresh_agent_text(svc: &crate::Services) {
-    if let Err(error) = oxplow_plugin::refresh_skills(&svc.layout.project_dir, &agent_text(svc)) {
-        tracing::warn!(%error, "refreshing the agent's skills failed");
+    let text = agent_text(svc);
+    for id in svc.harnesses.names() {
+        let Ok(harness) = svc.harnesses.get(&id) else {
+            continue;
+        };
+        if let Err(error) = harness.refresh_text(&svc.layout.project_dir, &text) {
+            tracing::warn!(%error, harness = %id, "refreshing the agent's skills failed");
+        }
     }
 }
 
@@ -893,7 +900,7 @@ pub fn offered_text(
 ) -> oxplow_domain::agent::text::AgentText {
     use crate::extensions::skills::SkillKind;
     let active = registry.snapshot(config);
-    let mut text = oxplow_plugin::core_text();
+    let mut text = oxplow_agent_text::core_text();
     for ext in extensions.iter().filter(|e| e.enabled) {
         for skill in &ext.skills {
             let owner = ext
@@ -1438,7 +1445,7 @@ mod tests {
         refresh_agent_text(svc);
         assert_eq!(
             std::fs::read_to_string(skills.join("oxplow-extension/SKILL.md")).unwrap(),
-            oxplow_plugin::core_text()
+            oxplow_agent_text::core_text()
                 .skill_body("oxplow-extension")
                 .unwrap()
         );

@@ -534,8 +534,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   `stream_id`. `launcher_lenses_need_no_slot_params` enforces the rule
   for every bundled lens (tsk374).
 - **One skill set.** Every agent runtime writes its skills and commands
-  from one `oxplow_plugin::AgentText`: core's (`OXPLOW_SKILLS` and
-  `CORE_COMMANDS` in `crates/oxplow-plugin/src/lib.rs`) plus what
+  from one `AgentText` (`oxplow_domain::agent::text`): core's
+  (`OXPLOW_SKILLS` and `CORE_COMMANDS` in
+  `crates/oxplow-agent-text/src/lib.rs`) plus what
   extensions offer now ("Skills"). ACP agents get the same set as an
   index in their system prompt plus the MCP `get_skill` tool (see
   agent-model.md → ACP).
@@ -820,9 +821,9 @@ reading the right skill can answer the questions a capability exists
 for. A questions file is a list of `{ question, skill, reaches: { sql } |
 { command, input }, shape: { columns } }`:
 
-- **Core capabilities**: `crates/oxplow-plugin/assets/questions/<capability>.yaml`
+- **Core capabilities**: `crates/oxplow-agent-text/assets/questions/<capability>.yaml`
   (`vcs`, `work_items`, `knowledge`, `code_intel`;
-  `oxplow_plugin::CAPABILITY_QUESTIONS`), each naming a shipped skill
+  `oxplow_agent_text::CAPABILITY_QUESTIONS`), each naming a shipped skill
   (`oxplow-codebase` — history and code, added for this —
   `oxplow-runtime`, `oxplow-wiki-capture`). The in-tree test
   (`every_capability_question_reaches_what_its_skill_names`) runs them
@@ -2494,7 +2495,7 @@ implementations:
 ```
 
 - `name` is lowercase letters, digits and `-`, not one of core's own
-  (`oxplow_plugin::AgentText::core`), declared once; a skill's
+  (`oxplow_agent_text::core_text`), declared once; a skill's
   frontmatter `name:` is its `name` and it has a `description:`, a
   command's frontmatter has a `description:`. `kind` is `skill` (the
   default: `<name>/SKILL.md`) or `command` (`/oxplow:<name>`).
@@ -2503,9 +2504,9 @@ implementations:
   it in its `skills:`, while that implementation is the active one. A name
   another extension already took is left out (logged).
 - **Installed.** Each spawn writes what's offered into the runtime
-  (`oxplow_plugin::write_agent_runtime(…, &AgentText)`); boot, an
+  (each harness's `launch`, `crates/oxplow-harnesses`); boot, an
   extension change and a `capability.switched` rewrite the runtimes
-  already on disk (`refresh_agent_text`). A skill folder oxplow wrote
+  already on disk (`refresh_agent_text` → each harness's `refresh_text`). A skill folder oxplow wrote
   carries a `.oxplow` marker, so one no longer offered is removed and a
   person's own stay; the Claude `commands/` folder is oxplow's whole.
   ACP agents get the offered set's index and `get_skill`.
@@ -2660,8 +2661,8 @@ tool list stable no matter how many extensions are installed.
   `[oxplow lens <id> row: col=value, …]` (`rowAsk`).
 - **The prompt catalog (current, P6.D2):** what a person can ask.
   - Core's are the capability questions
-    (`crates/oxplow-plugin/assets/questions/*.yaml`,
-    `oxplow_plugin::capability_prompts`); a question with `about: <ref
+    (`crates/oxplow-agent-text/assets/questions/*.yaml`,
+    `oxplow_agent_text::capability_prompts`); a question with `about: <ref
     kind>` is phrased with "this" and is offered on pages for that kind
     (its `reaches` keeps concrete fixture values for the answerability
     check, which also checks `about` names a registered kind).
@@ -2715,7 +2716,7 @@ tool list stable no matter how many extensions are installed.
 
 **Teaching the agent**
 
-An `oxplow-extension` skill (shipped in `crates/oxplow-plugin/assets`)
+An `oxplow-extension` skill (shipped in `crates/oxplow-agent-text/assets`)
 teaches the format, the `v_*` contract and the loop "read `v_model` →
 query_sql → write files → validate_extension → run_lens". "Improve with Agent" on a lens pastes
 `[oxplow lens <ext>/<slug>]` plus its params into the agent's context.

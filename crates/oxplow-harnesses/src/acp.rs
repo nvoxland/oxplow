@@ -2,11 +2,13 @@
 //! Its launch is the ACP agent's program — what its adapter declares, as
 //! resolved for this project (`acp::agents`) and handed in as the config.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use oxplow_domain::agent::harness::{
     AgentHarness, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
+
+use oxplow_domain::agent::text::AgentText;
 
 use super::Named;
 
@@ -63,12 +65,18 @@ impl AgentHarness for Acp {
     fn env_markers(&self) -> &[&str] {
         &[]
     }
+
+    /// An ACP agent has no runtime on disk: its skills ride its system
+    /// prompt, read at each session's start.
+    fn refresh_text(&self, _: &Path, _: &AgentText) -> Result<(), HarnessError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harnesses::test_launch::{harness, launch_in};
+    use crate::test_launch::{harness, launch_in};
 
     #[test]
     fn launch_is_the_agents_program() {

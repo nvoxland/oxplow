@@ -1920,7 +1920,7 @@ metrics:                              # the read SPEC (the chartable metric)
   an unknown key resolves to a warning (skipped), not an error.
 
 The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
-+ the **`/oxplow:new-metric`** command (assets in `crates/oxplow-plugin/`,
++ the **`/oxplow:new-metric`** command (assets in `crates/oxplow-agent-text/`,
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
 the measure+collector+metric trio + script + verification (`oxplow.collector.sync`
 runs it now), no oxplow-team involvement.

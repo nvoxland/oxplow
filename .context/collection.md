@@ -115,7 +115,7 @@ section for the column.
   config watcher (`ConfigWatcher`, see `git-integration.md`), so
   `/oxplow:configure` takes effect without a restart.
 - **`/oxplow:configure` command** + **`oxplow-collection` skill** (assets in
-  `crates/oxplow-plugin/`). `/configure` does two durable things: instruments
+  `crates/oxplow-agent-text/`). `/configure` does two durable things: instruments
   the project's test tooling to emit a standard-format report at a stable
   path, and records the `testing:` block and the report collectors in
   `.oxplow/project.yaml`. The standing skill keeps

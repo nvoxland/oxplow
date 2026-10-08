@@ -188,7 +188,7 @@ mod tests {
                 "claude".into()
             }));
         harnesses.register(
-            crate::harnesses::built_in("oxplow:claude-code", "claude", "Claude").unwrap(),
+            oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude").unwrap(),
         );
         let dropped = not_inherited(&harnesses);
         for marker in [

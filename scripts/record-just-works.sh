@@ -38,7 +38,7 @@ git -C "$project" -c user.name=record -c user.email=record@localhost commit -q -
   claude -p "$(cat "$prompt")" \
     --safe-mode \
     --no-session-persistence \
-    --append-system-prompt-file "$repo/crates/oxplow-plugin/assets/oxplow-extension.SKILL.md" \
+    --append-system-prompt-file "$repo/crates/oxplow-agent-text/assets/oxplow-extension.SKILL.md" \
     --permission-mode acceptEdits \
     --allowedTools Read Write Edit Glob Grep "Bash(oxplow plugin:*)" "Bash(ls:*)" "Bash(cat:*)" "Bash(mkdir:*)" \
     --output-format json

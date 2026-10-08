@@ -66,7 +66,7 @@ pub(crate) fn parse_skills(
     let Some(items) = value.as_sequence() else {
         return (Vec::new(), vec![at(file, block, "`skills` must be a list")]);
     };
-    let core = oxplow_plugin::core_text();
+    let core = oxplow_agent_text::core_text();
     let mut out: Vec<SkillDecl> = Vec::new();
     let mut errors = Vec::new();
     for item in items {

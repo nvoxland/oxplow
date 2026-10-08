@@ -1,4 +1,12 @@
-//! What the harnesses share: shell quoting and the launch command's shape.
+//! What the harnesses share: shell quoting, the launch command's shape, and
+//! writing skills and commands into a runtime.
+
+use std::fs;
+use std::io;
+use std::path::Path;
+
+use oxplow_domain::agent::harness::HarnessError;
+use oxplow_domain::agent::text::Text;
 
 /// POSIX single-quote escape: wraps `'`, replaces internal `'` with
 /// `'\''`.
@@ -62,6 +70,65 @@ pub fn in_shell(cwd: &str, guard: &str, command: &str) -> String {
 /// A TOML string for a `--config key=value` override.
 pub fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// A runtime file that couldn't be written.
+pub fn runtime(e: io::Error) -> HarnessError {
+    HarnessError::Runtime(e.to_string())
+}
+
+/// The file in each skill folder oxplow writes: how it tells its own
+/// from a person's when one is no longer offered.
+const SKILL_MARKER: &str = ".oxplow";
+
+/// Write each of `skills` as `<skills_dir>/<name>/SKILL.md`, and remove
+/// any other skill folder oxplow wrote there (one it no longer ships, or
+/// an extension's no longer offered); a person's own stay.
+pub fn write_skills(skills_dir: &Path, skills: &[Text]) -> io::Result<()> {
+    if let Ok(entries) = fs::read_dir(skills_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if entry.path().join(SKILL_MARKER).is_file() && !skills.iter().any(|s| s.name == name) {
+                fs::remove_dir_all(entry.path())?;
+            }
+        }
+    }
+    for skill in skills {
+        let dir = skills_dir.join(&skill.name);
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("SKILL.md"), &skill.body)?;
+        fs::write(dir.join(SKILL_MARKER), "")?;
+    }
+    Ok(())
+}
+
+/// Write each of `commands` as `<commands_dir>/<name>.md`, removing every
+/// other `.md` there: the folder is oxplow's.
+pub fn write_commands(commands_dir: &Path, commands: &[Text]) -> io::Result<()> {
+    if let Ok(entries) = fs::read_dir(commands_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(stem) = name.strip_suffix(".md") {
+                if !commands.iter().any(|c| c.name == stem) {
+                    fs::remove_file(entry.path())?;
+                }
+            }
+        }
+    }
+    for command in commands {
+        fs::write(
+            commands_dir.join(format!("{}.md", command.name)),
+            &command.body,
+        )?;
+    }
+    Ok(())
+}
+
+/// `value` as pretty JSON, newline-terminated, at `path`.
+pub fn write_json(path: &Path, value: &serde_json::Value) -> io::Result<()> {
+    let mut s = serde_json::to_string_pretty(value).map_err(io::Error::other)?;
+    s.push('\n');
+    fs::write(path, s)
 }
 
 #[cfg(test)]

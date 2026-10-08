@@ -4345,6 +4345,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-agent-text"
+version = "0.7.0"
+dependencies = [
+ "oxplow-domain",
+ "oxplow-workspace-hack",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
 name = "oxplow-ai"
 version = "0.7.0"
 dependencies = [
@@ -4389,6 +4399,7 @@ dependencies = [
  "libc",
  "opentelemetry-proto",
  "oxplow-acp-fake",
+ "oxplow-agent-text",
  "oxplow-ai",
  "oxplow-ai-fake",
  "oxplow-code-deps",
@@ -4401,10 +4412,10 @@ dependencies = [
  "oxplow-domain",
  "oxplow-fs-watch",
  "oxplow-git",
+ "oxplow-harnesses",
  "oxplow-lsp",
  "oxplow-lsp-installer",
  "oxplow-oauth-sim",
- "oxplow-plugin",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "oxplow-pty",
@@ -4743,6 +4754,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-harnesses"
+version = "0.7.0"
+dependencies = [
+ "oxplow-agent-text",
+ "oxplow-domain",
+ "oxplow-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "oxplow-lsp"
 version = "0.7.0"
 dependencies = [
@@ -4789,7 +4812,6 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-git",
- "oxplow-plugin",
  "oxplow-sdk",
  "oxplow-tasks",
  "oxplow-workspace-hack",
@@ -4827,20 +4849,6 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "url",
-]
-
-[[package]]
-name = "oxplow-plugin"
-version = "0.7.0"
-dependencies = [
- "oxplow-domain",
- "oxplow-workspace-hack",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
 ]
 
 [[package]]
@@ -4923,7 +4931,6 @@ dependencies = [
  "oxplow-domain",
  "oxplow-fs-watch",
  "oxplow-git",
- "oxplow-plugin",
  "oxplow-sdk",
  "oxplow-session",
  "oxplow-workspace-hack",
@@ -4962,12 +4969,12 @@ dependencies = [
 name = "oxplow-sdk"
 version = "0.7.0"
 dependencies = [
+ "oxplow-agent-text",
  "oxplow-ai",
  "oxplow-app",
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
- "oxplow-plugin",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "oxplow-workspace-hack",
@@ -5038,7 +5045,6 @@ dependencies = [
  "oxplow-fs-watch",
  "oxplow-git",
  "oxplow-oauth-redirect",
- "oxplow-plugin",
  "oxplow-rpc",
  "oxplow-sdk",
  "oxplow-session",
