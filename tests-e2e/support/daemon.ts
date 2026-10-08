@@ -3,7 +3,7 @@
 // reaches the person's real config, keychain, rc files or shell history.
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { chmodSync, cpSync, createWriteStream, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
@@ -64,11 +64,18 @@ function installGithubExample(project: string): void {
 }
 
 /** The environment a daemon runs in: its own home (so a terminal's shell
- *  reads no rc file and writes no history of the person's), a plain
- *  `/bin/sh`, and no global or system git config. */
+ *  reads no rc file and writes no history of the person's), a PATH without
+ *  the person's own bin dirs, a plain `/bin/sh`, and no global or system
+ *  git config. */
 function isolated(dir: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    // The person's own bin dirs (an agent CLI installed under their home)
+    // are out of reach: no spec ever starts a real agent CLI.
+    PATH: (process.env.PATH ?? "")
+      .split(":")
+      .filter((d) => d && !d.startsWith(homedir()))
+      .join(":"),
     HOME: join(dir, "user"),
     OXPLOW_HOME: join(dir, "home"),
     SHELL: "/bin/sh",
