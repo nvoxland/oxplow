@@ -14,7 +14,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, EffortId, TaskImpact, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, EffortId, EffortImpact, ThreadId, Timestamp};
 
 use crate::database::map_sql_err;
 use crate::database::Database;
@@ -681,7 +681,8 @@ pub trait EffortStore: Send + Sync {
     /// Replaces any prior list. The store then re-projects the
     /// owning work item's effort slice so impact edges show up in
     /// `page_ref` immediately.
-    async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError>;
+    async fn set_impacts(&self, id: &EffortId, impacts: &[EffortImpact])
+        -> Result<(), DomainError>;
     async fn list_for_work_item(&self, work_item: &str) -> Result<Vec<Effort>, DomainError>;
     /// The work item an effort is on; `None` when the row is gone.
     async fn work_item_for_effort(&self, id: &EffortId) -> Result<Option<String>, DomainError>;
@@ -708,7 +709,7 @@ pub trait EffortStore: Send + Sync {
     /// already closed the row.
     async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
-    async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError>;
+    async fn list_impacts(&self, id: &EffortId) -> Result<Vec<EffortImpact>, DomainError>;
     /// Record a turn's changed files as `effort`'s observed ones (see
     /// [`observe_files_tx`]); how many it added.
     async fn observe_files(
@@ -783,7 +784,7 @@ impl SqliteEffortStore {
     /// Re-emit the full effort-owned slice for `work_item` — the
     /// union of touched-file edges, the parsed wikilink/file/dir/
     /// task/finding/commit refs pulled from every effort's
-    /// `summary` body, and the declared `TaskImpact` rows.
+    /// `summary` body, and the declared `EffortImpact` rows.
     /// Replaces under `effort_ref_types()` so the task-body slice
     /// (owned by `task_store`) is unaffected.
     pub async fn project_effort_slice(&self, work_item: &str) -> Result<(), DomainError> {
@@ -1269,7 +1270,11 @@ impl EffortStore for SqliteEffortStore {
             .await
     }
 
-    async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError> {
+    async fn set_impacts(
+        &self,
+        id: &EffortId,
+        impacts: &[EffortImpact],
+    ) -> Result<(), DomainError> {
         let id_clone = *id;
         let json = if impacts.is_empty() {
             None
@@ -1290,7 +1295,7 @@ impl EffortStore for SqliteEffortStore {
         Ok(())
     }
 
-    async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError> {
+    async fn list_impacts(&self, id: &EffortId) -> Result<Vec<EffortImpact>, DomainError> {
         let id = *id;
         let raw: Option<String> = self
             .db
@@ -1506,9 +1511,9 @@ fn effort_slice_on(
     let impact_jsons: Vec<String> = imp_stmt
         .query_map(params![work_item], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut impacts: Vec<TaskImpact> = Vec::new();
+    let mut impacts: Vec<EffortImpact> = Vec::new();
     for j in &impact_jsons {
-        match serde_json::from_str::<Vec<TaskImpact>>(j) {
+        match serde_json::from_str::<Vec<EffortImpact>>(j) {
             Ok(rows) => impacts.extend(rows),
             Err(e) => {
                 tracing::warn!(?e, "effort impacts_json deserialize failed; skipping");
@@ -2136,18 +2141,18 @@ mod tests {
     #[tokio::test]
     async fn set_impacts_projects_edges_and_round_trips() {
         use crate::page_ref_store::SqlitePageRefStore;
-        use oxplow_domain::TaskImpact;
+        use oxplow_domain::EffortImpact;
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
         let store = SqliteEffortStore::new(db);
         let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         let impacts = vec![
-            TaskImpact {
+            EffortImpact {
                 kind: "wiki".into(),
                 id: "url-schemes".into(),
                 action: Some("created".into()),
             },
-            TaskImpact {
+            EffortImpact {
                 kind: "git_commit".into(),
                 id: "abc1234".into(),
                 action: Some("referenced".into()),
@@ -2186,7 +2191,7 @@ mod tests {
         store
             .set_impacts(
                 &eff.id,
-                &[TaskImpact {
+                &[EffortImpact {
                     kind: "wiki".into(),
                     id: "other-page".into(),
                     action: None,

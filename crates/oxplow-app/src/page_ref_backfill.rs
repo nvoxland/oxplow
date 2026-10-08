@@ -511,7 +511,7 @@ mod tests {
         effort_writer
             .set_impacts(
                 &own.id,
-                &[oxplow_domain::TaskImpact {
+                &[oxplow_domain::EffortImpact {
                     kind: "wiki".into(),
                     id: "auth-flow".into(),
                     action: Some("updated".into()),

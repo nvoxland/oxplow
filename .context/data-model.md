@@ -595,7 +595,7 @@ and has no task page. Columns: `work_item`,
 an optional `oxplow.effort.report` wrote describing what shipped; `v_effort`
 (v3) reads it, else the final message of the effort's last turn),
 `impacts_json` (V12 — nullable TEXT holding a JSON array of declared
-`TaskImpact` rows of the form `{kind, id, action?}`; the LLM uses this
+`EffortImpact` rows of the form `{kind, id, action?}`; the LLM uses this
 to call out wiki pages it created, tasks it completed, commits it
 referenced, etc. Each row projects into `page_ref` under
 `ref_type=impact` with the action carried in `source_extra`).
@@ -1118,7 +1118,7 @@ own initial-scan paths and don't need separate backfill.
 The effort slice has three contributors that run independently —
 `record_file` re-projects after each touched-file write, `finish`
 re-projects after `summary` lands, and `set_impacts` re-projects
-after the declared `TaskImpact` list is written. They share the
+after the declared `EffortImpact` list is written. They share the
 same `effort_ref_types()` set, so each call replaces the full
 union and the other contributors' rows survive.
 
