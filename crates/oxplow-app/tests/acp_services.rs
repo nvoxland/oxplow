@@ -89,6 +89,16 @@ async fn seed(svc: &Services, root: &std::path::Path, status: ThreadStatus) -> T
     thread.id
 }
 
+/// The thread's agent session (the one `seed` opened).
+async fn session_of(svc: &Services, thread: ThreadId) -> oxplow_domain::AgentSessionId {
+    svc.agent_session_store
+        .newest_for_thread(thread)
+        .await
+        .unwrap()
+        .unwrap()
+        .id
+}
+
 async fn claim_task(svc: &Services, thread: ThreadId) {
     let now = Timestamp::from_unix_ms(1);
     let task = svc
@@ -138,7 +148,11 @@ async fn open_in_process(svc: &Arc<Services>, thread: ThreadId, root: &std::path
         let _ = oxplow_acp_fake::serve(ar, aw, Shared::default(), FakeOptions::default()).await;
     });
     let (cr, cw) = tokio::io::split(client);
-    let host = Arc::new(ServicesAcpHost::new(svc, Some(StreamId::new(1))));
+    let host = Arc::new(ServicesAcpHost::new(
+        svc,
+        Some(StreamId::new(1)),
+        session_of(svc, thread).await,
+    ));
     svc.acp
         .open_with_io(host, spec(thread, root), cw, cr)
         .await
@@ -338,7 +352,11 @@ fn fake_bin() -> std::path::PathBuf {
 async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Active).await;
-    let host = Arc::new(ServicesAcpHost::new(&svc, Some(StreamId::new(1))));
+    let host = Arc::new(ServicesAcpHost::new(
+        &svc,
+        Some(StreamId::new(1)),
+        session_of(&svc, thread).await,
+    ));
     svc.acp
         .open(
             host,
@@ -375,7 +393,12 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
         .unwrap();
     wait_for(&mut rx, |b| matches!(b, AcpEventBody::Closed { .. })).await;
     assert!(!svc.acp.is_open(&thread));
-    let status = svc.agent_status_store.get(&thread).await.unwrap().unwrap();
+    let status = svc
+        .agent_status_store
+        .get(&thread, Some(session_of(&svc, thread).await))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(status.state, oxplow_domain::AgentStatusState::Stopped);
     assert!(svc
         .agent_turn_store
@@ -412,15 +435,21 @@ async fn a_permission_card_restores_the_status_it_interrupted() {
     use oxplow_domain::AgentStatusState;
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Active).await;
-    let host = ServicesAcpHost::new(&svc, Some(StreamId::new(1)));
+    let host = ServicesAcpHost::new(&svc, Some(StreamId::new(1)), session_of(&svc, thread).await);
     let status = || async {
-        let s = svc.agent_status_store.get(&thread).await.unwrap().unwrap();
+        let s = svc
+            .agent_status_store
+            .get(&thread, Some(session_of(&svc, thread).await))
+            .await
+            .unwrap()
+            .unwrap();
         (s.state, s.detail)
     };
     // The agent already parked on the person (it asked them something).
     svc.hook_ingest
         .set_status(
             &thread,
+            Some(session_of(&svc, thread).await),
             AgentStatusState::AwaitingUser,
             Some("Which DB?".into()),
         )
@@ -438,7 +467,12 @@ async fn a_permission_card_restores_the_status_it_interrupted() {
 
     // No turn open and nothing parked: answering leaves it idle, not running.
     svc.hook_ingest
-        .set_status(&thread, AgentStatusState::Idle, None)
+        .set_status(
+            &thread,
+            Some(session_of(&svc, thread).await),
+            AgentStatusState::Idle,
+            None,
+        )
         .await
         .unwrap();
     host.awaiting_user(&thread, Some("Permission: x".into()))

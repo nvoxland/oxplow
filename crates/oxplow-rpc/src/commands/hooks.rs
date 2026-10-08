@@ -1,7 +1,7 @@
 //! Cores for the `hooks` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
-use oxplow_app::agent_status_derive::{derive_thread_status, recent_activity};
+use oxplow_app::agent_status_derive::{derive_session_status, recent_activity};
 use oxplow_app::{HookEnvelope, Services};
 use oxplow_domain::stores::AgentTurnStore;
 use oxplow_domain::{AgentStatus, AgentTurn, StoredEvent, ThreadId};
@@ -57,15 +57,16 @@ pub async fn read_event_content(
 }
 
 pub async fn list_agent_statuses(svc: &Services) -> Result<Vec<AgentStatus>, IpcError> {
-    // Every thread that has logged a status, with its working/waiting
-    // state derived by replaying its activity: a missed Stop or a dead
-    // agent shows as what the log says happened (stalled), not as the
-    // last status it announced.
+    // Every open agent session that has logged a status (and each
+    // thread's activity no session claims), with its working/waiting state
+    // derived by replaying its activity: a missed Stop or a dead agent
+    // shows as what the log says happened (stalled), not as the last
+    // status it announced. The renderer rolls a thread's sessions up.
     let now = oxplow_domain::Timestamp::now();
     let mut statuses = svc.agent_status_store.list_all().await?;
     for s in &mut statuses {
-        let events = recent_activity(&svc.event_log_store, s.thread_id).await?;
-        s.state = derive_thread_status(&events, now);
+        let events = recent_activity(&svc.event_log_store, s.thread_id, s.agent_session_id).await?;
+        s.state = derive_session_status(&events, now);
     }
     Ok(statuses)
 }

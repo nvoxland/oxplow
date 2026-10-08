@@ -89,11 +89,18 @@ pub trait ThreadNoteStore: Send + Sync {
 }
 
 #[async_trait]
-/// A thread's agent status is its newest logged `agent.status.changed`;
+/// An agent session's status is its newest logged `agent.status.changed`;
 /// the log is the only record (writes go through the hook ingest).
 pub trait AgentStatusStore: Send + Sync {
-    async fn get(&self, thread: &ThreadId) -> Result<Option<AgentStatus>, DomainError>;
-    /// The status of every thread that has logged one.
+    /// The status of agent session `session` on `thread` (`None`: the
+    /// thread's activity no session claims).
+    async fn get(
+        &self,
+        thread: &ThreadId,
+        session: Option<AgentSessionId>,
+    ) -> Result<Option<AgentStatus>, DomainError>;
+    /// The status of every open session (and every thread's unclaimed
+    /// activity) that has logged one.
     async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError>;
 }
 

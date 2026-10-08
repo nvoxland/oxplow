@@ -80,6 +80,10 @@ pub enum OxplowEvent {
     /// re-derive) compute it inline before emitting.
     AgentStatusChanged {
         thread_id: ThreadId,
+        /// The agent session whose status it is; `None` for activity no
+        /// session claims. The renderer rolls a thread's sessions up
+        /// (`rollUpAgentStatus`).
+        agent_session_id: Option<oxplow_domain::AgentSessionId>,
         state: AgentStatusState,
         /// The status detail, when meaningful to the renderer. Carries
         /// what the agent is waiting on (its question, the permission it

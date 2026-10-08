@@ -8,6 +8,7 @@ import {
   getConfig,
   createWorkspaceDirectory,
   type AgentStatus,
+  type AgentStatusEntry,
   createWorkspaceFile,
   deleteWorkspacePath,
   getCurrentStream,
@@ -102,6 +103,7 @@ import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { AgentPage } from "./pages/AgentPage.js";
 import { agentLabel, sessionLabel } from "./agentKinds.js";
 import { useThreadSessions } from "./agentSessions.js";
+import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { TerminalPage } from "./pages/TerminalPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
@@ -278,11 +280,14 @@ export function App() {
   const [backlogState, setBacklogState] = useState<WorkList | null>(null);
   // The active work list: what it can do and its own fields.
   const workListProfile = useWorkListProfile();
-  const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
-  // Parallel to agentStatuses: the question each thread is waiting on, set
-  // only while that thread's status is "awaiting". Feeds the rail dot's
-  // tooltip so a thread parked on your answer says WHAT it's asking.
-  const [agentQuestions, setAgentQuestions] = useState<Record<string, string | undefined>>({});
+  // Each agent session's status (`sessionStatusKey`). A thread's dot is its
+  // sessions' roll-up, and its question (the rail dot's tooltip) the one
+  // the awaiting session asks.
+  const [sessionStatuses, setSessionStatuses] = useState<Record<string, AgentStatusEntry>>({});
+  const { statuses: agentStatuses, questions: agentQuestions } = useMemo(
+    () => threadStatuses(Object.values(sessionStatuses)),
+    [sessionStatuses],
+  );
   const [stream, setStream] = useState<Stream | null>(null);
   // Per-thread active center tab. The map is the source of truth; `centerActive`
   // and `setCenterActive` below are derived helpers so existing handler code
@@ -966,12 +971,9 @@ export function App() {
     const out: Record<string, AgentStatus> = {};
     for (const s of streams) {
       const threads = threadStates[s.id]?.threads ?? [];
-      const anyWorking = threads.some((t) => agentStatuses[t.id] === "working");
-      // Working (busy) outranks awaiting (needs you) outranks waiting so
-      // a stream whose thread parked on your answer shows the blue dot
-      // even from a collapsed rail.
-      const anyAwaiting = threads.some((t) => agentStatuses[t.id] === "awaiting");
-      out[s.id] = anyWorking ? "working" : anyAwaiting ? "awaiting" : "waiting";
+      // The threads' roll-up: what you owe (an answer, a dead turn) shows
+      // even from a collapsed rail, ahead of work in flight.
+      out[s.id] = rollUpAgentStatus(threads.flatMap((t) => agentStatuses[t.id] ?? [])) ?? "waiting";
     }
     return out;
   }, [streams, threadStates, agentStatuses]);
@@ -1130,8 +1132,7 @@ export function App() {
     setThreadStates,
     setStreams,
     setStream,
-    setAgentStatuses,
-    setAgentQuestions,
+    setSessionStatuses,
     setGeneratedState,
     setEnabledAgents,
   });

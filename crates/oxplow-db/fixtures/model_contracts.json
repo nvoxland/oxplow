@@ -6435,6 +6435,31 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread (v_thread.id)."
+        },
+        {
+          "name": "state",
+          "type": "",
+          "doc": "`running`, `idle`, `awaiting_user`, `stopped` or `error`: the session status that ranks first."
+        },
+        {
+          "name": "detail",
+          "type": "",
+          "doc": "What that session waits on (the question, the permission asked), or why it stopped."
+        },
+        {
+          "name": "since",
+          "type": "TEXT",
+          "doc": "When that session moved to it (RFC 3339)."
+        }
+      ],
+      "key": []
     }
   },
   "hint_stat": {
@@ -6681,6 +6706,38 @@
           "name": "updated_at",
           "type": "TEXT",
           "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
+  },
+  "agent_session_status": {
+    "1": {
+      "columns": [
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread (v_thread.id)."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The session (v_agent_session.id)."
+        },
+        {
+          "name": "state",
+          "type": "",
+          "doc": "`running`, `idle`, `awaiting_user`, `stopped` or `error`."
+        },
+        {
+          "name": "detail",
+          "type": "",
+          "doc": "What it's waiting on (the question, the permission asked), or why it stopped."
+        },
+        {
+          "name": "since",
+          "type": "TEXT",
+          "doc": "When it moved to this status (RFC 3339)."
         }
       ],
       "key": []

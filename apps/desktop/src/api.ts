@@ -2347,6 +2347,8 @@ export type AgentStatus = "working" | "waiting" | "stalled" | "awaiting";
 export interface AgentStatusEntry {
   streamId: string;
   threadId: string;
+  /** The agent session (`ses3`); `null` for activity no session claims. */
+  sessionId: string | null;
   status: AgentStatus;
   /// What the agent is waiting on (its question, a permission), present only when `status` is
   /// "awaiting". Surfaced as the rail dot's tooltip so you can see what
@@ -2403,6 +2405,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
     return {
       streamId: "",
       threadId: row.thread_id,
+      sessionId: row.agent_session_id,
       // detail is what it waits on only while awaiting; other
       // states reuse detail for markers ("boot"/"interrupt") the dot
       // shouldn't surface, so scope the tooltip to the awaiting state.
@@ -2563,6 +2566,7 @@ export function subscribeAgentStatus(
     onEvent({
       streamId: "",
       threadId,
+      sessionId: (event.agentSessionId as string | null | undefined) ?? null,
       status,
       question: status === "awaiting" ? (detail ?? undefined) : undefined,
     });

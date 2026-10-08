@@ -1,6 +1,6 @@
 //! Agent turns (`agent_turn` rows and their `agent.turn.*` events) and
-//! agent status, which is read from the log: a thread's status is its
-//! newest `agent.status.changed`.
+//! agent status, which is read from the log: an agent session's status is
+//! its newest `agent.status.changed`.
 
 use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 
@@ -369,16 +369,18 @@ pub fn close_turn_tx(
 
 // -- Agent status ------------------------------------------------------
 
-/// One `agent.status.changed` row as the thread's status, read at the
-/// type's newest version.
+/// One `agent.status.changed` row (`thread_id, agent_session_id, v,
+/// payload, at`) as its session's status, read at the type's newest
+/// version.
 fn row_to_status(
     vocabulary: &Vocabulary,
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<AgentStatus> {
     let thread: i64 = row.get(0)?;
-    let v: u32 = row.get(1)?;
-    let payload: String = row.get(2)?;
-    let at: String = row.get(3)?;
+    let session: Option<i64> = row.get(1)?;
+    let v: u32 = row.get(2)?;
+    let payload: String = row.get(3)?;
+    let at: String = row.get(4)?;
     let decode = || -> Result<AgentStatus, DomainError> {
         let value = serde_json::from_str(&payload)
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
@@ -387,6 +389,7 @@ fn row_to_status(
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
         Ok(AgentStatus {
             thread_id: ThreadId::new(thread),
+            agent_session_id: session.map(AgentSessionId::new),
             state: p.state.into(),
             detail: p.detail,
             updated_at: string_to_ts(&at)?,
@@ -395,36 +398,45 @@ fn row_to_status(
     decode().map_err(map_err_text)
 }
 
-/// The thread's current status: its newest `agent.status.changed`.
+/// Agent session `session`'s current status on `thread` (`None`: the
+/// activity no session claims): its newest `agent.status.changed`.
 pub fn last_status_tx(
     conn: &Connection,
     vocabulary: &Vocabulary,
     thread: ThreadId,
+    session: Option<AgentSessionId>,
 ) -> Result<Option<AgentStatus>, DomainError> {
     conn.query_row(
-        "SELECT thread_id, v, payload, at FROM event_log
-          WHERE thread_id = ?1 AND type = ?2
+        "SELECT thread_id, agent_session_id, v, payload, at FROM event_log
+          WHERE thread_id = ?1 AND agent_session_id IS ?3 AND type = ?2
           ORDER BY seq DESC LIMIT 1",
-        params![thread.value(), AgentStatusChanged::TYPE],
+        params![
+            thread.value(),
+            AgentStatusChanged::TYPE,
+            session.map(|s| s.value())
+        ],
         |r| row_to_status(vocabulary, r),
     )
     .optional()
     .map_err(map_sql_err)
 }
 
-/// Every existing thread's current status.
+/// The current status of every open session of an existing thread, and of
+/// each thread's unclaimed activity, by thread then session.
 fn all_statuses_tx(
     conn: &Connection,
     vocabulary: &Vocabulary,
 ) -> Result<Vec<AgentStatus>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT e.thread_id, e.v, e.payload, e.at
+            "SELECT e.thread_id, e.agent_session_id, e.v, e.payload, e.at
                FROM event_log e JOIN threads th ON th.id = e.thread_id
+               LEFT JOIN agent_session s ON s.id = e.agent_session_id
               WHERE e.seq IN (SELECT MAX(seq) FROM event_log
                                WHERE type = ?1 AND thread_id IS NOT NULL
-                               GROUP BY thread_id)
-              ORDER BY e.thread_id",
+                               GROUP BY thread_id, agent_session_id)
+                AND (e.agent_session_id IS NULL OR s.closed_at IS NULL)
+              ORDER BY e.thread_id, e.agent_session_id IS NOT NULL, e.agent_session_id",
         )
         .map_err(map_sql_err)?;
     let rows = stmt
@@ -451,10 +463,14 @@ impl SqliteAgentStatusStore {
 
 #[async_trait]
 impl AgentStatusStore for SqliteAgentStatusStore {
-    async fn get(&self, thread: &ThreadId) -> Result<Option<AgentStatus>, DomainError> {
+    async fn get(
+        &self,
+        thread: &ThreadId,
+        session: Option<AgentSessionId>,
+    ) -> Result<Option<AgentStatus>, DomainError> {
         let (vocabulary, thread) = (self.vocabulary.clone(), *thread);
         self.db
-            .call_mut(move |c| last_status_tx(c, &vocabulary.current(), thread))
+            .call_mut(move |c| last_status_tx(c, &vocabulary.current(), thread, session))
             .await
     }
 
@@ -705,7 +721,7 @@ mod tests {
         let (db, tid) = fixture().await;
         let vocabulary = VocabularyHandle::core();
         let store = SqliteAgentStatusStore::new(db.clone(), vocabulary.clone());
-        assert!(store.get(&tid).await.unwrap().is_none());
+        assert!(store.get(&tid, None).await.unwrap().is_none());
         assert!(store.list_all().await.unwrap().is_empty());
 
         log_status(&db, &vocabulary.current(), tid, S::Running, None);
@@ -719,12 +735,158 @@ mod tests {
 
         // A fresh store over the same database (a restarted daemon) reads it.
         let store = SqliteAgentStatusStore::new(db.clone(), vocabulary);
-        let got = store.get(&tid).await.unwrap().unwrap();
+        let got = store.get(&tid, None).await.unwrap().unwrap();
         assert_eq!(got.state, S::AwaitingUser);
         assert_eq!(got.detail.as_deref(), Some("A or B?"));
         let all = store.list_all().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0], got);
+    }
+
+    /// Status is per agent session: each session's newest
+    /// `agent.status.changed` is its own, and a closed session's isn't
+    /// listed.
+    #[tokio::test]
+    async fn each_session_has_its_own_status() {
+        use oxplow_domain::AgentStatusState as S;
+        let (db, tid) = fixture().await;
+        let vocabulary = VocabularyHandle::core();
+        let open = |at| {
+            let db = db.clone();
+            async move {
+                db.transaction(move |tx| {
+                    crate::agent_session_store::insert_tx(
+                        tx,
+                        &oxplow_domain::agent_session::NewAgentSession::of(
+                            tid,
+                            oxplow_domain::AgentKind::Claude,
+                            None,
+                        ),
+                        Timestamp::from_unix_ms(at),
+                    )
+                })
+                .await
+                .unwrap()
+                .id
+            }
+        };
+        let (a, b, c) = (open(1).await, open(2).await, open(3).await);
+        let log = |session, state| {
+            use oxplow_domain::events::schema::AgentStatusChangedV1;
+            let conn = db.conn().unwrap();
+            let vocabulary = vocabulary.current();
+            let ev = EventCtx::system(&vocabulary, "test");
+            let env = ev
+                .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
+                    thread: thread_ref(tid),
+                    state: oxplow_domain::events::schema::LoggedAgentStatus::of(state).unwrap(),
+                    detail: None,
+                })
+                .with_anchors(Anchors {
+                    agent_session_id: Some(session),
+                    ..anchors_for_thread_tx(&conn, tid).unwrap()
+                })
+                .with_subject([thread_ref(tid)]);
+            ev.append(&conn, &env).unwrap();
+        };
+        log(a, S::Running);
+        log(b, S::AwaitingUser);
+        log(a, S::Idle);
+        log(c, S::Running);
+        db.transaction(move |tx| {
+            crate::agent_session_store::close_tx(
+                tx,
+                c,
+                oxplow_domain::agent_session::SessionCloseReason::Closed,
+                Timestamp::from_unix_ms(4),
+            )
+        })
+        .await
+        .unwrap();
+        let store = SqliteAgentStatusStore::new(db.clone(), vocabulary);
+        assert_eq!(
+            store.get(&tid, Some(a)).await.unwrap().unwrap().state,
+            S::Idle
+        );
+        assert_eq!(
+            store.get(&tid, Some(b)).await.unwrap().unwrap().state,
+            S::AwaitingUser
+        );
+        let all: Vec<_> = store
+            .list_all()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| (s.agent_session_id, s.state))
+            .collect();
+        assert_eq!(all, vec![(Some(a), S::Idle), (Some(b), S::AwaitingUser)]);
+    }
+
+    /// `v_agent_status` rolls a thread's open sessions up by the same rule
+    /// as `oxplow_domain::agent::roll_up_status`, for every pair of logged
+    /// states (`stalled` is derived, never logged); `v_agent_session_status`
+    /// holds each session's own.
+    #[tokio::test]
+    async fn the_status_model_rolls_sessions_up_like_the_rule() {
+        use oxplow_domain::AgentStatusState as S;
+        let logged = [S::Idle, S::Running, S::AwaitingUser, S::Stopped, S::Error];
+        for a in logged {
+            for b in logged {
+                let (db, tid) = fixture().await;
+                let vocabulary = VocabularyHandle::core();
+                let conn = db.conn().unwrap();
+                for (at, state) in [(1, a), (2, b)] {
+                    let session = crate::agent_session_store::insert_tx(
+                        &conn,
+                        &oxplow_domain::agent_session::NewAgentSession::of(
+                            tid,
+                            oxplow_domain::AgentKind::Claude,
+                            None,
+                        ),
+                        Timestamp::from_unix_ms(at),
+                    )
+                    .unwrap()
+                    .id;
+                    use oxplow_domain::events::schema::AgentStatusChangedV1;
+                    let vocabulary = vocabulary.current();
+                    let ev = EventCtx::system(&vocabulary, "test");
+                    let env = ev
+                        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
+                            thread: thread_ref(tid),
+                            state: oxplow_domain::events::schema::LoggedAgentStatus::of(state)
+                                .unwrap(),
+                            detail: None,
+                        })
+                        .with_anchors(Anchors {
+                            agent_session_id: Some(session),
+                            ..anchors_for_thread_tx(&conn, tid).unwrap()
+                        })
+                        .with_subject([thread_ref(tid)]);
+                    ev.append(&conn, &env).unwrap();
+                }
+                let rolled: String = conn
+                    .query_row(
+                        "SELECT state FROM v_agent_status WHERE thread_id = ?1",
+                        [tid.value()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                let expected = oxplow_domain::agent::roll_up_status([a, b]).unwrap();
+                assert_eq!(
+                    serde_json::from_value::<S>(serde_json::Value::String(rolled)).unwrap(),
+                    expected,
+                    "{a:?} + {b:?}"
+                );
+                let per_session: i64 = conn
+                    .query_row(
+                        "SELECT count(*) FROM v_agent_session_status WHERE thread_id = ?1",
+                        [tid.value()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(per_session, 2);
+            }
+        }
     }
 
     #[tokio::test]

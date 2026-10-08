@@ -508,8 +508,9 @@ listing open turns — `listAgentTurns`, `listOpenTurns`,
 `subscribeTurnEvents` no longer exist, and there is no
 `TurnChangedEvent`. If you need a "what is the agent doing right
 now" signal, use the `task` rows themselves plus
-`agent-status.changed` for the colored-dot working/waiting/idle
-state.
+`agentStatusChanged` (per agent session — it names the session; the
+renderer rolls a thread's sessions up, agent-model.md "Agent status") for
+the colored-dot working/waiting/idle state.
 
 ## Thread and stream order
 

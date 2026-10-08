@@ -1250,6 +1250,11 @@ export type AgentSessionId = string;
 
 export type AgentStatus = {
 	thread_id: ThreadId,
+	/**
+	 *  The agent session it is the status of; `None` for activity no
+	 *  session claims (an agent oxplow didn't start).
+	 */
+	agent_session_id: AgentSessionId | null,
 	state: AgentStatusState,
 	detail: string | null,
 	updated_at: Timestamp,
@@ -4577,7 +4582,13 @@ export type OxplowEvent =
  *  PreToolUse/PostToolUse, where the renderer used to refetch and
  *  re-derive) compute it inline before emitting.
  */
-{ kind: "agentStatusChanged"; threadId: ThreadId; state: AgentStatusState; 
+{ kind: "agentStatusChanged"; threadId: ThreadId; 
+/**
+ *  The agent session whose status it is; `None` for activity no
+ *  session claims. The renderer rolls a thread's sessions up
+ *  (`rollUpAgentStatus`).
+ */
+agentSessionId: AgentSessionId | null; state: AgentStatusState; 
 /**
  *  The status detail, when meaningful to the renderer. Carries
  *  what the agent is waiting on (its question, the permission it

@@ -118,7 +118,7 @@ pub async fn acp_open_session(
         args: agent.args.clone(),
         env: agent.env.clone().into_iter().collect(),
     };
-    let host = Arc::new(ServicesAcpHost::new(svc, Some(stream.id)));
+    let host = Arc::new(ServicesAcpHost::new(svc, Some(stream.id), session_id));
     svc.acp.open(host, spec, launch).await.map_err(acp_err)?;
     snapshot(&svc.acp, &thread_id, 0)
 }

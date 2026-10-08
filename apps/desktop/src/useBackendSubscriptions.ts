@@ -2,7 +2,7 @@ import { type Dispatch, type RefObject, type SetStateAction, useEffect } from "r
 
 import {
   type AgentKind,
-  type AgentStatus,
+  type AgentStatusEntry,
   generatedPaths,
   getConfig,
   getThreadState,
@@ -26,6 +26,7 @@ const THREAD_READS = readsOf("v_thread");
 const STREAM_READS = readsOf("v_stream");
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 import { logUi } from "./logger.js";
+import { sessionStatusKey } from "./agentStatusRollup.js";
 
 /**
  * Backend-event subscription wiring for the app shell, lifted out of
@@ -49,8 +50,8 @@ export interface BackendSubscriptionHandlers {
   setThreadStates: Dispatch<SetStateAction<Record<string, ThreadState>>>;
   setStreams: Dispatch<SetStateAction<Stream[]>>;
   setStream: Dispatch<SetStateAction<Stream | null>>;
-  setAgentStatuses: Dispatch<SetStateAction<Record<string, AgentStatus>>>;
-  setAgentQuestions: Dispatch<SetStateAction<Record<string, string | undefined>>>;
+  /** Each agent session's status, by `sessionStatusKey`. */
+  setSessionStatuses: Dispatch<SetStateAction<Record<string, AgentStatusEntry>>>;
   setGeneratedState: (next: { exclude: string[]; include: string[] }) => void;
   setEnabledAgents: (next: AgentKind[]) => void;
 }
@@ -98,8 +99,7 @@ export function useBackendSubscriptions(
     setThreadStates,
     setStreams,
     setStream,
-    setAgentStatuses,
-    setAgentQuestions,
+    setSessionStatuses,
     setGeneratedState,
     setEnabledAgents,
   } = handlers;
@@ -256,22 +256,16 @@ export function useBackendSubscriptions(
       listAgentStatuses()
         .then((entries) => {
           if (cancelled) return;
-          const next: Record<string, AgentStatus> = {};
-          const nextQ: Record<string, string | undefined> = {};
-          for (const entry of entries) {
-            next[entry.threadId] = entry.status;
-            nextQ[entry.threadId] = entry.question;
-          }
-          setAgentStatuses(next);
-          setAgentQuestions(nextQ);
+          const next: Record<string, AgentStatusEntry> = {};
+          for (const entry of entries) next[sessionStatusKey(entry)] = entry;
+          setSessionStatuses(next);
         })
         .catch((error) => {
           logUi("warn", "failed to seed agent statuses", { error: String(error) });
         });
     void seed();
     const unsubscribe = subscribeAgentStatus("all", (entry) => {
-      setAgentStatuses((prev) => ({ ...prev, [entry.threadId]: entry.status }));
-      setAgentQuestions((prev) => ({ ...prev, [entry.threadId]: entry.question }));
+      setSessionStatuses((prev) => ({ ...prev, [sessionStatusKey(entry)]: entry }));
     });
     const unsubReconnect = onRemoteReconnect(() => void seed());
     return () => {
@@ -279,5 +273,5 @@ export function useBackendSubscriptions(
       unsubscribe();
       unsubReconnect();
     };
-  }, [setAgentStatuses, setAgentQuestions]);
+  }, [setSessionStatuses]);
 }

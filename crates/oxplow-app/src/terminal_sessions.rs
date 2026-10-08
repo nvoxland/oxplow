@@ -126,7 +126,7 @@ impl RingBuffer {
 }
 
 /// The agent a PTY runs: its thread and agent session. Its output stamps
-/// the thread's liveness, and its exit ends the session's harness session
+/// the session's liveness, and its exit ends the session's harness session
 /// (`HookIngestService` records a `SessionEnd` for it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentPane {
@@ -289,8 +289,8 @@ impl TerminalSessionRegistry {
                         // thread-bound (agent) panes record; the cadence
                         // distinguishes a busy long turn from a dead one
                         // (tsk141).
-                        if let Some(pane) = agent {
-                            activity.record(pane.thread, Timestamp::now());
+                        if let Some(session) = agent.and_then(|pane| pane.session) {
+                            activity.record(session, Timestamp::now());
                         }
                         ring_for_task.lock().await.push(bytes.clone());
                         let msg = serde_json::json!({

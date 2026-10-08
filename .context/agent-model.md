@@ -107,7 +107,7 @@ oxplow agent:
   `working` pane target; UI-side, it's an xterm.js inside
   `.xterm`. Click that element to focus, type with regular keystrokes;
   xterm pipes them through the PTY to the thread's assigned agent.
-- **When a turn is done.** `derive_thread_status`
+- **When a turn is done.** `derive_session_status`
   (`crates/oxplow-app/src/agent_status_derive.rs`) reduces the thread's
   logged `agent.*` activity to two states:
   `working` (agent is actively burning cycles) or `waiting` (agent
@@ -1563,10 +1563,28 @@ provide finer-grained overrides without displacing earlier context.
 
 ## Agent status
 
-`derive_thread_status` (`crates/oxplow-app/src/agent_status_derive.rs`)
-reduces a thread's recent activity into one of two states: `working` or
-`waiting`. **The input is the event log** (P3.9): the thread's newest 200
-`agent.*` events (`recent_activity`, via `SqliteEventLogStore::recent`),
+**Status is per agent session.** Each session has its own: its newest
+`agent.status.changed` (anchored to the session) and the status derived
+from its own activity; a thread's activity no session claims has one
+too. A thread's status is its sessions' **roll-up**, and a stream's is its
+threads': `oxplow_domain::agent::roll_up_status`, the desktop's
+`rollUpAgentStatus` and the `v_agent_status` model share one rule and one
+truth table (`crates/oxplow-domain/fixtures/agent_status_rollup.json`;
+the model is tested against the Rust rule over every pair). The ranking
+is what the person owes first: **awaiting > stalled > working > waiting**
+(`awaiting_user > stalled > running > error > stopped > idle`). A dead
+turn (`stalled`) means the person owes the next move, so it outranks work
+in flight — a stream whose one thread died beside a busy one must still
+say so; the old stream dot that ranked working first hid it.
+`v_agent_session_status` holds each open session's logged status;
+`AgentStatusChanged` carries the session, the UI keeps statuses by session
+(`sessionStatusKey`) and rolls them up per thread (`threadStatuses`) and
+per stream.
+
+`derive_session_status` (`crates/oxplow-app/src/agent_status_derive.rs`)
+reduces a session's recent activity into one of two states: `working` or
+`waiting`. **The input is the event log** (P3.9): the session's newest 200
+`agent.*` events (`recent_activity`, via `SqliteEventLogStore::recent_in_session`),
 each read as an `Activity` (`activity_of`) — `prompt.submitted` (every
 prompt, re-prompts too), `tool.requested{allowed}` (a refused request never
 runs, so it opens no tool), `tool.finished`, `turn.ended` (completed vs
@@ -1601,7 +1619,7 @@ prompt — "should I implement this plan?") and `AskUserQuestion` (the
 clarifying-question prompt). Each fires `PreToolUse` when the agent
 invokes it, but the matching `PostToolUse` only arrives once the user
 answers. Until then no `Stop` hook fires either — the agent is
-genuinely waiting on the user. `derive_thread_status` counts unreturned
+genuinely waiting on the user. `derive_session_status` counts unreturned
 calls to either tool (`is_user_input_tool` in
 `crates/oxplow-app/src/agent_status_derive.rs`) and, if the count is >0
 at the end of replay, overrides the derived state to `AwaitingUser` so
@@ -1633,7 +1651,7 @@ mid-stream) or a model-unavailable error ("Claude Fable 5 is currently
 unavailable") and the process drops back to its prompt — observed live
 as a dot stuck on `working` for ~1h while the queue silently stalled.
 Nothing event-driven can catch that, so the derivation is time-aware:
-`derive_thread_status(events, now)` degrades a derived `Running` whose
+`derive_session_status(events, now)` degrades a derived `Running` whose
 newest hook event is older than its silence threshold to a derived-only
 `AgentStatusState::Stalled` (never persisted to the agent_status
 table). **Two thresholds (tsk130),** chosen by whether a tool call is
@@ -1650,23 +1668,23 @@ still open (any `PreToolUse` without its matching `PostToolUse`):
 tokens to the terminal for many minutes while emitting **no**
 Pre/PostToolUse between tool calls, so a frozen hook log alone reads as
 death even though the agent is plainly working — the inverse of the
-tsk130 death case. `derive_thread_status_with_activity(events,
+tsk130 death case. `derive_session_status_with_activity(events,
 last_output_at, now)` therefore measures silence from the *later* of
 the newest hook event and `last_output_at` (the thread's most recent
 PTY output). An agent still writing to its PTY stays `Running`
 regardless of how stale its last hook is; only when **both** signals go
 quiet past the threshold does the turn degrade to `Stalled` — so tsk130
 death detection is intact (a dead turn stops emitting output too, and
-output older than the threshold can't revive it). `derive_thread_status`
+output older than the threshold can't revive it). `derive_session_status`
 is the hook-only wrapper (`last_output_at = None`), used where a hook
 just arrived (so the log is fresh by construction); the watchdog uses
 the activity-aware form. Liveness is tracked by
-`output_activity::OutputActivity` (a per-`ThreadId` last-output
+`output_activity::OutputActivity` (a per-agent-session last-output
 timestamp, never persisted): the terminal forwarder
-(`terminal_sessions.rs`) stamps it on every output burst for sessions
-spawned with a known thread id (agent panes via
-`attach_or_create_for_thread`; shell panes are not thread-scoped and
-contribute none), and `AgentStallWatch` reads it. The single shared
+(`terminal_sessions.rs`) stamps it on every output burst for a pane
+spawned for an agent session (`attach_or_create_for_agent` with an
+`AgentPane`; shell panes contribute none), the ACP host on its agent's
+activity, and `AgentStallWatch` reads it. The single shared
 instance lives on `Services::output_activity`.
 
 The `AwaitingUser` override (ExitPlanMode / AskUserQuestion — see the
@@ -1674,8 +1692,8 @@ user-input-pending carve-out) is exempt from both: waiting on the user
 indefinitely is legitimate. Because no hook will ever arrive to trigger
 a re-derive, `AgentStallWatch`
 (`crates/oxplow-app/src/agent_stall_watch.rs`, spawned from `boot.rs`)
-re-derives every thread once a minute and pushes
-`AgentStatusChanged { state: Stalled }` so the renderer's dot recovers
+re-derives every open session once a minute and pushes
+`AgentStatusChanged { agent_session_id, state: Stalled }` so the renderer's dot recovers
 on its own. It raises nothing about in_progress tasks: a task left in
 progress while its agent is idle is normal (nothing marks work done, and
 the agent may be waiting on the person — `.context/work-tracking.md`).

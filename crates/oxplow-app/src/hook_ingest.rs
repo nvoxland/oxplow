@@ -123,6 +123,8 @@ pub struct IngestOutcome {
 /// What the transaction decided, applied after it commits.
 #[derive(Default)]
 struct Applied {
+    /// The agent session the hook came from.
+    session: Option<oxplow_domain::AgentSessionId>,
     turn: Option<AgentTurnId>,
     opened_turn: bool,
     closed_turn: Option<AgentTurnId>,
@@ -206,8 +208,11 @@ impl HookIngestService {
         // `v_event` / `v_agent_turn` on the commit's `ModelsChanged`.
         outcome.closed_turn = applied.closed_turn;
         match applied.status {
-            Some((state, detail)) => self.announce(thread, state, detail),
-            None => self.announce_derived_status(&thread, kind).await,
+            Some((state, detail)) => self.announce(thread, applied.session, state, detail),
+            None => {
+                self.announce_derived_status(&thread, applied.session, kind)
+                    .await
+            }
         }
         drop(order);
         if let Some(pump) = &self.pump {
@@ -221,55 +226,68 @@ impl HookIngestService {
         Ok(outcome)
     }
 
-    /// Log and announce a thread's status outside a hook (the ACP session's
-    /// permission cards).
+    /// Log and announce an agent session's status outside a hook (the ACP
+    /// session's permission cards). `session` resolves as a hook's does.
     pub async fn set_status(
         &self,
         thread: &ThreadId,
+        session: Option<oxplow_domain::AgentSessionId>,
         state: AgentStatusState,
         detail: Option<String>,
     ) -> Result<(), HookIngestError> {
         let _order = self.status_order.lock().await;
         let vocabulary = self.vocabulary.clone();
         let (thread_c, detail_c) = (*thread, detail.clone());
-        let logged = self
+        let slot = self
             .db
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
                 let ev = EventCtx::system(&vocabulary, "hook_ingest");
-                let current = last_status_tx(tx, &vocabulary, thread_c)?;
-                if !changed(current.as_ref(), state, detail_c.as_deref()) {
-                    return Ok(false);
+                let slot = oxplow_db::agent_session_store::resolve_tx(tx, thread_c, session, None)?
+                    .map(|s| s.id);
+                let current = last_status_tx(tx, &vocabulary, thread_c, slot)?;
+                if changed(current.as_ref(), state, detail_c.as_deref()) {
+                    log_status_tx(tx, &ev, thread_c, slot, None, state, detail_c.clone())?;
                 }
-                log_status_tx(tx, &ev, thread_c, None, None, state, detail_c.clone())?;
-                Ok(true)
+                Ok(slot)
             })
             .await?;
-        let _ = logged;
-        self.announce(*thread, state, detail);
+        self.announce(*thread, slot, state, detail);
         Ok(())
     }
 
-    fn announce(&self, thread: ThreadId, state: AgentStatusState, detail: Option<String>) {
+    fn announce(
+        &self,
+        thread: ThreadId,
+        session: Option<oxplow_domain::AgentSessionId>,
+        state: AgentStatusState,
+        detail: Option<String>,
+    ) {
         self.events.emit(OxplowEvent::AgentStatusChanged {
             thread_id: thread,
+            agent_session_id: session,
             state,
             detail,
         });
     }
 
     /// Tool hooks set no status of their own, but they change what the
-    /// renderer derives (an open `Task` keeps a thread working). Re-derive
-    /// from the thread's logged activity and announce it, keeping an
-    /// status that parked the thread on the person.
-    async fn announce_derived_status(&self, thread: &ThreadId, kind: HookKind) {
+    /// renderer derives (an open `Task` keeps a session working). Re-derive
+    /// from the session's logged activity and announce it, keeping a
+    /// status that parked it on the person.
+    async fn announce_derived_status(
+        &self,
+        thread: &ThreadId,
+        session: Option<oxplow_domain::AgentSessionId>,
+        kind: HookKind,
+    ) {
         if !matches!(kind, HookKind::PreToolUse | HookKind::PostToolUse) {
             return;
         }
         let current = {
             use oxplow_domain::stores::AgentStatusStore as _;
             oxplow_db::SqliteAgentStatusStore::new(self.db.clone(), self.vocabulary.clone())
-                .get(thread)
+                .get(thread, session)
                 .await
                 .ok()
                 .flatten()
@@ -279,15 +297,16 @@ impl HookIngestService {
                 (AgentStatusState::AwaitingUser, s.detail)
             }
             _ => {
-                let recent = crate::agent_status_derive::recent_activity(&self.log, *thread)
-                    .await
-                    .unwrap_or_default();
+                let recent =
+                    crate::agent_status_derive::recent_activity(&self.log, *thread, session)
+                        .await
+                        .unwrap_or_default();
                 let derived =
-                    crate::agent_status_derive::derive_thread_status(&recent, Timestamp::now());
+                    crate::agent_status_derive::derive_session_status(&recent, Timestamp::now());
                 (derived, None)
             }
         };
-        self.announce(*thread, state, detail);
+        self.announce(*thread, session, state, detail);
     }
 }
 
@@ -397,7 +416,10 @@ fn record_tx(
     let body: serde_json::Value = serde_json::from_str(&env.payload_json).unwrap_or_default();
     let session = env.session_id.as_deref().filter(|s| !s.is_empty());
     let slot = row.session;
-    let mut applied = Applied::default();
+    let mut applied = Applied {
+        session: slot,
+        ..Applied::default()
+    };
     let mut status = None;
     let starts = starts_session(env.kind, &body);
     let transcript_path = body.get("transcript_path").and_then(|p| p.as_str());
@@ -472,7 +494,7 @@ fn record_tx(
                 status = Some((AgentStatusState::AwaitingUser, Some(asked_of(tool, &body))));
             } else if env.kind == HookKind::PostToolUse
                 && (asks
-                    || last_status_tx(conn, ev.vocabulary, thread)?
+                    || last_status_tx(conn, ev.vocabulary, thread, slot)?
                         .is_some_and(|s| s.state == AgentStatusState::AwaitingUser))
             {
                 // Answered, or the tool it was waiting on permission for ran.
@@ -564,7 +586,7 @@ fn record_tx(
     }
     if let Some((state, detail)) = &status {
         if changed(
-            last_status_tx(conn, ev.vocabulary, thread)?.as_ref(),
+            last_status_tx(conn, ev.vocabulary, thread, slot)?.as_ref(),
             *state,
             detail.as_deref(),
         ) {
@@ -886,20 +908,26 @@ mod tests {
     async fn set_status_logs_once_and_refreshes_the_activity_log() {
         let (svc, tid) = fixture().await;
         for _ in 0..2 {
-            svc.set_status(&tid, AgentStatusState::AwaitingUser, Some("A?".into()))
-                .await
-                .unwrap();
+            svc.set_status(
+                &tid,
+                Some(first_session()),
+                AgentStatusState::AwaitingUser,
+                Some("A?".into()),
+            )
+            .await
+            .unwrap();
         }
         // The second call changed nothing: logged once.
         let events = logged(&svc).await;
         assert_eq!(of_type(&events, "agent.status.changed").len(), 1);
     }
 
-    /// The thread's status as a freshly started daemon would read it.
+    /// The fixture session's status as a freshly started daemon would
+    /// read it.
     async fn status(svc: &HookIngestService, tid: ThreadId) -> Option<AgentStatus> {
         use oxplow_domain::stores::AgentStatusStore as _;
         oxplow_db::SqliteAgentStatusStore::new(svc.db.clone(), svc.vocabulary.clone())
-            .get(&tid)
+            .get(&tid, Some(first_session()))
             .await
             .unwrap()
     }
@@ -1761,12 +1789,13 @@ mod tests {
         assert_eq!(open[0].prompt, "first");
     }
 
-    /// The derived status the rail would show for the thread now.
+    /// The derived status the rail would show for the fixture session now.
     async fn derived(svc: &HookIngestService, tid: ThreadId) -> AgentStatusState {
-        let recent = crate::agent_status_derive::recent_activity(&svc.log, tid)
-            .await
-            .unwrap();
-        crate::agent_status_derive::derive_thread_status(&recent, Timestamp::now())
+        let recent =
+            crate::agent_status_derive::recent_activity(&svc.log, tid, Some(first_session()))
+                .await
+                .unwrap();
+        crate::agent_status_derive::derive_session_status(&recent, Timestamp::now())
     }
 
     #[tokio::test]

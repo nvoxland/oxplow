@@ -36,10 +36,19 @@
   tests:
     - { not_null: hint }
 - name: agent_status
-  version: 1
-  description: "Each thread's agent status as last logged: `running`, `idle`, `awaiting_user` (waiting on the person — a question it put to them, a plan to approve, a permission prompt, or a final message ending in a question), `stopped`, `error`. A dead turn's `stalled` is derived live, never logged."
+  version: 2
+  description: "Each thread's agent status: its open agent sessions' statuses (v_agent_session_status) rolled up — what the person owes ranks first: `awaiting_user` (waiting on them: a question, a plan to approve, a permission prompt, a final message ending in a question) > `running` > `error` > `stopped` > `idle`. A dead turn's `stalled` is derived live, never logged."
   columns:
     - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
+    - { name: "state", type: "", doc: "`running`, `idle`, `awaiting_user`, `stopped` or `error`: the session status that ranks first." }
+    - { name: "detail", type: "", doc: "What that session waits on (the question, the permission asked), or why it stopped." }
+    - { name: "since", type: "TEXT", doc: "When that session moved to it (RFC 3339)." }
+- name: agent_session_status
+  version: 1
+  description: "Each open agent session's status as last logged: `running`, `idle`, `awaiting_user`, `stopped`, `error`. A dead turn's `stalled` is derived live, never logged. v_agent_status rolls a thread's sessions up."
+  columns:
+    - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The session (v_agent_session.id)." }
     - { name: "state", type: "", doc: "`running`, `idle`, `awaiting_user`, `stopped` or `error`." }
     - { name: "detail", type: "", doc: "What it's waiting on (the question, the permission asked), or why it stopped." }
     - { name: "since", type: "TEXT", doc: "When it moved to this status (RFC 3339)." }

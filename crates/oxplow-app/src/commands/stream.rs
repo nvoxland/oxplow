@@ -82,6 +82,7 @@ pub struct StreamDeps {
     pub snapshot_captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
     pub ref_moves: crate::ref_moves::RefMoves,
     pub threads: Arc<oxplow_db::SqliteThreadStore>,
+    pub sessions: Arc<oxplow_db::SqliteAgentSessionStore>,
     pub log: Arc<oxplow_db::SqliteEventLogStore>,
     pub search: Arc<oxplow_db::SqliteSearchStore>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
@@ -216,8 +217,8 @@ pub fn archive_op(deps: StreamDeps) -> Op {
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
-                use crate::agent_status_derive::{derive_thread_status, recent_activity};
-                use oxplow_domain::stores::ThreadStore as _;
+                use crate::agent_status_derive::{derive_session_status, recent_activity};
+                use oxplow_domain::stores::{AgentSessionStore as _, ThreadStore as _};
                 let input: ArchiveInput = parse(input)?;
                 let id = stream_of(&input.stream)?;
                 // Running as the rail shows it: derived from the logged
@@ -225,14 +226,19 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                 let threads = deps.threads.list_for_stream(&id).await?;
                 let now = Timestamp::now();
                 for t in &threads {
-                    let activity = recent_activity(&deps.log, t.id).await?;
-                    if derive_thread_status(&activity, now)
-                        == oxplow_domain::AgentStatusState::Running
-                    {
-                        return Err(invalid(
-                            "/stream",
-                            "an agent is still running in one of this stream's threads".into(),
-                        ));
+                    // Each open session, and what no session claims.
+                    let sessions = deps.sessions.list_open_for_thread(&t.id).await?;
+                    let slots = sessions.iter().map(|s| Some(s.id)).chain([None]);
+                    for slot in slots {
+                        let activity = recent_activity(&deps.log, t.id, slot).await?;
+                        if derive_session_status(&activity, now)
+                            == oxplow_domain::AgentStatusState::Running
+                        {
+                            return Err(invalid(
+                                "/stream",
+                                "an agent is still running in one of this stream's threads".into(),
+                            ));
+                        }
                     }
                 }
                 // Its threads' work ends: each open effort closes at a
@@ -471,6 +477,68 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("primary"), "{err}");
         assert!(primary(&fx).await.archived_at.is_none());
+    }
+
+    /// An agent running in any of a thread's sessions — not only its first
+    /// — keeps the stream from being archived.
+    #[tokio::test]
+    async fn a_running_second_session_keeps_the_stream() {
+        let fx = services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let main = fx.svc.vcs.head(&root).await.unwrap().branch.unwrap();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE_WORKTREE,
+                json!({ "slug": "busy", "title": "Busy", "branch": "busy", "branch_source": main }),
+                false,
+            )
+            .await
+            .unwrap();
+        let side = serde_json::from_value::<oxplow_domain::Stream>(out.result)
+            .unwrap()
+            .id;
+        let thread = crate::test_fixtures::new_thread(&fx.svc, side, "t").await;
+        use oxplow_domain::stores::AgentSessionStore as _;
+        let second = fx
+            .svc
+            .agent_session_store
+            .open(&oxplow_domain::agent_session::NewAgentSession::of(
+                thread.id,
+                oxplow_domain::AgentKind::Claude,
+                None,
+            ))
+            .await
+            .unwrap()
+            .id;
+        fx.svc
+            .hook_ingest
+            .ingest(crate::hook_ingest::HookEnvelope {
+                kind: oxplow_domain::HookKind::UserPromptSubmit,
+                thread_id: Some(thread.id),
+                stream_id: Some(side),
+                agent_session_id: Some(second),
+                session_id: Some("h2".into()),
+                payload_json: "{}".into(),
+                prompt: Some("go".into()),
+                decision: None,
+            })
+            .await
+            .unwrap();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                ARCHIVE,
+                json!({ "stream": stream_ref(side) }),
+                true,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("still running"), "{err}");
     }
 
     /// Archiving a stream closes its threads' open efforts with an end

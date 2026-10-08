@@ -62,6 +62,8 @@ pub trait AcpHost: Send + Sync + 'static {
 pub struct ServicesAcpHost {
     svc: Weak<Services>,
     stream_id: Option<StreamId>,
+    /// The agent session it hosts.
+    session: oxplow_domain::AgentSessionId,
     /// The thread status a permission card interrupted, restored when the
     /// cards are answered (so a question the thread was waiting on survives
     /// one).
@@ -69,10 +71,17 @@ pub struct ServicesAcpHost {
 }
 
 impl ServicesAcpHost {
-    pub fn new(svc: &Arc<Services>, stream_id: Option<StreamId>) -> Self {
+    /// The host of agent session `session` (in stream `stream_id`): every
+    /// envelope and status it records names that session.
+    pub fn new(
+        svc: &Arc<Services>,
+        stream_id: Option<StreamId>,
+        session: oxplow_domain::AgentSessionId,
+    ) -> Self {
         Self {
             svc: Arc::downgrade(svc),
             stream_id,
+            session,
             before_card: parking_lot::Mutex::new(None),
         }
     }
@@ -89,7 +98,7 @@ impl ServicesAcpHost {
             kind,
             thread_id: Some(*thread),
             stream_id: self.stream_id,
-            agent_session_id: None,
+            agent_session_id: Some(self.session),
             session_id: Some(session_id.to_string()),
             payload_json: payload.to_string(),
             prompt,
@@ -230,13 +239,14 @@ impl AcpHost for ServicesAcpHost {
             return;
         };
         use oxplow_domain::stores::AgentTurnStore as _;
+        let session = Some(self.session);
         let (state, detail) = match question {
             Some(q) => {
                 // Remember what the first card interrupted.
                 if self.before_card.lock().is_none() {
                     let now = svc
                         .agent_status_store
-                        .get(thread)
+                        .get(thread, session)
                         .await
                         .ok()
                         .flatten()
@@ -271,7 +281,11 @@ impl AcpHost for ServicesAcpHost {
                 }
             }
         };
-        if let Err(err) = svc.hook_ingest.set_status(thread, state, detail).await {
+        if let Err(err) = svc
+            .hook_ingest
+            .set_status(thread, session, state, detail)
+            .await
+        {
             warn!(?err, "acp: status update failed");
         }
     }
@@ -284,7 +298,7 @@ impl AcpHost for ServicesAcpHost {
             kind: HookKind::Interrupt,
             thread_id: Some(*thread),
             stream_id: self.stream_id,
-            agent_session_id: None,
+            agent_session_id: Some(self.session),
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
@@ -293,10 +307,10 @@ impl AcpHost for ServicesAcpHost {
         self.ingest(&svc, env).await;
     }
 
-    fn activity(&self, thread: &ThreadId) {
+    fn activity(&self, _thread: &ThreadId) {
         if let Some(svc) = self.svc.upgrade() {
             svc.output_activity
-                .record(*thread, oxplow_domain::Timestamp::now());
+                .record(self.session, oxplow_domain::Timestamp::now());
         }
     }
 }

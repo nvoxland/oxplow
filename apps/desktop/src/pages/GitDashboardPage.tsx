@@ -25,6 +25,7 @@ import { AgentStatusDot } from "../components/AgentStatusDot.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { gitRevision, vcsRevOf } from "../revision.js";
 import { readBranches, readHistory, type History } from "../vcsHistory.js";
+import { sessionStatusKey } from "../agentStatusRollup.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { alertsRef, gitCommitRef, indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
@@ -295,14 +296,14 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       if (cancelled) return;
       const byStream: Record<string, Record<string, string>> = {};
       for (const e of entries) {
-        (byStream[e.streamId] ??= {})[e.threadId] = e.status;
+        (byStream[e.streamId] ??= {})[sessionStatusKey(e)] = e.status;
       }
       setAgentStatuses(byStream);
     });
     const unsub = subscribeAgentStatus("all", (entry) => {
       setAgentStatuses((prev: Record<string, Record<string, string>>) => ({
         ...prev,
-        [entry.streamId]: { ...(prev[entry.streamId] ?? {}), [entry.threadId]: entry.status },
+        [entry.streamId]: { ...(prev[entry.streamId] ?? {}), [sessionStatusKey(entry)]: entry.status },
       }));
     });
     return () => {

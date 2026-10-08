@@ -1226,6 +1226,7 @@ impl Services {
             snapshot_captures: snapshot_captures.clone(),
             ref_moves: ref_moves.clone(),
             threads: thread_store.clone(),
+            sessions: agent_session_store.clone(),
             log: event_log_store.clone(),
             search: search_store.clone(),
             worktrees: worktrees.clone(),

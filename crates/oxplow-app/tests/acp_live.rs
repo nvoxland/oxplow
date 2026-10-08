@@ -59,7 +59,14 @@ async fn a_real_adapter_answers_a_prompt() {
     let thread: oxplow_domain::ThreadId =
         serde_json::from_value(created.result["id"].clone()).unwrap();
 
-    let host = Arc::new(ServicesAcpHost::new(&svc, Some(stream.id)));
+    let session = svc
+        .agent_session_store
+        .newest_for_thread(thread)
+        .await
+        .unwrap()
+        .expect("the thread has its session")
+        .id;
+    let host = Arc::new(ServicesAcpHost::new(&svc, Some(stream.id), session));
     svc.acp
         .open(
             host,
