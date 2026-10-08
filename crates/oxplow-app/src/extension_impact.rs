@@ -1,7 +1,7 @@
 //! Reviewing an extension by its **impact**: what installing or updating
 //! it would change — lenses' rendered text, models and their contracts
 //! (and what reads them), collectors' and providers' grants, a provider's
-//! commands and features, the instance config schema — rather than only
+//! commands and features — rather than only
 //! what it declares, plus models' rows before and after, and derived
 //! collectors' and effects' dry runs on the same inputs — each version on
 //! its own models' overlay. It never runs a program, a provider or an exec
@@ -675,19 +675,6 @@ pub struct ProviderImpact {
     pub lines: Vec<String>,
 }
 
-/// The instance config schema (`config:`), by property.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigImpact {
-    #[specta(type = Option<oxplow_domain::Json>)]
-    pub before: Option<Value>,
-    #[specta(type = Option<oxplow_domain::Json>)]
-    pub after: Option<Value>,
-    pub changed_keys: Vec<String>,
-    /// The first difference outside `properties` (`required`, …).
-    pub other_change: Option<String>,
-}
-
 /// Everything installing or updating an extension would change.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -699,7 +686,6 @@ pub struct ImpactReport {
     /// Its effects: what each reacts to, and what each version
     /// composes on the same events.
     pub effects: Vec<EffectImpact>,
-    pub config: Option<ConfigImpact>,
     /// What its dry runs didn't get to (`collector <id>`, `effect <id>`):
     /// the review stops running scripts at its deadline.
     pub out_of_time: Vec<String>,
@@ -900,7 +886,7 @@ fn ran_text(r: Option<&Ran>) -> String {
 
 /// The report as lines: collectors' and providers' grants first (what a
 /// person approves), then what the collectors make of their inputs, the
-/// models (and their rows), the lenses and the config schema.
+/// models (and their rows) and the lenses.
 pub fn summary(report: &ImpactReport) -> Vec<String> {
     let mut out = Vec::new();
     for c in &report.collectors {
@@ -1018,17 +1004,6 @@ pub fn summary(report: &ImpactReport) -> Vec<String> {
                 out.push(format!("Lens {}: {}", l.id, change_word(l.change)))
             }
             None => {}
-        }
-    }
-    if let Some(config) = &report.config {
-        if let Some(other) = &config.other_change {
-            out.push(format!("Config: {other}"));
-        }
-        if !config.changed_keys.is_empty() {
-            out.push(format!(
-                "Config: {} changed",
-                config.changed_keys.join(", ")
-            ));
         }
     }
     if !report.out_of_time.is_empty() {
@@ -1413,43 +1388,6 @@ pub fn providers_diff(
         .collect()
 }
 
-/// The instance config schema before and after, by property: which keys
-/// were added, removed or changed. `None` when neither version has one.
-pub fn config_diff(before: Option<&Value>, after: Option<&Value>) -> Option<ConfigImpact> {
-    if before.is_none() && after.is_none() {
-        return None;
-    }
-    let props = |v: Option<&Value>| -> BTreeMap<String, Value> {
-        v.and_then(|v| v.get("properties"))
-            .and_then(Value::as_object)
-            .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default()
-    };
-    let (pb, pa) = (props(before), props(after));
-    let rest = |v: Option<&Value>| -> Value {
-        let mut v = v.cloned().unwrap_or(Value::Null);
-        if let Some(o) = v.as_object_mut() {
-            o.remove("properties");
-        }
-        v
-    };
-    let other_change = described_difference(&rest(before), &rest(after));
-    let changed_keys = pb
-        .keys()
-        .chain(pa.keys())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .filter(|k| pb.get(*k) != pa.get(*k))
-        .cloned()
-        .collect();
-    Some(ConfigImpact {
-        before: before.cloned(),
-        after: after.cloned(),
-        changed_keys,
-        other_change,
-    })
-}
-
 /// Where `b` first differs from `a`: its JSON pointer and the two values
 /// there (objects by key, equal-length arrays by index; anything else is
 /// compared whole). `None` when they're equal.
@@ -1531,14 +1469,6 @@ async fn rows_of(
             .collect(),
         truncated: result.truncated,
     })
-}
-
-/// A version's instance config schema (its manifest's `config:`), read
-/// from its files — only a review needs it, so the loaded `Extension`
-/// doesn't carry it.
-fn config_schema(v: &Version<'_>) -> Option<Value> {
-    let manifest: serde_yaml::Value = serde_yaml::from_str(&(v.read)("extension.yaml")?).ok()?;
-    serde_json::to_value(manifest.get("config")?).ok()
 }
 
 /// Each lens's rendered text, by slug: what `lens_text` gives an agent,
@@ -1737,17 +1667,12 @@ pub async fn impact_within(
         &before.as_ref().map(declared).unwrap_or_default(),
         &declared(&after),
     );
-    let config = config_diff(
-        before.as_ref().and_then(config_schema).as_ref(),
-        config_schema(&after).as_ref(),
-    );
     let mut report = ImpactReport {
         lenses,
         models,
         collectors,
         providers,
         effects,
-        config,
         out_of_time,
         lines: Vec::new(),
     };
@@ -2090,36 +2015,6 @@ mod tests {
         assert_eq!(same.first_difference, None);
     }
 
-    /// A schema change outside `properties` (what's required, say) is a
-    /// change too.
-    #[test]
-    fn config_diff_reports_a_change_beyond_properties() {
-        let before = json!({ "properties": { "team": { "type": "string" } } });
-        let after = json!({ "properties": { "team": { "type": "string" } }, "required": ["team"] });
-        let c = config_diff(Some(&before), Some(&after)).unwrap();
-        assert!(c.changed_keys.is_empty());
-        let other = c.other_change.unwrap();
-        assert!(other.contains("/required"), "{other}");
-        assert_eq!(
-            config_diff(Some(&before), Some(&before))
-                .unwrap()
-                .other_change,
-            None
-        );
-    }
-
-    #[test]
-    fn config_diff_lists_changed_keys() {
-        assert_eq!(config_diff(None, None), None);
-        let before =
-            json!({ "properties": { "team": { "type": "string" }, "old": { "type": "string" } } });
-        let after = json!({ "properties": { "team": { "type": "string", "enum": ["a"] }, "new": { "type": "number" } } });
-        let c = config_diff(Some(&before), Some(&after)).unwrap();
-        assert_eq!(c.changed_keys, vec!["new", "old", "team"]);
-        let first = config_diff(None, Some(&after)).unwrap();
-        assert_eq!(first.changed_keys, vec!["new", "team"]);
-    }
-
     fn write(root: &std::path::Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -2268,7 +2163,7 @@ mod tests {
         write(
             d.path(),
             "oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: p\nconfig:\n  type: object\n  properties:\n    team: { type: string }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
         );
         write(d.path(), "oxplow/extensions/x/bin/p", "#!/bin/sh\nexit 1\n");
         let declared = serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap();
@@ -2298,8 +2193,6 @@ mod tests {
         assert!(!p.commands.is_empty());
         assert!(p.commands.iter().all(|c| c.change == Change::Added));
         assert!(p.features_after.is_some());
-        // Its config schema is read from its manifest.
-        assert_eq!(report.config.unwrap().changed_keys, vec!["team"]);
     }
 
     #[tokio::test]
@@ -3156,12 +3049,6 @@ mod tests {
                     outputs: vec![],
                 },
             ],
-            config: Some(ConfigImpact {
-                before: None,
-                after: Some(json!({})),
-                changed_keys: vec!["team".into()],
-                other_change: None,
-            }),
             out_of_time: vec![],
             lines: vec![],
         };
@@ -3182,7 +3069,6 @@ mod tests {
                 "Lens shared/count: changed",
                 "Lens shared/new: added",
                 "Lens shared/bad: added; its query fails: no such table",
-                "Config: team changed",
             ]
         );
     }

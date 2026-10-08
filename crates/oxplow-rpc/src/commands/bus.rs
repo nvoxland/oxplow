@@ -31,6 +31,27 @@ pub async fn run_command(
     Ok(outcome)
 }
 
+/// The page a person's run of command `id` opens next: its
+/// `ui.open_after` bound from the run's `result` by the one tokenizer
+/// (`CommandUi::open_after_for`); `None` when it says none. A field the
+/// result lacks is `INVALID`, naming it.
+pub async fn command_open_after(
+    svc: &Services,
+    id: String,
+    result: Json,
+) -> Result<Option<String>, IpcError> {
+    let spec = svc
+        .commands
+        .list(&Actor::Human)
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| IpcError::invalid(format!("no command `{id}`")))?;
+    spec.ui
+        .as_ref()
+        .map_or(Ok(None), |ui| ui.open_after_for(&result.0))
+        .map_err(|e| IpcError::invalid(format!("`{id}`: {e}")))
+}
+
 /// The commands a person is offered: those they may run now (invokers,
 /// needs active) that say how a person meets them (`ui`) — what search,
 /// menus and pages list (`.context/commands.md` "Offering a command to a
@@ -160,6 +181,40 @@ mod tests {
     /// What a person can run now and is offered: every command with
     /// person-facing metadata the person may invoke — Pull, New Task —
     /// and none without (a step, an agent's tool).
+    /// What a person's run opens next is bound here, by the bus's own
+    /// tokenizer, from the run's result: a field the result lacks opens
+    /// nothing and says why, rather than a page with an empty id.
+    #[tokio::test]
+    async fn the_page_a_run_opens_is_bound_from_its_result() {
+        let (svc, _dir) = services();
+        let open = |result: serde_json::Value| {
+            let svc = svc.clone();
+            async move {
+                crate::dispatch(
+                    "command_open_after",
+                    json!({ "id": "oxplow.dashboard.create", "result": result }),
+                    &svc,
+                )
+                .await
+            }
+        };
+        assert_eq!(
+            open(json!({ "id": 7 })).await.unwrap(),
+            json!("page:custom-dashboard?id=7")
+        );
+        let err = open(json!({})).await.unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert!(err.message.contains("`id`"), "{}", err.message);
+        let none = crate::dispatch(
+            "command_open_after",
+            json!({ "id": "oxplow.vcs.pull", "result": {} }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(none, serde_json::Value::Null);
+    }
+
     #[tokio::test]
     async fn a_person_is_offered_the_commands_with_a_label() {
         let (svc, _dir) = services();

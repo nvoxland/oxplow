@@ -743,6 +743,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	commandOpenAfter: (id: string, result: unknown) => typedError<string | null, IpcError>(__TAURI_INVOKE("command_open_after", { id, result })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getCommand: (name: string) => typedError<CommandSpec, IpcError>(__TAURI_INVOKE("get_command", { name })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2143,15 +2148,6 @@ export type Composes = {
 	error: string | null,
 };
 
-// The instance config schema (`config:`), by property.
-export type ConfigImpact = {
-	before: unknown | null,
-	after: unknown | null,
-	changedKeys: string[],
-	// The first difference outside `properties` (`required`, …).
-	otherChange: string | null,
-};
-
 // Where a setting's value comes from.
 export type ConfigOrigin = "default" | "global" | "project" | 
 // A person's own layer (`.oxplow/personal.yaml`).
@@ -3382,7 +3378,6 @@ export type ImpactReport = {
 	 *  composes on the same events.
 	 */
 	effects: EffectImpact[],
-	config: ConfigImpact | null,
 	/**
 	 *  What its dry runs didn't get to (`collector <id>`, `effect <id>`):
 	 *  the review stops running scripts at its deadline.

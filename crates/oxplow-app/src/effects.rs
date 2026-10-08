@@ -156,11 +156,7 @@ fn decl_of(
         _ => return Err(named("`on` lists the event types it reacts to".into())),
     };
     for need in &f.needs {
-        if oxplow_domain::scope::scope(need).is_none() {
-            return Err(named(format!(
-                "`needs`: `{need}` isn't a scope an effect's script can call"
-            )));
-        }
+        crate::scope_calls::check_callable(need).map_err(&named)?;
     }
     let script = read(&f.entry)
         .ok_or_else(|| named(format!("entry `{}` isn't in the extension", f.entry)))?;
@@ -577,6 +573,13 @@ effects:
                 "isn't in the extension",
             ),
             ("id: announce-done", "id: Announce", "lowercase"),
+            // A scope a script can't call is refused at load, not when the
+            // call fails.
+            (
+                "entry: effects/announce.star",
+                "entry: effects/announce.star\n    needs: [threads.write]",
+                "a script calls only `sql.read`",
+            ),
         ] {
             let dir = tempfile::tempdir().unwrap();
             write_acme(dir.path(), &MANIFEST.replace(from, to), SCRIPT);

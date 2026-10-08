@@ -30,6 +30,10 @@ export interface OfferDeps {
   run(label: string, id: string, input: unknown): Promise<CommandOutcome | null>;
   /** Run it as a background task, reporting a failure. */
   runInBackground(label: string, id: string, input: unknown): void;
+  /** The page command `id` opens after a run that gave `result` — its
+   *  `ui.open_after`, bound by the server (`command_open_after`); `null`
+   *  when there's none to open (a failure is reported). */
+  openAfter(id: string, result: unknown): Promise<string | null>;
 }
 
 const BINDINGS: Record<string, (ctx: OfferContext) => string | null | undefined> = {
@@ -60,14 +64,6 @@ export function bindInput(template: unknown, ctx: OfferContext): { input: unknow
   return missing ? null : { input };
 }
 
-/** `template` with each `{{result.<field>}}` taken from `result`. */
-function withResult(template: string, result: unknown): string {
-  return template.replace(/\{\{result\.([a-z_]+)\}\}/g, (_, field: string) => {
-    const v = (result as Record<string, unknown> | null)?.[field];
-    return v == null ? "" : String(v);
-  });
-}
-
 /** `spec`'s entry, run with `input` (or its form). */
 function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: OfferDeps): CommandEntry {
   const ui = spec.ui!;
@@ -88,8 +84,10 @@ function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: Offer
       // window's own forms.
       if (ui.form) return ui.form.includes(":") ? deps.openPage(ui.form) : deps.openForm(ui.form);
       if (ui.background) return deps.runInBackground(ui.label, spec.id, input);
-      void deps.run(ui.label, spec.id, input).then((out) => {
-        if (out && ui.open_after) deps.openPage(withResult(ui.open_after, out.result));
+      void deps.run(ui.label, spec.id, input).then(async (out) => {
+        if (!out || !ui.open_after) return;
+        const page = await deps.openAfter(spec.id, out.result);
+        if (page) deps.openPage(page);
       });
     },
   };

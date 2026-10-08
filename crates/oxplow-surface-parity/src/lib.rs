@@ -145,6 +145,10 @@ pub const MANIFEST: &[Capability] = &[
     // person through IPC (`Actor::Human`, confirming where asked).
     both("run_command"),
     ui(
+        "command_open_after",
+        "binds the page a person's run opens next (`ui.open_after`), for the window",
+    ),
+    ui(
         "get_command",
         "one command's spec, for a form or a confirmation; an agent lists them with `list_commands`",
     ),

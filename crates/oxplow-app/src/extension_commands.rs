@@ -337,8 +337,8 @@ fn command_of(
     for need in &f.needs {
         oxplow_domain::capability::check_need(need).map_err(at_name)?;
     }
-    if f.ui.as_ref().is_some_and(|ui| ui.label.trim().is_empty()) {
-        return Err(at_name("`ui.label` must say what a person reads".into()));
+    if let Some((field, message)) = f.ui.as_ref().and_then(|ui| ui.problem()) {
+        return Err(at_name(format!("`{field}`: {message}")));
     }
     let handlers = [f.entry.is_some(), f.scope.is_some(), f.provider.is_some()];
     if handlers.iter().filter(|h| **h).count() > 1 {
@@ -416,6 +416,15 @@ fn command_of(
         }
         (Some(_), Some(_)) => unreachable!("refused above"),
         (None, Some(entry)) => {
+            // Its script calls the scopes it needs; a capability need
+            // gates it.
+            for need in f
+                .needs
+                .iter()
+                .filter(|n| oxplow_domain::scope::scope(n).is_some())
+            {
+                crate::scope_calls::check_callable(need).map_err(at_name)?;
+            }
             if f.op.is_some() {
                 return Err(at_name("`op:` names an operation of a `scope:`".into()));
             }
@@ -1267,6 +1276,51 @@ mod tests {
             .into_iter()
             .find(|e| e.origin == "project" && e.name == name)
             .unwrap()
+    }
+
+    /// A script handler's `needs` are the scopes it calls: one a script
+    /// can't call is refused at load — the rule effects meet too. A
+    /// capability need still gates it.
+    #[test]
+    fn a_script_needs_only_scopes_it_can_call() {
+        let d = tempfile::tempdir().unwrap();
+        let commands = GOOD.replace(
+            "    entry: handlers/finish_review.star",
+            "    entry: handlers/finish_review.star\n    needs: [sql.read, threads.write, work_items]",
+        );
+        write_ext(
+            d.path(),
+            "my-review",
+            &commands,
+            &[("handlers/finish_review.star", HANDLER)],
+        );
+        let errors = project(d.path(), "my-review").errors.join("\n");
+        assert!(
+            errors.contains("`threads.write`") && errors.contains("a script calls only `sql.read`"),
+            "{errors}"
+        );
+        assert!(!errors.contains("`work_items`"), "{errors}");
+    }
+
+    /// A command's `ui` is checked when its extension loads — a binding
+    /// that isn't one is an error there, not a menu entry that never
+    /// shows.
+    #[test]
+    fn a_commands_ui_is_checked_at_load() {
+        let d = tempfile::tempdir().unwrap();
+        let commands =
+            format!("{GOOD}    ui: {{ label: Finish, input: {{ ref: \"{{{{tread}}}}\" }} }}\n");
+        write_ext(
+            d.path(),
+            "my-review",
+            &commands,
+            &[("handlers/finish_review.star", HANDLER)],
+        );
+        let errors = project(d.path(), "my-review").errors.join("\n");
+        assert!(
+            errors.contains("`/ui/input`") && errors.contains("`{{tread}}` isn't a binding"),
+            "{errors}"
+        );
     }
 
     #[test]

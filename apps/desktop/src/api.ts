@@ -1873,6 +1873,13 @@ export async function runCommand(name: string, input: unknown, confirmed = false
   return unwrap(await commands.runCommand(name, input, confirmed));
 }
 
+/** The page command `name` opens after a run that gave `result`: its
+ *  `ui.open_after`, bound by the server from the result; `null` when it
+ *  says none. A field the result lacks is an error naming it. */
+export async function commandOpenAfter(name: string, result: unknown): Promise<string | null> {
+  return unwrap(await commands.commandOpenAfter(name, result));
+}
+
 /** Run a `vcs.*` / `git.*` command (P5.B6) and return its `OpOutcome`.
  *  A destructive one is refused `NEEDS_CONFIRMATION` unless the caller
  *  asked the person first and passes `confirmed`. */

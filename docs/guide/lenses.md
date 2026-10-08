@@ -24,9 +24,18 @@ extension folder needs an `extension.yaml`:
 
 ```yaml
 # oxplow/extensions/review/extension.yaml
+manifest: 2
 name: review          # must match the folder name
 description: Lenses for reviewing agent work
+intent:
+  purpose: Show what's blocked, so it gets unblocked
+  examples:
+    - { name: blocked, input: { lens: blocked } }
 ```
+
+`intent` is required: what the extension is for, and examples that
+`oxplow extension test` runs. `oxplow extension new extension review` writes this
+file for you.
 
 ```yaml
 # oxplow/extensions/review/lenses/blocked.yaml

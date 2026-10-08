@@ -41,6 +41,7 @@ export function recordRefOffers(ran: Array<[string, unknown]>): void {
       openPage: () => {},
       openForm: () => {},
       runInBackground: () => {},
+      openAfter: async () => null,
       run: async (_label, id, input) => {
         ran.push([id, input]);
         return null;

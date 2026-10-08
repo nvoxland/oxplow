@@ -236,6 +236,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_efforts_in_window,
             commands::generated::enable_metrics,
             commands::generated::run_command,
+            commands::generated::command_open_after,
             commands::generated::get_command,
             commands::generated::list_person_commands,
             commands::generated::register_client_host,

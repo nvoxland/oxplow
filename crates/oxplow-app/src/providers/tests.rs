@@ -5758,3 +5758,24 @@ async fn shutting_down_ends_every_process_gracefully() {
     assert!(file.is_file(), "the provider was told to shut down");
     assert!(fx.svc.providers.get(INSTANCE).await.is_none());
 }
+
+/// A provider's `needs` are the scopes its `host/call`s reach — a
+/// script's — so one `host/call` can't serve is refused at load, the rule
+/// commands and effects meet.
+#[tokio::test]
+async fn a_provider_needs_only_scopes_host_call_serves() {
+    let root = tempfile::tempdir().unwrap();
+    write_extension(root.path(), "");
+    let manifest = root.path().join("oxplow/extensions/tracker/extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, format!("{text}    needs: [config.read]\n")).unwrap();
+    let loaded = crate::extensions::load_extensions(root.path())
+        .into_iter()
+        .find(|e| e.name == EXT)
+        .unwrap();
+    let errs = loaded.errors.join("\n");
+    assert!(
+        errs.contains("`config.read` is a scope a script can't call"),
+        "{errs}"
+    );
+}

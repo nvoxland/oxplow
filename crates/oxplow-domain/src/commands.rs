@@ -304,6 +304,133 @@ pub struct CommandUi {
     pub when: Option<String>,
 }
 
+/// What a command's `ui.input` binds from where it runs: the stream and
+/// thread on screen, and the ref it is about (and that ref's id).
+pub const UI_INPUT_BINDINGS: &[&str] = &["stream", "thread", "ref", "ref.id"];
+
+/// The window's own forms: a `ui.form` that isn't a page's ref
+/// (`App.tsx` `openForm`).
+pub const WINDOW_FORMS: &[&str] = &["new-thread", "commit"];
+
+/// The menu bar's menus (`menuBar.ts` `MenuId`).
+pub const MENU_BARS: &[&str] = &["file", "edit"];
+
+impl CommandUi {
+    /// What's wrong with it, as `(field, message)` — what a window would
+    /// otherwise meet only by its not working.
+    pub fn problem(&self) -> Option<(String, String)> {
+        use crate::template::{placeholders, whole_placeholder};
+        let bad = |field: &str, message: String| Some((format!("/ui/{field}"), message));
+        if self.label.trim().is_empty() {
+            return bad("label", "a `ui.label` says what a person reads".into());
+        }
+        if let Some(kind) = &self.about {
+            if !crate::refs::grammar::is_valid_kind(kind) {
+                return bad("about", format!("`{kind}` isn't a ref kind"));
+            }
+        }
+        if let Some(form) = &self.form {
+            if self.input.is_some() {
+                return bad(
+                    "input",
+                    "a command with a `form` gathers its input there — drop `input`".into(),
+                );
+            }
+            let page =
+                form.contains(':') && crate::refs::grammar::CanonicalRef::parse(form).is_ok();
+            if !page && !WINDOW_FORMS.contains(&form.as_str()) {
+                return bad(
+                    "form",
+                    format!(
+                        "`{form}` is neither a page's ref (`page:new-task`) nor one of the \
+                         window's forms ({})",
+                        WINDOW_FORMS.join(", ")
+                    ),
+                );
+            }
+        }
+        for s in self
+            .input
+            .as_ref()
+            .map(crate::template::strings)
+            .unwrap_or_default()
+        {
+            let Some(p) = placeholders(s).into_iter().next() else {
+                continue;
+            };
+            let key = p.key();
+            if whole_placeholder(s).is_none() {
+                return bad(
+                    "input",
+                    format!("`{s}`: a binding is the whole string (`\"{{{{{key}}}}}\"`)"),
+                );
+            }
+            if !UI_INPUT_BINDINGS.contains(&key.as_str()) {
+                return bad(
+                    "input",
+                    format!(
+                        "`{{{{{key}}}}}` isn't a binding ({})",
+                        UI_INPUT_BINDINGS
+                            .iter()
+                            .map(|b| format!("`{{{{{b}}}}}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                );
+            }
+            if p.scope == "ref" && self.about.is_none() {
+                return bad(
+                    "input",
+                    format!("`{{{{{key}}}}}` binds the ref it is about: give it an `about`"),
+                );
+            }
+        }
+        if let Some(open) = &self.open_after {
+            for p in placeholders(open) {
+                if p.scope != "result" || p.name.is_empty() {
+                    return bad(
+                        "open_after",
+                        format!(
+                            "`{{{{{}}}}}`: it takes the result's fields (`{{{{result.<field>}}}}`)",
+                            p.key()
+                        ),
+                    );
+                }
+            }
+            let sample =
+                crate::template::splice::<()>(open, |_| Ok("1".into())).unwrap_or_default();
+            if crate::refs::grammar::CanonicalRef::parse(&sample).is_err() {
+                return bad("open_after", format!("`{open}` isn't a ref to open"));
+            }
+        }
+        if let Some(menu) = &self.menu {
+            if !MENU_BARS.contains(&menu.bar.as_str()) {
+                return Some((
+                    "/ui/menu/bar".into(),
+                    format!("`{}` isn't a menu ({})", menu.bar, MENU_BARS.join(", ")),
+                ));
+            }
+        }
+        None
+    }
+
+    /// The page to open once it ran: `open_after` with each
+    /// `{{result.<field>}}` taken from `result`. A field the result lacks
+    /// is an error naming it — nothing opens, rather than a page whose id
+    /// is empty.
+    pub fn open_after_for(&self, result: &Value) -> Result<Option<String>, String> {
+        let Some(open) = &self.open_after else {
+            return Ok(None);
+        };
+        crate::template::splice(open, |p| match result.get(&p.name) {
+            Some(Value::String(s)) => Ok(s.clone()),
+            Some(v) if !v.is_null() => Ok(v.to_string()),
+            _ => Err(format!("its result has no `{}` to open", p.name)),
+        })
+        .map(Some)
+    }
+}
+
 /// A command's place in the menu bar: which menu, the group it sits in
 /// (VS Code's: groups are sorted by name and drawn apart by a separator)
 /// and where in the group (lowest first).
@@ -803,6 +930,102 @@ fn accepted_values(root: &Value, node: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn ui(v: Value) -> CommandUi {
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// What a window would meet only by its not working is refused when
+    /// the command registers, naming the field: a binding that isn't one,
+    /// a ref binding with no `about`, a placeholder inside text, a form
+    /// that isn't a page or one of the window's, an `open_after` that
+    /// takes anything but the result's fields or isn't a ref, a menu that
+    /// isn't the menu bar's.
+    #[test]
+    fn a_command_ui_is_checked_where_it_is_declared() {
+        for good in [
+            json!({ "label": "New", "input": { "thread": "{{thread}}", "n": 1 } }),
+            json!({ "label": "Finish", "about": "work_item", "input": { "ref": "{{ref}}", "id": "{{ref.id}}" } }),
+            json!({ "label": "New Task…", "form": "page:new-task" }),
+            json!({ "label": "Commit…", "form": "commit" }),
+            json!({ "label": "New", "open_after": "page:custom-dashboard?id={{result.id}}" }),
+            json!({ "label": "New", "open_after": "agent_session:{{result.id}}" }),
+            json!({ "label": "Save", "menu": { "bar": "file", "order": 1 } }),
+        ] {
+            assert_eq!(ui(good.clone()).problem(), None, "{good}");
+        }
+        for (bad, field, says) in [
+            (json!({ "label": " " }), "/ui/label", "what a person reads"),
+            (
+                json!({ "label": "X", "input": { "t": "{{tread}}" } }),
+                "/ui/input",
+                "`{{tread}}`",
+            ),
+            (
+                json!({ "label": "X", "input": { "r": "{{ref}}" } }),
+                "/ui/input",
+                "`about`",
+            ),
+            (
+                json!({ "label": "X", "input": { "t": "on {{thread}}" } }),
+                "/ui/input",
+                "the whole string",
+            ),
+            (
+                json!({ "label": "X", "form": "page:new-task", "input": { "a": 1 } }),
+                "/ui/input",
+                "`form`",
+            ),
+            (
+                json!({ "label": "X", "form": "new-task" }),
+                "/ui/form",
+                "new-thread, commit",
+            ),
+            (
+                json!({ "label": "X", "about": "Work Item" }),
+                "/ui/about",
+                "ref kind",
+            ),
+            (
+                json!({ "label": "X", "open_after": "page:x?id={{row.id}}" }),
+                "/ui/open_after",
+                "{{result.",
+            ),
+            (
+                json!({ "label": "X", "open_after": "nowhere" }),
+                "/ui/open_after",
+                "a ref",
+            ),
+            (
+                json!({ "label": "X", "menu": { "bar": "view", "order": 1 } }),
+                "/ui/menu/bar",
+                "file, edit",
+            ),
+        ] {
+            let (f, message) = ui(bad.clone()).problem().expect("refused");
+            assert_eq!(f, field, "{bad}");
+            assert!(message.contains(says), "{bad}: {message}");
+        }
+    }
+
+    /// `open_after` is bound from the run's result by the same tokenizer;
+    /// a field the result lacks opens nothing, rather than a page whose
+    /// id is empty.
+    #[test]
+    fn open_after_is_bound_from_the_result() {
+        let u =
+            ui(json!({ "label": "New", "open_after": "page:custom-dashboard?id={{result.id}}" }));
+        assert_eq!(
+            u.open_after_for(&json!({ "id": 7 })),
+            Ok(Some("page:custom-dashboard?id=7".to_string()))
+        );
+        let err = u.open_after_for(&json!({})).unwrap_err();
+        assert!(err.contains("`id`"), "{err}");
+        assert_eq!(
+            ui(json!({ "label": "New" })).open_after_for(&json!({})),
+            Ok(None)
+        );
+    }
 
     /// A view runs as a read does; a record is audited but open to any
     /// thread; only a write needs the stream's writer.

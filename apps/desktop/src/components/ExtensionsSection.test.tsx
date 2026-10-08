@@ -27,7 +27,7 @@ const review = (over: Partial<Extension> = {}): ExtensionReview => ({
   gitRef: null,
   sha: "0123456789abcdef0123456789abcdef01234567",
   problems: [],
-  impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], config: null, lines: [] },
+  impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], lines: [] },
 });
 
 // tsk378: an install shows what it brings in; the person confirms or cancels.

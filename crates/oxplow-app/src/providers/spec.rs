@@ -485,26 +485,18 @@ pub fn read_pinned_tools(
     Ok(tools)
 }
 
-/// What's wrong with how `spec` names what runs: exactly one of `entry`
-/// and `adapter`, and every file it names inside the folder.
-/// A provider may call the scopes that only read so far: what
-/// `host/call` answers.
+/// What's wrong with `spec`'s `needs`: the scopes its `host/call`s
+/// reach, which are a script's ([`crate::scope_calls::check_callable`]).
 fn needs_problem(spec: &ProviderSpec) -> Option<String> {
-    use oxplow_domain::{scope::scope, Access};
-    spec.needs.iter().find_map(|need| match scope(need) {
-        None => Some(format!(
-            "provider `{}`: `needs`: no scope `{need}`",
-            spec.id
-        )),
-        Some(c) if c.access != Access::Read => Some(format!(
-            "provider `{}`: `needs`: a provider may call only scopes that read (`{need}` \
-             changes things)",
-            spec.id
-        )),
-        Some(_) => None,
+    spec.needs.iter().find_map(|need| {
+        crate::scope_calls::check_callable(need)
+            .err()
+            .map(|e| format!("provider `{}`: {e}", spec.id))
     })
 }
 
+/// What's wrong with how `spec` names what runs: exactly one of `entry`
+/// and `adapter`, and every file it names inside the folder.
 fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let id = &spec.id;
     match (&spec.entry, &spec.adapter) {

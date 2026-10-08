@@ -24,6 +24,7 @@ pub mod scope;
 pub mod snapshot;
 pub mod stores;
 pub mod stream;
+pub mod template;
 pub mod thread;
 pub mod time;
 pub mod tree_diff;

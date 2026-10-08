@@ -35,6 +35,7 @@ import {
   runCommand,
   runCommandForCall,
   runCommandInBackground,
+  commandOpenAfter,
   type ThreadState,
   type SqlCell,
   type Stream,
@@ -1330,6 +1331,11 @@ export function App() {
       },
       runInBackground: (label, id, input) =>
         void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
+      openAfter: (id, result) =>
+        commandOpenAfter(id, result).catch((e: unknown) => {
+          recordOpError({ label: "Open what it made", message: e instanceof Error ? e.message : String(e) });
+          return null;
+        }),
       }),
     [personSpecs, runGitMenuOp, openForm],
   );

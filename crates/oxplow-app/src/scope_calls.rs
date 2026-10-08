@@ -13,6 +13,31 @@ use oxplow_domain::DomainError;
 use serde::Deserialize;
 use serde_json::Value;
 
+/// The scopes a script — a command's handler, an effect, a provider's
+/// `host/call` — can call: what [`Calls::serve`] answers.
+pub const CALLABLE: &[&str] = &["sql.read"];
+
+/// A script's need of scope `id`: one it can call, or why not — the one
+/// rule a command's `entry:` and an effect meet at load.
+pub fn check_callable(id: &str) -> Result<(), String> {
+    if CALLABLE.contains(&id) {
+        return Ok(());
+    }
+    let what = if oxplow_domain::scope::scope(id).is_some() {
+        "a scope a script can't call"
+    } else {
+        "not a scope"
+    };
+    Err(format!(
+        "`needs`: `{id}` is {what} — a script calls only {}",
+        CALLABLE
+            .iter()
+            .map(|s| format!("`{s}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
 /// The most rows one `sql.read` answers.
 pub const SQL_READ_ROW_CAP: usize = 1_000;
 
@@ -100,7 +125,7 @@ impl<'a> Calls<'a> {
         }
         match id {
             "sql.read" => self.sql_read(args),
-            other => Err(format!("`{other}` can't be called from a handler yet")),
+            other => Err(check_callable(other).err().unwrap_or_default()),
         }
     }
 

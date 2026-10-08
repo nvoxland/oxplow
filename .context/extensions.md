@@ -201,9 +201,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       `{{param.<name>}}` or `{{row.<column>}}` becomes that value, typed
       (a number stays a number); a string containing them has them spliced
       in as text. The values go into the command's input, never into SQL.
-      One tokenizer reads them (`extensions::placeholders` /
-      `whole_placeholder`), for load-time validation and run-time binding
-      alike, so the two can't disagree.
+      One tokenizer reads them (`oxplow_domain::template` — every
+      template's, a command's `ui.input` and `open_after` too), for
+      load-time validation and run-time binding alike, so the two can't
+      disagree.
       At load, a `{{param.x}}` must name a declared param and `{{row.x}}`
       needs `row: true`; `validate_extension` checks `{{row.x}}` against
       the result's columns; the command name must be well-formed. Any
@@ -675,28 +676,23 @@ dimensions:  [...]
 collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entities) and
                      # fact collectors (`facts:`; starlark / jaq only; facts must be declared here or oxplow.*)
                      # see semantic-layer.md "Collectors"
-ui:                  # what it adds to the core UI
+ui:                  # what it adds to the core UI (a command's own `ui:` puts it in core menus: see "Commands")
   slots:             # lenses mounted into core pages; see "Slots"
     - { slot: effort.review.details, lens: change-review }
-  commands: …        # its commands in core menus (stable; P6b)
   decorators: …      # labels from its models on core refs (stable since P10; see "Decorators")
   replacements: …    # experimental: a lens in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
-launcher:            # entries for non-lens targets; a lens uses its own launcher: block
-  - { label: …, category: Data, target: { ref: page:… } }        # a page (a ref of a kind that opens as one)
-  - { label: …, category: Work, target: { command: …, input: { … } } }   # a command, run as the person
-  - { label: …, category: Code, target: { prompt: … } }          # a one-line prompt, put in the agent's input
 models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `key: [cols]`; `materialize: on_change | { every: 1h } | { incremental: <col> }` stores one (semantic-layer.md "Extension models", "Materialized models")
-pages: …  panels: …  # running (P6.G1/G2): see "Panels" and "Pages"
-commands:  [...]   # Starlark scripts composing core commands (see "Commands")
-config: …          # parsed as data
+pages: …  panels: …  # see "Panels" and "Pages"
+commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see "Commands")
 ref_kinds: …        # kinds of thing a ref can name (stable since P10; see "Ref kinds")
 event_types: …      # its own namespace's event types (stable; see "Event types", P8)
-# experimental kinds — a PRIVATE extension only
+implementations: …  # capability implementations it declares (oxplow-bundled declares the defaults)
+skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
-effects: …          # scripts reacting to logged events by composing commands (see "Effects", P8)
+effects: …          # scripts reacting to logged events by composing commands (see "Effects")
 custom_components: …   # sandboxed components for `viz: custom` lenses (see "Custom components")
-# and ui.replacements above
+# experimental — a PRIVATE extension only: ui.replacements (above)
 ```
 
 Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
@@ -1202,10 +1198,7 @@ it would change — not only by what it declares (`extension_impact.rs`).
   command or feature shows still reads as something) (`providers_diff`,
   over each spec and its checked-in declarations);
 - `effects` — each effect contribution's trigger and reactions
-  (`EffectImpact`, below);
-- `config` — the instance config schema, with the property keys added,
-  removed or changed and the first change outside `properties`
-  (`other_change`: `required`, …) (`config_diff`).
+  (`EffectImpact`, below).
 
 `extension_impact::json_difference` is the one "where do two JSON
 values first differ" walk (the provider host's `first_difference` uses
@@ -1242,7 +1235,7 @@ installed). Settings → Extensions shows `ImpactReport.lines` —
 review, `extension check --impact` and an effort's review share:
 collectors' and providers' grants first — "now reaches x (was y)", a
 provider command added (destructive) — then models with their readers,
-lenses, the config keys) and each changed lens's text before and after,
+lenses) and each changed lens's text before and after,
 side by side (`LensDiff`; no line diff yet).
 
 **An extension at any revision.** `extension_at(trees, ws, rev,
@@ -1681,15 +1674,15 @@ promise is already built: a published `type@v` is a contract
 (`event_type_contract` refuses a changed schema — stronger than a
 model's drift warning), a new shape is a new version with an upcast, and
 a removed type's rows stay readable. `STABLE_KINDS` lists it;
-`EXPERIMENTAL_KINDS` keeps `providers` and `ui.replacements`
-(`ui.decorators` and `ref_kinds` were promoted in P10, "Decorators" and
-"Ref kinds"; `effects` and `custom_components` in P11, below and
-"Custom components"). `ManifestV2::experimental_kinds_used` reads the
+`EXPERIMENTAL_KINDS` keeps only `ui.replacements` (`ui.decorators` and
+`ref_kinds` were promoted in P10, "Decorators" and "Ref kinds";
+`effects` and `custom_components` in P11, below and "Custom
+components"; `providers` once the provider host was). `ManifestV2::experimental_kinds_used` reads the
 table, so promoting a kind is moving it from one table to the other.
 
 **`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
 extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
-`oxplow_bundled.accepted`: its `input` reads the acceptance's subject
+`oxplow_bundled.accepted`: its script reads (`scope("sql.read")`) the acceptance's subject
 (`:event_id`, tsk955) — the effort, its item, and each claim and decision
 accepted unchecked, still unverified or inferred now — and is empty when
 the effect already filed (or proposed) a follow-up for an earlier
@@ -1976,7 +1969,7 @@ effects:
     summary: Note a finished item on its thread.
     on: [work_item.state_changed]  # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these
-    needs: [sql.read]              # the scopes its script calls
+    needs: [sql.read]              # the scopes its script calls: only what a script can (`scope_calls::CALLABLE`)
     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
     after: [page_ref.work_item]    # optional: consumers it waits for
 ```
@@ -2213,7 +2206,12 @@ Reacting to the past exists only as `oxplow.effect.backfill`.
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)
 are commands on the bus whose handler is a Starlark script that
 **composes core commands**, reaching anything else only through the **scopes**
-it declares in `needs` ([commands.md](./commands.md) "Scopes") — `scope("sql.read", { sql, params })` today:
+it declares in `needs` ([commands.md](./commands.md) "Scopes") — `scope("sql.read", { sql, params })` today.
+A script's scope needs are the scopes a script can call
+(`scope_calls::CALLABLE`, `check_callable`): one it can't is refused at
+load, the one rule a command's `entry:`, an effect and a provider's
+`host/call` meet. A capability need (`work_items.comments`) gates the
+command instead:
 
 ```yaml
 commands:

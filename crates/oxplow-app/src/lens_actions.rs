@@ -428,19 +428,11 @@ pub fn bind_input(
         SqlCell::Bool(b) => b.to_string(),
     };
     Ok(match input {
-        Value::String(s) => match crate::extensions::whole_placeholder(s) {
+        Value::String(s) => match oxplow_domain::template::whole_placeholder(s) {
             Some(p) => serde_json::to_value(lookup(&p.scope, &p.name)?).unwrap_or(Value::Null),
-            None => {
-                let mut out = String::with_capacity(s.len());
-                let mut at = 0;
-                for p in crate::extensions::placeholders(s) {
-                    out.push_str(&s[at..p.start]);
-                    out.push_str(&text(&lookup(&p.scope, &p.name)?));
-                    at = p.end;
-                }
-                out.push_str(&s[at..]);
-                Value::String(out)
-            }
+            None => Value::String(oxplow_domain::template::splice(s, |p| {
+                lookup(&p.scope, &p.name).map(|c| text(&c))
+            })?),
         },
         Value::Array(items) => Value::Array(
             items

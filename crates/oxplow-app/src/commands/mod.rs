@@ -304,6 +304,12 @@ impl Command {
 
     pub fn new(spec: CommandSpec, handler: Handler) -> Result<Self, CommandError> {
         CommandSpec::validate_id(&spec.id)?;
+        if let Some((field, message)) = spec.ui.as_ref().and_then(|ui| ui.problem()) {
+            return Err(CommandError::Invalid {
+                field: Some(field),
+                message: format!("`{}`'s {message}", spec.id),
+            });
+        }
         if let Some(when) = spec.ui.as_ref().and_then(|ui| ui.when.as_deref()) {
             oxplow_domain::when::check(when).map_err(|message| CommandError::Invalid {
                 field: Some("/ui/when".into()),

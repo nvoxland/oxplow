@@ -156,9 +156,6 @@ pub struct ManifestV2 {
     /// What it adds to the core UI: slots, commands in menus, decorators.
     #[serde(default)]
     pub ui: UiBlock,
-    /// The instance config schema (§10.3). Parsed as data in P1.
-    #[serde(default)]
-    pub config: Option<Value>,
     /// Guidance queries for the agent; parsed one by one by the loader.
     /// Stable: bundled `oxplow-bundled` ships on it, which is the
     /// evidence a kind needs to be promoted.
@@ -209,7 +206,6 @@ pub const STABLE_KINDS: &[&str] = &[
     "ref_kinds",
     "implementations",
     "skills",
-    "config",
     "advisories",
     "event_types",
     "effects",
@@ -597,6 +593,9 @@ mod tests {
     #[test]
     fn unknown_keys_and_bad_versions_are_errors() {
         assert!(serde_yaml::from_str::<ManifestV2>("manifest: 2\nname: a\nslots: []\n").is_err());
+        // Nothing reads an extension-wide `config:`: an instance's config
+        // schema is its provider's declarations'.
+        assert!(serde_yaml::from_str::<ManifestV2>("manifest: 2\nname: a\nconfig: {}\n").is_err());
         let text = "manifest: 3\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(

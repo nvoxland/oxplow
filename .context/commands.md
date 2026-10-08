@@ -66,21 +66,35 @@ A command says how a person meets it with an optional `ui`
 | `label` | what a person reads (`Pull Changes`, `New Task…`) |
 | `group` | what search lists it under (`Git`, `Tasks`) |
 | `keywords` | more words search matches it by |
-| `about` | the ref kind it acts on: offered on that ref's page and rows; absent, it needs no ref and **search** offers it |
-| `input` | the input it runs with; a string exactly `{{stream}}` / `{{thread}}` (bound to the stream's / thread's ref, `stream:str1`), `{{ref}}` or `{{ref.id}}` binds from where it runs, and one with nothing to bind there makes it unavailable there |
-| `form` | what gathers its input: a page (a tab id, `page:new-task`) or one of the window's own forms (`new-thread`: the Navigator's inline form; `commit`: the Files page's commit dialog) — choosing it opens that instead of running it |
-| `open_after` | a tab id to open once it ran, `{{result.<field>}}` from its result (`page:custom-dashboard?id={{result.id}}`) |
+| `about` | the ref kind it acts on (a ref kind's syntax): offered on that ref's page and rows; absent, it needs no ref and **search** offers it |
+| `input` | the input it runs with; a string exactly `{{stream}}` / `{{thread}}` (bound to the stream's / thread's ref, `stream:str1`), `{{ref}}` or `{{ref.id}}` (only with an `about`) binds from where it runs, and one with nothing to bind there makes it unavailable there. A binding is the whole string, never spliced into text (`UI_INPUT_BINDINGS`) |
+| `form` | what gathers its input (so no `input`): a page's ref (`page:new-task`) or one of the window's own forms (`WINDOW_FORMS`: `new-thread`, the Navigator's inline form; `commit`, the Files page's commit dialog) — choosing it opens that instead of running it |
+| `open_after` | a ref to open once it ran, taking only `{{result.<field>}}` from its result (`page:custom-dashboard?id={{result.id}}`, `agent_session:{{result.id}}`); bound by the server (RPC `command_open_after`, `CommandUi::open_after_for`) — a field the result lacks opens nothing and says so |
 | `background` | it runs as a background task (kind `vcs` for `oxplow.vcs.*`, else `command`), its failure an op error |
 | `shortcut` | the key that runs it, `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N` (`keybindings.ts` `offerForShortcut`). Several commands may share a key, told apart by `when` (VS Code's way): the key runs the one whose `when` holds now, oxplow's own first. Two on one key under the same `when` always collide, so the second is refused where it registers (`Invalid` at `/ui/shortcut`) |
 | `while_typing` | its shortcut runs while the person types in a field too (Save, Find, Quick Open); otherwise typing keeps it (New Task) |
-| `menu` | its place in the menu bar: `{ bar: file \| edit, group?, order }` (`menuBar.ts`) — groups (`1_project`, `2_save`) sorted by name, a separator between them, `order` within one |
+| `menu` | its place in the menu bar: `{ bar: file \| edit, group?, order }` (`MENU_BARS`, `menuBar.ts`) — groups (`1_project`, `2_save`) sorted by name, a separator between them, `order` within one |
 | `when` | when it's offered — in search, the menu bar (greyed when false) and by its shortcut — in VS Code's when-clause syntax over the window's context keys (below, "When a command is offered"); absent, always |
+
+**A `ui` is checked where it registers** (`CommandUi::problem`, from
+`Command::new` for every command and from an extension's loader, so a
+manifest's mistake is its `file:line` error): the label, `about`'s
+syntax, each `input` binding (whole, known, `ref` only with `about`),
+`form` (a ref or a window form, and no `input` beside it), `open_after`
+(a ref, only `{{result.<field>}}`) and `menu.bar` — `Invalid` at
+`/ui/<field>`, never a menu entry that silently doesn't work. Every
+template — a lens action's `{{param.x}}` / `{{row.x}}`, `ui.input`,
+`open_after` — is read by one tokenizer, `oxplow_domain::template`
+(`placeholders`, `whole_placeholder`, `splice`); the window binds
+`ui.input` by exact match on the four names the check let through, and
+parses nothing.
 
 RPC `list_person_commands` lists what a person is offered: what they may
 run now (invokers, `needs` active) that has a `ui`. The desktop keeps one
 listing (`personCommandsStore.ts`, reloaded when extensions or config
 change) and turns it into **offers** with `commandOffers.ts` (pure:
-binding, `when`, run / form / background / open-after).
+binding, `when`, run / form / background, and the page the server binds
+for open-after).
 Everything a person reaches a command by comes from the offers:
 
 - **search** lists the ref-less ones that can run now;

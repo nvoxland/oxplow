@@ -32,6 +32,11 @@ function deps() {
       return { result: { id: 7 } } as never;
     },
     runInBackground: (label, id, input) => calls.push(`background ${id} ${JSON.stringify(input)}`),
+    // The server binds `open_after` from the result (`command_open_after`).
+    openAfter: async (id, result) => {
+      calls.push(`open_after ${id} ${JSON.stringify(result)}`);
+      return "page:custom-dashboard?id=7";
+    },
   };
   return { d, calls };
 }
@@ -84,6 +89,7 @@ test("a form opens its page; a background command runs in the background; anothe
     "open page:new-task",
     'background oxplow.vcs.pull {"stream":"stream:str2"}',
     'run oxplow.dashboard.create {"title":"Untitled dashboard"}',
+    'open_after oxplow.dashboard.create {"id":7}',
     "open page:custom-dashboard?id=7",
   ]);
 });

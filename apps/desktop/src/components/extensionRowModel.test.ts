@@ -217,7 +217,7 @@ describe("reviewModel", () => {
     gitRef: null,
     sha: "0123456789abcdef0123456789abcdef01234567",
     problems,
-    impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], config: null, lines: [] },
+    impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], lines: [] },
   });
 
   test("spells out what runs, where it reaches and what it reads", () => {

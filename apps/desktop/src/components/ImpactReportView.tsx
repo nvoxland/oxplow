@@ -1,6 +1,6 @@
 /// What an extension change does: the server's lines
 /// (`extension_impact::summary` — grants first, then collectors' outputs,
-/// models and their rows, lenses, config), then each changed lens's text
+/// models and their rows, lenses), then each changed lens's text
 /// before and after. The install review and an effort's review show it.
 import type { ImpactReport } from "../tauri-bridge/generated/bindings.js";
 import { LensDiff } from "./LensDiff.js";
