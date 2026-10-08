@@ -213,7 +213,7 @@ impl HookIngestService {
         outcome.closed_turn = applied.closed_turn;
         outcome.harness = applied.harness.clone();
         match applied.status {
-            Some((state, detail)) => self.announce(thread, applied.session, state, detail),
+            Some((state, detail)) => self.announce(thread, applied.session, state, detail).await,
             None => {
                 self.announce_derived_status(&thread, applied.session, kind)
                     .await
@@ -257,19 +257,33 @@ impl HookIngestService {
                 Ok(slot)
             })
             .await?;
-        self.announce(*thread, slot, state, detail);
+        self.announce(*thread, slot, state, detail).await;
         Ok(())
     }
 
-    fn announce(
+    /// Tell the renderer `session`'s status on `thread`, with the thread's
+    /// stream. A thread that's gone has nothing to show.
+    async fn announce(
         &self,
         thread: ThreadId,
         session: Option<oxplow_domain::AgentSessionId>,
         state: AgentStatusState,
         detail: Option<String>,
     ) {
+        let stream = self
+            .db
+            .read(move |conn| {
+                oxplow_db::thread_store::get_tx(conn, thread)
+                    .map(|t| t.map(|t| t.stream_id))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await;
+        let Ok(Some(stream_id)) = stream else {
+            return;
+        };
         self.events.emit(OxplowEvent::AgentStatusChanged {
             thread_id: thread,
+            stream_id,
             agent_session_id: session,
             state,
             detail,
@@ -311,7 +325,7 @@ impl HookIngestService {
                 (derived, None)
             }
         };
-        self.announce(*thread, session, state, detail);
+        self.announce(*thread, session, state, detail).await;
     }
 }
 

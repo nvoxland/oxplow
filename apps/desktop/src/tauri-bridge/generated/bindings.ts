@@ -1295,6 +1295,8 @@ export type AgentSessionId = string;
 
 export type AgentStatus = {
 	thread_id: ThreadId,
+	// The thread's stream.
+	stream_id: StreamId,
 	/**
 	 *  The agent session it is the status of; `None` for activity no
 	 *  session claims (an agent oxplow didn't start).
@@ -4659,6 +4661,11 @@ export type OxplowEvent =
  *  re-derive) compute it inline before emitting.
  */
 { kind: "agentStatusChanged"; threadId: ThreadId; 
+/**
+ *  The thread's stream, so a view over every stream (the Git
+ *  dashboard) files it without a lookup.
+ */
+streamId: StreamId; 
 /**
  *  The agent session whose status it is; `None` for activity no
  *  session claims. The renderer rolls a thread's sessions up

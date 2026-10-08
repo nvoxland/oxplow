@@ -91,6 +91,7 @@ impl AgentStallWatch {
             // ever arrive to trigger this through the normal path.
             self.events.emit(OxplowEvent::AgentStatusChanged {
                 thread_id,
+                stream_id: status.stream_id,
                 agent_session_id: session,
                 state: AgentStatusState::Stalled,
                 detail: None,

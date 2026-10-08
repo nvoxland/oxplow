@@ -2462,7 +2462,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
   return rows.map((row) => {
     const status = collapseAgentStatusState(row.state);
     return {
-      streamId: "",
+      streamId: row.stream_id,
       threadId: row.thread_id,
       sessionId: row.agent_session_id,
       // detail is what it waits on only while awaiting; other
@@ -2619,11 +2619,10 @@ export function subscribeAgentStatus(
     if (!threadId || !rawState) return;
     const status = collapseAgentStatusState(rawState);
     const detail = event.detail as string | null | undefined;
-    // streamId filter is a no-op — the event doesn't carry stream
-    // attribution. The single caller in App.tsx subscribes with "all".
-    void streamId;
+    const eventStream = event.streamId as string | undefined;
+    if (!eventStream || (streamId !== "all" && eventStream !== streamId)) return;
     onEvent({
-      streamId: "",
+      streamId: eventStream,
       threadId,
       sessionId: (event.agentSessionId as string | null | undefined) ?? null,
       status,
