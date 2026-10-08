@@ -84,7 +84,7 @@ pub use comment_store::SqliteCommentStore;
 pub use dashboard_store::{
     Dashboard, DashboardItem, DashboardWithItems, NewDashboardItem, SqliteDashboardStore,
 };
-pub use database::{map_sql_err, string_to_ts, ts_to_string, Database, DbInitError};
+pub use database::{map_sql_err, string_to_ts, ts_to_string, Database, DbInitError, TxError};
 pub use diagnostic_store::{DiagnosticRow, SqliteDiagnosticStore};
 pub use effort_evidence_store::EffortObservation;
 pub use effort_evidence_store::SqliteEffortEvidenceStore;

@@ -530,15 +530,35 @@ impl Database {
             + 'static,
         R: Send + 'static,
     {
-        self.call_mut(move |conn| {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
-                .map_err(map_sql_err)?;
-            let out = f(&tx)?;
-            tx.rollback().map_err(map_sql_err)?;
-            Ok(out)
-        })
-        .await
+        self.read_or(move |tx| f(tx).map_err(TxError::Storage))
+            .await
+            .map_err(TxError::<std::convert::Infallible>::into_storage)
+    }
+
+    /// [`Self::read`] whose closure may end it with a reason of its own
+    /// (`TxError::Aborted`), handed back as given.
+    pub async fn read_or<R, A, F>(&self, f: F) -> Result<R, TxError<A>>
+    where
+        F: FnOnce(&rusqlite::Transaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
+        R: Send + 'static,
+        A: Send + 'static,
+    {
+        let out = self
+            .call_mut(move |conn| {
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
+                    .map_err(map_sql_err)?;
+                let out = match f(&tx) {
+                    Ok(v) => Ok(v),
+                    Err(TxError::Storage(e)) => return Err(e),
+                    Err(TxError::Aborted(a)) => Err(a),
+                };
+                tx.rollback().map_err(map_sql_err)?;
+                Ok(out)
+            })
+            .await
+            .map_err(TxError::Storage)?;
+        out.map_err(TxError::Aborted)
     }
 
     /// Run `f` inside a single SQLite transaction, off the async
@@ -560,6 +580,21 @@ impl Database {
     where
         F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
         R: Send + 'static,
+    {
+        self.write_transaction(move |tx| f(tx).map_err(TxError::Storage), true)
+            .await
+            .map_err(TxError::<std::convert::Infallible>::into_storage)
+    }
+
+    /// [`Self::transaction`] whose closure may end it with a reason of its
+    /// own (`TxError::Aborted`): rolled back, never retried, handed back
+    /// as given — so a caller needn't smuggle its reason out through a
+    /// side channel. A `TxError::Storage` that is busy is retried, as ever.
+    pub async fn transaction_or<R, A, F>(&self, f: F) -> Result<R, TxError<A>>
+    where
+        F: Fn(&rusqlite::Transaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
+        R: Send + 'static,
+        A: Send + 'static,
     {
         self.write_transaction(f, true).await
     }
@@ -591,54 +626,65 @@ impl Database {
         F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
         R: Send + 'static,
     {
+        self.write_transaction(move |tx| f(tx).map_err(TxError::Storage), false)
+            .await
+            .map_err(TxError::<std::convert::Infallible>::into_storage)
+    }
+
+    /// [`Self::rehearse`] whose closure may end it with a reason of its own,
+    /// as [`Self::transaction_or`].
+    pub async fn rehearse_or<R, A, F>(&self, f: F) -> Result<R, TxError<A>>
+    where
+        F: Fn(&rusqlite::Transaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
+        R: Send + 'static,
+        A: Send + 'static,
+    {
         self.write_transaction(f, false).await
     }
 
-    async fn write_transaction<R, F>(
-        &self,
-        f: F,
-        commit: bool,
-    ) -> Result<R, oxplow_domain::DomainError>
+    async fn write_transaction<R, A, F>(&self, f: F, commit: bool) -> Result<R, TxError<A>>
     where
-        F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
+        F: Fn(&rusqlite::Transaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
         R: Send + 'static,
+        A: Send + 'static,
     {
         const MAX_ATTEMPTS: u32 = 3;
         const BACKOFF: [std::time::Duration; 2] = [
             std::time::Duration::from_millis(50),
             std::time::Duration::from_millis(200),
         ];
-        let permit = self.db_permit().await?;
+        let permit = self.db_permit().await.map_err(TxError::Storage)?;
         let db = self.clone();
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let mut attempt: u32 = 0;
             loop {
                 attempt += 1;
-                let mut conn = db
-                    .conn()
-                    .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
+                let mut conn = db.conn().map_err(|e| {
+                    TxError::Storage(oxplow_domain::DomainError::Storage(format!("pool: {e}")))
+                })?;
                 // IMMEDIATE: take the write lock at BEGIN (waiting under
                 // `busy_timeout`). A deferred read-then-write transaction
                 // fails with SQLITE_BUSY_SNAPSHOT when another commits
                 // between its read and its first write, which no wait fixes.
                 // So Busy comes at BEGIN, and is retried like any other
                 // (tsk1005).
+                let sql = |e| TxError::Storage(map_sql_err(e));
                 let outcome = conn
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .map_err(map_sql_err)
+                    .map_err(sql)
                     .and_then(|tx| {
                         let value = f(&tx)?;
                         if commit {
-                            tx.commit().map_err(map_sql_err)?;
+                            tx.commit().map_err(sql)?;
                         } else {
-                            tx.rollback().map_err(map_sql_err)?;
+                            tx.rollback().map_err(sql)?;
                         }
                         Ok(value)
                     });
                 match outcome {
                     Ok(value) => return Ok(value),
-                    Err(err) if err.is_retryable() && attempt < MAX_ATTEMPTS => {
+                    Err(TxError::Storage(err)) if err.is_retryable() && attempt < MAX_ATTEMPTS => {
                         // Dropped `tx` already rolled back; safe to rerun.
                         std::thread::sleep(BACKOFF[(attempt - 1) as usize % BACKOFF.len()]);
                     }
@@ -647,9 +693,39 @@ impl Database {
             }
         })
         .await
-        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")));
+        .map_err(|e| {
+            TxError::Storage(oxplow_domain::DomainError::Storage(format!(
+                "db task panicked: {e}"
+            )))
+        });
         self.changes.flush();
         out?
+    }
+}
+
+/// How a transaction a caller may end ([`Database::transaction_or`],
+/// `rehearse_or`, `read_or`) ended without committing.
+#[derive(Debug)]
+pub enum TxError<A> {
+    /// The database: a busy one is retried; any other comes back as is.
+    Storage(oxplow_domain::DomainError),
+    /// The caller's own reason: rolled back, never retried, handed back.
+    Aborted(A),
+}
+
+impl<A> From<oxplow_domain::DomainError> for TxError<A> {
+    fn from(e: oxplow_domain::DomainError) -> Self {
+        TxError::Storage(e)
+    }
+}
+
+impl TxError<std::convert::Infallible> {
+    /// The storage error of a transaction no caller can end.
+    pub fn into_storage(self) -> oxplow_domain::DomainError {
+        match self {
+            TxError::Storage(e) => e,
+            TxError::Aborted(never) => match never {},
+        }
     }
 }
 
@@ -1086,6 +1162,46 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, oxplow_domain::DomainError::Constraint(_)));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// A transaction a caller ends with its own reason rolls back — nothing
+    /// it wrote lands — and hands the reason back as it was given, never
+    /// retried; a busy one is still retried.
+    #[tokio::test]
+    async fn a_transaction_ended_by_its_caller_rolls_back_and_says_why() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE t (n INTEGER)")
+                .map_err(map_sql_err)
+        })
+        .await
+        .unwrap();
+        let calls = Arc::new(AtomicU32::new(0));
+        let seen = calls.clone();
+        let out = db
+            .transaction_or(move |tx| {
+                tx.execute("INSERT INTO t VALUES (1)", [])
+                    .map_err(|e| TxError::Storage(map_sql_err(e)))?;
+                if seen.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(TxError::Storage(oxplow_domain::DomainError::Busy(
+                        "x".into(),
+                    )));
+                }
+                Err::<(), _>(TxError::Aborted("changed my mind"))
+            })
+            .await;
+        assert!(matches!(out, Err(TxError::Aborted("changed my mind"))));
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "the busy one was retried");
+        let n: i64 = db
+            .read(|tx| {
+                tx.query_row("SELECT count(*) FROM t", [], |r| r.get(0))
+                    .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(n, 0, "rolled back");
     }
 
     /// tsk978: `Database::transaction` is the one write path — it begins

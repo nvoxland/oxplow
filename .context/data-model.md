@@ -147,6 +147,15 @@ failures. The IPC layer maps these to `CONSTRAINT` / `BUSY` /
 `STORAGE` codes (`crates/oxplow-rpc/src/error.rs`). Don't map SQL
 errors to `Invalid` in new store code.
 
+**A caller's own reason to stop.** `Database::transaction_or` /
+`rehearse_or` / `read_or` take a closure returning `TxError<A>`:
+`Storage(DomainError)` (a busy one retried, as with `transaction`) or
+`Aborted(A)` — the caller's own reason, rolled back, never retried and
+handed back as given. The command bus ends a run's transaction this way
+(`Abort::{Failed, Lost, Unchanged}`), so nothing is smuggled out of the
+closure through a side channel; `transaction` / `rehearse` / `read` are
+the same with no reason of their own.
+
 ## Entity ids
 
 Every externally-visible entity id is a SQLite **autoincrement INTEGER**

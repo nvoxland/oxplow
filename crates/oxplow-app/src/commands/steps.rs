@@ -26,6 +26,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use oxplow_db::TxError;
 use oxplow_domain::events::schema::CommandOutcome as Outcome;
 use oxplow_domain::{Actor, CommandCall, CommandError, CommandOutcome, CommandSpec, Preview};
 use oxplow_runtime::policy::PolicyDecision;
@@ -448,11 +449,9 @@ impl CommandBus {
         let registry = self.commands.read().commands.clone();
         let active = self.active();
         let (c, input) = (compose.clone(), input.clone());
-        let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
-        let failed_c = failed.clone();
         let routed = self
             .db
-            .read(move |conn| {
+            .read_or(move |conn| {
                 let mut router = Router {
                     registry: &registry,
                     conn,
@@ -462,18 +461,10 @@ impl CommandBus {
                 router
                     .route(&c, &input, "", 0, "")
                     .map(|routed| (routed, router.prechecks))
-                    .map_err(|err| {
-                        *failed_c.lock() = Some(err);
-                        oxplow_domain::DomainError::Invariant("routing a composite failed".into())
-                    })
+                    .map_err(TxError::Aborted)
             })
             .await
-            .map_err(|db_err| {
-                failed
-                    .lock()
-                    .take()
-                    .unwrap_or_else(|| CommandError::from(db_err))
-            })?;
+            .map_err(super::command_error)?;
         let (Routed { composed, outside }, prechecks) = routed;
         let composed = Arc::new(composed);
         Ok((
@@ -712,10 +703,8 @@ impl CommandBus {
     ) -> Result<(HandlerOutput, BTreeMap<String, u32>), CommandError> {
         let (actor, input, cause) = (actor.clone(), input.clone(), cause.clone());
         let vocabulary = self.log.vocabulary().clone();
-        let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
-        let failed_c = failed.clone();
         self.db
-            .transaction(move |tx| {
+            .transaction_or(move |tx| {
                 let trace = crate::host_capabilities::CapabilityTrace::default();
                 let ctx = TxCtx {
                     conn: tx,
@@ -733,22 +722,12 @@ impl CommandBus {
                 match handler(&ctx, input.clone()) {
                     Ok(out) => Ok((out, trace.summary())),
                     Err(CommandError::Busy { message }) => {
-                        Err(oxplow_domain::DomainError::Busy(message))
+                        Err(TxError::Storage(oxplow_domain::DomainError::Busy(message)))
                     }
-                    Err(err) => {
-                        *failed_c.lock() = Some(err);
-                        Err(oxplow_domain::DomainError::Invariant(
-                            "a step failed; rolled back".into(),
-                        ))
-                    }
+                    Err(err) => Err(TxError::Aborted(err)),
                 }
             })
             .await
-            .map_err(|db_err| {
-                failed
-                    .lock()
-                    .take()
-                    .unwrap_or_else(|| CommandError::from(db_err))
-            })
+            .map_err(super::command_error)
     }
 }

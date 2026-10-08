@@ -52,7 +52,7 @@ use oxplow_db::event_log_store::append_tx;
 use oxplow_db::proposal_store::{self, NewProposal};
 use oxplow_db::{
     CommandAudit, Database, ProposalDecision, SqliteCommandAuditStore, SqliteEventLogStore,
-    SqliteProposalStore,
+    SqliteProposalStore, TxError,
 };
 use oxplow_domain::events::schema::{
     CommandApproved, CommandApprovedV1, CommandDeclined, CommandDeclinedV1, CommandExecuted,
@@ -1051,23 +1051,10 @@ impl CommandBus {
                 let spec_c = spec.clone();
                 let input_c = input.clone();
                 let vocabulary = self.log.vocabulary().clone();
-                // A handler error must roll the transaction back, which
-                // means returning `Err` from the closure; the structured
-                // `CommandError` rides out through this slot.
-                let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
-                let failed_c = failed.clone();
-                // An undo or approval that lost a race: not a failed run,
-                // so it leaves no audit row.
-                let lost: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
-                let lost_c = lost.clone();
-                // A call that changed nothing: its answer, its transaction
-                // rolled back (tsk901).
-                let unchanged: Arc<parking_lot::Mutex<Option<HandlerOutput>>> = Arc::default();
-                let unchanged_c = unchanged.clone();
                 let origin_tx = origin.clone();
                 let ran = self
                     .db
-                    .transaction(move |tx| {
+                    .transaction_or(move |tx| {
                         let executed_id = oxplow_domain::EventId::generate();
                         // Fresh per attempt: a retried run counts its calls once.
                         let trace = crate::host_capabilities::CapabilityTrace::default();
@@ -1085,33 +1072,31 @@ impl CommandBus {
                             trace: &trace,
                         };
                         let out = match handler(&ctx, input_c.clone()) {
+                            // A call that changed nothing: its answer, its
+                            // transaction rolled back (tsk901).
                             Ok(out) if out.unchanged && matches!(origin_tx, RunOrigin::Call) => {
                                 if !out.events.is_empty() || out.inverse.is_some() {
-                                    *failed_c.lock() = Some(CommandError::Failed {
-                                        message: format!(
-                                            "`{}` said it changed nothing but returned events \
-                                             or an inverse",
-                                            spec_c.id
-                                        ),
-                                    });
-                                } else {
-                                    *unchanged_c.lock() = Some(out);
+                                    return Err(TxError::Aborted(Abort::Failed(
+                                        CommandError::Failed {
+                                            message: format!(
+                                                "`{}` said it changed nothing but returned \
+                                                 events or an inverse",
+                                                spec_c.id
+                                            ),
+                                        },
+                                    )));
                                 }
-                                return Err(oxplow_domain::DomainError::Invariant(
-                                    "changed nothing; rolled back".into(),
-                                ));
+                                return Err(TxError::Aborted(Abort::Unchanged(Box::new(out))));
                             }
                             Ok(out) => out,
                             // A lock blip retries the whole run.
                             Err(CommandError::Busy { message }) => {
-                                return Err(oxplow_domain::DomainError::Busy(message));
+                                return Err(TxError::Storage(oxplow_domain::DomainError::Busy(
+                                    message,
+                                )));
                             }
-                            Err(err) => {
-                                *failed_c.lock() = Some(err);
-                                return Err(oxplow_domain::DomainError::Invariant(
-                                    "command handler failed; rolled back".into(),
-                                ));
-                            }
+                            // A handler error rolls the transaction back.
+                            Err(err) => return Err(TxError::Aborted(Abort::Failed(err))),
                         };
                         let recorded = record_tx(
                             tx,
@@ -1145,11 +1130,9 @@ impl CommandBus {
                             ),
                         };
                         if let Err(e) = marked {
-                            let e = lost_race(&origin_tx, e)?;
-                            *lost_c.lock() = Some(e);
-                            return Err(oxplow_domain::DomainError::Invariant(
-                                "decided meanwhile; rolled back".into(),
-                            ));
+                            // An undo or approval that lost a race: not a
+                            // failed run, so it leaves no audit row.
+                            return Err(TxError::Aborted(Abort::Lost(lost_race(&origin_tx, e)?)));
                         }
                         if let RunOrigin::Approval(id) = origin_tx {
                             log_approved_tx(
@@ -1166,18 +1149,10 @@ impl CommandBus {
                     .await;
                 match ran {
                     Ok((out, recorded)) => Ok(finish(out, recorded)),
-                    Err(db_err) => {
-                        if let Some(out) = unchanged.lock().take() {
-                            return Ok(unrecorded(out));
-                        }
-                        if let Some(e) = lost.lock().take() {
-                            return Err(e);
-                        }
-                        Err(failed
-                            .lock()
-                            .take()
-                            .unwrap_or_else(|| CommandError::from(db_err)))
-                    }
+                    Err(TxError::Aborted(Abort::Unchanged(out))) => return Ok(unrecorded(*out)),
+                    Err(TxError::Aborted(Abort::Lost(e))) => return Err(e),
+                    Err(TxError::Aborted(Abort::Failed(e))) => Err(e),
+                    Err(TxError::Storage(e)) => Err(CommandError::from(e)),
                 }
             }
             Resolved::Steps(_) => unreachable!("composite steps ran above"),
@@ -1421,10 +1396,8 @@ impl CommandBus {
     ) -> Result<Value, CommandError> {
         let (actor, input) = (actor.clone(), input.clone());
         let vocabulary = self.log.vocabulary().clone();
-        let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
-        let failed_c = failed.clone();
         self.db
-            .rehearse(move |tx| {
+            .rehearse_or(move |tx| {
                 let ctx = TxCtx {
                     conn: tx,
                     actor: &actor,
@@ -1441,23 +1414,13 @@ impl CommandBus {
                 match handler(&ctx, input.clone()) {
                     Ok(out) => Ok(out.result),
                     Err(CommandError::Busy { message }) => {
-                        Err(oxplow_domain::DomainError::Busy(message))
+                        Err(TxError::Storage(oxplow_domain::DomainError::Busy(message)))
                     }
-                    Err(err) => {
-                        *failed_c.lock() = Some(err);
-                        Err(oxplow_domain::DomainError::Invariant(
-                            "dry run failed".into(),
-                        ))
-                    }
+                    Err(err) => Err(TxError::Aborted(err)),
                 }
             })
             .await
-            .map_err(|db_err| {
-                failed
-                    .lock()
-                    .take()
-                    .unwrap_or_else(|| CommandError::from(db_err))
-            })
+            .map_err(command_error)
     }
 
     /// A person approves proposal `id`: its command runs as them,
@@ -1591,12 +1554,10 @@ impl CommandBus {
                 let handler = handler.clone();
                 let actor = actor.clone();
                 let vocabulary = self.log.vocabulary().clone();
-                let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
-                let failed_c = failed.clone();
                 // A read snapshot, always rolled back: a Read handler's
                 // stray write can't land (it isn't audited).
                 self.db
-                    .read(move |tx| {
+                    .read_or(move |tx| {
                         let ctx = TxCtx {
                             conn: tx,
                             actor: &actor,
@@ -1610,18 +1571,10 @@ impl CommandBus {
                             depth: 0,
                             trace: &crate::host_capabilities::CapabilityTrace::default(),
                         };
-                        handler(&ctx, input.clone()).map_err(|err| {
-                            *failed_c.lock() = Some(err);
-                            oxplow_domain::DomainError::Invariant("read command failed".into())
-                        })
+                        handler(&ctx, input.clone()).map_err(TxError::Aborted)
                     })
                     .await
-                    .map_err(|db_err| {
-                        failed
-                            .lock()
-                            .take()
-                            .unwrap_or_else(|| CommandError::from(db_err))
-                    })?
+                    .map_err(command_error)?
             }
             Resolved::External(handler) => {
                 let invocation = Invocation {
@@ -1919,6 +1872,27 @@ fn finish_undo_claim_tx(
     )
     .map(|_| ())
     .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+}
+
+/// A transaction a handler ended with its own error: that error; else the
+/// database's, as a command's.
+fn command_error(e: TxError<CommandError>) -> CommandError {
+    match e {
+        TxError::Aborted(e) => e,
+        TxError::Storage(e) => CommandError::from(e),
+    }
+}
+
+/// How a run's transaction ended short of recording it, besides the
+/// database's own errors (`TxError::Storage`, busy ones retried).
+enum Abort {
+    /// The handler failed: rolled back, then audited as the failure.
+    Failed(CommandError),
+    /// An undo or approval lost its race: nothing ran; no audit row.
+    Lost(CommandError),
+    /// The call changed nothing (`HandlerOutput::unchanged`): rolled back,
+    /// its answer returned, nothing recorded.
+    Unchanged(Box<HandlerOutput>),
 }
 
 /// What recording a successful run produced.
