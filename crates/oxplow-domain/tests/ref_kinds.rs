@@ -46,14 +46,14 @@ fn the_core_kinds_are_registered_and_validate_ids() {
         "plugin",
         "command",
         "finding",
-        "task_note",
         "thread_note",
         "run",
         "proposal",
     ] {
         assert!(reg.get(k).is_some(), "core kind {k} missing");
     }
-    // A thread's note is its own kind; a task comment stays `task_note`.
+    // A thread's note is its own kind; a work item's comment is its item's.
+    assert!(reg.get("task_note").is_none());
     assert!(reg.validate(&canon("thread_note:not4")).is_ok());
     assert!(reg.validate(&canon("thread_note:4")).is_err());
     // A pending command waiting for a person (`command_proposal.id`, P6b).

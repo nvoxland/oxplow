@@ -150,6 +150,28 @@ developer-facing mechanics.
   answering, so the "Backend daemon disconnected" overlay doesn't show;
   background reads fail through `readFailed` (logged), never uncaught.
 
+## Lifecycle, logs and stalls
+
+- **A daemon doesn't outlive its app.** The supervising app keeps the
+  daemon's stdin open; end-of-file means the app is gone (quit, crashed,
+  killed) and the daemon stops (`stop_when_app_goes`).
+- **A second app defers.** `.oxplow/daemon.json` names the running
+  daemon. Opening a project whose daemon is alive waits a few seconds
+  (one whose app just quit is on its way out), then refuses: "already
+  open in another Oxplow". It never kills it — a second launch used to
+  take the first app's backend down that way (`live_daemon`).
+  `oxplow --version` / `--help` print and exit rather than launch.
+- **Logs.** The daemon logs to its app's stderr and to
+  `.oxplow/logs/daemon.<date>.log` (daily, a week kept, written
+  synchronously): a packaged app's stderr goes nowhere. Every exit says
+  why — the server stopping, SIGTERM/SIGINT/SIGHUP, the app going, a
+  panic (with its thread and backtrace).
+- **Stalls.** A plain OS thread watches a heartbeat the runtime bumps
+  every second (`diagnostics::spawn_watchdog`). 20 s of no progress —
+  every worker busy or blocked — logs a warning and, on macOS, saves every
+  thread's stack (`sample`) to `.oxplow/logs/stall-<unix secs>.txt` (the
+  newest five kept); the recovery is logged too.
+
 ## Deployment model (v1)
 
 Daemon binds loopback only; reach it with

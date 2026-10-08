@@ -37,6 +37,7 @@ sinks.
 | `--surface-tab-inactive`| `transparent` | Inactive tabs (let the header tint show through) |
 | `--surface-elevated`    | `#20242c`     | Popovers, slideovers, context menus        |
 | `--surface-overlay`     | rgba dim      | Backdrops behind slideovers / overlays     |
+| `--surface-stream-tile` | `#2c3544`     | The Navigator's stream glyph: a filled square (a thread's is an outlined circle), so the collapsed strip tells them apart by shape |
 
 **Panel headers.** `--panel-header-bg` (`rgba(108,156,246,0.12)`, a muted
 accent wash — *not* grey) tints the header band of every panel so titles

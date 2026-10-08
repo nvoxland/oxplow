@@ -48,9 +48,10 @@ pub const REF_KIND_ICONS: &[&str] = &[
     "zap",
 ];
 
-/// Wikilink sugar core reads before kinds (`dir:`, `finding:`, `tsk42`):
-/// a prefix may not shadow it.
-const RESERVED_PREFIXES: &[&str] = &["dir", "finding", "tsk"];
+/// Wikilink sugar core reads before kinds (`dir:`, `finding:`): a prefix
+/// may not shadow it. A work list's own ids (`tsk42`) are its id
+/// pattern's, not a prefix core keeps.
+const RESERVED_PREFIXES: &[&str] = &["dir", "finding"];
 
 /// A ref kind an extension declares (valid ones; invalid ones are in its
 /// `errors`).
@@ -681,6 +682,22 @@ ref_kinds:
             assert!(
                 errors.contains("extension.yaml:15:") && errors.contains(says),
                 "{to}: {errors}"
+            );
+        }
+    }
+
+    /// Core's own sugar is reserved (`dir:`, `finding:`); a work list's
+    /// ids are that list's to say (its id pattern), not a prefix core
+    /// keeps, so `tsk` is free.
+    #[test]
+    fn only_cores_own_sugar_is_reserved() {
+        for (prefix, refused) in [("dir", true), ("finding", true), ("tsk", false)] {
+            let ext = acme(&MANIFEST.replace("wikilink: pr", &format!("wikilink: {prefix}")));
+            assert_eq!(
+                ext.errors.iter().any(|e| e.contains("oxplow's own")),
+                refused,
+                "{prefix}: {:?}",
+                ext.errors
             );
         }
     }

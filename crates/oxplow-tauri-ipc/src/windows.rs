@@ -194,9 +194,9 @@ pub fn build_shell_window(
     builder.build()
 }
 
-/// How long a killed orphan daemon gets to release the project lock
-/// before we try to start its replacement anyway.
-const ORPHAN_EXIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long a daemon whose app just quit gets to release the project
+/// lock before a new launch defers to it as another app's.
+const DAEMON_EXIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The shell's lifecycle: which windows are open, the daemon behind
 /// each, and the global session that follows from them.
@@ -259,23 +259,19 @@ impl ShellWindows {
             self.supervisor.stop(&dir);
         }
 
-        // A daemon left behind by a shell that died without unwinding
-        // (crash, SIGKILL, `kill` from a terminal) still holds this
-        // project's instance lock, so a fresh daemon can't start and the
-        // project would look permanently broken. Sweep it first — the
-        // endpoint file it published is how we find it. Deliberately
-        // kill rather than adopt: reattaching to a backend whose window
-        // is gone is a feature nobody has asked for yet.
-        if oxplow_app::daemon_supervisor::kill_orphan_daemon(&dir) {
-            tracing::warn!(project = %dir.display(), "reclaimed an orphaned daemon");
-            // The signal returns long before the process does. Starting
-            // the replacement now would just hit the lock the dying one
-            // still holds.
-            if !oxplow_app::wait_for_project_unlock(&dir, ORPHAN_EXIT_TIMEOUT) {
-                tracing::warn!(
-                    project = %dir.display(),
-                    "orphaned daemon still holds the project lock; starting anyway"
-                );
+        // A project with a live backend is open in another app process
+        // (or a daemon someone started by hand): defer to it rather than
+        // take it down. Its app quitting a moment ago is the exception —
+        // that daemon is on its way out (the stdin lifeline), so wait for
+        // its lock before giving up.
+        if let Some(running) = oxplow_app::daemon_supervisor::live_daemon(&dir) {
+            if !oxplow_app::wait_for_project_unlock(&dir, DAEMON_EXIT_TIMEOUT) {
+                return Err(format!(
+                    "{} is already open in another Oxplow (its backend is process {}). \
+                     Use that window, or quit it first.",
+                    dir.display(),
+                    running.pid
+                ));
             }
         }
 

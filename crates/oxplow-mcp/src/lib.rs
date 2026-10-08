@@ -244,7 +244,7 @@ pub struct FindNotesForNoteParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PageRefParams {
     /// Ref kind: `wiki`, `work_item`, `file`, `dir`, `commit`,
-    /// `finding`, `task_note`, `thread_note` (see .context/refs.md).
+    /// `finding`, `thread_note` (see .context/refs.md).
     pub kind: String,
     /// The ref's id within the kind: a repo-relative path for files and
     /// dirs, `oxplow:tsk42` for a task, the sha for a commit, the slug
@@ -3378,7 +3378,7 @@ mod tests {
         services: &Services,
         thread: Option<ThreadId>,
         title: &str,
-    ) -> oxplow_domain::TaskId {
+    ) -> oxplow_tasks::TaskId {
         let mut input = serde_json::json!({ "title": title });
         if let Some(t) = thread {
             input["thread"] = serde_json::Value::String(t.to_string());

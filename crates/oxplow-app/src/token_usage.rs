@@ -1657,7 +1657,8 @@ mod tests {
         // tsk37: the token fact-capture is stamped with the thread's single open
         // effort (the same resolution the run-ledger auto-claim uses), so
         // `captures_for_effort` — the T-D fact-attribution read — picks it up.
-        use oxplow_domain::{TaskId, Timestamp};
+        use oxplow_domain::Timestamp;
+        use oxplow_tasks::TaskId;
         use oxplow_tasks::TaskStore;
         use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
         let (svc, _dir, thread) = service_fixture().await;

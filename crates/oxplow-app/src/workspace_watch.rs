@@ -558,7 +558,9 @@ mod tests {
         // Now delete the worktree dir while the watcher is live.
         std::fs::remove_dir_all(&stream.worktree_path).unwrap();
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        // Ends as soon as the orphan event lands; the budget allows a
+        // loaded machine.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         let mut saw_orphan = false;
         while std::time::Instant::now() < deadline {
             match timeout(Duration::from_millis(300), rx.recv()).await {

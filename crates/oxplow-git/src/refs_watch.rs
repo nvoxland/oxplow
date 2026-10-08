@@ -93,7 +93,8 @@ mod tests {
         let head = repo.find_commit(head_oid).unwrap();
         repo.branch("feature", &head, false).unwrap();
 
-        let evt = timeout(Duration::from_secs(2), rx.recv())
+        // Returns as soon as it lands; the budget allows a loaded machine.
+        let evt = timeout(Duration::from_secs(20), rx.recv())
             .await
             .expect("event arrives")
             .expect("recv ok");

@@ -521,7 +521,7 @@ actions:
             .unwrap()
     }
 
-    async fn state(svc: &crate::Services, task: oxplow_domain::TaskId) -> String {
+    async fn state(svc: &crate::Services, task: oxplow_tasks::TaskId) -> String {
         use oxplow_tasks::TaskStore as _;
         let t = svc.task_store.get(task).await.unwrap().unwrap();
         serde_json::to_value(t.status)

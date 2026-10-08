@@ -352,7 +352,7 @@ mod tests {
         let other = fx.svc.stream_store.upsert(&other).await.unwrap();
         let there = new_thread(&fx.svc, other, "t").await;
         let mut task = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        task.id = oxplow_domain::TaskId::placeholder();
+        task.id = oxplow_tasks::TaskId::placeholder();
         task.thread_id = Some(there.id);
         task.status = oxplow_tasks::TaskStatus::Ready;
         let foreign = fx.svc.task_store.insert(&task).await.unwrap();

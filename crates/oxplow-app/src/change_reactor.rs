@@ -18,7 +18,8 @@
 //! On `effort.finished` it recomputes that effort's change, now against its
 //! end snapshot: the effort closed before its end take, so no take event
 //! reached it while it was open (tsk710; what `effort_churn`, `after:
-//! [change.analyze]`, reads).
+//! [change.analyze]`, reads). An effort with no start snapshot (opened and
+//! closed at once, after the fact) has no change, so its finish is done.
 //! The results land in `v_change*` (`ModelsChanged` announces them); an
 //! analysis already running for a change defers the event (`Busy`), and a
 //! failure is a dead letter naming the stream.
@@ -157,6 +158,12 @@ impl AsyncEventConsumer for ChangeReactor {
         };
         if event.envelope.event_type == EFFORT_FINISHED {
             let effort = crate::effort_lifecycle::effort_of(event)?;
+            // One with no start snapshot (opened and closed at once, after
+            // the fact) has no change to analyze: done, not a dead letter.
+            let started = oxplow_db::EffortStore::get_effort(&*svc.effort_store, &effort).await?;
+            if started.is_none_or(|e| e.start_snapshot_id.is_none()) {
+                return Ok(());
+            }
             return deep_now(
                 &svc,
                 ChangeTarget::Effort {
@@ -729,6 +736,24 @@ mod tests {
                 .contains(&serde_json::json!(["src/late.rs"])),
             "{paths}"
         );
+    }
+
+    /// An effort that finished with no start snapshot (opened and closed
+    /// at once, after the fact) has no change to analyze: its
+    /// `effort.finished` is done, not a dead letter and an alert.
+    #[tokio::test]
+    async fn a_finished_effort_with_no_start_snapshot_is_skipped() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
+            "system",
+            &oxplow_domain::events::schema::EffortFinishedV2 {
+                effort: oxplow_domain::refs::build::effort_ref(f.effort),
+                work_item: None,
+                end_snapshot: None,
+            },
+        );
+        reactor.handle(&log(&f.svc, finished).await).await.unwrap();
     }
 
     /// A failed analysis is an error naming the stream (the pump makes it a

@@ -18,8 +18,9 @@ use oxplow_app::Services;
 use oxplow_db::semantic_layer::SqlCell;
 use oxplow_domain::stores::{AgentTurnStore, StreamStore, ThreadStore};
 use oxplow_domain::{
-    AgentKind, Stream, StreamId, StreamKind, TaskId, Thread, ThreadId, ThreadStatus, Timestamp,
+    AgentKind, Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp,
 };
+use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore;
 use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
 

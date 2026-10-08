@@ -11,11 +11,14 @@
 //! one repair path.
 //!
 //! It runs only when the graph may have drifted from its sources: after a
-//! migration (one may reset it) or under a new build (a writer's bug may
-//! have been fixed). Between those, the writers keep it current, so
-//! restating every row on each boot repeated what was already there. Its
-//! last run is recorded as the `page_ref_repair` row of `asset_state`
-//! (`built_from`: the build and schema version), read as `v_asset`.
+//! migration (one may reset it) or when the code that projects edges
+//! changed (a writer's bug may have been fixed). Between those, the
+//! writers keep it current, so restating every row on each boot repeated
+//! what was already there. Its last run is recorded as the
+//! `page_ref_repair` row of `asset_state` (`built_from`: the projection
+//! code's hash and the schema version), read as `v_asset`. It used to be
+//! keyed on the build, so every dev rebuild repaid it (~59 s of a thread
+//! at boot), though projections rarely change.
 //!
 //! It writes in batches ([`BATCH`] sources per transaction): every commit
 //! is a change event the UI hears, and a commit per row — a quarter of a
@@ -90,8 +93,29 @@ fn slice(
 /// The `asset_state` row recording the last repair.
 pub const REPAIR: &str = "page_ref_repair";
 
-/// What a repair is current for: this build of the program and the
-/// database's schema version.
+/// The code that decides a source's edges: this module, the shared
+/// projections, the work-item interface's and the effort store's
+/// projectors. When any of it changes, the graph may have drifted; an
+/// edit elsewhere can't move it.
+const PROJECTION_SOURCES: &[&str] = &[
+    include_str!("page_ref_backfill.rs"),
+    include_str!("../../oxplow-db/src/page_ref_projections.rs"),
+    include_str!("../../oxplow-db/src/work_item_refs.rs"),
+    include_str!("../../oxplow-db/src/effort_store.rs"),
+];
+
+/// A hash of [`PROJECTION_SOURCES`]: the same for every build of the same
+/// projection code.
+fn projections_identity() -> String {
+    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+    for source in PROJECTION_SOURCES {
+        hasher.update(source.as_bytes());
+    }
+    format!("{:016x}", hasher.digest())
+}
+
+/// What a repair is current for: the projection code and the database's
+/// schema version.
 async fn repair_key(db: &oxplow_db::Database) -> Option<String> {
     let schema: i64 = db
         .read(|tx| {
@@ -106,15 +130,15 @@ async fn repair_key(db: &oxplow_db::Database) -> Option<String> {
         .ok()?;
     Some(
         serde_json::json!({
-            "build": oxplow_db::table_generations::build_identity(),
+            "projections": projections_identity(),
             "schema": schema,
         })
         .to_string(),
     )
 }
 
-/// Whether the graph needs restating: no repair yet by this build at this
-/// schema version (or that can't be told).
+/// Whether the graph needs restating: no repair yet with this projection
+/// code at this schema version (or that can't be told).
 pub async fn needs_repair(db: &oxplow_db::Database) -> bool {
     let Some(key) = repair_key(db).await else {
         return true;
@@ -220,13 +244,10 @@ pub async fn run(
     // 1b. The effort-owned slice (touched files, summary mentions,
     //     declared impacts) of every work item with an effort — an oxplow
     //     task's or another provider's — through the store's own projector.
-    if let Ok(work_items) = efforts.list_work_items().await {
-        for work_item in work_items {
-            match efforts.project_effort_slice(&work_item).await {
-                Ok(()) => counts.efforts += 1,
-                Err(e) => tracing::warn!(?e, %work_item, "page-ref backfill: effort slice failed"),
-            }
-        }
+    //     Read in one go and written in batches, like the kinds below.
+    match efforts.effort_slices().await {
+        Ok(slices) => counts.efforts = write_batched(&page_refs, "effort", slices).await,
+        Err(e) => tracing::warn!(?e, "page-ref backfill: reading the effort slices failed"),
     }
 
     // 2. Thread notes — one source per row, parsed from its body.
@@ -262,9 +283,8 @@ mod tests {
     use super::*;
     use oxplow_db::Database;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{
-        Stream, StreamId, StreamKind, TaskId, Thread, ThreadId, ThreadStatus, Timestamp,
-    };
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
+    use oxplow_tasks::TaskId;
     use oxplow_tasks::TaskStore;
     use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
@@ -272,24 +292,43 @@ mod tests {
         Timestamp::from_unix_ms(1_700_000_000_000)
     }
 
-    /// The repair is needed once per build and schema version: recorded,
-    /// it isn't again until either changes.
+    /// The repair is needed once per projection code and schema version:
+    /// recorded, it isn't again until either changes. A rebuild that left
+    /// the projections alone doesn't repay it (it took ~59 s of a thread
+    /// on every dev rebuild when it was keyed on the build).
     #[tokio::test]
-    async fn the_repair_runs_once_per_build_and_schema() {
+    async fn the_repair_runs_once_per_projection_code_and_schema() {
         let db = Database::in_memory();
         assert!(needs_repair(&db).await, "never repaired");
         record_repair(&db, 5).await;
-        assert!(!needs_repair(&db).await, "repaired by this build");
+        assert!(
+            !needs_repair(&db).await,
+            "repaired with this projection code"
+        );
+        let stored: String = db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT built_from FROM asset_state WHERE asset = ?1",
+                    [REPAIR],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let key: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        assert_eq!(key["projections"], projections_identity(), "{key}");
+        assert!(key.get("build").is_none(), "not the build: {key}");
         db.transaction(|tx| {
             tx.execute(
-                "UPDATE asset_state SET built_from = '{\"build\":\"older\",\"schema\":1}' WHERE asset = ?1",
+                "UPDATE asset_state SET built_from = json_set(built_from, '$.projections', 'older') WHERE asset = ?1",
                 [REPAIR],
             )
             .map_err(oxplow_db::map_sql_err)
         })
         .await
         .unwrap();
-        assert!(needs_repair(&db).await, "another build or schema");
+        assert!(needs_repair(&db).await, "other projection code");
     }
 
     /// The repair restates rows in batches: thousands of findings are a
@@ -471,7 +510,7 @@ mod tests {
         effort_writer
             .set_impacts(
                 &own.id,
-                &[oxplow_domain::TaskImpact {
+                &[oxplow_domain::EffortImpact {
                     kind: "wiki".into(),
                     id: "auth-flow".into(),
                     action: Some("updated".into()),

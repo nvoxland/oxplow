@@ -416,3 +416,39 @@ test("a menu request from elsewhere (the title bar) opens that row's menu, heade
   // A menu, not the panel.
   expect(queryByTestId("navigator-overlay") === null).toBe(true);
 });
+
+test("streams are filled squares and threads outlined circles, tied by a guide line", () => {
+  const { getByTestId } = renderNavigator();
+  const glyph = (rowId: string) =>
+    getByTestId(rowId).querySelector("[data-glyph]") as HTMLElement;
+
+  const stream = glyph("navigator-strip-stream-str1");
+  expect(stream.dataset.glyph).toBe("stream");
+  expect(stream.style.background).toBe("var(--surface-stream-tile)");
+  expect(stream.style.borderRadius).toBe("6px");
+
+  const writer = glyph("navigator-strip-thread-thr1");
+  const queued = glyph("navigator-strip-thread-thr2");
+  for (const t of [writer, queued]) {
+    expect(t.dataset.glyph).toBe("thread");
+    expect(t.style.borderRadius).toBe("50%");
+    expect(t.style.background).toBe("transparent");
+  }
+  expect(writer.style.borderColor).toBe("var(--accent)");
+  expect(queued.style.borderColor).toBe("var(--text-muted)");
+
+  // The guide runs from the stream through its threads, ending at the last.
+  const guide = (rowId: string) =>
+    getByTestId(rowId).querySelector("[data-guide]")?.getAttribute("data-guide") ?? null;
+  expect(guide("navigator-strip-stream-str1")).toBe("stream");
+  expect(guide("navigator-strip-thread-thr1")).toBe("mid");
+  expect(guide("navigator-strip-thread-thr2")).toBe("last");
+
+  // The panel draws the same, so its rows stay lined up with the strip's.
+  openOverlay(getByTestId);
+  expect(guide("navigator-stream-row-str1")).toBe("stream");
+  expect(guide("navigator-thread-row-thr2")).toBe("last");
+  expect(
+    (getByTestId("navigator-thread-row-thr1").querySelector("[data-glyph]") as HTMLElement).dataset.glyph,
+  ).toBe("thread");
+});

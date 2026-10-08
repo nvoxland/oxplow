@@ -2169,7 +2169,7 @@ impl SqliteSnapshotStore {
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE stream_id = ?1
-                     ORDER BY captured_at DESC LIMIT ?2",
+                     ORDER BY captured_at DESC, id DESC LIMIT ?2",
                 )?;
                 let rows = stmt.query_map(params![stream_id.value(), limit as i64], row_to_snapshot)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -2286,7 +2286,7 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms
-                     FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC",
+                     FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC, id DESC",
                 )?;
                 let rows = stmt.query_map(params![path], row_to_snapshot)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()

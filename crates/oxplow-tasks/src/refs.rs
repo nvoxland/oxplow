@@ -1,6 +1,6 @@
 //! oxplow's tasks as work items: `work_item:oxplow:tsk<n>`.
 
-use oxplow_domain::TaskId;
+use crate::ids::TaskId;
 
 /// The provider oxplow's tasks are filed under in a `work_item` ref.
 pub const PROVIDER: &str = "oxplow";

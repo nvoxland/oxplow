@@ -16,7 +16,7 @@ use std::sync::Arc;
 use oxplow_db::{Database, EffortStore as _, SqliteEffortStore};
 use oxplow_domain::refs::build::thread_ref;
 use oxplow_domain::vcs::Vcs;
-use oxplow_domain::{Actor, CommandError, TaskImpact, ThreadId};
+use oxplow_domain::{Actor, CommandError, EffortImpact, ThreadId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -41,7 +41,7 @@ pub struct ReportInput {
     /// Outcomes beyond the edits: `{ kind, id, action? }` — a wiki page,
     /// a work item, a commit, a finding.
     #[serde(default)]
-    pub impacts: Vec<TaskImpact>,
+    pub impacts: Vec<EffortImpact>,
 }
 
 /// What reporting reads and writes.

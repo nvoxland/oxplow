@@ -10,6 +10,7 @@ pub mod capability;
 pub mod code_intel;
 pub mod commands;
 pub mod comment;
+pub mod effort_impact;
 pub mod error;
 pub mod events;
 pub mod hook;
@@ -22,7 +23,6 @@ pub mod replaceable;
 pub mod snapshot;
 pub mod stores;
 pub mod stream;
-pub mod task;
 pub mod thread;
 pub mod time;
 pub mod tree_diff;
@@ -39,18 +39,17 @@ pub use commands::{
 pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,
 };
+pub use effort_impact::EffortImpact;
 pub use error::DomainError;
 pub use events::schema::{EventSchemaRegistry, EventType};
 pub use events::{Anchors, Envelope, EventId, StoredEvent};
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookKind};
 pub use ids::{
     AgentTurnId, AnyId, CommentId, CommentMessageId, DashboardId, DashboardItemId, EffortId,
-    EntityKind, FollowupId, IdParseError, NoteId, PageVisitId, StreamId, TaskId, TaskLinkId,
-    ThreadId, UsageEventId,
+    EntityKind, FollowupId, IdParseError, NoteId, PageVisitId, StreamId, ThreadId, UsageEventId,
 };
 pub use json::Json;
 pub use stream::{Stream, StreamKind};
-pub use task::TaskImpact;
 pub use thread::{Thread, ThreadNote, ThreadStatus};
 pub use time::Timestamp;
 pub use tree_diff::{diff_trees, ChangeStatus, FileChange};

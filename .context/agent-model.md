@@ -900,9 +900,8 @@ would otherwise surface as an opaque downstream `FOREIGN KEY
 constraint failed` into something actionable. Add the same call at
 the top of any new tool handler — see `IdPrefix` and the
 `ID_STREAM` / `ID_THREAD` / `ID_NOTE` / `ID_FOLLOWUP` constants in
-`crates/oxplow-mcp/src/lib.rs`. Task ids are integers, so the task
-parameter validator is the separate `parse_task_id` helper (digits
-only, returns `Some(TaskId)` or an `invalid_params` error).
+`crates/oxplow-mcp/src/lib.rs`. A work item is named by its ref, or a
+loose id of the active list (resolved by the `work_item.*` commands).
 
 `oxplow.work_item.transition { ref, to, native_state? }` moves an item
 between canonical states directly — `blocked → in_progress` (unblock)

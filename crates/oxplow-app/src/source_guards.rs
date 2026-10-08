@@ -820,6 +820,12 @@ const TASK_CRATE: &str = "crates/oxplow-tasks/";
 fn task_implementation_readers() -> BTreeSet<String> {
     const PATTERNS: &[&str] = &[
         "oxplow_tasks",
+        "TaskId",
+        "task_of_work_item_ref",
+        "FROM task",
+        "JOIN task",
+        "task_note",
+        "task_link",
         "v_task",
         "SqliteTaskStore",
         "TaskService",

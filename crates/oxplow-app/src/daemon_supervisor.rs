@@ -10,15 +10,15 @@
 //! `127.0.0.1:0` (an ephemeral port — no port-picking races between
 //! projects) and prints `oxplow-daemon listening on http://ADDR`, which
 //! [`parse_listening_line`] reads. A [`DaemonInfo`] file is written
-//! beside it in `.oxplow/daemon.json` for the *other* discovery
-//! problem: a daemon that outlived the shell that spawned it, which the
-//! next boot sweeps with [`kill_orphan_daemon`]. Same shape as the
-//! `instance.json` focus channel next door in `lib.rs`.
+//! beside it in `.oxplow/daemon.json`, so a shell that didn't spawn it
+//! can tell the project already has a backend ([`live_daemon`]).
 //!
-//! Orphans are killed rather than adopted. A daemon outliving its window
-//! (agents keep running while the UI is closed) is a feature someone may
-//! want later; it is not what today's process-per-window model does, so
-//! reattach isn't built on a guess.
+//! A daemon doesn't outlive its app: the app holds its stdin open, and the
+//! daemon stops on end-of-file ([`stop_when_app_goes`]) however the app
+//! went. So a live daemon in the file belongs to another app process, or
+//! was started by hand, and a second launch defers to it rather than
+//! killing it. Reattaching a window to a running daemon is a feature
+//! someone may want later; it isn't built on a guess.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -176,20 +176,20 @@ pub fn stop_when_app_goes(project_dir: PathBuf) {
     });
 }
 
-/// Kill a daemon left running for `project_dir` by a previous shell.
-/// Returns whether one was actually running. The endpoint file is
-/// cleared either way, so a stale file doesn't outlive its process.
-pub fn kill_orphan_daemon(project_dir: &Path) -> bool {
-    let Some(info) = read_daemon_info(project_dir) else {
-        return false;
-    };
-    let alive = process_alive(info.pid);
-    if alive {
-        tracing::info!(pid = info.pid, project = %project_dir.display(), "killing orphaned daemon");
-        terminate(info.pid);
+/// The daemon running for `project_dir`, if its endpoint file names a live
+/// one; a stale file (its process gone) is cleared. A live daemon is never
+/// killed here: one whose app died has stopped on its own (the stdin
+/// lifeline, [`stop_when_app_goes`]), so a live one belongs to another
+/// app process or was started by hand. Killing it was how a second launch
+/// took the first app's backend down (tsk1063).
+pub fn live_daemon(project_dir: &Path) -> Option<DaemonInfo> {
+    let info = read_daemon_info(project_dir)?;
+    if process_alive(info.pid) {
+        Some(info)
+    } else {
+        clear_daemon_info(project_dir);
+        None
     }
-    clear_daemon_info(project_dir);
-    alive
 }
 
 /// How a daemon process gets started. The real implementation resolves
@@ -754,8 +754,12 @@ mod tests {
         assert!(read_daemon_info(tmp.path()).is_none());
     }
 
+    /// A live daemon in the endpoint file is someone's — another app
+    /// process's, or one started by hand — so it is reported, never
+    /// killed: a second launch used to take the first app's backend
+    /// down this way.
     #[test]
-    fn orphan_sweep_kills_a_live_daemon_and_clears_the_file() {
+    fn a_live_daemon_is_reported_and_left_running() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".oxplow")).unwrap();
         let mut child = std::process::Command::new("/bin/sh")
@@ -772,15 +776,16 @@ mod tests {
         )
         .unwrap();
 
-        assert!(kill_orphan_daemon(tmp.path()), "a live orphan is killed");
-        // The child is gone (wait() returns rather than hanging).
-        let status = child.wait().unwrap();
-        assert!(!status.success(), "killed process should not exit cleanly");
-        assert!(read_daemon_info(tmp.path()).is_none(), "file cleaned up");
+        let live = live_daemon(tmp.path()).expect("a live daemon is reported");
+        assert_eq!(live.pid, child.id());
+        assert!(child.try_wait().unwrap().is_none(), "left running");
+        assert!(read_daemon_info(tmp.path()).is_some(), "its file stays");
+        child.kill().unwrap();
+        child.wait().unwrap();
     }
 
     #[test]
-    fn orphan_sweep_is_a_no_op_for_a_stale_file() {
+    fn a_stale_endpoint_file_is_cleared() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".oxplow")).unwrap();
         // A pid that has certainly exited: spawn and reap one.
@@ -800,7 +805,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!kill_orphan_daemon(tmp.path()), "nothing was running");
+        assert!(live_daemon(tmp.path()).is_none(), "nothing was running");
         assert!(
             read_daemon_info(tmp.path()).is_none(),
             "the stale file is cleaned up anyway"
@@ -808,9 +813,9 @@ mod tests {
     }
 
     #[test]
-    fn orphan_sweep_tolerates_a_project_with_no_file() {
+    fn a_project_with_no_endpoint_file_has_no_live_daemon() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(!kill_orphan_daemon(tmp.path()));
+        assert!(live_daemon(tmp.path()).is_none());
     }
 
     /// The UI token reaches the daemon on stdin only: never argv, never

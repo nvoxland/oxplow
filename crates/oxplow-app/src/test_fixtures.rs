@@ -7,7 +7,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use oxplow_db::EffortStore as _;
-use oxplow_domain::{EffortId, TaskId, ThreadId};
+use oxplow_domain::{EffortId, ThreadId};
+use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore as _;
 use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 

@@ -1623,6 +1623,43 @@ mod tests {
         );
     }
 
+    /// V31: a thread note's v1 events read as v2, naming a `thread_note`.
+    #[test]
+    fn v31_moves_thread_note_events_to_v2() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(30))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload) VALUES
+                 ('a', 'knowledge.note.written', 1, 't', 'human', '[]',
+                  '{"note":"task_note:not7","thread":"thread:thr3"}'),
+                 ('b', 'knowledge.note.deleted', 1, 't', 'human', '[]',
+                  '{"note":"thread_note:not8","thread":"thread:thr3"}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(31))
+            .run(&mut conn)
+            .unwrap();
+        let rows: Vec<String> = conn
+            .prepare("SELECT v || ' ' || payload FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                r#"2 {"note":"thread_note:not7","thread":"thread:thr3"}"#,
+                r#"2 {"note":"thread_note:not8","thread":"thread:thr3"}"#,
+            ]
+        );
+    }
+
     /// V8: effort events are v2 only and lose `retroactive`.
     #[test]
     fn v8_moves_effort_events_to_v2_without_retroactive() {

@@ -21,7 +21,7 @@
 
 use oxplow_domain::refs::kind::KindRegistry;
 use oxplow_domain::refs::{extract, RefVersion};
-use oxplow_domain::TaskImpact;
+use oxplow_domain::EffortImpact;
 
 use crate::effort_store::FileRefVersion;
 use crate::page_ref_store::PageRefEdge;
@@ -74,7 +74,7 @@ pub const RT_SUMMARY_WORK_ITEM: &str = "summary_work_item_mention";
 pub const RT_SUMMARY_FINDING: &str = "summary_finding_mention";
 pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
 
-/// Declared impacts (per-effort `TaskImpact` rows) — the action
+/// Declared impacts (per-effort `EffortImpact` rows) — the action
 /// taken is carried in `source_extra` as `{"action": "..."}`.
 /// Single ref_type covers every impacted kind because the target
 /// kind already discriminates wiki vs task vs file vs etc.
@@ -154,7 +154,7 @@ const COMMENT_MENTIONS: MentionTypes = MentionTypes {
 /// Slice owned by the effort store: the union of touched-file
 /// edges across every effort on a task, the projection of every
 /// `effort.summary` body parsed for refs, and the declared
-/// `TaskImpact` rows for each effort.
+/// `EffortImpact` rows for each effort.
 pub fn effort_ref_types() -> Vec<String> {
     vec![
         RT_TOUCHED_FILE.to_string(),
@@ -168,7 +168,7 @@ pub fn effort_ref_types() -> Vec<String> {
     ]
 }
 
-/// The kinds a `TaskImpact` may name, as the agent's tools document them.
+/// The kinds a `EffortImpact` may name, as the agent's tools document them.
 pub const IMPACT_KINDS: [&str; 6] = [
     "wiki",
     "work_item",
@@ -178,7 +178,7 @@ pub const IMPACT_KINDS: [&str; 6] = [
     "finding",
 ];
 
-/// The page-ref kind a `TaskImpact.kind` (one of [`IMPACT_KINDS`])
+/// The page-ref kind a `EffortImpact.kind` (one of [`IMPACT_KINDS`])
 /// projects to; `None` for any other (refused where impacts come in).
 pub fn impact_kind(kind: &str) -> Option<&'static str> {
     match kind {
@@ -199,7 +199,7 @@ pub fn impact_kind(kind: &str) -> Option<&'static str> {
 pub fn effort_impact_edges(
     kinds: &KindRegistry,
     source: &str,
-    impacts: &[TaskImpact],
+    impacts: &[EffortImpact],
 ) -> Vec<PageRefEdge> {
     let mut out = Vec::new();
     for imp in impacts {
@@ -712,39 +712,39 @@ mod tests {
 
     #[test]
     fn effort_impact_edges_normalize_kinds_and_carry_action() {
-        use oxplow_domain::TaskImpact;
+        use oxplow_domain::EffortImpact;
         let impacts = vec![
-            TaskImpact {
+            EffortImpact {
                 kind: "wiki".into(),
                 id: "url-schemes".into(),
                 action: Some("created".into()),
             },
-            TaskImpact {
+            EffortImpact {
                 kind: "git_commit".into(),
                 id: "abc1234".into(),
                 action: Some("referenced".into()),
             },
-            TaskImpact {
+            EffortImpact {
                 kind: "directory".into(),
                 id: "src/x".into(),
                 action: None,
             },
-            TaskImpact {
+            EffortImpact {
                 kind: "dir".into(),
                 id: "src/y".into(),
                 action: None,
             }, // not an impact kind — filtered
-            TaskImpact {
+            EffortImpact {
                 kind: "work_item".into(),
                 id: "tsk7".into(),
                 action: Some("completed".into()),
             }, // self — filtered
-            TaskImpact {
+            EffortImpact {
                 kind: "bogus".into(),
                 id: "x".into(),
                 action: None,
             }, // bad kind — filtered
-            TaskImpact {
+            EffortImpact {
                 kind: "work_item".into(),
                 id: "".into(),
                 action: None,
@@ -779,8 +779,8 @@ mod tests {
     /// What isn't one of its ids names nothing.
     #[test]
     fn impact_work_items_are_stored_canonical_whatever_the_agent_wrote() {
-        use oxplow_domain::TaskImpact;
-        let impact = |id: &str| TaskImpact {
+        use oxplow_domain::EffortImpact;
+        let impact = |id: &str| EffortImpact {
             kind: "work_item".into(),
             id: id.into(),
             action: None,
