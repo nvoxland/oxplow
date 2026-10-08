@@ -35,7 +35,6 @@ pub const KIND_FINDING: &str = "finding";
 pub const KIND_COMMIT: &str = "commit";
 
 // The work-item helpers live with the other ref builders (tsk450).
-pub use oxplow_domain::refs::build::{work_item_id, OXPLOW_PROVIDER};
 
 pub const RT_WIKI_FILE: &str = "wiki_file_ref";
 pub const RT_WIKI_DIR: &str = "wiki_dir_ref";

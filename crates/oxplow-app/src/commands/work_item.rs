@@ -37,7 +37,6 @@ use oxplow_domain::events::schema::{
     WorkItemLinkedV2, WorkItemRecorded, WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::events::Envelope;
-use oxplow_domain::refs::build::{task_of_work_item_ref, work_item_ref};
 use oxplow_domain::work_items::{
     provider_of, CanonicalState, MoveTo, WorkItemCommentInput, WorkItemCreateInput,
     WorkItemDeleteInput, WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput,
@@ -45,8 +44,11 @@ use oxplow_domain::work_items::{
     VERBS,
 };
 use oxplow_domain::{
-    Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, Task, TaskId,
-    TaskLinkType, TaskPriority, TaskStatus, ThreadId, Timestamp,
+    Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, TaskId,
+    ThreadId, Timestamp,
+};
+use oxplow_tasks::{
+    task_of_work_item_ref, work_item_ref, Task, TaskLinkType, TaskPriority, TaskStatus,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -899,7 +901,7 @@ fn tx_transition(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             })?;
         let now = Timestamp::now();
         let set = |status: TaskStatus| {
-            oxplow_db::task_store::set_status_tx(ctx.conn, id, status, now).map_err(|e| match e {
+            oxplow_tasks::store::set_status_tx(ctx.conn, id, status, now).map_err(|e| match e {
                 oxplow_domain::DomainError::NotFound => CommandError::Failed {
                     message: format!("task {id} not found"),
                 },
@@ -912,7 +914,7 @@ fn tx_transition(registry: WorkItemsRegistry) -> Arc<TxHandler> {
         let through = (to == TaskStatus::Archived)
             .then(|| native_status(input.to))
             .filter(|&status| {
-                let completed = oxplow_db::task_store::get_task_tx(ctx.conn, id)
+                let completed = oxplow_tasks::store::get_task_tx(ctx.conn, id)
                     .ok()
                     .flatten()
                     .is_some_and(|t| t.completed_at.is_some());
@@ -985,11 +987,11 @@ pub fn create_spec() -> CommandSpec {
 /// (`agent`, a lens acting for one included), or neither — an effect or
 /// oxplow itself: the creating actor is on the run's audit and its
 /// `work_item.created`, and the task isn't shown as the person's.
-fn task_author(actor: &oxplow_domain::Actor) -> Option<oxplow_domain::TaskAuthor> {
+fn task_author(actor: &oxplow_domain::Actor) -> Option<oxplow_tasks::TaskAuthor> {
     use oxplow_domain::Actor;
     match actor {
-        Actor::Human => Some(oxplow_domain::TaskAuthor::User),
-        Actor::Agent { .. } => Some(oxplow_domain::TaskAuthor::Agent),
+        Actor::Human => Some(oxplow_tasks::TaskAuthor::User),
+        Actor::Agent { .. } => Some(oxplow_tasks::TaskAuthor::Agent),
         Actor::Lens { on_behalf_of, .. } => task_author(on_behalf_of),
         Actor::Effect { .. } | Actor::System => None,
     }
@@ -1033,9 +1035,9 @@ fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             description: input.body.unwrap_or_default(),
             status,
             priority: native.priority.unwrap_or(TaskPriority::Medium),
-            sort_index: oxplow_db::task_store::next_sort_index_tx(ctx.conn, thread)
+            sort_index: oxplow_tasks::store::next_sort_index_tx(ctx.conn, thread)
                 .map_err(CommandError::from)?,
-            created_by: oxplow_domain::TaskActorKind::User,
+            created_by: oxplow_tasks::TaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: (status == TaskStatus::Done).then_some(now),
@@ -1043,8 +1045,8 @@ fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             note_count: 0,
             author: task_author(ctx.actor),
         };
-        let id = oxplow_db::task_store::insert_tx(ctx.conn, &item).map_err(CommandError::from)?;
-        let row = oxplow_db::task_store::get_task_tx(ctx.conn, id)
+        let id = oxplow_tasks::store::insert_tx(ctx.conn, &item).map_err(CommandError::from)?;
+        let row = oxplow_tasks::store::get_task_tx(ctx.conn, id)
             .map_err(CommandError::from)?
             .ok_or_else(|| CommandError::Failed {
                 message: format!("task {id} vanished"),
@@ -1116,7 +1118,7 @@ fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             },
             other => CommandError::from(other),
         };
-        let before = oxplow_db::task_store::get_task_tx(ctx.conn, id)
+        let before = oxplow_tasks::store::get_task_tx(ctx.conn, id)
             .map_err(not_found)?
             .ok_or_else(|| not_found(oxplow_domain::DomainError::NotFound))?;
         let now = Timestamp::now();
@@ -1134,7 +1136,7 @@ fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             item.parent_id = p;
         }
         item.updated_at = now;
-        let after = oxplow_db::task_store::update_with_status_tx(ctx.conn, &item, status, now)
+        let after = oxplow_tasks::store::update_with_status_tx(ctx.conn, &item, status, now)
             .map_err(not_found)?;
         let inverse = WorkItemUpdateInput {
             item_ref: input.item_ref.clone(),
@@ -1203,7 +1205,7 @@ fn tx_link(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             Some(t) => t,
             None => {
                 let on = |id: TaskId| -> Result<Option<ThreadId>, CommandError> {
-                    Ok(oxplow_db::task_store::get_task_tx(ctx.conn, id)
+                    Ok(oxplow_tasks::store::get_task_tx(ctx.conn, id)
                         .map_err(CommandError::from)?
                         .and_then(|t| t.thread_id))
                 };
@@ -1215,7 +1217,7 @@ fn tx_link(registry: WorkItemsRegistry) -> Arc<TxHandler> {
                 })?
             }
         };
-        let link = oxplow_db::task_satellite::create_link_tx(ctx.conn, thread, from, to, link_type)
+        let link = oxplow_tasks::satellite::create_link_tx(ctx.conn, thread, from, to, link_type)
             .map_err(CommandError::from)?;
         Ok(HandlerOutput {
             result: serde_json::to_value(&link).expect("TaskLink serializes"),
@@ -1261,7 +1263,7 @@ fn tx_comment(registry: WorkItemsRegistry) -> Arc<TxHandler> {
         if input.body.trim().is_empty() {
             return Err(invalid_at("/body", "a comment needs a body".into()));
         }
-        let note = oxplow_db::task_satellite::add_task_note_tx(
+        let note = oxplow_tasks::satellite::add_task_note_tx(
             ctx.conn,
             task,
             &input.body,
@@ -1306,7 +1308,7 @@ fn tx_delete(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemDeleteInput = parse(input)?;
         let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        oxplow_db::task_store::soft_delete_tx(ctx.conn, id, Timestamp::now()).map_err(
+        oxplow_tasks::store::soft_delete_tx(ctx.conn, id, Timestamp::now()).map_err(
             |e| match e {
                 oxplow_domain::DomainError::NotFound => {
                     invalid_at("/ref", format!("no work item `{}`", input.item_ref))
@@ -1366,8 +1368,8 @@ fn placement(
     registry: &WorkItemsRegistry,
     before: &Option<String>,
     after: &Option<String>,
-) -> Result<oxplow_db::task_store::Placement, CommandError> {
-    use oxplow_db::task_store::Placement;
+) -> Result<oxplow_tasks::store::Placement, CommandError> {
+    use oxplow_tasks::store::Placement;
     match (before, after) {
         (Some(_), Some(_)) => Err(invalid_at(
             "/after",
@@ -1380,8 +1382,8 @@ fn placement(
 }
 
 /// `before` / `after` for a place (the inverse's input).
-fn neighbour(place: oxplow_db::task_store::Placement) -> (Option<String>, Option<String>) {
-    use oxplow_db::task_store::Placement;
+fn neighbour(place: oxplow_tasks::store::Placement) -> (Option<String>, Option<String>) {
+    use oxplow_tasks::store::Placement;
     match place {
         Placement::End => (None, None),
         Placement::Before(t) => (Some(work_item_ref(t)), None),
@@ -1394,8 +1396,8 @@ fn place(
     ctx: &TxCtx<'_>,
     id: TaskId,
     dest: Option<ThreadId>,
-    at: oxplow_db::task_store::Placement,
-) -> Result<oxplow_db::task_store::Placed, CommandError> {
+    at: oxplow_tasks::store::Placement,
+) -> Result<oxplow_tasks::store::Placed, CommandError> {
     if let Some(thread) = dest {
         use rusqlite::OptionalExtension;
         let exists: Option<i64> = ctx
@@ -1413,7 +1415,7 @@ fn place(
             return Err(invalid_at("/to", format!("no thread `{thread}`")));
         }
     }
-    let placed = oxplow_db::task_store::place_task_tx(ctx.conn, id, dest, at, Timestamp::now())
+    let placed = oxplow_tasks::store::place_task_tx(ctx.conn, id, dest, at, Timestamp::now())
         .map_err(|e| match e {
             oxplow_domain::DomainError::NotFound => {
                 invalid_at("/ref", format!("no work item {}", work_item_ref(id)))
@@ -1442,7 +1444,7 @@ pub fn reorder_command(registry: WorkItemsRegistry) -> Command {
         let input: WorkItemReorderInput = parse(input)?;
         let id = oxplow_task(registry, &input.item_ref, "/ref")?;
         let at = placement(registry, &input.before, &input.after)?;
-        let current = oxplow_db::task_store::get_task_tx(ctx.conn, id)
+        let current = oxplow_tasks::store::get_task_tx(ctx.conn, id)
             .map_err(CommandError::from)?
             .map(|t| t.thread_id);
         let Some(list) = current else {
@@ -1684,7 +1686,7 @@ mod tests {
             .undo(&Actor::Human, out.audit_id.unwrap(), false)
             .await
             .unwrap();
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let back = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(back.status, TaskStatus::InProgress);
     }
@@ -1743,7 +1745,7 @@ mod tests {
     #[tokio::test]
     async fn a_comment_is_recorded_as_whoever_made_it() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
-        let item = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let item = oxplow_tasks::work_item_ref(fx.task);
         for (actor, author) in [
             (Actor::Human, "user"),
             (
@@ -2005,7 +2007,7 @@ mod tests {
     /// tsk572: a deleted task takes no comments or links.
     #[tokio::test]
     async fn a_deleted_task_takes_no_comments_or_links() {
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let other = fx
             .svc
@@ -2259,7 +2261,7 @@ mod tests {
         bus.undo(&agent, out.audit_id.unwrap(), false)
             .await
             .unwrap();
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let back = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(back.title, "t");
         assert_eq!(back.status, TaskStatus::InProgress);
@@ -2299,7 +2301,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.result["status"], "done");
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let row = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(
             (row.title.as_str(), row.status),
@@ -2404,7 +2406,7 @@ mod tests {
             .page_ref_store
             .list_outbound(
                 oxplow_db::page_ref_projections::KIND_WORK_ITEM,
-                &oxplow_db::page_ref_projections::work_item_id(id),
+                &oxplow_tasks::work_item_id(id),
                 None,
             )
             .await

@@ -123,7 +123,7 @@ handler (which runs in the bus's transaction).
 
 **Lifecycle invariant.** At most one effort is open per thread (the
 V5 unique index `idx_effort_open_per_thread`), and a task's status never
-opens or closes one: `task_store::write_status_tx` (the core of
+opens or closes one: `oxplow_tasks::store::write_status_tx` (the core of
 `set_status_tx` / `update_with_status_tx`, behind
 `oxplow.work_item.transition` / `update` / `create`), `soft_delete` and
 `move_task` touch the task alone — `get_task_tx` sees live rows only, so
@@ -368,7 +368,7 @@ running an older DB get the columns/tables dropped on first launch with
 the new binary; existing rows are not migrated forward (no surface
 reads them).
 
-### `task` — `SqliteTaskStore` (`crates/oxplow-db/src/task_store.rs`)
+### `task` — `SqliteTaskStore` (`crates/oxplow-tasks/src/store.rs`)
 
 The actual TODO list. Singular table name, `id INTEGER PRIMARY KEY
 AUTOINCREMENT` — stored as a plain integer, surfaced as `tsk<int>` (see
@@ -459,7 +459,7 @@ fields. Capability rows are published when services are built
 list.
 
 The oxplow provider's rows (`work_item:oxplow:tsk<n>`) are restated from
-the `task` row by `task_store::project_work_item_tx`, which every task
+the `task` row by `oxplow_tasks::store::project_work_item_tx`, which every task
 write calls in its own transaction (insert, field update, status,
 soft delete) — the two never disagree. Mapping: `ready` → `todo`;
 `archived` → `done` when `completed_at` is set, else `canceled`; the rest
@@ -495,7 +495,7 @@ concurrent duplicate keeps the first (`ON CONFLICT DO NOTHING`). The
 same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
 [ai-providers.md](./ai-providers.md) "Recorded computations".
 
-### `thread_note` and `task_note` (`thread_note_store.rs`, `task_satellite.rs`)
+### `thread_note` and `task_note` (`thread_note_store.rs`, `oxplow-tasks` `satellite.rs`)
 
 **`thread_note`** is a thread's capture pad: what an agent records as it
 works (a finding, why it paused) and what an Explore subagent fills in
@@ -1291,8 +1291,7 @@ still advances, so one poison event never stalls the pump. Events a
 consumer doesn't `handle` are skipped but checkpointed. Renaming a
 consumer restarts it from the beginning of the log. `Services.event_pump`
 is spawned by `boot.rs` (catches up on boot, then runs on `wake()` — which
-producers call after their commit — or every 5s); `TaskService` wakes it
-after a transition. A handler error that is retryable (`DomainError::
+producers call after their commit — or every 5s). A handler error that is retryable (`DomainError::
 Busy`) is not a poison event: the delivery transaction fails and retries,
 and if the database stays busy the event waits, checkpoint unmoved
 (tsk437 review).
@@ -1357,8 +1356,8 @@ events that trigger it, and `after()` still orders consumers in `settle`.
 `EventPump::settle(&[names], timeout)` spawns a catch-up of just the named
 consumers — side by side within a level, a consumer in a level after those
 it runs `after` — and waits for it, for callers whose answer needs their
-effect (`effort_lifecycle::settle`, which `EffortService` and
-`TaskService` call, settles `effort.lifecycle`).
+effect (`effort_lifecycle::settle`, which `EffortService` calls,
+settles `effort.lifecycle`).
 
 The one async consumer so far is **`effort.lifecycle`**
 (`crates/oxplow-app/src/effort_lifecycle.rs`), on `effort.opened` /
@@ -1390,7 +1389,7 @@ decisions — a model call; failures logged). (`effort.gauges` is gone:
 `{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
 They hold `Services` weakly (the pump is part
 of it).
-`TaskService::update` / `create`, `oxplow.effort.report`, and MCP / IPC
+`oxplow.effort.report` and MCP / IPC
 `run_command` after any write call `settle` on `effort.lifecycle` (up to 10 min; a
 start baseline on a huge repo waits for the startup sweep) so a report
 lands on the effort a close just before it closed and a batch's opens

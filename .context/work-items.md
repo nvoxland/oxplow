@@ -48,7 +48,7 @@ cascade trigger are in [data-model.md](./data-model.md) "`work_item`".
 There are two writers, one schema:
 
 - **oxplow's rows** are restated from the task row by the task cores in
-  the same transaction (`task_store::project_work_item_tx`), so they
+  the same transaction (`oxplow_tasks::store::project_work_item_tx`), so they
   never disagree with `v_task`; their links and comments follow
   `task_link` / `task_note` by trigger.
   That includes every row a core touches on the side: `place_task_tx`

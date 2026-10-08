@@ -4,6 +4,7 @@ members = [
     "apps/desktop/src-tauri",
     "crates/oxplow-domain",
     "crates/oxplow-db",
+    "crates/oxplow-tasks",
     "crates/oxplow-config",
     "crates/oxplow-fs-watch",
     "crates/oxplow-git",
@@ -168,6 +169,7 @@ oxplow-code-deps = { path = "crates/oxplow-code-deps" }
 oxplow-coverage = { path = "crates/oxplow-coverage" }
 oxplow-collect-plugin = { path = "crates/oxplow-collect-plugin" }
 oxplow-db = { path = "crates/oxplow-db" }
+oxplow-tasks = { path = "crates/oxplow-tasks" }
 oxplow-ai = { path = "crates/oxplow-ai" }
 oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
 oxplow-provider-protocol = { path = "crates/oxplow-provider-protocol" }

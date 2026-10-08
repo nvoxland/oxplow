@@ -767,8 +767,10 @@ mod core_tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use oxplow_domain::stores::{TaskStore as _, ThreadStore as _};
+    use oxplow_domain::stores::ThreadStore as _;
+
     use oxplow_domain::{CommentTarget, StreamId, ThreadId};
+    use oxplow_tasks::TaskStore as _;
 
     use crate::assets::Assets;
     use crate::Services;
@@ -839,11 +841,11 @@ mod core_tests {
             .any(|h| h.kind == kind)
     }
 
-    async fn task(svc: &Services, thread: ThreadId, title: &str) -> oxplow_domain::Task {
+    async fn task(svc: &Services, thread: ThreadId, title: &str) -> oxplow_tasks::Task {
         svc.tasks
             .create(
                 Some(thread),
-                crate::CreateTaskInput {
+                oxplow_tasks::CreateTaskInput {
                     title: title.into(),
                     ..Default::default()
                 },
@@ -990,7 +992,7 @@ mod core_tests {
             .tasks
             .create(
                 None,
-                crate::CreateTaskInput {
+                oxplow_tasks::CreateTaskInput {
                     title: "On the backlog".into(),
                     ..Default::default()
                 },

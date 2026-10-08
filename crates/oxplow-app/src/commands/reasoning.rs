@@ -258,8 +258,9 @@ pub fn commands() -> Vec<Command> {
 mod tests {
     use super::*;
     use crate::test_fixtures::{new_thread, services_with_effort};
-    use oxplow_domain::refs::build::{thread_ref, work_item_ref};
+    use oxplow_domain::refs::build::thread_ref;
     use oxplow_domain::{Actor, StreamId};
+    use oxplow_tasks::work_item_ref;
 
     async fn claims(svc: &crate::Services) -> Vec<(i64, Option<i64>, String)> {
         svc.db
@@ -367,7 +368,8 @@ mod tests {
     /// A claim about another stream's work item is refused.
     #[tokio::test]
     async fn a_claim_on_another_streams_work_is_refused() {
-        use oxplow_domain::stores::{StreamStore as _, TaskStore as _};
+        use oxplow_domain::stores::StreamStore as _;
+        use oxplow_tasks::TaskStore as _;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let mut other = fx.svc.stream_store.list().await.unwrap().pop().unwrap();
         other.id = StreamId::placeholder();
@@ -380,7 +382,7 @@ mod tests {
         let mut task = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         task.id = oxplow_domain::TaskId::placeholder();
         task.thread_id = Some(there.id);
-        task.status = oxplow_domain::TaskStatus::Ready;
+        task.status = oxplow_tasks::TaskStatus::Ready;
         let foreign = fx.svc.task_store.insert(&task).await.unwrap();
         let err = fx
             .svc

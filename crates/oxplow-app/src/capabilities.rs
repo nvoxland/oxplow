@@ -1090,7 +1090,7 @@ mod tests {
             let agent = agent.clone();
             async move { svc.commands.run(&agent, name, input, false).await.unwrap() }
         };
-        let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let task = oxplow_tasks::work_item_ref(fx.task);
         for (name, input) in [
             (
                 crate::commands::work_item::CREATE,
@@ -1120,11 +1120,11 @@ mod tests {
                 "{name}"
             );
         }
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let kept = svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(
             kept.status,
-            oxplow_domain::TaskStatus::InProgress,
+            oxplow_tasks::TaskStatus::InProgress,
             "oxplow's task untouched"
         );
         let count = svc

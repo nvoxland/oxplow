@@ -335,7 +335,7 @@ mod tests {
     /// the ones that read those — no others.
     #[tokio::test]
     async fn a_table_change_reaches_its_models_and_their_readers_only() {
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let lineage = Lineage::load(&f.svc.db).await.unwrap();
         let changed = lineage.affected(&["task".to_string()]);
@@ -519,7 +519,7 @@ mod tests {
     #[tokio::test]
     async fn a_materialized_model_recomputes_once_per_burst_and_announces_its_readers() {
         use oxplow_db::models::{ColumnDecl, ExtensionModels, Materialize, ModelDecl, ModelSource};
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let model =
             |name: &str, sql: &str, columns: &[(&str, &str)], on_change: bool| ModelSource {

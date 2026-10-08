@@ -14,15 +14,12 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use thiserror::Error;
 
-use oxplow_db::SqliteTaskStore;
-use oxplow_domain::stores::TaskStore;
-use oxplow_domain::{
-    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, ThreadId,
-    Timestamp,
-};
+use oxplow_domain::{DomainError, TaskId, ThreadId, Timestamp};
+
+use crate::model::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+use crate::store::{SqliteTaskStore, TaskStore};
 
 #[derive(Debug, Error)]
 pub enum TaskServiceError {
@@ -32,7 +29,7 @@ pub enum TaskServiceError {
     Storage(#[from] DomainError),
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateTaskInput {
     pub title: String,
     /// The task's prose body (canonical markdown).
@@ -45,7 +42,7 @@ pub struct CreateTaskInput {
 
 /// Partial-patch for `update_task`. Each `Option` follows
 /// "missing -> keep, present -> replace" semantics.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateTaskChanges {
     pub title: Option<String>,
     pub description: Option<String>,
@@ -154,8 +151,8 @@ impl TaskService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::refs::work_item_ref;
     use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
-    use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 

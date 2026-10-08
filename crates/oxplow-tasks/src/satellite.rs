@@ -7,13 +7,10 @@
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::stores::{TaskLinkStore, TaskNoteStore};
-use oxplow_domain::{
-    DomainError, NoteId, TaskId, TaskLink, TaskLinkId, TaskLinkType, TaskNote, ThreadId, Timestamp,
-};
+use oxplow_db::{map_sql_err, string_to_ts, ts_to_string, Database};
+use oxplow_domain::{DomainError, NoteId, TaskId, TaskLinkId, ThreadId, Timestamp};
 
-use crate::database::Database;
-use crate::database::{string_to_ts, ts_to_string};
+use crate::model::{TaskLink, TaskLinkType, TaskNote};
 
 fn link_type_to_str(t: TaskLinkType) -> &'static str {
     match t {
@@ -51,7 +48,7 @@ pub fn add_task_note_tx(
         "INSERT INTO task_note (task_id, body, author, created_at) VALUES (?1, ?2, ?3, ?4)",
         params![item.value(), body, author, ts_to_string(now)],
     )
-    .map_err(crate::database::map_sql_err)?;
+    .map_err(map_sql_err)?;
     let id = NoteId::new(conn.last_insert_rowid());
     Ok(TaskNote {
         id,
@@ -83,7 +80,7 @@ pub fn create_link_tx(
             ts_to_string(now),
         ],
     )
-    .map_err(crate::database::map_sql_err)?;
+    .map_err(map_sql_err)?;
     Ok(TaskLink {
         id: TaskLinkId::new(conn.last_insert_rowid()),
         thread_id: thread,
@@ -126,17 +123,22 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskNote> {
 }
 
 #[async_trait]
+pub trait TaskNoteStore: Send + Sync {
+    // A note on a task is a work-item comment: the `oxplow.work_item.comment`
+    // command ([`add_task_note_tx`]).
+    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError>;
+}
+
+#[async_trait]
 impl TaskNoteStore for SqliteTaskNoteStore {
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_note WHERE task_id = ?1 ORDER BY created_at ASC",
-                )?;
-                let rows = stmt.query_map(params![item.value()], row_to_note)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+        crate::db::read(&self.db, move |conn| {
+            let mut stmt =
+                conn.prepare("SELECT * FROM task_note WHERE task_id = ?1 ORDER BY created_at ASC")?;
+            let rows = stmt.query_map(params![item.value()], row_to_note)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 }
 
@@ -174,38 +176,43 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskLink> {
 }
 
 #[async_trait]
+pub trait TaskLinkStore: Send + Sync {
+    // Links are made by the `oxplow.work_item.link` command
+    // ([`create_link_tx`]).
+    async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
+    async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
+    async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError>;
+}
+
+#[async_trait]
 impl TaskLinkStore for SqliteTaskLinkStore {
     async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC",
-                )?;
-                let rows = stmt.query_map(params![item.value()], row_to_link)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+        crate::db::read(&self.db, move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC",
+            )?;
+            let rows = stmt.query_map(params![item.value()], row_to_link)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 
     async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_link WHERE to_item_id = ?1 ORDER BY created_at ASC",
-                )?;
-                let rows = stmt.query_map(params![item.value()], row_to_link)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+        crate::db::read(&self.db, move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT * FROM task_link WHERE to_item_id = ?1 ORDER BY created_at ASC")?;
+            let rows = stmt.query_map(params![item.value()], row_to_link)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 
     async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError> {
-        self.db
-            .call(move |conn| {
-                conn.execute("DELETE FROM task_link WHERE id = ?1", params![id.value()])?;
-                Ok(())
-            })
-            .await
+        crate::db::write(&self.db, move |conn| {
+            conn.execute("DELETE FROM task_link WHERE id = ?1", params![id.value()])?;
+            Ok(())
+        })
+        .await
     }
 }
 
@@ -213,14 +220,11 @@ impl TaskLinkStore for SqliteTaskLinkStore {
 mod tests {
     use super::*;
 
-    use crate::stream_store::SqliteStreamStore;
-    use crate::task_store::SqliteTaskStore;
-    use crate::thread_store::SqliteThreadStore;
-    use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
-    use oxplow_domain::{
-        Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus,
-        Thread, ThreadStatus,
-    };
+    use crate::model::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+    use crate::store::{SqliteTaskStore, TaskStore};
+    use oxplow_db::{SqliteStreamStore, SqliteThreadStore};
+    use oxplow_domain::stores::{StreamStore, ThreadStore};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 
     fn now() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
@@ -341,18 +345,17 @@ mod tests {
         db.transaction(move |tx| create_link_tx(tx, tid, from_id, to_id, TaskLinkType::Blocks))
             .await
             .unwrap();
-        let counts: (i64, i64, i64) = db
-            .call(|c| {
-                c.query_row(
-                    "SELECT (SELECT count(*) FROM work_item_comment),
+        let counts: (i64, i64, i64) = crate::db::read(&db, |c| {
+            c.query_row(
+                "SELECT (SELECT count(*) FROM work_item_comment),
                             (SELECT count(*) FROM work_item_link),
                             (SELECT count(*) FROM page_ref)",
-                    [],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                )
-            })
-            .await
-            .unwrap();
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+        })
+        .await
+        .unwrap();
         assert_eq!(counts, (1, 1, 0));
     }
 

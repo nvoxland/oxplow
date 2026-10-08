@@ -289,11 +289,7 @@ mod tests {
         let later = f
             .svc
             .effort_store
-            .start(
-                &oxplow_domain::refs::build::work_item_ref(f.task),
-                &f.thread,
-                None,
-            )
+            .start(&oxplow_tasks::work_item_ref(f.task), &f.thread, None)
             .await
             .unwrap()
             .id;

@@ -277,7 +277,8 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CreateTaskInput, Services};
+    use crate::Services;
+    use oxplow_tasks::CreateTaskInput;
 
     fn git_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();

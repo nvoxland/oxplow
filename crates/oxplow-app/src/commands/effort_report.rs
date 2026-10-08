@@ -240,8 +240,8 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{new_thread, services_with_effort, EffortFixture};
     use oxplow_db::SqliteCommandAuditStore;
-    use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::StreamId;
+    use oxplow_tasks::work_item_ref;
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {

@@ -156,9 +156,9 @@ pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::refs::build::work_item_ref;
-    use oxplow_domain::stores::TaskStore as _;
     use oxplow_domain::Actor;
+    use oxplow_tasks::work_item_ref;
+    use oxplow_tasks::TaskStore as _;
 
     /// Two `work_item.*` commands as one run by an agent: one audit row
     /// naming the sequence with the children in its result, the children's
@@ -189,7 +189,7 @@ mod tests {
             .unwrap();
         let after = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(after.title, "Renamed");
-        assert_eq!(after.status, oxplow_domain::TaskStatus::Done);
+        assert_eq!(after.status, oxplow_tasks::TaskStatus::Done);
         assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
         assert_eq!(
             out.result["children"][1]["name"],

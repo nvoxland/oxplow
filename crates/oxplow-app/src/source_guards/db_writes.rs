@@ -107,41 +107,50 @@ struct Function {
     calls: Calls,
 }
 
-/// Every function in `crate_name`'s `src/`, outside its test code.
+/// Every function in `crate_name`'s `src/`, outside its test code — a
+/// `#[cfg(test)]` item, or a whole module file declared `#[cfg(test)]`.
 fn functions(crate_dir: &Path, crate_name: &str) -> Vec<Function> {
-    let mut out = Vec::new();
     let src = crate_dir.join("src");
+    let mut files: Vec<(std::path::PathBuf, String)> = Vec::new();
     let mut stack = vec![src.clone()];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).unwrap().flatten() {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-                continue;
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                files.push((path, text));
             }
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
-            }
-            let rel = path.strip_prefix(&src).unwrap().with_extension("");
-            let mut segs: Vec<String> = rel
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy().to_string())
-                .collect();
-            if matches!(
-                segs.last().map(String::as_str),
-                Some("lib" | "main" | "mod")
-            ) {
-                segs.pop();
-            }
-            let module = std::iter::once(crate_name.to_string())
-                .chain(segs)
-                .collect::<Vec<_>>()
-                .join("::");
-            let text = std::fs::read_to_string(&path).unwrap();
-            let file = syn::parse_file(&text)
-                .unwrap_or_else(|e| panic!("{} doesn't parse: {e}", path.display()));
-            collect(&file.items, &module, &mut out);
         }
+    }
+    let test_only = super::test_only_files(&files);
+    let mut out = Vec::new();
+    for (path, text) in &files {
+        if test_only
+            .iter()
+            .any(|m| *path == m.with_extension("rs") || path.starts_with(m))
+        {
+            continue;
+        }
+        let rel = path.strip_prefix(&src).unwrap().with_extension("");
+        let mut segs: Vec<String> = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+        if matches!(
+            segs.last().map(String::as_str),
+            Some("lib" | "main" | "mod")
+        ) {
+            segs.pop();
+        }
+        let module = std::iter::once(crate_name.to_string())
+            .chain(segs)
+            .collect::<Vec<_>>()
+            .join("::");
+        let file = syn::parse_file(text)
+            .unwrap_or_else(|e| panic!("{} doesn't parse: {e}", path.display()));
+        collect(&file.items, &module, &mut out);
     }
     out
 }

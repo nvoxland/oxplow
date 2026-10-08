@@ -118,6 +118,9 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   workspace scripts) boots Vite + the shell.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
+  `oxplow-tasks` (oxplow's own task list, one implementation of the
+  work-item interface: its store, service and status mapping; nothing
+  outside it names them — `.context/work-items.md`),
   `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
   `oxplow-runtime` (the write guard),
   `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,

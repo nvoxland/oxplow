@@ -4129,12 +4129,14 @@ mod tests {
     /// built through the public store APIs.
     mod integration {
         use super::*;
-        use oxplow_db::{Database, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskStore};
-        use oxplow_domain::stores::{StreamStore, TaskStore};
+        use oxplow_db::{Database, SqliteSnapshotStore, SqliteStreamStore};
+        use oxplow_domain::stores::StreamStore;
         use oxplow_domain::{
-            EffortId, Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskId,
-            TaskPriority, TaskStatus, Thread, ThreadStatus, Timestamp,
+            EffortId, Stream, StreamId, StreamKind, TaskId, Thread, ThreadStatus, Timestamp,
         };
+        use oxplow_tasks::SqliteTaskStore;
+        use oxplow_tasks::TaskStore;
+        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
         const COBERTURA_50PCT: &str = r#"<?xml version="1.0"?>
 <coverage><packages><package name="p"><classes>
@@ -4315,7 +4317,7 @@ mod tests {
             let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
             let effort = efforts
                 .start(
-                    &oxplow_domain::refs::build::work_item_ref(task_id),
+                    &oxplow_tasks::work_item_ref(task_id),
                     &thread.id,
                     Some(snap_id),
                 )
@@ -6169,11 +6171,7 @@ mod tests {
                 .unwrap();
             let eff2 = h
                 .efforts
-                .start(
-                    &oxplow_domain::refs::build::work_item_ref(task2),
-                    &h.thread,
-                    None,
-                )
+                .start(&oxplow_tasks::work_item_ref(task2), &h.thread, None)
                 .await
                 .unwrap();
             let eff2_id = eff2.id.to_string();

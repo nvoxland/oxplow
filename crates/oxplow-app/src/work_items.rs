@@ -399,7 +399,7 @@ mod tests {
         use serde_json::json;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let task = oxplow_tasks::work_item_ref(fx.task);
         let run = |name: &'static str, input: serde_json::Value| {
             let svc = svc.clone();
             async move {
@@ -532,7 +532,7 @@ mod tests {
             Some(("renamed".into(), "in_progress".into(), true))
         );
 
-        let own = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let own = oxplow_tasks::work_item_ref(fx.task);
         svc.event_log_store
             .append(recorded(&own, "hijack", false))
             .await
@@ -577,7 +577,7 @@ mod tests {
             .unwrap();
         assert_eq!(thread, Some(fx.thread.value()));
         // An oxplow task's thread is the task's own.
-        let own = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let own = oxplow_tasks::work_item_ref(fx.task);
         let out = svc
             .sql
             .query_sql(

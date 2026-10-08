@@ -4,7 +4,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use oxplow_domain::refs::build::work_item_ref;
+use oxplow_tasks::work_item_ref;
 use std::process::Command as Proc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,11 +16,12 @@ use oxplow_app::acp::session::{AcpEventBody, AcpStatus, SessionSpec};
 use oxplow_app::acp::transcript::ItemBody;
 use oxplow_app::Services;
 use oxplow_db::semantic_layer::SqlCell;
-use oxplow_domain::stores::{AgentTurnStore, StreamStore, TaskStore, ThreadStore};
+use oxplow_domain::stores::{AgentTurnStore, StreamStore, ThreadStore};
 use oxplow_domain::{
-    AgentKind, Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus,
-    Thread, ThreadId, ThreadStatus, Timestamp,
+    AgentKind, Stream, StreamId, StreamKind, TaskId, Thread, ThreadId, ThreadStatus, Timestamp,
 };
+use oxplow_tasks::TaskStore;
+use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
 
 async fn boot() -> (Arc<Services>, std::path::PathBuf, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();

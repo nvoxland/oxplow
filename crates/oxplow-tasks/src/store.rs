@@ -3,14 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::stores::TaskStore;
-use oxplow_domain::{
-    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, ThreadId,
-    Timestamp,
-};
+use oxplow_db::{map_sql_err, string_to_ts, ts_to_string, Database};
+use oxplow_domain::{DomainError, TaskId, ThreadId, Timestamp};
 
-use crate::database::Database;
-use crate::database::{string_to_ts, ts_to_string};
+use crate::model::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
 /// oxplow's task rows. It writes nothing of core's but the `work_item`
 /// row it restates ([`project_work_item_tx`]): a work item's events and
@@ -93,11 +89,11 @@ fn write_status_tx(conn: &rusqlite::Connection, item: &Task) -> Result<(), Domai
                 ts_to_string(item.updated_at),
             ],
         )
-        .map_err(crate::database::map_sql_err)?;
+        .map_err(map_sql_err)?;
     if rows == 0 {
         return Err(DomainError::NotFound);
     }
-    project_work_item_tx(conn, item.id).map_err(crate::database::map_sql_err)?;
+    project_work_item_tx(conn, item.id).map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -111,7 +107,7 @@ pub fn update_with_status_tx(
     status: Option<TaskStatus>,
     now: Timestamp,
 ) -> Result<Task, DomainError> {
-    if update_task_tx(conn, item).map_err(crate::database::map_sql_err)? == 0 {
+    if update_task_tx(conn, item).map_err(map_sql_err)? == 0 {
         return Err(DomainError::NotFound);
     }
     if let Some(to) = status {
@@ -123,7 +119,7 @@ pub fn update_with_status_tx(
 /// Insert `item` (its `id` ignored) in the caller's transaction. Returns
 /// its id.
 pub fn insert_tx(conn: &rusqlite::Connection, item: &Task) -> Result<TaskId, DomainError> {
-    insert_task_tx(conn, item).map_err(crate::database::map_sql_err)
+    insert_task_tx(conn, item).map_err(map_sql_err)
 }
 
 /// The next `sort_index` at the end of `thread`'s list (or the backlog's),
@@ -138,7 +134,7 @@ pub fn next_sort_index_tx(
         params![thread.map(|t| t.value())],
         |r| r.get(0),
     )
-    .map_err(crate::database::map_sql_err)
+    .map_err(map_sql_err)
 }
 
 /// Soft-delete task `id` at `now` in the caller's transaction — the core
@@ -159,9 +155,9 @@ pub fn soft_delete_tx(
         |r| r.get::<_, Option<i64>>(0),
     )
     .optional()
-    .map_err(crate::database::map_sql_err)?
+    .map_err(map_sql_err)?
     .ok_or(DomainError::NotFound)?;
-    project_work_item_tx(conn, id).map_err(crate::database::map_sql_err)?;
+    project_work_item_tx(conn, id).map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -192,12 +188,12 @@ fn list_ids_tx(
             "SELECT id FROM task WHERE thread_id IS ?1 AND deleted_at IS NULL
              ORDER BY sort_index ASC, created_at ASC",
         )
-        .map_err(crate::database::map_sql_err)?;
+        .map_err(map_sql_err)?;
     let ids = stmt
         .query_map(params![thread.map(|t| t.value())], |r| r.get::<_, i64>(0))
-        .map_err(crate::database::map_sql_err)?
+        .map_err(map_sql_err)?
         .collect::<rusqlite::Result<Vec<i64>>>()
-        .map_err(crate::database::map_sql_err)?;
+        .map_err(map_sql_err)?;
     Ok(ids.into_iter().map(TaskId::new).collect())
 }
 
@@ -246,18 +242,18 @@ pub fn place_task_tx(
                     "UPDATE task SET sort_index = ?2 WHERE id = ?1 AND sort_index != ?2",
                     params![t.value(), i as i64],
                 )
-                .map_err(crate::database::map_sql_err)?;
+                .map_err(map_sql_err)?;
             // Its work_item row carries `sort_index` in `native`: restate
             // it with the task row, so `v_work_item` never disagrees.
             if renumbered > 0 {
-                project_work_item_tx(conn, *t).map_err(crate::database::map_sql_err)?;
+                project_work_item_tx(conn, *t).map_err(map_sql_err)?;
             }
         }
     }
     item.thread_id = dest;
     item.sort_index = index as i64;
     item.updated_at = now;
-    if update_task_tx(conn, &item).map_err(crate::database::map_sql_err)? == 0 {
+    if update_task_tx(conn, &item).map_err(map_sql_err)? == 0 {
         return Err(DomainError::NotFound);
     }
     Ok(Placed {
@@ -368,7 +364,7 @@ pub fn get_task_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<Option<Tas
     let sql = format!("{} WHERE t.id = ?1 AND t.deleted_at IS NULL", SELECT_BASE);
     conn.query_row(&sql, params![id.value()], row_to_task)
         .optional()
-        .map_err(crate::database::map_sql_err)
+        .map_err(map_sql_err)
 }
 
 /// Sync core for the task-row UPDATE of everything but the status:
@@ -541,22 +537,39 @@ const SELECT_BASE: &str =
     "SELECT t.*, COALESCE((SELECT COUNT(*) FROM task_note wn WHERE wn.task_id = t.id), 0) AS note_count
      FROM task t";
 
+/// The task rows, read and written.
+#[async_trait]
+pub trait TaskStore: Send + Sync {
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
+    async fn list_by_status_for_thread(
+        &self,
+        thread: &ThreadId,
+        status: TaskStatus,
+    ) -> Result<Vec<Task>, DomainError>;
+    async fn list_backlog(&self) -> Result<Vec<Task>, DomainError>;
+    async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError>;
+    /// Insert a new task; assigns and returns the autoincrement id.
+    async fn insert(&self, item: &Task) -> Result<TaskId, DomainError>;
+    /// Update an existing task by id.
+    async fn update(&self, item: &Task) -> Result<(), DomainError>;
+    async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError>;
+}
+
 #[async_trait]
 impl TaskStore for SqliteTaskStore {
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError> {
         let thread = *thread;
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "{} WHERE t.thread_id = ?1 AND t.deleted_at IS NULL \
+        crate::db::read(&self.db, move |conn| {
+            let sql = format!(
+                "{} WHERE t.thread_id = ?1 AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
-                    SELECT_BASE
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![thread.value()], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+                SELECT_BASE
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![thread.value()], row_to_task)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 
     async fn list_by_status_for_thread(
@@ -566,55 +579,49 @@ impl TaskStore for SqliteTaskStore {
     ) -> Result<Vec<Task>, DomainError> {
         let thread = *thread;
         let status_str = status_to_str(status);
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "{} WHERE t.thread_id = ?1 AND t.status = ?2 AND t.deleted_at IS NULL \
+        crate::db::read(&self.db, move |conn| {
+            let sql = format!(
+                "{} WHERE t.thread_id = ?1 AND t.status = ?2 AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
-                    SELECT_BASE
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![thread.value(), status_str], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+                SELECT_BASE
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![thread.value(), status_str], row_to_task)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 
     async fn list_backlog(&self) -> Result<Vec<Task>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "{} WHERE t.thread_id IS NULL AND t.deleted_at IS NULL \
+        crate::db::read(&self.db, move |conn| {
+            let sql = format!(
+                "{} WHERE t.thread_id IS NULL AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
-                    SELECT_BASE
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map([], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+                SELECT_BASE
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([], row_to_task)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 
     async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!("{} WHERE t.id = ?1", SELECT_BASE);
-                let mut stmt = conn.prepare(&sql)?;
-                let mut rows = stmt.query_map(params![id.value()], row_to_task)?;
-                match rows.next() {
-                    Some(r) => Ok(Some(r?)),
-                    None => Ok(None),
-                }
-            })
-            .await
+        crate::db::read(&self.db, move |conn| {
+            let sql = format!("{} WHERE t.id = ?1", SELECT_BASE);
+            let mut stmt = conn.prepare(&sql)?;
+            let mut rows = stmt.query_map(params![id.value()], row_to_task)?;
+            match rows.next() {
+                Some(r) => Ok(Some(r?)),
+                None => Ok(None),
+            }
+        })
+        .await
     }
 
     async fn insert(&self, item: &Task) -> Result<TaskId, DomainError> {
         let owned = item.clone();
-        let new_id = self
-            .db
-            .call(move |conn| insert_task_tx(conn, &owned))
-            .await?;
+        let new_id = crate::db::write(&self.db, move |conn| insert_task_tx(conn, &owned)).await?;
         Ok(new_id)
     }
 
@@ -647,9 +654,8 @@ impl TaskStore for SqliteTaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_store::SqliteStreamStore;
-    use crate::thread_store::SqliteThreadStore;
-    use oxplow_domain::refs::build::work_item_ref;
+    use crate::refs::work_item_ref;
+    use oxplow_db::{SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 
@@ -733,20 +739,18 @@ mod tests {
         let child = store.insert(&child).await.unwrap();
         store.soft_delete(epic).await.unwrap();
         let child_ref = work_item_ref(child);
-        let (parent, dangling): (Option<String>, i64) = store
-            .db
-            .call(move |c| {
-                c.query_row(
-                    "SELECT (SELECT parent_ref FROM v_work_item WHERE ref = ?1),
+        let (parent, dangling): (Option<String>, i64) = crate::db::read(&store.db, move |c| {
+            c.query_row(
+                "SELECT (SELECT parent_ref FROM v_work_item WHERE ref = ?1),
                             (SELECT count(*) FROM v_work_item w WHERE w.parent_ref IS NOT NULL
                                AND NOT EXISTS (SELECT 1 FROM v_work_item p
                                                WHERE p.ref = w.parent_ref))",
-                    [child_ref],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-            })
-            .await
-            .unwrap();
+                [child_ref],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+        })
+        .await
+        .unwrap();
         assert_eq!(parent, None);
         assert_eq!(dangling, 0);
     }
@@ -784,33 +788,31 @@ mod tests {
             .await
             .unwrap();
 
-        let rows = store
-            .db
-            .call(|c| {
-                let mut stmt = c.prepare(
-                    "SELECT ref, provider, title, body, state, native_state, parent_ref,
+        let rows = crate::db::read(&store.db, |c| {
+            let mut stmt = c.prepare(
+                "SELECT ref, provider, title, body, state, native_state, parent_ref,
                             deleted_at IS NOT NULL
                      FROM work_item ORDER BY ref",
-                )?;
-                let rows = stmt
-                    .query_map([], |r| {
-                        Ok(format!(
-                            "{}|{}|{}|{}|{}|{}|{}|{}",
-                            r.get::<_, String>(0)?,
-                            r.get::<_, String>(1)?,
-                            r.get::<_, String>(2)?,
-                            r.get::<_, String>(3)?,
-                            r.get::<_, String>(4)?,
-                            r.get::<_, String>(5)?,
-                            r.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                            r.get::<_, bool>(7)?,
-                        ))
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(rows)
-            })
-            .await
-            .unwrap();
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(format!(
+                        "{}|{}|{}|{}|{}|{}|{}|{}",
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                        r.get::<_, bool>(7)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap();
         let r = |id: TaskId| work_item_ref(id);
         let mut expected = vec![
             format!("{}|oxplow|ship it||in_progress|in_progress||false", r(epic)),
@@ -828,22 +830,18 @@ mod tests {
 
         // A cascade (the stream or thread deleted outright) takes the
         // work item with the task.
-        store
-            .db
-            .call(|c| c.execute("DELETE FROM threads", []))
+        crate::db::write(&store.db, |c| c.execute("DELETE FROM threads", []))
             .await
             .unwrap();
-        let left: (i64, i64) = store
-            .db
-            .call(|c| {
-                c.query_row(
-                    "SELECT (SELECT count(*) FROM task), (SELECT count(*) FROM work_item)",
-                    [],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-            })
-            .await
-            .unwrap();
+        let left: (i64, i64) = crate::db::read(&store.db, |c| {
+            c.query_row(
+                "SELECT (SELECT count(*) FROM task), (SELECT count(*) FROM work_item)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+        })
+        .await
+        .unwrap();
         assert_eq!(left, (0, 0), "the backlog child went with its parent");
     }
 
@@ -866,11 +864,11 @@ mod tests {
             store.update_with_status(&edit, None).await,
             Err(DomainError::NotFound)
         ));
-        let logged: i64 = store
-            .db
-            .call(|c| c.query_row("SELECT count(*) FROM event_log", [], |r| r.get(0)))
-            .await
-            .unwrap();
+        let logged: i64 = crate::db::read(&store.db, |c| {
+            c.query_row("SELECT count(*) FROM event_log", [], |r| r.get(0))
+        })
+        .await
+        .unwrap();
         assert_eq!(logged, 0);
         let live = store
             .db

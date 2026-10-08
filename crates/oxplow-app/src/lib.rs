@@ -125,7 +125,6 @@ pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
 pub mod symbol_collector;
-pub mod task_service;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
@@ -163,7 +162,7 @@ pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
 pub use oxplow_lsp::{LspError, LspProxy};
-pub use task_service::{CreateTaskInput, TaskService, TaskServiceError, UpdateTaskChanges};
+use oxplow_tasks::{SqliteTaskLinkStore, SqliteTaskStore, TaskService};
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
@@ -190,9 +189,8 @@ use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
     SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore, SqliteFactStore,
     SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
-    SqliteStreamStore, SqliteTaskLinkStore, SqliteTaskStore, SqliteThreadNoteStore,
-    SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
-    SqliteWikiPageThreadUpdateStore,
+    SqliteStreamStore, SqliteThreadNoteStore, SqliteThreadStore, SqliteTokenUsageStore,
+    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};

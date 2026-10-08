@@ -21,11 +21,12 @@ use common::boot;
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
 use oxplow_db::EffortStore as _;
-use oxplow_domain::stores::{StreamStore, TaskStore as _, ThreadStore};
+use oxplow_domain::stores::{StreamStore, ThreadStore};
 use oxplow_domain::{
-    Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus, Thread,
-    ThreadId, ThreadStatus, Timestamp,
+    Stream, StreamId, StreamKind, TaskId, Thread, ThreadId, ThreadStatus, Timestamp,
 };
+use oxplow_tasks::TaskStore as _;
+use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
 
 fn golden(name: &str, body: &serde_json::Value, root: &std::path::Path) {
     let text = serde_json::to_string_pretty(body)
@@ -113,11 +114,7 @@ async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> Tas
         .unwrap();
     services
         .effort_store
-        .start(
-            &oxplow_domain::refs::build::work_item_ref(task),
-            &thread_id,
-            None,
-        )
+        .start(&oxplow_tasks::work_item_ref(task), &thread_id, None)
         .await
         .unwrap();
     task

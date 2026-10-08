@@ -261,11 +261,12 @@ pub async fn run(
 mod tests {
     use super::*;
     use oxplow_db::Database;
-    use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
+    use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{
-        Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority,
-        TaskStatus, Thread, ThreadId, ThreadStatus, Timestamp,
+        Stream, StreamId, StreamKind, TaskId, Thread, ThreadId, ThreadStatus, Timestamp,
     };
+    use oxplow_tasks::TaskStore;
+    use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
     fn ts() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
@@ -376,7 +377,7 @@ mod tests {
         // inserting normally, then clearing the projected slice below.
         let streams = oxplow_db::SqliteStreamStore::new(db.clone());
         let threads = oxplow_db::SqliteThreadStore::new(db.clone());
-        let bare_items = oxplow_db::SqliteTaskStore::new(db.clone());
+        let bare_items = oxplow_tasks::SqliteTaskStore::new(db.clone());
 
         streams
             .upsert(&Stream {
@@ -446,7 +447,7 @@ mod tests {
         let effort_writer = SqliteEffortStore::new(db.clone());
         let own = effort_writer
             .start(
-                &oxplow_domain::refs::build::work_item_ref(task_id),
+                &oxplow_tasks::work_item_ref(task_id),
                 &ThreadId::new(1),
                 None,
             )
