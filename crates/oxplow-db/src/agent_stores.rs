@@ -56,33 +56,41 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
     })
 }
 
-/// The anchors agent activity on `thread` carries (P3.3): the thread, its
-/// stream, its agent session, the thread's open turn and its open effort
-/// (at most one).
-pub fn activity_anchors_tx(conn: &Connection, thread: ThreadId) -> Result<Anchors, DomainError> {
+/// The anchors agent activity in agent session `session` on `thread`
+/// carries (P3.3): the thread, its stream, the session, the session's open
+/// turn and the thread's open effort (at most one). `None` is activity no
+/// session claims (a hook from an agent oxplow didn't start).
+pub fn activity_anchors_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    session: Option<AgentSessionId>,
+) -> Result<Anchors, DomainError> {
     let mut anchors = anchors_for_thread_tx(conn, thread)?;
-    anchors.agent_session_id =
-        crate::agent_session_store::newest_for_thread_tx(conn, thread)?.map(|s| s.id);
-    anchors.turn_id = open_turn_ids_tx(conn, thread)?.first().map(|t| t.value());
+    anchors.agent_session_id = session;
+    anchors.turn_id = open_turn_ids_in_tx(conn, thread, session)?
+        .first()
+        .map(|t| t.value());
     anchors.effort_id = crate::effort_store::open_for_thread_tx(conn, thread)
         .map_err(crate::database::map_sql_err)?;
     Ok(anchors)
 }
 
-/// The turn on `thread` that something measured at `at` happened in: the
-/// newest one started at or before `at` — the one whose span holds it, or
+/// The turn of agent session `session` on `thread` that something measured
+/// at `at` happened in: the newest one started at or before `at` — the one whose span holds it, or
 /// the last before it when it fell between turns. `None` before the
 /// thread's first turn. What places a report that arrives after its turn
 /// ended (an agent's telemetry export).
 pub fn turn_at_tx(
     conn: &Connection,
     thread: ThreadId,
+    session: Option<AgentSessionId>,
     at: Timestamp,
 ) -> Result<Option<AgentTurnId>, DomainError> {
     conn.query_row(
-        "SELECT id FROM agent_turn WHERE thread_id = ?1 AND started_at <= ?2
+        "SELECT id FROM agent_turn
+          WHERE thread_id = ?1 AND agent_session_id IS ?3 AND started_at <= ?2
           ORDER BY started_at DESC, id DESC LIMIT 1",
-        params![thread.value(), ts_to_string(at)],
+        params![thread.value(), ts_to_string(at), session.map(|s| s.value())],
         |r| r.get::<_, i64>(0),
     )
     .optional()
@@ -90,7 +98,8 @@ pub fn turn_at_tx(
     .map_err(map_sql_err)
 }
 
-/// The turn on `thread` a report covering `from..to` measured (tsk900):
+/// The turn of agent session `session` on `thread` a report covering
+/// `from..to` measured:
 /// the one whose span (an open turn's runs to `to`) overlaps the window
 /// most, the earlier on a tie; when none overlaps, [`turn_at_tx`] at `to`.
 /// A telemetry export is stamped with when it was collected, so its window
@@ -98,20 +107,26 @@ pub fn turn_at_tx(
 pub fn turn_for_window_tx(
     conn: &Connection,
     thread: ThreadId,
+    session: Option<AgentSessionId>,
     from: Timestamp,
     to: Timestamp,
 ) -> Result<Option<AgentTurnId>, DomainError> {
     let mut stmt = conn
         .prepare(
             "SELECT id, started_at, ended_at FROM agent_turn
-              WHERE thread_id = ?1 AND started_at <= ?3
+              WHERE thread_id = ?1 AND agent_session_id IS ?4 AND started_at <= ?3
                 AND (ended_at IS NULL OR ended_at >= ?2)
               ORDER BY started_at, id",
         )
         .map_err(map_sql_err)?;
     let spans = stmt
         .query_map(
-            params![thread.value(), ts_to_string(from), ts_to_string(to)],
+            params![
+                thread.value(),
+                ts_to_string(from),
+                ts_to_string(to),
+                session.map(|s| s.value())
+            ],
             |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
@@ -139,7 +154,7 @@ pub fn turn_for_window_tx(
     }
     match best {
         Some((id, _)) => Ok(Some(AgentTurnId::new(id))),
-        None => turn_at_tx(conn, thread, to),
+        None => turn_at_tx(conn, thread, session, to),
     }
 }
 
@@ -189,9 +204,33 @@ pub fn open_turn_ids_tx(
     Ok(rows.into_iter().map(AgentTurnId::new).collect())
 }
 
+/// The open turns of agent session `session` on `thread`, newest first;
+/// `None` is the turns no session claims.
+pub fn open_turn_ids_in_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    session: Option<AgentSessionId>,
+) -> Result<Vec<AgentTurnId>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM agent_turn
+              WHERE thread_id = ?1 AND agent_session_id IS ?2 AND ended_at IS NULL
+              ORDER BY started_at DESC, id DESC",
+        )
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map(params![thread.value(), session.map(|s| s.value())], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map_err(map_sql_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sql_err)?;
+    Ok(rows.into_iter().map(AgentTurnId::new).collect())
+}
+
 /// The thread's open turns that harness session `session` opened, newest
 /// first.
-pub fn open_session_turn_ids_tx(
+pub fn open_harness_turn_ids_tx(
     conn: &Connection,
     thread: ThreadId,
     session: &str,
@@ -213,17 +252,19 @@ pub fn open_session_turn_ids_tx(
     Ok(rows.into_iter().map(AgentTurnId::new).collect())
 }
 
-/// Open a turn on `thread` and log `agent.turn.started`, in the caller's
-/// transaction. The turn starts at its stream's current snapshot.
+/// Open a turn in agent session `agent_session` on `thread` and log
+/// `agent.turn.started`, in the caller's transaction (`session` is the
+/// harness's own session id). The turn starts at its stream's current snapshot.
 pub fn open_turn_tx(
     conn: &Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
+    agent_session: Option<AgentSessionId>,
     prompt: &str,
     session: Option<&str>,
     started_at: Timestamp,
 ) -> Result<AgentTurnId, DomainError> {
-    let anchors = activity_anchors_tx(conn, thread)?;
+    let anchors = activity_anchors_tx(conn, thread, agent_session)?;
     conn.execute(
         "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, session_id, started_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -295,19 +336,20 @@ pub fn close_turn_tx(
     id: AgentTurnId,
     end: &TurnEnd<'_>,
 ) -> Result<Option<ThreadId>, DomainError> {
-    let thread: Option<i64> = conn
+    let closed: Option<(i64, Option<i64>)> = conn
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer)
               WHERE id = ?1 AND ended_at IS NULL
-              RETURNING thread_id",
+              RETURNING thread_id, agent_session_id",
             params![id.value(), ts_to_string(end.at), end.answer],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
         .map_err(map_sql_err)?;
-    let Some(thread) = thread.map(ThreadId::new) else {
+    let Some((thread, session)) = closed else {
         return Ok(None);
     };
+    let (thread, session) = (ThreadId::new(thread), session.map(AgentSessionId::new));
     let env = ev
         .typed::<AgentTurnEnded>(&AgentTurnEndedV2 {
             turn: turn_ref(id),
@@ -318,7 +360,7 @@ pub fn close_turn_tx(
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
-            ..activity_anchors_tx(conn, thread)?
+            ..activity_anchors_tx(conn, thread, session)?
         })
         .with_subject([turn_ref(id), thread_ref(thread)]);
     ev.append(conn, &env)?;
@@ -471,6 +513,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                         tx,
                         &ev,
                         turn.thread_id,
+                        turn.agent_session_id,
                         &turn.prompt,
                         turn.session_id.as_deref(),
                         turn.started_at,
@@ -706,7 +749,7 @@ mod tests {
         let turn = AgentTurn {
             id: AgentTurnId::placeholder(),
             thread_id: tid,
-            agent_session_id: None,
+            agent_session_id: Some(session),
             prompt: "do the thing".into(),
             answer: None,
             session_id: Some("s1".into()),

@@ -236,11 +236,26 @@ async fn handle_otlp_metrics(
     };
     // Logged as `agent.tokens.reported`; the `token_usage.otlp` consumer
     // counts it.
-    match ctx.services.otlp_ingest.ingest(thread_id, &body).await {
+    match ctx
+        .services
+        .otlp_ingest
+        .ingest(thread_id, agent_session_of(&headers), &body)
+        .await
+    {
         Ok(logged) => tracing::debug!(logged, "OTLP token export"),
         Err(err) => warn!(?err, "failed to log OTLP token export"),
     }
     otlp_ok()
+}
+
+/// The agent session a hook or export came from: the `X-Oxplow-Session`
+/// header every process oxplow starts sends (`ses<n>`).
+fn agent_session_of(headers: &HeaderMap) -> Option<oxplow_domain::AgentSessionId> {
+    headers
+        .get("x-oxplow-session")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .and_then(oxplow_domain::AgentSessionId::try_from_str)
 }
 
 /// Append a human-readable dump of an OTLP export to the file named by
@@ -387,6 +402,8 @@ async fn handle_hook_inner(
         .filter(|s| !s.is_empty())
         .and_then(ThreadId::try_from_str);
 
+    let agent_session_id = agent_session_of(&headers);
+
     hook_debug_dump(&event, thread_id.map(|t| t.to_string()).as_deref(), &body);
 
     let body_str = match std::str::from_utf8(&body) {
@@ -425,6 +442,7 @@ async fn handle_hook_inner(
             kind,
             thread_id,
             stream_id,
+            agent_session_id,
             session_id,
             payload_json: body_str,
             prompt: None,
@@ -465,6 +483,7 @@ async fn handle_hook_inner(
                 kind,
                 thread_id,
                 stream_id,
+                agent_session_id,
                 session_id: session_id.clone(),
                 payload_json: body_str,
                 prompt: None,
@@ -484,6 +503,7 @@ async fn handle_hook_inner(
         kind,
         thread_id,
         stream_id,
+        agent_session_id,
         session_id,
         payload_json: body_str,
         prompt,

@@ -65,7 +65,7 @@ pub const PLUGIN_ENV_VARS: &[&str] = &[
     "OXPLOW_HOOK_TOKEN",
     "OXPLOW_STREAM_ID",
     "OXPLOW_THREAD_ID",
-    "OXPLOW_PANE",
+    "OXPLOW_SESSION",
 ];
 
 #[derive(Debug, Error)]
@@ -578,7 +578,7 @@ fn build_hooks_json(hook_base_url: &str) -> serde_json::Value {
                 "Authorization": "Bearer $OXPLOW_HOOK_TOKEN",
                 "X-Oxplow-Stream": "$OXPLOW_STREAM_ID",
                 "X-Oxplow-Thread": "$OXPLOW_THREAD_ID",
-                "X-Oxplow-Pane": "$OXPLOW_PANE",
+                "X-Oxplow-Session": "$OXPLOW_SESSION",
             },
             "allowedEnvVars": PLUGIN_ENV_VARS,
         });
@@ -594,12 +594,14 @@ fn build_hooks_json(hook_base_url: &str) -> serde_json::Value {
     json!({ "hooks": serde_json::Value::Object(hooks) })
 }
 
-/// The thread and stream an MCP connection acts for, as the control
-/// plane reads them (`X-Oxplow-Thread` / `X-Oxplow-Stream`).
+/// The thread, stream and agent session an MCP connection acts for, as the
+/// control plane reads them (`X-Oxplow-Thread` / `X-Oxplow-Stream` /
+/// `X-Oxplow-Session`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct McpIdentity<'a> {
     pub thread_id: &'a str,
     pub stream_id: &'a str,
+    pub session_id: Option<&'a str>,
 }
 
 fn build_mcp_config(
@@ -622,6 +624,9 @@ fn build_mcp_config(
     if let Some(id) = identity {
         headers.insert("X-Oxplow-Thread".into(), id.thread_id.into());
         headers.insert("X-Oxplow-Stream".into(), id.stream_id.into());
+        if let Some(session) = id.session_id {
+            headers.insert("X-Oxplow-Session".into(), session.into());
+        }
     }
     json!({
         "mcpServers": {
@@ -634,8 +639,9 @@ fn build_mcp_config(
     })
 }
 
-/// A per-thread MCP config for Claude (`mcp-config.<thread>.json` next to
-/// the shared `mcp-config.json`) carrying the thread's identity headers,
+/// A per-session MCP config for Claude (`mcp-config.<session>.json`, or
+/// `mcp-config.<thread>.json` for a thread with no session, next to the
+/// shared `mcp-config.json`) carrying its identity headers,
 /// so `run_command` and every audited write know which thread is acting.
 /// The shared file stays for spawns with no thread. Returns the path to
 /// pass as `--mcp-config`.
@@ -645,7 +651,11 @@ pub fn write_claude_mcp_config(
     hook_token: &str,
     identity: McpIdentity<'_>,
 ) -> Result<PathBuf, PluginError> {
-    let path = plugin_dir.join(format!("mcp-config.{}.json", identity.thread_id));
+    // One file per session (its headers name it), else per thread.
+    let path = plugin_dir.join(format!(
+        "mcp-config.{}.json",
+        identity.session_id.unwrap_or(identity.thread_id)
+    ));
     write_json(
         &path,
         &build_mcp_config(mcp_endpoint_url, hook_token, Some(identity)),

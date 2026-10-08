@@ -110,6 +110,55 @@ pub fn newest_for_thread_tx(
     .pop())
 }
 
+/// The agent session a report on `thread` came from, by what the sender
+/// said, in order: the session it named (`X-Oxplow-Session`; refused when
+/// it is another thread's), the session whose resume id is the harness's
+/// session id `harness_session` (an open one first, then the newest), the
+/// thread's newest open session (one with an open turn first; logged,
+/// since every process oxplow starts names its session), or none — a report
+/// from an agent oxplow didn't start.
+pub fn resolve_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    named: Option<AgentSessionId>,
+    harness_session: Option<&str>,
+) -> Result<Option<AgentSession>, DomainError> {
+    if let Some(id) = named {
+        match get_tx(conn, id)? {
+            Some(s) if s.thread_id == thread => return Ok(Some(s)),
+            _ => {
+                tracing::warn!(%id, %thread, "a report named a session not on its thread; ignored")
+            }
+        }
+    }
+    if let Some(sid) = harness_session.filter(|s| !s.is_empty()) {
+        if let Some(s) = query(
+            conn,
+            "WHERE thread_id = ?1 AND resume_session_id = ?2
+             ORDER BY closed_at IS NULL DESC, opened_at DESC, id DESC LIMIT 1",
+            params![thread.value(), sid],
+        )?
+        .pop()
+        {
+            return Ok(Some(s));
+        }
+    }
+    let newest = query(
+        conn,
+        "WHERE thread_id = ?1 AND closed_at IS NULL
+         ORDER BY EXISTS (SELECT 1 FROM agent_turn t
+                           WHERE t.agent_session_id = agent_session.id AND t.ended_at IS NULL) DESC,
+                  opened_at DESC, id DESC
+         LIMIT 1",
+        [thread.value()],
+    )?
+    .pop();
+    if let Some(s) = &newest {
+        tracing::warn!(session = %s.id, %thread, "a report named no session; took the thread's newest");
+    }
+    Ok(newest)
+}
+
 /// Open a session on its thread at `now`.
 pub fn insert_tx(
     conn: &Connection,

@@ -168,6 +168,7 @@ pub(crate) mod tests {
             kind,
             thread_id: Some(thread),
             stream_id: None,
+            agent_session_id: None,
             session_id: Some("s".into()),
             payload_json: "{}".into(),
             prompt: Some("go".into()),

@@ -1158,9 +1158,11 @@ time), `type` (`namespace.name`, snake_case, validated on append), `v`
 (schema version), `at`, `source` (`agent:thr3`, `human`, `lens:<id>`,
 `system`, or `system:<component>` from `refs::build::system_source` —
 `system:task_service`, `system:hook_ingest`, `system:snapshot_capture`),
-`anchors` (nullable stream / thread / effort / turn / snapshot columns,
-so per-anchor timelines are indexed range scans; an event that names a
-thread also carries its stream; V153 adds a partial index on a
+`anchors` (nullable stream / thread / effort / turn / snapshot / agent
+session columns, so per-anchor timelines are indexed range scans; an
+event that names a thread also carries its stream, and agent activity
+carries the agent session it came from — `hook_ingest`'s resolution,
+agent-model.md; V153 adds a partial index on a
 `work_item.recorded`'s item ref, for a provider read's "did this
 change?" lookup — providers.md), `subject` (JSON array of canonical
 refs built with `oxplow_domain::refs::build` and validated against the

@@ -14,7 +14,7 @@ use oxplow_db::Database;
 use oxplow_domain::events::schema::{AgentTokensReported, AgentTokensReportedV1, TokenCount};
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::vocabulary::VocabularyHandle;
-use oxplow_domain::{DomainError, EffortId, ThreadId};
+use oxplow_domain::{AgentSessionId, DomainError, EffortId, ThreadId};
 
 use crate::event_pump::EventPump;
 use crate::otlp_tokens::decode_token_export;
@@ -36,12 +36,18 @@ impl OtlpIngestService {
         }
     }
 
-    /// Log `thread`'s export `body` as `agent.tokens.reported`. Whether it
+    /// Log `thread`'s export `body` as `agent.tokens.reported`, from agent
+    /// session `session` when the exporter named it (`X-Oxplow-Session`). Whether it
     /// logged one: a body with no token counts (most Codex log events)
     /// logs nothing, nor does a retransmit of an export already logged
     /// (keyed by the body's hash — each export carries its own window's
     /// timestamps, so two exports never hash alike).
-    pub async fn ingest(&self, thread: ThreadId, body: &[u8]) -> Result<bool, DomainError> {
+    pub async fn ingest(
+        &self,
+        thread: ThreadId,
+        session: Option<AgentSessionId>,
+        body: &[u8],
+    ) -> Result<bool, DomainError> {
         let Some(export) = decode_token_export(body) else {
             return Ok(false);
         };
@@ -82,7 +88,10 @@ impl OtlpIngestService {
                     return Ok(false);
                 }
                 let vocabulary = vocabulary.current();
-                let mut anchors = activity_anchors_tx(tx, thread)?;
+                let session =
+                    oxplow_db::agent_session_store::resolve_tx(tx, thread, session, None)?
+                        .map(|s| s.id);
+                let mut anchors = activity_anchors_tx(tx, thread, session)?;
                 // The turn it measured, not the one open as it arrives: an
                 // export lands after its turn's Stop, and is stamped with
                 // when it was collected, so its window can reach into the
@@ -91,7 +100,7 @@ impl OtlpIngestService {
                 // doesn't say when is the open turn's.
                 if let Some(end) = export.window_end {
                     let start = export.window_start.unwrap_or(end);
-                    let turn = turn_for_window_tx(tx, thread, start, end)?;
+                    let turn = turn_for_window_tx(tx, thread, session, start, end)?;
                     anchors.turn_id = turn.map(|t| t.value());
                     anchors.effort_id = match turn {
                         Some(t) => effort_during_turn_tx(tx, thread, t)?.map(EffortId::new),
@@ -129,6 +138,7 @@ mod tests {
             kind,
             thread_id: Some(thread),
             stream_id: None,
+            agent_session_id: None,
             session_id: Some("s".into()),
             payload_json: "{}".into(),
             prompt: Some("go".into()),
@@ -172,7 +182,11 @@ mod tests {
             .unwrap();
         let turn = open_turn(svc).await;
         let body = encoded_claude_export_at("claude-opus-4-8", 100, 20, Some(Timestamp::now()));
-        assert!(svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap());
+        assert!(svc
+            .otlp_ingest
+            .ingest(fx.thread, None, &body)
+            .await
+            .unwrap());
         let events = reported(svc).await;
         assert_eq!(events.len(), 1);
         let env = &events[0].envelope;
@@ -182,6 +196,87 @@ mod tests {
         assert_eq!(env.payload["counts"][0]["value"], 100);
     }
 
+    /// Two sessions in a thread each have a turn running: an export from
+    /// one (`X-Oxplow-Session`) is that session's turn's.
+    #[tokio::test]
+    async fn an_export_goes_to_its_own_sessions_turn() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let a = svc
+            .agent_session_store
+            .newest_for_thread(fx.thread)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        let b = svc
+            .db
+            .transaction({
+                let thread = fx.thread;
+                move |tx| {
+                    oxplow_db::agent_session_store::insert_tx(
+                        tx,
+                        &oxplow_domain::agent_session::NewAgentSession::of(
+                            thread,
+                            oxplow_domain::AgentKind::Claude,
+                            None,
+                        ),
+                        Timestamp::now(),
+                    )
+                }
+            })
+            .await
+            .unwrap()
+            .id;
+        for (ses, sid) in [(a, "ha"), (b, "hb")] {
+            svc.hook_ingest
+                .ingest(HookEnvelope {
+                    agent_session_id: Some(ses),
+                    session_id: Some(sid.into()),
+                    ..hook(fx.thread, HookKind::UserPromptSubmit)
+                })
+                .await
+                .unwrap();
+        }
+        let turn_of = |ses: AgentSessionId| {
+            svc.db.read(move |c| {
+                c.query_row(
+                    "SELECT id FROM agent_turn WHERE agent_session_id = ?1",
+                    [ses.value()],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+        };
+        let (turn_a, turn_b) = (turn_of(a).await.unwrap(), turn_of(b).await.unwrap());
+        let body = encoded_claude_export_at("claude-opus-4-8", 100, 20, Some(Timestamp::now()));
+        assert!(svc
+            .otlp_ingest
+            .ingest(fx.thread, Some(a), &body)
+            .await
+            .unwrap());
+        let body = encoded_claude_export_at("claude-opus-4-8", 5, 1, Some(Timestamp::now()));
+        assert!(svc
+            .otlp_ingest
+            .ingest(fx.thread, Some(b), &body)
+            .await
+            .unwrap());
+        let anchored: Vec<_> = reported(svc)
+            .await
+            .iter()
+            .map(|e| {
+                (
+                    e.envelope.anchors.agent_session_id,
+                    e.envelope.anchors.turn_id,
+                )
+            })
+            .collect();
+        assert_eq!(
+            anchored,
+            vec![(Some(a), Some(turn_a)), (Some(b), Some(turn_b))]
+        );
+    }
+
     /// An SDK retransmit of the same export logs nothing more; a body
     /// with no token counts logs nothing.
     #[tokio::test]
@@ -189,11 +284,19 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let body = encoded_claude_export("claude-opus-4-8", 100, 20);
-        assert!(svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap());
-        assert!(!svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap());
+        assert!(svc
+            .otlp_ingest
+            .ingest(fx.thread, None, &body)
+            .await
+            .unwrap());
         assert!(!svc
             .otlp_ingest
-            .ingest(fx.thread, b"not otlp")
+            .ingest(fx.thread, None, &body)
+            .await
+            .unwrap());
+        assert!(!svc
+            .otlp_ingest
+            .ingest(fx.thread, None, b"not otlp")
             .await
             .unwrap());
         assert_eq!(reported(svc).await.len(), 1);
@@ -208,7 +311,7 @@ mod tests {
         let body = encoded_claude_export("claude-opus-4-8", 100, 20);
         assert!(!svc
             .otlp_ingest
-            .ingest(ThreadId::new(999), &body)
+            .ingest(ThreadId::new(999), None, &body)
             .await
             .unwrap());
         assert!(reported(svc).await.is_empty());
@@ -226,7 +329,11 @@ mod tests {
             .unwrap();
         let open = open_turn(svc).await;
         let body = encoded_claude_export_at("claude-opus-4-8", 100, 20, None);
-        assert!(svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap());
+        assert!(svc
+            .otlp_ingest
+            .ingest(fx.thread, None, &body)
+            .await
+            .unwrap());
         let events = reported(svc).await;
         assert_eq!(events[0].envelope.anchors.turn_id, Some(open));
         assert_eq!(events[0].envelope.anchors.effort_id, Some(fx.effort));
@@ -244,7 +351,11 @@ mod tests {
             .await
             .unwrap();
         let body = encoded_claude_export_at("claude-opus-4-8", 100, 20, Some(before));
-        assert!(svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap());
+        assert!(svc
+            .otlp_ingest
+            .ingest(fx.thread, None, &body)
+            .await
+            .unwrap());
         let events = reported(svc).await;
         assert_eq!(events[0].envelope.anchors.turn_id, None);
         assert_eq!(events[0].envelope.anchors.effort_id, None);
@@ -273,7 +384,10 @@ mod tests {
             .unwrap();
         assert_ne!(open_turn(svc).await, measured_in);
         let body = encoded_claude_export_at("claude-opus-4-8", 100, 20, Some(at));
-        svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap();
+        svc.otlp_ingest
+            .ingest(fx.thread, None, &body)
+            .await
+            .unwrap();
         let events = reported(svc).await;
         assert_eq!(events[0].envelope.anchors.turn_id, Some(measured_in));
     }
@@ -353,7 +467,10 @@ mod tests {
             at(5),
             at(15),
         );
-        svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap();
+        svc.otlp_ingest
+            .ingest(fx.thread, None, &body)
+            .await
+            .unwrap();
         let events = reported(svc).await;
         assert_eq!(events[0].envelope.anchors.turn_id, Some(turns[0]));
         assert_eq!(
@@ -376,7 +493,10 @@ mod tests {
             .unwrap();
         let turn = open_turn(svc).await;
         let body = encoded_claude_export_at("claude-opus-4-8", 100, 20, Some(Timestamp::now()));
-        svc.otlp_ingest.ingest(fx.thread, &body).await.unwrap();
+        svc.otlp_ingest
+            .ingest(fx.thread, None, &body)
+            .await
+            .unwrap();
         let tokens = svc
             .fact_store
             .get_measure("oxplow.tokens")

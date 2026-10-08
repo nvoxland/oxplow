@@ -165,7 +165,7 @@ pub const NOT_INHERITED: &[&str] = &[
     "OXPLOW_HOOK_BASE_URL",
     "OXPLOW_STREAM_ID",
     "OXPLOW_THREAD_ID",
-    "OXPLOW_PANE",
+    "OXPLOW_SESSION",
 ];
 
 /// [`NOT_INHERITED`] as a spawn's `env_remove`.

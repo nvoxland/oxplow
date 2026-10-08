@@ -79,14 +79,15 @@ fn codex_config_overrides(
 
 /// OTEL env that points Claude Code's OTLP metrics exporter at oxplow's
 /// control-plane receiver (epic tsk22). Only metrics are exported (no logs/
-/// traces). The owning thread/stream ride custom OTLP headers so the receiver
-/// attributes token facts without a session→thread lookup — one agent process
-/// per thread, so the headers are constant for its lifetime. Temporality is
+/// traces). The owning thread and agent session ride custom OTLP headers so
+/// the receiver attributes token facts to the session's turn — one agent
+/// process per session, so the headers are constant for its lifetime. Temporality is
 /// left at the SDK default (delta): each export is the per-interval increment,
 /// which maps straight onto the additive `oxplow.tokens` facts.
 fn claude_otel_env(
     plugin_runtime: &crate::PluginRuntime,
     thread_id: &str,
+    session_id: &str,
 ) -> Vec<(String, String)> {
     vec![
         ("CLAUDE_CODE_ENABLE_TELEMETRY".to_string(), "1".to_string()),
@@ -103,8 +104,8 @@ fn claude_otel_env(
         (
             "OTEL_EXPORTER_OTLP_HEADERS".to_string(),
             format!(
-                "Authorization=Bearer {},X-Oxplow-Thread={}",
-                plugin_runtime.hook_token, thread_id
+                "Authorization=Bearer {},X-Oxplow-Thread={},X-Oxplow-Session={}",
+                plugin_runtime.hook_token, thread_id, session_id
             ),
         ),
         // 10s (default is 60s) — snappier token updates in the UI.
@@ -119,10 +120,16 @@ fn claude_otel_env(
 /// oxplow's receiver (tsk24). Codex has NO OTEL env vars — config only. The
 /// http exporter is protobuf ("binary"); the endpoint is the FULL signal URL
 /// (`<base>/v1/metrics` — Codex uses it as-is, unlike Claude which appends the
-/// signal path). Attribution + auth ride the `X-Oxplow-Thread` + bearer headers
-/// the receiver reads (the thread names its stream). The tagged-union `otel.exporter.otlp-http.*` keys select
+/// signal path). Attribution + auth ride the `X-Oxplow-Thread`,
+/// `X-Oxplow-Session` and bearer headers the receiver reads (the thread names
+/// its stream). The tagged-union `otel.exporter.otlp-http.*` keys select
 /// the http exporter (default is `none`).
-fn codex_otel_overrides(otlp_base_url: &str, hook_token: &str, thread_id: &str) -> Vec<String> {
+fn codex_otel_overrides(
+    otlp_base_url: &str,
+    hook_token: &str,
+    thread_id: &str,
+    session_id: &str,
+) -> Vec<String> {
     let endpoint = format!("{otlp_base_url}/v1/metrics");
     vec![
         format!(
@@ -137,6 +144,10 @@ fn codex_otel_overrides(otlp_base_url: &str, hook_token: &str, thread_id: &str) 
         format!(
             "otel.exporter.otlp-http.headers.x-oxplow-thread={}",
             toml_cli_string(thread_id)
+        ),
+        format!(
+            "otel.exporter.otlp-http.headers.x-oxplow-session={}",
+            toml_cli_string(session_id)
         ),
     ]
 }
@@ -350,6 +361,10 @@ pub async fn open_terminal_session(
     )
     .map_err(|e| IpcError::internal(format!("plugin write failed: {e}")))?;
 
+    let session_id = session
+        .as_ref()
+        .map(|s| s.id.to_string())
+        .unwrap_or_default();
     let mut plugin_env = vec![
         (
             "OXPLOW_HOOK_TOKEN".to_string(),
@@ -367,7 +382,9 @@ pub async fn open_terminal_session(
                 .map(|t| t.to_string())
                 .unwrap_or_default(),
         ),
-        ("OXPLOW_PANE".to_string(), pane_target.clone()),
+        // Which agent session the process is: every hook and export it
+        // sends names it (`X-Oxplow-Session`).
+        ("OXPLOW_SESSION".to_string(), session_id.clone()),
     ];
     // Claude Code exports token-usage metrics via OTEL to the control-plane
     // OTLP receiver (epic tsk22); the owning thread/stream ride custom OTLP
@@ -378,6 +395,7 @@ pub async fn open_terminal_session(
         plugin_env.extend(claude_otel_env(
             plugin_runtime,
             thread_id_str.as_deref().unwrap_or_default(),
+            &session_id,
         ));
     }
 
@@ -408,6 +426,9 @@ pub async fn open_terminal_session(
                     oxplow_plugin::McpIdentity {
                         thread_id: thread,
                         stream_id: &stream.id.to_string(),
+                        session_id: Some(&session_id)
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.as_str()),
                     },
                 )
                 .map_err(|e| IpcError::internal(format!("mcp config write failed: {e}")))?,
@@ -429,6 +450,7 @@ pub async fn open_terminal_session(
                 &plugin_runtime.otlp_base_url,
                 &plugin_runtime.hook_token,
                 thread_id_str.as_deref().unwrap_or_default(),
+                &session_id,
             ));
         }
         oxplow_plugin::AgentRuntimePaths::Opencode(paths) => {
@@ -515,15 +537,24 @@ pub async fn open_terminal_session(
         );
         let cwd = std::path::PathBuf::from(&stream.worktree_path);
         ctx.terminal_sessions
-            .attach_or_create_for_thread(session_key, thread_id, cols, rows, |c, r| SpawnRequest {
-                command: "sh".into(),
-                args: vec!["-lc".into(), command],
-                cwd,
-                env: oxplow_app::agent_path::base_pty_env(),
-                env_remove: oxplow_app::agent_path::not_inherited(),
-                cols: c,
-                rows: r,
-            })
+            .attach_or_create_for_agent(
+                session_key,
+                thread_id.map(|thread| oxplow_app::terminal_sessions::AgentPane {
+                    thread,
+                    session: session.as_ref().map(|s| s.id),
+                }),
+                cols,
+                rows,
+                |c, r| SpawnRequest {
+                    command: "sh".into(),
+                    args: vec!["-lc".into(), command],
+                    cwd,
+                    env: oxplow_app::agent_path::base_pty_env(),
+                    env_remove: oxplow_app::agent_path::not_inherited(),
+                    cols: c,
+                    rows: r,
+                },
+            )
             .await?
     };
     Ok(result)
@@ -652,14 +683,14 @@ mod tests {
             hook_token: "tok123".into(),
         };
         let env: std::collections::HashMap<String, String> =
-            claude_otel_env(&pr, "thr1").into_iter().collect();
+            claude_otel_env(&pr, "thr1", "ses3").into_iter().collect();
         assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
         assert_eq!(env["OTEL_METRICS_EXPORTER"], "otlp");
         assert_eq!(env["OTEL_EXPORTER_OTLP_PROTOCOL"], "http/protobuf");
         assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:9");
         assert_eq!(
             env["OTEL_EXPORTER_OTLP_HEADERS"],
-            "Authorization=Bearer tok123,X-Oxplow-Thread=thr1"
+            "Authorization=Bearer tok123,X-Oxplow-Thread=thr1,X-Oxplow-Session=ses3"
         );
         assert_eq!(env["OTEL_METRIC_EXPORT_INTERVAL"], "10000");
     }
@@ -669,7 +700,7 @@ mod tests {
         // tsk24: Codex OTEL is config-only (`--config`). Pin the keys — the
         // endpoint is the full /v1/metrics signal URL, protobuf ("binary"),
         // and the bearer + attribution headers ride the exporter's headers map.
-        let ov = codex_otel_overrides("http://127.0.0.1:9", "tok123", "thr1");
+        let ov = codex_otel_overrides("http://127.0.0.1:9", "tok123", "thr1", "ses3");
         assert!(ov.contains(
             &"otel.exporter.otlp-http.endpoint=\"http://127.0.0.1:9/v1/metrics\"".to_string()
         ));
@@ -679,6 +710,9 @@ mod tests {
         ));
         assert!(
             ov.contains(&"otel.exporter.otlp-http.headers.x-oxplow-thread=\"thr1\"".to_string())
+        );
+        assert!(
+            ov.contains(&"otel.exporter.otlp-http.headers.x-oxplow-session=\"ses3\"".to_string())
         );
         assert!(!ov.iter().any(|o| o.contains("x-oxplow-stream")));
     }

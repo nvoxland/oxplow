@@ -191,8 +191,11 @@ concurrently.
   the hook-bridge plugin, and an `instructions` entry pointing at the
   per-thread prompt file (opencode has no `--append-system-prompt`).
 - All agents export `OXPLOW_STREAM_ID`, `OXPLOW_THREAD_ID`,
-  `OXPLOW_HOOK_TOKEN`, and `OXPLOW_PANE` so hooks can identify
-  themselves to the runtime.
+  `OXPLOW_HOOK_TOKEN`, and `OXPLOW_SESSION` (the agent session, `ses<n>`)
+  so hooks can identify themselves to the runtime. The OTLP exporters
+  carry the session too (`X-Oxplow-Session` beside `X-Oxplow-Thread`),
+  and so do the Claude and ACP MCP connections (nothing reads it there
+  yet).
 
 The command runs as `sh -lc <command>` in a PTY
 (`oxplow_rpc::commands::terminal::open_terminal_session`, keyed by stream,
@@ -322,8 +325,30 @@ records the per-turn `agent_token_usage` prompt rows + `oxplow.turn` facts. Deta
 
 Each hook POSTs to the runtime's MCP server with bearer-token auth via the
 env-var-interpolated `OXPLOW_HOOK_TOKEN` header, plus `X-Oxplow-Stream`,
-`X-Oxplow-Thread`, `X-Oxplow-Pane`. The MCP server's `onHook` callback dispatches
+`X-Oxplow-Thread`, `X-Oxplow-Session`. The MCP server's `onHook` callback dispatches
 to `runtime.handleHookEnvelope`, which:
+
+**Which agent session a hook came from** (`agent_session_store::resolve_tx`,
+shared by hooks and OTLP exports), in order:
+1. the session the sender named (`X-Oxplow-Session`, the ACP host, the UI's
+   interrupt) — refused, with a warning, when it is another thread's;
+2. the session whose resume id is the hook's harness session id (an open
+   one first, then the newest);
+3. the thread's newest open session, one with a turn running first —
+   logged as a warning, since every process oxplow starts names its
+   session, so this firing means a sender that doesn't;
+4. none: an agent oxplow didn't start. It records with the thread's
+   anchors only, its turn and events carry no session (adopting it onto
+   one is later work).
+
+Turns are per session: a prompt opens a turn in its session, a Stop or
+Interrupt closes that session's turns, a process start interrupts only
+its own session's, and the resume id is the session's
+(`agent_session.resume_session_id`). A PTY's exit ingests a `SessionEnd`
+naming only its session (`TerminalSessionRegistry::ingest_exits_into`):
+that session's open turn closes and its harness session ends — once, so
+a harness that already posted its own SessionEnd (Claude) logs no second
+one, and one that posts none (Codex) still ends.
 
 1. (There is no in-memory hook ring any more — P3.9. What a hook did is its
    `agent.*` events in the log; the Hook events page lists them through
@@ -332,7 +357,8 @@ to `runtime.handleHookEnvelope`, which:
 2. Runs `HookIngestService::ingest` (`crates/oxplow-app/src/hook_ingest.rs`,
    P3.3): **one transaction per envelope** writes the state the hook changes
    and the `agent.*` events that record it, anchored to the thread's stream,
-   its open turn and its single open effort (`activity_anchors_tx`).
+   its agent session, that session's open turn and the thread's single
+   open effort (`activity_anchors_tx`).
    **Attribution is a best effort, by design (tsk511, decided with
    Nathan 2026-09-30).** Several agents, the person and outside processes
    can all change a worktree at once, so no rule ties every change to

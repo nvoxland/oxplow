@@ -3243,6 +3243,12 @@ export type HookEnvelope = {
 	kind: HookKind,
 	thread_id: ThreadId | null,
 	stream_id: StreamId | null,
+	/**
+	 *  The agent session it came from (`X-Oxplow-Session`, the ACP host,
+	 *  the UI's interrupt), when the sender knows it.
+	 */
+	agent_session_id?: AgentSessionId | null,
+	// The harness's own session id.
 	session_id: string | null,
 	payload_json: string,
 	/**

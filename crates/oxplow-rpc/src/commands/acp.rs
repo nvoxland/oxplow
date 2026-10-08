@@ -50,9 +50,9 @@ pub async fn acp_open_session(
         .newest_for_thread(thread_id)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?;
-    let (name, resume) = match session {
+    let (session_id, name, resume) = match session {
         Some(s) if s.harness == AgentKind::Acp && s.acp_agent.is_some() => {
-            (s.acp_agent.unwrap_or_default(), s.resume_session_id)
+            (s.id, s.acp_agent.unwrap_or_default(), s.resume_session_id)
         }
         _ => return Err(IpcError::invalid("this thread doesn't run an ACP agent")),
     };
@@ -92,6 +92,7 @@ pub async fn acp_open_session(
                 ("Authorization".into(), format!("Bearer {}", rt.hook_token)),
                 ("X-Oxplow-Thread".into(), thread.id.to_string()),
                 ("X-Oxplow-Stream".into(), stream.id.to_string()),
+                ("X-Oxplow-Session".into(), session_id.to_string()),
             ],
         }],
         None => vec![],

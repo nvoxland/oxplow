@@ -1076,6 +1076,7 @@ mod tests {
             kind: oxplow_domain::HookKind::Stop,
             thread_id: Some(thread),
             stream_id: None,
+            agent_session_id: None,
             session_id: Some("sess-r".into()),
             payload_json: body.to_string(),
             prompt: None,
@@ -1089,6 +1090,7 @@ mod tests {
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(thread),
                 stream_id: None,
+                agent_session_id: None,
                 session_id: Some("sess-r".into()),
                 payload_json: "{}".into(),
                 prompt: Some("count me".into()),
@@ -1433,7 +1435,7 @@ mod tests {
 
     /// An agent's export, logged and counted (P10.M2).
     async fn report(svc: &crate::Services, thread: ThreadId, body: &[u8]) -> bool {
-        let logged = svc.otlp_ingest.ingest(thread, body).await.unwrap();
+        let logged = svc.otlp_ingest.ingest(thread, None, body).await.unwrap();
         svc.event_pump.run_once().await.unwrap();
         logged
     }

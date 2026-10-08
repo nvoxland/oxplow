@@ -29,7 +29,7 @@ command):
 | follow-ups, background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough |
-| forgetting a stale Claude resume pointer at launch (`resume_check::forget_missing`) | agent-session state, like hook ingest's own writes of it; only that column, only while it's still the id found gone |
+| forgetting a stale Claude resume pointer at launch (`resume_check::forget_missing`) | agent-session state (`agent_session.resume_session_id`), like hook ingest's own writes of it; only that column, only while it's still the id found gone |
 | the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |

@@ -26,7 +26,7 @@ export const OxplowHooks = async ({ client }) => {
     Authorization: `Bearer ${env.OXPLOW_HOOK_TOKEN || ""}`,
     "X-Oxplow-Stream": env.OXPLOW_STREAM_ID || "",
     "X-Oxplow-Thread": env.OXPLOW_THREAD_ID || "",
-    "X-Oxplow-Pane": env.OXPLOW_PANE || "",
+    "X-Oxplow-Session": env.OXPLOW_SESSION || "",
   };
 
   async function post(event, payload) {

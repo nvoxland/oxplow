@@ -3,7 +3,9 @@
 //! Closes any `agent_turn` rows the previous boot left open. The pane
 //! that owned them is dead, so the turn can't ever `Stop` on its own
 //! and the row would otherwise pin the work panel to a phantom
-//! in-progress entry.
+//! in-progress entry. It closes turns, not `agent_session` rows: a
+//! session is the slot the person opened, which outlives its process —
+//! its tab comes back after a restart and resumes.
 //!
 //! Agent status needs no reset: it is the newest logged
 //! `agent.status.changed`, and what the rail shows is derived from the

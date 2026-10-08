@@ -1012,6 +1012,8 @@ impl Services {
                 efforts: effort_store.clone(),
                 config: config_arc.clone(),
             }));
+        // An agent's PTY exiting ends its session (Codex posts no SessionEnd).
+        terminal_sessions.ingest_exits_into(hook_ingest.clone());
         // Built before the metric runner, which reports whole-tree collector sweeps
         // through it (tsk48).
         let background_tasks = BackgroundTaskStore::new();
