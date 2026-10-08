@@ -370,10 +370,9 @@ commands:
     op: demote
     invokers: { human: true, agent: false, lens: true }
   - name: thread.promote
-    summary: "Make a thread its stream's writer (the one thread whose agent may change the worktree); the current writer joins the queue. A person's."
+    summary: "Make a thread its stream's writer (the one thread whose agent may change the worktree); the current writer joins the queue. Undo hands the worktree back."
     capability: threads.write
     op: promote
-    invokers: { human: true, agent: false, lens: true }
   - name: thread.rename
     summary: "Rename a thread (`thread:thr12`)."
     capability: threads.write

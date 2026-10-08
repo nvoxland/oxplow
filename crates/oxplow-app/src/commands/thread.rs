@@ -713,23 +713,15 @@ mod tests {
     }
 
     /// Promoting demotes the writer in the same run; undoing it promotes
-    /// the old writer back. An agent may not promote.
+    /// the old writer back. An agent may promote too: handing the worktree
+    /// to the thread that should write next is part of its work.
     #[tokio::test]
-    async fn promote_is_one_run_undoable_and_a_persons() {
+    async fn promote_is_one_run_and_undoable_by_a_person_or_an_agent() {
         let fx = services_with_effort().await;
         let second = create(&fx, "second").await;
-        let denied = run(
-            &fx,
-            &agent(&fx),
-            PROMOTE,
-            json!({ "thread": thread_ref(second) }),
-        )
-        .await
-        .unwrap_err();
-        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
         let out = run(
             &fx,
-            &Actor::Human,
+            &agent(&fx),
             PROMOTE,
             json!({ "thread": thread_ref(second) }),
         )

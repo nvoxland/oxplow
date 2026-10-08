@@ -150,14 +150,14 @@ pub fn read_only_reason(
             "path `{}` is inside the shared worktree and this thread is read-only — \
              only the stream's writer thread may mutate the worktree. \
              Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). \
-             Promote this thread to writer from the thread rail if you need to edit.",
+             To edit here, make this thread the writer (`oxplow.thread.promote` through mcp__oxplow__run_command) — it takes the worktree from the current writer, so do it only when this thread's work should go first.",
             abs.display()
         ));
     }
     Some(
         "This thread is read-only — only the stream's writer thread may mutate the worktree. \
          Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). \
-         Promote this thread to writer from the thread rail if you need to edit."
+         To edit here, make this thread the writer (`oxplow.thread.promote` through mcp__oxplow__run_command) — it takes the worktree from the current writer, so do it only when this thread's work should go first."
             .into(),
     )
 }
