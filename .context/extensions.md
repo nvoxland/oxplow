@@ -871,11 +871,13 @@ launcher commands are checked), then — only if `check` is clean — each
   used to be run as an entity collector and fail);
 - `input: { command, input }` — a provider's, run in its session
   (providers.md "The conformance kit");
-- `input: { effect: <id>, event: { type, payload, subject? }, rows? }`,
+- `input: { effect: <id>, event: { type, payload, subject? }, answers? }`,
   `expect: { commands: [names] } | { skip: <part of the reason> } | {
   reacts: false }` (P8.D12) — whether the effect reacts (`on`/`where`),
-  then `effects::dry_run`: its `input` rows (or `rows`), its script, the
-  composed calls checked against the registry; nothing runs;
+  then `effects::dry_run`: its script, its capability calls answered
+  from `answers` (per capability, in call order) or for real, the
+  composed calls checked against the registry; nothing runs. An
+  extension command's is `input: { command: <id>, input, answers? }`;
 - `input: { event_type, v?, payload }`, `expect: { valid: true | false,
   upcast?: <payload> }` — the payload against the extension's declared
   schema (the newest version without `v`), and its upcast;
@@ -1268,9 +1270,9 @@ script changed" even when there's nothing to run it on (tsk783).
 
 **An effect's reactions** (P8.D12). `EffectReport.effects` lists each
 effect by id with its trigger before and after (`EffectTrigger { on,
-filter, input }`; a script-only change is `changed` too) and, when it
+filter, needs }`; a script-only change is `changed` too) and, when it
 changed, `outputs`: each input — both versions' fixtures that name it
-(`input: { effect, event, rows? }`) and the latest five events of its
+(`input: { effect, event, answers? }`) and the latest five events of its
 `on` types — composed by each version that reacts to it
 (`effects::dry_run` through that side's overlay, nothing runs):
 `Composes { commands, skip?, error? }`. The lines read "Effect x: added — on t where k = v", "Effect x: on …
@@ -1955,8 +1957,8 @@ effects:
     summary: Note a finished item on its thread.
     on: [work_item.state_changed]  # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these
-    input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields bound, and :event_id / :event_seq
-    entry: effects/announce.star   # transform({event, rows}) → {commands, events?} | {skip}
+    needs: [sql.read]              # the host capabilities its script calls
+    entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
     after: [page_ref.work_item]    # optional: consumers it waits for
 ```
 
@@ -2033,18 +2035,19 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    triggers it; one that `MAX_CHAIN` (4) effect runs already led to is
    `skipped`;
 4. the script runs sandboxed over `{ event: { id, type, v, seq, source,
-   subject, payload }, rows }` (`input` with the payload's fields bound,
-   and the event itself as `:event_id` (its id) and `:event_seq` (its
-   seq), the same names and meanings a collector's `input` binds — the
-   event's own win over payload fields of those names, and a dry run's
-   fixture without them binds NULL (tsk1002) — to read its own
-   `v_event` row, its subject or cause; P11, tsk955 — one
-   `effects::input_query` for the run and `dry_run` alike):
-   `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs.
-   The script and its `input` rows run on a read **before** the run's
-   transaction: the composed calls are fixed by then, so a row can be
-   stale against what the run then sees (each command's own validation
-   is what holds — the composer doesn't re-read).
+   subject, payload } }`, reading with the host capabilities its `needs`
+   lists — `capability("sql.read", { sql, params })`, binding what it
+   wants (the payload's fields, the event's `id` / `seq` to read its own
+   `v_event` row, its subject or cause) — served through the SQL gateway,
+   each call its own read (`effects::run_script` with
+   `host_capabilities::Calls`, for the run and `dry_run` alike; a dry run
+   answers from a fixture's `answers`): `{ skip: "why" }` is `skipped`;
+   `{ commands, events? }` runs. The script and its reads run **before**
+   the run's transaction: the composed calls are fixed by then, so a row
+   can be stale against what the run then sees (each command's own
+   validation is what holds — the composer doesn't re-read). What it
+   called is added to the run's trace (`CapabilityTrace::add`), so the
+   reaction's audit row records it.
 
 A run is the registered `oxplow.command.sequence` — its spec and compiled input
 schema, shared (`Command::with_handler`) — over what the script composed

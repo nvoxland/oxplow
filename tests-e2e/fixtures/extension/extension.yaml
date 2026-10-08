@@ -21,10 +21,7 @@ effects:
       titled "[delete]" asks to delete it.
     on: [work_item.created]
     entry: effects/note.star
-    # The item as it reads now: a person's retry composes from this afresh.
-    input: |
-      SELECT CAST(ref AS TEXT) AS ref, CAST(title AS TEXT) AS title
-        FROM v_work_item WHERE ref = :work_item
+    needs: [sql.read]
 models:
   - name: item
     version: 1

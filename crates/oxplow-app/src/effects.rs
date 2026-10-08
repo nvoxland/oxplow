@@ -9,8 +9,8 @@
 //!     summary: Note a finished item on its thread.
 //!     on: [work_item.state_changed]
 //!     where: { to: done }        # optional: payload fields equal to these
-//!     input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields, :event_id, :event_seq bound
-//!     entry: effects/announce.star   # transform({event, rows}) → {commands, events?} | {skip}
+//!     needs: [sql.read]              # the host capabilities its script calls
+//!     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
 //!     after: [page_ref.work_item]    # optional: consumers it waits for
 //! ```
 //!
@@ -42,8 +42,9 @@ pub struct EffectDecl {
     /// Payload fields that must equal these values (the collectors'
     /// `where`).
     pub filter: BTreeMap<String, String>,
-    /// SQL whose rows the script gets, the event's payload fields bound.
-    pub input: Option<String>,
+    /// The host capabilities its script calls (`capability(id, args)`,
+    /// `.context/commands.md` "Host capabilities"): `sql.read`.
+    pub needs: Vec<String>,
     /// The script's path in the folder.
     pub entry: String,
     /// Its source.
@@ -70,7 +71,7 @@ struct EffectFile {
     #[serde(default, rename = "where")]
     filter: Option<serde_yaml::Value>,
     #[serde(default)]
-    input: Option<String>,
+    needs: Vec<String>,
     entry: String,
     #[serde(default)]
     after: Vec<String>,
@@ -154,6 +155,13 @@ fn decl_of(
         oxplow_config::collectors::Trigger::On { events, filter, .. } => (events, filter),
         _ => return Err(named("`on` lists the event types it reacts to".into())),
     };
+    for need in &f.needs {
+        if oxplow_domain::host_capability::host_capability(need).is_none() {
+            return Err(named(format!(
+                "`needs`: `{need}` isn't a host capability an effect's script can call"
+            )));
+        }
+    }
     let script = read(&f.entry)
         .ok_or_else(|| named(format!("entry `{}` isn't in the extension", f.entry)))?;
     oxplow_collect_plugin::runtime::check_starlark(&f.entry, &script)
@@ -164,7 +172,7 @@ fn decl_of(
         summary: f.summary,
         on,
         filter,
-        input: f.input,
+        needs: f.needs,
         entry: f.entry,
         script,
         after: f.after,
@@ -173,7 +181,7 @@ fn decl_of(
 }
 
 /// An effect as a program to approve: its script, over every file of its
-/// extension's folder (the manifest, whose `on`/`where`/`input` decide
+/// extension's folder (the manifest, whose `on`/`where`/`needs` decide
 /// when and with what it runs, included).
 pub fn effect_program(ext: &Extension, decl: &EffectDecl) -> ProjectProgram {
     let dir = ext.path.trim_end_matches('/');
@@ -329,48 +337,6 @@ pub fn event_json(event: &oxplow_domain::StoredEvent) -> serde_json::Value {
     })
 }
 
-/// The query an effect's `input` runs for `event` (its [`event_json`]):
-/// the payload's top-level fields bound as named parameters, and the event
-/// itself as `:event_id` (its id) and `:event_seq` (its seq) — so it can
-/// read the event's own row (its subject, its cause) from `v_event`
-/// (tsk955). The event's own win over payload fields of those names, and
-/// what a dry run's fixture leaves out binds NULL (tsk1002). Capped as a
-/// command's `input` is.
-pub fn input_query(sql: &str, event: &serde_json::Value) -> oxplow_db::SqlQuery {
-    let mut params: Vec<(String, oxplow_db::SqlCell)> =
-        input_params(event.get("payload").unwrap_or(&serde_json::Value::Null))
-            .into_iter()
-            .filter(|(name, _)| name != "event_id" && name != "event_seq")
-            .collect();
-    let id = event.get("id").and_then(serde_json::Value::as_str);
-    let seq = event.get("seq").and_then(serde_json::Value::as_i64);
-    params.push((
-        "event_id".into(),
-        id.map_or(oxplow_db::SqlCell::Null(()), |id| {
-            oxplow_db::SqlCell::Text(id.into())
-        }),
-    ));
-    params.push((
-        "event_seq".into(),
-        seq.map_or(oxplow_db::SqlCell::Null(()), oxplow_db::SqlCell::Int),
-    ));
-    oxplow_db::SqlQuery::new(sql)
-        .named(params)
-        .limit(Some(crate::host_capabilities::SQL_READ_ROW_CAP))
-}
-
-/// The named parameters a payload binds: its top-level fields.
-fn input_params(payload: &serde_json::Value) -> Vec<(String, oxplow_db::SqlCell)> {
-    payload
-        .as_object()
-        .map(|o| {
-            o.iter()
-                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// Whether `decl` reacts to an event of `event_type` with `payload`: its
 /// `on` names the type and its `where` matches.
 pub fn reacts_to(decl: &EffectDecl, event_type: &str, payload: &serde_json::Value) -> bool {
@@ -378,53 +344,49 @@ pub fn reacts_to(decl: &EffectDecl, event_type: &str, payload: &serde_json::Valu
         && crate::collector_triggers::payload_matches(&decl.filter, payload)
 }
 
-/// Run `script` over `{ event, rows }`, sandboxed with a command script's
-/// budget and no host (no files, no `ai_*`). Blocks: call it off the
-/// async runtime.
+/// Run `script` over `{ event }`, sandboxed with a command script's budget,
+/// its `capability` calls answered by `calls` (no files, no `ai_*`).
+/// Blocks: call it off the async runtime.
 pub fn run_script(
     script: &str,
     event: serde_json::Value,
-    rows: Vec<serde_json::Value>,
+    calls: &mut crate::host_capabilities::Calls<'_>,
 ) -> Result<Reaction, String> {
-    use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
-    let (script, input) = (
-        script.to_string(),
-        serde_json::json!({ "event": event, "rows": rows }),
-    );
-    let out = run_sandboxed(
+    let out = oxplow_collect_plugin::capability::run_starlark_serving(
         &crate::extension_commands::COMMAND_SCRIPT_BUDGET,
-        move || run_starlark(&script, &input),
+        script,
+        &serde_json::json!({ "event": event }),
+        &mut |id, args| calls.serve(id, args),
     )
     .map_err(|e| format!("the script failed: {e}"))?;
     reaction(out)
 }
 
 /// What `decl` would do with `event` (a fixture's, or a logged one's
-/// [`event_json`]) — its `input` rows (`rows` stands in for them when
-/// given), its script, the commands it composes checked against
-/// `registry` — running nothing: `plugin test` and a change's review.
+/// [`event_json`]) — its script, its capability calls answered from
+/// `answers` or for real (reads through `layer`), the commands it composes
+/// checked against `registry` — running nothing: `plugin test` and a
+/// change's review.
 pub async fn dry_run(
     layer: &crate::sql_gateway::SqlGateway,
     decl: &EffectDecl,
     script: &str,
     event: serde_json::Value,
-    rows: Option<Vec<serde_json::Value>>,
+    answers: &BTreeMap<String, Vec<serde_json::Value>>,
     registry: Option<crate::extensions::CommandSchemas<'_>>,
 ) -> Result<Reaction, String> {
-    let rows = match (rows, &decl.input) {
-        (Some(rows), _) => rows,
-        (None, Some(sql)) => crate::host_capabilities::rows_json(
-            &layer
-                .run(input_query(sql, &event))
-                .await
-                .map_err(|e| format!("`input`: {e}"))?,
-        ),
-        (None, None) => Vec::new(),
-    };
-    let script = script.to_string();
-    let reaction = tokio::task::spawn_blocking(move || run_script(&script, event, rows))
-        .await
-        .map_err(|e| format!("the script's worker failed: {e}"))??;
+    let (script, needs) = (script.to_string(), decl.needs.clone());
+    let (layer, answers) = (layer.clone(), answers.clone());
+    let runtime = tokio::runtime::Handle::current();
+    let reaction = tokio::task::spawn_blocking(move || {
+        let trace = crate::host_capabilities::CapabilityTrace::default();
+        let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
+        let mut calls =
+            crate::host_capabilities::Calls::new(&needs, &trace, read).with_answers(&answers);
+        run_script(&script, event, &mut calls)
+    })
+    .await
+    .map_err(|e| format!("the script's worker failed: {e}"))??;
     if let (Some(registry), Reaction::Run { calls, .. }) = (registry, &reaction) {
         crate::extension_commands::check_calls(registry, calls)?;
     }
@@ -505,31 +467,6 @@ pub fn finished_tx(
 
 #[cfg(test)]
 pub(crate) mod tests {
-
-    /// tsk1002: an effect's `input` binds the event's own id and seq —
-    /// over a payload field of either name — and NULL for what a dry run's
-    /// fixture leaves out, rather than failing on an unbound name.
-    #[tokio::test]
-    async fn the_input_binds_the_events_own_id_and_seq() {
-        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let sql = "SELECT :event_id AS id, :event_seq AS seq";
-        let event = serde_json::json!({
-            "id": "ev-1",
-            "seq": 7,
-            "payload": { "event_id": "spoofed", "event_seq": 99 },
-        });
-        let bound = layer.run(super::input_query(sql, &event)).await.unwrap();
-        assert_eq!(
-            serde_json::to_value(bound.rows).unwrap(),
-            serde_json::json!([["ev-1", 7]])
-        );
-        let fixture = serde_json::json!({ "payload": {} });
-        let bound = layer.run(super::input_query(sql, &fixture)).await.unwrap();
-        assert_eq!(
-            serde_json::to_value(bound.rows).unwrap(),
-            serde_json::json!([[null, null]])
-        );
-    }
 
     /// tsk990: what a scheduled retry would send was composed by the
     /// script as it was when it failed. A new approval is of the script as

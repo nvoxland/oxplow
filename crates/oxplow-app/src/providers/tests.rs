@@ -4593,13 +4593,9 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
 
 /// The tracker extension with the fake (running with `hooks`) and an
 /// effect `file` that reacts to an oxplow task moved to done with the
-/// calls `script` composes; both approved, the provider enabled.
+/// calls `script` composes (it may read with `sql.read`); both approved,
+/// the provider enabled.
 async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
-    with_effect_reading(hooks, None, script).await
-}
-
-/// [`with_effect`], its effect reading `input` rows first when given.
-async fn with_effect_reading(hooks: &str, input: Option<&str>, script: &str) -> TaskEffortFixture {
     let fx = services_with_task_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, hooks);
@@ -4608,10 +4604,7 @@ async fn with_effect_reading(hooks: &str, input: Option<&str>, script: &str) -> 
     std::fs::write(
         dir.join("extension.yaml"),
         manifest
-            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.state_changed]\n    where: { to: done }\n    entry: file.star\n"
-            + &input
-                .map(|sql| format!("    input: \"{sql}\"\n"))
-                .unwrap_or_default(),
+            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: file.star\n",
     )
     .unwrap();
     std::fs::write(dir.join("file.star"), script).unwrap();
@@ -4744,15 +4737,10 @@ async fn a_lost_reply_is_sent_again_and_lands_once() {
 /// changed in between.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
-    let titled_from_the_task = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + x[\"rows\"][0][\"title\"]}}]}\n";
-    let fx = with_effect_reading(
-        "lose-reply",
-        // The oxplow task that moved (the fake is the active list, so the
-        // interface doesn't show it): its own view.
-        Some("SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = :work_item"),
-        titled_from_the_task,
-    )
-    .await;
+    // Reads the oxplow task that moved (the fake is the active list, so
+    // the interface doesn't show it): its own view.
+    let titled_from_the_task = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
+    let fx = with_effect("lose-reply", titled_from_the_task).await;
     let task = oxplow_domain::refs::build::work_item_ref(fx.task);
     let rows = fx
         .svc
