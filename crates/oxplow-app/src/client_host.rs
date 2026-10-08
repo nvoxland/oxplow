@@ -1,6 +1,8 @@
 //! The window as a command host (`.context/commands.md` "Where a command
 //! runs"): a command backed by a capability the window hosts
-//! (`Host::Window`: `tabs.write`, …) runs in the window. The window's own
+//! (`Host::Window`: `tabs.write`, …) runs in the window — and one the
+//! app shell hosts (`Host::Shell`: `projects.write`), which the window
+//! reaches. The window's own
 //! runs never come here; a run on the daemon — an agent's, a script's —
 //! reaches the window through [`ClientHost::call`]: an
 //! `OxplowEvent::ClientCall` to the project's one window, answered with
@@ -174,6 +176,17 @@ pub struct DraftInput {
     pub text: String,
 }
 
+/// `projects.write` `open`'s input: the folder (none asks the person to
+/// pick one), and whether it opens in a new window.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpenProjectInput {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub new_window: bool,
+}
+
 /// An operation that takes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -212,6 +225,19 @@ pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
         "agent_input.write",
         "draft",
         schema::<DraftInput>(),
+    ));
+    // The shell's, reached through the window.
+    ops.push(ClientHost::op(
+        host,
+        "projects.write",
+        "create",
+        schema::<NoInput>(),
+    ));
+    ops.push(ClientHost::op(
+        host,
+        "projects.write",
+        "open",
+        schema::<OpenProjectInput>(),
     ));
     ops
 }

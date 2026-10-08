@@ -58,6 +58,10 @@ pub enum Host {
     /// The project's window: its threads' tabs, the editor, the search
     /// box, the agent's input.
     Window,
+    /// The app shell: projects and windows (New / Open Project). The
+    /// window runs its commands by calling the shell; a run on the daemon
+    /// reaches the shell through the window.
+    Shell,
 }
 
 /// One host capability, as core declares it.
@@ -199,6 +203,12 @@ pub const HOST_CAPABILITIES: &[HostCapability] = &[
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Enable, record and rebuild metrics (changes the configuration and the facts).",
+    },
+    HostCapability {
+        id: "projects.write",
+        class: EffectClass::Write,
+        host: Host::Shell,
+        summary: "Create a project in a folder, or open one — in this window or a new one.",
     },
     HostCapability {
         id: "providers.sync",

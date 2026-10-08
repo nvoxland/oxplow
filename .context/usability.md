@@ -549,9 +549,8 @@ declaring *what it is* and mounting the generic layer.
   the pair (`launcher-new-project` accented, `launcher-open-project`
   secondary). Don't reintroduce an "open initializes it for you" path.
 - **The menu bar is File and Edit only** (decided 2026-10-07): the
-  offers with a `ui.menu` place (Save, Quick Open… in File; Find in
-  Edit), beside the shell's project commands and the native Edit roles
-  (`menuBar.ts`). Every other command is a **search command** — the
+  offers with a `ui.menu` place (New / Open Project…, Save, Quick Open…
+  in File; Find in Edit), beside the native Edit roles (`menuBar.ts`). Every other command is a **search command** — the
   command bus's offers (`commandOffers`: Pull / Push Changes, New Task…
   (⌘⇧N), New Dashboard…, New Stream…, New Thread…, Commit Changes…, New
   Lens with Your Agent…). **Pages aren't commands:** the View / Git /

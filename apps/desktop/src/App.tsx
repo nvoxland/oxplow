@@ -65,7 +65,7 @@ import {
   updateFileDraft,
   type FileSessionState,
 } from "./editor-session.js";
-import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFIX, shellCommands, type ShellActions } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
@@ -1246,18 +1246,6 @@ export function App() {
     },
     [],
   );
-  // The shell's project commands (opening a folder is the shell's).
-  const shellActions = useMemo<ShellActions>(() => ({
-    openProject() {
-      void pickAndOpenProject(false);
-    },
-    openProjectNewWindow() {
-      void pickAndOpenProject(true);
-    },
-    newProject() {
-      void pickAndCreateProject();
-    },
-  }), []);
   /** One of the window's own forms — a command's `ui.form` that isn't a
    *  tab id: what gathers New Thread's and Commit's input. */
   const openForm = useCallback((name: string) => {
@@ -1311,6 +1299,10 @@ export function App() {
               return commandState.hasStream;
             case "agent_input.write/draft":
               return commandState.hasThread;
+            case "projects.write/create":
+            case "projects.write/open":
+              // The shell's: a browser window has none to ask.
+              return shellAvailable();
             default:
               return true;
           }
@@ -1336,12 +1328,11 @@ export function App() {
   );
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
-  const menuGroups = useMemo(() => buildMenuBar(offers, shellActions), [offers, shellActions]);
+  const menuGroups = useMemo(() => buildMenuBar(offers), [offers]);
   const nativeMenuSnapshots = useMemo(
     () => buildNativeMenuSnapshots(menuGroups, recentProjects),
     [menuGroups, recentProjects],
   );
-  const searchOffers = useMemo(() => [...offers, ...shellCommands(shellActions)], [offers, shellActions]);
 
   // The launcher (QuickOpen) is the single discovery surface — pages,
   // files, commands, and body search in one box — and has exactly one
@@ -1381,12 +1372,15 @@ export function App() {
 
   useEffect(() => {
     return desktopBridge().onMenuCommand((commandId: string) => {
-      // Dynamic "Open Recent ▸ <project>" entries aren't menu items;
-      // open the trailing path in a new window. A recent whose `.oxplow/`
-      // has since been deleted errors rather than re-creating it.
+      // Dynamic "Open Recent ▸ <project>" entries aren't menu items:
+      // `oxplow.project.open`'s operation opens the trailing path in a
+      // new window. A recent whose `.oxplow/` has since been deleted
+      // errors rather than re-creating it.
       if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
         const path = commandId.slice(OPEN_RECENT_PREFIX.length);
-        void openProject(path, true).catch((e) => {
+        void Promise.resolve(
+          windowHandlersRef.current["projects.write"]?.open?.({ path, new_window: true }, { threadId: null, actor: "human" }),
+        ).catch((e: unknown) => {
           recordOpError({
             label: "Open project",
             message: e instanceof Error ? e.message : String(e),
@@ -2153,6 +2147,19 @@ export function App() {
           const text = (input as { text?: unknown } | null)?.text;
           if (typeof text !== "string") throw new Error("`text` is the draft");
           insertIntoAgent(text);
+          return null;
+        },
+      },
+      // The app shell's: projects and windows.
+      "projects.write": {
+        create: async () => {
+          await pickAndCreateProject();
+          return null;
+        },
+        open: async (input) => {
+          const { path, new_window } = (input ?? {}) as { path?: unknown; new_window?: unknown };
+          if (typeof path === "string") await openProject(path, new_window === true);
+          else await pickAndOpenProject(new_window === true);
           return null;
         },
       },
@@ -3366,7 +3373,7 @@ export function App() {
         pages={computePagesDirectory({
           backlogReadyCount: backlogState?.items.length ?? 0,
         })}
-        offers={searchOffers}
+        offers={offers}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {
           void handleOpenFile(path);

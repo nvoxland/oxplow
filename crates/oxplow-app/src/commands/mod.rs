@@ -714,12 +714,12 @@ impl CommandBus {
             .commands
             .values()
             .filter(|c| matches!(c.handler, Handler::External(_)))
-            // The window's own (`client_host`) run in the window, not
-            // against a system that owns state: reviewed as a class.
+            // The window's and the shell's own (`client_host`) run there,
+            // not against a system that owns state: reviewed as a class.
             .filter(|c| {
                 !c.spec.op.as_ref().is_some_and(|op| {
                     oxplow_domain::host_capability::host_capability(&op.capability)
-                        .is_some_and(|h| h.host == oxplow_domain::host_capability::Host::Window)
+                        .is_some_and(|h| h.host != oxplow_domain::host_capability::Host::Daemon)
                 })
             })
             .map(|c| c.spec.id.clone())

@@ -79,10 +79,10 @@ Everything a person reaches a command by comes from the offers:
 - **search** lists the ref-less ones that can run now;
 - **the menu bar** (`menuBar.ts`: the OS's on macOS, the in-window
   `Menubar` elsewhere) is the offers with a `ui.menu` place, in order —
-  beside the shell's project commands (New / Open Project, until the app
-  shell hosts them) and the native Edit roles (Undo … Select All, done by
-  the OS's responder chain: WKWebView only delivers ⌘C/⌘V with them in
-  the menu);
+  the project commands among them — beside only the native Edit roles
+  (Undo … Select All, done by the OS's responder chain: WKWebView only
+  delivers ⌘C/⌘V with them in the menu; File ▸ Open Recent's submenu is
+  built from the recents list and runs `projects.write` `open`);
 - **shortcuts** are the offers' `ui.shortcut`s.
 
 Save, Find, Quick Open and New Lens with Your Agent are the window's own
@@ -127,9 +127,14 @@ call order) or through the SQL gateway.
 
 **Where a command runs** (VS Code's model: commands run where their
 handler lives). A capability says its host (`Host`): the **daemon**
-(oxplow's records, the repository, the project — every capability so far
-but one) or the project's **window** (`tabs.write`: open, close, focus a
-tab; later the editor, the search box, the agent's input). A command
+(oxplow's records, the repository, the project's files), the project's
+**window** (`tabs.write`: open, close, focus a tab; `editor.write`:
+save; `window.show`: find, quick open; `agent_input.write`: draft, a
+person's) or the **app shell** (`projects.write`: create, open — New /
+Open Project; the window reaches the shell, so the window hosts its
+handlers too). A shell command isn't recorded: there's no app-scope bus
+or log yet — one comes when something there is worth recording or an
+agent needs it. A command
 backed by a window capability is View class (not recorded, no
 transaction) and its spec carries the operation (`CommandSpec::op`):
 

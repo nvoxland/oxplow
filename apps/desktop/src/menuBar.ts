@@ -1,10 +1,9 @@
 /// The menu bar — File and Edit, the OS's on macOS and the in-window
 /// `Menubar` elsewhere — built from the commands the bus offers with a
-/// `ui.menu` place (`commandOffers`), in order. Beside them: the shell's
-/// project commands (New / Open Project, until the app shell hosts them)
-/// and the native Edit roles (Undo … Select All): the OS's responder
-/// chain does those, never our dispatch — WKWebView only delivers ⌘C/⌘V
-/// with them in the menu.
+/// `ui.menu` place (`commandOffers`), in order, the project commands
+/// (the shell's) among them. Beside them only the native Edit roles (Undo
+/// … Select All): the OS's responder chain does those, never our
+/// dispatch — WKWebView only delivers ⌘C/⌘V with them in the menu.
 import type { MenuGroup as SharedMenuGroup, MenuItem } from "./menu.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type {
@@ -18,13 +17,6 @@ export interface MenuGroup extends SharedMenuGroup {
   id: MenuId;
   label: string;
   items: MenuItem[];
-}
-
-/** The shell's project commands (opening a folder is the shell's). */
-export interface ShellActions {
-  newProject(): void;
-  openProject(): void;
-  openProjectNewWindow(): void;
 }
 
 /** A menu entry and its place. */
@@ -44,31 +36,18 @@ const NATIVE_EDIT: MenuItem[] = [
   { id: "native.separator.2", label: "", separator: true, enabled: true },
 ];
 
-/** The shell's project commands, as search lists them too. */
-export function shellCommands(shell: ShellActions): CommandEntry[] {
-  // Creating and opening are separate doors: New Project… is the only
-  // command that initializes a folder; the Open pair only ever opens one
-  // that already is.
-  return [
-    { id: "project.new", label: "New Project…", run: shell.newProject },
-    { id: "project.open", label: "Open Project…", run: shell.openProject },
-    { id: "project.openNewWindow", label: "Open Project in New Window…", run: shell.openProjectNewWindow },
-  ].map((c) => ({ ...c, group: "File", searchKey: `file ${c.label}`.toLowerCase() }));
-}
-
 function entry(o: CommandEntry): MenuItem {
   return { id: o.id, label: o.label, shortcut: o.shortcut, enabled: o.enabled ?? true, run: o.run };
 }
 
-/** File and Edit: `offers` placed by `ui.menu`, after the project
- *  commands (File) and the native roles (Edit). */
-export function buildMenuBar(offers: CommandEntry[], shell: ShellActions): MenuGroup[] {
+/** File and Edit: `offers` placed by `ui.menu`, after the native roles
+ *  (Edit). */
+export function buildMenuBar(offers: CommandEntry[]): MenuGroup[] {
   const placed = (bar: MenuId): Placed[] =>
     offers.filter((o) => o.menu?.bar === bar).map((o) => ({ order: o.menu!.order, item: entry(o) }));
   const sorted = (items: Placed[]) => items.sort((a, b) => a.order - b.order).map((p) => p.item);
-  const project = shellCommands(shell).map((c, i) => ({ order: (i + 1) * 10, item: entry(c) }));
   return [
-    { id: "file", label: "File", items: sorted([...project, ...placed("file")]) },
+    { id: "file", label: "File", items: sorted(placed("file")) },
     { id: "edit", label: "Edit", items: [...NATIVE_EDIT, ...sorted(placed("edit"))] },
   ];
 }
@@ -86,6 +65,9 @@ export function menuItemById(groups: MenuGroup[], id: string): MenuItem | undefi
 /// The native `menu:command` dispatch matches this prefix and opens the
 /// trailing path in a new window.
 export const OPEN_RECENT_PREFIX = "project.openRecent:";
+
+/// The File item Open Recent follows.
+const OPEN_RECENT_AFTER = "oxplow.project.open_in_new_window";
 
 /// The native-menu snapshot: `groups` plus a File ▸ Open Recent ▸
 /// <project> submenu built from the recents list (the in-window Menubar
@@ -111,7 +93,7 @@ export function buildNativeMenuSnapshots(
           checked: null,
         })),
       };
-      const afterIdx = items.findIndex((i) => i.id === "project.openNewWindow");
+      const afterIdx = items.findIndex((i) => i.id === OPEN_RECENT_AFTER);
       items.splice(afterIdx >= 0 ? afterIdx + 1 : items.length, 0, openRecent);
     }
     return { id: group.id, label: group.label, items };

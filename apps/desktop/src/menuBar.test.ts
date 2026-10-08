@@ -4,7 +4,6 @@ import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFI
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { MenuItemSnapshot } from "./tauri-bridge/generated/bindings.js";
 
-const shell = { newProject: () => {}, openProject: () => {}, openProjectNewWindow: () => {} };
 const offer = (id: string, menu: CommandEntry["menu"], enabled = true): CommandEntry => ({
   id,
   group: "G",
@@ -16,18 +15,18 @@ const offer = (id: string, menu: CommandEntry["menu"], enabled = true): CommandE
   run: () => {},
 });
 
-test("the menu bar is the offers placed by `ui.menu`, after the project commands and the native Edit roles", () => {
+test("the menu bar is the offers placed by `ui.menu`, the native Edit roles first", () => {
   const bar = buildMenuBar(
     [
       offer("oxplow.window.quick_open", { bar: "file", order: 50 }),
+      offer("oxplow.project.create", { bar: "file", order: 10 }),
       offer("oxplow.editor.save", { bar: "file", order: 40 }, false),
       offer("oxplow.window.find", { bar: "edit", order: 100 }),
       offer("oxplow.vcs.pull", null),
     ],
-    shell,
   );
   expect(bar.map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([
-    ["file", ["project.new", "project.open", "project.openNewWindow", "oxplow.editor.save", "oxplow.window.quick_open"]],
+    ["file", ["oxplow.project.create", "oxplow.editor.save", "oxplow.window.quick_open"]],
     [
       "edit",
       [
@@ -51,7 +50,12 @@ test("the menu bar is the offers placed by `ui.menu`, after the project commands
 // shell deserializes — every item names its shortcut and check state (null
 // when it has none), and carries nothing the shell doesn't read.
 test("the native menu is the shell's own snapshot shape, with Open Recent", () => {
-  const groups = buildNativeMenuSnapshots(buildMenuBar([], shell), [{ path: "/p/a", title: "A", exists: true }]);
+  const files = [
+    offer("oxplow.project.create", { bar: "file", order: 10 }),
+    offer("oxplow.project.open_in_new_window", { bar: "file", order: 30 }),
+    offer("oxplow.editor.save", { bar: "file", order: 40 }),
+  ];
+  const groups = buildNativeMenuSnapshots(buildMenuBar(files), [{ path: "/p/a", title: "A", exists: true }]);
   const keys = new Set<string>();
   const walk = (items: MenuItemSnapshot[]) => {
     for (const item of items) {
@@ -65,12 +69,12 @@ test("the native menu is the shell's own snapshot shape, with Open Recent", () =
   expect(keys.has("run")).toBe(false);
   const file = groups.find((g) => g.id === "file")!;
   expect(file.items.map((i) => i.id)).toEqual([
-    "project.new",
-    "project.open",
-    "project.openNewWindow",
+    "oxplow.project.create",
+    "oxplow.project.open_in_new_window",
     "project.openRecent",
+    "oxplow.editor.save",
   ]);
-  expect(file.items[3].submenu).toEqual([
+  expect(file.items[2].submenu).toEqual([
     { id: `${OPEN_RECENT_PREFIX}/p/a`, label: "A", shortcut: null, enabled: true, checked: null },
   ]);
 });

@@ -385,8 +385,8 @@ The launcher does everything in one box:
     collapsed}`.
 - **Typing** → ranked results, pages → **commands** → files → body hits.
   Commands are the bus's offers (`commandOffers`, passed in as `offers`)
-  that can run now (`searchableCommands`), with the shell's project
-  commands; the same offers feed the menu bar (`menuBar.ts`). Body hits come from `searchSite` (BM25 over tasks / comments /
+  that can run now (`searchableCommands`); the same offers feed the menu
+  bar (`menuBar.ts`). Body hits come from `searchSite` (BM25 over tasks / comments /
   wiki / notes / file contents). The ordering is a pure helper —
   `buildQuickOpenResults` in `components/quickOpenResults.ts` — so it's
   unit-tested without mounting React.

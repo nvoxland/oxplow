@@ -301,6 +301,25 @@ commands:
     summary: "Record an asserted number for a metric (provenance `asserted`): a value oxplow didn't compute, like a CI import. The metric needs a source measure and must not be a `count`; the fact is stamped to match the metric's own filter."
     capability: metrics.write
     op: record
+  # projects.write — the app shell's; a person's.
+  - name: project.create
+    summary: "Pick a folder and create a project in it, opened in a new window. A folder that already is a project is refused."
+    capability: projects.write
+    op: create
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "New Project…", group: File, menu: { bar: file, order: 10 } }
+  - name: project.open
+    summary: "Open a folder that is a project (`path`, else pick one), in this window or a new one (`new_window`)."
+    capability: projects.write
+    op: open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "Open Project…", group: File, input: { new_window: false }, menu: { bar: file, order: 20 } }
+  - name: project.open_in_new_window
+    summary: "Pick a folder that is a project and open it in a new window."
+    capability: projects.write
+    op: open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "Open Project in New Window…", group: File, input: { new_window: true }, menu: { bar: file, order: 30 } }
   # providers.sync
   - name: provider.sync
     summary: "Read a provider instance's collectors now (all, or one), restating the items it tracks (runs the provider process, a system the bus doesn't own)."
