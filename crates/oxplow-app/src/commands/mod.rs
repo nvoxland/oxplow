@@ -198,35 +198,9 @@ pub enum Handler {
     /// Runs against a system the bus doesn't own; the bus audits it after
     /// it returns.
     External(Arc<ExternalHandler>),
-    /// Decides per input which of the two it is (P7.A1): the `work_item.*`
-    /// verbs route by the ref's provider — oxplow's items in the
-    /// transaction, another provider's through its process.
-    Dispatch(Dispatch),
     /// A composite (`compose.rs`): says which calls an input runs; the bus
     /// runs them in its transaction when every one can, else as steps.
     Compose(Arc<compose::Compose>),
-}
-
-/// Where a `Dispatch` command's run goes for one input.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Route {
-    /// The `Tx` handler, in the bus's transaction.
-    Tx,
-    /// The `External` handler, against the named system (`provider
-    /// \`issues\``) — what a refusal to compose it names.
-    External(String),
-}
-
-type Router = dyn Fn(&Value) -> Result<Route, CommandError> + Send + Sync;
-
-/// A `Dispatch` handler: the route decision and the two handlers it
-/// picks between. The route runs after the input has passed the schema,
-/// so it sees a well-formed input; its error is the caller's (`Invalid`).
-#[derive(Clone)]
-pub struct Dispatch {
-    pub route: Arc<Router>,
-    pub tx: Arc<TxHandler>,
-    pub external: Arc<ExternalHandler>,
 }
 
 /// A handler with its route decided: what step 5 runs.
@@ -326,7 +300,7 @@ impl Command {
         let declared = match self.handler {
             Handler::Tx(_) => Atomicity::Tx,
             Handler::External(_) => Atomicity::External,
-            Handler::Dispatch(_) | Handler::Compose(_) => Atomicity::Dispatch,
+            Handler::Compose(_) => Atomicity::Dispatch,
         };
         if declared != self.spec.atomicity {
             return Err(CommandError::Invalid {
@@ -374,18 +348,14 @@ impl Command {
         }
     }
 
-    /// The handler for `input`: a `Dispatch` command's route decided (its
-    /// error is the caller's), the others as they are.
-    fn resolve(&self, input: &Value) -> Result<Routing, CommandError> {
-        Ok(Routing::Ready(match &self.handler {
+    /// Its handler: a composite's routing deferred until the actor is
+    /// admitted, the others as they are.
+    fn resolve(&self) -> Routing {
+        Routing::Ready(match &self.handler {
             Handler::Tx(h) => Resolved::Tx(h.clone()),
             Handler::External(h) => Resolved::External(h.clone()),
-            Handler::Dispatch(d) => match (d.route)(input)? {
-                Route::Tx => Resolved::Tx(d.tx.clone()),
-                Route::External(_) => Resolved::External(d.external.clone()),
-            },
-            Handler::Compose(c) => return Ok(Routing::Composite(c.clone())),
-        }))
+            Handler::Compose(c) => return Routing::Composite(c.clone()),
+        })
     }
 }
 
@@ -758,17 +728,16 @@ impl CommandBus {
         names
     }
 
-    /// The `Dispatch` commands (composites included), sorted — each
-    /// decides per input whether it runs in the transaction or against a
-    /// system outside it, so the list is pinned like
+    /// The composites, sorted — each decides per input whether it runs in
+    /// the transaction or as steps, so the list is pinned like
     /// [`Self::external_commands`].
-    pub fn dispatch_commands(&self) -> Vec<String> {
+    pub fn composite_commands(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .commands
             .read()
             .commands
             .values()
-            .filter(|c| matches!(c.handler, Handler::Dispatch(_) | Handler::Compose(_)))
+            .filter(|c| matches!(c.handler, Handler::Compose(_)))
             .map(|c| c.spec.id.clone())
             .collect();
         names.sort();
@@ -787,6 +756,16 @@ impl CommandBus {
     ) -> Result<CommandOutcome, CommandError> {
         self.run_inner(actor, name, input, confirmed, RunOrigin::Call)
             .await
+    }
+
+    /// After a run lands: what it wrote reads back once it returns — its
+    /// projections (a work list's records in `work_item`, the page refs)
+    /// are delivered first — and the pump's loops are woken for the rest.
+    async fn landed(&self) {
+        if let Err(error) = self.pump.deliver_projections().await {
+            tracing::warn!(%error, "delivering a run's projections failed");
+        }
+        self.pump.wake();
     }
 
     /// Run an extension effect's reaction to one event (P8.D10): `command`
@@ -866,13 +845,8 @@ impl CommandBus {
             return Err(err);
         }
 
-        // 1. The input must match the schema — and, for a `Dispatch`
-        // command, name a route.
-        let routing = match command
-            .validator
-            .check(&input)
-            .and_then(|()| command.resolve(&input))
-        {
+        // 1. The input must match the schema.
+        let routing = match command.validator.check(&input).map(|()| command.resolve()) {
             Ok(routing) => routing,
             Err(err) => {
                 self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
@@ -990,6 +964,10 @@ impl CommandBus {
                     Err(self
                         .unconfirmed(actor, origin, run, input, *preview, gates)
                         .await)
+                }
+                Ok(done) => {
+                    self.landed().await;
+                    Ok(done)
                 }
                 other => other,
             };
@@ -1148,7 +1126,7 @@ impl CommandBus {
         };
         match outcome {
             Ok(done) => {
-                self.pump.wake();
+                self.landed().await;
                 Ok(done)
             }
             // A confirmation a handler raised while running (a composite
@@ -1532,12 +1510,6 @@ impl CommandBus {
             let handler = match &command.handler {
                 Handler::Tx(h) => h.clone(),
                 Handler::External(_) => return Err(external("runs against a system".into())),
-                Handler::Dispatch(d) => match (d.route)(&call.input).map_err(at_input)? {
-                    Route::Tx => d.tx.clone(),
-                    Route::External(system) => {
-                        return Err(external(format!("runs through {system} for this input")));
-                    }
-                },
                 // Its own calls join this transaction too, or are refused
                 // there.
                 Handler::Compose(c) => c.tx.clone(),
@@ -4247,175 +4219,5 @@ mod tests {
             oxplow_db::ProposalDecision::Pending
         );
         assert_eq!(kv_value(&db, "a").await, None);
-    }
-
-    /// `oxplow.kv.put`, a `Dispatch` command: a key starting `far:` routes to an
-    /// External handler (the "far" system), any other key to `kv_set`'s
-    /// Tx handler.
-    fn kv_dispatch(confirm: Confirm) -> Command {
-        let mut spec = kv_spec("oxplow.kv.put", Invokers::ALL, confirm);
-        spec.atomicity = Atomicity::Dispatch;
-        let Handler::Tx(tx) = kv_set() else {
-            unreachable!("kv_set is a Tx handler");
-        };
-        Command::new(
-            spec,
-            Handler::Dispatch(Dispatch {
-                route: Arc::new(|input: &Value| match input["k"].as_str() {
-                    Some(k) if k.starts_with("far:") => Ok(Route::External("far".into())),
-                    Some(k) if k.starts_with("nowhere:") => Err(CommandError::Invalid {
-                        field: Some("/k".into()),
-                        message: format!("no system holds `{k}`"),
-                    }),
-                    _ => Ok(Route::Tx),
-                }),
-                tx,
-                external: Arc::new(|_actor, input| {
-                    Box::pin(async move {
-                        Ok(HandlerOutput {
-                            result: json!({ "far": input["k"] }),
-                            inverse: Some(CommandCall {
-                                name: "oxplow.kv.put".into(),
-                                input: json!({ "k": input["k"], "v": "was" }),
-                            }),
-                            ..HandlerOutput::default()
-                        })
-                    })
-                }),
-            }),
-        )
-        .unwrap()
-    }
-
-    /// P7.A1: a `Dispatch` command routes by its input and then runs
-    /// exactly as a Tx or an External command: its Tx route commits in the
-    /// bus's transaction and composes into it; its External route runs the
-    /// external handler, and in a composite makes the composite run as
-    /// steps (P7 review, tsk713); a route the input doesn't name is the
-    /// caller's error. Composites are pinned with the `Dispatch` commands.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_dispatch_command_routes_by_input_and_composes_by_its_route() {
-        let (db, bus) = bus();
-        let bus = Arc::new(bus);
-        bus.register(kv_dispatch(Confirm::Never)).unwrap();
-        bus.register(compose::sequence_command(&bus)).unwrap();
-        assert_eq!(
-            bus.dispatch_commands(),
-            ["oxplow.command.sequence", "oxplow.kv.put"]
-        );
-        assert!(bus.external_commands().is_empty());
-        let mut wrong = kv_spec("oxplow.kv.wrong", Invokers::ALL, Confirm::Never);
-        wrong.atomicity = Atomicity::Tx;
-        let Handler::Dispatch(d) = kv_dispatch(Confirm::Never).handler else {
-            unreachable!()
-        };
-        assert!(Command::new(wrong, Handler::Dispatch(d)).is_err());
-
-        let near = bus
-            .run(
-                &Actor::Human,
-                "oxplow.kv.put",
-                json!({"k": "a", "v": "1"}),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
-        assert!(near.audit_id.is_some());
-        let far = bus
-            .run(
-                &Actor::Human,
-                "oxplow.kv.put",
-                json!({"k": "far:a", "v": "1"}),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(far.result["far"], "far:a");
-        assert_eq!(
-            kv_value(&db, "far:a").await,
-            None,
-            "the far system's, not ours"
-        );
-        assert_eq!(far.inverse.unwrap().name, "oxplow.kv.put");
-        assert_eq!(audits(&db).await.len(), 2);
-
-        let err = bus
-            .run(
-                &Actor::Human,
-                "oxplow.kv.put",
-                json!({"k": "nowhere:a", "v": "1"}),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/k"),
-            "{err:?}"
-        );
-
-        bus.run(
-            &Actor::Human,
-            compose::SEQUENCE,
-            json!({ "calls": [{ "name": "oxplow.kv.put", "input": { "k": "b", "v": "2" } }] }),
-            false,
-        )
-        .await
-        .unwrap();
-        assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
-        let far = bus
-            .run(
-                &Actor::Human,
-                compose::SEQUENCE,
-                json!({ "calls": [{ "name": "oxplow.kv.put", "input": { "k": "far:b", "v": "2" } }] }),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(far.result["children"][0]["result"]["far"], "far:b");
-        assert!(far.inverse.is_none(), "steps aren't undoable");
-    }
-
-    /// An agent's run of a `Dispatch` command that needs a person is
-    /// proposed like any other: dry-run on its Tx route (the proposal
-    /// shows what it would do), with no dry run on its External route
-    /// (nothing outside the transaction runs before a person decides).
-    #[tokio::test(flavor = "multi_thread")]
-    async fn an_agents_dispatch_run_is_dry_run_only_on_its_tx_route() {
-        let (db, bus) = bus();
-        bus.register(kv_dispatch(Confirm::Always)).unwrap();
-        let proposed = |err: CommandError| -> i64 {
-            let CommandError::Proposed { proposal, .. } = err else {
-                panic!("{err:?}");
-            };
-            proposal
-                .strip_prefix("proposal:")
-                .and_then(|id| id.parse().ok())
-                .unwrap()
-        };
-        let near = bus
-            .run(
-                &agent(),
-                "oxplow.kv.put",
-                json!({"k": "a", "v": "1"}),
-                false,
-            )
-            .await
-            .unwrap_err();
-        let near = proposal(&db, proposed(near)).await;
-        assert_eq!(near.dry_run.as_ref().map(|d| &d["v"]), Some(&json!("1")));
-        let far = bus
-            .run(
-                &agent(),
-                "oxplow.kv.put",
-                json!({"k": "far:a", "v": "1"}),
-                false,
-            )
-            .await
-            .unwrap_err();
-        let far = proposal(&db, proposed(far)).await;
-        assert_eq!(far.dry_run, None);
-        assert_eq!(kv_value(&db, "a").await, None);
-        assert!(audits(&db).await.is_empty());
     }
 }

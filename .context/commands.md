@@ -36,12 +36,12 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 
 | Field | Meaning |
 |---|---|
-| `input_schema` | JSON Schema; the bus validates the input first and names the failing field |
+| `input_schema` | JSON Schema; the bus validates the input first and names the failing field, plus what the schema accepts there (`InputValidator::check`: an object's fields, required first, for an unknown or missing one; the choices for a bad enum value), so a caller fixes it in one more call |
 | `invokers` | which surfaces may run it: `human`, `agent`, `lens` |
 | `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A `Read` command may not ask (`Command::new` / `with_confirm_for` refuse it — so a read capability's command can't declare `confirm`): it runs unrecorded, so nothing would resolve its proposal |
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
-| `atomicity` | `Tx` (handler runs inside the bus's transaction), `External`, or `Dispatch` — one or the other, decided per input (see below) |
+| `atomicity` | `Tx` (handler runs inside the bus's transaction), `External` (against a system the bus doesn't own — a VCS, a process, a work list), or `Dispatch` — a composite, which its calls decide ("Composition") |
 | `effect` | `Write` (the default), `Read` or `Record`. A read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`oxplow.config.list_keys`, `oxplow.config.get`). A `Write` is refused to an agent thread that may not write. A `Record` changes oxplow's own records (`work_item.*`, `effort.*`): audited like a write, open to any thread |
 | `needs` | the **host capabilities** its handler calls (`sql.read`; below — always available, enforced per call) and the capabilities, or their features (`work_items.comments`), it needs active — the grammar lenses use. Unmet, it isn't offered and doesn't run (pipeline step 0). `oxplow.work_item.create` / `update` / `transition` need `work_items`; `link`, `comment` and `delete` need their feature |
 
@@ -324,13 +324,13 @@ landed; an extension command's declared types, P8.D4). It is the
 one mechanism: `oxplow.command.sequence { calls: [{ name, input }] }` composes
 its input's calls; an extension's own command (P6b.B2) composes what its
 script returns over its `input` rows. Its atomicity is `Dispatch` — its
-calls decide where it runs, so composites are pinned with the
-`Dispatch` commands. Once the actor is admitted (steps 2–3), the bus
-**routes** it (`CommandBus::route_composite`, `commands/steps.rs`): it
-composes on a read snapshot and routes each call — a `Tx` command or a
-`Dispatch` one routed inside stays in the transaction; an `External`
-command or a `Dispatch` one routed outside (`work_item.*` on another
-provider's item) leaves it; a nested composite must route inside (its
+calls decide where it runs, so composites are pinned
+(`CommandBus::composite_commands`, `the_composite_commands_are_the_reviewed_ones`).
+Once the actor is admitted (steps 2–3), the bus **routes** it
+(`CommandBus::route_composite`, `commands/steps.rs`): it composes on a
+read snapshot and routes each call — a `Tx` command stays in the
+transaction; an `External` one (every work list's `work_item.*` verbs,
+oxplow's own tasks' included) leaves it; a nested composite must route inside (its
 steps would otherwise land outside the run they're a step of), and a
 `Read` call is refused (a composite composes commands that write).
 Every call inside → **one run in one transaction**, below; any outside →
@@ -352,7 +352,9 @@ instead of recursing until the stack overflows, and the whole run rolls
 back. The parent has the **one audit row** and `command.executed`
 (children are not audited separately — a child row would be an
 independently undoable unit fighting the parent's inverse); its
-`result` is `{ result, children: [{ name, input, result, inverse? }] }`;
+`result` is `{ result, children: [{ name, result }] }` — no child's
+`input` (the caller sent it) or `inverse` (the parent's is the undo):
+echoing both cost an agent filing twenty tasks 23k characters back;
 the children's events ride out on the parent's `HandlerOutput.events`,
 so they are caused by the parent's `command.executed`; their
 `after_commit`s chain in order. The inverse is the children's inverses,
@@ -389,8 +391,7 @@ A run an agent can't confirm is kept for a person instead of being
 refused (`CommandBus::unconfirmed`):
 
 1. **Dry run** — a `Tx` handler runs with `confirmed: true` in a write
-   transaction that is always rolled back (`Database::rehearse`) — for a
-   `Dispatch` command, only when its route for the input is `Tx`; its
+   transaction that is always rolled back (`Database::rehearse`); its
    `result` is what it would have done (`oxplow.config.set`: `{ key, before,
    after }`; a composite: its `children`). Its events and `after_commit`
    are dropped, so nothing reaches a file. An `External` handler never
@@ -517,7 +518,7 @@ pump can see the commit before the swap.
 `CommandBus::list(actor)` is the specs that actor may run —
 `list_commands` for the agent, the launcher for the human.
 
-## `Tx`, `External` and `Dispatch`
+## `Tx` and `External`
 
 A `Tx` handler is `Fn(&TxCtx, Value) -> HandlerOutput` and composes
 into the bus's transaction, so its writes, the audit and the events
@@ -553,17 +554,20 @@ events uniquely, so a step that landed and is re-sent on a retry — its
 system answering again, events included — logs them once (tsk912). It is the right
 kind for exactly those commands, not a shortcut: `CommandBus::
 external_commands()` is pinned by `the_external_commands_are_the_reviewed_ones`,
-and adding one means naming its system in the summary. A
-**`Dispatch`** handler (P7.A1) is `{ route, tx, external }`: after the
-input passes the schema, `route(&input)` answers `Route::Tx` or
-`Route::External(<system>)` (or the caller's `Invalid`), and the run
-proceeds **exactly** as that kind — the same steps, one audit row under
-the command's name. It exists for the `work_item.*` verbs, whose item may
-be oxplow's (in the transaction) or another provider's (through its
-process); `CommandBus::dispatch_commands()` is pinned like the External
-list (`the_dispatch_commands_are_the_reviewed_ones`). Registering a
-handler whose kind disagrees with the spec's `atomicity` is refused, as
-is a second command of the same name.
+and adding one means naming its system in the summary. The
+`work_item.*` verbs are `External` for every list, oxplow's own tasks
+included: each runs on the item's list through its `WorkItemVerbs`
+([work-items.md](./work-items.md)). Registering a handler whose kind
+disagrees with the spec's `atomicity` is refused, as is a second command
+of the same name.
+
+**A run's projections are delivered before it returns.** Once a run
+lands (one transaction, an outside call recorded, or a composite's
+steps), `CommandBus::landed` runs the event pump's sync consumers — the
+projections: a work list's records into `work_item`, the page refs —
+before the caller gets the outcome (`EventPump::deliver_projections`),
+then wakes the pump's loops. So whoever ran a write reads it back at
+once, whichever list holds it.
 
 ## Commands so far
 
@@ -575,14 +579,14 @@ capability its area falls under (`threads.write`, `vcs.write`, …;
 | Command | Handler | Notes |
 |---|---|---|
 | `<extension namespace>.<name>` (an enabled extension's `commands:`) | `Tx`: the extension's Starlark script composes core commands, run through `run_nested` (`extension_commands.rs`, P6b.B2) | declared invokers / confirm / effect, undoable, `Experimental`; registered while the extension is enabled (primary worktree). See [extensions.md](./extensions.md) → "Commands" |
-| `oxplow.review.accept`, `oxplow.review.request_changes` (oxplow-bundled, P7.C5) | extension composites of `oxplow.work_item.comment` + `oxplow.work_item.transition` (to `done` / `todo`) on an effort's work item — oxplow's own in one transaction (undoable), another provider's as steps (not undoable, tsk713); an effort without a work item is refused by name; accept refuses unreviewed claims or inferred decisions unless `force` | human + lens, not agent; `confirm: always`. See [extensions.md](./extensions.md) → "oxplow-bundled" |
-| `oxplow.command.sequence { calls: [{ name, input }] }` | `Dispatch` — a composite (`commands/compose.rs`, P6b.A1) | all invokers, `Write`, `Confirm::Never` — the children decide. Each child's own invokers, policy and confirmation; one audit row for the parent with the children in `result`. Every call in oxplow's records → one transaction (`run_nested`), undoable as the reversed children; a call outside it → steps, in order, not undoable (tsk713). The one composition mechanism (an extension's command runs on it). See "Composition" |
-| `oxplow.work_item.transition { ref, to, native_state? }` | `Dispatch` (`commands/work_item.rs`, P2.6.3 / P7.A1): oxplow's items → `Tx` over `task_store::set_status_tx`; another provider's → its `transition` verb | all invokers, `Record`; undoable (the inverse restores the prior canonical and native state; an external inverse is renamed to `oxplow.work_item.transition` so undo dispatches again). `to` is a canonical state, `native_state` the provider's own and must map to it (oxplow: its status; `archived` with `done` or `canceled`). For every provider core logs `work_item.state_changed` when the state moved, with the audit, caused by `command.executed` (the interface's events: [work-items.md](./work-items.md)), which the effort policy reacts to ([work-tracking.md](./work-tracking.md)). |
-| `oxplow.work_item.create { title, body?, parent_ref?, state?, native_state?, native?, thread? }` | `Dispatch` (tsk463 / P7.A1): oxplow → `Tx` over `task_store::insert_tx` | all invokers; not undoable (that would be deleting an item). Always files on the active tracker, which must be running (tsk1058). `thread`: absent, an agent's own; a person's without one, the backlog. oxplow: `native { priority? }`; the row at the end of its list (`next_sort_index_tx`), core's `work_item.created@2 { work_item, state }` and `work_item.state_changed`, caused by the run; an agent's task is authored `agent`. The result has the item's `ref` and `link_warnings` (tsk775): the body's `[[…]]` links that don't resolve, checked like a note's (`link_check::LinkDeps`). |
-| `oxplow.work_item.update { ref, title?, body?, parent_ref?, state?, native_state?, native? }` | `Dispatch`: oxplow → `Tx` over `task_store::update_with_status_tx` | all invokers; undoable (the inverse restores exactly the fields and state given). oxplow: fields and status commit together — core logs `work_item.edited@2 { work_item, fields }` for the fields the input set, then the status move with everything `oxplow.work_item.transition` implies; `native { priority? }` (a thread change is `oxplow.work_item.move`). A refused run writes nothing. The result carries `link_warnings` for the body, as `oxplow.work_item.create`'s does (tsk775). |
-| `oxplow.work_item.delete { ref }` | `Dispatch`: oxplow → `Tx` over `task_store::soft_delete_tx` (P6.E1b) | all invokers; `Destructive` (asks first); not undoable; only on a provider declaring `delete`. oxplow: marks the task deleted, drops its body's `page_ref` edges and core logs `work_item.deleted@2`, caused by the run. The UI's Delete (a right-click menu item, a page's inline confirm) is the confirmation. |
-| `oxplow.work_item.reorder { ref, before?, after? }` / `oxplow.work_item.move { ref, to: "backlog" \| { thread }, before?, after? }` | `Tx` over `task_store::place_task_tx` (`commands/work_item.rs`, P6.E1a) | oxplow's lists only. All invokers; undoable — the inverse puts the item back next to the neighbour it had. `reorder` places an item before or after another of its own list (neither: at its end); `move` takes it to a thread's list or the backlog (at the end, or next to an item there), renumbering that list's `sort_index`. Logs core's `work_item.edited@2` (`list` and `rank`, or `rank`). An anchor from another list, both anchors, or an unknown thread is refused. |
-| `oxplow.work_item.link { ref, target, link_type }` / `oxplow.work_item.comment { ref, body }` | `Dispatch`: oxplow → `Tx` over `task_satellite::create_link_tx` / `add_task_note_tx` (P5.C2) | all invokers; not undoable; only with the provider's `links` / `comments`; the target must be the same provider's. oxplow: a link type of its own list, made in the caller's thread (a person's: the linked task's, else the target's), or a note on the task, with its `page_ref` edges, logging core's `work_item.linked@2` / `work_item.commented@2` caused by the run. |
+| `oxplow.review.accept`, `oxplow.review.request_changes` (oxplow-bundled, P7.C5) | extension composites of `oxplow.work_item.comment` + `oxplow.work_item.transition` (to `done` / `todo`) on an effort's work item — as steps, every list's verbs running outside the transaction (not undoable); an effort without a work item is refused by name; accept refuses unreviewed claims or inferred decisions unless `force` | human + lens, not agent; `confirm: always`. See [extensions.md](./extensions.md) → "oxplow-bundled" |
+| `oxplow.command.sequence { calls: [{ name, input }] }` | `Dispatch` — a composite (`commands/compose.rs`, P6b.A1) | all invokers, `Write`, `Confirm::Never` — the children decide. Each child's own invokers, policy and confirmation; one audit row for the parent with the children in `result`. Every call in oxplow's records → one transaction (`run_nested`), undoable as the reversed children; a call outside it (a `work_item.*` verb, any list's) → steps, in order, not undoable. The one composition mechanism (an extension's command runs on it). See "Composition" |
+| `oxplow.work_item.transition { ref, to, native_state? }` | `External` (`commands/work_item.rs`): the item's list's `transition` verb (oxplow's tasks: `oxplow_tasks::verbs::transition_tx`, in a transaction of their own) | all invokers, `Record`; undoable (the inverse restores the prior canonical and native state; an external inverse is renamed to `oxplow.work_item.transition` so undo dispatches again). `to` is a canonical state, `native_state` the provider's own and must map to it (oxplow: its status; `archived` with `done` or `canceled`). For every provider core logs `work_item.state_changed` when the state moved, with the audit, caused by `command.executed` (the interface's events: [work-items.md](./work-items.md)), which the effort policy reacts to ([work-tracking.md](./work-tracking.md)). |
+| `oxplow.work_item.create { title, body?, parent_ref?, state?, native_state?, native?, thread? }` | `External`: the active list's `create` (oxplow's tasks: `oxplow_tasks::verbs::create_tx`) | all invokers; not undoable (that would be deleting an item). Always files on the active tracker, which must be running. `thread`: absent, an agent's own; a person's without one, the backlog. oxplow: `native { priority? }`; the row at the end of its list (`next_sort_index_tx`), core's `work_item.created@2 { work_item, state }` and `work_item.state_changed`, caused by the run; an agent's task is authored `agent`. The result has the item's `ref` and `link_warnings`: the body's `[[…]]` links that don't resolve, checked like a note's, for every list (`link_check::LinkDeps::item_warnings`, on a read of its own). |
+| `oxplow.work_item.update { ref, title?, body?, parent_ref?, state?, native_state?, native? }` | `External`: the item's list's `update` (oxplow's tasks: `oxplow_tasks::verbs::update_tx`) | all invokers; undoable (the inverse restores exactly the fields and state given). oxplow: fields and status commit together — core logs `work_item.edited@2 { work_item, fields }` for the fields the input set, then the status move with everything `oxplow.work_item.transition` implies; `native { priority? }` (a thread change is `oxplow.work_item.move`). A refused run writes nothing. An update that sets a body carries its `link_warnings`, as `oxplow.work_item.create`'s does. |
+| `oxplow.work_item.delete { ref }` | `External`: the item's list's `delete` (oxplow's tasks: `oxplow_tasks::verbs::delete_tx`) | all invokers; `Destructive` (asks first); not undoable; only on a provider declaring `delete`. oxplow: marks the task deleted; its record says so, which clears its row and its page refs; core logs `work_item.deleted@2`, caused by the run. The UI's Delete (a right-click menu item, a page's inline confirm) is the confirmation. |
+| `oxplow.work_item.reorder { ref, before?, after? }` / `oxplow.work_item.move { ref, to: "backlog" \| { thread }, before?, after? }` | `External`: the item's list's `reorder` / `move` (oxplow's tasks: `oxplow_tasks::verbs::reorder_tx` / `move_tx`) | Only on a list declaring `ordering` / `lists`. All invokers; undoable — the inverse puts the item back next to the neighbour it had. `reorder` places an item before or after another of its own list (neither: at its end); `move` takes it to a thread's list or the backlog (at the end, or next to an item there), renumbering that list's `sort_index`. Logs core's `work_item.edited@2` (`list` and `rank`, or `rank`). An anchor from another list, both anchors, or an unknown thread is refused. |
+| `oxplow.work_item.link { ref, target, link_type }` / `oxplow.work_item.comment { ref, body }` | `External`: the item's list's `link` / `comment` (oxplow's tasks: `oxplow_tasks::verbs::link_tx` / `comment_tx`) | all invokers; not undoable; only with the provider's `links` / `comments`; the target must be the same provider's. oxplow: a link type of its own list, made in the caller's thread (a person's: the linked task's, else the target's), or a note on the task (its page refs restated from the interface), logging core's `work_item.linked@2` / `work_item.commented@2` caused by the run. |
 | `oxplow.effort.open { thread?, work_item?, title?, adopt_since? }` / `oxplow.effort.close { effort \| thread, as_of?, summary?, reason? }` / `oxplow.effort.link { effort \| thread, work_item }` / `oxplow.effort.update { effort, title }` | `Tx` over `effort_store::start_tx` / `finish_tx` / `link_tx` / `retitle_tx` (`commands/effort.rs`) | all invokers, `Record`: an effort is a record, not a claim on the worktree, so any thread may run them (an agent only in its own stream). `open` needs no work item; the thread's open effort closes first (`switch`), and `adopt_since` adopts the thread's un-efforted activity back to there, never before its previous effort ended. `close` names the effort or the thread's open one; `as_of` closes it at a past point and releases what came after; `reason` (`commit` / `switch`) records why, else it's the caller's (`agent`, `person`, an effect's `system`). `link` (`null` unlinks) and `update` (`null` clears the title) undo to what was there. See [work-tracking.md](./work-tracking.md) |
 | `oxplow.effort.record_decision { thread?, work_item?, question, choice, alternatives?, confidence?, why? }`, `oxplow.effort.record_claim { thread?, work_item?, statement, kind, evidence_ref? }` | `Tx` over `reasoning_store::{record_decision_tx, record_claim_tx}` (`commands/reasoning.rs`, P8.A7) | all invokers, `Record`, `Confirm::Never`, not undoable. An agent's land on its own thread whatever thread it names (another is refused); a person names one. They attach to `work_item`'s open effort — refused when the item is another stream's work — else the thread's newest open effort. Read back as `v_decision` / `v_claim` |
 | `oxplow.effort.report { thread?, summary?, impacts? }` | `External` (`commands/effort_report.rs`): it checks the summary's links against the worktree | all invokers, `Record`, not undoable; optional. An agent reports only on its own thread; a person names one. It settles the effort lifecycle first, then records the summary and impacts on the thread's open effort, else its latest (refused at `/thread` when it has none) — never opening, closing or creating one — and returns `{ effort, link_warnings }`. Files and runs are observed, never reported, and without a summary `v_effort.summary` is the effort's last turn's final message ([work-tracking.md](./work-tracking.md)) |
@@ -597,7 +601,7 @@ capability its area falls under (`threads.write`, `vcs.write`, …;
 | `oxplow.bookmark.set`, `oxplow.bookmark.remove` (`Tx`) | `commands/bookmark.rs` over `bookmark_store::*_tx` | `Record`; a person's or a lens's, never an agent's (bookmarks are the person's navigation). The viewer is `thread` (its stream implied) or `stream`; `set` moves a page's bookmark to its `scope`. Both undo to what the viewer saw before |
 | `oxplow.dashboard.create`, `oxplow.dashboard.rename`, `oxplow.dashboard.delete`, `oxplow.dashboard.remove_item`, `oxplow.dashboard.reorder_items` (`Tx`); `oxplow.dashboard.add_item`, `oxplow.dashboard.update_item` (`External`) | `commands/dashboard.rs` over `dashboard_store::*_tx` (P8.A5) | `Record`; all invokers except `delete` (a person's or a lens's, `Confirm::Destructive`, not undoable). `create` isn't undoable; the rest undo (a removed tile comes back at its position). Adding or editing a tile is `External` because its SQL is checked by the semantic engine (async) first. See [dashboards.md](./dashboards.md) |
 | `oxplow.knowledge.add_comment { stream, thread?, target, quote, selectors_json, context_chain?, referenced_refs?, intent, body }`, `oxplow.knowledge.reply_comment { comment, body }`, `oxplow.knowledge.update_comment { comment, intent?, status?, quote? + selectors_json? }`, `oxplow.knowledge.delete_comment { comment }` | `Tx` over `comment_store::*_tx` (`commands/comment.rs`, P8.A6) | `Record`, logging the existing `knowledge.comment.*` events caused by the run. The author is the actor (`user` for a person, `agent`, the person a lens acts for) — never an input. An agent comments only in its own stream and thread. `update_comment` undoes to the intent/status/quote it replaced (a relink is `quote` + `selectors_json`); `add`/`reply` aren't undoable; `delete` is a person's or a lens's, `Confirm::Destructive`. `oxplow.knowledge.relocate_comment { comment, selectors_json, orphaned }` (tsk861) is the renderer's re-anchor after it re-finds the quote — a person's or a lens's, not undoable; one already where it was is `unchanged` and leaves no record. Views re-read on `ModelsChanged` naming `v_comment` |
-| `oxplow.knowledge.add_note { thread?, body }`, `oxplow.knowledge.update_note { note, body }` | `Tx` over `task_satellite::{add_thread_note_tx, update_note_tx}` (`commands/note.rs`, P8.A6) | `Record`, `Confirm::Never`, so a queued agent (one that may not write the worktree) still takes notes. An agent's note lands on its own thread whatever it names; a person names one. `update_note` (a subagent filling in the note it was handed) undoes to the previous body and is refused on another thread's note. The result is `{ note, link_warnings }` — each `[[…]]` that doesn't resolve |
+| `oxplow.knowledge.add_note { thread?, body }`, `oxplow.knowledge.update_note { note, body }` | `Tx` over `oxplow_tasks::satellite::{add_thread_note_tx, update_note_tx}` (`commands/note.rs`, P8.A6) | `Record`, `Confirm::Never`, so a queued agent (one that may not write the worktree) still takes notes. An agent's note lands on its own thread whatever it names; a person names one. `update_note` (a subagent filling in the note it was handed) undoes to the previous body and is refused on another thread's note. The result is `{ note, link_warnings }` — each `[[…]]` that doesn't resolve |
 | `oxplow.effort.verify_claim { claim, evidence? }` / `oxplow.effort.unverify_claim { claim }` | `Tx` over `claim.evidence_ref` (`commands/review.rs`, P7.C4) | a person's review: invokers human and lens, not agent — so a lens acting for an agent is `Denied` too, by the agent policy (an agent doesn't review its own work); `Record`; undoable as each other. `verify_claim` sets the claim's evidence (`reviewer` when none is given — the person checked it) and refuses a claim already citing something; `unverify_claim` clears it. Logs `effort.claim_verified@1 { claim, effort?, evidence? }`. The claim is named by ref (`claim:7`), whatever effort it's in |
 | `oxplow.effort.confirm_decision { decision }` / `oxplow.effort.dismiss_decision { decision }` / `oxplow.effort.reopen_decision { decision }` | `Tx` over `decision.provenance` (`commands/review.rs`, P7.C4) | the same reviewers. Confirm and dismiss move an `inferred` decision to `confirmed` / `dismissed` (a recorded one isn't reviewed); reopen moves either back to `inferred`, and is their inverse (and they are its). Logs `effort.decision_reviewed@1 { decision, effort?, outcome }` |
 | `oxplow.config.list_keys {}` / `oxplow.config.get { key }` | `Tx` (read-only) over the key registry (`commands/config_commands.rs`) | every `.oxplow/project.yaml` key with doc, value schema, current value, `human_only` |
@@ -638,9 +642,6 @@ them; an epic is a `oxplow.work_item.create` per row (children with
 `parent_ref`), and closing is the `oxplow.command.sequence` above.
 `oxplow_app::work_items::WorkItems`
 is a typed client over the commands (the conformance suite uses it).
-`TaskService::update`
-(no actor) still logs every status change, with source
-`system:task_service`, but isn't audited.
 **Config is written only by `config.*`** (tsk515). The Settings page's
 typed IPC setters (`set_agents`, `set_agent_prompt_append`,
 `set_agent_model`, `set_generated`, `set_extension_enabled`)

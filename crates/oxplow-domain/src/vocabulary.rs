@@ -93,9 +93,13 @@ impl VocabularyHandle {
         Self(Arc::new(RwLock::new(Arc::new(vocabulary))))
     }
 
-    /// A handle on core's vocabulary alone.
+    /// A handle on core's vocabulary alone. Core's is the same for the
+    /// whole process, so it is built once (compiling every core event
+    /// type's schema) and shared; a swap replaces this handle's, never it.
     pub fn core() -> Self {
-        Self::new(Vocabulary::core())
+        static CORE: std::sync::LazyLock<Arc<Vocabulary>> =
+            std::sync::LazyLock::new(|| Arc::new(Vocabulary::core()));
+        Self(Arc::new(RwLock::new(CORE.clone())))
     }
 
     /// The vocabulary as it is now — what one transaction validates
@@ -116,6 +120,18 @@ mod tests {
     use super::*;
     use crate::events::schema::{EventType, WorkItemTransitioned};
     use crate::refs::kind::KindSpec;
+
+    /// Core's vocabulary is built once per process: compiling every core
+    /// event type's schema was most of what building a test's services
+    /// cost, and each store took its own handle. Handles still swap alone.
+    #[test]
+    fn core_handles_share_one_vocabulary_and_swap_alone() {
+        let (a, b) = (VocabularyHandle::core(), VocabularyHandle::core());
+        assert!(Arc::ptr_eq(&a.current(), &b.current()));
+        a.swap(Vocabulary::new(EventSchemaRegistry::new(), core_kinds()));
+        assert!(!Arc::ptr_eq(&a.current(), &b.current()));
+        assert!(!b.current().versions().is_empty(), "b keeps core's");
+    }
 
     /// What a writer holds sees a type swapped in after it was built; the
     /// snapshot it already took doesn't change under it.

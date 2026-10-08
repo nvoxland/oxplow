@@ -89,11 +89,16 @@ impl Tasks {
         let db = Database::open_existing(&layout.state_db_path)
             .map_err(|e| format!("{}: {e}", layout.state_db_path.display()))?;
         let vocabulary = oxplow_domain::vocabulary::VocabularyHandle::core();
-        let log = SqliteEventLogStore::new(db.clone(), vocabulary);
+        let log = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
+        // The work-item interface's projections, so a write here reads
+        // back at once (the app's pump delivers the rest).
         let pump = Arc::new(oxplow_app::event_pump::EventPump::new(
             db.clone(),
             log.clone(),
-            Vec::new(),
+            vec![
+                Arc::new(oxplow_app::work_items::WorkItemsProjection),
+                Arc::new(oxplow_app::page_ref_consumers::PageRefWorkItemConsumer { vocabulary }),
+            ],
         ));
         // No `with_capabilities`: every registered command is offered,
         // whatever the project has active.
@@ -105,10 +110,19 @@ impl Tasks {
         ));
         let work_items =
             WorkItemsRegistry::new(Arc::new(|| oxplow_app::work_items::PROVIDER.to_string()));
-        work_items.register(oxplow_app::work_items::oxplow_provider());
+        work_items.register(
+            oxplow_app::work_items::built_in_provider(
+                oxplow_app::work_items::BUILT_IN,
+                oxplow_app::work_items::PROVIDER,
+                &db,
+            )
+            .ok_or("oxplow's tasks aren't a built-in work list")?,
+        );
         let links = oxplow_app::link_check::LinkDeps {
             project_dir: layout.project_dir.clone(),
             vcs: Arc::new(oxplow_app::vcs::GitProvider),
+            db: db.clone(),
+            vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         };
         use oxplow_app::commands::work_item as w;
         for op in [

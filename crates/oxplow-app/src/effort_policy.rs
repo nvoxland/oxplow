@@ -390,8 +390,8 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
 mod tests {
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
-    use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::StreamId;
+    use oxplow_tasks::work_item_ref;
 
     async fn settle(fx: &EffortFixture) {
         fx.svc

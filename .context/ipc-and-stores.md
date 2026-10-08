@@ -671,11 +671,10 @@ schema in [data-model.md](./data-model.md), migration `V33`).
 Most stores have a single writer per row. The unified
 cross-page-reference graph (`page_ref` table; see
 [data-model.md](./data-model.md)) is the exception: a single
-`(source_kind, source_id)` like `(task, wi-42)` accumulates
-rows from three different writers (the task store's body
-mentions, the link store's `work_item_link:*` edges, the effort
-store's `touched_file` edges), each owning a slice keyed by
-`ref_type`.
+`(source_kind, source_id)` like `(work_item, oxplow:tsk42)` accumulates
+rows from different owners (the item's body, link and comment slices,
+restated from the work-item interface, and the effort store's edges),
+each owning a slice keyed by `ref_type`.
 
 The pattern that lets writers co-own a source without trampling
 each other:
@@ -683,8 +682,8 @@ each other:
 1. **Pure projections** (`crates/oxplow-db/src/page_ref_projections.rs`)
    turn each writer's domain rows into `Vec<PageRefEdge>`. Each
    helper also exposes a small list of the `ref_type`s it owns
-   (`task_body_ref_types()`, `task_link_ref_types()`,
-   `effort_ref_types()`).
+   (`work_item_body_ref_types()`, `work_item_comment_ref_types()`,
+   the `work_item_link:` prefix, `effort_ref_types()`).
 2. **Slice-replace** at the store
    (`SqlitePageRefStore::replace_source_for_ref_types`) takes
    `(source_kind, source_id, ref_types, edges)` and atomically
@@ -703,11 +702,13 @@ each other:
    or a writer's drift is undone at the next start after a migration or
    under a new build (it doesn't rerun when neither changed).
 4. **Event-driven projection** where the write logs an event. A task
-   work-item command logs core's `work_item.created` / `edited` in its
+   work-item command logs core's `work_item.*` events in its
    transaction (`.context/work-items.md`), and
    `PageRefWorkItemConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
-   re-projects the body slice through the
-   `replace_source_for_ref_types_tx` core when the pump delivers it —
+   restates the item's body, link and comment slices from the
+   work-item interface (`work_item_refs::restate_tx`) when the pump
+   delivers it, for every list — after `work_items.project` has put a
+   list's record there —
    checkpointed and dead-lettered, so a crash between commit and
    projection can't leave the graph stale. As writes gain events this
    replaces (3) for them; see [data-model.md](./data-model.md)

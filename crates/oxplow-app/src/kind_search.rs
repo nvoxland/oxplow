@@ -767,7 +767,7 @@ mod core_tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use oxplow_domain::stores::{TaskStore as _, ThreadStore as _};
+
     use oxplow_domain::{CommentTarget, StreamId, ThreadId};
 
     use crate::assets::Assets;
@@ -839,17 +839,17 @@ mod core_tests {
             .any(|h| h.kind == kind)
     }
 
-    async fn task(svc: &Services, thread: ThreadId, title: &str) -> oxplow_domain::Task {
-        svc.tasks
-            .create(
-                Some(thread),
-                crate::CreateTaskInput {
-                    title: title.into(),
-                    ..Default::default()
-                },
-            )
-            .await
+    /// An item filed on `thread`'s list, through its command.
+    async fn task(svc: &Services, thread: ThreadId, title: &str) -> String {
+        run(
+            svc,
+            crate::commands::work_item::CREATE,
+            serde_json::json!({ "title": title, "thread": thread.to_string() }),
+        )
+        .await["ref"]
+            .as_str()
             .unwrap()
+            .to_string()
     }
 
     /// tsk864: a work item is indexed from `v_search_work_item` — written, edited,
@@ -865,22 +865,30 @@ mod core_tests {
             found(&svc, "sprocket", Some(stream.id), "work_item")
         })
         .await;
-        let id = t.id.to_string();
+        let id = t.rsplit(':').next().unwrap().to_string();
         assert!(
             found(&svc, &id, Some(stream.id), "work_item").await,
             "its id finds it"
         );
 
-        let mut edited = t.clone();
-        edited.title = "Quux the flange".into();
-        svc.task_store.update(&edited).await.unwrap();
+        run(
+            &svc,
+            crate::commands::work_item::UPDATE,
+            serde_json::json!({ "ref": t, "title": "Quux the flange" }),
+        )
+        .await;
         eventually("the edit is found", || {
             found(&svc, "flange", Some(stream.id), "work_item")
         })
         .await;
         assert!(!found(&svc, "sprocket", Some(stream.id), "work_item").await);
 
-        svc.task_store.soft_delete(t.id).await.unwrap();
+        run(
+            &svc,
+            crate::commands::work_item::DELETE,
+            serde_json::json!({ "ref": t }),
+        )
+        .await;
         eventually("the deleted task leaves", || async {
             entries(&svc, "work_item").await.is_empty()
         })
@@ -908,29 +916,6 @@ mod core_tests {
         svc.capabilities.publish(&config, &svc.db).await.unwrap();
         eventually("with no list it leaves", || async {
             entries(&svc, "work_item").await.is_empty()
-        })
-        .await;
-    }
-
-    /// tsk864: a thread's tasks go with it — what the old upsert-only
-    /// backfill never removed.
-    #[tokio::test]
-    async fn a_deleted_threads_tasks_leave_the_index() {
-        let (svc, _dir) = services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let kept = crate::test_fixtures::new_thread(&svc, stream.id, "kept").await;
-        let gone = crate::test_fixtures::new_thread(&svc, stream.id, "gone").await;
-        change_loop(&svc);
-        let stays = task(&svc, kept.id, "Stays put").await;
-        task(&svc, gone.id, "Goes with its thread").await;
-        eventually("both are indexed", || async {
-            entries(&svc, "work_item").await.len() == 2
-        })
-        .await;
-        svc.thread_store.delete(&gone.id).await.unwrap();
-        eventually("only the kept thread's task is left", || async {
-            entries(&svc, "work_item").await
-                == vec![(format!("oxplow:{}", stays.id), Some(stream.id.to_string()))]
         })
         .await;
     }
@@ -964,14 +949,17 @@ mod core_tests {
             })
             .await
             .unwrap();
-        assert_eq!(refs, vec![format!("work_item:oxplow:{}", t.id)]);
+        assert_eq!(refs, vec![t.clone()]);
         let kinds = oxplow_domain::refs::kind::core_kinds();
         for r in &refs {
             oxplow_domain::refs::validate_ref(&kinds, r).unwrap();
         }
         assert_eq!(
             entries(&svc, "work_item").await,
-            vec![(format!("oxplow:{}", t.id), Some(stream.id.to_string()))]
+            vec![(
+                t.strip_prefix("work_item:").unwrap().to_string(),
+                Some(stream.id.to_string())
+            )]
         );
     }
 
@@ -986,17 +974,16 @@ mod core_tests {
         change_loop(&svc);
         let stays = task(&svc, kept.id, "Stays put").await;
         task(&svc, shelved.id, "Shelved with its thread").await;
-        let backlog = svc
-            .tasks
-            .create(
-                None,
-                crate::CreateTaskInput {
-                    title: "On the backlog".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
+        // A person's item names no thread: the backlog.
+        let backlog = run(
+            &svc,
+            crate::commands::work_item::CREATE,
+            serde_json::json!({ "title": "On the backlog" }),
+        )
+        .await["ref"]
+            .as_str()
+            .unwrap()
+            .to_string();
         eventually("all three are indexed", || async {
             entries(&svc, "work_item").await.len() == 3
         })
@@ -1007,8 +994,14 @@ mod core_tests {
         eventually("the archived thread's task leaves", || async {
             entries(&svc, "work_item").await
                 == vec![
-                    (format!("oxplow:{}", stays.id), Some(stream.id.to_string())),
-                    (format!("oxplow:{}", backlog.id), None),
+                    (
+                        stays.strip_prefix("work_item:").unwrap().to_string(),
+                        Some(stream.id.to_string()),
+                    ),
+                    (
+                        backlog.strip_prefix("work_item:").unwrap().to_string(),
+                        None,
+                    ),
                 ]
         })
         .await;
@@ -1018,7 +1011,11 @@ mod core_tests {
         eventually(
             "the archived stream's tasks leave; the backlog stays",
             || async {
-                entries(&svc, "work_item").await == vec![(format!("oxplow:{}", backlog.id), None)]
+                entries(&svc, "work_item").await
+                    == vec![(
+                        backlog.strip_prefix("work_item:").unwrap().to_string(),
+                        None,
+                    )]
             },
         )
         .await;
@@ -1033,12 +1030,17 @@ mod core_tests {
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
-        let id = format!("oxplow:{}", t.id);
+        let id = t.strip_prefix("work_item:").unwrap().to_string();
         eventually("in its thread's stream", || async {
             entries(&svc, "work_item").await == vec![(id.clone(), Some(stream.id.to_string()))]
         })
         .await;
-        svc.task_store.move_task(t.id, None).await.unwrap();
+        run(
+            &svc,
+            crate::commands::work_item::MOVE,
+            serde_json::json!({ "ref": t, "to": "backlog" }),
+        )
+        .await;
         eventually("in the backlog", || async {
             entries(&svc, "work_item").await == vec![(id.clone(), None)]
         })

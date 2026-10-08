@@ -406,7 +406,7 @@ mod tests {
             .unwrap();
         store.record(turn(None, "chat", 9)).await.unwrap();
 
-        let item = oxplow_domain::refs::build::work_item_ref(f.task);
+        let item = oxplow_tasks::work_item_ref(f.task);
         assert_eq!(
             run_bundled_lens_with(
                 &f,
@@ -534,7 +534,7 @@ mod tests {
     #[tokio::test]
     async fn what_deviated_lists_files_outside_the_tasks_stated_area() {
         use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         f.svc.extension_models.sync().await.unwrap();
         let describe = |text: &'static str| {
@@ -544,6 +544,7 @@ mod tests {
                 let mut t = svc.task_store.get(task).await.unwrap().unwrap();
                 t.description = text.into();
                 svc.task_store.update(&t).await.unwrap();
+                crate::test_fixtures::restate_task(&svc, task).await;
             }
         };
         for path in ["src/ui/panel.ts", "src/ui/button.ts", "crates/db/store.rs"] {
@@ -643,12 +644,13 @@ mod tests {
     #[tokio::test]
     async fn review_prompt_names_the_task_and_what_changed() {
         use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         t.title = "Fix the hover state".into();
         t.description = "Buttons flicker on hover.".into();
         f.svc.task_store.update(&t).await.unwrap();
+        crate::test_fixtures::restate_task(&f.svc, f.task).await;
         f.svc
             .effort_store
             .record_file(
@@ -725,7 +727,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewDecision {
                         thread_id: thread,
-                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                        work_item: Some(oxplow_tasks::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         question: "Where does export live?".into(),
                         choice: "src/export".into(),
@@ -744,7 +746,7 @@ mod tests {
                         tx,
                         &oxplow_db::NewClaim {
                             thread_id: thread,
-                            work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                            work_item: Some(oxplow_tasks::work_item_ref(task)),
                             effort_id: Some(effort.value()),
                             statement: statement.into(),
                             kind: "tests_pass".into(),
@@ -1380,9 +1382,10 @@ mod tests {
         assert!(!alert(run).firing);
         f.svc
             .task_store
-            .set_status(f.task, oxplow_domain::TaskStatus::Blocked)
+            .set_status(f.task, oxplow_tasks::TaskStatus::Blocked)
             .await
             .unwrap();
+        crate::test_fixtures::restate_task(&f.svc, f.task).await;
         let run = crate::extensions::run_lens(
             &layer,
             &f.svc.extension_catalog,
@@ -1403,11 +1406,12 @@ mod tests {
     /// `crates/db/store.rs` outside it; oxplow-bundled's commands registered.
     async fn review_fixture() -> crate::test_fixtures::TaskEffortFixture {
         use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         t.description = "Fix the hover state in [[src/ui/button.ts]].".into();
         f.svc.task_store.update(&t).await.unwrap();
+        crate::test_fixtures::restate_task(&f.svc, f.task).await;
         for path in ["src/ui/button.ts", "crates/db/store.rs"] {
             f.svc
                 .effort_store
@@ -1432,7 +1436,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
-                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                        work_item: Some(oxplow_tasks::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
@@ -1448,7 +1452,7 @@ mod tests {
                 f.effort.value(),
                 vec![oxplow_db::NewDecision {
                     thread_id: f.thread.value(),
-                    work_item: Some(oxplow_domain::refs::build::work_item_ref(f.task)),
+                    work_item: Some(oxplow_tasks::work_item_ref(f.task)),
                     effort_id: Some(f.effort.value()),
                     question: "Which store?".into(),
                     choice: "SQLite".into(),
@@ -1498,7 +1502,7 @@ mod tests {
     }
 
     async fn task_status(f: &crate::test_fixtures::TaskEffortFixture) -> String {
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         serde_json::to_value(t.status)
             .unwrap()
@@ -1865,7 +1869,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
-                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                        work_item: Some(oxplow_tasks::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         statement: format!(
                             "first line\n- [x] forged item [link](https://evil.example) {}",
@@ -2290,7 +2294,7 @@ mod tests {
                 .unwrap();
             serde_json::to_value(out.rows).unwrap()
         };
-        let item = oxplow_domain::refs::build::work_item_ref(f.task);
+        let item = oxplow_tasks::work_item_ref(f.task);
 
         review(
             &f,

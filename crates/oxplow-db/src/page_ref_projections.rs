@@ -17,19 +17,17 @@
 //! - dir:       `"<repo-relative path, no trailing slash>"`
 //! - finding:   `"<finding id>"`
 //! - commit:    `"<sha>"`
-//! - task_note: `"not<n>"` (a comment on an oxplow task)
 //! - thread_note: `"not<n>"`
 
 use oxplow_domain::refs::kind::KindRegistry;
 use oxplow_domain::refs::{extract, RefVersion};
-use oxplow_domain::{Task, TaskImpact, TaskLink, TaskLinkType};
+use oxplow_domain::TaskImpact;
 
 use crate::effort_store::FileRefVersion;
 use crate::page_ref_store::PageRefEdge;
 
 pub const KIND_WIKI: &str = "wiki";
 pub const KIND_WORK_ITEM: &str = "work_item";
-pub const KIND_TASK_NOTE: &str = "task_note";
 pub const KIND_THREAD_NOTE: &str = "thread_note";
 pub const KIND_FILE: &str = "file";
 pub const KIND_DIR: &str = "dir";
@@ -37,7 +35,6 @@ pub const KIND_FINDING: &str = "finding";
 pub const KIND_COMMIT: &str = "commit";
 
 // The work-item helpers live with the other ref builders (tsk450).
-pub use oxplow_domain::refs::build::{work_item_id, OXPLOW_PROVIDER};
 
 pub const RT_WIKI_FILE: &str = "wiki_file_ref";
 pub const RT_WIKI_DIR: &str = "wiki_dir_ref";
@@ -89,35 +86,70 @@ pub const RT_IMPACT: &str = "impact";
 /// `{"effort": "eff12"}`.
 pub const RT_COMMITTED: &str = "committed";
 
-/// Ref-types written by the task store from a body (title +
-/// description + AC). Used by the slice-replace call so other
-/// writers' rows for the same `task:<id>` source survive.
-pub fn task_body_ref_types() -> Vec<String> {
-    vec![
-        RT_WIKI_FILE.to_string(),
-        RT_WIKI_DIR.to_string(),
-        RT_WIKILINK.to_string(),
-        RT_BODY_WORK_ITEM.to_string(),
-        RT_BODY_FINDING.to_string(),
-        RT_BODY_COMMIT.to_string(),
-    ]
+/// A work item's body slice: its title and body's mentions.
+pub fn work_item_body_ref_types() -> Vec<String> {
+    BODY_MENTIONS.all()
 }
 
-/// All link sub-types — the link store owns this slice for any
-/// given source task.
-pub fn task_link_ref_types() -> Vec<String> {
-    [
-        "blocks",
-        "relates_to",
-        "discovered_from",
-        "duplicates",
-        "supersedes",
-        "replies_to",
-    ]
-    .iter()
-    .map(|t| format!("work_item_link:{t}"))
-    .collect()
+/// A work item's comment slice: its comments' mentions, recorded as the
+/// item's own edges (a comment lives on its item's page).
+pub fn work_item_comment_ref_types() -> Vec<String> {
+    COMMENT_MENTIONS.all()
 }
+
+/// A work item's link slice is every ref type with this prefix — one per
+/// link type, the list's own (`work_item_link:blocks`).
+pub const RT_LINK_PREFIX: &str = "work_item_link:";
+
+pub const RT_COMMENT_FILE: &str = "comment_file_ref";
+pub const RT_COMMENT_DIR: &str = "comment_dir_ref";
+pub const RT_COMMENT_WIKILINK: &str = "comment_wikilink";
+pub const RT_COMMENT_WORK_ITEM: &str = "comment_work_item_mention";
+pub const RT_COMMENT_FINDING: &str = "comment_finding_mention";
+pub const RT_COMMENT_COMMIT: &str = "comment_commit_mention";
+
+/// The ref types a text's mentions are recorded under, by what they name.
+struct MentionTypes {
+    file: &'static str,
+    dir: &'static str,
+    wiki: &'static str,
+    work_item: &'static str,
+    finding: &'static str,
+    commit: &'static str,
+}
+
+impl MentionTypes {
+    fn all(&self) -> Vec<String> {
+        [
+            self.file,
+            self.dir,
+            self.wiki,
+            self.work_item,
+            self.finding,
+            self.commit,
+        ]
+        .map(str::to_string)
+        .to_vec()
+    }
+}
+
+const BODY_MENTIONS: MentionTypes = MentionTypes {
+    file: RT_WIKI_FILE,
+    dir: RT_WIKI_DIR,
+    wiki: RT_WIKILINK,
+    work_item: RT_BODY_WORK_ITEM,
+    finding: RT_BODY_FINDING,
+    commit: RT_BODY_COMMIT,
+};
+
+const COMMENT_MENTIONS: MentionTypes = MentionTypes {
+    file: RT_COMMENT_FILE,
+    dir: RT_COMMENT_DIR,
+    wiki: RT_COMMENT_WIKILINK,
+    work_item: RT_COMMENT_WORK_ITEM,
+    finding: RT_COMMENT_FINDING,
+    commit: RT_COMMENT_COMMIT,
+};
 
 /// Slice owned by the effort store: the union of touched-file
 /// edges across every effort on a task, the projection of every
@@ -332,16 +364,6 @@ pub fn note_edges(
     out
 }
 
-/// Edges contributed by a task's title + description text.
-pub fn task_edges(kinds: &KindRegistry, item: &Task) -> Vec<PageRefEdge> {
-    work_item_edges(
-        kinds,
-        &work_item_id(item.id),
-        &item.title,
-        &item.description,
-    )
-}
-
 /// A work item's body-mention edges — what its title and body name — for
 /// any list's item; `id` is its `<provider>:<id>`.
 pub fn work_item_edges(
@@ -350,70 +372,88 @@ pub fn work_item_edges(
     title: &str,
     body: &str,
 ) -> Vec<PageRefEdge> {
-    let mut combined = String::new();
-    combined.push_str(title);
-    combined.push('\n');
-    combined.push_str(body);
-    let refs = extract(kinds, &combined);
-    let id = id.to_string();
-    let mut out = Vec::new();
-    for fd in refs.files_detail {
-        out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            &id,
-            KIND_FILE,
-            fd.path,
-            RT_WIKI_FILE,
-        ));
-    }
-    for d in refs.dirs {
-        out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            &id,
-            KIND_DIR,
-            d,
-            RT_WIKI_DIR,
-        ));
-    }
-    for w in refs.wikis {
-        out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            &id,
-            KIND_WIKI,
-            w,
-            RT_WIKILINK,
-        ));
-    }
-    for t in refs.work_items {
-        if t == id {
-            continue;
+    mention_edges(kinds, id, &format!("{title}\n{body}"), &BODY_MENTIONS)
+}
+
+/// A work item's comment-mention edges: what its comments' bodies name.
+pub fn work_item_comment_edges<'a>(
+    kinds: &KindRegistry,
+    id: &str,
+    bodies: impl IntoIterator<Item = &'a str>,
+) -> Vec<PageRefEdge> {
+    let mut out: Vec<PageRefEdge> = Vec::new();
+    for body in bodies {
+        for edge in mention_edges(kinds, id, body, &COMMENT_MENTIONS) {
+            if !out.iter().any(|e| {
+                e.target_kind == edge.target_kind
+                    && e.target_id == edge.target_id
+                    && e.ref_type == edge.ref_type
+            }) {
+                out.push(edge);
+            }
         }
-        out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            &id,
-            KIND_WORK_ITEM,
-            t,
-            RT_BODY_WORK_ITEM,
-        ));
     }
-    for f in refs.findings {
-        out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            &id,
-            KIND_FINDING,
-            f,
-            RT_BODY_FINDING,
-        ));
-    }
-    for c in refs.commits {
-        out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            &id,
-            KIND_COMMIT,
-            c,
-            RT_BODY_COMMIT,
-        ));
-    }
+    out
+}
+
+/// A work item's link edges: one per `(target ref, link type)`, its ref
+/// type `work_item_link:<type>`.
+pub fn work_item_link_edges(id: &str, links: &[(String, String)]) -> Vec<PageRefEdge> {
+    links
+        .iter()
+        .filter_map(|(target, link_type)| {
+            let target = target.strip_prefix("work_item:")?;
+            Some(PageRefEdge::new(
+                KIND_WORK_ITEM,
+                id,
+                KIND_WORK_ITEM,
+                target,
+                format!("{RT_LINK_PREFIX}{link_type}"),
+            ))
+        })
+        .collect()
+}
+
+/// What `text` mentions, as edges from work item `id` under `types`; the
+/// item naming itself isn't one.
+fn mention_edges(
+    kinds: &KindRegistry,
+    id: &str,
+    text: &str,
+    types: &MentionTypes,
+) -> Vec<PageRefEdge> {
+    let refs = extract(kinds, text);
+    let edge = |kind: &str, target: String, ref_type: &str| {
+        PageRefEdge::new(KIND_WORK_ITEM, id, kind, target, ref_type)
+    };
+    let mut out = Vec::new();
+    out.extend(
+        refs.files_detail
+            .into_iter()
+            .map(|fd| edge(KIND_FILE, fd.path, types.file)),
+    );
+    out.extend(refs.dirs.into_iter().map(|d| edge(KIND_DIR, d, types.dir)));
+    out.extend(
+        refs.wikis
+            .into_iter()
+            .map(|w| edge(KIND_WIKI, w, types.wiki)),
+    );
+    out.extend(
+        refs.work_items
+            .into_iter()
+            .filter(|t| t != id)
+            .map(|t| edge(KIND_WORK_ITEM, t, types.work_item)),
+    );
+    out.extend(
+        refs.findings
+            .into_iter()
+            .map(|f| edge(KIND_FINDING, f, types.finding)),
+    );
+    out.extend(
+        refs.commits
+            .into_iter()
+            .map(|c| edge(KIND_COMMIT, c, types.commit)),
+    );
     out
 }
 
@@ -521,29 +561,6 @@ pub fn effort_summary_edges(
     out
 }
 
-fn link_type_str(t: TaskLinkType) -> &'static str {
-    match t {
-        TaskLinkType::Blocks => "blocks",
-        TaskLinkType::RelatesTo => "relates_to",
-        TaskLinkType::DiscoveredFrom => "discovered_from",
-        TaskLinkType::Duplicates => "duplicates",
-        TaskLinkType::Supersedes => "supersedes",
-        TaskLinkType::RepliesTo => "replies_to",
-    }
-}
-
-/// One edge per `TaskLink`. Source is `from_item`, target is
-/// `to_item`, ref_type encodes the link sub-type.
-pub fn link_edge(link: &TaskLink) -> PageRefEdge {
-    PageRefEdge::new(
-        KIND_WORK_ITEM,
-        work_item_id(link.from_item_id),
-        KIND_WORK_ITEM,
-        work_item_id(link.to_item_id),
-        format!("work_item_link:{}", link_type_str(link.link_type)),
-    )
-}
-
 /// One edge per finding -> file. Owned by the findings writer.
 pub fn finding_edges(finding_id: &str, path: &str) -> Vec<PageRefEdge> {
     vec![PageRefEdge::new(
@@ -564,33 +581,6 @@ mod tests {
         oxplow_domain::refs::kind::core_kinds()
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap()
-    }
-    use oxplow_domain::{
-        Task, TaskActorKind, TaskAuthor, TaskId, TaskLinkType, TaskPriority, TaskStatus, Timestamp,
-    };
-
-    fn ts() -> Timestamp {
-        Timestamp::from_unix_ms(1_700_000_000_000)
-    }
-
-    fn item(id: i64, title: &str, description: &str) -> Task {
-        Task {
-            id: TaskId::new(id),
-            thread_id: None,
-            parent_id: None,
-            title: title.into(),
-            description: description.into(),
-            status: TaskStatus::Ready,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: ts(),
-            updated_at: ts(),
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
-        }
     }
 
     #[test]
@@ -619,13 +609,13 @@ mod tests {
     }
 
     #[test]
-    fn task_edges_parse_description() {
-        let it = item(
-            1,
+    fn work_item_edges_parse_the_body() {
+        let edges = work_item_edges(
+            &tasks_kinds(),
+            "oxplow:tsk1",
             "fix something",
             "see [[src/app.rs]] for context, blocked by tsk2, touches finding:fnd-9",
         );
-        let edges = task_edges(&tasks_kinds(), &it);
         let targets: Vec<_> = edges
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
@@ -809,21 +799,44 @@ mod tests {
     }
 
     #[test]
-    fn link_edge_labels_link_subtype() {
-        use oxplow_domain::TaskLinkId;
-        let link = TaskLink {
-            id: TaskLinkId::new(1),
-            thread_id: oxplow_domain::ThreadId::new(1),
-            from_item_id: TaskId::new(10),
-            to_item_id: TaskId::new(20),
-            link_type: TaskLinkType::Blocks,
-            created_at: ts(),
-        };
-        let edge = link_edge(&link);
-        assert_eq!(edge.source_kind, "work_item");
-        assert_eq!(edge.source_id, "oxplow:tsk10");
-        assert_eq!(edge.target_id, "oxplow:tsk20");
-        assert_eq!(edge.ref_type, "work_item_link:blocks");
+    fn link_edges_carry_the_lists_own_link_type() {
+        let edges = work_item_link_edges(
+            "issues:ENG-10",
+            &[("work_item:issues:ENG-20".into(), "parent_of".into())],
+        );
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].source_kind, "work_item");
+        assert_eq!(edges[0].source_id, "issues:ENG-10");
+        assert_eq!(edges[0].target_id, "issues:ENG-20");
+        assert_eq!(edges[0].ref_type, "work_item_link:parent_of");
+    }
+
+    /// Comments' mentions are the item's own edges, under the comment
+    /// ref types, each target once.
+    #[test]
+    fn comment_edges_are_the_items_under_comment_types() {
+        let edges = work_item_comment_edges(
+            &tasks_kinds(),
+            "oxplow:tsk1",
+            ["see [[src/app.rs]] and tsk2", "again [[src/app.rs]]"],
+        );
+        let got: Vec<(&str, &str, &str)> = edges
+            .iter()
+            .map(|e| {
+                (
+                    e.source_id.as_str(),
+                    e.target_id.as_str(),
+                    e.ref_type.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("oxplow:tsk1", "src/app.rs", RT_COMMENT_FILE),
+                ("oxplow:tsk1", "oxplow:tsk2", RT_COMMENT_WORK_ITEM),
+            ]
+        );
     }
 
     #[test]

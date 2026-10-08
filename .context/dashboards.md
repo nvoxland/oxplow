@@ -44,7 +44,7 @@ dashboard + its tiles in display order), `create`, `rename`, `delete`,
 `add_item`, `update_item`, `remove_item`, `reorder_items`. Lists
 `ORDER BY sort_index, id`. `create` / `add_item` set `sort_index =
 COALESCE(MAX(sort_index), -1) + 1`; `reorder_items` rewrites `0..N` in one
-`conn.transaction()` (the `task_store` reorder pattern). Registered on `Services`
+`conn.transaction()` (the task store's reorder pattern). Registered on `Services`
 as `dashboard_store` (`oxplow-app/src/lib.rs`).
 
 **Writes are `_tx` cores** (`create_tx`, `rename_tx`, `delete_tx`,

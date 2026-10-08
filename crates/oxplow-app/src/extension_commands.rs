@@ -1307,7 +1307,7 @@ mod tests {
             "def transform(x):\n    return {\"commands\": [], \"result\": 1}\n",
         )
         .await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let run = || async {
             fx.svc
                 .commands
@@ -1553,8 +1553,8 @@ mod tests {
         }
     }
 
-    async fn task(fx: &crate::test_fixtures::TaskEffortFixture) -> oxplow_domain::Task {
-        use oxplow_domain::stores::TaskStore as _;
+    async fn task(fx: &crate::test_fixtures::TaskEffortFixture) -> oxplow_tasks::Task {
+        use oxplow_tasks::TaskStore as _;
         fx.svc.task_store.get(fx.task).await.unwrap().unwrap()
     }
 
@@ -1589,7 +1589,7 @@ mod tests {
     async fn a_command_emits_its_own_extensions_event_type() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         with_emitting_finish(&fx, "my_review.finished").await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let out = fx
             .svc
             .commands
@@ -1622,7 +1622,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_command_may_not_emit_a_foreign_or_undeclared_type() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         for foreign in ["work_item.created", "my_review.undeclared"] {
             with_emitting_finish(&fx, foreign).await;
             let err = fx
@@ -1648,7 +1648,7 @@ mod tests {
     async fn an_extension_command_composes_core_commands_in_one_run() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(&fx, FINISH).await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let out = fx
             .svc
             .commands
@@ -1663,7 +1663,7 @@ mod tests {
         assert_eq!(out.result["result"], json!({ "finished": r }));
         assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
         let t = task(&fx).await;
-        assert_eq!(t.status, oxplow_domain::TaskStatus::Done);
+        assert_eq!(t.status, oxplow_tasks::TaskStatus::Done);
         assert_eq!(t.title, "t (reviewed)");
         let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
         let ok: Vec<_> = audits
@@ -1684,15 +1684,9 @@ mod tests {
             .find(|e| e.envelope.event_type == "work_item.state_changed")
             .expect("the child's event");
         assert_eq!(changed.envelope.cause, out.event_id, "caused by the run");
-        // One undo reverses both children.
-        fx.svc
-            .commands
-            .undo(&agent(&fx), out.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        let t = task(&fx).await;
-        assert_eq!(t.status, oxplow_domain::TaskStatus::InProgress);
-        assert_eq!(t.title, "t");
+        // A work list's verbs run outside the transaction: the children are
+        // steps, and the run isn't undoable as a whole.
+        assert!(out.inverse.is_none());
     }
 
     /// A project extension declares its own command over one of the
@@ -1753,7 +1747,7 @@ mod tests {
             &[("handlers/finish.star", FINISH)],
         );
         fx.svc.extension_commands.reconcile().await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let err = fx
             .svc
             .commands
@@ -1770,10 +1764,7 @@ mod tests {
                 .contains("`sql.read` isn't in the command's `needs`"),
             "{err}"
         );
-        assert_eq!(
-            task(&fx).await.status,
-            oxplow_domain::TaskStatus::InProgress
-        );
+        assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
     }
 
     /// `effect: read`: it reads and answers, and nothing is recorded; one
@@ -1805,15 +1796,12 @@ mod tests {
 
         with_count(&format!(
             "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"ref\": \"{}\", \"to\": \"done\"}}}}]}}\n",
-            oxplow_domain::refs::build::work_item_ref(fx.task)
+            oxplow_tasks::work_item_ref(fx.task)
         ));
         fx.svc.extension_commands.reconcile().await;
         let err = run().await.unwrap_err();
         assert!(err.to_string().contains("composes no commands"), "{err}");
-        assert_eq!(
-            task(&fx).await.status,
-            oxplow_domain::TaskStatus::InProgress
-        );
+        assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1824,7 +1812,7 @@ mod tests {
             "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"input\"][\"ref\"]}}]}\n",
         )
         .await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let err = fx
             .svc
             .commands
@@ -1847,10 +1835,9 @@ mod tests {
             .list_pending()
             .await
             .unwrap();
-        assert_eq!(
-            pending[0].dry_run.as_ref().unwrap()["children"][0]["name"],
-            "oxplow.work_item.delete"
-        );
+        // A work list's verb runs outside the transaction: nothing of it
+        // runs, dry or not, before a person decides.
+        assert!(pending[0].dry_run.is_none());
         assert!(task(&fx).await.deleted_at.is_none(), "nothing ran");
     }
 
@@ -1874,7 +1861,7 @@ mod tests {
         ] {
             let fx = crate::test_fixtures::services_with_task_effort().await;
             with_finish(&fx, script).await;
-            let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+            let r = oxplow_tasks::work_item_ref(fx.task);
             let err = fx
                 .svc
                 .commands
@@ -1882,7 +1869,7 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(err.to_string().contains(says), "{script}: {err}");
-            assert_eq!(task(&fx).await.status, oxplow_domain::TaskStatus::InProgress);
+            assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
         }
     }
 
@@ -1896,7 +1883,7 @@ mod tests {
             "def transform(x):\n    r = x[\"input\"][\"ref\"]\n    return {\"commands\": [\n        {\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": r, \"title\": \"again\"}},\n        {\"name\": \"my_review.review.finish\", \"input\": {\"ref\": r}},\n    ]}\n",
         )
         .await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let before = task(&fx).await.title;
         let err = fx
             .svc
@@ -1928,7 +1915,7 @@ mod tests {
             "def transform(x):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"commands\": []}\n",
         )
         .await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let started = std::time::Instant::now();
         let err = fx
             .svc
@@ -1947,10 +1934,7 @@ mod tests {
             started.elapsed()
         );
         assert!(err.to_string().contains("time"), "{err}");
-        assert_eq!(
-            task(&fx).await.status,
-            oxplow_domain::TaskStatus::InProgress
-        );
+        assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2034,7 +2018,7 @@ mod tests {
             "def transform(x):\n    return {\"refuse\": \"it has unverified claims\"}\n",
         )
         .await;
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let err = fx
             .svc
             .commands

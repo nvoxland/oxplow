@@ -1,10 +1,10 @@
 # Work items
 
 Tasks, issues, tickets — whatever a provider tracks — behind one
-capability (P5.C). oxplow's own tasks are the
-built-in provider, `oxplow`; another provider (P5.D brings external ones)
-is a **backend that replaces it**: the person picks the active tracker,
-and every new item goes there (tsk1058). So it should have the
+capability (P5.C). oxplow's own tasks are one provider, `oxplow` — a
+built-in list (`crates/oxplow-tasks`) called exactly like any other;
+another provider is a **backend that replaces it**: the person picks the
+active tracker, and every new item goes there. So it should have the
 visibility the person wants for their work — usually still just theirs,
 like a local tracker such as beads — not a team's tracker
 ([providers.md](./providers.md) "Which trackers are backends"). Reads are
@@ -42,31 +42,60 @@ active: `[{ name, title, kind: enum|text|number, values? }]`
 published as `v_capability_provider.fields`. A built-in's are core's
 table's (`BuiltIn.fields`: oxplow's tasks declare `priority`, an enum of
 urgent/high/medium/low); an external provider's are its `providers:`
-entry's `fields:`. None declares none. How the rows are written, the state mapping and the
-cascade trigger are in [data-model.md](./data-model.md) "`work_item`".
+entry's `fields:`. None declares none. How the rows are written and
+oxplow's state mapping are in [data-model.md](./data-model.md) "`work_item`".
 
-There are two writers, one schema:
+**One writer, one schema.** Every list's rows arrive by projection: its
+`work_item.recorded@2 { item }` events — what each verb answers with,
+and what a read back restates — carry the item as it now stands: ref,
+title, body, canonical and native state, native fields, parent, deleted,
+and, when the list keeps them, `rank`, `links`, `comments` and `list`
+(a thread's or the backlog: `List`), each the whole set (stated, the
+host restates it; absent, it keeps what it has; an item whose record
+states no `list` stays on the list its first record was filed from —
+the filing event's thread anchor). The pump consumer `work_items.project`
+(`crates/oxplow-app/src/work_items.rs`) upserts it by ref; a replay
+restates the same row. Why one record event rather than state on each of
+`created` / `edited` / `state_changed`: the "what happened" events stay
+small and the same for every list, and the projection is one upsert
+from one event type. A run's projections are delivered before the run
+returns ([commands.md](./commands.md) "A run's projections are
+delivered"), so a write reads back at once.
 
-- **oxplow's rows** are restated from the task row by the task cores in
-  the same transaction (`task_store::project_work_item_tx`), so they
-  never disagree with `v_task`; their links and comments follow
-  `task_link` / `task_note` by trigger.
-  That includes every row a core touches on the side: `place_task_tx`
-  renumbers the moved item's neighbours and restates each one it changed
-  (`native.sort_index`), checked by the reorder test's `stale_native_rows`.
-- **Another provider's rows** arrive by projection: its
-  `work_item.recorded@2 { item }` events (the item as it now stands —
-  ref, title, body, canonical and native state, native fields, parent,
-  deleted, and — when the provider keeps them — `rank`, `links` and
-  `comments`, each the whole set: stated, the host restates it; absent,
-  it keeps what it has; `@1` lacked the three and upcasts as "not
-  stated") are upserted by ref by the pump consumer `work_items.project`
-  (`crates/oxplow-app/src/work_items.rs`). A replay restates the same
-  row. An `oxplow` record is refused (dead-lettered): those rows are the
-  task cores' alone. Why one record event rather than state on each of
-  `created` / `edited` / `state_changed`: the "what happened" events stay
-  small and the same for every list, and the projection is one upsert
-  from one event type.
+**oxplow's tasks are their own crate**, `crates/oxplow-tasks`, named by
+nothing outside it but the built-in factory and `Services`' stores: the
+task store and its links and notes (`store.rs`, `satellite.rs`), the
+task types, the mapping of statuses and priority onto the interface
+(`mapping.rs`), its answers to the verbs (`verbs.rs`: `create_tx`,
+`update_tx`, `transition_tx`, `link_tx`, `comment_tx`, `delete_tx`,
+`reorder_tx`, `move_tx`, each over a connection, the interface's input
+and the actor, answering with its result, the verb that undoes it and the
+tasks it changed), the record of a task (`record.rs`: the item whole,
+from the task tables — links, notes, list and rank included) and
+`OxplowTasks`, its `WorkItemVerbs`: each verb in a transaction of its own
+over the task tables, answering with the `work_item.recorded` of every
+task it changed (a reorder's renumbered neighbours too). A refused verb
+rolls its transaction back. It writes nothing of core's: no `work_item*`
+row (V29 dropped the triggers that did), no page ref, no event — core
+logs the run, its canonical events and the records. The store's own
+async writes (tests) reach the interface only when restated
+(`test_fixtures::restate_task`).
+
+**A built-in list registers by declaration.** `oxplow-bundled` declares
+`implementations: [{ capability: work_items, id: oxplow, entry:
+"oxplow:tasks" }]`; `work_items::register_built_ins` registers the
+provider each declared built-in names (`built_in_provider`, the factory:
+its features and id pattern from `capabilities::BUILT_INS`, its verbs
+the crate's) when services are built and at every `capabilities::refresh`,
+and unregisters `oxplow` when nothing declares it — the task data stays,
+and nothing reaches it.
+
+**Page refs** for every list's item come from the interface: its body's
+mentions, its links (`work_item_link:<type>`, the list's own types) and
+its comments' mentions (`comment_*`, keyed by the item), restated by
+`work_item_refs::restate_tx` on the item's events (the
+`page_ref.work_item` consumer, after `work_items.project`) and by the
+boot repair. A list writes no page refs of its own.
 
 ## Reading them in the UI
 
@@ -156,12 +185,13 @@ service or models.
 `oxplow_domain::work_items`:
 
 - **`WorkItemsProvider`** (a struct): `id` (the ref segment),
-  `features`, and `external: Option<Arc<dyn ExternalVerbs>>` — `None`
-  for oxplow's own (its verbs are the `work_item.*` commands' `Tx`
-  cores), the provider's verbs for an external one.
-- **`ExternalVerbs::invoke(actor, verb, input, idempotency_key) ->
-  VerbOutcome { result, events, inverse? }`**: a provider outside the
-  bus's transaction; its inverse is named by its **verb**. The key is
+  `features`, `verbs: Arc<dyn WorkItemVerbs>`, its `id_pattern`, and
+  `sink` (none).
+- **`WorkItemVerbs::invoke(actor, verb, input, idempotency_key) ->
+  VerbOutcome { result, events, inverse? }`**: every list's verbs —
+  oxplow's tasks (`OxplowTasks`), an extension's process
+  (`ExternalWorkItems`), none (`Sink`) — run outside the bus's
+  transaction; its inverse is named by its **verb**. The key is
   the caller's when it has one (an effect's step), else the host mints
   one ([providers.md](./providers.md) "Idempotency").
 - **`WorkItemsFeatures`**: `hierarchy`, `comments`, `links`, `delete`,
@@ -178,19 +208,22 @@ service or models.
   `delete` — the capability's verbs.
 
 **One write surface: the dispatching `work_item.*`** (P7.A1;
-`commands/work_item.rs`). Each verb is a `Dispatch` command
-([commands.md](./commands.md) "Tx, External and Dispatch"): the bus
-routes by the item's provider — the ref's segment, or for `create` the
-active one — to oxplow's `Tx` core in the bus's
-transaction, or to the provider's `ExternalVerbs` through its process,
-with **one audit row** `work_item.<verb>` either way. The route also
-refuses, before anything runs: a ref of another list's item (`/ref`,
+`commands/work_item.rs`). Each verb is an `External` command
+([commands.md](./commands.md) "Tx and External") on the item's provider
+— the ref's segment, or for `create` the active one — called through its
+`WorkItemVerbs`, the same way for every list, with **one audit row**
+`work_item.<verb>`. In a composite it is a step: a sequence of work-item
+verbs runs as steps, not undoable as a whole. Before anything runs it
+refuses: a ref of another list's item (`/ref`,
 naming the active list), a parent, link target or place of another list
 (`/parent_ref`, `/target`, `/before`, `/after`), and a feature the list
 doesn't declare.
-An external `create` hands the provider the input less `thread` (the host
-anchors the item to it) and renames its inverse to `work_item.<verb>`, so
-an undo dispatches again.
+A `create` hands the list the input with `thread` resolved
+([`filing_thread`]: the named one, else an agent's own; a person's none,
+the backlog), and the list's inverse is renamed to `work_item.<verb>`, so
+an undo dispatches again. A create's, or an update's that sets a body,
+result carries its `link_warnings` (`LinkDeps::item_warnings`), for every
+list.
 `reorder` (feature `ordering`: an item's place on its list, read as
 `rank`) and `move` (feature `lists`: to a thread's list or the backlog,
 read as `thread_id`) are interface verbs like the rest; a provider that
@@ -206,7 +239,7 @@ provider (a provider's verb receives the same input, less `create`'s
 `thread`):
 
 - `create { title, body?, parent_ref?, state?, native_state?, native?,
-  thread? }` — **always on the active tracker** (tsk1058): the person
+  thread? }` — **always on the active tracker**: the person
   chose it, and nothing a caller says — a person, an agent, an effect or
   oxplow itself — files anywhere else. One that isn't running is an
   error, never a fallback. `thread` is the thread it's filed on: absent,
@@ -251,11 +284,10 @@ anchored to the actor's thread. A list logs none of them itself
 | `delete` | `work_item.deleted@2 { work_item }` |
 | `reorder` / `move` | `edited` naming `rank` / `list` and `rank` |
 
-Whether the state moved: oxplow's is read from `work_item` before and
-after in the bus's transaction; for an external provider, whose prior
-state oxplow can't read, a create, a transition and an update naming a
-state each count, `to` taken from the `work_item.recorded` its answer
-carries (a create with none: the state it asked for, else `todo`).
+Whether the state moved: a list's prior state isn't read, so a create,
+a transition and an update naming a state each count, `to` taken from
+the `work_item.recorded` its answer carries (a create with none: the
+state it asked for, else `todo`).
 `edited` names what the command set, not a diff: a list's prior values
 aren't readable for every list. The `@1` versions spoke oxplow's task
 list (`created { status }`, `edited` with `description` / `priority` /
@@ -359,10 +391,10 @@ provider back restates what its writes recorded — after a
 own or a provider without collectors) every item it filed is the row it
 was (P7.A7; the fake's `stale-read` hook is the red); a provider that
 declares `idempotent_writes` keeps it — a create sent twice with one key
-(through `WorkItemsProbe::verbs`, the host's `ExternalVerbs`, since the
+(through `WorkItemsProbe::verbs`, the provider's `WorkItemVerbs`, since the
 bus never re-sends a key itself) answers alike, another key is another
 item, the first key sent again **after the provider's process restarts**
-(`ExternalVerbs::restart`) still answers alike — the promise outlives the
+(`WorkItemVerbs::restart`) still answers alike — the promise outlives the
 process, which is when the host re-sends — and after a read back two
 items carry the run's own keyed title (`conformance keyed item <8 hex>`,
 so a leftover from an earlier run against a real service never counts;
@@ -383,7 +415,7 @@ once per settle, so the projection has landed before each read.
 ## External providers
 
 `ExternalWorkItems` ([providers.md](./providers.md)) is the
-`ExternalVerbs` of an enabled provider instance: each verb's input is
+`WorkItemVerbs` of an enabled provider instance: each verb's input is
 checked against the schema the provider declared for it (its `native`
 fields included) before the process is called, and the
 `work_item.recorded` events it returns reach `work_item` through the

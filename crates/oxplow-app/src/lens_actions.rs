@@ -460,7 +460,7 @@ pub fn bind_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::refs::build::work_item_ref;
+    use oxplow_tasks::work_item_ref;
     use serde_json::json;
 
     /// A task, and a lens over it whose actions run commands.
@@ -522,7 +522,7 @@ actions:
     }
 
     async fn state(svc: &crate::Services, task: oxplow_domain::TaskId) -> String {
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let t = svc.task_store.get(task).await.unwrap().unwrap();
         serde_json::to_value(t.status)
             .unwrap()
@@ -737,7 +737,7 @@ actions:
         ComponentInvoke {
             lens_id: "acme/view".into(),
             command: command.into(),
-            input: serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
+            input: serde_json::json!({ "ref": oxplow_tasks::work_item_ref(fx.task), "to": "done" }),
             on_behalf_of: Actor::Human,
             confirmed: false,
             version: version.into(),

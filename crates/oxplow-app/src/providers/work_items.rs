@@ -1,5 +1,5 @@
 //! An external provider's work items (P7.A1): [`ExternalWorkItems`] is
-//! the [`ExternalVerbs`] the `work_item.*` commands dispatch to for an
+//! the [`WorkItemVerbs`] the `work_item.*` commands dispatch to for an
 //! enabled instance's items. Its verbs are not commands of their own —
 //! `work_item.<verb>` is the one write surface, audited once — so each
 //! call checks the input against the verb's declared `input_schema`,
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use oxplow_domain::work_items::{ExternalVerbs, VerbOutcome, WorkItemsFeatures, WorkItemsProvider};
+use oxplow_domain::work_items::{VerbOutcome, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider};
 use oxplow_domain::{Actor, CommandCall, CommandError, InputValidator};
 use serde_json::Value;
 
@@ -62,16 +62,16 @@ impl ExternalWorkItems {
             id_pattern: instance.spec.id_pattern.clone(),
             sink: false,
             features,
-            external: Some(Arc::new(ExternalWorkItems {
+            verbs: Arc::new(ExternalWorkItems {
                 instance: instance.clone(),
                 inputs,
-            })),
+            }),
         })
     }
 }
 
 #[async_trait]
-impl ExternalVerbs for ExternalWorkItems {
+impl WorkItemVerbs for ExternalWorkItems {
     async fn restart(&self) {
         self.instance.end_process().await;
     }

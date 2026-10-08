@@ -118,6 +118,9 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   workspace scripts) boots Vite + the shell.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
+  `oxplow-tasks` (oxplow's own task list, one implementation of the
+  work-item interface: its store, service and status mapping; nothing
+  outside it names them — `.context/work-items.md`),
   `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
   `oxplow-runtime` (the write guard),
   `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
@@ -151,6 +154,14 @@ test) or a tempfile-backed DB.
 
 Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun run test` invokes both Rust and TS suites.
+
+**A fresh worktree runs as-is.** `test:fast`, `test:collect` and
+`lint:collect` start with `scripts/test-prereqs.sh`, which builds what no
+crate's own graph does, only when it's missing: the staged sidecars
+(oxplow-desktop's build script validates them, so a workspace test or
+clippy run fails without them) and the fake provider's binary
+(oxplow-app's provider tests spawn it). Both used to fail a new
+worktree's first run.
 
 **Which tests and lint to run, and when, is the agent's call** — run
 what the change warrants; nothing requires a full run before a commit.
@@ -230,7 +241,13 @@ a full run and then refuses to reproduce in isolation.
 
 Prefer asserting **completion under a budget** over a wall-clock number
 (`lcov_plugin_parses_a_whole_workspace_report_without_timing_out` is the
-model). When you genuinely need a timing *ratio* — a curve-shape guard —
+model), and make the budget generous: a wait that returns as soon as the
+event arrives costs nothing extra on a pass, while a 3 s budget for an
+FSEvents delivery or a loopback redirect failed in most full runs on a
+loaded machine (`a_top_level_dir_created_later_is_followed`,
+`an_idle_connection_doesnt_hold_up_the_redirect` now allow 20–30 s). When
+the deadline is the thing under test, retry the scenario on a lost race
+(`a_listener_stops_when_its_time_is_up_with_nobody_waiting`). When you genuinely need a timing *ratio* — a curve-shape guard —
 min-of-N sampling is **not** enough on its own, because all N samples of a
 size can be descheduled together. Retry the whole comparison and pass on
 any clean attempt (`first_ratio_under` in `oxplow-collect-plugin`): noise
@@ -255,7 +272,9 @@ in isolation. Rules, applied in `TerminalTabStrip.test.tsx`,
   flushes through `act`. Never `await sleep(); expect(…)`.
 - A change that must **not** happen: sleep *inside* `act` (`await
   act(settle)`) so anything pending has flushed before you look.
-- Absence is a boolean: `expect(queryByTestId("x") === null).toBe(true)`.
+- Absence is a boolean: `expect(queryByTestId("x") === null).toBe(true)`,
+  inside `waitFor` too — there a failing `toBeNull()` serializes the tree
+  on every poll, which under load ran a menu test past bun's 5 s timeout.
   `expect(el).toBeNull()` on a present element serializes the whole
   happy-dom tree into the JUnit message — that is how
   `apps/desktop/test-report.xml` once reached 1.8 GB.
@@ -365,9 +384,21 @@ aws-lc-rs).
   install cargo-sweep --locked`) drops artifacts of toolchains no longer
   installed, then the oldest artifacts until `target/` is under 60 GB.
   Coverage builds live apart in `target/llvm-cov-target` (`cargo cov`).
-- Debug info isn't the lever: a fresh workspace build is ~17 GB, its
+- **`split-debuginfo = "off"`.** A fresh workspace build is ~17 GB, its
   object files 1.8 GB (`debug = "line-tables-only"`, none for
-  dependencies), so `split-debuginfo` isn't set.
+  dependencies), but that isn't where `target/` grew. macOS's default
+  `unpacked` keeps every codegen unit's `.rcgu.o` in `deps/` for the
+  debugger, and each incremental rebuild writes them under a new
+  session suffix without deleting the old: after one day of rebuilds the
+  main worktree held 44 copies of each `oxplow_app` unit, 88 GB of
+  object files in a 79 GB-on-disk `target/`. cargo-sweep can't help: the
+  copies belong to one artifact. `off` (Linux's default already) links
+  `oxplow-app`'s test lib as fast (7–8 s) and leaves none; `packed` also
+  leaves none but runs `dsymutil` per link (+4 s, a 468 MB `.dSYM`). The
+  cost of `off` on macOS: backtraces name functions without file:line
+  (panic messages keep theirs). For a debugging session that needs them,
+  `CARGO_PROFILE_DEV_SPLIT_DEBUGINFO=packed`. Object files already
+  leaked stay until a `cargo clean`.
 
 ## Recording a fresh agent (`scripts/record-just-works.sh`)
 

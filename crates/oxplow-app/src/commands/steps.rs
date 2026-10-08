@@ -30,8 +30,8 @@ use serde_json::{json, Value};
 use super::compose::Compose;
 use super::{
     finish_undo_claim_tx, log_approved_tx, proposal_store, record_tx, Command, CommandBus,
-    Executed, ExternalHandler, Gates, Handler, HandlerOutput, NestedChild, Resolved, Route,
-    RunOrigin, TxCtx, TxHandler, MAX_NESTING,
+    Executed, ExternalHandler, Gates, Handler, HandlerOutput, NestedChild, Resolved, RunOrigin,
+    TxCtx, TxHandler, MAX_NESTING,
 };
 
 /// How one step runs.
@@ -187,13 +187,6 @@ impl Router<'_> {
                     outside = true;
                     StepRun::External(h.clone())
                 }
-                Handler::Dispatch(d) => match (d.route)(&call.input).map_err(at_input)? {
-                    Route::Tx => StepRun::Tx(d.tx.clone()),
-                    Route::External(_) => {
-                        outside = true;
-                        StepRun::External(d.external.clone())
-                    }
-                },
                 Handler::Compose(c) => {
                     match self.route(c, &call.input, &call.name, depth + 1, &call_at)? {
                         Routed::Tx => StepRun::Tx(c.tx.clone()),

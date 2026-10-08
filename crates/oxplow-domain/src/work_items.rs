@@ -3,8 +3,8 @@
 //! interface. oxplow's own tasks are one provider (`oxplow`); an issue
 //! tracker is another. Reads are SQL over `v_work_item`; writes are the
 //! `work_item.*` commands, which the bus dispatches by the ref's provider
-//! segment (`work_item:<provider>:<id>`): oxplow's in its transaction,
-//! another provider's through its [`ExternalVerbs`].
+//! segment (`work_item:<provider>:<id>`) to that provider's
+//! [`WorkItemVerbs`] — the same way for every list, oxplow's own included.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -201,6 +201,11 @@ pub struct WorkItemRecord {
     /// Its comments, the whole set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comments: Option<Vec<CommentRecord>>,
+    /// The list it's on, when the provider keeps lists (`lists`): stated,
+    /// the host restates it; absent, it stays on the list its first record
+    /// was filed from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list: Option<List>,
 }
 
 // [`WorkItemRecord`] as `work_item.recorded@1` carried it: no rank, links
@@ -266,15 +271,17 @@ pub struct VerbOutcome {
     pub inverse: Option<CommandCall>,
 }
 
-/// A provider outside the bus's transaction: its verbs run against its
-/// own system (a process, a tracker) and are recorded after they return.
+/// A provider's verbs: they run against its own system (its tables, a
+/// process, a tracker) outside the bus's transaction, and are recorded
+/// after they return; what they wrote reaches the interface through the
+/// `work_item.recorded` events they answer with.
 /// `input` is the `work_item.<verb>` input, less the host-side
 /// `provider`; the implementation checks it against what the provider
 /// declared and refuses anything else before calling. `idempotency_key`
 /// is the write's key when the caller has one (an effect's step: the same
 /// on every attempt); without one the provider's host mints one.
 #[async_trait]
-pub trait ExternalVerbs: Send + Sync {
+pub trait WorkItemVerbs: Send + Sync {
     async fn invoke(
         &self,
         actor: &Actor,
@@ -290,14 +297,12 @@ pub trait ExternalVerbs: Send + Sync {
 }
 
 /// One source of work items: its ref segment (`oxplow`, `issues`), what
-/// it supports, and — for a provider outside the bus's transaction — the
-/// verbs the dispatching commands call. `None` is oxplow's own: its verbs
-/// are the commands' `Tx` cores.
+/// it supports, and the verbs the dispatching commands call.
 #[derive(Clone)]
 pub struct WorkItemsProvider {
     pub id: String,
     pub features: WorkItemsFeatures,
-    pub external: Option<Arc<dyn ExternalVerbs>>,
+    pub verbs: Arc<dyn WorkItemVerbs>,
     /// What its own ids look like (a regex, matched whole: `tsk\d+`), so a
     /// loose id in a command resolves to its item while it's the active
     /// work list; `None` declares none.
@@ -312,7 +317,6 @@ impl std::fmt::Debug for WorkItemsProvider {
         f.debug_struct("WorkItemsProvider")
             .field("id", &self.id)
             .field("features", &self.features)
-            .field("external", &self.external.is_some())
             .field("id_pattern", &self.id_pattern)
             .field("sink", &self.sink)
             .finish()
@@ -452,11 +456,28 @@ mod tests {
         assert!(problem(&[field("note", FieldKind::Text, &["x"])]).contains("only an enum"));
     }
 
+    struct Nothing;
+
+    #[async_trait]
+    impl WorkItemVerbs for Nothing {
+        async fn invoke(
+            &self,
+            _actor: &Actor,
+            _verb: &str,
+            _input: Value,
+            _idempotency_key: Option<String>,
+        ) -> Result<VerbOutcome, CommandError> {
+            unreachable!("the registry never calls a verb")
+        }
+
+        async fn restart(&self) {}
+    }
+
     fn named(id: &str) -> WorkItemsProvider {
         WorkItemsProvider {
             id: id.into(),
             features: WorkItemsFeatures::default(),
-            external: None,
+            verbs: Arc::new(Nothing),
             id_pattern: None,
             sink: false,
         }
@@ -515,9 +536,11 @@ mod tests {
             rank: None,
             links: None,
             comments: None,
+            list: Some(List::Thread("thr3".into())),
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["ref"], "work_item:fake:W-1");
+        assert_eq!(json["list"], serde_json::json!({ "thread": "thr3" }));
         assert_eq!(json["state"], "in_progress");
         assert_eq!(
             serde_json::from_value::<WorkItemRecord>(json).unwrap(),
@@ -535,4 +558,150 @@ mod tests {
         .unwrap();
         assert!(!f.delete);
     }
+}
+
+// ---- The verbs' inputs: one shape for every list ----
+//
+// What a `oxplow.work_item.<verb>` command takes, and what a list's verb
+// receives (`WorkItemVerbs::invoke`): the `v_work_item` columns, a
+// canonical `state` with the list's `native_state`, and `native` for its
+// own fields.
+
+/// Move an item to a canonical state, and optionally to one of its
+/// provider's own states that maps to it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemTransitionInput {
+    /// The item's ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    pub to: CanonicalState,
+    /// The provider's own state, which must map to `to` (oxplow:
+    /// `archived` with `done` or `canceled`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_state: Option<String>,
+}
+
+/// A new item on the active tracker, optionally straight into
+/// a state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCreateInput {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// The parent's ref, on the same provider (needs `hierarchy`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_ref: Option<String>,
+    /// `todo` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<CanonicalState>,
+    /// The provider's own state, which must map to `state` when both are
+    /// given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_state: Option<String>,
+    /// The tracker's own fields (oxplow: `{ priority? }`), as its
+    /// `create` declares them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<Value>,
+    /// The thread it's filed on (`thr3`): absent, an agent's own, or none
+    /// for a person (oxplow's backlog).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+}
+
+/// Edit an item's fields and, optionally, its state — one run. Absent
+/// fields are left alone.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemUpdateInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// The parent's ref on the same provider, or `""` to detach.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<CanonicalState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_state: Option<String>,
+    /// The provider's own fields to change (oxplow: `{ priority? }`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<Value>,
+}
+
+/// A typed link from one item to another of the same provider.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemLinkInput {
+    /// The item linked from.
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// The item linked to (the same provider's).
+    pub target: String,
+    /// The provider names its own types (oxplow: blocks, relates_to,
+    /// discovered_from, duplicates, supersedes, replies_to).
+    pub link_type: String,
+}
+
+/// A comment on an item (oxplow: a task note).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCommentInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// Markdown.
+    pub body: String,
+}
+
+/// Remove an item (oxplow: soft — the row stays, marked deleted).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemDeleteInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+}
+
+/// `oxplow.work_item.reorder`: put an item before or after another in its own
+/// list (neither: at its end).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemReorderInput {
+    /// The task's ref (`work_item:oxplow:tsk42`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// Put it just before this item of the same list.
+    #[serde(default)]
+    pub before: Option<String>,
+    /// Put it just after this item of the same list.
+    #[serde(default)]
+    pub after: Option<String>,
+}
+
+/// A work list: a thread's, or the project-wide backlog — where
+/// `oxplow.work_item.move` takes an item, and where a record says it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum List {
+    /// The project-wide backlog.
+    Backlog,
+    /// A thread's list (`thr3`).
+    Thread(String),
+}
+
+/// `oxplow.work_item.move`: take an item to another list — its end, or next to
+/// an item there.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemMoveInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    pub to: List,
+    #[serde(default)]
+    pub before: Option<String>,
+    #[serde(default)]
+    pub after: Option<String>,
 }

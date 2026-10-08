@@ -4646,7 +4646,7 @@ async fn react(fx: &TaskEffortFixture) -> oxplow_domain::StoredEvent {
     let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
         "human",
         &WorkItemStateChangedV1 {
-            work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
+            work_item: oxplow_tasks::work_item_ref(fx.task),
             to: oxplow_domain::work_items::CanonicalState::Done,
         },
     );
@@ -4741,7 +4741,7 @@ async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
     // the interface doesn't show it): its own view.
     let titled_from_the_task = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
     let fx = with_effect("lose-reply", titled_from_the_task).await;
-    let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+    let task = oxplow_tasks::work_item_ref(fx.task);
     let rows = fx
         .svc
         .sql
@@ -4762,7 +4762,7 @@ async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
     // What the effect reads changes before its retry (oxplow's task,
     // through its own store: the fake is the active list).
     {
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let mut t = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         t.title = "renamed".into();
         fx.svc.task_store.update(&t).await.unwrap();
@@ -4891,7 +4891,7 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
         let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
             "human",
             &WorkItemStateChangedV1 {
-                work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
+                work_item: oxplow_tasks::work_item_ref(fx.task),
                 to: oxplow_domain::work_items::CanonicalState::Done,
             },
         );
@@ -4932,7 +4932,7 @@ async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
         .append(oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
             "human",
             &WorkItemStateChangedV1 {
-                work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
+                work_item: oxplow_tasks::work_item_ref(fx.task),
                 to: oxplow_domain::work_items::CanonicalState::Done,
             },
         ))
@@ -5012,7 +5012,7 @@ where
     let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
         "human",
         &WorkItemStateChangedV1 {
-            work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
+            work_item: oxplow_tasks::work_item_ref(fx.task),
             to: oxplow_domain::work_items::CanonicalState::Done,
         },
     );

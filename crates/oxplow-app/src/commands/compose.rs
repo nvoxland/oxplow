@@ -73,8 +73,17 @@ impl Compose {
                 events,
             } = composer(ctx.conn, ctx.trace, &input)?;
             let nested = bus.run_nested(ctx, &parent, &calls)?;
+            // Each child answers with its name and result: the caller sent
+            // the inputs, and the composite's own inverse is the undo, so
+            // echoing either only costs the reader (an agent filing twenty
+            // tasks got 23k characters back).
+            let children: Vec<Value> = nested
+                .children
+                .iter()
+                .map(|c| json!({ "name": c.name, "result": c.result }))
+                .collect();
             Ok(HandlerOutput {
-                result: json!({ "result": result, "children": nested.children }),
+                result: json!({ "result": result, "children": children }),
                 inverse: nested.inverse,
                 events: nested.events.into_iter().chain(events).collect(),
                 after_commit: nested.after_commit,
@@ -157,23 +166,23 @@ pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::refs::build::work_item_ref;
-    use oxplow_domain::stores::TaskStore as _;
     use oxplow_domain::Actor;
+    use oxplow_tasks::work_item_ref;
+    use oxplow_tasks::TaskStore as _;
 
-    /// Two `work_item.*` commands as one run by an agent: one audit row
-    /// naming the sequence with the children in its result, the children's
-    /// events caused by that one `command.executed`, and one undo that
-    /// reverses both.
+    /// Two `work_item.*` commands as one run by an agent: a work list's
+    /// verbs run outside the transaction, so the sequence runs them as
+    /// steps — one audit row naming the sequence with the children in its
+    /// result, the children's events caused by that one
+    /// `command.executed`, and no undo of the whole.
     #[tokio::test]
-    async fn a_sequence_of_work_item_commands_is_one_audited_undoable_run() {
+    async fn a_sequence_of_work_item_commands_is_one_audited_run_of_steps() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
         let task = work_item_ref(fx.task);
-        let before = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         let out = fx
             .svc
             .commands
@@ -190,12 +199,13 @@ mod tests {
             .unwrap();
         let after = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(after.title, "Renamed");
-        assert_eq!(after.status, oxplow_domain::TaskStatus::Done);
+        assert_eq!(after.status, oxplow_tasks::TaskStatus::Done);
         assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
         assert_eq!(
             out.result["children"][1]["name"],
             "oxplow.work_item.transition"
         );
+        assert!(out.inverse.is_none(), "steps aren't undoable");
 
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
             .list_recent(20)
@@ -225,14 +235,5 @@ mod tests {
                 "{t}"
             );
         }
-
-        fx.svc
-            .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        let restored = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        assert_eq!(restored.title, before.title);
-        assert_eq!(restored.status, before.status);
     }
 }

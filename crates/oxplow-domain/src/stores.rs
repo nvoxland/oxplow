@@ -11,9 +11,8 @@ use async_trait::async_trait;
 
 use crate::comment::{CommentTarget, CommentThread};
 use crate::hook::{AgentStatus, AgentTurn};
-use crate::ids::{AgentTurnId, CommentId, StreamId, TaskId, TaskLinkId, ThreadId};
+use crate::ids::{AgentTurnId, CommentId, StreamId, ThreadId};
 use crate::stream::Stream;
-use crate::task::{Task, TaskLink, TaskNote, TaskStatus};
 use crate::thread::{Thread, ThreadNote};
 use crate::DomainError;
 
@@ -68,43 +67,10 @@ pub trait ThreadStore: Send + Sync {
 }
 
 #[async_trait]
-pub trait TaskStore: Send + Sync {
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
-    async fn list_by_status_for_thread(
-        &self,
-        thread: &ThreadId,
-        status: TaskStatus,
-    ) -> Result<Vec<Task>, DomainError>;
-    async fn list_backlog(&self) -> Result<Vec<Task>, DomainError>;
-    async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError>;
-    /// Insert a new task; assigns and returns the autoincrement id.
-    async fn insert(&self, item: &Task) -> Result<TaskId, DomainError>;
-    /// Update an existing task by id.
-    async fn update(&self, item: &Task) -> Result<(), DomainError>;
-    async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError>;
-}
-
-#[async_trait]
-pub trait TaskNoteStore: Send + Sync {
-    // A note on a task is a work-item comment: the `oxplow.work_item.comment`
-    // command (`oxplow_db::task_satellite::add_task_note_tx`).
-    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError>;
-}
-
-#[async_trait]
 pub trait ThreadNoteStore: Send + Sync {
     // Written by `oxplow.knowledge.add_note` / `update_note`
     // (`oxplow_db::thread_note_store`).
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<ThreadNote>, DomainError>;
-}
-
-#[async_trait]
-pub trait TaskLinkStore: Send + Sync {
-    // Links are made by the `oxplow.work_item.link` command
-    // (`oxplow_db::task_satellite::create_link_tx`).
-    async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
-    async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
-    async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError>;
 }
 
 #[async_trait]

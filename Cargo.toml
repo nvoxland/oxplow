@@ -4,6 +4,7 @@ members = [
     "apps/desktop/src-tauri",
     "crates/oxplow-domain",
     "crates/oxplow-db",
+    "crates/oxplow-tasks",
     "crates/oxplow-config",
     "crates/oxplow-fs-watch",
     "crates/oxplow-git",
@@ -168,6 +169,7 @@ oxplow-code-deps = { path = "crates/oxplow-code-deps" }
 oxplow-coverage = { path = "crates/oxplow-coverage" }
 oxplow-collect-plugin = { path = "crates/oxplow-collect-plugin" }
 oxplow-db = { path = "crates/oxplow-db" }
+oxplow-tasks = { path = "crates/oxplow-tasks" }
 oxplow-ai = { path = "crates/oxplow-ai" }
 oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
 oxplow-provider-protocol = { path = "crates/oxplow-provider-protocol" }
@@ -203,10 +205,18 @@ strip = true
 # Dev builds are link/debuginfo-bound, not CPU-bound (a touched-crate
 # rebuild is ~all emit + link). Full debuginfo (`debug = 2`) is the bulk of
 # that cost and of the multi-GB `target/debug`. `line-tables-only` keeps
-# file/line in backtraces and panics while cutting the heavy variable/type
+# file/line in Linux backtraces while cutting the heavy variable/type
 # debuginfo; dependencies don't need any (we don't step into them).
+#
+# `split-debuginfo = "off"`: macOS defaults to `unpacked`, which keeps each
+# codegen unit's `.rcgu.o` beside the binary for the debugger, and with
+# incremental builds every rebuild writes new ones without deleting the
+# old: one day of rebuilds left 44 copies of each, 88 GB. `off` is Linux's
+# default already; on macOS it links as fast and leaves nothing behind, at
+# the cost of line numbers in backtraces (panic messages keep file:line).
 [profile.dev]
 debug = "line-tables-only"
+split-debuginfo = "off"
 
 [profile.dev.package."*"]
 debug = false

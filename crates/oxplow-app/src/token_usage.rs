@@ -876,7 +876,7 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::refs::build::work_item_ref;
+    use oxplow_tasks::work_item_ref;
     use std::io::Write;
 
     const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}"#;
@@ -1657,10 +1657,9 @@ mod tests {
         // tsk37: the token fact-capture is stamped with the thread's single open
         // effort (the same resolution the run-ledger auto-claim uses), so
         // `captures_for_effort` — the T-D fact-attribution read — picks it up.
-        use oxplow_domain::stores::TaskStore;
-        use oxplow_domain::{
-            Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, Timestamp,
-        };
+        use oxplow_domain::{TaskId, Timestamp};
+        use oxplow_tasks::TaskStore;
+        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
         let (svc, _dir, thread) = service_fixture().await;
         // One open effort on the thread → the unambiguous single-open case.
         let now = Timestamp::now();

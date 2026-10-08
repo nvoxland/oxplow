@@ -503,9 +503,8 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
         ActorKind, CommandExecuted, CommandExecutedV2, CommandOutcome, ConfigChanged,
-        ConfigChangedV2, WorkItemTransitioned, WorkItemTransitionedV1,
+        ConfigChangedV2, TaskStatus, WorkItemTransitioned, WorkItemTransitionedV1,
     };
-    use oxplow_domain::TaskStatus;
     use serde_json::{json, Value};
 
     fn vocabulary() -> VocabularyHandle {

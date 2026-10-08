@@ -16,15 +16,16 @@
 mod common;
 
 use common::boot;
-use oxplow_domain::refs::build::work_item_ref;
+use oxplow_tasks::work_item_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
-use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
+use oxplow_domain::stores::{StreamStore, ThreadStore};
 use oxplow_domain::{
-    Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus, Thread,
-    ThreadId, ThreadStatus, Timestamp,
+    Stream, StreamId, StreamKind, TaskId, Thread, ThreadId, ThreadStatus, Timestamp,
 };
+use oxplow_tasks::TaskStore;
+use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
 
 /// Seed a stream + thread with the given status; returns the thread id
 /// string used in the X-Oxplow-Thread header.
@@ -469,7 +470,7 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
                 tx,
                 &oxplow_db::NewDecision {
                     thread_id: tid.value(),
-                    work_item: Some(oxplow_domain::refs::build::work_item_ref(task_id)),
+                    work_item: Some(oxplow_tasks::work_item_ref(task_id)),
                     effort_id: Some(effort.id.value()),
                     question: "Storage?".into(),
                     choice: "main DB".into(),

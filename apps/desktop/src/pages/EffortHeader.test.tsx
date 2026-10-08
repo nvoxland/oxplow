@@ -55,7 +55,7 @@ test("linking takes a work item; Escape cancels", async () => {
   await waitFor(() =>
     expect(ran).toEqual([["oxplow.effort.link", { effort: "eff12", work_item: "work_item:oxplow:tsk42" }]]),
   );
-  await waitFor(() => expect(view.queryByTestId("effort-link-prompt-item")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("effort-link-prompt-item") === null).toBe(true));
 });
 
 test("a linked effort shows its item and unlinks", async () => {

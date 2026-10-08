@@ -632,7 +632,11 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     an unsynced source). A table that doesn't exist at all names the
     published model it most likely meant ("no such table: v_tasks; did you
     mean `v_task`?", edit distance, read once the session's authorizer is
-    off — tsk1039). `count(*)` over a view is allowed (SQLite reports
+    off — tsk1039). An unknown column names the columns of each published
+    model the query names, and the nearest one ("no such column: titel …;
+    did you mean `title`? v_task has: …"), so an agent's next query is
+    right without a discovery query (agents spent about one call in six
+    guessing columns). `count(*)` over a view is allowed (SQLite reports
     its base table at top level after the view's own reads). **A read's
     accessor is the view *or CTE* it happened in** — SQLite names a CTE,
     not the view around it — so the session takes the statement's own

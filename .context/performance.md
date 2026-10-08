@@ -496,6 +496,27 @@ them together cut a close from ~174 s to ~115 s:
 still one foreground command, so collection sees both. Read
 `target/clippy.json` (or rerun plain clippy) when it fails.
 
+## Core's vocabulary is built once per process (2026-10-07)
+
+Building a test's `Services` had crept back to ~0.3 s, and `oxplow-app`'s
+median test to 0.37 s. A `sample` of repeated builds put most of it in
+`VocabularyHandle::core()`: every store that validates events took its
+own handle, and each one compiled every core event type's JSON schema
+(`EventSchemaRegistry::core()`) again — four-plus times per `Services`,
+more than loading the bundled extension. Core's vocabulary can't differ
+within a process, so `VocabularyHandle::core()` now shares one
+`LazyLock<Arc<Vocabulary>>` (a swap still replaces only that handle's).
+`oxplow-app`'s suite went from 1,265 to 622 test-seconds (91 s → 46 s
+wall, median test 0.37 s → 0.13 s) on the same loaded machine; daemon
+boot gains the same.
+
+What's left in a fixture, measured: the bundled extension's load
+(`ExtensionCatalog::get`, about twice one vocabulary build) — parsed once
+per `Services`, and nextest runs each test in its own process, so a
+process-wide cache wouldn't help tests. Optimizing bundled SQLite
+(`opt-level = 3` for `libsqlite3-sys`) changed nothing measurable
+(`oxplow-db`: 9.2 s vs 9.0 s); a test process's own start is ~15 ms.
+
 ## Related
 
 - [metrics.md](./metrics.md) — the metric substrate itself: the cube, its two

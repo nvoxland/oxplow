@@ -402,6 +402,18 @@ pub struct StreamScopeParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListExtensionsParams {
+    /// Stream whose worktree to read `oxplow/extensions/` from. Omit for
+    /// your own stream (the calling thread's; the primary when the call
+    /// carries no thread).
+    pub stream_id: Option<String>,
+    /// One extension's name: its whole listing (every lens, collector,
+    /// effect, …) instead of the summary of each.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ShowLensParams {
     /// An existing lens to show (`<extension>/<slug>`, see `list_lenses`).
     /// Give this or `spec`.
@@ -1081,9 +1093,11 @@ impl OxplowMcp {
 
     #[tool(
         description = "List the project's extensions (folders under `oxplow/extensions/` in a \
-                       stream's worktree) with their lenses and any load errors. A lens is a \
+                       stream's worktree): each one's name, whether it's enabled, any load \
+                       errors and warnings, and how many lenses, collectors, effects, … it \
+                       contributes. Pass `name` for one extension's whole listing. A lens is a \
                        saved query over the semantic layer plus how to show it; the human sees \
-                       each one as a page. To build one, write \
+                       each one as a page (`list_lenses` lists them all). To build one, write \
                        `oxplow/extensions/<name>/extension.yaml` and `lenses/<slug>.yaml` with \
                        your normal file tools (see the oxplow-extension skill), then call \
                        `validate_extension`."
@@ -1091,7 +1105,7 @@ impl OxplowMcp {
     async fn list_extensions(
         &self,
         extensions: rmcp::model::Extensions,
-        params: Parameters<StreamScopeParams>,
+        params: Parameters<ListExtensionsParams>,
     ) -> Result<CallToolResult, McpError> {
         check_optional_stream("list_extensions", params.0.stream_id.as_deref())?;
         // Omitted: the caller's own stream (tsk574).
@@ -1100,7 +1114,19 @@ impl OxplowMcp {
             .await;
         let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let listed = self.services.listed_extensions(&root).await;
-        json_result(&listed)
+        match &params.0.name {
+            Some(name) => {
+                let one: Vec<_> = listed.into_iter().filter(|e| &e.name == name).collect();
+                if one.is_empty() {
+                    return Err(McpError::invalid_params(
+                        format!("no extension named `{name}`"),
+                        None,
+                    ));
+                }
+                json_result(&one)
+            }
+            None => json_result(&listed.iter().map(extension_summary).collect::<Vec<_>>()),
+        }
     }
 
     #[tool(
@@ -3188,6 +3214,36 @@ fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> Str
     )
 }
 
+/// An extension in `list_extensions`'s summary: its scalar fields and
+/// load errors/warnings as they are, every list it contributes counted.
+/// The full listing (the bundled extension's ran to 124k characters) is a
+/// `name` away.
+fn extension_summary(ext: &oxplow_app::extensions::Extension) -> serde_json::Value {
+    let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(ext) else {
+        return serde_json::Value::Null;
+    };
+    let mut out = serde_json::Map::new();
+    let mut contributes = serde_json::Map::new();
+    for (key, value) in fields {
+        match value {
+            serde_json::Value::Array(items) if key == "errors" || key == "warnings" => {
+                out.insert(key, serde_json::Value::Array(items));
+            }
+            serde_json::Value::Array(items) => {
+                if !items.is_empty() {
+                    contributes.insert(key, items.len().into());
+                }
+            }
+            serde_json::Value::Object(_) => {}
+            scalar => {
+                out.insert(key, scalar);
+            }
+        }
+    }
+    out.insert("contributes".into(), serde_json::Value::Object(contributes));
+    serde_json::Value::Object(out)
+}
+
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let json = serde_json::to_string_pretty(value).map_err(internal)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
@@ -3211,9 +3267,6 @@ mod tests {
     )]
 
     use super::*;
-    use oxplow_domain::stores::TaskStore;
-    use oxplow_domain::task::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
-    use oxplow_domain::time::Timestamp;
 
     /// tsk203: every registered tool must be classified read XOR write, so a new
     /// tool can't slip in un-annotated (a write mis-marked read is a safety bug;
@@ -3319,25 +3372,28 @@ mod tests {
         panic!("CallToolResult had no text content");
     }
 
-    fn make_task(thread_id: Option<ThreadId>, title: &str) -> Task {
-        let now = Timestamp::now();
-        Task {
-            id: oxplow_domain::TaskId::placeholder(),
-            thread_id,
-            parent_id: None,
-            title: title.into(),
-            description: String::new(),
-            status: TaskStatus::Ready,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
+    /// A task filed as a person through `oxplow.work_item.create` — on
+    /// `thread`'s list, else the backlog: its id.
+    async fn file_task(
+        services: &Services,
+        thread: Option<ThreadId>,
+        title: &str,
+    ) -> oxplow_domain::TaskId {
+        let mut input = serde_json::json!({ "title": title });
+        if let Some(t) = thread {
+            input["thread"] = serde_json::Value::String(t.to_string());
         }
+        let out = services
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.work_item.create",
+                input,
+                false,
+            )
+            .await
+            .unwrap();
+        oxplow_tasks::task_of_work_item_ref(out.result["ref"].as_str().unwrap()).unwrap()
     }
 
     #[tokio::test]
@@ -3473,17 +3529,35 @@ mod tests {
             "title: Broken\nquery: SELECT x FROM v_nope\n",
         );
 
-        let exts: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .list_extensions(
-                    rmcp::model::Extensions::new(),
-                    Parameters(StreamScopeParams { stream_id: None }),
-                )
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
+        let list = |name: Option<&str>| {
+            let server = &server;
+            let name = name.map(str::to_string);
+            async move {
+                serde_json::from_str::<serde_json::Value>(&text_payload(
+                    server
+                        .list_extensions(
+                            rmcp::model::Extensions::new(),
+                            Parameters(ListExtensionsParams {
+                                stream_id: None,
+                                name,
+                            }),
+                        )
+                        .await
+                        .unwrap(),
+                ))
+                .unwrap()
+            }
+        };
+        // The list is a summary: what each extension contributes, counted,
+        // and its errors — not every lens's query.
+        let exts = list(None).await;
         assert_eq!(exts[0]["name"], "demo");
+        assert_eq!(exts[0]["contributes"]["lenses"], 2, "{exts}");
+        assert!(!exts.to_string().contains("v_stream"), "{exts}");
+        // One extension by name: all of it.
+        let demo = list(Some("demo")).await;
+        assert!(demo.to_string().contains("v_stream"), "{demo}");
+        assert_eq!(demo.as_array().map(Vec::len), Some(1), "{demo}");
 
         let lenses: serde_json::Value = serde_json::from_str(&text_payload(
             server
@@ -3650,16 +3724,8 @@ mod tests {
 
         // A task to use as the primary target, and another as a context
         // ancestor (e.g. an epic the row sat under).
-        let primary_task = services
-            .task_store
-            .insert(&make_task(None, "Primary item"))
-            .await
-            .unwrap();
-        let parent_task = services
-            .task_store
-            .insert(&make_task(None, "Parent epic"))
-            .await
-            .unwrap();
+        let primary_task = file_task(&services, None, "Primary item").await;
+        let parent_task = file_task(&services, None, "Parent epic").await;
 
         services
             .commands
@@ -3849,11 +3915,7 @@ mod tests {
     #[tokio::test]
     async fn the_backlog_lists_the_items_on_no_thread() {
         let (_proj, services, server) = boot();
-        let id = services
-            .task_store
-            .insert(&make_task(None, "do the thing"))
-            .await
-            .unwrap();
+        let id = file_task(&services, None, "do the thing").await;
         let r = server
             .list_work_items(Parameters(ListWorkItemsParams {
                 list: "backlog".into(),
@@ -3891,11 +3953,7 @@ mod tests {
         let (_proj, services, server) = boot();
         services.streams.ensure_primary().await.unwrap();
         let thread = ThreadId::new(1);
-        services
-            .task_store
-            .insert(&make_task(Some(thread), "on the thread"))
-            .await
-            .unwrap();
+        file_task(&services, Some(thread), "on the thread").await;
         let items = thread_context(&server, thread).await["items"].clone();
         assert_eq!(items[0]["title"], "on the thread", "{items}");
         assert!(items[0]["ref"]
@@ -3926,11 +3984,7 @@ mod tests {
     #[tokio::test]
     async fn the_work_item_tools_read_the_active_list() {
         let (_proj, services, server) = boot();
-        let id = services
-            .task_store
-            .insert(&make_task(None, "round trip"))
-            .await
-            .unwrap();
+        let id = file_task(&services, None, "round trip").await;
         let item_ref = format!("work_item:oxplow:{id}");
         let get = |server: &OxplowMcp| {
             let item_ref = item_ref.clone();
@@ -4316,7 +4370,13 @@ mod tests {
         };
         let listed = text_payload(
             server
-                .list_extensions(caller(), Parameters(StreamScopeParams { stream_id: None }))
+                .list_extensions(
+                    caller(),
+                    Parameters(ListExtensionsParams {
+                        stream_id: None,
+                        name: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         );
@@ -4326,7 +4386,10 @@ mod tests {
             server
                 .list_extensions(
                     rmcp::model::Extensions::new(),
-                    Parameters(StreamScopeParams { stream_id: None }),
+                    Parameters(ListExtensionsParams {
+                        stream_id: None,
+                        name: None,
+                    }),
                 )
                 .await
                 .unwrap(),
@@ -4408,18 +4471,10 @@ mod tests {
             .into_iter()
             .next()
             .unwrap();
-        let task_id = services
-            .task_store
-            .insert(&make_task(Some(thread.id), "evidence"))
-            .await
-            .unwrap();
+        let task_id = file_task(&services, Some(thread.id), "evidence").await;
         let effort = services
             .effort_store
-            .start(
-                &oxplow_domain::refs::build::work_item_ref(task_id),
-                &thread.id,
-                None,
-            )
+            .start(&oxplow_tasks::work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
         let row = |kind: &str, value: f64| oxplow_db::EffortObservation {
@@ -4474,18 +4529,10 @@ mod tests {
             .into_iter()
             .next()
             .expect("primary stream must have a writer thread");
-        let task_id = services
-            .task_store
-            .insert(&make_task(Some(thread.id), "open effort task"))
-            .await
-            .unwrap();
+        let task_id = file_task(&services, Some(thread.id), "open effort task").await;
         let effort = services
             .effort_store
-            .start(
-                &oxplow_domain::refs::build::work_item_ref(task_id),
-                &thread.id,
-                None,
-            )
+            .start(&oxplow_tasks::work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
 
@@ -4499,10 +4546,7 @@ mod tests {
         assert_eq!(parsed["open"], true);
         assert_eq!(parsed["effortId"], effort.id.to_string());
         // The effort's work item, as a ref: no oxplow task id.
-        assert_eq!(
-            parsed["workItem"],
-            oxplow_domain::refs::build::work_item_ref(task_id)
-        );
+        assert_eq!(parsed["workItem"], oxplow_tasks::work_item_ref(task_id));
         assert!(parsed.get("taskId").is_none());
         assert!(parsed["startedAt"].is_string());
         // start() with None records no start snapshot.

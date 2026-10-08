@@ -126,7 +126,6 @@ pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
 pub mod symbol_collector;
-pub mod task_service;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
@@ -164,7 +163,7 @@ pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
 pub use oxplow_lsp::{LspError, LspProxy};
-pub use task_service::{CreateTaskInput, TaskService, TaskServiceError, UpdateTaskChanges};
+use oxplow_tasks::{SqliteTaskLinkStore, SqliteTaskStore};
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
@@ -191,9 +190,8 @@ use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
     SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore, SqliteFactStore,
     SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
-    SqliteStreamStore, SqliteTaskLinkStore, SqliteTaskStore, SqliteThreadNoteStore,
-    SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
-    SqliteWikiPageThreadUpdateStore,
+    SqliteStreamStore, SqliteThreadNoteStore, SqliteThreadStore, SqliteTokenUsageStore,
+    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -468,7 +466,6 @@ pub struct Services {
     pub layout: AppLayout,
     pub streams: StreamService,
     pub threads: ThreadService,
-    pub tasks: TaskService,
     /// What an effort's lifecycle does around its store (snapshot pins,
     /// lifecycle metrics, file claims).
     pub efforts: effort_service::EffortService,
@@ -765,10 +762,7 @@ impl Services {
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
         let vocabulary = VocabularyHandle::core();
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
-        let task_store = Arc::new(SqliteTaskStore::with_vocabulary(
-            db.clone(),
-            vocabulary.clone(),
-        ));
+        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
@@ -779,10 +773,12 @@ impl Services {
             db.clone(),
             (*event_log_store).clone(),
             vec![
+                // A list's records reach the interface before an item's
+                // page refs are restated from it.
+                Arc::new(work_items::WorkItemsProjection),
                 Arc::new(page_ref_consumers::PageRefWorkItemConsumer {
                     vocabulary: vocabulary.clone(),
                 }),
-                Arc::new(work_items::WorkItemsProjection),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(knowledge::WikiAttribution),
                 // The log's facts the renderer hears (P7.B6).
@@ -865,7 +861,6 @@ impl Services {
             },
         );
         let threads = ThreadService::new(thread_store.clone());
-        let tasks = TaskService::new(task_store.clone());
 
         let hook_ingest = HookIngestService::new(
             db.clone(),
@@ -953,9 +948,7 @@ impl Services {
         ));
 
         // Snapshot capture singleton — owned here so anything in
-        // Services can request snapshots (e.g. TaskService stamps
-        // start/end ids on the effort row when a task transitions
-        // through in_progress). The fs-watcher, startup sweep, and
+        // Services can request snapshots. The fs-watcher, startup sweep, and
         // cleanup loop are spawned by the host binary (main.rs).
         let (max_bytes, workspace_filter) = {
             let g = config_arc.read();
@@ -1085,9 +1078,8 @@ impl Services {
             }],
             vocabulary.clone(),
         ));
-        capabilities.set_declared(capabilities::declared_by(
-            &extension_catalog.get(&layout.project_dir),
-        ));
+        let declared = capabilities::declared_by(&extension_catalog.get(&layout.project_dir));
+        capabilities.set_declared(declared.clone());
         // What's active, published before anything reads it: the work-item
         // interface shows the active list's items.
         capabilities
@@ -1150,7 +1142,9 @@ impl Services {
                 capabilities.active(&config_service::read_config(&config), "work_items")
             }))
         };
-        work_items.register(work_items::oxplow_provider());
+        // The built-in lists the project's extensions declare (oxplow's
+        // tasks, while `oxplow-bundled` does).
+        work_items::register_built_ins(&work_items, &declared, &db);
         // None as a work list: the sink every verb reaches while no list is
         // active (`work_items::none_provider`).
         work_items.register(work_items::none_provider());
@@ -1187,6 +1181,8 @@ impl Services {
         let link_deps = link_check::LinkDeps {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
+            db: db.clone(),
+            vocabulary: vocabulary.clone(),
         };
         for command in [
             commands::work_item::transition_op(work_items.clone()),
@@ -1452,7 +1448,6 @@ impl Services {
             layout,
             streams,
             threads,
-            tasks,
             efforts,
             snapshot_captures,
             stream_store,
@@ -1843,23 +1838,7 @@ mod tests {
                 "oxplow.vcs.rename_branch",
                 "oxplow.vcs.resolve_conflict",
                 "oxplow.vcs.stage",
-            ]
-        );
-    }
-
-    /// P7.A1: every `Dispatch` command — one that decides per input
-    /// whether it runs in the transaction or through a provider's process
-    /// — is listed here on purpose, like the `External` ones. A composite
-    /// is one (P7 review, tsk713): its calls decide.
-    #[tokio::test]
-    async fn the_dispatch_commands_are_the_reviewed_ones() {
-        let dir = tempfile::tempdir().unwrap();
-        crate::test_fixtures::init_git_repo(dir.path());
-        let services = Services::in_memory(dir.path()).unwrap();
-        assert_eq!(
-            services.commands.dispatch_commands(),
-            [
-                "oxplow.command.sequence",
+                // Every work list's verbs, oxplow's own included.
                 "oxplow.work_item.comment",
                 "oxplow.work_item.create",
                 "oxplow.work_item.delete",
@@ -1869,6 +1848,20 @@ mod tests {
                 "oxplow.work_item.transition",
                 "oxplow.work_item.update",
             ]
+        );
+    }
+
+    /// Every composite — whose calls decide, per input, whether it runs in
+    /// the transaction or as steps — is listed here on purpose, like the
+    /// `External` commands.
+    #[tokio::test]
+    async fn the_composite_commands_are_the_reviewed_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let services = Services::in_memory(dir.path()).unwrap();
+        assert_eq!(
+            services.commands.composite_commands(),
+            ["oxplow.command.sequence",]
         );
     }
 }

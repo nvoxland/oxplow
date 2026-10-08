@@ -203,7 +203,8 @@ and the link checker never drift.
 
 `crates/oxplow-db/src/page_ref_projections.rs` writes `(kind, id)` pairs
 that are exactly a canonical ref's: kinds `work_item`, `commit`, `dir`,
-`task_note`, `thread_note`, `wiki`, `file`, `finding`; a work item's id is
+`thread_note`, `wiki`, `file`, `finding` (a work item's comments are its
+own edges, `comment_*`); a work item's id is
 `<provider>:<id>` (`oxplow:tsk<n>`). An effort's impacts name their kind
 in the agent tools' vocabulary (`IMPACT_KINDS`: `wiki | work_item | file
 | directory | git_commit | finding`; `oxplow.effort.report` refuses any other,

@@ -32,23 +32,7 @@ pub fn production_sources() -> Vec<(String, String)> {
             }
         }
     }
-    // A module declared `#[cfg(test)] mod x;` is test code wherever its
-    // file is: `x.rs` and everything under `x/`.
-    let test_only: Vec<PathBuf> = files
-        .iter()
-        .flat_map(|(path, text)| {
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-            let parent = path.parent().unwrap_or(Path::new("")).to_path_buf();
-            let dir = if matches!(stem.as_ref(), "mod" | "lib" | "main") {
-                parent
-            } else {
-                parent.join(stem.as_ref())
-            };
-            test_only_modules(text)
-                .into_iter()
-                .map(move |name| dir.join(name))
-        })
-        .collect();
+    let test_only = test_only_files(&files);
     let mut out: Vec<(String, String)> = files
         .iter()
         .filter(|(path, _)| {
@@ -67,6 +51,27 @@ pub fn production_sources() -> Vec<(String, String)> {
         .collect();
     out.sort();
     out
+}
+
+/// The test-only module paths `files` declare: a module declared
+/// `#[cfg(test)] mod x;` is test code wherever its file is — `x.rs` and
+/// everything under `x/`.
+fn test_only_files(files: &[(PathBuf, String)]) -> Vec<PathBuf> {
+    files
+        .iter()
+        .flat_map(|(path, text)| {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            let parent = path.parent().unwrap_or(Path::new("")).to_path_buf();
+            let dir = if matches!(stem.as_ref(), "mod" | "lib" | "main") {
+                parent
+            } else {
+                parent.join(stem.as_ref())
+            };
+            test_only_modules(text)
+                .into_iter()
+                .map(move |name| dir.join(name))
+        })
+        .collect()
 }
 
 /// The modules `text` declares for tests only: each `#[cfg(test)]`
@@ -738,11 +743,6 @@ fn no_tmux_in_the_app() {
 /// it. Each `(file, pattern)` still here says why.
 #[rustfmt::skip]
 const SPECIAL_CASES: &[(&str, &str, &str)] = &[
-    // Placing a task among oxplow's own: these commands are oxplow's
-    // tasks', until the tasks sit behind the work-list interface like any
-    // other implementation (so does `dispatching`'s in-transaction route
-    // for them, in the same file).
-    ("crates/oxplow-app/src/commands/work_item.rs", "!= OXPLOW", "oxplow's tasks' own commands"),
     // Reserving the name, so no provider takes oxplow's refs: no decision
     // about how to call one.
     ("crates/oxplow-domain/src/work_items.rs", "== OXPLOW", "the reserved provider id"),
@@ -801,25 +801,24 @@ fn core_never_special_cases_its_own_pieces() {
 
 /// Where oxplow's own task list — one implementation of the work-item
 /// interface (`.context/work-items.md`) — may be named in production
-/// code: its store, its service and its models. Everything else reads the
-/// interface (`v_work_item` and its views, `work_item_reads`) and writes
-/// through the `work_item.*` commands, whichever list is active. Each
-/// file still here says why.
+/// code: its crate (`crates/oxplow-tasks`, all of it) and the files listed
+/// here. Everything else reads the interface (`v_work_item` and its views,
+/// `work_item_reads`) and writes through the `work_item.*` commands,
+/// whichever list is active. Each file still here says why.
 #[rustfmt::skip]
 const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
-    ("crates/oxplow-db/src/task_store.rs", "the store"),
-    ("crates/oxplow-db/src/task_satellite.rs", "its links and comments"),
-    ("crates/oxplow-db/src/lib.rs", "exports the store"),
-    ("crates/oxplow-app/src/task_service.rs", "the service"),
-    ("crates/oxplow-app/src/commands/work_item.rs", "oxplow's verbs, dispatched in-transaction"),
-    ("crates/oxplow-app/src/lib.rs", "wires the store and service into Services"),
-    ("crates/oxplow-app/src/page_ref_backfill.rs", "the boot-time repair of the page-ref slices oxplow's tasks project when written"),
-    ("crates/oxplow-app/src/boot.rs", "hands that repair the task stores"),
+    ("crates/oxplow-app/src/work_items.rs", "the built-in factory: `oxplow:tasks` is oxplow_tasks's verbs"),
+    ("crates/oxplow-app/src/lib.rs", "wires the task stores into Services"),
 ];
 
-/// Production files that name oxplow's task list (comments left out).
+/// The implementation's own crate.
+const TASK_CRATE: &str = "crates/oxplow-tasks/";
+
+/// Production files outside the task crate that name oxplow's task list
+/// (comments left out).
 fn task_implementation_readers() -> BTreeSet<String> {
     const PATTERNS: &[&str] = &[
+        "oxplow_tasks",
         "v_task",
         "SqliteTaskStore",
         "TaskService",
@@ -829,6 +828,9 @@ fn task_implementation_readers() -> BTreeSet<String> {
     ];
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {
+        if path.starts_with(TASK_CRATE) {
+            continue;
+        }
         let named = text
             .lines()
             .filter(|l| !l.trim_start().starts_with("//"))

@@ -68,7 +68,7 @@ test("clicking a menu item does not bubble to the underlying row's onClick", asy
   );
   fireEvent.contextMenu(getByTestId("row"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-delete"));
-  await waitFor(() => expect(queryByTestId("menu-item-delete")).toBeNull());
+  await waitFor(() => expect(queryByTestId("menu-item-delete") === null).toBe(true));
   expect(ran).toBe(1);
   expect(rowClicks).toBe(0);
 });
@@ -79,6 +79,6 @@ test("choosing an item runs it and closes the menu", async () => {
   fireEvent.contextMenu(getByTestId("row"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-delete"));
   // run + onClose are awaited inside the menu; wait for the close re-render.
-  await waitFor(() => expect(queryByTestId("menu-item-delete")).toBeNull());
+  await waitFor(() => expect(queryByTestId("menu-item-delete") === null).toBe(true));
   expect(ran).toBe(1);
 });

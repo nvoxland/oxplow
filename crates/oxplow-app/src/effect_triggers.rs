@@ -688,7 +688,7 @@ fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
             // work was meant for a list, and resending it nowhere would
             // lose it quietly.
             crate::commands::work_item::provider_for(&svc.work_items, &call.name, &call.input)
-                .is_some_and(|p| p.external.is_some() && !p.sink && p.features.idempotent_writes)
+                .is_some_and(|p| !p.sink && p.features.idempotent_writes)
         })
 }
 
@@ -979,14 +979,14 @@ mod tests {
         Envelope::typed::<WorkItemStateChanged>(
             "human",
             &WorkItemStateChangedV1 {
-                work_item: oxplow_domain::refs::build::work_item_ref(task),
+                work_item: oxplow_tasks::work_item_ref(task),
                 to,
             },
         )
     }
 
     async fn title(fx: &crate::test_fixtures::TaskEffortFixture) -> String {
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         fx.svc.task_store.get(fx.task).await.unwrap().unwrap().title
     }
 
@@ -1574,7 +1574,7 @@ mod tests {
         extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         svc.commands
             .run(
                 &oxplow_domain::Actor::Human,
@@ -1661,7 +1661,7 @@ mod tests {
             rows(svc, "SELECT json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result'").await,
             json!([["proposed"]])
         );
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         assert!(
             svc.task_store.get(fx.task).await.unwrap().is_some(),
             "nothing deleted"
@@ -1809,7 +1809,7 @@ mod tests {
             "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
         );
         // The subscriber: retitles the fixture's task with what it saw.
-        let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let task = oxplow_tasks::work_item_ref(fx.task);
         write(
             &root,
             "oxplow/extensions/acme/extension.yaml",
@@ -2039,7 +2039,7 @@ mod tests {
         let script = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
         register(svc);
-        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let r = oxplow_tasks::work_item_ref(fx.task);
         let edited = |source: &str| {
             Envelope::typed::<WorkItemEdited>(
                 source,

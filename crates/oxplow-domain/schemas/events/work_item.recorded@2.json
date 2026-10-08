@@ -61,6 +61,29 @@
       ],
       "type": "object"
     },
+    "List": {
+      "description": "A work list: a thread's, or the project-wide backlog — where\n`oxplow.work_item.move` takes an item, and where a record says it is.",
+      "oneOf": [
+        {
+          "const": "backlog",
+          "description": "The project-wide backlog.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A thread's list (`thr3`).",
+          "properties": {
+            "thread": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "WorkItemRecord": {
       "additionalProperties": false,
       "description": "An item as its provider now has it — what `v_work_item` holds, and\nwhat a provider's `work_item.recorded` event carries. `rank`, `links`\nand `comments` are stated when the provider keeps them: absent, the\nhost keeps what it has; present, it's the whole set.",
@@ -93,6 +116,17 @@
             "array",
             "null"
           ]
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/List"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The list it's on, when the provider keeps lists (`lists`): stated,\nthe host restates it; absent, it stays on the list its first record\nwas filed from."
         },
         "native": {
           "default": null,
@@ -137,7 +171,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`work_item.recorded@2`: a provider's item as it now stands — how an\nexternal provider's items reach the work-item interface (the\n`work_items.project` consumer upserts it by ref), with its rank, links\nand comments when it states them. oxplow's own tasks don't log it:\ntheir rows are written with the task, in the same transaction.",
+  "description": "`work_item.recorded@2`: a list's item as it now stands — how every\nlist's items reach the work-item interface (the `work_items.project`\nconsumer upserts it by ref), with its rank, links, comments and list\nwhen it states them. A list's verbs answer with it.",
   "properties": {
     "item": {
       "$ref": "#/$defs/WorkItemRecord"

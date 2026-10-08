@@ -11,11 +11,11 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use oxplow_domain::work_items::{CanonicalState, ExternalVerbs, WorkItemRecord, WorkItemsFeatures};
+use oxplow_domain::work_items::{CanonicalState, WorkItemRecord, WorkItemVerbs, WorkItemsFeatures};
 use oxplow_domain::Actor;
 
-use crate::commands::work_item::WorkItemUpdateInput;
 use crate::work_items::{NewItem, WorkItems};
+use oxplow_domain::work_items::WorkItemUpdateInput;
 
 /// A failed check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +51,7 @@ pub trait WorkItemsProbe: Send + Sync {
     /// `provider`'s verbs as the host calls them (an external provider's),
     /// for what the bus never sends itself: a write re-sent with its
     /// idempotency key.
-    async fn verbs(&self, provider: &str) -> Option<Arc<dyn ExternalVerbs>>;
+    async fn verbs(&self, provider: &str) -> Option<Arc<dyn WorkItemVerbs>>;
     /// The refs of `provider`'s live rows titled `title`.
     async fn titled(&self, provider: &str, title: &str) -> Vec<String>;
     /// The host's active work-items provider: where every create files.
@@ -632,6 +632,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
                         rank: None,
                         links: None,
                         comments: None,
+                        list: None,
                     })
                 },
             )
@@ -673,8 +674,8 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .map_err(|e| e.to_string())
     }
 
-    async fn verbs(&self, provider: &str) -> Option<Arc<dyn ExternalVerbs>> {
-        self.0.work_items.get(provider).ok()?.external
+    async fn verbs(&self, provider: &str) -> Option<Arc<dyn WorkItemVerbs>> {
+        self.0.work_items.get(provider).ok().map(|p| p.verbs)
     }
 
     async fn active(&self) -> String {

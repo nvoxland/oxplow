@@ -265,6 +265,9 @@ function refFor(kind: string, id: string): TabRef | null {
  *  - **typed link** — `work_item_link:<sub>` becomes the sub-type with
  *    underscores swapped for spaces (e.g. `blocks`, `relates to`).
  *
+ *  - **comment** — `comment_*`: a work item's comment mentions it (the
+ *    item is the source; its comments live on its page).
+ *
  *  Plus a `found in` fallback for `finding_path`, and the raw
  *  ref_type for anything unrecognized so a new ref_type never
  *  crashes the renderer.
@@ -288,6 +291,13 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
     case "commit_mention":
     case "summary_commit_mention":
       return "mention";
+    case "comment_file_ref":
+    case "comment_dir_ref":
+    case "comment_wikilink":
+    case "comment_work_item_mention":
+    case "comment_finding_mention":
+    case "comment_commit_mention":
+      return "comment";
     case "touched_file":
       return normalizeAction(parseExtraField(sourceExtra, "change_kind")) ?? "modified";
     case "finding_path":

@@ -50,10 +50,7 @@ pub use ids::{
 };
 pub use json::Json;
 pub use stream::{Stream, StreamKind};
-pub use task::{
-    Task, TaskActorKind, TaskAuthor, TaskImpact, TaskLink, TaskLinkType, TaskNote, TaskPriority,
-    TaskStatus,
-};
+pub use task::TaskImpact;
 pub use thread::{Thread, ThreadNote, ThreadStatus};
 pub use time::Timestamp;
 pub use tree_diff::{diff_trees, ChangeStatus, FileChange};

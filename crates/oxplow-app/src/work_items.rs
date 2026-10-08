@@ -1,20 +1,21 @@
 //! The work-items capability in the app (`.context/work-items.md`):
 //!
-//! - [`oxplow_provider`], the built-in provider — oxplow's own tasks —
-//!   whose verbs are the `work_item.*` commands' `Tx` cores;
+//! - [`built_in_provider`], the factory for a built-in work list
+//!   (`oxplow:tasks`, oxplow's own tasks, from `oxplow-tasks`), and
+//!   [`register_built_ins`], which registers the ones the project's
+//!   extensions declare;
 //! - [`WorkItems`], a typed client over the `work_item.*` commands: the
 //!   one write surface for every provider (the conformance suite and
 //!   `task_writes` use it);
 //! - [`WorkItemsProjection`], the pump consumer (`work_items.project`)
-//!   that upserts another provider's items into `work_item` from its
-//!   `work_item.recorded` events. oxplow's own rows never take this path:
-//!   the task cores write them with the task.
+//!   that upserts every list's items into `work_item` from its
+//!   `work_item.recorded` events.
 
 use std::sync::Arc;
 
 use oxplow_domain::events::schema::{EventType, WorkItemRecorded, WorkItemRecordedV2};
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, WorkItemsFeatures, WorkItemsProvider,
+    provider_of, CanonicalState, List, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider,
 };
 use oxplow_domain::{Actor, CommandError, CommandOutcome, DomainError, StoredEvent};
 use serde_json::{json, Value};
@@ -27,28 +28,66 @@ pub const PROVIDER: &str = oxplow_domain::work_items::OXPLOW;
 /// oxplow's tasks' built-in entry (`capabilities::BUILT_INS`).
 pub const BUILT_IN: &str = "oxplow:tasks";
 
-/// oxplow's tasks as a work-items provider: every feature, and its
-/// effort follows its status. No external verbs — the `work_item.*`
-/// commands run its cores in the bus's transaction.
-pub fn oxplow_provider() -> WorkItemsProvider {
-    WorkItemsProvider {
-        id: PROVIDER.into(),
+/// A built-in work list's provider, by its entry (`capabilities::BUILT_INS`)
+/// and the id an extension declares it under: its features and ids as
+/// the built-in declares them, its verbs its own. `None` for an entry
+/// that isn't a work list.
+pub fn built_in_provider(
+    entry: &str,
+    id: &str,
+    db: &oxplow_db::Database,
+) -> Option<WorkItemsProvider> {
+    let built_in = crate::capabilities::built_in(entry)?;
+    if built_in.capability != "work_items" {
+        return None;
+    }
+    let verbs: Arc<dyn WorkItemVerbs> = match entry {
+        BUILT_IN => Arc::new(oxplow_tasks::OxplowTasks::new(db.clone())),
+        _ => return None,
+    };
+    let has = |f: &str| built_in.features.contains(&f);
+    Some(WorkItemsProvider {
+        id: id.into(),
         features: WorkItemsFeatures {
-            hierarchy: true,
-            comments: true,
-            links: true,
-            delete: true,
-            // Its writes run in the bus's transaction: never sent twice.
-            idempotent_writes: false,
-            ordering: true,
-            lists: true,
+            hierarchy: has("hierarchy"),
+            comments: has("comments"),
+            links: has("links"),
+            delete: has("delete"),
+            idempotent_writes: has("idempotent_writes"),
+            ordering: has("ordering"),
+            lists: has("lists"),
         },
-        external: None,
-        // Its ids (`tsk12`), as its built-in declares them.
-        id_pattern: crate::capabilities::built_in(BUILT_IN)
-            .and_then(|b| b.id_pattern)
-            .map(str::to_string),
+        verbs,
+        id_pattern: built_in.id_pattern.map(str::to_string),
         sink: false,
+    })
+}
+
+/// Register the built-in work lists `declared` names (the project's
+/// extensions' `implementations:`), and unregister the ones it no longer
+/// does: a built-in list is reachable only while an extension declares
+/// it; its data stays.
+pub fn register_built_ins(
+    registry: &oxplow_domain::work_items::WorkItemsRegistry,
+    declared: &[crate::capabilities::Implementation],
+    db: &oxplow_db::Database,
+) {
+    for b in crate::capabilities::BUILT_INS
+        .iter()
+        .filter(|b| b.capability == "work_items")
+    {
+        let named: Vec<&crate::capabilities::Implementation> = declared
+            .iter()
+            .filter(|i| matches!(i.source, crate::capabilities::Source::BuiltIn(e) if e == b.entry))
+            .collect();
+        for i in &named {
+            if let Some(provider) = built_in_provider(b.entry, &i.id, db) {
+                registry.register(provider);
+            }
+        }
+        if named.is_empty() && b.entry == BUILT_IN {
+            registry.unregister(PROVIDER);
+        }
     }
 }
 
@@ -68,7 +107,7 @@ pub fn none_provider() -> WorkItemsProvider {
             ordering: true,
             lists: true,
         },
-        external: Some(Arc::new(Sink)),
+        verbs: Arc::new(Sink),
         id_pattern: Some(".+".into()),
         sink: true,
     }
@@ -78,7 +117,7 @@ pub fn none_provider() -> WorkItemsProvider {
 struct Sink;
 
 #[async_trait::async_trait]
-impl oxplow_domain::work_items::ExternalVerbs for Sink {
+impl WorkItemVerbs for Sink {
     async fn invoke(
         &self,
         _actor: &oxplow_domain::Actor,
@@ -137,7 +176,7 @@ impl WorkItems {
         actor: &Actor,
         item: NewItem,
     ) -> Result<Option<String>, CommandError> {
-        let input = serde_json::to_value(work_item::WorkItemCreateInput {
+        let input = serde_json::to_value(oxplow_domain::work_items::WorkItemCreateInput {
             title: item.title,
             body: (!item.body.is_empty()).then_some(item.body),
             parent_ref: item.parent_ref,
@@ -162,7 +201,7 @@ impl WorkItems {
     pub async fn update(
         &self,
         actor: &Actor,
-        input: work_item::WorkItemUpdateInput,
+        input: oxplow_domain::work_items::WorkItemUpdateInput,
     ) -> Result<CommandOutcome, CommandError> {
         let input = serde_json::to_value(input).expect("input serializes");
         self.run(actor, work_item::UPDATE, input).await
@@ -264,10 +303,9 @@ impl WorkItems {
     }
 }
 
-/// Upserts another provider's item into `work_item` from its
-/// `work_item.recorded` event, by ref — idempotent, so a replay restates
-/// the same row. An `oxplow` record is refused: those rows are the task
-/// cores' alone.
+/// Upserts a list's item into `work_item` from its `work_item.recorded`
+/// event, by ref — idempotent, so a replay restates the same row; every
+/// list's, oxplow's own tasks' included.
 pub struct WorkItemsProjection;
 
 impl WorkItemsProjection {
@@ -289,12 +327,6 @@ impl EventConsumer for WorkItemsProjection {
         let provider = provider_of(&item.item_ref)
             .map_err(|e| DomainError::Invalid(e.to_string()))?
             .to_string();
-        if provider == PROVIDER {
-            return Err(DomainError::Invalid(format!(
-                "`{}` is oxplow's own; its row is written with the task",
-                item.item_ref
-            )));
-        }
         let at = event.envelope.at.to_string();
         conn.execute(
             "INSERT INTO work_item (ref, provider, title, body, state, native_state, native,
@@ -330,6 +362,21 @@ impl EventConsumer for WorkItemsProjection {
         let storage = |e: rusqlite::Error| DomainError::Storage(e.to_string());
         // What the record states, it restates whole; what it leaves out,
         // the host keeps.
+        if let Some(list) = &item.list {
+            let thread = match list {
+                List::Backlog => None,
+                List::Thread(raw) => Some(
+                    raw.parse::<oxplow_domain::ThreadId>()
+                        .map_err(|e| DomainError::Invalid(format!("list `{raw}`: {e}")))?
+                        .value(),
+                ),
+            };
+            conn.execute(
+                "UPDATE work_item SET thread_id = ?2 WHERE ref = ?1",
+                rusqlite::params![item.item_ref, thread],
+            )
+            .map_err(storage)?;
+        }
         if let Some(rank) = item.rank {
             conn.execute(
                 "UPDATE work_item SET rank = ?2 WHERE ref = ?1",
@@ -399,7 +446,7 @@ mod tests {
         use serde_json::json;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let task = oxplow_tasks::work_item_ref(fx.task);
         let run = |name: &'static str, input: serde_json::Value| {
             let svc = svc.clone();
             async move {
@@ -482,6 +529,7 @@ mod tests {
                     rank: None,
                     links: None,
                     comments: None,
+                    list: None,
                 },
             },
         )
@@ -532,14 +580,15 @@ mod tests {
             Some(("renamed".into(), "in_progress".into(), true))
         );
 
-        let own = oxplow_domain::refs::build::work_item_ref(fx.task);
+        // oxplow's own tasks take the same path.
+        let own = oxplow_tasks::work_item_ref(fx.task);
         svc.event_log_store
-            .append(recorded(&own, "hijack", false))
+            .append(recorded(&own, "restated", false))
             .await
             .unwrap();
         let report = svc.event_pump.run_once().await.unwrap();
-        assert_eq!(report.dead_lettered, 1);
-        assert_ne!(row(svc, &own).await.unwrap().0, "hijack");
+        assert_eq!(report.dead_lettered, 0);
+        assert_eq!(row(svc, &own).await.unwrap().0, "restated");
         assert!(WorkItemsProjection.handles(WorkItemRecorded::TYPE));
     }
 
@@ -577,7 +626,7 @@ mod tests {
             .unwrap();
         assert_eq!(thread, Some(fx.thread.value()));
         // An oxplow task's thread is the task's own.
-        let own = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let own = oxplow_tasks::work_item_ref(fx.task);
         let out = svc
             .sql
             .query_sql(
