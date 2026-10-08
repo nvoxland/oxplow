@@ -1189,7 +1189,7 @@ impl Services {
             vocabulary: vocabulary.clone(),
         };
         for command in [
-            commands::work_item::transition_op(work_items.clone()),
+            commands::work_item::transition_op(work_items.clone(), db.clone()),
             commands::work_item::update_op(work_items.clone(), link_deps.clone()),
             commands::work_item::create_op(work_items.clone(), link_deps.clone()),
             commands::work_item::link_op(work_items.clone()),

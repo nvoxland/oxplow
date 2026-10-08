@@ -334,9 +334,10 @@ fn dispatching(
     verb: &'static str,
     target: Target,
     links: Option<LinkDeps>,
+    reads: Option<oxplow_db::Database>,
 ) -> Op {
     let external = Arc::new(move |invocation: Invocation, input: Value| {
-        let (registry, links) = (registry.clone(), links.clone());
+        let (registry, links, reads) = (registry.clone(), links.clone(), reads.clone());
         Box::pin(async move {
             let mut input = with_loose_refs(&registry, input)?;
             let provider = target(&registry, &input)?;
@@ -351,6 +352,12 @@ fn dispatching(
                     };
                 }
             }
+            // The state it's in before the verb: a state verb that leaves
+            // it there moved nothing.
+            let prior = match (&reads, input["ref"].as_str()) {
+                (Some(db), Some(item)) if verb != "create" => prior_state(db, item).await?,
+                _ => None,
+            };
             let out = provider
                 .verbs
                 .invoke(
@@ -396,12 +403,15 @@ fn dispatching(
             if let (Some(state), Value::Object(fields)) = (state, &mut result) {
                 fields.insert("state".into(), json!(state));
             }
+            // `work_item.state_changed` says the state moved: not for a
+            // verb that left it where it was.
+            let moved = state.filter(|s| prior != Some(*s));
             events.extend(canonical_events(
                 &invocation.actor.source(),
                 verb,
                 &input,
                 &result,
-                state,
+                moved,
             ));
             Ok(HandlerOutput {
                 result,
@@ -421,6 +431,28 @@ fn dispatching(
     )
 }
 
+/// The canonical state item `item_ref` is in, as the interface shows it
+/// (`v_work_item`); `None` for one it doesn't show.
+async fn prior_state(
+    db: &oxplow_db::Database,
+    item_ref: &str,
+) -> Result<Option<CanonicalState>, CommandError> {
+    use rusqlite::OptionalExtension as _;
+    let item = item_ref.to_string();
+    let state: Option<String> = db
+        .read(move |tx| {
+            tx.query_row(
+                "SELECT state FROM v_work_item WHERE ref = ?1",
+                [&item],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await?;
+    Ok(state.and_then(|s| serde_json::from_value(json!(s)).ok()))
+}
+
 /// The item a verb wrote: a create's from its result, else the input's
 /// `ref`.
 fn written_ref(verb: &str, input: &Value, result: &Value) -> Option<String> {
@@ -429,9 +461,9 @@ fn written_ref(verb: &str, input: &Value, result: &Value) -> Option<String> {
 }
 
 /// The state a state verb put its item in, from the item its answer
-/// recorded. A provider's prior state isn't read, so a create, a
-/// transition and an update naming a state each count as a change; a
-/// create its answer recorded no item for is in the state it asked for.
+/// recorded; a create its answer recorded no item for is in the state it
+/// asked for. Whether that is a move is the caller's question: the state
+/// it was in before (`prior_state`) says.
 fn external_state(
     verb: &str,
     input: &Value,
@@ -595,8 +627,15 @@ pub fn transition_shape() -> Shape {
     }
 }
 
-pub fn transition_op(registry: WorkItemsRegistry) -> Op {
-    dispatching(transition_shape(), registry, "transition", ref_target, None)
+pub fn transition_op(registry: WorkItemsRegistry, reads: oxplow_db::Database) -> Op {
+    dispatching(
+        transition_shape(),
+        registry,
+        "transition",
+        ref_target,
+        None,
+        Some(reads),
+    )
 }
 
 // ---- oxplow.work_item.create ----
@@ -618,6 +657,7 @@ pub fn create_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
         "create",
         create_target,
         Some(links),
+        None,
     )
 }
 
@@ -633,12 +673,14 @@ pub fn update_shape() -> Shape {
 }
 
 pub fn update_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
+    let reads = links.db.clone();
     dispatching(
         update_shape(),
         registry,
         "update",
         update_target,
         Some(links),
+        Some(reads),
     )
 }
 
@@ -651,7 +693,7 @@ pub fn link_op(registry: WorkItemsRegistry) -> Op {
         schema: schema::<WorkItemLinkInput>(),
         undoable: false,
     };
-    dispatching(shape, registry, "link", link_target, None)
+    dispatching(shape, registry, "link", link_target, None, None)
 }
 
 // ---- oxplow.work_item.comment ----
@@ -663,7 +705,7 @@ pub fn comment_op(registry: WorkItemsRegistry) -> Op {
         schema: schema::<WorkItemCommentInput>(),
         undoable: false,
     };
-    dispatching(shape, registry, "comment", comment_target, None)
+    dispatching(shape, registry, "comment", comment_target, None, None)
 }
 
 // ---- oxplow.work_item.delete ----
@@ -675,7 +717,7 @@ pub fn delete_op(registry: WorkItemsRegistry) -> Op {
         schema: schema::<WorkItemDeleteInput>(),
         undoable: false,
     };
-    dispatching(shape, registry, "delete", delete_target, None)
+    dispatching(shape, registry, "delete", delete_target, None, None)
         .confirm_at_least(oxplow_domain::Confirm::Destructive)
 }
 
@@ -689,7 +731,7 @@ pub fn reorder_op(registry: WorkItemsRegistry) -> Op {
         schema: schema::<WorkItemReorderInput>(),
         undoable: true,
     };
-    dispatching(shape, registry, "reorder", reorder_target, None)
+    dispatching(shape, registry, "reorder", reorder_target, None, None)
 }
 
 pub fn move_op(registry: WorkItemsRegistry) -> Op {
@@ -697,7 +739,7 @@ pub fn move_op(registry: WorkItemsRegistry) -> Op {
         schema: schema::<WorkItemMoveInput>(),
         undoable: true,
     };
-    dispatching(shape, registry, "move", move_target, None)
+    dispatching(shape, registry, "move", move_target, None, None)
 }
 
 #[cfg(test)]
@@ -1419,6 +1461,46 @@ mod tests {
     /// core's `work_item.state_changed` carry the actor's source and are
     /// caused by the run's `command.executed`.
     /// The effort policy closes the item's effort after it, as a reaction.
+    /// A transition to the state the item is in moves nothing, so it logs
+    /// no `work_item.state_changed` — the event says the state moved, and
+    /// the effort policy acts on it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_transition_to_the_state_it_is_in_logs_no_change() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let changes = |svc: Arc<crate::Services>| async move {
+            svc.event_log_store
+                .read_after(0, 1000)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|e| e.envelope.event_type == "work_item.state_changed")
+                .count()
+        };
+        let before = changes(fx.svc.clone()).await;
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                NAME,
+                json!({ "ref": work_item_ref(fx.task), "to": "in_progress" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(changes(fx.svc.clone()).await, before, "already in progress");
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                NAME,
+                json!({ "ref": work_item_ref(fx.task), "to": "done" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(changes(fx.svc.clone()).await, before + 1);
+    }
+
     #[tokio::test]
     async fn a_transition_commits_with_its_audit_and_names_its_cause() {
         let fx = crate::test_fixtures::services_with_task_effort().await;

@@ -294,10 +294,13 @@ anchored to the actor's thread. A list logs none of them itself
 | `delete` | `work_item.deleted@2 { work_item }` |
 | `reorder` / `move` | `edited` naming `rank` / `list` and `rank` |
 
-Whether the state moved: a list's prior state isn't read, so a create,
-a transition and an update naming a state each count, `to` taken from
-the `work_item.recorded` its answer carries (a create with none: the
-state it asked for, else `todo`).
+Whether the state moved: core reads the item's state as the interface
+shows it (`v_work_item.state`) before a transition or an update runs, and
+logs `state_changed` only when the state its answer recorded differs — a
+transition to the state it's in moves nothing, so the effort policy
+doesn't act on it. A create always counts. `to` is taken from the
+`work_item.recorded` its answer carries (a create with none: the state it
+asked for, else `todo`).
 `edited` names what the command set, not a diff: a list's prior values
 aren't readable for every list. These are the only versions: the `@1`
 ones spoke oxplow's task list (its statuses, field names and note refs)

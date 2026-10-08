@@ -179,6 +179,8 @@ const EMITTERS: &[(&str, &str)] = &[
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
     ("StreamOrphaned", "crates/oxplow-app/src/workspace_watch.rs"),
     ("VcsRefsChanged", "crates/oxplow-app/src/ref_moves.rs"),
+    // A restored file is on disk, in no model.
+    ("WorkspaceChanged", "crates/oxplow-app/src/commands/snapshot.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/commands/vcs.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/workspace_files.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/workspace_watch.rs"),

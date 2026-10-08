@@ -131,7 +131,7 @@ impl Tasks {
         };
         use oxplow_app::commands::work_item as w;
         for op in [
-            w::transition_op(work_items.clone()),
+            w::transition_op(work_items.clone(), db.clone()),
             w::create_op(work_items.clone(), links.clone()),
             w::update_op(work_items.clone(), links),
             w::link_op(work_items.clone()),
