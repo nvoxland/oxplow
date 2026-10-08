@@ -601,7 +601,7 @@ impl CommandBus {
     }
 
     /// What's active now, when the bus knows.
-    fn active(&self) -> Option<crate::capabilities::Active> {
+    pub(super) fn active(&self) -> Option<crate::capabilities::Active> {
         self.capabilities.as_ref().map(|(registry, config)| {
             registry.snapshot(&crate::config_service::read_config(config))
         })
@@ -1539,11 +1539,13 @@ impl CommandBus {
                 })
                 .collect::<Result<_, _>>()?
         };
+        let active = self.active();
         let mut asks = false;
         let mut destructive = false;
         let mut handlers: Vec<Arc<TxHandler>> = Vec::with_capacity(calls.len());
         for (i, (call, command)) in calls.iter().zip(&resolved).enumerate() {
             let spec = &command.spec;
+            offered(active.as_ref(), spec, i)?;
             let name_field = || Some(format!("/calls/{i}/name"));
             let at_input = |e: CommandError| match e {
                 CommandError::Invalid { field, message } => CommandError::Invalid {
@@ -1929,6 +1931,23 @@ impl CommandBus {
         if let Err(e) = released {
             tracing::error!(?origin, error = %e, "releasing a claim failed");
         }
+    }
+}
+
+/// Step 0 for a composed call at `i`: what it needs is active (and the
+/// implementation that owns it is), as a direct call's must be — else
+/// it's refused at its place in the calls.
+pub(super) fn offered(
+    active: Option<&crate::capabilities::Active>,
+    spec: &CommandSpec,
+    i: usize,
+) -> Result<(), CommandError> {
+    match active.and_then(|a| a.refusal(spec)) {
+        Some(message) => Err(CommandError::Invalid {
+            field: Some(format!("/calls/{i}/name")),
+            message: format!("`{}`: {message}", spec.id),
+        }),
+        None => Ok(()),
     }
 }
 
@@ -3306,6 +3325,11 @@ mod tests {
     /// inverses, reversed.
     fn composing_bus() -> (Database, Arc<CommandBus>) {
         let (db, bus) = bus();
+        composing_bus_on(db, bus)
+    }
+
+    /// [`composing_bus`]'s commands on `bus` (one with capabilities, say).
+    fn composing_bus_on(db: Database, bus: CommandBus) -> (Database, Arc<CommandBus>) {
         let bus = Arc::new(bus);
         bus.register(
             Command::new(
@@ -3381,6 +3405,61 @@ mod tests {
 
     fn calls(items: &[(&str, &str, &str)]) -> Value {
         json!({ "calls": items.iter().map(|(n, k, v)| json!({ "name": n, "input": { "k": k, "v": v } })).collect::<Vec<_>>() })
+    }
+
+    /// Step 0 holds for a composed call as for a direct one: a child
+    /// that needs what isn't active (a work list, say) is
+    /// refused at its place in the calls — whether the composite runs in
+    /// one transaction or as steps — and nothing lands.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_composed_call_needs_what_a_direct_one_does() {
+        let (db, bus) = bus();
+        // Nothing is declared, so no capability is active.
+        let registry = Arc::new(crate::capabilities::CapabilityRegistry::new(
+            Vec::new(),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
+        ));
+        let config = Arc::new(std::sync::RwLock::new(
+            oxplow_config::load_project_config(tempfile::tempdir().unwrap().path()).unwrap(),
+        ));
+        let (db, bus) = composing_bus_on(db, bus.with_capabilities(registry, config));
+        let mut needy = kv_spec("oxplow.kv.needy", Invokers::ALL, Confirm::Never);
+        needy.needs = vec!["work_items".into()];
+        bus.register(Command::new(needy, kv_set()).unwrap())
+            .unwrap();
+
+        let direct = bus
+            .run(
+                &Actor::Human,
+                "oxplow.kv.needy",
+                json!({ "k": "n", "v": "1" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(direct, CommandError::Invalid { .. }), "{direct:?}");
+
+        for (first, why) in [
+            ("oxplow.kv.set", "in one transaction"),
+            ("oxplow.kv.external", "as steps"),
+        ] {
+            let err = bus
+                .run(
+                    &Actor::Human,
+                    "oxplow.command.sequence",
+                    calls(&[(first, "a", "1"), ("oxplow.kv.needy", "n", "1")]),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), message }
+                    if f == "/calls/1/name" && message.contains("`oxplow.kv.needy`: Needs: Work list")),
+                "{why}: {err:?}"
+            );
+            assert_eq!(kv_value(&db, "a").await, None, "{why}: nothing landed");
+            assert_eq!(kv_value(&db, "n").await, None, "{why}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

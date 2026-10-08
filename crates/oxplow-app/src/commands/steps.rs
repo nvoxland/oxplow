@@ -113,6 +113,8 @@ enum Routed {
 struct Router<'a> {
     registry: &'a BTreeMap<String, Arc<Command>>,
     conn: &'a rusqlite::Connection,
+    /// What's active: each call needs what a direct one would (step 0).
+    active: Option<&'a crate::capabilities::Active>,
     prechecks: Vec<Pending>,
 }
 
@@ -163,6 +165,7 @@ impl Router<'_> {
                     .ok_or_else(|| CommandError::Unknown {
                         name: call.name.clone(),
                     })?;
+            super::offered(self.active, &command.spec, i)?;
             if command.spec.effect == oxplow_domain::CommandEffect::Read {
                 return Err(CommandError::Invalid {
                     field: name_field(),
@@ -265,6 +268,7 @@ impl CommandBus {
         input: &Value,
     ) -> Result<(Resolved, Vec<Pending>), CommandError> {
         let registry = self.commands.read().commands.clone();
+        let active = self.active();
         let (c, input) = (compose.clone(), input.clone());
         let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
         let failed_c = failed.clone();
@@ -274,6 +278,7 @@ impl CommandBus {
                 let mut router = Router {
                     registry: &registry,
                     conn,
+                    active: active.as_ref(),
                     prechecks: Vec::new(),
                 };
                 router

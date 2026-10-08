@@ -15,7 +15,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// What a capability does to the world: a command's effect is the
-/// strongest class among what it needs.
+/// strongest class among what it needs — whether its run is recorded and
+/// who may make it (`CommandEffect`). Not where its handler runs: that is
+/// the operation's handler, in the bus's transaction or outside it
+/// (`config.write`'s `set` is one transaction, the file written after it
+/// commits; `providers.sync` commits each batch in its own).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
@@ -25,26 +29,12 @@ pub enum EffectClass {
     View,
     /// Reads, changes nothing (`sql.read`).
     Read,
-    /// Changes oxplow's own records, in the run's transaction.
+    /// Changes oxplow's own records: audited, open to any thread.
     Record,
-    /// Changes something outside oxplow's records — files, git, processes —
-    /// so it can't run in the run's transaction.
+    /// Changes something outside oxplow's records — files, git, processes,
+    /// the configuration: audited, and an agent's only from its stream's
+    /// writer thread.
     Write,
-}
-
-impl EffectClass {
-    /// Whether it runs in the command's database transaction (rolled back
-    /// with it): a command needing only these runs as one transaction;
-    /// one needing any other runs as steps.
-    pub fn in_transaction(self) -> bool {
-        matches!(self, EffectClass::Read | EffectClass::Record)
-    }
-
-    /// Whether a run that used it is recorded (an audit row and
-    /// `command.executed`).
-    pub fn audited(self) -> bool {
-        matches!(self, EffectClass::Record | EffectClass::Write)
-    }
 }
 
 /// Where a capability's handler lives: a command it backs runs there,
@@ -320,9 +310,5 @@ mod tests {
             Some(EffectClass::Read)
         );
         assert_eq!(strongest_class(&needs(&["work_items"])), None);
-        assert!(EffectClass::Read.in_transaction() && !EffectClass::Read.audited());
-        assert!(EffectClass::Record.in_transaction() && EffectClass::Record.audited());
-        assert!(!EffectClass::Write.in_transaction() && EffectClass::Write.audited());
-        assert!(!EffectClass::View.in_transaction() && !EffectClass::View.audited());
     }
 }

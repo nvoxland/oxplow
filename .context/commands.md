@@ -98,14 +98,22 @@ by core with an **effect class** (`oxplow_domain::host_capability`:
 `needs`. Every command — core's and any extension's — reaches them the
 same way, so oxplow's own commands can do nothing an extension's can't.
 
-| Class | Does | In the run's transaction | Audited |
+| Class | Does | Audited | An agent's run |
 |---|---|---|---|
-| `view` | changes only what the person sees (open a page) | no | no |
-| `read` | reads (`sql.read`) | yes | no |
-| `record` | changes oxplow's own records | yes | yes |
-| `write` | changes files, git, processes | no | yes |
+| `view` | changes only what the person sees (open a page) | no | any thread |
+| `read` | reads (`sql.read`) | no | any thread |
+| `record` | changes oxplow's own records | yes | any thread |
+| `write` | changes files, git, processes, the configuration | yes | its stream's writer thread only |
 
-A command's effect is the strongest class it needs (`strongest_class`).
+A command's effect is the strongest class it needs (`strongest_class`;
+`view`/`read` → `Read`, `record` → `Record`, `write` → `Write`). The
+class says what a run changes, not where its handler runs: that is the
+operation's handler — in the bus's transaction (`Tx`) or against a system
+it doesn't own (`External`, pinned by `the_external_commands_are_the_reviewed_ones`).
+They don't follow each other: `config.write`'s `set` is `Tx` (the record
+commits with the run; the file is written after it commits), while
+`providers.sync` and `test_runs.write` are `record` and `External`
+(each commits in its own service's transaction).
 Today there is one: **`sql.read`** — `{ sql, params? }`, one read-only
 statement over the published models (`v_*`), its `:name`s bound from
 `params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
@@ -377,10 +385,11 @@ Every call inside → **one run in one transaction**, below; any outside →
 calls)` (`commands/mod.rs`), the composite's `Tx` handler — composing
 again, in the run's own transaction. It first makes a pass that writes
 nothing: every call must join the transaction (a call that leaves it is
-refused, naming the system and the composite), its input must fit (a problem
-is reported at `/calls/<i>/input/…`), and its **own** `invokers`, the
-agent policy (with the parent's `may_write`) and its `confirm` apply, so
-a composite never widens what its children allow; a child that asks
+refused, naming the system and the composite), what it needs must be
+active (step 0, refused at `/calls/<i>/name` — `commands::offered`), its
+input must fit (a problem is reported at `/calls/<i>/input/…`), and its
+**own** `invokers`, the agent policy (with the parent's `may_write`) and
+its `confirm` apply, so a composite never widens what its children allow; a child that asks
 makes the parent ask (`Preview { command: <parent>, destructive }`)
 unless the run was confirmed. Then every handler runs on the parent's
 `TxCtx` one level deeper (`TxCtx.depth`); a composite more than
@@ -402,8 +411,9 @@ parent (handlers are pure).
 
 **As steps** (P7 review, tsk713; `CommandBus::run_steps`): a composite
 with a call outside the transaction can't be all-or-nothing, so its
-calls run as steps. (1) **Checked first**: every step's input (at
-`/calls/<i>/input/…`), its own invokers and the agent policy, before
+calls run as steps. (1) **Checked first**: every step's needs (step 0),
+its input (at `/calls/<i>/input/…`), its own invokers and the agent
+policy, before
 anything runs — a refusal is the run's, audited, and nothing ran; a step
 that asks makes the run ask once (`NeedsConfirmation` with the calls in
 the preview), and an agent's run is a proposal **with no dry run**
