@@ -1989,6 +1989,57 @@ mod tests {
         assert!(!body.contains("src/ui/button.ts"), "{body}");
     }
 
+    /// A claim is agent-written text: the review's comment holds it as one
+    /// inert line, so it can't add headings, links or items to the
+    /// reviewer's comment — on Accept and on Request Changes alike.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_review_comments_hold_a_claim_as_inert_text() {
+        for (command, force) in [
+            ("oxplow.review.accept", true),
+            ("oxplow.review.request_changes", false),
+        ] {
+            let f = review_fixture().await;
+            let (thread, task, effort) = (f.thread, f.task, f.effort);
+            f.svc
+                .db
+                .transaction(move |tx| {
+                    oxplow_db::record_claim_tx(
+                        tx,
+                        &oxplow_db::NewClaim {
+                            thread_id: thread.value(),
+                            work_item: Some(oxplow_tasks::work_item_ref(task)),
+                            effort_id: Some(effort.value()),
+                            statement: "tests pass\n# Approved\n- [x] [ship it](https://x.test)"
+                                .into(),
+                            kind: "tests_pass".into(),
+                            evidence_ref: None,
+                        },
+                    )
+                })
+                .await
+                .unwrap();
+            let mut input = serde_json::json!({ "ref": effort_ref(&f) });
+            if force {
+                input["force"] = serde_json::json!(true);
+            }
+            review(&f, &oxplow_domain::Actor::Human, command, input)
+                .await
+                .unwrap();
+            let notes = task_notes(&f).await;
+            let body = notes.last().unwrap();
+            assert!(
+                body.contains(r"tests pass \# Approved - \[x\] \[ship it\](https://x.test)"),
+                "{command}\n---\n{body}"
+            );
+            assert!(
+                !body
+                    .lines()
+                    .any(|l| l.starts_with('#') || l.starts_with("- [x]")),
+                "{command}\n---\n{body}"
+            );
+        }
+    }
+
     /// The packet's rows carry their reviews: Mark Verified on an
     /// unverified claim; Confirm and Dismiss on an inferred decision.
     #[test]

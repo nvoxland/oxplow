@@ -210,7 +210,10 @@ empty: Nothing is waiting on you.
   "params": { "ref": x["input"]["ref"] } })` (a list of row dicts; it must
   list `sql.read` in `needs`) and returns `{ commands: [{ name, input }],
   result? }`
-  — or `{ refuse: "why" }` to decline (the caller sees the reason);
+  — or `{ refuse: "why" }` to decline (the caller sees the reason).
+  Splice text an agent wrote (a claim, a decision) into a comment or
+  body with `md_text(text)`: one inert line, so it can't add headings,
+  links or items;
   those core commands run as the caller, each one's own policy and
   confirmation checked first — in one transaction with one undo when they
   all touch oxplow's own records, or in order through the provider when

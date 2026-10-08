@@ -31,19 +31,9 @@ WHERE e.id = :event_id
 def _list(text):
     return json.decode(text) if text else []
 
-# A checklist line holds text, not markdown: whitespace (newlines too)
-# becomes one space, markdown's punctuation is escaped, and a long one is
-# cut — so a claim can't add items, links or headings to the body.
-_LINE = 300
+# A checklist line holds a claim or decision as text, not markdown
+# (`md_text`), so it can't add items, links or headings to the body.
 _ITEMS = 50
-
-def _text(value):
-    s = " ".join(str(value).split())
-    for ch in ["\\", "`", "*", "_", "[", "]", "<", ">", "#", "|"]:
-        s = s.replace(ch, "\\" + ch)
-    if len(s) > _LINE:
-        s = s[:_LINE].rstrip("\\") + "…"
-    return s
 
 def transform(x):
     event = x["event"]
@@ -60,8 +50,8 @@ def transform(x):
         return {"skip": "nothing was accepted unchecked"}
     effort = row["effort"]
     item = row["work_item"]
-    items = ["- [ ] %s: %s" % (c["claim"], _text(c["statement"])) for c in claims]
-    items.extend(["- [ ] %s: %s → %s" % (d["decision"], _text(d["question"]), _text(d["choice"])) for d in decisions])
+    items = ["- [ ] %s: %s" % (c["claim"], md_text(c["statement"])) for c in claims]
+    items.extend(["- [ ] %s: %s → %s" % (d["decision"], md_text(d["question"]), md_text(d["choice"])) for d in decisions])
     lines = ["The review of %s (%s) accepted these unchecked:" % (effort, item), ""]
     lines.extend(items[:_ITEMS])
     if len(items) > _ITEMS:

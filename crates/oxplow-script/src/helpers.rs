@@ -48,6 +48,34 @@ pub fn parse_json(content: &str) -> Result<Value, HelperError> {
     serde_json::from_str(content).map_err(|e| HelperError::Json(e.to_string()))
 }
 
+/// `text` as one line of markdown that renders as itself: whitespace runs
+/// (newlines too) become one space, markdown's punctuation is escaped, and
+/// a line longer than `limit` characters is cut, with an ellipsis, between
+/// escapes rather than inside one. For splicing text someone else wrote
+/// (an agent's claim, a decision) into a comment or checklist without it
+/// adding headings, links or items.
+pub fn md_text(text: &str, limit: usize) -> String {
+    const PUNCTUATION: &[char] = &['\\', '`', '*', '_', '[', ']', '<', '>', '#', '|'];
+    let mut out = String::new();
+    let mut len = 0;
+    for (i, word) in text.split_whitespace().enumerate() {
+        let space = (i > 0).then_some(' ');
+        for c in space.into_iter().chain(word.chars()) {
+            let width = if PUNCTUATION.contains(&c) { 2 } else { 1 };
+            if len + width > limit {
+                out.push('…');
+                return out;
+            }
+            if width == 2 {
+                out.push('\\');
+            }
+            out.push(c);
+            len += width;
+        }
+    }
+    out
+}
+
 /// Split into an array of line strings (line terminators stripped, `\r\n` and
 /// `\n` both handled).
 pub fn lines(content: &str) -> Value {
@@ -273,6 +301,21 @@ mod tests {
         assert_eq!(v["a"], serde_json::json!(1));
         assert_eq!(v["b"][0], serde_json::json!("x"));
         assert!(parse_json("{not json").is_err());
+    }
+
+    /// Text spliced into markdown stays one inert line: whitespace runs
+    /// (newlines too) become a space, markdown punctuation is escaped, and
+    /// a long one is cut at `limit` characters — never mid-escape.
+    #[test]
+    fn md_text_is_one_inert_line() {
+        assert_eq!(
+            md_text("a\n# b  [c](d) *e* `f` <g> |h| _i_ \\", 300),
+            "a \\# b \\[c\\](d) \\*e\\* \\`f\\` \\<g\\> \\|h\\| \\_i\\_ \\\\"
+        );
+        assert_eq!(md_text("abcdef", 3), "abc…");
+        assert_eq!(md_text("ab*cd", 3), "ab…");
+        assert_eq!(md_text("é".repeat(5).as_str(), 4), "éééé…");
+        assert_eq!(md_text("short", 300), "short");
     }
 
     #[test]

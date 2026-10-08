@@ -289,6 +289,18 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         Ok(heap.alloc(crate::helpers::lcov_records(content)))
     }
+    /// `text` as one inert line of markdown (`helpers::md_text`): for
+    /// splicing someone else's text into a comment or checklist.
+    fn md_text(
+        #[starlark(require = pos)] text: starlark::values::Value,
+        #[starlark(require = named, default = 300)] limit: u32,
+    ) -> anyhow::Result<String> {
+        let text = match text.unpack_str() {
+            Some(s) => s.to_string(),
+            None => text.to_str(),
+        };
+        Ok(crate::helpers::md_text(&text, limit as usize))
+    }
     fn lines<'v>(
         content: &str,
         heap: starlark::values::Heap<'v>,

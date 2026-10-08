@@ -528,7 +528,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   `force` (then it lists them in the comment);
   `oxplow.review.request_changes { ref, note? }` comments a checklist —
   each unverified claim, inferred decision, file outside the area, and
-  the note — then transitions to `todo`. Both read one `input` query
+  the note — then transitions to `todo`. A claim, decision or path is
+  spliced in through `md_text` (one inert line: an agent's claim can't
+  add headings, links or items to the reviewer's comment); the note is
+  the reviewer's own markdown. Both read one `input` query
   (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
   `v_oxplow_bundled_deviation`), compose `oxplow.work_item.comment` and
   `oxplow.work_item.transition` — as steps, every list's verbs running
@@ -1695,8 +1698,8 @@ approval, or whose reaction skipped or failed, doesn't count). With
 nothing unchecked it skips; otherwise it files **one** item on the
 active tracker, like every new item (tsk1058) — "Verify what the review of <effort> accepted
 unchecked", a checklist naming each claim and decision. Each line is
-text, not markdown: whitespace becomes one space, markdown's punctuation
-is escaped and a long one is cut at 300 characters, and the list stops
+text, not markdown (`md_text`: whitespace becomes one space, markdown's
+punctuation is escaped and a long one is cut at 300 characters), and the list stops
 at 50 items, saying how many more the review has. A bundled effect
 is approved like any (K1, tsk953: its embedded files are hashed alike),
 so it runs only once a person approves it. A task an effect (or oxplow
