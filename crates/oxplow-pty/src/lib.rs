@@ -483,9 +483,12 @@ mod tests {
             .unwrap();
 
         // Read until we see "hello" in the stream (cat's PTY echo
-        // turns each input byte into output).
+        // turns each input byte into output). A quiet moment on a loaded
+        // machine is waited out, not taken as the end: only the deadline
+        // or a closed stream ends it.
         let mut got = Vec::new();
-        for _ in 0..50 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while std::time::Instant::now() < deadline {
             match timeout(Duration::from_millis(200), handle.events.recv()).await {
                 Ok(Ok(PaneEvent::Output(b))) => {
                     got.extend_from_slice(&b);
@@ -493,7 +496,8 @@ mod tests {
                         break;
                     }
                 }
-                _ => break,
+                Ok(Ok(_)) | Err(_) => continue,
+                Ok(Err(_)) => break,
             }
         }
         assert!(

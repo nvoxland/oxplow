@@ -1327,9 +1327,11 @@ mod tests {
         let item = "work_item:test:7".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
 
-        // Two prompts inside the window + one ancient one outside it.
+        // Two prompts inside the window + one ancient one outside it. At the
+        // window's (inclusive) start: one millisecond after it could land
+        // past the close, when the whole test runs inside a millisecond.
         let turns = svc.agent_turn_store.as_ref().expect("turn store attached");
-        let in_window = Timestamp::from_unix_ms(effort.started_at.unix_ms() + 1);
+        let in_window = effort.started_at;
         for started_at in [in_window, in_window, Timestamp::from_unix_ms(1)] {
             turns
                 .open(&oxplow_domain::AgentTurn {
