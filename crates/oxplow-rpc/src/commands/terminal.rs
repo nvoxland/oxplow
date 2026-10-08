@@ -53,10 +53,11 @@ fn has_a_terminal(session: &AgentSession) -> Result<(), IpcError> {
 }
 
 /// What every process oxplow starts for agent session `session` is told
-/// about itself: the hook endpoint and token, and its stream, thread and
-/// session, which its hooks and exports send back (`X-Oxplow-*`).
+/// about itself: the hook endpoint, its session's bearer, and its stream,
+/// thread and session. The bearer alone tells the control plane who is
+/// calling; the ids are the agent's own knowledge of where it is.
 fn identity_env(
-    plugin_runtime: &crate::PluginRuntime,
+    endpoints: &Endpoints,
     stream: StreamId,
     thread: ThreadId,
     session: AgentSessionId,
@@ -64,16 +65,42 @@ fn identity_env(
     vec![
         (
             "OXPLOW_HOOK_TOKEN".to_string(),
-            plugin_runtime.hook_token.clone(),
+            endpoints.hook_token.clone(),
         ),
         (
             "OXPLOW_HOOK_BASE_URL".to_string(),
-            plugin_runtime.hook_base_url.clone(),
+            endpoints.hook_base_url.clone(),
         ),
         ("OXPLOW_STREAM_ID".to_string(), stream.to_string()),
         ("OXPLOW_THREAD_ID".to_string(), thread.to_string()),
         ("OXPLOW_SESSION".to_string(), session.to_string()),
     ]
+}
+
+/// Where agent session `session` reaches oxplow, with a bearer minted for
+/// it now (retiring any it had: a launch is a new process).
+pub(crate) fn session_endpoints(
+    ctx: &RpcContext,
+    session: &AgentSession,
+    thread: &Thread,
+) -> Result<Endpoints, IpcError> {
+    // Agent spawn needs the control-plane coordinates; a host that didn't
+    // supply them can't wire hooks/MCP, so refuse cleanly.
+    let rt = ctx.plugin_runtime.as_ref().ok_or_else(|| {
+        IpcError::invalid("agent spawn unavailable: host supplied no plugin runtime")
+    })?;
+    let hook_token = ctx.session_auth.mint(oxplow_app::session_auth::Principal {
+        session: session.id,
+        thread: thread.id,
+        stream: thread.stream_id,
+        harness: session.harness.clone(),
+    });
+    Ok(Endpoints {
+        hook_base_url: rt.hook_base_url.clone(),
+        mcp_endpoint_url: rt.mcp_endpoint_url.clone(),
+        otlp_base_url: rt.otlp_base_url.clone(),
+        hook_token,
+    })
 }
 
 /// Open a renderer-attached terminal session: the agent CLI, or a shell,
@@ -160,9 +187,11 @@ pub async fn open_terminal_session(
         .get(&session.harness)
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
+    let endpoints = session_endpoints(ctx, &session, &thread)?;
     let launch = launch_session(
         ctx,
         harness.as_ref(),
+        &endpoints,
         &session,
         &thread,
         &stream,
@@ -205,27 +234,21 @@ pub async fn open_terminal_session(
 /// its harness: identity, endpoints and what's offered now go in; how to
 /// start its process comes out. A resume id the harness found stale is
 /// forgotten here. Starting a session only spawns — nothing is typed.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "everything a launch is told, gathered by its two callers"
+)]
 pub(crate) async fn launch_session(
     ctx: &RpcContext,
     harness: &dyn AgentHarness,
+    endpoints: &Endpoints,
     session: &AgentSession,
     thread: &Thread,
     stream: &Stream,
     system_prompt: Option<&str>,
     config: &serde_json::Value,
 ) -> Result<Launch, IpcError> {
-    // Agent spawn needs the control-plane coordinates; a host that didn't
-    // supply them can't wire hooks/MCP, so refuse cleanly.
-    let rt = ctx.plugin_runtime.as_ref().ok_or_else(|| {
-        IpcError::invalid("agent spawn unavailable: host supplied no plugin runtime")
-    })?;
-    let endpoints = Endpoints {
-        hook_base_url: rt.hook_base_url.clone(),
-        mcp_endpoint_url: rt.mcp_endpoint_url.clone(),
-        otlp_base_url: rt.otlp_base_url.clone(),
-        hook_token: rt.hook_token.clone(),
-    };
-    let identity = identity_env(rt, stream.id, thread.id, session.id);
+    let identity = identity_env(endpoints, stream.id, thread.id, session.id);
     let text = oxplow_app::capabilities::agent_text(ctx);
     let executable = std::env::current_exe()
         .map_err(|e| IpcError::internal(format!("the oxplow binary: {e}")))?;
@@ -240,7 +263,7 @@ pub(crate) async fn launch_session(
             },
             workspace: std::path::Path::new(&stream.worktree_path),
             project_dir: &ctx.layout.project_dir,
-            endpoints: &endpoints,
+            endpoints,
             identity_env: &identity,
             system_prompt,
             resume: Some(session.resume_session_id.as_str()).filter(|r| !r.is_empty()),
@@ -340,14 +363,20 @@ pub async fn terminate_terminal_session(
 mod tests {
     use serde_json::json;
 
-    use super::{identity_env, shell_session_key};
+    use super::{identity_env, session_endpoints, shell_session_key};
     use crate::error::IpcError;
     use crate::test_support::services;
 
     #[test]
     fn the_identity_env_names_the_session() {
+        let endpoints = oxplow_domain::agent::harness::Endpoints {
+            hook_base_url: "http://127.0.0.1:9/hook".into(),
+            mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
+            otlp_base_url: "http://127.0.0.1:9".into(),
+            hook_token: "test-token".into(),
+        };
         let env: std::collections::HashMap<String, String> = identity_env(
-            &runtime(),
+            &endpoints,
             oxplow_domain::StreamId::new(1),
             oxplow_domain::ThreadId::new(2),
             oxplow_domain::AgentSessionId::new(3),
@@ -365,8 +394,31 @@ mod tests {
             hook_base_url: "http://127.0.0.1:9/hook".into(),
             mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
             otlp_base_url: "http://127.0.0.1:9".into(),
-            hook_token: "test-token".into(),
         }
+    }
+
+    /// A launch's endpoints carry a bearer minted for its session: it
+    /// authenticates as that session, thread and stream, and the next
+    /// launch's retires it.
+    #[tokio::test]
+    async fn a_launch_mints_its_sessions_bearer() {
+        let (mut ctx, _dir) = services();
+        ctx.plugin_runtime = Some(runtime());
+        let session = first_session(&ctx).await;
+        let thread =
+            oxplow_domain::stores::ThreadStore::get(&*ctx.thread_store, &session.thread_id)
+                .await
+                .unwrap()
+                .unwrap();
+        let first = session_endpoints(&ctx, &session, &thread).unwrap();
+        let principal = ctx.session_auth.authenticate(&first.hook_token).unwrap();
+        assert_eq!(principal.session, session.id);
+        assert_eq!(principal.thread, thread.id);
+        assert_eq!(principal.stream, thread.stream_id);
+        assert_eq!(principal.harness, session.harness);
+        let second = session_endpoints(&ctx, &session, &thread).unwrap();
+        assert!(ctx.session_auth.authenticate(&first.hook_token).is_none());
+        assert!(ctx.session_auth.authenticate(&second.hook_token).is_some());
     }
 
     /// An agent session opened, as a person does, on the primary stream's

@@ -6,14 +6,18 @@
 //!
 //! - `POST /hook/:event` — receives hook envelopes from the plugin's
 //!   HTTP hooks, drains into [`oxplow_app::HookIngestService`].
-//!   Bearer-auth via `Authorization: Bearer <hook_token>`.
+//! - `POST /v1/metrics`, `/v1/logs` — the agents' OTLP exports.
 //! - `POST /mcp` (and friends) — the rmcp Streamable HTTP transport
-//!   wrapping [`oxplow_mcp::OxplowMcp`]. Same bearer token.
+//!   wrapping [`oxplow_mcp::OxplowMcp`].
 //!
-//! Started once at boot from the Tauri main; the resulting
-//! [`ControlPlane`] handle exposes `hook_base_url`, `mcp_endpoint_url`,
-//! and `hook_token`, all of which the per-spawn plugin writer + agent-
-//! command builder feed into env / config files.
+//! Every route takes `Authorization: Bearer <token>`, the token minted for
+//! one agent session at its launch ([`oxplow_app::session_auth`]). The
+//! bearer is the whole of who a request comes from: its session, thread,
+//! stream and harness. Nothing else a request carries names its sender.
+//!
+//! Started once at boot by the daemon; the resulting [`ControlPlane`]
+//! handle exposes the URLs the launch feeds into each agent's env and
+//! config files.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,9 +28,8 @@ use axum::{
     http::{HeaderMap, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{any_service, post},
-    Json, Router,
+    Extension, Json, Router,
 };
-use base64::Engine;
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, tower::StreamableHttpService,
 };
@@ -34,10 +37,11 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
+use oxplow_app::session_auth::Principal;
 use oxplow_app::{HookEnvelope, Services, ToolDecision};
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::registry::HarnessRegistry;
-use oxplow_domain::{HookKind, StreamId, ThreadId};
+use oxplow_domain::{HookKind, ThreadId};
 
 #[derive(Debug, Error)]
 pub enum ControlPlaneError {
@@ -45,14 +49,12 @@ pub enum ControlPlaneError {
     Io(#[from] std::io::Error),
 }
 
-/// Returned by [`spawn`]. The Tauri main keeps this alive for the life
-/// of the process — dropping it does not stop the server (background
-/// task is detached), but the URLs/token in it are what the plugin
-/// writer needs.
+/// Returned by [`spawn`]. The daemon keeps this alive for the life of
+/// the process — dropping it does not stop the server (background task
+/// is detached), but the URLs in it are what a launch needs.
 #[derive(Debug, Clone)]
 pub struct ControlPlane {
     pub bind_addr: SocketAddr,
-    pub hook_token: String,
 }
 
 impl ControlPlane {
@@ -80,23 +82,19 @@ impl ControlPlane {
 #[derive(Clone)]
 struct AppCtx {
     services: Arc<Services>,
-    hook_token: Arc<String>,
 }
 
 /// Boot the control plane. Picks an ephemeral port on 127.0.0.1 and
 /// returns immediately (the server runs in a detached tokio task).
 pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlaneError> {
-    let token = generate_token();
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bind_addr = listener.local_addr()?;
 
     let ctx = AppCtx {
         services: services.clone(),
-        hook_token: Arc::new(token.clone()),
     };
 
     let mcp_services = services.clone();
-    let mcp_token = Arc::new(token.clone());
 
     // rmcp's StreamableHttpService is a tower::Service<Request>.
     // Mount it under /mcp via `any_service`. The factory closure runs
@@ -107,38 +105,38 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
         Default::default(),
     );
 
-    // axum router for the MCP routes — wrap with our auth check.
-    let mcp_auth_token = mcp_token.clone();
+    // The MCP routes, behind the session's bearer: the middleware puts its
+    // `Principal` in the request's extensions, where rmcp hands it to the
+    // tools (`oxplow_mcp::caller_of`).
     let mcp_router = Router::new()
         .route_service("/mcp", any_service(mcp_service.clone()))
         .route_service("/mcp/", any_service(mcp_service))
-        .layer(axum::middleware::from_fn(move |req, next| {
-            let token = mcp_auth_token.clone();
-            async move { auth_middleware(token, req, next).await }
-        }));
+        .layer(axum::middleware::from_fn_with_state(
+            ctx.clone(),
+            auth_middleware,
+        ));
 
-    // Health-check endpoint. Not full dev-hot-reload (Rust dylib swap
-    // in-process isn't practical with rmcp's tower service factory),
-    // but lets external tooling verify the control plane is up + the
-    // bearer token matches before spawning an agent.
+    // Health-check endpoint: lets external tooling verify the control
+    // plane is up and a session's bearer is live.
     let dev_router = Router::new()
         .route("/dev/ping", post(handle_dev_ping))
-        .layer(axum::middleware::from_fn({
-            let token = mcp_token.clone();
-            move |req, next| {
-                let token = token.clone();
-                async move { auth_middleware(token, req, next).await }
-            }
-        }));
+        .layer(axum::middleware::from_fn_with_state(
+            ctx.clone(),
+            auth_middleware,
+        ));
 
     let hook_router = Router::new()
         .route("/hook/{event}", post(handle_hook))
         // OTLP receiver (epic tsk22). Agent CLIs export token usage here —
         // Claude as metrics, Codex as logs (its `response.completed` event) —
-        // attribution rides the same X-Oxplow-* headers as hooks. Both signal
-        // paths hit one handler; the ingest path decodes metrics-or-logs.
+        // attributed by the bearer like a hook. Both signal paths hit one
+        // handler; the ingest path decodes metrics-or-logs.
         .route("/v1/metrics", post(handle_otlp_metrics))
         .route("/v1/logs", post(handle_otlp_metrics))
+        .layer(axum::middleware::from_fn_with_state(
+            ctx.clone(),
+            auth_middleware,
+        ))
         .with_state(ctx);
 
     let app = Router::new()
@@ -154,43 +152,33 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
         }
     });
 
-    Ok(ControlPlane {
-        bind_addr,
-        hook_token: token,
-    })
+    Ok(ControlPlane { bind_addr })
 }
 
-fn generate_token() -> String {
-    let mut bytes = [0u8; 32];
-    rand::fill(&mut bytes);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-/// Bearer auth check. Constant-time comparison via base64 round-trip
-/// avoidance — token strings are random base64 of equal length, so a
-/// straight `==` is fine.
+/// Admit a request only with a live session's bearer, and hand the
+/// handler that session's [`Principal`] in the request's extensions.
 async fn auth_middleware(
-    expected_token: Arc<String>,
-    req: Request<Body>,
+    State(ctx): State<AppCtx>,
+    mut req: Request<Body>,
     next: axum::middleware::Next,
 ) -> Response {
-    if !check_bearer(req.headers(), &expected_token) {
+    let Some(principal) =
+        bearer(req.headers()).and_then(|t| ctx.services.session_auth.authenticate(t))
+    else {
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
-    }
+    };
+    req.extensions_mut().insert(principal);
     next.run(req).await
 }
 
-fn check_bearer(headers: &HeaderMap, expected: &str) -> bool {
-    let Some(auth) = headers.get(http::header::AUTHORIZATION) else {
-        return false;
-    };
-    let Ok(s) = auth.to_str() else {
-        return false;
-    };
-    let Some(rest) = s.strip_prefix("Bearer ") else {
-        return false;
-    };
-    rest == expected
+/// The token of an `Authorization: Bearer <token>` header (the scheme as
+/// written, case-sensitively).
+fn bearer(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")
 }
 
 async fn handle_dev_ping() -> Response {
@@ -205,43 +193,28 @@ async fn handle_dev_ping() -> Response {
 }
 
 /// OTLP/HTTP metrics receiver (epic tsk22). Agent CLIs (Claude Code, Codex)
-/// export token usage here. Attribution reuses the hook spine: the owning
-/// thread rides the `X-Oxplow-Thread` header the spawn path injects into the
-/// exporter (one agent process per thread, so it is constant for its
-/// lifetime). The body is logged as one `agent.tokens.reported` event
-/// (`oxplow_app::otlp_ingest`); the `token_usage.otlp` consumer counts it.
+/// export token usage here, attributed to the session whose bearer the
+/// exporter carries. The body is logged as one `agent.tokens.reported`
+/// event (`oxplow_app::otlp_ingest`); the `token_usage.otlp` consumer
+/// counts it.
 ///
 /// Always answers 200 (an empty OTLP success ack): token capture is a
 /// best-effort side-band, and a non-2xx would make the exporter retry-storm a
-/// payload we can't use. Missing attribution headers → accept + drop.
+/// payload we can't use.
 async fn handle_otlp_metrics(
     State(ctx): State<AppCtx>,
-    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
     body: axum::body::Bytes,
 ) -> Response {
-    if !check_bearer(&headers, &ctx.hook_token) {
-        return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
-    }
     // Opt-in wire-format diagnostic (tsk25): when `OXPLOW_OTLP_DEBUG` names a
     // file, append a human-readable dump of every received export to it — used
     // to discover an agent's real OTEL shape (e.g. Codex) from a live run.
     // Off by default, zero cost when unset.
-    otlp_debug_dump(&headers, &body);
-    let thread_id = headers
-        .get("x-oxplow-thread")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .and_then(ThreadId::try_from_str);
-    let Some(thread_id) = thread_id else {
-        warn!("OTLP export missing the X-Oxplow-Thread header; dropping");
-        return otlp_ok();
-    };
-    // Logged as `agent.tokens.reported`; the `token_usage.otlp` consumer
-    // counts it.
+    otlp_debug_dump(&principal, &body);
     match ctx
         .services
         .otlp_ingest
-        .ingest(thread_id, agent_session_of(&headers), &body)
+        .ingest(principal.thread, Some(principal.session), &body)
         .await
     {
         Ok(logged) => tracing::debug!(logged, "OTLP token export"),
@@ -250,36 +223,20 @@ async fn handle_otlp_metrics(
     otlp_ok()
 }
 
-/// The agent session a hook or export came from: the `X-Oxplow-Session`
-/// header every process oxplow starts sends (`ses<n>`).
-fn agent_session_of(headers: &HeaderMap) -> Option<oxplow_domain::AgentSessionId> {
-    headers
-        .get("x-oxplow-session")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .and_then(oxplow_domain::AgentSessionId::try_from_str)
-}
-
 /// Append a human-readable dump of an OTLP export to the file named by
 /// `OXPLOW_OTLP_DEBUG` (tsk25). No-op when the env var is unset. Best-effort:
 /// a file/IO error is ignored (it's a diagnostic, never load-bearing).
-fn otlp_debug_dump(headers: &HeaderMap, body: &[u8]) {
+fn otlp_debug_dump(principal: &Principal, body: &[u8]) {
     let Ok(path) = std::env::var("OXPLOW_OTLP_DEBUG") else {
         return;
     };
     if path.is_empty() {
         return;
     }
-    let hdr = |k: &str| {
-        headers
-            .get(k)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("<none>")
-    };
     let entry = format!(
         "=== OTLP export ({} bytes) thread={} ===\n{}\n\n",
         body.len(),
-        hdr("x-oxplow-thread"),
+        principal.thread,
         oxplow_app::otlp_tokens::summarize_metrics_request(body),
     );
     use std::io::Write;
@@ -351,22 +308,22 @@ const HOOK_HANDLING_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 
 async fn handle_hook(
     State(ctx): State<AppCtx>,
+    Extension(principal): Extension<Principal>,
     AxumPath(event): AxumPath<String>,
-    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    if !check_bearer(&headers, &ctx.hook_token) {
-        return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
-    }
     let event_name = event.clone();
-    // The session isn't known until the ingest resolves it: a timed-out
-    // hook gets the default harness's ack.
-    let ack = respond(&ctx.services.harnesses, None, &HookAnswer::Ack);
+    // A timed-out hook gets its harness's ack.
+    let ack = respond(
+        &ctx.services.harnesses,
+        Some(&principal.harness),
+        &HookAnswer::Ack,
+    );
     bounded_hook_response(
         HOOK_HANDLING_TIMEOUT,
         &event_name,
         ack,
-        handle_hook_inner(ctx, event, headers, body),
+        handle_hook_inner(ctx, principal, event, body),
     )
     .await
 }
@@ -398,24 +355,16 @@ where
 
 async fn handle_hook_inner(
     ctx: AppCtx,
+    principal: Principal,
     event: String,
-    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    let stream_id = headers
-        .get("x-oxplow-stream")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .and_then(StreamId::try_from_str);
-    let thread_id = headers
-        .get("x-oxplow-thread")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .and_then(ThreadId::try_from_str);
+    // Who sent it is the bearer's session; nothing in the request says.
+    let thread_id = Some(principal.thread);
+    let stream_id = Some(principal.stream);
+    let agent_session_id = Some(principal.session);
 
-    let agent_session_id = agent_session_of(&headers);
-
-    hook_debug_dump(&event, thread_id.map(|t| t.to_string()).as_deref(), &body);
+    hook_debug_dump(&event, Some(&principal.thread.to_string()), &body);
 
     let body_str = match std::str::from_utf8(&body) {
         Ok(s) => s.to_string(),
@@ -707,38 +656,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    #[test]
-    fn token_is_long_enough() {
-        let t = generate_token();
-        // 32 bytes base64-url-no-pad → 43 chars.
-        assert_eq!(t.len(), 43);
-    }
-
-    #[test]
-    fn bearer_check_accepts_matching() {
-        let mut h = HeaderMap::new();
-        h.insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_static("Bearer abc"),
-        );
-        assert!(check_bearer(&h, "abc"));
-    }
-
-    #[test]
-    fn bearer_check_rejects_missing() {
-        assert!(!check_bearer(&HeaderMap::new(), "abc"));
-    }
-
-    #[test]
-    fn bearer_check_rejects_wrong() {
-        let mut h = HeaderMap::new();
-        h.insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_static("Bearer xyz"),
-        );
-        assert!(!check_bearer(&h, "abc"));
-    }
-
     /// `OXPLOW_HOOK_DEBUG`'s entry is one JSON line per hook: the event,
     /// its headers' thread, and the payload as sent (kept verbatim when it
     /// isn't JSON).
@@ -762,6 +679,24 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(raw.trim_end()).unwrap();
         assert_eq!(v["payload"], "not json");
         assert!(v["thread"].is_null());
+    }
+
+    fn auth(value: &'static str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static(value),
+        );
+        h
+    }
+
+    #[test]
+    fn the_bearer_is_the_token_after_the_scheme() {
+        assert_eq!(bearer(&auth("Bearer abc")), Some("abc"));
+        assert_eq!(bearer(&HeaderMap::new()), None);
+        // No scheme, or one in another case: clients send "Bearer ".
+        assert_eq!(bearer(&auth("abc")), None);
+        assert_eq!(bearer(&auth("bearer abc")), None);
     }
 
     #[test]
@@ -796,36 +731,5 @@ mod tests {
         assert!(matches!(parse_hook_kind("Stop"), Some(HookKind::Stop)));
         assert!(parse_hook_kind("").is_none());
         assert!(parse_hook_kind("PRETOOLUSE").is_none()); // case-sensitive
-    }
-
-    #[test]
-    fn bearer_check_rejects_malformed_header() {
-        // No "Bearer " prefix — even if the token bytes match.
-        let mut h = HeaderMap::new();
-        h.insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_static("abc"),
-        );
-        assert!(!check_bearer(&h, "abc"));
-    }
-
-    #[test]
-    fn bearer_check_is_case_sensitive_on_scheme() {
-        // "bearer " (lowercase) is rejected — clients must send the
-        // canonical "Bearer " scheme.
-        let mut h = HeaderMap::new();
-        h.insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_static("bearer abc"),
-        );
-        assert!(!check_bearer(&h, "abc"));
-    }
-
-    #[test]
-    fn generated_tokens_are_unique() {
-        // Sanity: the OS RNG produces distinct tokens across calls.
-        let a = generate_token();
-        let b = generate_token();
-        assert_ne!(a, b);
     }
 }

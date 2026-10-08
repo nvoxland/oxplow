@@ -97,19 +97,16 @@ pub async fn acp_open_session(
             ))
         })?;
 
-    let mcp = match &ctx.plugin_runtime {
-        Some(rt) => vec![McpHttp {
-            name: "oxplow".into(),
-            url: rt.mcp_endpoint_url.clone(),
-            headers: vec![
-                ("Authorization".into(), format!("Bearer {}", rt.hook_token)),
-                ("X-Oxplow-Thread".into(), thread.id.to_string()),
-                ("X-Oxplow-Stream".into(), stream.id.to_string()),
-                ("X-Oxplow-Session".into(), session_id.to_string()),
-            ],
-        }],
-        None => vec![],
-    };
+    // The session's bearer is the whole of who its MCP calls come from.
+    let endpoints = crate::commands::terminal::session_endpoints(ctx, &session, &thread)?;
+    let mcp = vec![McpHttp {
+        name: "oxplow".into(),
+        url: endpoints.mcp_endpoint_url.clone(),
+        headers: vec![(
+            "Authorization".into(),
+            format!("Bearer {}", endpoints.hook_token),
+        )],
+    }];
     let harness = svc
         .harnesses
         .get(session.harness.as_str())
@@ -133,6 +130,7 @@ pub async fn acp_open_session(
     let launch = crate::commands::terminal::launch_session(
         ctx,
         harness.as_ref(),
+        &endpoints,
         &session,
         &thread,
         &stream,

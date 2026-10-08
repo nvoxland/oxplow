@@ -96,8 +96,9 @@ async fn the_fake_harness_session_is_recorded_canonically() {
     let harness = svc.harnesses.get(oxplow_harness_fake::ID).unwrap();
     let bin = fake_bin().to_string_lossy().into_owned();
     let resolve = move |_: &str| Some(bin.clone());
+    let token = common::bearer_for(&svc, session.id).await;
     let identity = vec![
-        ("OXPLOW_HOOK_TOKEN".to_string(), cp.hook_token.clone()),
+        ("OXPLOW_HOOK_TOKEN".to_string(), token.clone()),
         ("OXPLOW_HOOK_BASE_URL".to_string(), cp.hook_base_url()),
         ("OXPLOW_STREAM_ID".to_string(), stream.id.to_string()),
         ("OXPLOW_THREAD_ID".to_string(), thread.id.to_string()),
@@ -116,7 +117,7 @@ async fn the_fake_harness_session_is_recorded_canonically() {
                 hook_base_url: cp.hook_base_url(),
                 mcp_endpoint_url: cp.mcp_endpoint_url(),
                 otlp_base_url: cp.otlp_base_url(),
-                hook_token: cp.hook_token.clone(),
+                hook_token: token.clone(),
             },
             identity_env: &identity,
             system_prompt: None,

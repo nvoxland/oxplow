@@ -366,6 +366,8 @@ test("right-clicking a thread icon in the strip opens its row menu, headed by it
   expect(getByTestId("menu-item-thread.rename")).toBeTruthy();
   expect(getByTestId("menu-item-thread.settings")).toBeTruthy();
   expect(getByTestId("menu-item-thread.close")).toBeTruthy();
+  // Sessions start from the thread's own page, not its menu.
+  expect(queryByTestId("menu-item-thread.new-session") === null).toBe(true);
   fireEvent.click(getByTestId("menu-item-thread.promote"));
   expect(promoted).toEqual(["thr2"]);
   // Right-click opens a menu, not the panel.
@@ -422,17 +424,27 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   const glyph = (rowId: string) =>
     getByTestId(rowId).querySelector("[data-glyph]") as HTMLElement;
 
+  // Tabs: rounded on the left only, flush with the strip's right edge.
   const stream = glyph("navigator-strip-stream-str1");
   expect(stream.dataset.glyph).toBe("stream");
   expect(stream.style.background).toBe("var(--surface-stream-tile)");
   expect(stream.style.color).toBe("var(--text-on-stream-tile)");
+  expect(stream.style.borderRadius).toBe("6px 0px 0px 6px");
 
+  // A stream's threads are tabs butted up against each other: each fills
+  // its row, and only the last closes the stack along its bottom.
   const writer = glyph("navigator-strip-thread-thr1");
   const queued = glyph("navigator-strip-thread-thr2");
-  for (const t of [writer, queued]) {
+  for (const [rowId, t] of [
+    ["navigator-strip-thread-thr1", writer],
+    ["navigator-strip-thread-thr2", queued],
+  ] as const) {
     expect(t.dataset.glyph).toBe("thread");
-    expect(t.style.borderRadius).toBe("5px");
+    expect(t.style.borderRadius).toBe("4px 0px 0px 4px");
+    expect(t.style.height).toBe(getByTestId(rowId).style.height);
   }
+  expect(writer.style.borderWidth).toBe("1px 0px 0px 1px");
+  expect(queued.style.borderWidth).toBe("1px 0px 1px 1px");
   expect(writer.style.borderColor).toBe("var(--accent)");
   expect(queued.style.borderColor).toBe("var(--border-strong)");
 

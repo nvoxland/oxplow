@@ -239,12 +239,11 @@ persists its own harness, so Claude and Codex sessions run concurrently.
   (bearer via opencode's own `{env:OXPLOW_HOOK_TOKEN}` interpolation),
   the hook-bridge opencode plugin, and an `instructions` entry pointing at the
   per-session prompt file (opencode has no `--append-system-prompt`).
-- All agents export `OXPLOW_STREAM_ID`, `OXPLOW_THREAD_ID`,
-  `OXPLOW_HOOK_TOKEN`, and `OXPLOW_SESSION` (the agent session, `ses<n>`)
-  so hooks can identify themselves to the runtime. The OTLP exporters
-  carry the session too (`X-Oxplow-Session` beside `X-Oxplow-Thread`),
-  and so do the Claude and ACP MCP connections (nothing reads it there
-  yet).
+- All agents get `OXPLOW_HOOK_TOKEN`, their session's own bearer, which
+  their hooks, OTLP exports and MCP connection carry and which alone says
+  who they are (see "Caller identity" below). `OXPLOW_STREAM_ID`,
+  `OXPLOW_THREAD_ID` and `OXPLOW_SESSION` (`ses<n>`) are the agent's own
+  knowledge of where it runs; nothing trusts them.
 
 The command runs as `sh -lc <command>` in a PTY
 (`oxplow_rpc::commands::terminal::open_terminal_session`, keyed by the
@@ -291,6 +290,34 @@ directories that no fixed list can guess, so a GUI-launched agent can still miss
 `node`/`bun`. Fixing that needs a login-shell env capture (`$SHELL -ilc`), which
 was deliberately not taken here — it costs a subprocess per launch and can hang
 on a user's rc file.
+
+## Caller identity
+
+Every agent session gets its own bearer when it launches
+(`oxplow_rpc::commands::terminal::session_endpoints` →
+`SessionAuth::mint`, `crates/oxplow-app/src/session_auth.rs`), bound in
+memory to its session, thread, stream and harness (a `Principal`). The
+control plane's routes — `/hook/{event}`, `/v1/metrics`, `/v1/logs`,
+`/mcp`, `/dev/ping` — admit a request only with a live session's bearer,
+and take who sent it from the bearer alone: `auth_middleware` puts the
+session's `Principal` in the request's extensions, the hook and OTLP
+handlers read the session, thread and stream from it, and MCP's
+`caller_of` reads it from the request parts rmcp hands each tool. No
+header or query names the caller — an `X-Oxplow-Thread` a request carries
+is ignored — so one agent can't run commands, post hooks or export tokens
+as another, and two sessions on one thread are told apart.
+
+- **One bearer per session, for its process's life.** A relaunch mints a
+  new one and retires the old. Closing the session, its thread or its
+  stream revokes it (`SessionProcesses::kill`). Bearers live in memory and
+  end with the daemon; a session's next launch mints a fresh one.
+- **Where it rides.** The agent's env (`OXPLOW_HOOK_TOKEN`), its
+  per-session MCP config, its OTLP exporter's headers, and an ACP
+  agent's `McpHttp` entry.
+- **In process.** The ACP host and the UI's interrupt build their hook
+  envelopes directly, naming the session; they don't go through a route.
+- A hook's harness is the bearer's, so even a hook that times out is
+  answered in its harness's shape.
 
 ## Harness runtimes
 
@@ -362,11 +389,11 @@ streamId-derivation in other MCP tools).
 
 **Token usage — OTEL, not the Stop hook (tsk22).** The control plane hosts a
 sibling `POST /v1/metrics` OTLP receiver beside `/hook` and `/mcp`
-(`handle_otlp_metrics`, same bearer auth). Claude Code's launch env
-(`terminal.rs::claude_otel_env`) points its OTEL metrics exporter at it and
-attaches `X-Oxplow-Thread` as an OTLP header (one process per thread →
-constant), so the receiver attributes the `claude_code.token.usage` counter
-without a session→thread lookup. Each export is logged as one
+(`handle_otlp_metrics`, behind the session's bearer like a hook). Claude
+Code's launch env (its harness's `otel_env`) points its OTEL metrics
+exporter at it with the session's bearer as the OTLP `Authorization`
+header, so the receiver attributes the `claude_code.token.usage` counter
+to the session the bearer stands for. Each export is logged as one
 `agent.tokens.reported` event anchored to the turn it measured (P10.M2,
 `otlp_ingest.rs`); the `token_usage.otlp` consumer turns it into
 `oxplow.tokens` facts. Cache
@@ -379,15 +406,14 @@ repeats a message's cumulative `usage` on every content-block line). The
 `token_usage.turns` reactor on `agent.turn.ended` (`TokenUsageService::on_stop`)
 records the per-turn `agent_token_usage` prompt rows + `oxplow.turn` facts. Details: `.context/metrics.md` → "OTEL token tracking".
 
-Each hook POSTs to the runtime's MCP server with bearer-token auth via the
-env-var-interpolated `OXPLOW_HOOK_TOKEN` header, plus `X-Oxplow-Stream`,
-`X-Oxplow-Thread`, `X-Oxplow-Session`. The MCP server's `onHook` callback dispatches
-to `runtime.handleHookEnvelope`, which:
+Each hook POSTs to the control plane's `/hook/<event>` with the session's
+bearer (`Authorization: Bearer $OXPLOW_HOOK_TOKEN`); the session, thread
+and stream are the bearer's ("Caller identity").
 
 **Which agent session a hook came from** (`agent_session_store::resolve_tx`,
 shared by hooks and OTLP exports), in order:
-1. the session the sender named (`X-Oxplow-Session`, the ACP host, the UI's
-   interrupt) — refused, with a warning, when it is another thread's;
+1. the session the sender is (the bearer's, the ACP host's, the UI's
+   interrupt's) — refused, with a warning, when it is another thread's;
 2. the session whose resume id is the hook's harness session id (an open
    one first, then the newest);
 3. the thread's newest open session, one with a turn running first —
@@ -758,7 +784,7 @@ the same JSON.
   - a read-only thread's edit blocked with no card;
   - a writer's card without "always allow", which round-trips;
   - the Stop audit shown as a banner, with "Put in input" filling the draft and nothing sent;
-  - the MCP entry the agent received (URL plus Bearer / `X-Oxplow-*`) initializing against oxplow's MCP, where a wrong token gets 401.
+  - the MCP entry the agent received (URL plus its session's bearer) initializing against oxplow's MCP, where a wrong token gets 401.
 - **Live smoke:** `tests/acp_live.rs` is `#[ignore]`d. Run it with `OXPLOW_ACP_LIVE_CMD="<adapter command>" cargo test -p oxplow-app --test acp_live -- --ignored` (e.g. `bunx @zed-industries/claude-code-acp`).
 - **Not done:** recorded traces from real adapters, because this machine has no Node.
 
@@ -909,10 +935,10 @@ items.
 
 ## MCP tools
 
-**Caller identity and commands.** Every MCP request carries the acting
-thread (`X-Oxplow-Thread` / `X-Oxplow-Stream` headers, or `?thread=` on
-the endpoint URL for Codex); `oxplow_mcp::caller_of` turns it into the
-`Actor::Agent` the command bus audits to. Writes that are commands go
+**Caller identity and commands.** Every MCP request carries its session's
+bearer, and the caller is the session it stands for ("Caller identity"
+above); `oxplow_mcp::caller_of` turns it into the `Actor::Agent` the
+command bus audits to. Writes that are commands go
 through `run_command` (`list_commands` shows what the agent may run);
 an anonymous connection may read but not run commands. Any thread in
 the stream may file, edit, start and finish tasks and open efforts

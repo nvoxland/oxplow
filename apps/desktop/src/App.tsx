@@ -149,7 +149,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -3340,17 +3340,6 @@ export function App() {
           onCreateThread={async (streamId, title) => {
             if (streamId !== stream?.id) await handleSwitch(streamId);
             await handleCreateThread(title);
-          }}
-          onNewSession={async (streamId, threadId) => {
-            if (streamId !== stream?.id) await handleSwitch(streamId);
-            await handleSelectThread(streamId, threadId);
-            // Into that thread's tabs, not the one selected when the menu opened.
-            const picker = newSessionRef();
-            setThreadPageTabs((prev) => {
-              const current = prev[threadId] ?? [];
-              return current.some((t) => t.id === picker.id) ? prev : { ...prev, [threadId]: [...current, picker] };
-            });
-            setThreadCenterActive((prev) => ({ ...prev, [threadId]: picker.id }));
           }}
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onRenameStream={handleRenameStreamById}

@@ -26,7 +26,7 @@ swap in-process needs a different scaffolding (`stabby`/`abi_stable`,
 or moving oxplow-mcp behind a child-process boundary with stdio
 transport that can be respawned). What landed instead: a
 `POST /dev/ping` health-check endpoint on the control plane so dev
-tooling can verify the server is up + the bearer token matches. For
+tooling can verify the server is up + a session's bearer is live. For
 real iteration, `bun run tauri:dev` rebuilds the Rust side on save.
 
 ## Useful follow-ups discovered during the sweep

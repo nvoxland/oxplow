@@ -40,6 +40,7 @@ oxplow-provider-protocol = { workspace = true }
 futures = "0.3"
 bytes = "1"
 base64 = "0.23"
+rand = "0.10"
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
