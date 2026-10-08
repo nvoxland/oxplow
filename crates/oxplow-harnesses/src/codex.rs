@@ -9,11 +9,11 @@ use std::path::Path;
 use serde_json::json;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
-    LaunchSpec, Transcript,
+    AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading};
 use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
 
 use super::shared::{
@@ -35,8 +35,6 @@ impl AgentHarness for Codex {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Terminal,
-            input: Input::Keystrokes,
-            gate: Gate::Harness,
         }
     }
 
@@ -74,14 +72,6 @@ impl AgentHarness for Codex {
         &["CLAUDE.md"]
     }
 
-    fn env_markers(&self) -> &[&str] {
-        &[]
-    }
-
-    fn settings(&self) -> &[HarnessSetting] {
-        &[]
-    }
-
     fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError> {
         let skills_dir = project_dir.join(RUNTIME_DIR_REL).join("skills");
         if skills_dir.is_dir() {
@@ -90,13 +80,12 @@ impl AgentHarness for Codex {
         Ok(())
     }
 
-    fn writing_tools(&self) -> &[&str] {
-        &["apply_patch", "shell", "exec_command"]
+    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+        codex_tool_use(body)
     }
 
-    /// Its session format isn't read yet.
-    fn turns(&self, _: &str) -> Vec<Turn> {
-        Vec::new()
+    fn writing_tools(&self) -> &[&str] {
+        &["apply_patch", "shell", "exec_command"]
     }
 
     fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {
@@ -311,6 +300,83 @@ fn otel_overrides(otlp_base_url: &str, hook_token: &str) -> Vec<String> {
     ]
 }
 
+/// A Codex tool hook's body mapped onto oxplow's vocabulary. Codex posts
+/// its own tool names in Claude Code's hook fields: `apply_patch` edits the
+/// files its patch names, `shell` / `exec_command` run a command (a string
+/// or an argv list).
+fn codex_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
+    let name = body.get("tool_name")?.as_str()?.to_string();
+    let input = body.get("tool_input").cloned().unwrap_or_default();
+    let command = || -> Option<String> {
+        let c = input.get("command").or_else(|| input.get("cmd"))?;
+        match c {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Array(argv) => Some(
+                argv.iter()
+                    .filter_map(|a| a.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            _ => None,
+        }
+    };
+    let (kind, paths, command) = match name.as_str() {
+        "apply_patch" => (ToolKind::Edit, patch_paths(&input), None),
+        "shell" | "exec_command" | "local_shell" => (ToolKind::Shell, Vec::new(), command()),
+        n if n.starts_with("mcp__") => (ToolKind::Mcp, Vec::new(), None),
+        _ => (ToolKind::Other, Vec::new(), None),
+    };
+    let response = body.get("tool_response").filter(|r| !r.is_null());
+    let exit_code = response.and_then(|r| {
+        ["exit_code", "exitCode", "code"]
+            .iter()
+            .find_map(|k| r.get(*k).and_then(|x| x.as_i64()))
+    });
+    Some(ToolUse {
+        name,
+        kind,
+        paths,
+        detail: command.clone(),
+        command,
+        call_id: body
+            .get("tool_use_id")
+            .or_else(|| body.get("call_id"))
+            .and_then(|t| t.as_str())
+            .map(str::to_string),
+        ok: exit_code.map(|c| c == 0),
+        exit_code,
+        question: None,
+    })
+}
+
+/// The files a Codex patch names (`*** Add File: a`, `*** Update File: b`,
+/// `*** Delete File: c`, `*** Move to: d`), from its `input` / `patch`
+/// text or an explicit `path`.
+fn patch_paths(input: &serde_json::Value) -> Vec<String> {
+    let text = ["input", "patch"]
+        .iter()
+        .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
+        .unwrap_or_default();
+    let mut paths: Vec<String> = text
+        .lines()
+        .filter_map(|l| {
+            [
+                "*** Add File: ",
+                "*** Update File: ",
+                "*** Delete File: ",
+                "*** Move to: ",
+            ]
+            .iter()
+            .find_map(|p| l.strip_prefix(p))
+        })
+        .map(|p| p.trim().to_string())
+        .collect();
+    if let Some(p) = input.get("path").and_then(|p| p.as_str()) {
+        paths.push(p.to_string());
+    }
+    paths
+}
+
 /// The command a Codex hook runs: the oxplow binary, which forwards it.
 fn hook_command(oxplow_executable: &Path, event: &str) -> String {
     format!(
@@ -325,6 +391,37 @@ mod tests {
     use super::*;
     use crate::test_launch::{harness, launch_in};
     use tempfile::TempDir;
+
+    /// `apply_patch` is an edit of every file its patch names; `shell` a
+    /// command, joined when it's an argv list, with its exit code.
+    #[test]
+    fn codex_tools_map_onto_the_vocabulary() {
+        let patch = codex_tool_use(&serde_json::json!({
+            "tool_name": "apply_patch",
+            "tool_input": {"input": "*** Begin Patch\n*** Update File: src/a.rs\n@@\n-x\n+y\n*** Add File: src/b.rs\n+z\n*** End Patch"}
+        }))
+        .unwrap();
+        assert_eq!(patch.kind, ToolKind::Edit);
+        assert_eq!(
+            patch.paths,
+            vec!["src/a.rs".to_string(), "src/b.rs".to_string()]
+        );
+        let shell = codex_tool_use(&serde_json::json!({
+            "tool_name": "shell",
+            "tool_input": {"command": ["bash", "-lc", "cargo test"]},
+            "tool_response": {"exit_code": 0}
+        }))
+        .unwrap();
+        assert_eq!(shell.kind, ToolKind::Shell);
+        assert_eq!(shell.command.as_deref(), Some("bash -lc cargo test"));
+        assert_eq!((shell.exit_code, shell.ok), (Some(0), Some(true)));
+        assert_eq!(
+            codex_tool_use(&serde_json::json!({"tool_name": "view_image"}))
+                .unwrap()
+                .kind,
+            ToolKind::Other
+        );
+    }
 
     #[test]
     fn launch_builds_the_command_and_env() {

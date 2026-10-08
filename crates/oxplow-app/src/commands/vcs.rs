@@ -103,12 +103,14 @@ where
             Box::pin(async move {
                 let input: I = parse(input)?;
                 let stream: StreamId = ref_id(input.stream(), "stream", "/stream")?;
-                if matches!(invocation.actor, oxplow_domain::Actor::Agent { .. })
+                // Isolation: an agent, or an effect in its event's stream,
+                // works in its own stream's worktree only.
+                if invocation.actor.confined_to_own_stream()
                     && invocation.actor.stream_id() != Some(stream)
                 {
                     return Err(CommandError::Denied {
                         reason: format!(
-                            "an agent runs VCS commands on its own stream only, not `{stream}`"
+                            "an agent or an effect runs VCS commands on its own stream only, not `{stream}`"
                         ),
                     });
                 }
@@ -637,6 +639,26 @@ mod tests {
             .await
             .unwrap_err();
         assert!(format!("{err:?}").contains("Denied"), "{err:?}");
+        // An effect is held to its event's stream the same way: none, or
+        // another, is refused.
+        for stream_id in [None, Some(elsewhere)] {
+            let effect = Actor::Effect {
+                effect: "acme/ship".into(),
+                thread_id: Some(f.thread),
+                stream_id,
+            };
+            let err = svc
+                .commands
+                .run(
+                    &effect,
+                    "oxplow.vcs.commit",
+                    json!({ "stream": stream, "message": "not its stream" }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(format!("{err:?}").contains("Denied"), "{err:?}");
+        }
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base again");
         std::fs::write(root.join("a.txt"), "two\n").unwrap();

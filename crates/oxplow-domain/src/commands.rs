@@ -364,11 +364,18 @@ pub enum Actor {
     },
     System,
     /// An extension's effect reacting to an event (`effects:`, P8.D8):
-    /// an agent's invoker rights, no thread, and never a confirmation —
-    /// a command that asks becomes a proposal for a person.
+    /// an agent's rights and gates, for the thread and stream the event
+    /// happened in (the writer gate, its own stream's VCS), and never a
+    /// confirmation — a command that asks becomes a proposal for a person.
     Effect {
         /// `<extension>/<effect id>`.
         effect: String,
+        /// The triggering event's thread, when it has one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_id: Option<ThreadId>,
+        /// The triggering event's stream, when it has one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stream_id: Option<StreamId>,
     },
 }
 
@@ -414,6 +421,22 @@ impl Actor {
         }
     }
 
+    /// The thread an agent's gates apply to, for an actor that has them:
+    /// an agent (or a lens acting for one) its own, an effect its event's.
+    /// `None` for a person or oxplow itself.
+    pub fn gated_thread(&self) -> Option<Option<ThreadId>> {
+        match self {
+            Actor::Effect { thread_id, .. } => Some(*thread_id),
+            other => other.agent_thread(),
+        }
+    }
+
+    /// Whether this actor works only in its own stream (VCS commands): an
+    /// agent (or a lens acting for one), or an effect, in its event's.
+    pub fn confined_to_own_stream(&self) -> bool {
+        self.is_agent_driven() || matches!(self, Actor::Effect { .. })
+    }
+
     /// The agent behind this actor, if any (see [`Self::is_agent_driven`]).
     pub fn agent_thread(&self) -> Option<Option<ThreadId>> {
         match self {
@@ -444,7 +467,7 @@ impl Actor {
             } => "agent".into(),
             Actor::Lens { lens_id, .. } => format!("lens:{lens_id}"),
             Actor::System => "system".into(),
-            Actor::Effect { effect } => format!("effect:{effect}"),
+            Actor::Effect { effect, .. } => format!("effect:{effect}"),
         }
     }
 
@@ -455,14 +478,14 @@ impl Actor {
                 thread_id: Some(t), ..
             } => Some(t.to_string()),
             Actor::Lens { lens_id, .. } => Some(lens_id.clone()),
-            Actor::Effect { effect } => Some(effect.clone()),
+            Actor::Effect { effect, .. } => Some(effect.clone()),
             _ => None,
         }
     }
 
     pub fn thread_id(&self) -> Option<ThreadId> {
         match self {
-            Actor::Agent { thread_id, .. } => *thread_id,
+            Actor::Agent { thread_id, .. } | Actor::Effect { thread_id, .. } => *thread_id,
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.thread_id(),
             _ => None,
         }
@@ -472,7 +495,7 @@ impl Actor {
     /// chain too, like [`Self::thread_id`]).
     pub fn stream_id(&self) -> Option<StreamId> {
         match self {
-            Actor::Agent { stream_id, .. } => *stream_id,
+            Actor::Agent { stream_id, .. } | Actor::Effect { stream_id, .. } => *stream_id,
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.stream_id(),
             _ => None,
         }
@@ -870,6 +893,8 @@ mod tests {
         assert_eq!(Actor::System.invoker(), Invoker::Human);
         let effect = Actor::Effect {
             effect: "acme/notify".into(),
+            thread_id: None,
+            stream_id: None,
         };
         assert_eq!(effect.invoker(), Invoker::Agent);
         assert_eq!(effect.source(), "effect:acme/notify");
@@ -929,6 +954,8 @@ mod tests {
             Actor::System,
             Actor::Effect {
                 effect: "acme/notify".into(),
+                thread_id: None,
+                stream_id: None,
             },
         ] {
             assert!(!actor.may_confirm(), "{actor:?}");

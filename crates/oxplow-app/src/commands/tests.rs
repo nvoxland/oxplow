@@ -292,6 +292,57 @@ async fn an_agent_thread_that_may_not_write_is_refused_writes_not_reads() {
     .unwrap();
 }
 
+/// An effect is gated like the agent whose rights it carries: reacting to
+/// an event on a thread that may not write, its writes are refused; on
+/// one that may, or with no thread, they run.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_effect_is_held_to_its_events_threads_writer_gate() {
+    let (db, bus) = bus();
+    let bus = bus.with_write_gate(Arc::new(|thread| {
+        Box::pin(async move { thread != ThreadId::new(7) })
+    }));
+    bus.register(
+        Command::new(
+            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+            kv_set(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let on = |thread: Option<i64>| Actor::Effect {
+        effect: "acme/notify".into(),
+        thread_id: thread.map(ThreadId::new),
+        stream_id: None,
+    };
+    let err = bus
+        .run(
+            &on(Some(7)),
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "1"}),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+    assert_eq!(kv_value(&db, "a").await, None);
+    bus.run(
+        &on(Some(8)),
+        "oxplow.kv.set",
+        json!({"k": "a", "v": "1"}),
+        false,
+    )
+    .await
+    .unwrap();
+    bus.run(
+        &on(None),
+        "oxplow.kv.set",
+        json!({"k": "b", "v": "1"}),
+        false,
+    )
+    .await
+    .unwrap();
+}
+
 /// A composite carries step 3's answer to its children: a thread that
 /// may not write can't write through `oxplow.command.sequence` either.
 #[tokio::test(flavor = "multi_thread")]
@@ -2353,6 +2404,8 @@ async fn declining_writes_only_the_decision() {
 fn effect() -> Actor {
     Actor::Effect {
         effect: "acme/notify".into(),
+        thread_id: None,
+        stream_id: None,
     }
 }
 

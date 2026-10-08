@@ -1,0 +1,154 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "description": "Where a large or sensitive body lives: `event_content.hash` (xxh3-128\nhex) and its length. Retention may delete the body; the ref stays.",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "size": {
+          "description": "The whole body's length, stored or not.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Only the first part was stored (bodies are capped).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hash",
+        "size"
+      ],
+      "type": "object"
+    },
+    "ToolKind": {
+      "description": "What a tool call does, as oxplow reads it.",
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Reads a file.",
+          "type": "string"
+        },
+        {
+          "const": "edit",
+          "description": "Writes, edits, deletes or moves files — the call names them.",
+          "type": "string"
+        },
+        {
+          "const": "shell",
+          "description": "Runs a shell command.",
+          "type": "string"
+        },
+        {
+          "const": "subagent",
+          "description": "Starts a subagent, which runs tools of its own.",
+          "type": "string"
+        },
+        {
+          "const": "ask",
+          "description": "Asks the person a question and waits for the answer.",
+          "type": "string"
+        },
+        {
+          "const": "plan",
+          "description": "Puts a plan to the person and waits for approval.",
+          "type": "string"
+        },
+        {
+          "const": "search",
+          "description": "Searches files (names or contents).",
+          "type": "string"
+        },
+        {
+          "const": "fetch",
+          "description": "Fetches or searches the web.",
+          "type": "string"
+        },
+        {
+          "const": "mcp",
+          "description": "Calls an MCP server's tool.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "Anything else (a to-do list, a mode switch, thinking).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.tool.finished@2`: a tool call returned (PostToolUse). The\nrecorders — tool-call rows, effort claims, collection — react to this.\nAs `agent.tool.requested@2`: the harness's name, oxplow's `kind`, the\nfiles it names; and a shell call's whole `command`.",
+  "properties": {
+    "command": {
+      "description": "A shell call's command line, whole.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "detail": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "exit_code": {
+      "description": "A shell command's exit code.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kind": {
+      "$ref": "#/$defs/ToolKind"
+    },
+    "ok": {
+      "description": "Whether it succeeded, when the harness said.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tool": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool",
+    "kind"
+  ],
+  "title": "AgentToolFinishedV2",
+  "type": "object"
+}

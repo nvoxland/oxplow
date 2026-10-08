@@ -195,12 +195,7 @@ mod tests {
     /// a terminal.
     #[test]
     fn a_structured_harness_is_a_chat_and_the_rest_are_terminals() {
-        use crate::agent::harness::{Gate, Input};
-        let interact = |transcript| Interact {
-            transcript,
-            input: Input::Keystrokes,
-            gate: Gate::Harness,
-        };
+        let interact = |transcript| Interact { transcript };
         assert_eq!(
             SessionKind::default_for(interact(Transcript::Structured)),
             SessionKind::Chat

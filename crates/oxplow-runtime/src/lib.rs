@@ -14,4 +14,3 @@ pub use policy::{
     decide_tool, path_outside_worktree, DenyLayer, IntentKind, PolicyDecision, PolicyFacts,
     ToolIntent,
 };
-pub use write_guard::{write_guard_reason, WriteGuardContext, WORKTREE_MUTATING_TOOLS};

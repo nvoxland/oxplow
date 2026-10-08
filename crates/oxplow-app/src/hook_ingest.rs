@@ -36,6 +36,7 @@
 //! in commit order.
 
 use oxplow_domain::vocabulary::VocabularyHandle;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,10 +50,12 @@ use oxplow_db::agent_stores::{
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
+use oxplow_domain::agent::registry::HarnessRegistry;
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
     AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
-    AgentSessionStarted, AgentSessionStartedV2, AgentToolFinished, AgentToolFinishedV1,
-    AgentToolRequested, AgentToolRequestedV1, ContentRef, ToolDecision as Decision,
+    AgentSessionStarted, AgentSessionStartedV2, AgentToolFinished, AgentToolFinishedV2,
+    AgentToolRequested, AgentToolRequestedV2, ContentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
@@ -104,6 +107,13 @@ pub struct HookEnvelope {
     /// PreToolUse only: the policy's verdict (`None` reads as allowed).
     #[serde(default)]
     pub decision: Option<ToolDecision>,
+    /// A tool hook's call in oxplow's vocabulary, when the sender mapped it
+    /// (the control plane, with the hook's harness; the ACP host). `None`:
+    /// the ingest maps the body with its session's harness. In-process
+    /// only: an envelope that crosses a wire carries none.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub tool: Option<ToolUse>,
 }
 
 #[derive(Debug, Error)]
@@ -144,13 +154,18 @@ pub struct HookIngestService {
     project_dir: PathBuf,
     /// Reads recent activity to derive a thread's status.
     log: oxplow_db::SqliteEventLogStore,
-    /// Held from a status-deciding transaction to its announcement, so
-    /// `AgentStatusChanged` reaches the UI in commit order.
-    status_order: Arc<tokio::sync::Mutex<()>>,
+    /// One lock per thread, held from a status-deciding transaction to its
+    /// announcement, so a thread's `AgentStatusChanged` reaches the UI in
+    /// commit order. Per thread: one agent's hooks never queue behind
+    /// another thread's.
+    status_order: Arc<parking_lot::Mutex<HashMap<ThreadId, Arc<tokio::sync::Mutex<()>>>>>,
     events: EventBus,
     pump: Option<Arc<crate::event_pump::EventPump>>,
     /// Snapshots the worktree when a turn ends (P2.3); `None` in bare tests.
     turn_snapshots: Option<Arc<dyn crate::turn_snapshots::TurnSnapshots>>,
+    /// Maps a tool hook's body the sender didn't map, by its session's
+    /// harness.
+    harnesses: HarnessRegistry,
 }
 
 impl HookIngestService {
@@ -159,16 +174,18 @@ impl HookIngestService {
         vocabulary: VocabularyHandle,
         project_dir: PathBuf,
         events: EventBus,
+        harnesses: HarnessRegistry,
     ) -> Self {
         Self {
             log: oxplow_db::SqliteEventLogStore::new(db.clone(), vocabulary.clone()),
             db,
             vocabulary,
             project_dir,
-            status_order: Arc::new(tokio::sync::Mutex::new(())),
+            status_order: Arc::default(),
             events,
             pump: None,
             turn_snapshots: None,
+            harnesses,
         }
     }
 
@@ -187,8 +204,24 @@ impl HookIngestService {
         self
     }
 
-    /// Record the envelope and drive the turn / status state machine.
+    /// `thread`'s ordering lock.
+    fn order_of(&self, thread: ThreadId) -> Arc<tokio::sync::Mutex<()>> {
+        self.status_order.lock().entry(thread).or_default().clone()
+    }
+
+    /// Record the envelope and drive the turn / status state machine. It
+    /// runs as its own task, so a caller that stops waiting (the hook
+    /// route's budget ran out) can't cut it short between its commit and
+    /// what follows: the status, the pump's wake, a closed turn's end
+    /// snapshot.
     pub async fn ingest(&self, env: HookEnvelope) -> Result<IngestOutcome, HookIngestError> {
+        let this = self.clone();
+        tokio::spawn(async move { this.ingest_now(env).await })
+            .await
+            .map_err(|e| HookIngestError::Storage(DomainError::Invariant(e.to_string())))?
+    }
+
+    async fn ingest_now(&self, env: HookEnvelope) -> Result<IngestOutcome, HookIngestError> {
         let now = Timestamp::now();
         let mut outcome = IngestOutcome::default();
         let kind = env.kind;
@@ -196,15 +229,17 @@ impl HookIngestService {
             return Ok(outcome); // no thread: nothing to anchor a record to
         };
 
-        let order = self.status_order.lock().await;
+        let order_lock = self.order_of(thread);
+        let order = order_lock.lock().await;
         let vocabulary = self.vocabulary.clone();
         let project_dir = self.project_dir.clone();
+        let harnesses = self.harnesses.clone();
         let applied = self
             .db
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
                 let ev = EventCtx::system(&vocabulary, "hook_ingest");
-                record_tx(tx, &ev, &project_dir, thread, &env, now)
+                record_tx(tx, &ev, &project_dir, &harnesses, thread, &env, now)
             })
             .await?;
 
@@ -240,7 +275,8 @@ impl HookIngestService {
         state: AgentStatusState,
         detail: Option<String>,
     ) -> Result<(), HookIngestError> {
-        let _order = self.status_order.lock().await;
+        let order_lock = self.order_of(*thread);
+        let _order = order_lock.lock().await;
         let vocabulary = self.vocabulary.clone();
         let (thread_c, detail_c) = (*thread, detail.clone());
         let slot = self
@@ -396,6 +432,7 @@ fn record_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     project_dir: &Path,
+    harnesses: &HarnessRegistry,
     thread: ThreadId,
     env: &HookEnvelope,
     now: Timestamp,
@@ -474,15 +511,23 @@ fn record_tx(
             status = Some((AgentStatusState::Running, None));
         }
         HookKind::PreToolUse | HookKind::PostToolUse => {
-            log_tool_tx(conn, ev, thread, &row, env, &body, session)?;
-            let tool = body
-                .get("tool_name")
-                .and_then(|t| t.as_str())
-                .unwrap_or_default();
-            let asks = crate::agent_status_derive::is_user_input_tool(tool);
-            if env.kind == HookKind::PreToolUse && asks {
+            // The call as its harness maps it: the sender's, else the
+            // session's harness's reading of the body.
+            let tool = env.tool.clone().or_else(|| {
+                row.harness
+                    .as_deref()
+                    .and_then(|h| harnesses.get(h).ok())
+                    .and_then(|h| h.tool_use(&body))
+            });
+            // A body that names no tool records nothing.
+            if let Some(tool) = &tool {
+                log_tool_tx(conn, ev, thread, &row, env, tool, &body, session)?;
+            }
+            let asking = tool.filter(|t| t.kind.waits_on_person());
+            let asks = asking.is_some();
+            if let (HookKind::PreToolUse, Some(tool)) = (env.kind, &asking) {
                 // A question or a plan put to the person waits on them.
-                status = Some((AgentStatusState::AwaitingUser, Some(asked_of(tool, &body))));
+                status = Some((AgentStatusState::AwaitingUser, Some(asked_of(tool))));
             } else if env.kind == HookKind::PostToolUse
                 && (asks
                     || last_status_tx(conn, ev.vocabulary, thread, slot)?
@@ -508,6 +553,10 @@ fn record_tx(
                 status = Some((AgentStatusState::AwaitingUser, Some(message)));
             }
         }
+        // The person's Escape with no turn running closed a menu or a
+        // prompt, not a turn: nothing to end, and a thread waiting on them
+        // still is.
+        HookKind::Interrupt if applied.turn.is_none() => {}
         HookKind::Stop | HookKind::Interrupt => {
             let (answer, outcome) = if env.kind == HookKind::Stop {
                 let said = body
@@ -610,16 +659,12 @@ fn stop_status(answer: Option<&str>) -> (AgentStatusState, Option<String>) {
     }
 }
 
-/// What a question tool asks: AskUserQuestion's first question, or that a
-/// plan waits for approval (ExitPlanMode).
-fn asked_of(tool: &str, body: &serde_json::Value) -> String {
-    let input = &body["tool_input"];
-    let question = input["questions"][0]["question"]
-        .as_str()
-        .or_else(|| input["question"].as_str());
-    match (tool, question) {
-        (_, Some(q)) => q.to_string(),
-        ("ExitPlanMode", None) => "A plan to approve".to_string(),
+/// What a call that waits on the person asks: its question, or that a
+/// plan waits for approval.
+fn asked_of(tool: &ToolUse) -> String {
+    match (&tool.question, tool.kind) {
+        (Some(q), _) => q.clone(),
+        (None, ToolKind::Plan) => "A plan to approve".to_string(),
         _ => "A question".to_string(),
     }
 }
@@ -746,27 +791,32 @@ fn end_session_tx(
 
 /// `agent.tool.requested` / `agent.tool.finished` for a tool hook, with
 /// the input (and output) stored by hash.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the hook, its call and where it lands, read by one writer"
+)]
 fn log_tool_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
     row: &ThreadRow,
     env: &HookEnvelope,
+    tool: &ToolUse,
     body: &serde_json::Value,
     session: Option<&str>,
 ) -> Result<(), DomainError> {
-    let Some(parts) = crate::tool_calls::parse_tool_call(&env.payload_json, &row.worktree) else {
-        return Ok(()); // no tool name: nothing to record
-    };
+    let recorded = crate::tool_calls::recorded(tool, &row.worktree);
     let content = |key: &str| -> Result<Option<ContentRef>, DomainError> {
         match body.get(key) {
             Some(v) if !v.is_null() => event_content_store::put_json_tx(conn, "agent", v).map(Some),
             _ => Ok(None),
         }
     };
-    let tool_use = body.get("tool_use_id").and_then(|t| t.as_str());
-    let dedupe =
-        |phase: &str| tool_use.map(|id| format!("{}:{id}:{phase}", session.unwrap_or("-")));
+    let dedupe = |phase: &str| {
+        tool.call_id
+            .as_deref()
+            .map(|id| format!("{}:{id}:{phase}", session.unwrap_or("-")))
+    };
     let anchors = activity_anchors_tx(conn, thread, row.session)?;
     let subject = anchors
         .turn_id
@@ -777,10 +827,11 @@ fn log_tool_tx(
             allowed: true,
             reason: None,
         });
-        ev.typed::<AgentToolRequested>(&AgentToolRequestedV1 {
-            tool: parts.tool,
-            path: parts.path,
-            detail: parts.detail,
+        ev.typed::<AgentToolRequested>(&AgentToolRequestedV2 {
+            tool: tool.name.clone(),
+            kind: tool.kind,
+            paths: recorded.paths,
+            detail: recorded.detail,
             input: content("tool_input")?,
             decision: if decision.allowed {
                 Decision::Allowed
@@ -791,15 +842,15 @@ fn log_tool_tx(
         })
         .with_dedupe_key_opt(dedupe("requested"))
     } else {
-        let exit_code =
-            crate::collection::parse_bash_post_tool(&env.payload_json).and_then(|b| b.exit_code);
         let finished = ev
-            .typed::<AgentToolFinished>(&AgentToolFinishedV1 {
-                tool: parts.tool,
-                path: parts.path,
-                detail: parts.detail,
-                ok: parts.ok,
-                exit_code,
+            .typed::<AgentToolFinished>(&AgentToolFinishedV2 {
+                tool: tool.name.clone(),
+                kind: tool.kind,
+                paths: recorded.paths,
+                detail: recorded.detail,
+                command: tool.command.clone(),
+                ok: tool.ok,
+                exit_code: tool.exit_code,
                 input: content("tool_input")?,
                 output: content("tool_response")?,
             })
@@ -882,8 +933,20 @@ mod tests {
             oxplow_domain::vocabulary::VocabularyHandle::core(),
             std::path::PathBuf::from("/p"),
             EventBus::new(),
+            claude_registry(),
         );
         (svc, t.id)
+    }
+
+    /// The harnesses the fixture's sessions run: Claude Code, whose hook
+    /// bodies these tests post.
+    fn claude_registry() -> HarnessRegistry {
+        let registry = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        registry.register(
+            oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude")
+                .expect("the built-in"),
+        );
+        registry
     }
 
     /// A new service over the same database: a restarted daemon.
@@ -893,6 +956,7 @@ mod tests {
             svc.vocabulary.clone(),
             svc.project_dir.clone(),
             EventBus::new(),
+            svc.harnesses.clone(),
         )
     }
 
@@ -964,6 +1028,7 @@ mod tests {
                 .and_then(|p| p.as_str())
                 .map(str::to_string),
             decision: None,
+            tool: None,
         }
     }
 
@@ -1278,7 +1343,8 @@ mod tests {
         assert_eq!(e.anchors.effort_id.map(|e| e.value()), Some(effort));
         assert_eq!(e.anchors.agent_session_id, Some(first_session()));
         assert_eq!(e.payload["tool"], "Edit");
-        assert_eq!(e.payload["path"], "src/a.rs");
+        assert_eq!(e.payload["kind"], "edit");
+        assert_eq!(e.payload["paths"], json!(["src/a.rs"]));
         assert_eq!(e.payload["ok"], true);
         let hash = e.payload["input"]["hash"].as_str().unwrap().to_string();
         let input = oxplow_db::event_content_store::read(&svc.db, &hash)
@@ -1614,6 +1680,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: prompt.map(str::to_string),
             decision: None,
+            tool: None,
         };
         svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p")))
             .await
@@ -1639,6 +1706,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("do the thing".into()),
             decision: None,
+            tool: None,
         };
         svc.ingest(env).await.unwrap();
         // Spot-check via stores.
@@ -1661,6 +1729,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("do".into()),
             decision: None,
+            tool: None,
         };
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
@@ -1672,6 +1741,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: None,
             decision: None,
+            tool: None,
         };
         svc.ingest(stop).await.unwrap();
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
@@ -1691,6 +1761,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("p".into()),
             decision: None,
+            tool: None,
         })
         .await
         .unwrap();
@@ -1703,12 +1774,117 @@ mod tests {
             payload_json: "{}".into(),
             prompt: None,
             decision: None,
+            tool: None,
         })
         .await
         .unwrap();
         let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Stopped);
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
+    }
+
+    /// Records each turn-end take it finishes; a take takes a while, as
+    /// one behind a busy database writer does.
+    #[derive(Default)]
+    struct Takes(std::sync::Mutex<Vec<AgentTurnId>>);
+
+    #[async_trait::async_trait]
+    impl crate::turn_snapshots::TurnSnapshots for Takes {
+        async fn take_turn_end(&self, _thread: ThreadId, turn: AgentTurnId) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            self.0.lock().unwrap().push(turn);
+        }
+    }
+
+    /// A Stop whose caller stops waiting (the hook route's budget ran out)
+    /// still finishes: the turn it closed gets its end snapshot.
+    #[tokio::test]
+    async fn a_stop_finishes_though_its_caller_stops_waiting() {
+        let (svc, tid) = fixture().await;
+        let takes = std::sync::Arc::new(Takes::default());
+        let svc = svc.with_turn_snapshots(takes.clone());
+        svc.ingest(HookEnvelope {
+            kind: HookKind::UserPromptSubmit,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: Some("p".into()),
+            decision: None,
+            tool: None,
+        })
+        .await
+        .unwrap();
+        let stop = svc.ingest(HookEnvelope {
+            kind: HookKind::Stop,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: None,
+            decision: None,
+            tool: None,
+        });
+        // The caller gives up while the take is under way: the ingest's
+        // future is dropped.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(20), stop).await;
+        for _ in 0..200 {
+            if !takes.0.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(takes.0.lock().unwrap().len(), 1, "the turn's end take");
+    }
+
+    /// The person's Escape only interrupts a turn that's running: with
+    /// none open (the agent asked a question and stopped, and Escape closed
+    /// a menu) it changes nothing, so the thread still waits on them.
+    #[tokio::test]
+    async fn an_interrupt_with_no_open_turn_changes_nothing() {
+        let (svc, tid) = fixture().await;
+        let hook = |kind, prompt: Option<&str>, payload: serde_json::Value| HookEnvelope {
+            kind,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: payload.to_string(),
+            prompt: prompt.map(str::to_string),
+            decision: None,
+            tool: None,
+        };
+        svc.ingest(hook(HookKind::UserPromptSubmit, Some("p"), json!({})))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::Stop,
+            None,
+            json!({"last_assistant_message": "Which one should I use?"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::AwaitingUser
+        );
+        let ended = of_type(&logged(&svc).await, "agent.turn.ended").len();
+        let out = svc
+            .ingest(hook(HookKind::Interrupt, None, json!({})))
+            .await
+            .unwrap();
+        assert_eq!(out.closed_turn, None);
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::AwaitingUser,
+            "still waiting on the person"
+        );
+        assert_eq!(
+            of_type(&logged(&svc).await, "agent.turn.ended").len(),
+            ended
+        );
     }
 
     #[tokio::test]
@@ -1726,6 +1902,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: None,
             decision: None,
+            tool: None,
         })
         .await
         .unwrap();
@@ -1746,6 +1923,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("orphan".into()),
             decision: None,
+            tool: None,
         })
         .await
         .unwrap();
@@ -1768,6 +1946,7 @@ mod tests {
                 payload_json: "{}".into(),
                 prompt: Some(prompt.into()),
                 decision: None,
+                tool: None,
             })
             .await
             .unwrap();

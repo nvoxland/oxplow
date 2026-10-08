@@ -871,8 +871,9 @@ impl CommandBus {
     }
 
     /// Run an extension effect's reaction to one event (P8.D10): `command`
-    /// (a composite of what its script composed) as
-    /// `Actor::Effect { effect }`, with the reaction's `effect_run` row and
+    /// (a composite of what its script composed) as `Actor::Effect` for the
+    /// event's thread and stream (`anchors`), with the reaction's
+    /// `effect_run` row and
     /// `effect.result` landing with the run — in its transaction, after a
     /// `started` claim when a step leaves it, or with its proposal when a
     /// command asks — and its `command.executed` caused by the event.
@@ -884,9 +885,12 @@ impl CommandBus {
         resend: Option<String>,
         command: Command,
         input: Value,
+        anchors: &oxplow_domain::Anchors,
     ) -> Result<CommandOutcome, CommandError> {
         let actor = Actor::Effect {
             effect: key.effect.clone(),
+            thread_id: anchors.thread_id,
+            stream_id: anchors.stream_id,
         };
         self.run_prepared(
             &actor,
@@ -978,7 +982,7 @@ impl CommandBus {
         // A `Record` command isn't refused here: any thread may change
         // oxplow's own records.
         let mut gates = Gates { may_write: None };
-        if let Some(thread_id) = actor.agent_thread() {
+        if let Some(thread_id) = actor.gated_thread() {
             let may_write = match (spec.access.records(), &thread_id, &self.write_gate) {
                 (true, Some(t), Some(gate)) => Some(gate(*t).await),
                 _ => None,

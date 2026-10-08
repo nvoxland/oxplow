@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::stores::{StreamStore, ThreadStore};
 use oxplow_domain::ThreadId;
 use parking_lot::Mutex;
@@ -60,7 +61,7 @@ impl AgentContext {
     }
 
     /// What the agent hears after a tool call: the ROLE CHANGE banner after
-    /// `ExitPlanMode`, else the thread's undelivered nudges (collection and
+    /// a plan settles, else the thread's undelivered nudges (collection and
     /// post-tool advisories). The recording itself is the pump's
     /// (`tool_call_reactors`, `post_tool_reactors`, P3.5–P3.6): this waits
     /// up to [`POST_TOOL_SETTLE`] for the two reactors that write nudges,
@@ -72,13 +73,13 @@ impl AgentContext {
         svc: &Services,
         thread_id: &ThreadId,
         session_id: Option<&str>,
-        body: &serde_json::Value,
+        tool: Option<&ToolUse>,
     ) -> Option<String> {
-        // ExitPlanMode just settled: a promotion or demotion while the
-        // plan-mode prompt was up gets no prompt event before the agent
-        // resumes, so the banner rides this call's context. (ExitPlanMode is
-        // never a test-run command; any nudges wait for the next call.)
-        if body.get("tool_name").and_then(|v| v.as_str()) == Some("ExitPlanMode") {
+        // A plan just settled: a promotion or demotion while the plan was
+        // up for approval gets no prompt event before the agent resumes, so
+        // the banner rides this call's context. (A plan is never a test-run
+        // command; any nudges wait for the next call.)
+        if tool.is_some_and(|t| t.kind == ToolKind::Plan) {
             if let Some(banner) = self.role_change_banner(svc, thread_id, session_id).await {
                 return Some(banner);
             }
