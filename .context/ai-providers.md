@@ -99,12 +99,14 @@ ai:
 
 | Role | Used for |
 |---|---|
-| `main` | general reasoning |
-| `fast` | cheap, quick generation |
-| `summarize` | summaries of sessions, efforts, changes |
-| `embed` | embeddings |
-| `decide` | typed questions with probabilities (Jev-shaped) |
-| `review` | second-opinion review by a different model |
+| `main` | general reasoning: `extract` (an effort's inferred decisions, a collector's `ai_extract`) |
+| `summarize` | summaries of sessions, efforts, changes (`summarize`, MCP `ai_summarize`) |
+| `decide` | typed questions with probabilities, Jev-shaped (`classify`, `score`, `decide`, MCP `ai_decide`) |
+
+A role exists only once something asks it. A config naming a role oxplow
+dropped (`fast`, `embed`, `review`: nothing asked them) fails to load,
+saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
+`DROPPED_AI_ROLES`).
 
 ## Client
 
@@ -150,6 +152,21 @@ ai:
 - Every call, including failures, is a row in `ai_call` / `v_ai_call`
   (role, provider, model, caller, tokens, latency, ok, error), so AI
   usage is itself queryable in the [semantic layer](./semantic-layer.md).
+- **Every call keeps what it was asked and answered** (V41): the request
+  as `AiService` hands it to the provider — `ModelRequest::Complete {
+  system, prompt, json }` or `Decide { state, questions }`, its `body()`
+  — and the response (`{ text }` or `{ answers }`; none for a failure),
+  each stored whole (never cut: the request is a cache key) by its
+  content hash in `event_content` under namespace `ai`
+  (`ai_call_store::BODY_NAMESPACE`), the hashes on the row
+  (`request_hash`, `response_hash`). `ai` is one of core's namespaces with
+  no events; its bodies keep 30 days (`CORE_WINDOWS`) and the rows stay.
+  A person reads one with RPC `read_ai_call { id, body: request |
+  response }`, an agent with MCP `read_ai_call` — only the calls recorded
+  as its own thread (`oxplow_app::ai_calls::read`, capped at 64 KiB like
+  an event body). What a provider adapter wraps around a request
+  (`decide_via_chat`'s JSON instructions, an API's own envelope) is the
+  adapter's, not part of it.
 - Tests use `oxplow_ai_fake::mock` (the dev-only `oxplow-ai-fake` crate,
   not a feature of `oxplow-ai`, so no build compiles it two ways —
   working-in-this-repo.md "Builds and `target/`"), a local axum server
@@ -164,25 +181,35 @@ ai:
 
 `crates/oxplow-app/src/ai_compute.rs`, `Services.ai_compute`. A model
 computation oxplow asks for is **recorded**: kept in `ai_result`
-(`v_ai_result`, V118; the provider joined the key in V121) by
-`UNIQUE (input_hash, provider, model, prompt_version)`,
+(`v_ai_result`) by `UNIQUE (input_hash, provider, model, request_hash)`,
 where `input_hash = sha256(canonical JSON of { op, args })` (object keys
-sorted, so argument order doesn't matter). Asking again for the same
-thing — same input, same provider and model, same prompt — reads the recorded result:
+sorted, so argument order doesn't matter) and `request_hash` is the
+content hash of the exact request the op sends (`ModelRequest::hash`,
+the one its call keeps). Asking again for the same thing — same input,
+same provider and model, same prompt — reads the recorded result:
 `Recorded { value, cached: true, ai_call_id, input_tokens,
 output_tokens }`, and **no call and no `ai_call` row** are made. A miss
-calls, then records (a concurrent duplicate keeps the first). A failed
-or unusable answer is never recorded. Tokens only; no cost.
+calls, then records. Of two concurrent computations of one thing the
+first recorded wins and **both return it** (`insert` returns what is
+recorded for the key): one question reads one answer; the loser's call
+stays in `v_ai_call`, paid for, with the same `input_hash`. A failed or
+unusable answer is never recorded. Tokens only; no cost.
 
-| op | role | returns | prompt version |
-|---|---|---|---|
-| `classify(caller, text, labels)` | `decide` (a `choice` question) | `{ label, probabilities }` | `classify@1` |
-| `score(caller, text, levels)` | `decide` (a `score` question, levels lowest first) | `{ level, score, probabilities }` | `score@1` |
-| `summarize(caller, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path: MCP `ai_summarize` asks it too | the summary | `summarize@1` |
-| `extract(caller, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) | `extract@1` |
+| op | role | returns |
+|---|---|---|
+| `classify(caller, text, labels)` | `decide` (a `choice` question, `CLASSIFY_INSTRUCTIONS`) | `{ label, probabilities }` |
+| `score(caller, text, levels)` | `decide` (a `score` question, levels lowest first, `SCORE_INSTRUCTIONS`) | `{ level, score, probabilities }` |
+| `decide(caller, state, questions)` | `decide` (any named `noul` / `choice` / `score` questions) — MCP `ai_decide` asks it | answers by question name (a reply missing one is refused) |
+| `summarize(caller, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path: MCP `ai_summarize` asks it too | the summary |
+| `extract(caller, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) |
 
-Changing an op's prompt means bumping its version constant: old results
-stay (for their version) and new ones are computed. The model is the
+**The version follows the prompt.** There is no version constant to
+bump: an op's request carries its whole prompt — its instructions, its
+system text (`summarize_system`, `inferred_decisions::SYSTEM_PROMPT` as
+`extract`'s instructions) — so editing any of it is another
+`request_hash`, and the next ask computes afresh while the old results
+stay under theirs. (A provider adapter's own wording isn't in the
+request, so changing `decide_via_chat` doesn't.) The model is the
 role's provider and model *now* (`AiService::binding_for`), so
 reassigning a role computes afresh — to another model, or to another
 provider serving the same model name (a local and a hosted `llama3.1`
@@ -203,7 +230,10 @@ a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
 which blocks the script's worker thread on the runtime and asks
 `AiCompute` as caller `collector:<owner>/<id>` — so every answer is a
 recorded computation (the same question on the same text is one call,
-ever). The time a script waits on the oracle is left out of its sandbox
+ever). Only a script a person approved gets it: one that names an `ai_*`
+builtin runs only once approved, like an exec program
+([semantic-layer.md](./semantic-layer.md) "Sandbox"), and every other
+derived run gets `RefusingOracle`. The time a script waits on the oracle is left out of its sandbox
 `timeout` (`RunClock`, the in-flight call included;
 `run_sandboxed_excluding`) but not out of its `ceiling` (10 min of wall
 clock, model time included), so a per-row loop of calls can't run for
@@ -223,13 +253,22 @@ turn's prompt (`turn_kind`).
 - `list_ai_roles`: providers (with `keySet`, never keys) and every role's
   binding.
 - `ai_decide`: typed questions (`noul` / `choice` / `score`) about some
-  text, on the `decide` role unless another is named.
+  text, on the `decide` role (an agent can't pick a costlier one) — a
+  recorded computation (`AiCompute::decide`), returning `{ answers,
+  cached }`.
 - `ai_summarize`: text through the `summarize` role, with an optional focus
   — a recorded computation (`AiCompute::summarize`, tsk571), so the same
   text and focus is one call.
+- `read_ai_call { id, body }`: what one of its own calls was asked or
+  answered (see the client notes above).
 
-Agents can't change providers, roles or keys: those IPC commands are
-UI-only in the surface-parity manifest. Calls record caller `mcp:<tool>`.
+Each is paid with the person's key, so neither is a read-only tool (no
+`read_only_hint`: a harness doesn't auto-approve it), each takes at most
+`AI_TEXT_MAX` (100,000) characters of text, and each records as the
+asking thread (caller `thread:<id>`, from the session's bearer); a
+connection with no thread identity is refused. Agents can't change
+providers, roles or keys: those IPC commands are UI-only in the
+surface-parity manifest.
 
 ## Inferred decisions (current)
 

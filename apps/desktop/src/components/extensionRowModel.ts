@@ -108,6 +108,12 @@ export function collectorRowModel(l: CollectorListing): CollectorRowModel {
         ? ` It can reach only ${hosts.join(", ")}.`
         : ` It declares ${hosts.join(", ")} (not enforced on this OS).`;
   const missing = l.credentials.filter((c) => !c.set).map((c) => c.name);
+  const program = `${l.owner}/${l.spec.entry ?? l.spec.id}`;
+  // A derived collector asks only when its script calls a model.
+  const consent =
+    l.spec.runtime === "starlark"
+      ? `${program} calls a model through your AI provider, with its key, each time it runs (${triggerLabel(l.spec.trigger)}).`
+      : `Runs ${program} on this machine${env}.${network}`;
   return {
     id: l.spec.id,
     trigger: triggerLabel(l.spec.trigger),
@@ -118,7 +124,7 @@ export function collectorRowModel(l: CollectorListing): CollectorRowModel {
     actionLabel: l.approved ? "Sync Now" : "Approve & Run",
     actionTitle: l.approved
       ? `Run ${l.spec.entry ?? l.spec.id} now`
-      : `Runs ${l.owner}/${l.spec.entry ?? l.spec.id} on this machine${env}.${network} Approve only if you trust this extension; a changed script or host list needs approval again.`,
+      : `${consent} Approve only if you trust this extension; a changed script or host list needs approval again.`,
     credentials: l.credentials,
     missingCredentials: missing.length > 0 ? `Needs ${missing.join(", ")} (set it under Extensions).` : null,
   };

@@ -20,7 +20,13 @@ answers the other side, and whatever isn't a reply arrives on the
 `start_streaming` is told about: `$/progress`, `$/record` and `$/state`
 naming its id go, in order, to a channel of its own, registered before
 the request is sent and closed when its reply arrives (P7.A3). Ids are the sender's own, from 1. When the stream
-ends, replies still awaited fail. It is deliberately not the
+ends, replies still awaited fail (`calls_cut_off` counts them, and
+`closed()` resolves once they have). **Everything is bounded**
+(`PeerLimits`): a line over `max_line_bytes` (16 MiB) ends the
+connection — what was awaited fails saying so — and each channel holds
+`channel_capacity` (1,024) messages, so a reader that falls behind slows
+the other side (its writes block on the pipe) instead of queueing without
+end. It is deliberately not the
 `agent-client-protocol` layer: that one is ACP-typed and actor-heavy.
 
 **Notifications about an in-flight request:** `$/cancel { id }` (host →
@@ -39,7 +45,7 @@ schemars), host → provider:
 | `discover` | `{ handle }` → `DiscoverResult { entities }` | the entities the instance can read (`EntityDecl { name, description, schema }`) |
 | `invoke` | `InvokeParams { handle, command, input, idempotency_key? }` → `InvokeResult { result, events, inverse? }` | run a declared command; the host logs its `EventDraft { type, v, payload, subject }`s ("Idempotency" for the key) |
 | `read` | `ReadParams { handle, collector, state? }` → `ReadResult { records }` | run a collector, streaming `$/record` and `$/state` first |
-| `shutdown` | → `null` | |
+| `shutdown` | → `null` | finish what's in flight, persist, answer, exit; the host kills it after its grace |
 
 Provider → host (protocol 3): `host/call` — `HostCallParams { key?,
 scope, op?, args }` → the scope's answer: a scope the provider's
@@ -48,8 +54,13 @@ rows), `key` naming the idempotency key of the `invoke` it serves so the
 call is recorded with that run. Refused (`InvalidInput` at `/scope`)
 for one it doesn't need or that isn't there.
 
-`PROTOCOL_VERSION` is `"3"` (P10: `InvokeParams.idempotency_key`; 3:
-`host/call`). A
+Provider → host (protocol 4), a notification: `host/changed` —
+`HostChangedParams { collectors? }`: something it reads changed at its
+service (a webhook, a watch), so the host reads those collectors (all
+of them when none) now rather than at the next poll.
+
+`PROTOCOL_VERSION` is `"4"` (P10: `InvokeParams.idempotency_key`; 3:
+`host/call`; 4: `host/changed`). A
 provider's declarations carry the version, so a bump changes what was
 approved: every provider is approved again.
 
@@ -103,7 +114,10 @@ clears), keeping only what was declared at `initialize` — `plain-writes`,
 `slow` — so a test knows a call is under way without timing it),
 `slow:<ms>` (invoke and read wait first; `$/cancel` interrupts them with
 `Cancelled`), `slow-check:<ms>` (check waits first), `crash` (the next request drops the connection; the binary
-exits 3) and `bad-declarations` (`initialize` answers something other
+exits 3), `shutdown-file:<path>` (a `shutdown` writes `<path>` first —
+proof of an orderly stop), `ignore-shutdown` (it answers `shutdown` and
+keeps running), `checkpoint-at-end` (a read sends one `$/state`, after
+its last record) and `bad-declarations` (`initialize` answers something other
 than `declarations()`, for the host's handshake check), `progress` (a
 read sends `$/progress` before each record, then takes 100 ms over it), `read-fail-after:<n>` (a
 read fails after `n` checkpointed records) and `bad-record` (a read
@@ -134,6 +148,9 @@ extension folder, whose contents its consent covers — and the kit tests
 clear it before each run, since the golden transcript records the refs
 handed out. Without it the fake forgets on exit, and a declared
 `idempotent_writes` fails the kit's restart check.
+Two notifications drive it from a test: `fake/changed { collectors? }`
+(it sends `host/changed` back, as a webhook would make it) and
+`fake/exit` (it exits 3 on its own).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 
@@ -388,7 +405,16 @@ credentials from the instance's keychain accounts
 (`instance:<project>:<ext>/<instance id>:<name>`),
 `OXPLOW_EXTENSION_DIR`, `OXPLOW_PROVIDER_ID` = the **instance id**), the egress proxy and
 `sandbox-exec` where the OS enforces `network`, stderr to the log, and
-`kill_on_drop`. Then **the handshake**: the live `initialize` must equal
+`kill_on_drop` as the last resort. **A process is ended the orderly
+way** (`Connection::shutdown`): every stop — reconcile, a config or
+approval change, a disable, a sign-in renewal (`Instance::end`, outside
+the `live` lock; the renewal is recorded first, so a call it cuts off
+knows why), `check_as`, and the daemon's exit (`shutdown_all`, every
+instance at once, within 2 s of the supervisor's grace; `process::exit`
+runs no destructors, so without it the processes were orphaned) — sends
+`shutdown` and waits `HostDeps.shutdown_grace`
+(`MachineEnv.provider_shutdown_grace`: 5 s in the app, 1 s in
+`Services::in_memory`) for the process to exit, then kills it. Then **the handshake**: the live `initialize` must equal
 the approved declarations (`HostError::DeclarationsChanged` names the
 first difference), and `check` of the instance's config must return a
 handle (`HostError::Unconfigured { problems }` otherwise). A request
@@ -797,6 +823,21 @@ through it reconcile, `oxplow.contribution.enable` or `set_instance`). `Peer::st
 refuses once the other side's stream has closed, instead of leaving a
 waiter that nothing resolves.
 
+**A process is supervised** (`Instance::supervise`, for each started
+process): one that exits while it is its instance's process — not one
+the host ended, which leaves `live` first — is noticed at once, not at
+the next call. The exit counts toward health (`its process exited
+(status N)`) unless a call it cut off already counted it
+(`Peer::calls_cut_off`), and the instance starts again once its backoff
+is up — so a process that keeps dying backs off and is disabled like one
+whose calls keep failing.
+
+**A provider can say something changed** (`host/changed`):
+`Instance::announce` reads the collectors it names after
+`CHANGED_DEBOUNCE` (1 s), through `oxplow.provider.sync` as the system
+like the schedule (`sync_announced`, audited); what is announced in the
+meantime joins that read.
+
 **Rate limits** (P7.A4). A `RateLimited` reply (`data.retry_after_ms`)
 never counts toward disable, and never resets the count either. A wait of
 at most `RATE_LIMIT_WAIT_MAX` (10 s) is slept through and the call
@@ -883,7 +924,10 @@ The checkpoint's `records` still counts what was read. This leans on a
 read restating a write exactly, which the work-items conformance suite
 checks. The result's
 `records` must equal what was streamed; records after the last
-checkpoint of a read that succeeded land too. A record that breaks a
+checkpoint of a read that succeeded land too. A read holds at most
+`HostDeps.max_uncheckpointed` records between checkpoints
+(`MachineEnv.provider_max_uncheckpointed`: 10,000; 100 in-memory): one that
+streams more without a `$/state` fails. A record that breaks a
 rule, a count that doesn't match, or a read that sends nothing for
 `call_timeout` (`$/cancel` follows) fails the read and counts toward the
 instance's health like a failed call (a refused input or a cancel
@@ -983,7 +1027,7 @@ tell it is the same write. The contract (P10, built):
 - **`features.idempotent_writes: true`** in a provider's work-items
   declaration promises that two `invoke`s carrying the same key perform
   the write once and answer alike (a key sent with another write is
-  `InvalidInput` at `/idempotency_key`). `PROTOCOL_VERSION` is `"2"`.
+  `InvalidInput` at `/idempotency_key`; protocol 2).
 - **`InvokeParams.idempotency_key`** goes with every write: the caller's
   (a step of an effect's reaction: `effect_step_key`,
   `effect:<effect>:<event id>:<index>:<hash of the call>`, the same on

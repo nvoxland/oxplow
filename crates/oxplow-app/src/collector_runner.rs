@@ -202,11 +202,11 @@ pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListin
     for ext in ctx.catalog.get(ctx.root).iter().cloned() {
         let ext_dir = ctx.root.join(&ext.path);
         for spec in ext.collectors {
-            // A derived collector can't do anything an approval would guard.
-            let version = (!spec.runtime.is_derived())
+            let guarded = needs_approval(ctx.root, &ext.name, &spec);
+            let version = guarded
                 .then(|| approval_hash(&ext_dir, &spec).ok())
                 .flatten();
-            let approved = spec.runtime.is_derived()
+            let approved = !guarded
                 || version
                     .as_ref()
                     .is_some_and(|h| is_approved(ctx.approvals, &ext.name, &spec.id, h));
@@ -337,6 +337,20 @@ pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let bytes = std::fs::read(ext_dir.join(entry))?;
     Ok(hex::encode(Sha256::digest(&bytes)))
+}
+
+/// Whether collector `spec` runs only once a person approves it: a
+/// program (`exec`), or a Starlark script that calls a model (`ai_*`),
+/// which spends the person's key each time it runs — on a schedule, as
+/// nobody. Any other derived script does no I/O an approval would guard.
+pub fn needs_approval(root: &Path, extension: &str, spec: &CollectorSpec) -> bool {
+    match spec.runtime {
+        CollectorRuntime::Starlark => {
+            crate::extensions::read_extension_file(root, extension, entry_of(spec))
+                .is_some_and(|script| oxplow_script::ai::calls_ai(&script))
+        }
+        runtime => !runtime.is_derived(),
+    }
 }
 
 /// What an approval covers: every file in the extension (the entry and
@@ -1518,10 +1532,10 @@ fn find_collector(
     Ok((ext, spec))
 }
 
-/// A person approves exec collector `owner/id` on this machine at
-/// `version` — the listing's version they reviewed (UI only; an agent can't
-/// approve). A collector that changed since is refused, and nothing is
-/// recorded. A derived collector runs no program and needs no approval.
+/// A person approves collector `owner/id` on this machine at `version` —
+/// the listing's version they reviewed (UI only; an agent can't approve).
+/// A collector that changed since is refused, and nothing is recorded. One
+/// that [needs no approval](needs_approval) has nothing to record.
 pub fn approve_reviewed(
     ctx: &Collectors<'_>,
     owner: &str,
@@ -1529,7 +1543,7 @@ pub fn approve_reviewed(
     version: &str,
 ) -> Result<(), RunCollectorError> {
     let (ext, spec) = find_collector(ctx, owner, id)?;
-    if spec.runtime.is_derived() {
+    if !needs_approval(ctx.root, &ext.name, &spec) {
         return Ok(());
     }
     let hash = approval_hash(&ctx.root.join(&ext.path), &spec).map_err(|e| {
@@ -1547,6 +1561,28 @@ pub fn approve_reviewed(
     approve(ctx.approvals, owner, id, &hash).map_err(|e| {
         RunCollectorError::Storage(DomainError::Storage(format!("record approval: {e}")))
     })
+}
+
+/// Refuse collector `owner/<spec.id>`, which `does` (what it does that a
+/// person approves), unless a person approved it at its current version.
+fn check_approved(
+    approvals: &crate::exec_consent::ApprovalStore,
+    ext_dir: &Path,
+    owner: &str,
+    spec: &CollectorSpec,
+    does: &str,
+) -> Result<(), RunCollectorError> {
+    let id = &spec.id;
+    let hash = approval_hash(ext_dir, spec).map_err(|e| {
+        RunCollectorError::Failed(format!("collector `{id}`: entry `{}`: {e}", entry_of(spec)))
+    })?;
+    if is_approved(approvals, owner, id, &hash) {
+        return Ok(());
+    }
+    Err(RunCollectorError::NeedsApproval(format!(
+        "collector `{owner}/{id}` {does} and needs a person's approval first \
+         (Settings → Data → Approve & Run). Approval is per machine and per script version."
+    )))
 }
 
 /// Find a collector in `ctx.root` and run it, stopping at its output. The
@@ -1569,44 +1605,55 @@ async fn produce(
         )));
     }
     if spec.runtime.is_derived() {
-        let output = match crate::extensions::read_extension_file(root, &ext.name, entry_of(&spec))
-        {
-            Some(script) => {
-                let oracle = crate::ai_compute::CollectorOracle::new(
-                    ctx.ai.clone(),
-                    format!("collector:{}/{}", ext.name, spec.id),
-                );
-                derive_collector(
-                    &ctx.layer,
-                    script,
-                    &spec,
-                    std::sync::Arc::new(oracle),
-                    event,
-                    rows,
-                    oxplow_script::SandboxBudget::default(),
-                )
-                .await
-            }
-            None => Err(format!(
+        let Some(script) = crate::extensions::read_extension_file(root, &ext.name, entry_of(&spec))
+        else {
+            let missing = format!(
                 "collector `{id}`: entry `{}` doesn't exist in the extension",
                 entry_of(&spec)
-            )),
+            );
+            return Ok((spec, Err(missing)));
         };
+        // Only a script a person approved gets a model: one that doesn't
+        // name an `ai_*` builtin gets the oracle that refuses.
+        let oracle: std::sync::Arc<dyn oxplow_script::AiOracle> =
+            if spec.runtime == CollectorRuntime::Starlark && oxplow_script::ai::calls_ai(&script) {
+                check_approved(
+                    approvals,
+                    &ext_dir,
+                    owner,
+                    &spec,
+                    &format!(
+                        "calls a model (`ai_*`) in `{}`, spending your AI provider's key each \
+                         run,",
+                        entry_of(&spec)
+                    ),
+                )?;
+                std::sync::Arc::new(crate::ai_compute::CollectorOracle::new(
+                    ctx.ai.clone(),
+                    format!("collector:{}/{}", ext.name, spec.id),
+                ))
+            } else {
+                std::sync::Arc::new(RefusingOracle)
+            };
+        let output = derive_collector(
+            &ctx.layer,
+            script,
+            &spec,
+            oracle,
+            event,
+            rows,
+            oxplow_script::SandboxBudget::default(),
+        )
+        .await;
         return Ok((spec, output));
     }
-    let hash = approval_hash(&ext_dir, &spec).map_err(|e| {
-        RunCollectorError::Failed(format!(
-            "collector `{id}`: entry `{}`: {e}",
-            entry_of(&spec)
-        ))
-    })?;
-    if !is_approved(approvals, owner, id, &hash) {
-        return Err(RunCollectorError::NeedsApproval(format!(
-            "collector `{owner}/{id}` runs `{}` and needs a person's approval first \
-             (Settings → Data → Approve & Run). Approval is per machine and per script version.",
-            entry_of(&spec)
-        )));
-    }
+    check_approved(
+        approvals,
+        &ext_dir,
+        owner,
+        &spec,
+        &format!("runs `{}`", entry_of(&spec)),
+    )?;
 
     let mut credentials = BTreeMap::new();
     let mut missing = None;
@@ -2707,9 +2754,11 @@ pub(crate) mod tests {
         );
     }
 
-    /// P5.E2's red: a derived source's `ai_classify` is a recorded
-    /// computation — six calls on one text, one model call, recorded as
-    /// the source.
+    /// A derived source's `ai_classify` is a recorded computation — six
+    /// calls on one text, one model call, recorded as the source. A script
+    /// that calls a model spends the person's key each run, so it is a
+    /// program they approve, like an exec one: until then it is refused,
+    /// listed unapproved, and asks nothing.
     #[tokio::test]
     async fn a_derived_sources_ai_classify_on_one_text_is_one_call() {
         use crate::ai_service::{ProviderConfig, Role, RoleBinding};
@@ -2772,7 +2821,26 @@ pub(crate) mod tests {
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
             )),
         };
-        let report = run_collector(&ctx, "work", "star", RunTrigger::Manual, "human")
+        let err = run_collector(&ctx, "work", "star", RunTrigger::Manual, "human")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, RunCollectorError::NeedsApproval(ref m) if m.contains("calls a model")),
+            "{err:?}"
+        );
+        let listed = list_collectors(&ctx)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|l| l.owner == "work")
+            .unwrap();
+        assert!(!listed.approved);
+        let calls = crate::sql_gateway::SqlGateway::new(db.clone())
+            .query_sql("SELECT count(*) FROM v_ai_call", vec![], None)
+            .await
+            .unwrap();
+        assert_eq!(serde_json::to_value(&calls.rows).unwrap(), json!([[0]]));
+        let report = reviewed_run(&ctx, "work", "star", &listed.version.unwrap())
             .await
             .unwrap();
         assert_eq!(report.row_counts["kind"], 3);

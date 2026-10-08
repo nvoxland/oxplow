@@ -22,6 +22,10 @@ WHERE 'effort:eff' || e.id = :ref
 def _list(text):
     return json.decode(text) if text else []
 
+# Claims, decisions and paths are spliced in as one inert line of text
+# each (`md_text`), so an agent's claim can't add headings, links or items
+# to the reviewer's checklist. The note is the reviewer's own markdown.
+
 def transform(x):
     ref = x["input"]["ref"]
     rows = scope("sql.read", {"sql": _REVIEW, "params": {"ref": ref}})
@@ -32,9 +36,9 @@ def transform(x):
         return {"refuse": "effort `%s` has no work item to review" % ref}
     note = x["input"].get("note", "")
     checklist = (
-        ["- [ ] Back up the claim: %s" % c["statement"] for c in _list(row["unverified"])] +
-        ["- [ ] Confirm or rework the decision: %s → %s" % (d["question"], d["choice"]) for d in _list(row["inferred"])] +
-        ["- [ ] Explain or revert the change outside the task's area: %s" % p for p in _list(row["deviated"])]
+        ["- [ ] Back up the claim: %s" % md_text(c["statement"]) for c in _list(row["unverified"])] +
+        ["- [ ] Confirm or rework the decision: %s → %s" % (md_text(d["question"]), md_text(d["choice"])) for d in _list(row["inferred"])] +
+        ["- [ ] Explain or revert the change outside the task's area: %s" % md_text(p) for p in _list(row["deviated"])]
     )
     if not checklist and not note:
         return {"refuse": "nothing to ask for: every claim is backed, no decision is inferred and nothing deviated — add a `note`"}

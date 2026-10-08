@@ -171,6 +171,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::remove_ai_provider,
             commands::generated::set_ai_role,
             commands::generated::test_ai_provider,
+            commands::generated::read_ai_call,
             // notes (task / thread)
             commands::generated::list_thread_notes,
             // comments

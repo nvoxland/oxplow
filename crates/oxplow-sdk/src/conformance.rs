@@ -211,7 +211,7 @@ impl ReferenceClient {
         pump(Side::Provider, stdout, tap_write, monitor.clone());
         pump(Side::Host, tap_read, stdin, monitor.clone());
         let (peer, incoming) = Peer::spawn(peer_read, peer_write);
-        host::serve_incoming(peer.clone(), incoming, None);
+        host::serve_incoming(peer.clone(), incoming, None, None);
         Ok(Self {
             peer,
             child,
@@ -363,7 +363,7 @@ mod tests {
         let transcript = vec![
             (
                 Side::Host,
-                json!({ "jsonrpc": "2.0", "id": 7, "method": "initialize", "params": { "protocol_version": "3", "host": { "name": "oxplow", "version": "0.7.0" } } }),
+                json!({ "jsonrpc": "2.0", "id": 7, "method": "initialize", "params": { "protocol_version": "4", "host": { "name": "oxplow", "version": "0.7.0" } } }),
             ),
             (
                 Side::Provider,

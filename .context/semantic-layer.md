@@ -730,8 +730,8 @@ extension's own declared event types, logged with the run (P9.D2;
 
 - An **entity collector** (`entities:`) writes rows published as
   `v_<owner>_<entity>`; `collector_runner` runs it. It may be `exec`
-  (approved), `starlark` / `jaq` (derived, below; may call `ai_*`, has no
-  `files()`) or `read`.
+  (approved), `starlark` / `jaq` (derived, below; a Starlark one may call
+  `ai_*` once approved, has no `files()`) or `read`.
 - A **fact collector** (`facts: [<measure>, …]`) is what a *gauge* was
   until P7.B3. It runs in the fact engine (`MetricsService`,
   [metrics.md](./metrics.md)): its Starlark gets the snapshot tree
@@ -865,13 +865,23 @@ entities from data already in the semantic layer:
   shape.
 - **Sandbox.** It runs in the collector sandbox
   (`run_sandboxed_excluding` + `run_starlark_with_ai` / `run_jaq`), with
-  no files, network, env or secrets. So there is **no approval**:
-  `list_collectors` reports it as approved, and the scheduler runs it on
-  its `every:` trigger. Its one way out is oxplow's own: the `ai_*` builtins
-  (`ai_classify` / `ai_score` / `ai_summarize` / `ai_extract`), recorded
-  computations on the project's AI roles as caller `collector:<owner>/<id>`,
-  whose wait is left out of the budget ([ai-providers.md](./ai-providers.md)
-  "`ai_*` functions for sources").
+  no files, network, env or secrets. Its one way out is oxplow's own: the
+  `ai_*` builtins (`ai_classify` / `ai_score` / `ai_summarize` /
+  `ai_extract`), recorded computations on the project's AI roles as caller
+  `collector:<owner>/<id>`, whose wait is left out of the budget
+  ([ai-providers.md](./ai-providers.md) "`ai_*` functions for sources").
+  A model call spends the person's key — on an `every:` trigger, every few
+  minutes, run as nobody — so a Starlark script that names an `ai_*`
+  builtin (`oxplow_script::ai::calls_ai`: any identifier, so an alias
+  counts; Starlark reaches a global only by name) is a program a person
+  approves, exactly as an exec one (`collector_runner::needs_approval`;
+  the same `approval_hash`, Settings → Data → Approve & Run). Until then
+  `produce` refuses it (a scheduled run records `needs_approval`),
+  `list_collectors` lists it unapproved with its `version`, `extension
+  test` skips its examples with a warning, and only an approved script is
+  handed a model at all — every other derived run gets `RefusingOracle`.
+  Any other derived collector needs **no approval**: `list_collectors`
+  reports it approved and the scheduler runs it on its `every:` trigger.
 - **Refused at parse:** `env` / `credentials` on a derived collector,
   `input` on an exec collector, and an `input` that names one of the
   collector's own views (a collector can't feed on itself). Reading other extensions' views

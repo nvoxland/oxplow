@@ -29,12 +29,9 @@ Oxplow and extensions ask for a role, not a model:
 
 | Role | Used for |
 |---|---|
-| `main` | general reasoning |
-| `fast` | cheap, quick generation |
+| `main` | general reasoning, such as finding the decisions an effort made |
 | `summarize` | summaries of sessions, efforts and changes |
-| `embed` | embeddings |
 | `decide` | typed yes/no, choice and score questions (Jev fits well) |
-| `review` | a second opinion from a different model |
 
 A role with no model assigned just isn't available. Anything that needs it
 says so.
@@ -65,6 +62,11 @@ Your coding agent sees three MCP tools:
 - `list_ai_roles`: what's configured.
 - `ai_decide`: ask the `decide` model typed questions about some text.
 - `ai_summarize`: summarize text with the `summarize` model.
+
+Both spend your key. Each answer is recorded against the thread that
+asked, and asking the same thing again reuses it instead of calling the
+model. Neither is marked read-only, so your agent's own permission
+prompts treat them like any other tool that acts.
 
 It can't change providers, roles or keys.
 

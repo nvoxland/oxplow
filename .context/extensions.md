@@ -298,8 +298,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       git-installed extensions.
     - Installing is a write tool on MCP. The skill says to do it only when
       the user asks, and to offer to commit the result.
-    - Installing runs nothing. An exec source (and a shared extension's
-      advisories) runs only after a person approves it in Settings →
+    - Installing runs nothing. An exec source, a Starlark one that calls
+      a model (`ai_*`) and a shared extension's
+      advisories run only after a person approves them in Settings →
       Data. Approvals are stored per machine outside the repo, MACed under
       a keychain key, and bound to a hash of that version of the program,
       so a changed script needs approving again (`exec_consent.rs`,
@@ -356,7 +357,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - **One lens shape, `LensSpec`**: what a lens file holds, what an
       answer stores and what `oxplow.lens.keep` writes (`Lens::from_spec`,
       `Lens::spec`). `extensions::save_lens(root, ext, slug, &spec,
-      &LensOrigin)` refuses a spec with a `spec_problem`, writes the YAML
+      &LensOrigin)` refuses a spec with a `spec_problem` (no title, a
+      `grid` or `custom`, or a `form`: a form's submit runs its command
+      as the person, and an answer an agent chose never does — so no
+      answer, and no kept spec, is a form), writes the YAML
       pruned of nulls and empties, and — when the file doesn't then load —
       removes it and reports the loader's errors. Serialize a spec's JSON
       values with `plain_json` (serde_json's `arbitrary_precision` makes
@@ -525,7 +529,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   `force` (then it lists them in the comment);
   `oxplow.review.request_changes { ref, note? }` comments a checklist —
   each unverified claim, inferred decision, file outside the area, and
-  the note — then transitions to `todo`. Both read one `input` query
+  the note — then transitions to `todo`. A claim, decision or path is
+  spliced in through `md_text` (one inert line: an agent's claim can't
+  add headings, links or items to the reviewer's comment); the note is
+  the reviewer's own markdown. Both read one `input` query
   (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
   `v_oxplow_bundled_deviation`), compose `oxplow.work_item.comment` and
   `oxplow.work_item.transition` — as steps, every list's verbs running
@@ -1692,8 +1699,8 @@ approval, or whose reaction skipped or failed, doesn't count). With
 nothing unchecked it skips; otherwise it files **one** item on the
 active tracker, like every new item (tsk1058) — "Verify what the review of <effort> accepted
 unchecked", a checklist naming each claim and decision. Each line is
-text, not markdown: whitespace becomes one space, markdown's punctuation
-is escaped and a long one is cut at 300 characters, and the list stops
+text, not markdown (`md_text`: whitespace becomes one space, markdown's
+punctuation is escaped and a long one is cut at 300 characters), and the list stops
 at 50 items, saying how many more the review has. A bundled effect
 is approved like any (K1, tsk953: its embedded files are hashed alike),
 so it runs only once a person approves it. A task an effect (or oxplow
@@ -2730,7 +2737,8 @@ tool list stable no matter how many extensions are installed.
   `preview_collector(owner, id, stream_id)`: `collector_runner::
   preview_collector` runs that worktree's version through the same
   `produce` step (same consent: an exec collector needs a person's
-  approval of that exact hash; derived collectors don't) and returns the coerced
+  approval of that exact hash, and so does a Starlark one that calls a
+  model; other derived collectors don't) and returns the coerced
   rows per entity (first 50, plus totals), storing nothing and recording
   no run.
 

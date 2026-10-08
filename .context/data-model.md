@@ -1277,7 +1277,9 @@ can't use a BINARY index; windows in `oxplow_domain::events::retention`'s
 `CORE_WINDOWS`: `agent` 30 d payload / 14 d body,
 `test`, `code`, `collector` and `effect` 90 / 30, `ui` (op errors the
 person saw, tsk1072) 30 / 14, `file` (`file.saved`, each editor save,
-`oxplow.file.save`) 30 / 14, and every namespace core
+`oxplow.file.save`) 30 / 14, `ai` (no events: the request and response
+of each of oxplow's own model calls, `ai_call.request_hash` /
+`response_hash`, [ai-providers.md](./ai-providers.md)) 30 / 30, and every namespace core
 doesn't own — an extension's, found by skipping through that index one
 namespace per probe, and in `event_content` — `EXTENSION_DEFAULT` 30 / 14
 (P7.B7), or the shorter window its extension declares

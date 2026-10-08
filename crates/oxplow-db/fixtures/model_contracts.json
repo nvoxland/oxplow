@@ -333,6 +333,81 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "Role used (`main`, `summarize`, `decide`)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "Provider id from ai.yaml."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "Model id."
+        },
+        {
+          "name": "caller",
+          "type": "TEXT",
+          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, …"
+        },
+        {
+          "name": "input_tokens",
+          "type": "INTEGER",
+          "doc": "Input tokens."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INTEGER",
+          "doc": "Output tokens."
+        },
+        {
+          "name": "latency_ms",
+          "type": "INTEGER",
+          "doc": "Round-trip time."
+        },
+        {
+          "name": "ok",
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Error message when it failed."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "input_hash",
+          "type": "TEXT",
+          "doc": "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls."
+        },
+        {
+          "name": "request_hash",
+          "type": "TEXT",
+          "doc": "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept."
+        },
+        {
+          "name": "response_hash",
+          "type": "TEXT",
+          "doc": "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed."
+        }
+      ],
+      "key": []
     }
   },
   "ai_result": {
@@ -367,6 +442,76 @@
           "name": "op",
           "type": "TEXT",
           "doc": "`classify`, `score`, `summarize` or `extract`."
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "The role it ran on (`decide`, `summarize`, `main`)."
+        },
+        {
+          "name": "caller",
+          "type": "TEXT",
+          "doc": "What first asked, e.g. `inferred-decisions`, `collector:<owner>/<id>`."
+        },
+        {
+          "name": "output_json",
+          "type": "TEXT",
+          "doc": "The result as JSON."
+        },
+        {
+          "name": "input_tokens",
+          "type": "INTEGER",
+          "doc": "Input tokens of the call that computed it."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INTEGER",
+          "doc": "Output tokens of that call."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it was computed (RFC 3339)."
+        },
+        {
+          "name": "ai_call_id",
+          "type": "INTEGER",
+          "doc": "The call that computed it (v_ai_call.id)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "input_hash",
+          "type": "TEXT",
+          "doc": "sha256 of the canonical `{ op, args }`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model that computed it."
+        },
+        {
+          "name": "request_hash",
+          "type": "TEXT",
+          "doc": "Content hash of the exact request the model was sent (`v_ai_call.request_hash`); a changed prompt is a new result."
+        },
+        {
+          "name": "op",
+          "type": "TEXT",
+          "doc": "`classify`, `score`, `decide`, `summarize` or `extract`."
         },
         {
           "name": "role",

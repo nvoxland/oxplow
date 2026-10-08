@@ -766,6 +766,50 @@ mod tests {
         assert_eq!(left, vec!["h-new", "h-test"], "test bodies keep 30 days");
     }
 
+    /// A model call's request and response are core's `ai` bodies: kept
+    /// 30 days, then gone while the call's row stays.
+    #[tokio::test]
+    async fn a_model_calls_bodies_keep_30_days() {
+        let db = Database::in_memory();
+        let now = oxplow_domain::Timestamp::from_unix_ms(400 * DAY_MS);
+        let days_ago = |d: i64| {
+            crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
+                now.unix_ms() - d * DAY_MS,
+            ))
+        };
+        let (old, new) = (days_ago(31), days_ago(29));
+        db.transaction(move |tx| {
+            for (hash, at) in [("ai-new", &new), ("ai-old", &old)] {
+                tx.execute(
+                    "INSERT INTO event_content (hash, namespace, bytes, size, created_at)
+                       VALUES (?1, 'ai', x'00', 1, ?2)",
+                    rusqlite::params![hash, at],
+                )
+                .map_err(crate::map_sql_err)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let report = sweep(&db, now, &BTreeMap::new()).await.unwrap();
+        assert!(report.unused.is_empty(), "{report:?}");
+        let left: Vec<String> = db
+            .read(|tx| {
+                let mut st = tx
+                    .prepare("SELECT hash FROM event_content ORDER BY hash")
+                    .map_err(crate::map_sql_err)?;
+                let r = st
+                    .query_map([], |r| r.get(0))
+                    .map_err(crate::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(crate::map_sql_err)?;
+                Ok(r)
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, vec!["ai-new"]);
+    }
+
     /// P7.B7: an extension's namespace expires on the extension default (payload
     /// 30 days, body 14); `collector` and `effect` payloads keep 90 days;
     /// core's state namespaces are still kept whole.

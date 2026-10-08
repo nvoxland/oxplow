@@ -399,6 +399,15 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	readAiCall: (id: number, body: AiCallBody) => typedError<{
+	text: string,
+	size: number,
+	truncated: boolean,
+} | null, IpcError>(__TAURI_INVOKE("read_ai_call", { id, body })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listThreadNotes: (threadId: ThreadId) => typedError<ThreadNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1350,6 +1359,16 @@ export type AgentTurn = {
 
 export type AgentTurnId = string;
 
+// Which body of the call.
+export type AiCallBody = 
+/**
+ *  What the model was asked: `{ system, prompt, json }` or `{ state,
+ *  questions }`.
+ */
+"request" | 
+// What it answered: `{ text }` or `{ answers }`.
+"response";
+
 // One `ai.roles` entry.
 export type AiRoleOverride = {
 	provider: string,
@@ -1740,7 +1759,10 @@ export type CollectorRuntime =
  *  person's approval to run.
  */
 "exec" | 
-// A sandboxed Starlark script: no I/O, so no approval.
+/**
+ *  A sandboxed Starlark script: no I/O, so no approval — unless it
+ *  calls a model (`ai_*`), which spends the person's key.
+ */
 "starlark" | 
 // A sandboxed jq program: no I/O, so no approval.
 "jaq" | 
@@ -5254,7 +5276,7 @@ export type RevisionInfo = {
  *  Jobs oxplow gives models. Extensions and features refer to roles,
  *  never to models.
  */
-export type Role = "main" | "fast" | "summarize" | "embed" | "decide" | "review";
+export type Role = "main" | "summarize" | "decide";
 
 export type RoleBinding = {
 	// A provider `id`.

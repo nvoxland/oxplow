@@ -900,6 +900,32 @@ mod tests {
         assert_eq!(events_of(&fx, "lens.shown").await.len(), 1);
     }
 
+    /// A form's submit runs its command as whoever submits it, so an
+    /// answer — a spec an agent chose — is never a form: the person's
+    /// click would be the confirmation an agent can't give itself.
+    #[tokio::test]
+    async fn an_answer_is_never_a_form() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let form = json!({
+            "title": "Close it",
+            "query": "SELECT 1 AS n",
+            "viz": "form",
+            "form": { "command": "oxplow.work_item.transition", "defaults": { "state": "done" } }
+        });
+        let err = fx
+            .svc
+            .commands
+            .run(&agent(&fx), SHOW, json!({ "spec": form }), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message }
+                if f == "/spec" && message.contains("never runs a command as the person")),
+            "{err:?}"
+        );
+        assert!(events_of(&fx, "lens.shown").await.is_empty());
+    }
+
     /// Agent SQL gets exactly `query_sql`'s rights: a raw table, a write
     /// or a broken spec is refused, and nothing is stored.
     #[tokio::test]

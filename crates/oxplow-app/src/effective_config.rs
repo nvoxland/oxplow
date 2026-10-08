@@ -279,7 +279,7 @@ mod tests {
                     overridden: false,
                 },
                 RoleStatus {
-                    role: Role::Fast,
+                    role: Role::Summarize,
                     binding: Some(RoleBinding {
                         provider: "p".into(),
                         model: "f".into(),
@@ -287,7 +287,7 @@ mod tests {
                     overridden: true,
                 },
                 RoleStatus {
-                    role: Role::Embed,
+                    role: Role::Decide,
                     binding: None,
                     overridden: false,
                 },
@@ -310,8 +310,11 @@ mod tests {
         );
         assert!(!unset.doc.is_empty() && !unset.schema.is_null());
         assert_eq!(find(&all, "ai.roles.main").origin, ConfigOrigin::Global);
-        assert_eq!(find(&all, "ai.roles.fast").origin, ConfigOrigin::Project);
-        assert_eq!(find(&all, "ai.roles.embed").origin, ConfigOrigin::Default);
+        assert_eq!(
+            find(&all, "ai.roles.summarize").origin,
+            ConfigOrigin::Project
+        );
+        assert_eq!(find(&all, "ai.roles.decide").origin, ConfigOrigin::Default);
         assert!(find(&all, "ai.roles.main").human_only);
         let metric = find(&all, "metrics.gh.prs.open");
         assert_eq!(

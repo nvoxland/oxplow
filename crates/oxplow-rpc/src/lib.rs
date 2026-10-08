@@ -284,6 +284,7 @@ macro_rules! oxplow_command_table {
                 remove_ai_provider => $crate::commands::ai::remove_ai_provider { id: String } -> ::oxplow_app::ai_service::AiSettings,
                 set_ai_role => $crate::commands::ai::set_ai_role { role: ::oxplow_app::ai_service::Role, binding: Option<::oxplow_app::ai_service::RoleBinding> } -> ::oxplow_app::ai_service::AiSettings,
                 test_ai_provider => $crate::commands::ai::test_ai_provider { id: String, model: String } -> String,
+                read_ai_call => $crate::commands::ai::read_ai_call { id: i64, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
                 approve_collector => $crate::commands::collectors::approve_collector { owner: String, id: String, version: String } -> (),
                 set_credential => $crate::commands::collectors::set_credential { extension: String, name: String, value: Option<String> } -> (),
                 list_project_programs => $crate::commands::collectors::list_project_programs {} -> Vec<::oxplow_app::exec_consent::ProjectProgram>,

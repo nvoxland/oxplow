@@ -1,12 +1,15 @@
 //! Recorded AI computations (P5.E1, `.context/ai-providers.md` "Recorded
-//! computations"): `classify`, `score`, `summarize` and `extract`, each
-//! kept in `ai_result` by the hash of its input, the provider, the model
-//! and the op's prompt version. Asking again for the same thing reads the recorded
-//! result — no call, no `ai_call` row — so a computation is paid for once
-//! and reads stay deterministic. Tokens only; there is no cost.
+//! computations"): `classify`, `score`, `decide`, `summarize` and
+//! `extract`, each kept in `ai_result` by the hash of its input, the
+//! provider, the model and the request the model is sent — the whole
+//! prompt, so a changed prompt is a new result without a version to bump.
+//! Asking again for the same thing reads the recorded result — no call,
+//! no `ai_call` row — so a computation is paid for once and reads stay
+//! deterministic. Tokens only; there is no cost.
 //!
 //! - `classify(caller, text, labels)` and `score(caller, text, levels)`
-//!   ask the `decide` role a typed question;
+//!   ask the `decide` role a typed question, and `decide(caller, state,
+//!   questions)` asks it any set of them;
 //! - `summarize(caller, text, focus)` runs on the `summarize` role;
 //! - `extract(caller, instructions, text, schema)` asks the `main` role
 //!   for JSON matching `schema`, and refuses a reply that doesn't.
@@ -21,13 +24,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::ai_service::{AiService, AiServiceError, CallSite};
+use crate::ai_service::{AiService, AiServiceError, CallSite, ModelRequest};
 
-/// One prompt version per op: a changed prompt is a new result.
-pub const CLASSIFY_V: &str = "classify@1";
-pub const SCORE_V: &str = "score@1";
-pub const SUMMARIZE_V: &str = "summarize@1";
-pub const EXTRACT_V: &str = "extract@1";
+/// What `classify` asks of the text.
+const CLASSIFY_INSTRUCTIONS: &str = "Which label fits the text best?";
+/// What `score` asks of the text.
+const SCORE_INSTRUCTIONS: &str = "Where does the text sit on this scale?";
 
 #[derive(Debug, thiserror::Error)]
 pub enum AiComputeError {
@@ -114,13 +116,14 @@ pub struct AiCompute {
     results: SqliteAiResultStore,
 }
 
-/// One computation, before it runs.
+/// One computation, before it runs: what it is (`name`, `args`), the
+/// request it sends, on which role, for whom.
 struct Op<'a> {
     name: &'static str,
-    prompt_version: &'static str,
     role: Role,
     caller: &'a str,
     args: Value,
+    request: ModelRequest<'a>,
 }
 
 impl AiCompute {
@@ -142,10 +145,11 @@ impl AiCompute {
     {
         let binding = self.ai.binding_for(op.role)?;
         let hash = input_hash(op.name, &op.args);
+        let request_hash = op.request.hash();
         let storage = |e: oxplow_domain::DomainError| AiComputeError::Storage(e.to_string());
         if let Some(hit) = self
             .results
-            .get(&hash, &binding.provider, &binding.model, op.prompt_version)
+            .get(&hash, &binding.provider, &binding.model, &request_hash)
             .await
             .map_err(storage)?
         {
@@ -159,12 +163,15 @@ impl AiCompute {
             });
         }
         let (value, input_tokens, output_tokens, ai_call_id) = compute(hash.clone()).await?;
-        self.results
+        // A concurrent computation of the same thing may have recorded
+        // first: what's recorded is the answer, so that one is returned.
+        let kept = self
+            .results
             .insert(NewAiResult {
                 input_hash: hash,
                 provider: binding.provider,
                 model: binding.model,
-                prompt_version: op.prompt_version.into(),
+                request_hash,
                 op: op.name.into(),
                 role: crate::ai_service::role_name(op.role),
                 caller: op.caller.into(),
@@ -176,11 +183,12 @@ impl AiCompute {
             .await
             .map_err(storage)?;
         Ok(Recorded {
-            value,
-            cached: false,
-            ai_call_id,
-            input_tokens,
-            output_tokens,
+            value: serde_json::from_value(kept.output)
+                .map_err(|e| AiComputeError::Storage(format!("recorded output: {e}")))?,
+            cached: kept.ai_call_id != ai_call_id,
+            ai_call_id: kept.ai_call_id,
+            input_tokens: kept.input_tokens,
+            output_tokens: kept.output_tokens,
         })
     }
 
@@ -191,24 +199,28 @@ impl AiCompute {
         text: &str,
         labels: &[String],
     ) -> Result<Recorded<Classification>, AiComputeError> {
+        let questions = BTreeMap::from([(
+            "label".to_string(),
+            Question::Choice {
+                instructions: CLASSIFY_INSTRUCTIONS.into(),
+                options: labels.to_vec(),
+            },
+        )]);
         let op = Op {
             name: "classify",
-            prompt_version: CLASSIFY_V,
             role: Role::Decide,
             caller,
             args: json!({ "text": text, "labels": labels }),
+            request: ModelRequest::Decide {
+                state: text,
+                questions: &questions,
+            },
         };
+        let questions = &questions;
         self.recorded(op, |hash| async move {
-            let questions = BTreeMap::from([(
-                "label".to_string(),
-                Question::Choice {
-                    instructions: "Which label fits the text best?".into(),
-                    options: labels.to_vec(),
-                },
-            )]);
             let (decision, call) = self
                 .ai
-                .decide_as(Role::Decide, site(caller, &hash), text, &questions)
+                .decide_as(Role::Decide, site(caller, &hash), text, questions)
                 .await?;
             match decision.answers.get("label") {
                 Some(Answer::Choice {
@@ -238,24 +250,28 @@ impl AiCompute {
         text: &str,
         levels: &[String],
     ) -> Result<Recorded<Scored>, AiComputeError> {
+        let questions = BTreeMap::from([(
+            "score".to_string(),
+            Question::Score {
+                instructions: SCORE_INSTRUCTIONS.into(),
+                levels: levels.to_vec(),
+            },
+        )]);
         let op = Op {
             name: "score",
-            prompt_version: SCORE_V,
             role: Role::Decide,
             caller,
             args: json!({ "text": text, "levels": levels }),
+            request: ModelRequest::Decide {
+                state: text,
+                questions: &questions,
+            },
         };
+        let questions = &questions;
         self.recorded(op, |hash| async move {
-            let questions = BTreeMap::from([(
-                "score".to_string(),
-                Question::Score {
-                    instructions: "Where does the text sit on this scale?".into(),
-                    levels: levels.to_vec(),
-                },
-            )]);
             let (decision, call) = self
                 .ai
-                .decide_as(Role::Decide, site(caller, &hash), text, &questions)
+                .decide_as(Role::Decide, site(caller, &hash), text, questions)
                 .await?;
             match decision.answers.get("score") {
                 Some(Answer::Score {
@@ -282,6 +298,44 @@ impl AiCompute {
         .await
     }
 
+    /// Answers to typed `questions` about `state` (the `decide` role), by
+    /// question name. A reply missing an answer is refused.
+    pub async fn decide(
+        &self,
+        caller: &str,
+        state: &str,
+        questions: &BTreeMap<String, Question>,
+    ) -> Result<Recorded<BTreeMap<String, Answer>>, AiComputeError> {
+        let op = Op {
+            name: "decide",
+            role: Role::Decide,
+            caller,
+            args: json!({ "state": state, "questions": questions }),
+            request: ModelRequest::Decide { state, questions },
+        };
+        self.recorded(op, |hash| async move {
+            let (decision, call) = self
+                .ai
+                .decide_as(Role::Decide, site(caller, &hash), state, questions)
+                .await?;
+            if let Some(missing) = questions
+                .keys()
+                .find(|q| !decision.answers.contains_key(*q))
+            {
+                return Err(AiComputeError::BadOutput(format!(
+                    "no answer to question `{missing}`"
+                )));
+            }
+            Ok((
+                decision.answers,
+                decision.input_tokens,
+                decision.output_tokens,
+                call,
+            ))
+        })
+        .await
+    }
+
     /// A summary of `text` (the `summarize` role), focused on `focus`.
     pub async fn summarize(
         &self,
@@ -289,20 +343,26 @@ impl AiCompute {
         text: &str,
         focus: Option<&str>,
     ) -> Result<Recorded<String>, AiComputeError> {
+        let system = crate::ai_service::summarize_system(focus);
         let op = Op {
             name: "summarize",
-            prompt_version: SUMMARIZE_V,
             role: Role::Summarize,
             caller,
             args: json!({ "text": text, "focus": focus }),
+            request: ModelRequest::Complete {
+                system: Some(&system),
+                prompt: text,
+                json: false,
+            },
         };
+        let system = &system;
         self.recorded(op, |hash| async move {
             let (c, call) = self
                 .ai
                 .complete_as(
                     Role::Summarize,
                     site(caller, &hash),
-                    Some(&crate::ai_service::summarize_system(focus)),
+                    Some(system),
                     text,
                     false,
                 )
@@ -327,23 +387,27 @@ impl AiCompute {
         text: &str,
         schema: &Value,
     ) -> Result<Recorded<Value>, AiComputeError> {
+        let system =
+            format!("{instructions}\n\nReply with JSON only, matching this JSON Schema:\n{schema}");
         let op = Op {
             name: "extract",
-            prompt_version: EXTRACT_V,
             role: Role::Main,
             caller,
             args: json!({ "instructions": instructions, "text": text, "schema": schema }),
+            request: ModelRequest::Complete {
+                system: Some(&system),
+                prompt: text,
+                json: true,
+            },
         };
+        let system = &system;
         self.recorded(op, |hash| async move {
             let validator = oxplow_domain::InputValidator::compile(schema).map_err(|e| {
                 AiComputeError::BadOutput(format!("the schema doesn't compile: {e}"))
             })?;
-            let system = format!(
-                "{instructions}\n\nReply with JSON only, matching this JSON Schema:\n{schema}"
-            );
             let (c, call) = self
                 .ai
-                .complete_as(Role::Main, site(caller, &hash), Some(&system), text, true)
+                .complete_as(Role::Main, site(caller, &hash), Some(system), text, true)
                 .await?;
             let value = parse_json_reply(&c.text)?;
             if let Err(oxplow_domain::CommandError::Invalid { field, message }) =
@@ -522,6 +586,30 @@ mod tests {
             )
         );
 
+        // The result is keyed by the exact request its call kept — the
+        // system prompt included, so editing it computes afresh.
+        let system = crate::ai_service::summarize_system(None);
+        let request = ModelRequest::Complete {
+            system: Some(&system),
+            prompt: "a long text",
+            json: false,
+        };
+        let keys = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT r.request_hash, c.request_hash FROM v_ai_result r \
+                 JOIN v_ai_call c ON c.id = r.ai_call_id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&keys.rows).unwrap(),
+            json!([[request.hash(), request.hash()]])
+        );
+
         // Another input, or focus, is another computation.
         let other = fx
             .svc
@@ -531,6 +619,52 @@ mod tests {
             .unwrap();
         assert!(!other.cached);
         assert_eq!(calls(&fx.svc).await.len(), 2);
+    }
+
+    /// Typed questions about a text are a recorded computation on the
+    /// `decide` role: asked twice, one call, recorded as its caller; a
+    /// reply that leaves a question unanswered isn't recorded.
+    #[tokio::test]
+    async fn decide_is_a_recorded_computation() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let reply = json!({ "answers": { "risky": { "type": "noul", "probability": 0.8 } } });
+        with_model(&fx.svc, Role::Decide, chat(&reply.to_string())).await;
+        let questions = BTreeMap::from([(
+            "risky".to_string(),
+            Question::Noul {
+                instructions: "Is it risky?".into(),
+            },
+        )]);
+        for cached in [false, true] {
+            let out = fx
+                .svc
+                .ai_compute
+                .decide("thread:thr1", "a diff", &questions)
+                .await
+                .unwrap();
+            assert_eq!(out.cached, cached);
+            assert_eq!(out.value["risky"], Answer::Noul { probability: 0.8 });
+        }
+        let recorded = calls(&fx.svc).await;
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].0, "thread:thr1");
+
+        let more = BTreeMap::from([
+            ("risky".to_string(), questions["risky"].clone()),
+            (
+                "big".to_string(),
+                Question::Noul {
+                    instructions: "Is it big?".into(),
+                },
+            ),
+        ]);
+        let err = fx
+            .svc
+            .ai_compute
+            .decide("thread:thr1", "a diff", &more)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("`big`"), "{err}");
     }
 
     /// A result is the provider's as well as the model's: rebinding a role

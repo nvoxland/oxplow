@@ -22,6 +22,10 @@ WHERE 'effort:eff' || e.id = :ref
 def _list(text):
     return json.decode(text) if text else []
 
+# Claims and decisions are agent-written: each is spliced in as one inert
+# line of text (`md_text`), so it can't add headings, links or items to
+# the reviewer's comment.
+
 def _count(n, one, many):
     return "%d %s" % (n, one if n == 1 else many)
 
@@ -44,11 +48,11 @@ def transform(x):
     if claims:
         lines.append("")
         lines.append("Accepted with unverified claims:")
-        lines.extend(["- %s" % c["statement"] for c in claims])
+        lines.extend(["- %s" % md_text(c["statement"]) for c in claims])
     if decisions:
         lines.append("")
         lines.append("Accepted with unreviewed decisions:")
-        lines.extend(["- %s → %s" % (d["question"], d["choice"]) for d in decisions])
+        lines.extend(["- %s → %s" % (md_text(d["question"]), md_text(d["choice"])) for d in decisions])
     item = row["work_item"]
     return {
         "commands": [

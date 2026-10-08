@@ -10,9 +10,9 @@ use oxplow_provider_protocol::schemas::{for_message, validate};
 use oxplow_provider_protocol::{Incoming, Peer, ProtocolError};
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
-fn spawn(hooks: &str) -> (Child, Peer, UnboundedReceiver<Incoming>) {
+fn spawn(hooks: &str) -> (Child, Peer, Receiver<Incoming>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"))
         .env("OXPLOW_FAKE_HOOKS", hooks)
         .stdin(Stdio::piped())
@@ -85,11 +85,7 @@ async fn keyed(
 }
 
 /// The refs of every item it has, by a read from the start.
-async fn refs(
-    peer: &Peer,
-    handle: &Handle,
-    incoming: &mut UnboundedReceiver<Incoming>,
-) -> Vec<String> {
+async fn refs(peer: &Peer, handle: &Handle, incoming: &mut Receiver<Incoming>) -> Vec<String> {
     let result: ReadResult = peer
         .call(
             method::READ,
@@ -386,7 +382,7 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
     async fn read(
         peer: &Peer,
         handle: &Handle,
-        incoming: &mut UnboundedReceiver<Incoming>,
+        incoming: &mut Receiver<Incoming>,
     ) -> (Result<ReadResult, ProtocolError>, Vec<(String, Value)>) {
         let result = peer
             .call(

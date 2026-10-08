@@ -70,14 +70,14 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_call
-  version: 1
+  version: 2
   description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
-    - { name: "role", type: "TEXT", doc: "Role used (`main`, `fast`, `summarize`, `embed`, `decide`, `review`)." }
+    - { name: "role", type: "TEXT", doc: "Role used (`main`, `summarize`, `decide`)." }
     - { name: "provider", type: "TEXT", doc: "Provider id from ai.yaml." }
     - { name: "model", type: "TEXT", doc: "Model id." }
-    - { name: "caller", type: "TEXT", doc: "What asked, e.g. `mcp:ai_decide`, `inferred-decisions`." }
+    - { name: "caller", type: "TEXT", doc: "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, …" }
     - { name: "input_tokens", type: "INTEGER", doc: "Input tokens." }
     - { name: "output_tokens", type: "INTEGER", doc: "Output tokens." }
     - { name: "latency_ms", type: "INTEGER", doc: "Round-trip time." }
@@ -85,19 +85,21 @@
     - { name: "error", type: "TEXT", doc: "Error message when it failed." }
     - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "input_hash", type: "TEXT", doc: "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls." }
+    - { name: "request_hash", type: "TEXT", doc: "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept." }
+    - { name: "response_hash", type: "TEXT", doc: "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed." }
   tests:
     - { not_null: id }
     - { unique: id }
 - name: ai_result
-  version: 1
-  description: "Recorded AI computations: a classify / score / summarize / extract result kept by the hash of its input, the provider, the model and the prompt version, so asking again reads it instead of calling. Tokens only; no cost."
+  version: 2
+  description: "Recorded AI computations: a classify / score / decide / summarize / extract result kept by the hash of its input, the provider, the model and the request the model was sent, so asking again reads it instead of calling, and a changed prompt computes afresh. Tokens only; no cost."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
     - { name: "input_hash", type: "TEXT", doc: "sha256 of the canonical `{ op, args }`." }
     - { name: "provider", type: "TEXT", doc: "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result." }
     - { name: "model", type: "TEXT", doc: "The model that computed it." }
-    - { name: "prompt_version", type: "TEXT", doc: "The op's prompt version (`classify@1`); a new prompt is a new result." }
-    - { name: "op", type: "TEXT", doc: "`classify`, `score`, `summarize` or `extract`." }
+    - { name: "request_hash", type: "TEXT", doc: "Content hash of the exact request the model was sent (`v_ai_call.request_hash`); a changed prompt is a new result." }
+    - { name: "op", type: "TEXT", doc: "`classify`, `score`, `decide`, `summarize` or `extract`." }
     - { name: "role", type: "TEXT", doc: "The role it ran on (`decide`, `summarize`, `main`)." }
     - { name: "caller", type: "TEXT", doc: "What first asked, e.g. `inferred-decisions`, `collector:<owner>/<id>`." }
     - { name: "output_json", type: "TEXT", doc: "The result as JSON." }

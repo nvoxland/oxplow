@@ -754,7 +754,11 @@ pub fn disabled_extensions(project_dir: impl AsRef<Path>) -> Vec<String> {
 
 /// Role names `ai.roles` accepts. Must match `oxplow_ai::config::Role`
 /// (a test in oxplow-app checks).
-pub const AI_ROLE_NAMES: [&str; 6] = ["main", "fast", "summarize", "embed", "decide", "review"];
+pub const AI_ROLE_NAMES: [&str; 3] = ["main", "summarize", "decide"];
+
+/// Roles oxplow dropped because nothing asked them (`oxplow_ai`'s
+/// `DROPPED_ROLES`): naming one fails saying so.
+const DROPPED_AI_ROLES: [&str; 3] = ["fast", "embed", "review"];
 
 /// One `ai.roles` entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
@@ -2234,6 +2238,13 @@ fn validate_ai_roles(
 ) -> Result<std::collections::BTreeMap<String, AiRoleOverride>, ConfigError> {
     let roles = raw.map(|b| b.roles).unwrap_or_default();
     for (role, o) in &roles {
+        if DROPPED_AI_ROLES.contains(&role.as_str()) {
+            return Err(ConfigError::Invalid(format!(
+                "ai.roles.{role}: oxplow has no `{role}` role: nothing asked it; remove it \
+                 (use one of {})",
+                AI_ROLE_NAMES.join(", ")
+            )));
+        }
         if !AI_ROLE_NAMES.contains(&role.as_str()) {
             return Err(ConfigError::Invalid(format!(
                 "ai.roles.{role}: unknown role (use one of {})",
@@ -4498,6 +4509,11 @@ lsp:
             (
                 "ai:\n  roles:\n    main: { provider: p, model: \"\" }\n",
                 "main",
+            ),
+            // A role nothing asked is gone: naming one says so.
+            (
+                "ai:\n  roles:\n    embed: { provider: p, model: m }\n",
+                "ai.roles.embed: oxplow has no `embed` role",
             ),
         ] {
             std::fs::write(cfg_path(dir.path()), yaml).unwrap();

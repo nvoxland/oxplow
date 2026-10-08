@@ -5606,3 +5606,155 @@ async fn auto_retry_stops_after_two_and_counts_one_failure() {
         0
     );
 }
+
+/// Stopping an instance asks its process to shut down — it finishes and
+/// persists what it was doing — rather than killing it outright.
+#[tokio::test]
+async fn a_stop_shuts_the_process_down_gracefully() {
+    let marker = tempfile::tempdir().unwrap();
+    let file = marker.path().join("shut-down");
+    let (fx, _ext) = approved(&format!("shutdown-file:{}", file.display())).await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    first_read(&fx).await;
+    assert!(fx.svc.providers.stop(INSTANCE).await);
+    assert!(file.is_file(), "the provider was told to shut down");
+}
+
+/// A process that answers `shutdown` and keeps running is killed once its
+/// grace is up: a stop never hangs on it.
+#[tokio::test]
+async fn a_process_that_wont_exit_is_killed_after_its_grace() {
+    let (fx, _ext) = approved("ignore-shutdown").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    first_read(&fx).await;
+    let stopped = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        fx.svc.providers.stop(INSTANCE),
+    )
+    .await
+    .expect("the stop ends once the grace is up");
+    assert!(stopped);
+}
+
+async fn syncs(fx: &EffortFixture) -> i64 {
+    fx.svc
+        .db
+        .read(|c| {
+            c.query_row(
+                "SELECT count(*) FROM command_audit WHERE command = 'oxplow.provider.sync'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap()
+}
+
+/// A provider says what it reads changed (`host/changed`): the host reads
+/// it now, through `oxplow.provider.sync` like the schedule, rather than at
+/// the next poll — and announcements close together are one read.
+#[tokio::test]
+async fn a_change_the_provider_announces_is_read_now() {
+    let (fx, _ext) = approved("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    first_read(&fx).await;
+    let before = syncs(&fx).await;
+    let instance = fx.svc.providers.get(INSTANCE).await.unwrap();
+    let (peer, _) = instance.connection().await.unwrap();
+    for _ in 0..3 {
+        peer.notify("fake/changed", json!({ "collectors": ["work_items"] }))
+            .await
+            .unwrap();
+    }
+    for _ in 0..200 {
+        if syncs(&fx).await > before {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(
+        syncs(&fx).await,
+        before + 1,
+        "three announcements, one read"
+    );
+}
+
+/// A process that exits on its own is noticed when it exits, not at the
+/// next call: the exit counts toward its health and it starts again.
+#[tokio::test]
+async fn a_process_that_exits_is_restarted_and_counted() {
+    let (fx, _ext) = approved("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    first_read(&fx).await;
+    let instance = fx.svc.providers.get(INSTANCE).await.unwrap();
+    let (peer, _) = instance.connection().await.unwrap();
+    peer.notify("fake/exit", json!({})).await.unwrap();
+    let mut restarted = false;
+    for _ in 0..200 {
+        let health = fx.svc.providers.health(INSTANCE).unwrap();
+        let live = instance.connection_if_running().await;
+        if health.consecutive_failures >= 1
+            && live.is_some_and(|(p, _)| !p.is_closed() && !p.same_connection(&peer))
+        {
+            restarted = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(restarted, "{:?}", fx.svc.providers.health(INSTANCE));
+}
+
+/// A read keeps the records it streams only until its next `$/state`: one
+/// that streams more than `max_uncheckpointed` (100 in-memory) without a
+/// checkpoint fails rather than growing without end.
+#[tokio::test]
+async fn a_read_must_checkpoint_within_its_limit() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    first_read(&fx).await;
+    for _ in 0..101 {
+        create_on_fake(&fx).await.unwrap();
+    }
+    set_hooks(&fx, "checkpoint-at-end").await;
+    let err = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("more than 100 records without a `$/state`"),
+        "{err}"
+    );
+}
+
+/// Leaving (the daemon exits) shuts every running instance's process down
+/// the orderly way, all at once.
+#[tokio::test]
+async fn shutting_down_ends_every_process_gracefully() {
+    let marker = tempfile::tempdir().unwrap();
+    let file = marker.path().join("shut-down");
+    let (fx, _ext) = approved(&format!("shutdown-file:{}", file.display())).await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    first_read(&fx).await;
+    fx.svc.providers.shutdown_all().await;
+    assert!(file.is_file(), "the provider was told to shut down");
+    assert!(fx.svc.providers.get(INSTANCE).await.is_none());
+}

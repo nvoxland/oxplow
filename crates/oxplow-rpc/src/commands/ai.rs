@@ -60,6 +60,20 @@ pub async fn test_ai_provider(
     Ok(svc.ai.test_provider(&id, &model).await?)
 }
 
+/// What model call `id` was asked or answered, capped; `None` when it has
+/// no such body or retention removed it. The person's read: any call.
+pub async fn read_ai_call(
+    svc: &Services,
+    id: i64,
+    body: oxplow_app::ai_calls::AiCallBody,
+) -> Result<Option<oxplow_app::event_bodies::EventBody>, IpcError> {
+    use oxplow_app::ai_calls::{read, AiCallBodyError};
+    read(svc, id, body, None).await.map_err(|e| match e {
+        AiCallBodyError::Storage(e) => e.into(),
+        other => IpcError::invalid(other.to_string()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -112,7 +126,7 @@ mod tests {
         let st = crate::dispatch("ai_settings", json!({}), &svc)
             .await
             .unwrap();
-        assert_eq!(st["roles"].as_array().unwrap().len(), 6);
+        assert_eq!(st["roles"].as_array().unwrap().len(), 3);
     }
 
     /// A role's binding is config (an `ai.roles.<role>` row in Settings'
@@ -141,6 +155,15 @@ mod tests {
             saw |= matches!(event, oxplow_app::OxplowEvent::ConfigChanged);
         }
         assert!(saw, "set_ai_role emitted no ConfigChanged");
+    }
+
+    #[tokio::test]
+    async fn reading_an_unknown_model_call_is_invalid() {
+        let (svc, _dir) = crate::test_support::services();
+        let err = crate::dispatch("read_ai_call", json!({ "id": 9, "body": "request" }), &svc)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "INVALID");
     }
 
     #[tokio::test]

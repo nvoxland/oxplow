@@ -235,7 +235,8 @@ pub enum CollectorRuntime {
     /// A program: can reach the network and credentials, so it needs a
     /// person's approval to run.
     Exec,
-    /// A sandboxed Starlark script: no I/O, so no approval.
+    /// A sandboxed Starlark script: no I/O, so no approval — unless it
+    /// calls a model (`ai_*`), which spends the person's key.
     Starlark,
     /// A sandboxed jq program: no I/O, so no approval.
     Jaq,
@@ -245,7 +246,8 @@ pub enum CollectorRuntime {
 }
 
 impl CollectorRuntime {
-    /// Sandboxed in-process: no I/O, no approval.
+    /// Sandboxed in-process: no I/O (a Starlark script's `ai_*` calls
+    /// aside, which need a person's approval).
     pub fn is_derived(self) -> bool {
         matches!(self, CollectorRuntime::Starlark | CollectorRuntime::Jaq)
     }

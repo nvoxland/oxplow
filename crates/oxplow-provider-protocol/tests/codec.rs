@@ -230,3 +230,46 @@ async fn a_streaming_request_gets_its_own_notifications_until_its_reply() {
     };
     assert_eq!(params["id"], 999);
 }
+
+/// A message is one line, and a line has a length limit: a peer that
+/// sends a longer one is cut off — what was awaited fails saying why —
+/// instead of the reader buffering it without end.
+#[tokio::test]
+async fn a_line_over_the_limit_ends_the_connection() {
+    use oxplow_provider_protocol::peer::PeerLimits;
+    let (host_end, provider_end) = tokio::io::duplex(1 << 16);
+    let (hr, hw) = tokio::io::split(host_end);
+    let limits = PeerLimits {
+        max_line_bytes: 1024,
+        ..PeerLimits::default()
+    };
+    let (host, _incoming) = Peer::spawn_with(hr, hw, limits);
+    let (_provider_reads, mut provider_writes) = tokio::io::split(provider_end);
+    let call = host.start("echo", json!({})).await.unwrap();
+    let long = format!("{}\n", "x".repeat(4096));
+    tokio::io::AsyncWriteExt::write_all(&mut provider_writes, long.as_bytes())
+        .await
+        .unwrap();
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(1), call.reply())
+        .await
+        .expect("answered without waiting");
+    let err = reply.unwrap_err().to_string();
+    assert!(err.contains("1024 bytes"), "{err}");
+    assert!(host.is_closed());
+}
+
+/// `closed` resolves once the other side's stream has ended, saying how
+/// many awaited replies the end failed.
+#[tokio::test]
+async fn closed_says_how_many_calls_the_end_cut_off() {
+    let (host_end, provider_end) = tokio::io::duplex(1024);
+    let (hr, hw) = tokio::io::split(host_end);
+    let (host, _incoming) = Peer::spawn(hr, hw);
+    let call = host.start("echo", json!({})).await.unwrap();
+    drop(provider_end);
+    tokio::time::timeout(std::time::Duration::from_secs(1), host.closed())
+        .await
+        .expect("it ends");
+    assert_eq!(host.calls_cut_off(), 1);
+    assert!(call.reply().await.is_err());
+}

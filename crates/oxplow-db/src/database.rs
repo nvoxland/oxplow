@@ -1908,6 +1908,55 @@ mod tests {
         );
     }
 
+    /// V41: a model call keeps its request and response (by content
+    /// hash), and a recorded result is keyed by its request's hash rather
+    /// than a hand-bumped prompt version. A result recorded under a
+    /// version no request hashes to is never read again, so it goes.
+    #[test]
+    fn v41_keys_ai_results_by_their_request() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(40))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO ai_call (role, provider, model, caller, ok, at) VALUES
+                 ('decide', 'p', 'm', 'test', 1, '2026-10-01T00:00:00Z');
+               INSERT INTO ai_result (input_hash, provider, model, prompt_version, op, role, caller,
+                                      output_json, input_tokens, output_tokens, at, ai_call_id)
+               VALUES ('h', 'p', 'm', 'classify@1', 'classify', 'decide', 'test', '{}', 1, 1,
+                       '2026-10-01T00:00:00Z', 1);"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(41))
+            .run(&mut conn)
+            .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM ai_result", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+        conn.execute_batch(
+            r#"UPDATE ai_call SET request_hash = 'rq', response_hash = 'rs';
+               INSERT INTO ai_result (input_hash, provider, model, request_hash, op, role, caller,
+                                      output_json, input_tokens, output_tokens, at, ai_call_id)
+               VALUES ('h', 'p', 'm', 'rq', 'classify', 'decide', 'test', '{}', 1, 1,
+                       '2026-10-01T00:00:00Z', 1);"#,
+        )
+        .unwrap();
+        let dup = conn.execute(
+            "INSERT INTO ai_result (input_hash, provider, model, request_hash, op, role, caller,
+                                    output_json, input_tokens, output_tokens, at)
+             VALUES ('h', 'p', 'm', 'rq', 'classify', 'decide', 'test', '{}', 1, 1, 'x')",
+            [],
+        );
+        assert!(
+            dup.is_err(),
+            "one result per input, provider, model and request"
+        );
+    }
+
     /// V32: a thread's agent becomes one `agent_session` (closed with the
     /// thread, or with its stream's archive), its turns and its `agent.*`
     /// events carry that session, and the thread loses the agent columns.

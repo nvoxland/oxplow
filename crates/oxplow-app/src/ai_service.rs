@@ -75,7 +75,8 @@ pub struct ProviderKindInfo {
 /// Who a call is for, as its `ai_call` row records it.
 #[derive(Debug, Clone, Copy)]
 pub struct CallSite<'a> {
-    /// What asked (`mcp:ai_decide`, `inferred-decisions`, …).
+    /// What asked (`thread:<id>` for an agent's MCP call,
+    /// `collector:<owner>/<id>`, `inferred-decisions`, …).
     pub caller: &'a str,
     /// For a recorded computation (`ai_compute`), the hash of its input.
     pub input_hash: Option<&'a str>,
@@ -88,6 +89,52 @@ impl<'a> CallSite<'a> {
             input_hash: None,
         }
     }
+}
+
+/// What a model is asked, as its call keeps it (`ai_call.request_hash`)
+/// and a recorded result is keyed by (`ai_result.request_hash`): the
+/// whole prompt, so a changed prompt is another request.
+pub enum ModelRequest<'a> {
+    Complete {
+        system: Option<&'a str>,
+        prompt: &'a str,
+        json: bool,
+    },
+    Decide {
+        state: &'a str,
+        questions: &'a BTreeMap<String, Question>,
+    },
+}
+
+impl ModelRequest<'_> {
+    pub fn body(&self) -> serde_json::Value {
+        match self {
+            ModelRequest::Complete {
+                system,
+                prompt,
+                json,
+            } => serde_json::json!({ "system": system, "prompt": prompt, "json": json }),
+            ModelRequest::Decide { state, questions } => {
+                serde_json::json!({ "state": state, "questions": questions })
+            }
+        }
+    }
+
+    /// Its content hash.
+    pub fn hash(&self) -> String {
+        oxplow_db::ai_call_store::request_hash(&self.body())
+    }
+}
+
+/// One call as it is recorded: who asked, what answered, when it started,
+/// and what it was asked.
+struct Attempt<'a> {
+    role: Role,
+    site: CallSite<'a>,
+    provider: &'a ProviderConfig,
+    binding: &'a RoleBinding,
+    started: Instant,
+    request: &'a ModelRequest<'a>,
 }
 
 pub struct AiService {
@@ -348,10 +395,27 @@ impl AiService {
                 },
             )
             .await;
-        let outcome = result.as_ref().map(|c| (c.input_tokens, c.output_tokens));
-        let call_id = self
-            .record(role, site, &provider, &binding, started, outcome)
-            .await;
+        let request = ModelRequest::Complete {
+            system,
+            prompt,
+            json,
+        };
+        let outcome = result.as_ref().map(|c| {
+            (
+                c.input_tokens,
+                c.output_tokens,
+                serde_json::json!({ "text": c.text }),
+            )
+        });
+        let attempt = Attempt {
+            role,
+            site,
+            provider: &provider,
+            binding: &binding,
+            started,
+            request: &request,
+        };
+        let call_id = self.record(attempt, outcome).await;
         Ok((result?, call_id))
     }
 
@@ -390,10 +454,23 @@ impl AiService {
                 },
             )
             .await;
-        let outcome = result.as_ref().map(|d| (d.input_tokens, d.output_tokens));
-        let call_id = self
-            .record(role, site, &provider, &binding, started, outcome)
-            .await;
+        let request = ModelRequest::Decide { state, questions };
+        let outcome = result.as_ref().map(|d| {
+            (
+                d.input_tokens,
+                d.output_tokens,
+                serde_json::json!({ "answers": d.answers }),
+            )
+        });
+        let attempt = Attempt {
+            role,
+            site,
+            provider: &provider,
+            binding: &binding,
+            started,
+            request: &request,
+        };
+        let call_id = self.record(attempt, outcome).await;
         Ok((result?, call_id))
     }
 
@@ -480,15 +557,21 @@ impl AiService {
     /// failed, which is logged, never an error).
     async fn record(
         &self,
-        role: Role,
-        site: CallSite<'_>,
-        provider: &ProviderConfig,
-        binding: &RoleBinding,
-        started: Instant,
-        outcome: Result<(i64, i64), &AiError>,
+        attempt: Attempt<'_>,
+        outcome: Result<(i64, i64, serde_json::Value), &AiError>,
     ) -> Option<i64> {
-        let (input_tokens, output_tokens) = outcome.unwrap_or((0, 0));
-        let error = outcome.err();
+        let Attempt {
+            role,
+            site,
+            provider,
+            binding,
+            started,
+            request,
+        } = attempt;
+        let (error, (input_tokens, output_tokens, response)) = match outcome {
+            Ok((i, o, r)) => (None, (i, o, Some(r))),
+            Err(e) => (Some(e), (0, 0, None)),
+        };
         let call = NewAiCall {
             role: role_name(role),
             provider: provider.id.clone(),
@@ -500,6 +583,8 @@ impl AiService {
             ok: error.is_none(),
             error: error.map(|e| e.to_string()),
             input_hash: site.input_hash.map(str::to_string),
+            request: request.body(),
+            response,
         };
         match self.calls.record(call).await {
             Ok(id) => Some(id),
@@ -731,6 +816,27 @@ mod tests {
             recorded(&db).await,
             json!([["summarize", "ext:review", 1, 0, 10]])
         );
+        // It keeps what it asked and what came back, by content hash.
+        let out = crate::sql_gateway::SqlGateway::new(db.clone())
+            .query_sql(
+                "SELECT request_hash, response_hash FROM v_ai_call",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        let row = serde_json::to_value(&out.rows).unwrap()[0].clone();
+        let request = ModelRequest::Complete {
+            system: None,
+            prompt: "hi",
+            json: false,
+        };
+        assert_eq!(row[0], request.hash());
+        let response = oxplow_db::event_content_store::read(&db, row[1].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(String::from_utf8(response).unwrap(), r#"{"text":"hello"}"#);
     }
 
     /// A provider's `kind:` is a declared provider; an unknown one is
@@ -948,7 +1054,7 @@ mod tests {
         let (svc, _) = service("http://x", &dir);
         let svc = svc.with_project_overrides(Arc::new(|| {
             BTreeMap::from([(
-                Role::Fast,
+                Role::Summarize,
                 RoleBinding {
                     provider: "or".into(),
                     model: "small".into(),
@@ -956,9 +1062,9 @@ mod tests {
             )])
         }));
         let st = svc.settings().unwrap();
-        let fast = st.roles.iter().find(|r| r.role == Role::Fast).unwrap();
-        assert!(fast.overridden);
-        assert_eq!(fast.binding.as_ref().unwrap().model, "small");
+        let summarize = st.roles.iter().find(|r| r.role == Role::Summarize).unwrap();
+        assert!(summarize.overridden);
+        assert_eq!(summarize.binding.as_ref().unwrap().model, "small");
     }
 
     #[tokio::test]
@@ -1000,7 +1106,7 @@ mod tests {
             std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
             std::fs::write(
                 dir.path().join(".oxplow/project.yaml"),
-                format!("ai:\n  roles:\n    fast: {{ provider: or, model: {model} }}\n"),
+                format!("ai:\n  roles:\n    summarize: {{ provider: or, model: {model} }}\n"),
             )
             .unwrap();
         };
@@ -1016,15 +1122,19 @@ mod tests {
                 None,
             )
             .unwrap();
-        let fast = |svc: &crate::Services| {
+        let summarize = |svc: &crate::Services| {
             let st = svc.ai.settings().unwrap();
-            let r = st.roles.into_iter().find(|r| r.role == Role::Fast).unwrap();
+            let r = st
+                .roles
+                .into_iter()
+                .find(|r| r.role == Role::Summarize)
+                .unwrap();
             (r.overridden, r.binding.map(|b| b.model))
         };
-        assert_eq!(fast(&svc), (true, Some("small".to_string())));
+        assert_eq!(summarize(&svc), (true, Some("small".to_string())));
         yaml("tiny");
         svc.reload_config_from_disk().unwrap();
-        assert_eq!(fast(&svc), (true, Some("tiny".to_string())));
+        assert_eq!(summarize(&svc), (true, Some("tiny".to_string())));
     }
 
     /// An agent can edit `ai.yaml`. Pointing a provider at another host

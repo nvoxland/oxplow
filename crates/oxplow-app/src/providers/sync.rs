@@ -248,6 +248,14 @@ impl Instance {
             };
             match method.as_str() {
                 notify::RECORD => match self.record(actor, decl, params) {
+                    Ok(_) if batch.len() >= self.deps.max_uncheckpointed => {
+                        return Err(failed(format!(
+                            "its read streamed more than {} records without a `$/state`; a \
+                             read checkpoints at least that often",
+                            self.deps.max_uncheckpointed
+                        ))
+                        .await)
+                    }
                     Ok(envelope) => {
                         batch.push(envelope);
                         streamed += 1;
@@ -510,6 +518,30 @@ impl ProviderRegistry {
             tracing::warn!(error = ?e, "recording the instances' next due times failed");
         }
         started
+    }
+
+    /// Read what `instance`'s provider announced changed (`host/changed`):
+    /// `collectors` it declares, or every one for `None`, as the system.
+    pub(super) async fn sync_announced(
+        &self,
+        instance: &str,
+        collectors: Option<std::collections::BTreeSet<String>>,
+    ) {
+        let Some(bus) = self.bus.upgrade() else {
+            return;
+        };
+        let inputs: Vec<Value> = match collectors {
+            None => vec![json!({ "instance": instance })],
+            Some(named) => named
+                .into_iter()
+                .map(|c| json!({ "instance": instance, "collector": c }))
+                .collect(),
+        };
+        for input in inputs {
+            if let Err(e) = bus.run(&Actor::System, SYNC, input, false).await {
+                tracing::warn!(instance, error = %e, "reading what a provider announced failed");
+            }
+        }
     }
 
     /// Read every collector of a just-started `instance` once, as the

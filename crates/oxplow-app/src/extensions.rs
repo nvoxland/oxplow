@@ -3816,8 +3816,10 @@ impl Lens {
 }
 
 /// What's wrong with `spec` as a standalone lens, if anything: no title,
-/// or a component missing what it needs. (A `grid` composes other lenses,
-/// so a standalone spec can't be one.)
+/// or a component missing what it needs. A `grid` composes other lenses
+/// and a `custom` lens an extension's component, so a standalone spec
+/// can't be either; nor a `form`, whose submit runs its command as the
+/// person — an answer an agent chose never does.
 pub fn spec_problem(spec: &LensSpec) -> Option<String> {
     if spec.title.trim().is_empty() {
         return Some("a lens needs a `title`".into());
@@ -3829,6 +3831,13 @@ pub fn spec_problem(spec: &LensSpec) -> Option<String> {
         return Some(
             "a `custom` lens renders an extension's component; write it as a lens file in a \
              private extension that declares the component"
+                .into(),
+        );
+    }
+    if spec.viz == LensViz::Form {
+        return Some(
+            "a `form` runs its command as whoever submits it, and an answer never runs a \
+             command as the person; write the form as a lens file in an extension"
                 .into(),
         );
     }
@@ -5006,20 +5015,21 @@ empty: No items.
             .exists());
     }
 
-    /// A form's numeric defaults are written as numbers and read back.
+    /// A kept spec is never a form: its submit would run the command as
+    /// the person with defaults an agent chose.
     #[test]
-    fn a_form_specs_defaults_round_trip_through_its_file() {
+    fn a_form_spec_isnt_kept() {
         let project = tempfile::tempdir().unwrap();
         let spec = LensSpec {
             title: "New Task".into(),
             viz: LensViz::Form,
             form: Some(LensForm {
                 command: Some("oxplow.work_item.create".into()),
-                defaults: Some(serde_json::json!({ "title": "x", "n": 3, "tags": ["a"] })),
+                defaults: Some(serde_json::json!({ "title": "x" })),
             }),
             ..spec_base()
         };
-        let lens = save_lens(
+        let err = save_lens(
             project.path(),
             project.path(),
             "mine",
@@ -5027,8 +5037,13 @@ empty: No items.
             &spec,
             &todo_origin(),
         )
-        .unwrap();
-        assert_eq!(lens.spec(), spec);
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("never runs a command as the person"),
+            "{err}"
+        );
+        assert!(!project.path().join("oxplow/extensions/mine").exists());
     }
 
     #[test]
