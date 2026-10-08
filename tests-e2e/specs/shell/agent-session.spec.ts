@@ -37,3 +37,22 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
   await page.getByTestId(`center-tab-close-${id}-confirm`).click();
   await expect(page.getByTestId(tabTestId)).toHaveCount(0);
 });
+
+/// Search offers a command per enabled agent that starts it directly — the
+/// project's agents decide which: Codex once enabled, never Claude here.
+test("search starts an enabled agent's session directly", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  await ipc(daemon, "set_agents", { agents: ["acp", "codex"] });
+  await page.goto("/");
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await page.getByTestId("title-bar-search").click();
+  await page.keyboard.type("new claude session");
+  await expect(page.getByTestId("launcher-command-oxplow.agent_session.open_claude")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByTestId("title-bar-search").click();
+  await page.keyboard.type("new codex session");
+  await page.getByTestId("launcher-command-oxplow.agent_session.open_codex").click();
+  const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
+  await expect(tab).toBeVisible();
+  await expect(page.getByTestId("page-new-session")).toBeHidden();
+});

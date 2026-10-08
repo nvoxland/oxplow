@@ -38,6 +38,11 @@ pub struct ContextKey {
 /// `windowContext`), sorted.
 pub const CONTEXT_KEYS: &[ContextKey] = &[
     ContextKey {
+        name: "enabledAgents",
+        kind: KeyKind::Str,
+        doc: "The agent harnesses the project enables, by key, comma-joined in priority order (`claude,codex`): a command for one says `enabledAgents =~ /(^|,)claude(,|$)/`.",
+    },
+    ContextKey {
         name: "fileDirty",
         kind: KeyKind::Bool,
         doc: "The file shown has unsaved changes and has finished loading.",

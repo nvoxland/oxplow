@@ -2,6 +2,10 @@
   "comment": "A command's `when` (VS Code's when-clause syntax), as both the Rust check (oxplow_domain::when) and the window's evaluator (apps/desktop/src/when.ts) read it. `cases` evaluate against `context`; `refused` don't parse, and the error says `says`.",
   "cases": [
     { "when": "fileDirty", "context": { "fileDirty": true }, "is": true },
+    { "when": "enabledAgents =~ /(^|,)codex(,|$)/", "context": { "enabledAgents": "claude,codex" }, "is": true },
+    { "when": "enabledAgents =~ /(^|,)codex(,|$)/", "context": { "enabledAgents": "codex" }, "is": true },
+    { "when": "enabledAgents =~ /(^|,)codex(,|$)/", "context": { "enabledAgents": "claude,opencode" }, "is": false },
+    { "when": "enabledAgents =~ /(^|,)codex(,|$)/", "context": { "enabledAgents": "" }, "is": false },
     { "when": "fileDirty", "context": {}, "is": false },
     { "when": "!fileDirty", "context": { "fileDirty": true }, "is": false },
     { "when": "!!fileDirty", "context": { "fileDirty": true }, "is": true },

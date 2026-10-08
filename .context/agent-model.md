@@ -586,7 +586,15 @@ enabled chat harness, flagged "not installed" or "needs approval"
 (`agentChoices` in `agentKinds.ts`). The picker is reached from a thread with no session, the thread's
 **New session…** menu item, and search: `agent_session.open` declares
 `ui: { label: "New Agent Session…", form: "page:new-session" }`, so
-choosing it opens the picker rather than running the command.
+choosing it opens the picker rather than running the command. Each agent
+also has a command that opens its session directly, with no picker —
+"New Claude Session", "New Codex Session", "New OpenCode Session" and,
+for each declared ACP adapter, "New … Session (ACP)" — declared by
+`oxplow-foundation` beside the harnesses they name
+(`agent_session.open_<agent>` over the same `open` op, `ui.input` fixing
+the `harness` / `acp_agent`, `open_after` the new session's tab). Each is
+offered only while its harness is enabled (`when: enabledAgents =~ …`).
+They are a person's: agents open sessions with `agent_session.open`.
 
 **Not built yet:** a personal (user-global) `acpAgents` file; declared
 adapters and project entries only for now.

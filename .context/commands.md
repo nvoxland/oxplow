@@ -102,7 +102,9 @@ the window doesn't hold is false, equal to nothing (but `false`) and
 unmatched. VS Code's `<` `<=` `>` `>=` and `in` / `not in` parse but are
 refused as not supported yet: no context key holds a number or a list.
 The window publishes its **context keys** (`CONTEXT_KEYS`, the one list):
-`fileDirty`, `fileShown`, `pageKind` (the kind of the page shown),
+`enabledAgents` (the enabled agent harnesses' keys, comma-joined in
+priority order; a command for one matches `enabledAgents =~
+/(^|,)claude(,|$)/`), `fileDirty`, `fileShown`, `pageKind` (the kind of the page shown),
 `shellAvailable` (the app, not a browser window), `streamKind`
 (`primary` / `worktree`), `streamShown`, `threadShown`, `vcsEnabled`.
 A command's `when` is checked where it registers — it parses, names only

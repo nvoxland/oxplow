@@ -1246,8 +1246,12 @@ export function App() {
       pageKind: (centerActive ? refFromTabId(centerActive)?.kind : undefined) ?? "",
       vcsEnabled: !!workspaceContext.vcsEnabled,
       shellAvailable: shellAvailable(),
+      enabledAgents: harnesses
+        .filter((h) => h.enabled)
+        .map((h) => h.id)
+        .join(","),
     }),
-    [centerActive, currentFile, currentFileDirty, selectedThread, selectedFilePath, stream, workspaceContext.vcsEnabled],
+    [centerActive, currentFile, currentFileDirty, harnesses, selectedThread, selectedFilePath, stream, workspaceContext.vcsEnabled],
   );
   // Run a Git-menu mutation (pull/push) as a background task and surface
   // any failure the same way the Git Dashboard does: record an op-error

@@ -56,6 +56,42 @@ commands:
     op: open
     invokers: { human: true, agent: true, lens: true }
     ui: { label: "New Agent Session…", group: Tasks, keywords: [agent, session, start], form: "page:new-session", when: "threadShown" }
+  - name: agent_session.open_claude
+    summary: "Open a Claude terminal session on the thread shown; its tab starts the agent."
+    scope: agent_sessions.write
+    op: open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "New Claude Session", group: Tasks, keywords: [agent, session, start, claude], input: { thread: "{{thread}}", harness: claude }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)claude(,|$)/" }
+  - name: agent_session.open_codex
+    summary: "Open a Codex terminal session on the thread shown; its tab starts the agent."
+    scope: agent_sessions.write
+    op: open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "New Codex Session", group: Tasks, keywords: [agent, session, start, codex], input: { thread: "{{thread}}", harness: codex }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)codex(,|$)/" }
+  - name: agent_session.open_opencode
+    summary: "Open an OpenCode terminal session on the thread shown; its tab starts the agent."
+    scope: agent_sessions.write
+    op: open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "New OpenCode Session", group: Tasks, keywords: [agent, session, start, opencode], input: { thread: "{{thread}}", harness: opencode }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)opencode(,|$)/" }
+  - name: agent_session.open_acp_claude
+    summary: "Open a session of the Claude ACP agent on the thread shown; its tab starts the agent."
+    scope: agent_sessions.write
+    op: open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "New Claude Session (ACP)", group: Tasks, keywords: [agent, session, start, claude], input: { thread: "{{thread}}", harness: acp, acp_agent: claude }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)acp(,|$)/" }
+  - name: agent_session.open_acp_gemini
+    summary: "Open a session of the Gemini ACP agent on the thread shown; its tab starts the agent."
+    scope: agent_sessions.write
+    op: open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "New Gemini Session (ACP)", group: Tasks, keywords: [agent, session, start, gemini], input: { thread: "{{thread}}", harness: acp, acp_agent: gemini }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)acp(,|$)/" }
+  - name: agent_session.open_acp_codex
+    summary: "Open a session of the Codex ACP agent on the thread shown; its tab starts the agent."
+    scope: agent_sessions.write
+    op: open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "New Codex Session (ACP)", group: Tasks, keywords: [agent, session, start, codex], input: { thread: "{{thread}}", harness: acp, acp_agent: codex }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)acp(,|$)/" }
   - name: agent_session.rename
     summary: "Rename an agent session (`agent_session:ses3`)."
     scope: agent_sessions.write
