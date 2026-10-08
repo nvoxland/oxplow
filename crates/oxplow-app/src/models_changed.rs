@@ -158,9 +158,15 @@ impl CaptureListener {
                            JOIN measure m ON m.id = f.measure_id
                           WHERE f.id > ?1
                          UNION
+                         SELECT c.stream_id, m.key FROM fact_chain ch
+                           JOIN metric_capture c ON c.id = ch.capture_id
+                           JOIN measure m ON m.id = ch.measure_id
+                          WHERE c.id > ?2
+                         UNION
                          SELECT c.stream_id, NULL FROM metric_capture c
                           WHERE c.id > ?2
-                            AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.capture_id = c.id)",
+                            AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.capture_id = c.id)
+                            AND NOT EXISTS (SELECT 1 FROM fact_chain ch WHERE ch.capture_id = c.id)",
                     )
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = st
@@ -435,6 +441,27 @@ mod tests {
         assert_eq!(
             listener.landed(&f.svc.db).await.unwrap(),
             vec![(oxplow_domain::StreamId::new(1), Vec::new())]
+        );
+
+        // A scan that repeats the one before stores no fact of its own, but
+        // still names the measure it holds.
+        facts
+            .record_facts(
+                oxplow_db::NewMetricCapture::done(1, "p", "s"),
+                vec![
+                    oxplow_db::NewFact::new(b, 1.0),
+                    oxplow_db::NewFact::new(a, 2.0),
+                    oxplow_db::NewFact::new(b, 3.0),
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            listener.landed(&f.svc.db).await.unwrap(),
+            vec![(
+                oxplow_domain::StreamId::new(1),
+                vec!["acme.alpha".to_string(), "acme.beta".to_string()]
+            )]
         );
     }
 

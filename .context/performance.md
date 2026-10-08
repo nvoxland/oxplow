@@ -537,6 +537,36 @@ the text with per-row scalar subqueries in the SELECT list: reads went
 across many rows. Resolving ids once per read in Rust (`FactText`)
 brought reads back to par; don't reintroduce per-row lookups.
 
+## Change-only complete scans (V39, 2026-10-08)
+
+A complete-scope capture stores only what changed since its producer's
+previous scan and holds the rest (`fact_chain`, see
+[metrics.md](./metrics.md)). The live history rewritten into chains,
+measured with `cube_equivalence` against `main` on identical copies of
+the live database (1.30 GB, 6.3 M facts), two runs each:
+
+| | main | chains |
+|---|---|---|
+| fact rows | 6.27 M | 3.29 M |
+| fact table + its indexes | 529 MB | ~280 MB |
+| whole database, vacuumed | 1.30 GB | 0.91 GB |
+| fact-served reads (72 specs) | 22.7 / 23.9 s | 24.2 / 21.3 s |
+| `oxplow.duplicate_lines` fact read | 5.6 s | 5.0 s |
+| full cube build from empty | 67 / 71 s | 78 / 76 s |
+
+`v_fact` returned every row of every complete-scope measure identically
+before and after the rewrite (order-free digest). The full build pays a
+few seconds for the chained captures' per-fact join; incremental builds
+fold only new captures.
+
+Two planner traps on the chain join, both pinned in `fact_chain.rs` and
+`fact.sql`: without CROSS JOINs the planner (no stats for an empty
+`fact_chain`) drove from every fact and scanned the stream's later
+captures for each — a `v_fact` digest that takes 11 s ran past ten
+minutes; and with `f.capture_id BETWEEN ch.from_capture_id AND
+ch.capture_id` it used only the lower bound, scanning every later fact of
+the measure. Spell the bounds out as `>=` / `<=`.
+
 ## Related
 
 - [metrics.md](./metrics.md) — the metric substrate itself: the cube, its two

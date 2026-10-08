@@ -1391,6 +1391,8 @@ mod tests {
             "fact_subject",
             "fact_path",
             "fact_dims",
+            // V39 — the captures that hold facts an earlier one stored.
+            "fact_chain",
             // V44 — the metric SPEC layer.
             "metric_spec",
             // V62 — the aggregate cube: the materialized fold (tsk96), its

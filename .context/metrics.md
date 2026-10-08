@@ -434,6 +434,33 @@ welded to collection.
   `dims_id`) and joins `fact_subject` where the subject ref's text is the
   key (a kind can share a ref). `v_fact` and `v_tree_fact` join the
   dictionaries, so their columns are unchanged.
+  **Complete-scope scans store only what changed (V39, `fact_chain.rs`).**
+  A finished capture of a complete-scope measure stores the facts that are
+  new or changed since its producer's previous finished capture in the
+  same stream (its base), and **holds** the rest: a fact is held by its
+  chain's captures from its own capture up to `last_capture_id` (NULL
+  while the newest holds it), and a `fact_chain (capture, measure,
+  from_capture_id, depth)` row marks a holding capture. A dropped fact is
+  closed at the base. A capture stores the measure whole (closing what the
+  base held, `from_capture_id` = itself) when there's no chain to extend,
+  when more than half of what it restates changed, or every
+  `MAX_CHAIN_DEPTH` (32) captures, so a read looks back a bounded range.
+  Every fact read goes through `held_facts_sql` (own rows of captures
+  with no chain row, plus each chain row's held facts, with the
+  **holder's** capture columns), and `v_fact` spells out the same rule,
+  so readers still see each capture's whole set. **Consequences:** a fact
+  id repeats across the captures holding it unchanged (`v_fact` v2); a
+  query that joins `fact` to `metric_capture` on `f.capture_id` sees only
+  what a chain capture stored, so a new reader of complete-scope facts
+  goes through `held_facts_sql` or `v_fact`; the chain join is pinned with
+  CROSS JOINs and spelled-out bounds (see performance.md). Failed captures
+  and per-path/per-subject measures store as before, held by their own
+  capture only. Pruning moves a fact a doomed capture stored up to the
+  first kept capture that holds it (`rehome`), and prune's keep rules
+  protect a fact's **last holder** (`LAST_HOLDER`), not the capture that
+  stored it. `prune_dominated_tree_captures` never takes a chain holder.
+  The live database's history was rewritten into chains once, by hand
+  (the same diff, replayed in capture order), when V39 landed.
 - **`metric_cube`** + **`metric_live_fact`** + **`metric_cube_state`**
   (`V62__metric_cube.sql`, tsk96; live state + watermark re-keyed per **branch**
   by `V63__branch_aware_cube.sql`, tsk97) — the **aggregate cube**: the

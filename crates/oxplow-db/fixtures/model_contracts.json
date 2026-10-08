@@ -2954,6 +2954,106 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Fact id; the same across the captures that hold the fact unchanged."
+        },
+        {
+          "name": "capture_id",
+          "type": "INTEGER",
+          "doc": "A capture holding it (v_capture.id)."
+        },
+        {
+          "name": "measure_key",
+          "type": "TEXT",
+          "doc": "Measure this is a value of (v_measure.key)."
+        },
+        {
+          "name": "value",
+          "type": "REAL",
+          "doc": "The measured value."
+        },
+        {
+          "name": "numerator",
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
+        },
+        {
+          "name": "denominator",
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
+        },
+        {
+          "name": "subject_kind",
+          "type": "TEXT",
+          "doc": "What the fact is about."
+        },
+        {
+          "name": "subject_ref",
+          "type": "TEXT",
+          "doc": "Logical id of the subject."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File path, when the subject has one."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Line number, when it has one."
+        },
+        {
+          "name": "severity",
+          "type": "TEXT",
+          "doc": "Finding severity, for lint-like facts."
+        },
+        {
+          "name": "rule",
+          "type": "TEXT",
+          "doc": "Rule id, for lint-like facts."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "Free-text detail."
+        },
+        {
+          "name": "dims_json",
+          "type": "TEXT",
+          "doc": "Extra dimensions as a JSON object."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "From the capture."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "From the capture."
+        }
+      ],
+      "key": []
     }
   },
   "measure": {

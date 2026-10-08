@@ -547,11 +547,11 @@
     - { name: "output_size", type: "INT", doc: "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured." }
     - { name: "payload_expired_at", type: "TEXT", doc: "When retention expired its details (they read NULL); NULL while kept." }
 - name: fact
-  version: 1
-  description: "Facts: atomic measurements (a function's complexity, a test's outcome, a token count), joined to their measure and capture context."
+  version: 2
+  description: "Facts: atomic measurements (a function's complexity, a test's outcome, a token count), joined to their measure and capture context. One row per capture holding the fact: a scan that restates a whole population (duplicate blocks) holds the facts it repeats from the scan before, so an unchanged fact appears under each scan with the same id."
   columns:
-    - { name: "id", type: "INTEGER", doc: "Fact id." }
-    - { name: "capture_id", type: "INTEGER", doc: "Producing capture (v_capture.id)." }
+    - { name: "id", type: "INTEGER", doc: "Fact id; the same across the captures that hold the fact unchanged." }
+    - { name: "capture_id", type: "INTEGER", doc: "A capture holding it (v_capture.id)." }
     - { name: "measure_key", type: "TEXT", doc: "Measure this is a value of (v_measure.key)." }
     - { name: "value", type: "REAL", doc: "The measured value." }
     - { name: "numerator", type: "REAL", doc: "Ratio numerator, for ratio measures." }

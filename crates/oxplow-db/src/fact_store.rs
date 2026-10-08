@@ -588,9 +588,17 @@ pub fn record_facts_tx(
         check_dims_tx(conn, f.dims_json.as_deref())?;
     }
     let capture_id = insert_capture(conn, capture).map_err(map_sql_err)?;
-    for f in facts {
-        insert_fact(conn, f, capture_id).map_err(map_sql_err)?;
-    }
+    // A complete-scope measure stores only what changed since the
+    // producer's previous scan (V39, `fact_chain`).
+    crate::fact_chain::write(
+        conn,
+        capture_id,
+        capture.stream_id,
+        &capture.producer,
+        capture.status == "done",
+        facts,
+    )
+    .map_err(map_sql_err)?;
     if let Some(log) = log {
         let env = (log.build)(capture_id);
         crate::event_log_store::append_unique_tx(conn, &log.vocabulary.current(), &env)?;
@@ -925,10 +933,10 @@ pub struct FactSliceKey {
 /// A fact's subject ref, from the dictionary it points into (V38).
 const SUBJECT_REF: &str = "(SELECT ref FROM fact_subject WHERE id = f.subject_id)";
 
-/// A [`FactRow`]'s columns. The subject, path and dims come as the ids of
-/// the dictionaries the fact points into (V38); [`fact_row_mapper`]
-/// resolves each id once per read.
-const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numerator, \
+/// A [`FactRow`]'s columns, for fact `f` as held by capture `c`. The
+/// subject, path and dims come as the ids of the dictionaries the fact
+/// points into (V38); [`fact_row_mapper`] resolves each id once per read.
+pub(crate) const FACT_ROW_COLS: &str = "f.id, c.id, f.measure_id, f.value, f.numerator, \
      f.denominator, f.subject_id, f.path_id, f.line, f.severity, f.rule, \
      f.detail, f.dims_id, c.captured_at, c.branch, c.closest_vcs_rev, \
      c.vcs_rev_exact, c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, \
@@ -947,7 +955,7 @@ const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numera
 /// so a hit is correct **regardless of row order**. Ordering (the queries sort by
 /// `captured_at, id`) only decides the hit RATE — never correctness — so no
 /// caller has to guarantee adjacency.
-fn fact_row_mapper<'c>(
+pub(crate) fn fact_row_mapper<'c>(
     conn: &'c rusqlite::Connection,
 ) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> + 'c> {
     // Effort → work item, loaded once per read: `effort` is small next to
@@ -1096,7 +1104,11 @@ impl<'c> FactText<'c> {
     }
 }
 
-fn insert_fact(conn: &rusqlite::Connection, f: &NewFact, capture_id: i64) -> rusqlite::Result<i64> {
+pub(crate) fn insert_fact(
+    conn: &rusqlite::Connection,
+    f: &NewFact,
+    capture_id: i64,
+) -> rusqlite::Result<i64> {
     let subject = subject_id(conn, f.subject_kind.as_deref(), f.subject_ref.as_deref())?;
     let path = interned(conn, "fact_path", "path", f.path.as_deref())?;
     let dims = interned(conn, "fact_dims", "json", f.dims_json.as_deref())?;
@@ -1819,12 +1831,7 @@ impl SqliteFactStore {
     pub async fn facts_for_measure(&self, measure_id: i64) -> Result<Vec<FactRow>, DomainError> {
         self.db
             .call(move |conn| {
-                let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM fact f
-                       JOIN metric_capture c ON c.id = f.capture_id
-                      WHERE f.measure_id = ?1
-                      ORDER BY c.captured_at ASC, f.id ASC"
-                );
+                let sql = crate::fact_chain::held_facts_sql("?1", crate::fact_chain::Holders::All);
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![measure_id], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1843,11 +1850,9 @@ impl SqliteFactStore {
     ) -> Result<Vec<FactRow>, DomainError> {
         self.db
             .call(move |conn| {
-                let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM fact f
-                       JOIN metric_capture c ON c.id = f.capture_id
-                      WHERE f.measure_id = ?1 AND c.stream_id = ?2
-                      ORDER BY c.captured_at ASC, f.id ASC"
+                let sql = crate::fact_chain::held_facts_sql(
+                    "?1",
+                    crate::fact_chain::Holders::Stream("?2"),
                 );
                 let mut stmt = conn.prepare(&sql)?;
                 let rows =
@@ -2681,20 +2686,11 @@ impl SqliteFactStore {
         }
         self.db
             .call(move |conn| {
-                let placeholders = vec!["?"; capture_ids.len()].join(", ");
-                let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM fact f
-                       JOIN metric_capture c ON c.id = f.capture_id
-                      WHERE f.measure_id = ? AND f.capture_id IN ({placeholders})
-                      ORDER BY c.captured_at ASC, f.id ASC"
-                );
+                let sql =
+                    crate::fact_chain::held_facts_sql("?1", crate::fact_chain::Holders::Ids("?2"));
                 let mut stmt = conn.prepare_cached(&sql)?;
-                let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&measure_id];
-                for id in &capture_ids {
-                    binds.push(id);
-                }
-                let rows =
-                    stmt.query_map(rusqlite::params_from_iter(binds), fact_row_mapper(conn)?)?;
+                let ids = serde_json::to_string(&capture_ids).expect("ids serialize");
+                let rows = stmt.query_map(params![measure_id, ids], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -2989,6 +2985,10 @@ impl SqliteFactStore {
                               WHERE f.capture_id = c.id
                                 AND m.capture_scope <> 'per-path'
                            )
+                           -- Nor one holding a chain's facts (V39).
+                           AND NOT EXISTS (
+                             SELECT 1 FROM fact_chain ch WHERE ch.capture_id = c.id
+                           )
                       )",
                         params![stream_id],
                     )
@@ -3158,7 +3158,25 @@ impl SqliteFactStore {
         let n = self
             .db
             .transaction(move |tx| {
-                let doomed_where = "captured_at < ?1
+                // Each partition's latest fact keeps the capture that last
+                // holds it — the one that stored it, unless a chain carries
+                // it on (V39).
+                let latest = |partition: &str, from: &str, filter: &str| {
+                    format!(
+                        "SELECT {held} FROM (
+                           SELECT f.capture_id, f.measure_id, f.last_capture_id,
+                                  c.stream_id, c.producer, ROW_NUMBER() OVER (
+                             PARTITION BY f.measure_id, c.stream_id, c.producer{partition}
+                             ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
+                           FROM fact f JOIN metric_capture c ON c.id = f.capture_id
+                           {from}
+                           WHERE {filter} AND c.status = 'done') f
+                         WHERE rn = 1",
+                        held = crate::fact_chain::LAST_HOLDER,
+                    )
+                };
+                let doomed_where = &format!(
+                    "captured_at < ?1
                        AND effort_id IS NULL
                        AND id NOT IN (
                          SELECT id FROM (
@@ -3167,33 +3185,21 @@ impl SqliteFactStore {
                              ORDER BY captured_at DESC, id DESC) rn
                            FROM metric_capture)
                          WHERE rn = 1)
-                       AND id NOT IN (
-                         SELECT capture_id FROM (
-                           SELECT f.capture_id, ROW_NUMBER() OVER (
-                             PARTITION BY f.measure_id, c.stream_id, c.producer, fs.ref
-                             ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
-                           FROM fact f JOIN metric_capture c ON c.id = f.capture_id
-                           JOIN fact_subject fs ON fs.id = f.subject_id
-                           WHERE fs.ref IS NOT NULL AND c.status = 'done')
-                         WHERE rn = 1)
-                       AND id NOT IN (
-                         SELECT capture_id FROM (
-                           SELECT f.capture_id, ROW_NUMBER() OVER (
-                             PARTITION BY f.measure_id, c.stream_id, c.producer, f.path_id
-                             ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
-                           FROM fact f JOIN metric_capture c ON c.id = f.capture_id
-                           WHERE f.path_id IS NOT NULL AND c.status = 'done')
-                         WHERE rn = 1)
-                       AND id NOT IN (
-                         SELECT capture_id FROM (
-                           SELECT f.capture_id, ROW_NUMBER() OVER (
-                             PARTITION BY f.measure_id, c.stream_id, c.producer
-                             ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
-                           FROM fact f JOIN metric_capture c ON c.id = f.capture_id
-                           LEFT JOIN fact_subject fs ON fs.id = f.subject_id
-                           WHERE fs.ref IS NULL AND f.path_id IS NULL
-                             AND c.status = 'done')
-                         WHERE rn = 1)";
+                       AND id NOT IN ({by_subject})
+                       AND id NOT IN ({by_path})
+                       AND id NOT IN ({scalar})",
+                    by_subject = latest(
+                        ", fs.ref",
+                        "JOIN fact_subject fs ON fs.id = f.subject_id",
+                        "fs.ref IS NOT NULL"
+                    ),
+                    by_path = latest(", f.path_id", "", "f.path_id IS NOT NULL"),
+                    scalar = latest(
+                        "",
+                        "LEFT JOIN fact_subject fs ON fs.id = f.subject_id",
+                        "fs.ref IS NULL AND f.path_id IS NULL"
+                    ),
+                );
                 let mut streams: Vec<i64> = {
                     let sql = format!(
                         "SELECT DISTINCT stream_id FROM metric_capture WHERE {doomed_where}"
@@ -3207,10 +3213,23 @@ impl SqliteFactStore {
                     rows
                 };
                 streams.sort_unstable();
+                let doomed: Vec<i64> = {
+                    let sql = format!("SELECT id FROM metric_capture WHERE {doomed_where}");
+                    let mut stmt = tx.prepare(&sql).map_err(map_sql_err)?;
+                    let rows = stmt
+                        .query_map(params![cutoff], |r| r.get::<_, i64>(0))
+                        .map_err(map_sql_err)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(map_sql_err)?;
+                    rows
+                };
+                // A fact a doomed capture stored that a kept one still
+                // holds moves up to it first.
+                crate::fact_chain::rehome(tx, &doomed).map_err(map_sql_err)?;
                 let n = tx
                     .execute(
-                        &format!("DELETE FROM metric_capture WHERE {doomed_where}"),
-                        params![cutoff],
+                        "DELETE FROM metric_capture WHERE id IN (SELECT value FROM json_each(?1))",
+                        params![serde_json::to_string(&doomed).expect("ids serialize")],
                     )
                     .map_err(map_sql_err)?;
                 if n > 0 {
@@ -3445,6 +3464,7 @@ impl SqliteFactStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fact_chain::MAX_CHAIN_DEPTH;
 
     /// tsk978: a store write runs in the retried write transaction — the
     /// measure seeding that failed a fresh daemon's boot with "database is
@@ -3610,6 +3630,246 @@ mod tests {
 
     fn at(ts: &str) -> Timestamp {
         string_to_ts(ts).unwrap()
+    }
+
+    // --- change-only complete captures (V39) -----------------------------
+
+    /// One scanned block: subject `id`, at `id.rs:1`, valued `value`.
+    fn block(m: i64, id: &str, value: f64) -> NewFact {
+        NewFact {
+            subject_kind: Some("block".into()),
+            subject_ref: Some(id.into()),
+            path: Some(format!("{id}.rs")),
+            line: Some(1),
+            ..NewFact::new(m, value)
+        }
+    }
+
+    /// A whole-tree scan by `producer` on stream 1 at `when`.
+    async fn scan(store: &SqliteFactStore, producer: &str, when: &str, facts: Vec<NewFact>) -> i64 {
+        let mut capture = NewMetricCapture::done(1, producer, "scan");
+        capture.captured_at = Some(at(when));
+        store.record_facts(capture, facts).await.unwrap()
+    }
+
+    /// What a read returns for one capture: `(subject, value)`, sorted.
+    fn shape(rows: &[FactRow], capture: i64) -> Vec<(String, f64)> {
+        let mut out: Vec<(String, f64)> = rows
+            .iter()
+            .filter(|r| r.capture_id == capture)
+            .map(|r| (r.subject_ref.clone().unwrap_or_default(), r.value))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// The fact rows `capture` stored itself.
+    async fn stored(store: &SqliteFactStore, capture: i64) -> i64 {
+        store
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT count(*) FROM fact WHERE capture_id = ?1",
+                    [capture],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// A whole-tree scan stores only what changed since the producer's
+    /// previous scan, and every read of a capture still returns everything
+    /// it scanned, as that capture's own facts.
+    #[tokio::test]
+    async fn a_complete_scan_stores_what_changed_and_reads_back_whole() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.dup").await;
+        let many: Vec<String> = (0..10).map(|i| format!("k{i}")).collect();
+        let base = |extra: &[(&str, f64)]| {
+            let mut v: Vec<NewFact> = many.iter().map(|k| block(m, k, 1.0)).collect();
+            v.extend(extra.iter().map(|(k, x)| block(m, k, *x)));
+            v
+        };
+        let c1 = scan(&store, "dup", "2026-07-01T00:00:00Z", base(&[])).await;
+        let c2 = scan(&store, "dup", "2026-07-02T00:00:00Z", base(&[("new", 4.0)])).await;
+        let c3 = scan(&store, "dup", "2026-07-03T00:00:00Z", base(&[("new", 5.0)])).await;
+        let c4 = scan(&store, "dup", "2026-07-04T00:00:00Z", base(&[])).await;
+        assert_eq!(stored(&store, c1).await, 10, "the first scan stores whole");
+        assert_eq!(stored(&store, c2).await, 1, "one added");
+        assert_eq!(stored(&store, c3).await, 1, "one changed");
+        assert_eq!(stored(&store, c4).await, 0, "one removed");
+
+        let mut expected: Vec<(String, f64)> = many.iter().map(|k| (k.clone(), 1.0)).collect();
+        expected.sort_by(|a, b| a.0.cmp(&b.0));
+        let with = |x: f64| {
+            let mut v = expected.clone();
+            v.push(("new".into(), x));
+            v.sort_by(|a, b| a.0.cmp(&b.0));
+            v
+        };
+        for (capture, want) in [
+            (c1, expected.clone()),
+            (c2, with(4.0)),
+            (c3, with(5.0)),
+            (c4, expected.clone()),
+        ] {
+            let one = store.facts_for_captures(m, vec![capture]).await.unwrap();
+            assert_eq!(shape(&one, capture), want, "capture {capture}");
+            assert!(one
+                .iter()
+                .all(|r| r.capture_id == capture && r.producer == "dup"));
+        }
+        let all = store.facts_for_measure(m).await.unwrap();
+        for (capture, want) in [
+            (c1, expected.clone()),
+            (c2, with(4.0)),
+            (c3, with(5.0)),
+            (c4, expected),
+        ] {
+            assert_eq!(shape(&all, capture), want, "history, capture {capture}");
+        }
+        let in_stream = store.facts_for_measure_in_stream(m, 1).await.unwrap();
+        assert_eq!(in_stream.len(), all.len());
+
+        // `v_fact` holds the same rows.
+        let model: Vec<(i64, String, f64)> = store
+            .db
+            .call(|conn| {
+                let mut st = conn.prepare(
+                    "SELECT capture_id, subject_ref, value FROM v_fact
+                      WHERE measure_key = 'acme.dup' ORDER BY capture_id, subject_ref",
+                )?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        let mut engine: Vec<(i64, String, f64)> = all
+            .iter()
+            .map(|r| {
+                (
+                    r.capture_id,
+                    r.subject_ref.clone().unwrap_or_default(),
+                    r.value,
+                )
+            })
+            .collect();
+        engine.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+        assert_eq!(model, engine);
+    }
+
+    /// A scan that changed most of what it restates, or that ends a long
+    /// chain, stores whole: a read never looks far back.
+    #[tokio::test]
+    async fn a_large_change_or_a_long_chain_stores_the_capture_whole() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.dup").await;
+        let set = |tag: &str| -> Vec<NewFact> {
+            (0..4)
+                .map(|i| block(m, &format!("{tag}{i}"), 1.0))
+                .collect()
+        };
+        scan(&store, "dup", "2026-07-01T00:00:00Z", set("a")).await;
+        let changed = scan(&store, "dup", "2026-07-02T00:00:00Z", set("b")).await;
+        assert_eq!(
+            stored(&store, changed).await,
+            4,
+            "a new population stores whole"
+        );
+        let empty = scan(&store, "dup", "2026-07-03T00:00:00Z", vec![]).await;
+        assert!(store
+            .facts_for_captures(m, vec![empty])
+            .await
+            .unwrap()
+            .is_empty());
+
+        let first = scan(&store, "dup", "2026-07-04T00:00:00Z", set("c")).await;
+        assert_eq!(stored(&store, first).await, 4);
+        let mut last = first;
+        for day in 0..MAX_CHAIN_DEPTH as u32 {
+            last = scan(
+                &store,
+                "dup",
+                &format!("2026-08-01T{:02}:{:02}:00Z", day / 60, day % 60),
+                set("c"),
+            )
+            .await;
+        }
+        assert_eq!(
+            stored(&store, last).await,
+            4,
+            "the chain's cap restates whole"
+        );
+        assert_eq!(
+            shape(
+                &store.facts_for_captures(m, vec![last]).await.unwrap(),
+                last
+            )
+            .len(),
+            4
+        );
+    }
+
+    /// A failed scan found out nothing about the tree: the next scan diffs
+    /// against the last one that finished.
+    #[tokio::test]
+    async fn a_failed_capture_is_never_a_base() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.dup").await;
+        let set = |n: usize| -> Vec<NewFact> {
+            (0..n).map(|i| block(m, &format!("k{i}"), 1.0)).collect()
+        };
+        scan(&store, "dup", "2026-07-01T00:00:00Z", set(10)).await;
+        let mut failed = NewMetricCapture::done(1, "dup", "scan");
+        failed.status = "failed".into();
+        failed.captured_at = Some(at("2026-07-02T00:00:00Z"));
+        store.record_facts(failed, vec![]).await.unwrap();
+        let next = scan(&store, "dup", "2026-07-03T00:00:00Z", set(11)).await;
+        assert_eq!(
+            stored(&store, next).await,
+            1,
+            "diffed against the finished scan"
+        );
+        assert_eq!(
+            store.facts_for_captures(m, vec![next]).await.unwrap().len(),
+            11
+        );
+    }
+
+    /// Pruning the capture that stored facts a kept capture still holds
+    /// moves them up to it, so it reads back the same.
+    #[tokio::test]
+    async fn pruning_a_capture_moves_the_facts_a_kept_one_holds() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.dup").await;
+        let set = |x: f64| -> Vec<NewFact> {
+            let mut v: Vec<NewFact> = (0..10).map(|i| block(m, &format!("k{i}"), 1.0)).collect();
+            v.push(block(m, "a", x));
+            v
+        };
+        let old = scan(&store, "dup", "2026-07-01T00:00:00Z", set(1.0)).await;
+        let kept = scan(&store, "dup", "2026-07-02T00:00:00Z", set(2.0)).await;
+        assert_eq!(stored(&store, kept).await, 1);
+        let before = shape(
+            &store.facts_for_captures(m, vec![kept]).await.unwrap(),
+            kept,
+        );
+        let pruned = store
+            .prune_aged_captures(at("2026-07-01T12:00:00Z"))
+            .await
+            .unwrap();
+        assert_eq!(pruned, 1);
+        assert!(store.get_capture(old).await.unwrap().is_none());
+        let after = shape(
+            &store.facts_for_captures(m, vec![kept]).await.unwrap(),
+            kept,
+        );
+        assert_eq!(after, before);
+        assert_eq!(stored(&store, kept).await, 11, "moved up to it");
     }
 
     // --- per-path fold (V54, tsk41) helpers -------------------------------
