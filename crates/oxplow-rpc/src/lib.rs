@@ -43,7 +43,6 @@ pub struct PluginRuntime {
     /// Base URL for the OTLP metrics receiver (epic tsk22) — pointed at via the
     /// agent's `OTEL_EXPORTER_OTLP_ENDPOINT`; the SDK appends `/v1/metrics`.
     pub otlp_base_url: String,
-    pub hook_token: String,
 }
 
 /// Everything a dispatched command may need. Most cores only touch

@@ -579,4 +579,60 @@ mod tests {
             Some(SessionCloseReason::ThreadClosed)
         );
     }
+
+    fn mint(fx: &EffortFixture, session: &AgentSession, stream: oxplow_domain::StreamId) -> String {
+        fx.svc.session_auth.mint(crate::session_auth::Principal {
+            session: session.id,
+            thread: session.thread_id,
+            stream,
+            harness: session.harness.clone(),
+        })
+    }
+
+    /// A closed session's process stops, and so does its bearer: nothing
+    /// can post or call as it after.
+    #[tokio::test]
+    async fn closing_a_session_or_its_thread_retires_its_bearer() {
+        let fx = services_with_effort().await;
+        use oxplow_domain::stores::ThreadStore as _;
+        let stream = fx
+            .svc
+            .thread_store
+            .get(&fx.thread)
+            .await
+            .unwrap()
+            .unwrap()
+            .stream_id;
+        let session = get(&fx, fx.session).await;
+        let token = mint(&fx, &session, stream);
+        run(
+            &fx,
+            &Actor::Human,
+            CLOSE,
+            json!({ "session": agent_session_ref(session.id) }),
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(fx.svc.session_auth.authenticate(&token).is_none());
+
+        let second = crate::test_fixtures::new_thread(&fx.svc, stream, "t").await;
+        let s = open(
+            &fx,
+            &Actor::Human,
+            json!({ "thread": thread_ref(second.id) }),
+        )
+        .await;
+        let token = mint(&fx, &s, stream);
+        run(
+            &fx,
+            &Actor::Human,
+            crate::commands::thread::CLOSE,
+            json!({ "thread": thread_ref(second.id) }),
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(fx.svc.session_auth.authenticate(&token).is_none());
+    }
 }

@@ -4441,6 +4441,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "prost",
+ "rand 0.10.3",
  "rayon",
  "regex",
  "reqwest",
@@ -4531,7 +4532,6 @@ name = "oxplow-control-plane"
 version = "0.7.0"
 dependencies = [
  "axum",
- "base64 0.23.1",
  "bytes",
  "http",
  "http-body",
@@ -4548,7 +4548,6 @@ dependencies = [
  "oxplow-workspace-hack",
  "parking_lot",
  "prost",
- "rand 0.10.3",
  "reqwest",
  "rmcp",
  "serde",

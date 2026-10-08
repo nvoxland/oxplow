@@ -103,18 +103,28 @@ fn hook_url(cp: &ControlPlane, event: &str) -> String {
 
 async fn post_hook(
     cp: &ControlPlane,
+    svc: &Services,
     event: &str,
-    thread: Option<ThreadId>,
+    thread: ThreadId,
     body: serde_json::Value,
 ) -> reqwest::Response {
-    let mut req = reqwest::Client::new()
+    post_hook_as(cp, &common::bearer(svc, thread).await, event, body).await
+}
+
+/// A hook carrying `token`, and nothing else naming who sent it.
+async fn post_hook_as(
+    cp: &ControlPlane,
+    token: &str,
+    event: &str,
+    body: serde_json::Value,
+) -> reqwest::Response {
+    reqwest::Client::new()
         .post(hook_url(cp, event))
-        .header("authorization", format!("Bearer {}", cp.hook_token))
-        .json(&body);
-    if let Some(t) = thread {
-        req = req.header("x-oxplow-thread", t.to_string());
-    }
-    req.send().await.unwrap()
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -131,8 +141,9 @@ async fn hook_post_without_bearer_is_unauthorized() {
 
 #[tokio::test]
 async fn unknown_hook_event_is_acked_not_persisted() {
-    let (cp, _svc, _root, _dir) = boot().await;
-    let resp = post_hook(&cp, "TotallyNovelEvent", None, serde_json::json!({})).await;
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let resp = post_hook(&cp, &svc, "TotallyNovelEvent", tid, serde_json::json!({})).await;
     // Claude Code's HTTP hooks treat anything but 200 as a failure and
     // print a "non-blocking status code" warning into the agent's
     // terminal — every ack path must be a plain 200.
@@ -141,11 +152,13 @@ async fn unknown_hook_event_is_acked_not_persisted() {
 
 #[tokio::test]
 async fn session_start_resets_and_acks() {
-    let (cp, _svc, _root, _dir) = boot().await;
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
     let resp = post_hook(
         &cp,
+        &svc,
         "SessionStart",
-        None,
+        tid,
         serde_json::json!({ "session_id": "s1" }),
     )
     .await;
@@ -159,8 +172,9 @@ async fn pre_tool_use_on_read_only_thread_denies_with_write_guard_shape() {
     let target = root.join("src/x.rs");
     let resp = post_hook(
         &cp,
+        &svc,
         "PreToolUse",
-        Some(tid),
+        tid,
         serde_json::json!({
             "tool_name": "Edit",
             "tool_input": { "file_path": target.to_string_lossy() },
@@ -185,8 +199,9 @@ async fn the_writer_edits_without_any_tracked_work() {
     let target = root.join("src/x.rs");
     let resp = post_hook(
         &cp,
+        &svc,
         "PreToolUse",
-        Some(tid),
+        tid,
         serde_json::json!({
             "tool_name": "Edit",
             "tool_input": { "file_path": target.to_string_lossy() },
@@ -205,16 +220,18 @@ async fn a_stop_is_never_refused_and_keeps_the_final_message() {
     seed_in_progress_task(&svc, tid).await;
     post_hook(
         &cp,
+        &svc,
         "UserPromptSubmit",
-        Some(tid),
+        tid,
         serde_json::json!({ "prompt": "do the thing", "session_id": "s1" }),
     )
     .await;
     let target = root.join("src/x.rs");
     post_hook(
         &cp,
+        &svc,
         "PreToolUse",
-        Some(tid),
+        tid,
         serde_json::json!({
             "tool_name": "Edit",
             "tool_input": { "file_path": target.to_string_lossy() },
@@ -224,8 +241,9 @@ async fn a_stop_is_never_refused_and_keeps_the_final_message() {
 
     let resp = post_hook(
         &cp,
+        &svc,
         "Stop",
-        Some(tid),
+        tid,
         serde_json::json!({ "session_id": "s1", "last_assistant_message": "Did the thing." }),
     )
     .await;
@@ -287,8 +305,9 @@ async fn session_end_clear_drops_the_resume_token() {
     set_resume_session_id(&svc, tid, "cleared-session").await;
     let resp = post_hook(
         &cp,
+        &svc,
         "SessionEnd",
-        Some(tid),
+        tid,
         serde_json::json!({ "session_id": "cleared-session", "reason": "clear" }),
     )
     .await;
@@ -305,8 +324,9 @@ async fn session_end_other_reason_keeps_the_resume_token() {
     set_resume_session_id(&svc, tid, "keep-me").await;
     let resp = post_hook(
         &cp,
+        &svc,
         "SessionEnd",
-        Some(tid),
+        tid,
         serde_json::json!({ "session_id": "keep-me", "reason": "other" }),
     )
     .await;
@@ -323,8 +343,9 @@ async fn session_end_clear_for_stale_session_keeps_newer_token() {
     set_resume_session_id(&svc, tid, "newer-session").await;
     let resp = post_hook(
         &cp,
+        &svc,
         "SessionEnd",
-        Some(tid),
+        tid,
         serde_json::json!({ "session_id": "old-session", "reason": "clear" }),
     )
     .await;
@@ -363,45 +384,136 @@ async fn anchored_sessions(
         .collect()
 }
 
-/// A hook's `X-Oxplow-Session` names the session it came from, though
-/// another session in its thread is newer; one naming no session of the
-/// thread is ignored (the thread's session with a turn running takes it).
+/// A second thread on the seeded stream, with an agent session.
+async fn seed_other_thread(services: &Services) -> ThreadId {
+    let now = Timestamp::from_unix_ms(1);
+    let thread = Thread {
+        id: ThreadId::new(2),
+        stream_id: StreamId::new(1),
+        title: "other".into(),
+        // One writer per stream: the seeded thread is it.
+        status: ThreadStatus::Queued,
+        sort_index: 1,
+        summary: String::new(),
+        summary_updated_at: None,
+        closed_at: None,
+        custom_prompt: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+    services.thread_store.upsert(&thread).await.unwrap();
+    open_second_session(services, thread.id).await;
+    thread.id
+}
+
+/// The thread each logged event of `ty` was anchored to.
+async fn anchored_threads(services: &Services, ty: &str) -> Vec<Option<ThreadId>> {
+    services
+        .event_log_store
+        .read_after(0, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.envelope.event_type == ty)
+        .map(|e| e.envelope.anchors.thread_id)
+        .collect()
+}
+
+/// A hook comes from the session its bearer was minted for, though
+/// another session in its thread is newer.
 #[tokio::test]
-async fn the_session_header_lands_on_the_hook() {
+async fn the_bearer_names_the_hooks_session() {
     let (cp, svc, _root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     let first = session_of(&svc, tid).await;
+    let token = common::bearer_for(&svc, first).await;
     open_second_session(&svc, tid).await;
-    let post = |session: &str| {
-        reqwest::Client::new()
-            .post(hook_url(&cp, "UserPromptSubmit"))
-            .header("authorization", format!("Bearer {}", cp.hook_token))
-            .header("x-oxplow-thread", tid.to_string())
-            .header("x-oxplow-session", session.to_string())
-            .json(&serde_json::json!({ "prompt": "go" }))
-            .send()
-    };
-    assert_eq!(post(&first.to_string()).await.unwrap().status(), 200);
-    assert_eq!(post("ses999").await.unwrap().status(), 200);
+    let resp = post_hook_as(
+        &cp,
+        &token,
+        "UserPromptSubmit",
+        serde_json::json!({ "prompt": "go" }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
     assert_eq!(
         anchored_sessions(&svc, "agent.prompt.submitted").await,
-        vec![Some(first), Some(first)]
+        vec![Some(first)]
     );
 }
 
-/// An export's `X-Oxplow-Session` anchors its event to that session.
+/// What a request says about itself names nobody: headers naming another
+/// thread and session are ignored, and the hook lands on its bearer's.
 #[tokio::test]
-async fn the_session_header_lands_on_an_export() {
+async fn identity_headers_are_ignored() {
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let other = seed_other_thread(&svc).await;
+    let other_session = session_of(&svc, other).await;
+    let token = common::bearer(&svc, tid).await;
+    let resp = reqwest::Client::new()
+        .post(hook_url(&cp, "UserPromptSubmit"))
+        .bearer_auth(&token)
+        .header("x-oxplow-thread", other.to_string())
+        .header("x-oxplow-stream", "str1")
+        .header("x-oxplow-session", other_session.to_string())
+        .json(&serde_json::json!({ "prompt": "go" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        anchored_threads(&svc, "agent.prompt.submitted").await,
+        vec![Some(tid)]
+    );
+    assert_eq!(
+        anchored_sessions(&svc, "agent.prompt.submitted").await,
+        vec![Some(session_of(&svc, tid).await)]
+    );
+}
+
+/// A bearer stops working when its session is minted another (a
+/// relaunch) or revoked (its session closed).
+#[tokio::test]
+async fn a_retired_or_revoked_bearer_is_unauthorized() {
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let session = session_of(&svc, tid).await;
+    let retired = common::bearer_for(&svc, session).await;
+    let live = common::bearer_for(&svc, session).await;
+    let ack = |token: String| {
+        let cp = cp.clone();
+        async move {
+            post_hook_as(
+                &cp,
+                &token,
+                "UserPromptSubmit",
+                serde_json::json!({ "prompt": "go" }),
+            )
+            .await
+            .status()
+        }
+    };
+    assert_eq!(ack(retired).await, 401);
+    assert_eq!(ack(live.clone()).await, 200);
+    svc.session_auth.revoke(session);
+    assert_eq!(ack(live).await, 401);
+}
+
+/// An export comes from its bearer's session, whatever its headers say.
+#[tokio::test]
+async fn the_bearer_names_the_exports_session() {
     let (cp, svc, _root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     let first = session_of(&svc, tid).await;
-    open_second_session(&svc, tid).await;
+    let token = common::bearer_for(&svc, first).await;
+    let other = seed_other_thread(&svc).await;
     let resp = reqwest::Client::new()
         .post(format!("{}/v1/metrics", cp.otlp_base_url()))
-        .header("authorization", format!("Bearer {}", cp.hook_token))
+        .bearer_auth(&token)
         .header("content-type", "application/x-protobuf")
-        .header("x-oxplow-thread", tid.to_string())
-        .header("x-oxplow-session", first.to_string())
+        .header("x-oxplow-thread", other.to_string())
         .body(otlp_claude_body("claude-opus-4-8", 100, 20))
         .send()
         .await
@@ -425,8 +537,9 @@ async fn post_tool_use_edit_acks_200_empty() {
     let target = root.join("src/x.rs");
     let resp = post_hook(
         &cp,
+        &svc,
         "PostToolUse",
-        Some(tid),
+        tid,
         serde_json::json!({
             "tool_name": "Edit",
             "tool_input": { "file_path": target.to_string_lossy() },
@@ -480,8 +593,9 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
     let target = root.join("src/x.rs");
     let resp = post_hook(
         &cp,
+        &svc,
         "PostToolUse",
-        Some(tid),
+        tid,
         serde_json::json!({
             "tool_name": "Edit",
             "tool_input": { "file_path": target.to_string_lossy() },
@@ -505,8 +619,9 @@ async fn post_tool_use_is_persisted_as_a_tool_call() {
     let doc = root.join(".context/usability.md");
     let resp = post_hook(
         &cp,
+        &svc,
         "PostToolUse",
-        Some(tid),
+        tid,
         serde_json::json!({
             "tool_name": "Read",
             "tool_input": { "file_path": doc.to_string_lossy() },
@@ -585,7 +700,7 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
             .to_string()
     };
     let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
-    let first = post_hook(&cp, "UserPromptSubmit", Some(tid), prompt())
+    let first = post_hook(&cp, &svc, "UserPromptSubmit", tid, prompt())
         .await
         .json()
         .await
@@ -594,7 +709,7 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
         context(first).contains("Storage? → main DB"),
         "first prompt of a session carries decisions"
     );
-    let second = post_hook(&cp, "UserPromptSubmit", Some(tid), prompt())
+    let second = post_hook(&cp, &svc, "UserPromptSubmit", tid, prompt())
         .await
         .json()
         .await
@@ -606,12 +721,13 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
     // A compaction / resume starts a new context: decisions come back.
     post_hook(
         &cp,
+        &svc,
         "SessionStart",
-        Some(tid),
+        tid,
         serde_json::json!({ "session_id": "s1", "source": "compact" }),
     )
     .await;
-    let third = post_hook(&cp, "UserPromptSubmit", Some(tid), prompt())
+    let third = post_hook(&cp, &svc, "UserPromptSubmit", tid, prompt())
         .await
         .json()
         .await
@@ -628,12 +744,17 @@ async fn ingest_failure_still_acks_200() {
     // ingest. The agent can't do anything useful with a 500 — it just
     // prints the warning line — so the handler logs server-side and
     // acks 200 {} anyway.
-    let (cp, _svc, _root, _dir) = boot().await;
-    let bogus = ThreadId::new(999_999);
-    let resp = post_hook(
+    let (cp, svc, _root, _dir) = boot().await;
+    let token = svc.session_auth.mint(oxplow_app::session_auth::Principal {
+        session: oxplow_domain::AgentSessionId::new(999_999),
+        thread: ThreadId::new(999_999),
+        stream: StreamId::new(1),
+        harness: "claude".into(),
+    });
+    let resp = post_hook_as(
         &cp,
+        &token,
         "UserPromptSubmit",
-        Some(bogus),
         serde_json::json!({ "prompt": "hello", "session_id": "s1" }),
     )
     .await;
@@ -783,18 +904,17 @@ fn otlp_codex_logs_body(
 async fn post_otlp(
     cp: &ControlPlane,
     svc: &oxplow_app::Services,
-    thread: Option<ThreadId>,
+    thread: ThreadId,
     body: Vec<u8>,
 ) -> reqwest::Response {
-    let mut req = reqwest::Client::new()
+    let resp = reqwest::Client::new()
         .post(format!("{}/v1/metrics", cp.otlp_base_url()))
-        .header("authorization", format!("Bearer {}", cp.hook_token))
+        .bearer_auth(common::bearer(svc, thread).await)
         .header("content-type", "application/x-protobuf")
-        .body(body);
-    if let Some(t) = thread {
-        req = req.header("x-oxplow-thread", t.to_string());
-    }
-    let resp = req.send().await.unwrap();
+        .body(body)
+        .send()
+        .await
+        .unwrap();
     svc.event_pump.run_once().await.unwrap();
     resp
 }
@@ -815,13 +935,7 @@ async fn otlp_metrics_without_bearer_is_unauthorized() {
 async fn otlp_metrics_ingests_token_facts_attributed_by_headers() {
     let (cp, svc, _root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
-    let resp = post_otlp(
-        &cp,
-        &svc,
-        Some(tid),
-        otlp_claude_body("claude-opus-4-8", 100, 20),
-    )
-    .await;
+    let resp = post_otlp(&cp, &svc, tid, otlp_claude_body("claude-opus-4-8", 100, 20)).await;
     // OTLP success ack is always a 200 (best-effort side-band).
     assert_eq!(resp.status(), 200);
 
@@ -845,7 +959,7 @@ async fn otlp_metrics_ingests_codex_histogram_facts() {
     let resp = post_otlp(
         &cp,
         &svc,
-        Some(tid),
+        tid,
         otlp_codex_body("gpt-5-codex", 100.0, 20.0, 30.0),
     )
     .await;
@@ -874,7 +988,7 @@ async fn otlp_logs_body_at_metrics_endpoint_ingests_codex_token_facts() {
     let resp = post_otlp(
         &cp,
         &svc,
-        Some(tid),
+        tid,
         otlp_codex_logs_body("gpt-5.5", 5000, 1000, 200, 50),
     )
     .await;
@@ -891,20 +1005,4 @@ async fn otlp_logs_body_at_metrics_endpoint_ingests_codex_token_facts() {
     assert!(facts
         .iter()
         .all(|f| f.subject_ref.as_deref() == Some("model:gpt-5.5")));
-}
-
-#[tokio::test]
-async fn otlp_metrics_without_attribution_headers_is_dropped_but_acked() {
-    let (cp, svc, _root, _dir) = boot().await;
-    // No X-Oxplow-Thread/Stream → nothing to attribute to; accept + drop.
-    let resp = post_otlp(&cp, &svc, None, otlp_claude_body("m", 100, 20)).await;
-    assert_eq!(resp.status(), 200);
-    let measure = svc
-        .fact_store
-        .get_measure("oxplow.tokens")
-        .await
-        .unwrap()
-        .unwrap();
-    let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
-    assert!(facts.is_empty(), "no facts without attribution headers");
 }

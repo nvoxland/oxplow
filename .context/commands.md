@@ -818,20 +818,17 @@ each with its reason, and `read_write_split_covers_every_tool` fails on a
 tool in neither list — a new write tool is a deliberate, reviewed
 addition).
 
-**Caller identity.** Every harness carries the acting thread on the
-HTTP request, and `oxplow_mcp::McpCaller::from_parts` reads it from the
-`http::request::Parts` rmcp attaches to each tool call — the
-`X-Oxplow-Thread` / `X-Oxplow-Stream` headers (ACP: `McpHttp.headers`;
-opencode: `{env:OXPLOW_THREAD_ID}` in its config headers; Claude: a
-per-thread `mcp-config.<thread>.json` with the literal headers, since
-Claude's MCP config reads no env vars), or `?thread=…&stream=…` on the
-endpoint URL (Codex, whose config has no per-session headers). A
-connection with neither is an anonymous agent: it may list, and
-`run_command` refuses it — no run without an actor
-to audit it to. **The header is a claim, not a proof**:
-`OxplowMcp::verified_actor` resolves the thread and refuses an unknown
-thread or a stream header that isn't the thread's stream, and the actor
-carries the thread's real stream.
+**Caller identity.** The control plane admits an MCP request only with an
+agent session's bearer, minted at its launch, and puts that session's
+`Principal` (session, thread, stream, harness) in the request's
+extensions; `oxplow_mcp::McpCaller::from_parts` reads it from the
+`http::request::Parts` rmcp attaches to each tool call
+([agent-model.md](./agent-model.md) "Caller identity"). Nothing the
+request says about itself — an `X-Oxplow-Thread` header, a `?thread=`
+query — names the caller. A transport with no HTTP parts (stdio, a unit
+test) is an anonymous agent: it may list, and `run_command` refuses it —
+no run without an actor to audit it to. `OxplowMcp::verified_actor` still
+resolves the thread, refusing one that no longer exists.
 The wire test `crates/oxplow-control-plane/tests/mcp_wire.rs` proves the
 headers reach `command.executed`'s `source = agent:thr…`.
 
