@@ -19,6 +19,7 @@ import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { SettingsSlotSections } from "../lens/SettingsSlotSections.js";
 import { AiSection } from "../components/AiSection.js";
+import { NewThreadSessionSetting } from "../components/NewThreadSessionSetting.js";
 import { ProposalCard } from "../components/Proposals/ProposalCard.js";
 import { decide, proposalForSetting, useProposals, type Proposal } from "../proposals.js";
 import { useAgentHarnesses } from "../useAgentHarnesses.js";
@@ -170,6 +171,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             Enabled agents for this project. The first enabled agent is the default for new sessions.
           </Hint>
           <AgentPicker harnesses={harnesses} agents={agents} onChange={setAgentsState} disabled={!loaded || saving} />
+          <NewThreadSessionSetting harnesses={harnesses} />
           {harnesses
             .filter((h) => agents.includes(h.id))
             .flatMap((h) =>
@@ -364,7 +366,9 @@ function AgentPicker({
 
 /** Where a person-only setting's direct control is, if the page has one. */
 function controlFor(key: string): string | null {
-  if (["agents", "agentConfig", "acpAgents", "agentPromptAppend"].includes(key)) return "settings-agents";
+  if (["agents", "agentConfig", "acpAgents", "agentPromptAppend", "personal.newThreadSession"].includes(key)) {
+    return "settings-agents";
+  }
   if (key === "ai" || key.startsWith("ai.")) return "settings-ai";
   if (key === "lsp") return "settings-lsp";
   if (key === "extensions") return "settings-extensions";

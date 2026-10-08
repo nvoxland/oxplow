@@ -10,20 +10,25 @@ interface NewSessionPageProps {
   thread: Thread | null;
   /** The registered harnesses in priority order (`useAgentHarnesses`). */
   harnesses: HarnessListing[];
-  /** Open the session; resolves once its row exists (its tab follows). */
-  onStart(harness: string, acpAgent: string | null): Promise<void>;
+  /** Open the session; resolves once its row exists (its tab follows).
+   *  `remember`: new threads start this agent from now on. */
+  onStart(harness: string, acpAgent: string | null, remember: boolean): Promise<void>;
+  /** Leave the thread without a session (the picker closes).
+   *  `remember`: new threads start with none from now on. */
+  onNoSession(remember: boolean): Promise<void>;
 }
 
 /**
- * The session picker: what a thread with no agent session shows.
- * Starting one only opens its slot — the new
+ * The session picker: what a new thread opens with when the person's
+ * `newThreadSession` is `ask`. Starting one only opens its slot — the new
  * tab starts its process when it mounts, and nothing is typed into it.
  * It offers no prompts to hand an agent: there is no agent here yet.
  */
-export function NewSessionPage({ thread, harnesses, onStart }: NewSessionPageProps) {
+export function NewSessionPage({ thread, harnesses, onStart, onNoSession }: NewSessionPageProps) {
   const [acpAgents, setAcpAgents] = useState<AcpAgentListing[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [remember, setRemember] = useState(false);
   const acpEnabled = harnesses.some((h) => h.enabled && h.chat);
   useEffect(() => {
     if (!acpEnabled) return;
@@ -51,7 +56,7 @@ export function NewSessionPage({ thread, harnesses, onStart }: NewSessionPagePro
               setError(null);
               try {
                 const { harness, acpAgent } = parseAgentChoice(picked);
-                await onStart(harness, acpAgent);
+                await onStart(harness, acpAgent, remember);
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               } finally {
@@ -77,7 +82,37 @@ export function NewSessionPage({ thread, harnesses, onStart }: NewSessionPagePro
             <button type="submit" data-testid="new-session-start" disabled={busy || !thread || !picked} style={startStyle}>
               Start
             </button>
+            <button
+              type="button"
+              data-testid="new-session-none"
+              disabled={busy}
+              style={noneStyle}
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                try {
+                  await onNoSession(remember);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : String(err));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              No Session in This Thread
+            </button>
           </form>
+          <label style={rememberStyle} title="Change it later in Settings → Agents">
+            <input
+              type="checkbox"
+              data-testid="new-session-remember"
+              checked={remember}
+              disabled={busy}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            Remember this for new threads
+            <span style={{ color: "var(--text-muted)" }}>(Settings → Agents changes it)</span>
+          </label>
           {error ? (
             <div data-testid="new-session-error" style={{ color: "var(--severity-high)" }}>
               {error}
@@ -96,6 +131,26 @@ const selectStyle = {
   borderRadius: 4,
   padding: "4px 6px",
   fontSize: "var(--text-sm)",
+} as const;
+
+const noneStyle = {
+  background: "transparent",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 4,
+  padding: "4px 12px",
+  fontSize: "var(--text-sm)",
+  cursor: "pointer",
+} as const;
+
+const rememberStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  marginTop: 10,
+  fontSize: "var(--text-sm)",
+  color: "var(--text-secondary)",
+  cursor: "pointer",
 } as const;
 
 const startStyle = {

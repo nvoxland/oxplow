@@ -25,10 +25,24 @@ pages are THE shell.
   thread's tabs, in the order the sessions opened: its terminal or its
   ACP chat. The tabs follow the rows — `useThreadSessions` reads
   `v_agent_session`, and `reconcileSessionTabs` (`tabs/sessionTabs.ts`)
-  keeps each open session's tab first and drops a closed one's. A thread
-  with no open session shows the **session picker** (`page:new-session`,
-  `NewSessionPage`); each agent's command starts a session directly. A process
-  survives switches; closing a session's tab closes the session.
+  keeps each open session's tab first and drops a closed one's — a
+  session opened later still goes ahead of every other tab. **A new
+  thread** (one with no tab list yet; they persist, so it's one never
+  opened here) with no session opens as the person's `newThreadSession`
+  says (`newThreadTabs` in `tabs/sessionTabs.ts`, applied by App's
+  `openNewThread`): `ask` (the default) opens the **session picker**
+  (`page:new-session`, `NewSessionPage`), `none` opens nothing, and an
+  agent starts its session — or asks, if it can't start any more. The
+  picker is an ordinary tab after that: its × closes it for good, and
+  closing a thread's last session leaves its other tabs (or home), not
+  the picker. The picker's **No Session in This Thread** closes it, and
+  its **Remember this for new threads** checkbox saves the choice (the
+  agent started, or `none`) as `newThreadSession`; Settings → Agents has
+  the same choice ("New threads start with",
+  `components/NewThreadSessionSetting.tsx`). The launcher's New Agent
+  Session… opens the picker, and each agent's command starts a session
+  directly. A process survives switches; closing a session's tab closes
+  the session.
 - A **page** is anything addressable inside a tab body — file, task,
   wiki page, finding, dashboard, settings, agent session. Pages share a
   common chrome (header + collapsible Backlinks panel).
@@ -685,7 +699,7 @@ kinds slot in without re-discovering the layout.
   active tab. Mutated by `setCenterActive` (which writes into the
   per-thread map for the current thread). `HOME_TAB` (nothing chosen)
   falls back to the thread's home tab: its first agent session's, else
-  the session picker.
+  the session picker if it's open, else its first tab.
 - **`threadPageMru: Record<string, string[]>`** — per-thread tab
   recency, most-recently-used first. In-memory (like
   `threadCenterActive`); rebuilt as tabs are activated. A `centerActive`

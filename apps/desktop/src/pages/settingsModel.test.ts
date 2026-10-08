@@ -21,10 +21,11 @@ test("settings group by what they're about, in a fixed order", () => {
     row("agents", { humanOnly: true }),
     row("metrics.gh.prs"),
     row("zones"),
+    row("personal.newThreadSession", { origin: "personal", humanOnly: true }),
   ]);
   expect(groups.map((g) => [g.title, g.settings.map((s) => s.key)])).toEqual([
     ["Project", ["zones"]],
-    ["Agents", ["agents"]],
+    ["Agents", ["agents", "personal.newThreadSession"]],
     ["AI", ["ai.roles.main"]],
     ["Snapshots", ["snapshotRetentionDays"]],
     ["Metrics & Data", ["metrics.gh.prs"]],

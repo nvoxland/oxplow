@@ -587,9 +587,12 @@ to `RawConfig` makes it managed, documented and settable at once.
 (the default) or `layer: personal`: `.oxplow/personal.yaml`, a person's
 own layer over the project's, which git ignores (`.oxplow/.gitignore`
 keeps only `project.yaml`). It holds only `oxplow_config::PERSONAL_KEYS`
-(`activeProviders`, a person's choice of implementations); another key
-there is refused, by the command and by the loader. A personal key keeps
-its key's human-only rule. `config.changed@2` names the `layer`; `@1`
+(`activeProviders`, a person's choice of implementations, and
+`newThreadSession`, what a new thread starts with — `ask`, `none` or an
+agent — which has no project counterpart and so no `project.yaml`
+schema; the layer's loader validates it); another key there is refused,
+by the command and by the loader. Any write to the personal layer needs
+the person's confirmation, so an agent's change waits as a proposal. `config.changed@2` names the `layer`; `@1`
 payloads were all the project's (V14 moved them). `effective_config`
 shows the layer as its own `personal.<key>` row, origin `personal`.
 `set_zones` is gone (tsk392): `zones` is just a key.

@@ -106,6 +106,7 @@ import { AgentSessionPage } from "./pages/AgentSessionPage.js";
 import { NewSessionPage } from "./pages/NewSessionPage.js";
 import { InlinePromptStrip } from "./components/InlinePromptStrip.js";
 import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
+import { agentChoiceValue, newThreadOpening, saveNewThreadSession } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { useThreadSessions } from "./agentSessions.js";
@@ -149,7 +150,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -262,7 +263,7 @@ async function isWorkspaceDir(streamId: string, path: string): Promise<boolean> 
 }
 
 /** No tab chosen: the thread's home tab shows — its first agent session's,
- *  else the session picker (`homeTabOf`). */
+ *  else the session picker if it's open, else its first tab (`homeTabOf`). */
 const HOME_TAB = "";
 
 /** The tab a thread falls back to: its first agent session's, else the
@@ -1693,16 +1694,49 @@ export function App() {
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
   // A thread's agent-session tabs follow its open sessions (their rows):
-  // each open one's tab leads, a closed one's goes, and a thread with none
-  // shows the session picker.
+  // each open one's tab leads, a closed one's goes. A thread seen here for
+  // the first time (no tab list yet — they persist) with no session opens
+  // the way the person's `newThreadSession` says: the session picker, no
+  // session, or that agent's session.
   useEffect(() => {
     if (!selectedThreadId || selectedThreadSessions === null) return;
+    if (threadPageTabs[selectedThreadId] === undefined && selectedThreadSessions.length === 0) {
+      const threadId = selectedThreadId;
+      setThreadPageTabs((prev) => (prev[threadId] ? prev : { ...prev, [threadId]: [] }));
+      void openNewThread(threadId);
+      return;
+    }
     setThreadPageTabs((prev) => {
       const current = prev[selectedThreadId] ?? [];
       const next = reconcileSessionTabs(current, selectedThreadSessions);
       return next === current ? prev : { ...prev, [selectedThreadId]: next };
     });
   }, [selectedThreadId, selectedThreadSessions, threadPageTabs]);
+
+  async function openNewThread(threadId: string) {
+    try {
+      const opening = await newThreadOpening();
+      if (opening.tabs.length > 0) {
+        setThreadPageTabs((prev) => {
+          const current = prev[threadId] ?? [];
+          if (current.some((t) => t.kind === "new-session")) return prev;
+          return { ...prev, [threadId]: [...opening.tabs, ...current] };
+        });
+      }
+      if (opening.start) {
+        const opened = await openAgentSession(threadId, opening.start.harness, opening.start.acpAgent);
+        setThreadCenterActive((prev) => ({ ...prev, [threadId]: agentSessionRef(opened.id).id }));
+      }
+    } catch (error) {
+      // Couldn't read the choice or start the agent: ask instead.
+      logUi("warn", "opening a new thread failed; showing the session picker", { error: String(error) });
+      setThreadPageTabs((prev) => {
+        const current = prev[threadId] ?? [];
+        if (current.some((t) => t.kind === "new-session")) return prev;
+        return { ...prev, [threadId]: [newSessionRef(), ...current] };
+      });
+    }
+  }
 
   const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
 
@@ -2486,13 +2520,18 @@ export function App() {
           <NewSessionPage
             thread={selectedThread}
             harnesses={harnesses}
-            onStart={async (harness, acpAgent) => {
+            onStart={async (harness, acpAgent, remember) => {
               if (!selectedThread) return;
+              if (remember) await saveNewThreadSession(agentChoiceValue(harness, acpAgent));
               const opened = await openAgentSession(selectedThread.id, harness, acpAgent);
               // The picker gives way to the session's tab (it follows the
               // row once the model re-reads).
               closePageTab(ref.id);
               setCenterActive(agentSessionRef(opened.id).id);
+            }}
+            onNoSession={async (remember) => {
+              if (remember) await saveNewThreadSession("none");
+              closePageTab(ref.id);
             }}
           />
         ),

@@ -73,7 +73,7 @@ pub struct SetInput {
     pub value: Value,
     /// `project` (the default: `.oxplow/project.yaml`, shared) or
     /// `personal` (`.oxplow/personal.yaml`, a person's own; only
-    /// `activeProviders`).
+    /// `activeProviders` and `newThreadSession`, which is only there).
     #[serde(default)]
     pub layer: Layer,
 }
@@ -163,8 +163,12 @@ fn known_key(key: &str) -> Result<ConfigKey, CommandError> {
     })
 }
 
-/// A human-only key needs a person's confirmation; the rest don't.
+/// A human-only key, and anything in a person's own layer, needs a
+/// person's confirmation; the rest don't.
 fn confirm_for_key(input: &Value) -> Confirm {
+    if input.get("layer").and_then(|l| l.as_str()) == Some("personal") {
+        return Confirm::Always;
+    }
     match input
         .get("key")
         .and_then(|k| k.as_str())
@@ -193,7 +197,16 @@ pub(crate) fn change(
     value: Option<Value>,
     layer: Layer,
 ) -> Result<HandlerOutput, CommandError> {
-    let spec = known_key(key)?;
+    let personal_only = layer == Layer::Personal
+        && oxplow_config::PERSONAL_KEYS.contains(&key)
+        && config_key(key).is_none();
+    // A personal-only key (`newThreadSession`) has no project.yaml schema;
+    // the personal layer's own load validates it.
+    let spec = if personal_only {
+        None
+    } else {
+        Some(known_key(key)?)
+    };
     if layer == Layer::Personal && !oxplow_config::PERSONAL_KEYS.contains(&key) {
         return Err(CommandError::Invalid {
             field: Some("/layer".into()),
@@ -210,6 +223,8 @@ pub(crate) fn change(
                 message: format!("`{key}` cannot be set to null; use oxplow.config.unset"),
             });
         }
+    }
+    if let (Some(v), Some(spec)) = (&value, &spec) {
         InputValidator::compile(&spec.schema)?
             .check(v)
             .map_err(|e| match e {
@@ -536,6 +551,63 @@ mod tests {
             )
             .await
             .is_err());
+    }
+
+    /// What a new thread starts with is a person's own key, with no
+    /// project counterpart: a person sets and unsets it in their layer, an
+    /// agent's change to it waits for them, and an empty choice is refused.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_new_thread_session_choice_is_a_persons_own() {
+        let (dir, target, bus) = setup(None);
+        let human = Actor::Human;
+        let set = |value: Value| json!({ "key": "newThreadSession", "value": value, "layer": "personal" });
+        bus.run(&human, SET, set(json!("none")), true)
+            .await
+            .unwrap();
+        let personal = std::fs::read_to_string(dir.path().join(".oxplow/personal.yaml")).unwrap();
+        assert!(personal.contains("newThreadSession: none"), "{personal}");
+        assert_eq!(
+            target
+                .config
+                .read()
+                .unwrap()
+                .personal_new_thread_session
+                .as_deref(),
+            Some("none")
+        );
+        let err = bus
+            .run(&agent(), SET, set(json!("claude")), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CommandError::Proposed { .. } | CommandError::NeedsConfirmation { .. }
+            ),
+            "{err:?}"
+        );
+        assert!(bus.run(&human, SET, set(json!("")), true).await.is_err());
+        assert!(bus
+            .run(
+                &human,
+                SET,
+                json!({ "key": "newThreadSession", "value": "none" }),
+                true
+            )
+            .await
+            .is_err());
+        bus.run(
+            &human,
+            UNSET,
+            json!({ "key": "newThreadSession", "layer": "personal" }),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            target.config.read().unwrap().personal_new_thread_session,
+            None
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

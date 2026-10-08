@@ -106,9 +106,7 @@ pub fn effective_config(
             let spec = keys.iter().find(|k| k.key == *key);
             out.push(EffectiveSetting {
                 key: format!("personal.{key}"),
-                doc: format!(
-                    "Your own `{key}`, over the project's (.oxplow/personal.yaml, which git ignores)."
-                ),
+                doc: oxplow_config::personal_key_doc(key).to_string(),
                 value,
                 origin: ConfigOrigin::Personal,
                 extension: None,
@@ -235,6 +233,24 @@ mod tests {
             serde_json::json!({ "effort_policy": "none" })
         );
         assert_eq!(find(&all, "activeProviders").origin, ConfigOrigin::Default);
+    }
+
+    /// What a new thread starts with shows as the person's own row.
+    #[test]
+    fn a_new_thread_session_choice_shows_as_personal() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            "newThreadSession: none\n",
+        )
+        .unwrap();
+        let config = oxplow_config::load_project_config(dir.path()).unwrap();
+        let all = effective_config(&config, dir.path(), None, None, &[]);
+        let row = find(&all, "personal.newThreadSession");
+        assert_eq!(row.origin, ConfigOrigin::Personal);
+        assert_eq!(row.value, serde_json::json!("none"));
+        assert!(row.doc.contains("new thread"), "{}", row.doc);
     }
 
     /// P6.H1: a project-set key is `project`; an unset one is `default`,

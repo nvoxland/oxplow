@@ -56,3 +56,63 @@ test("search starts an enabled agent's session directly", async ({ fresh }) => {
   await expect(tab).toBeVisible();
   await expect(page.getByTestId("page-new-session")).toBeHidden();
 });
+
+const PICKER_CLOSE = "center-tab-close-page:new-session";
+
+/** A new thread from the navigator: the stream's menu, Add thread, a title. */
+async function addThread(page: import("@playwright/test").Page, daemon: import("../../support/daemon.js").Daemon, title: string) {
+  const [stream] = await ipc<{ id: string }[]>(daemon, "list_streams");
+  await page.getByTestId(`navigator-strip-stream-${stream!.id}`).click({ button: "right" });
+  await page.getByTestId("menu-item-stream.add-thread").click();
+  await page.getByTestId("navigator-new-thread-input").fill(title);
+  await page.keyboard.press("Enter");
+}
+
+/// The picker is an ordinary tab: its × closes it for good (a reload
+/// doesn't bring it back), and No Session in This Thread does the same.
+test("the picker closes, and stays closed", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  await page.goto("/");
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await page.getByTestId(PICKER_CLOSE).click();
+  await expect(page.getByTestId("page-new-session")).toBeHidden();
+  await page.reload();
+  await expect(page.getByTestId("navigator-strip")).toBeVisible();
+  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
+
+  await addThread(page, daemon, "Research");
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await page.getByTestId("new-session-none").click();
+  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
+});
+
+/// Remember This makes the choice what new threads start with: none opens
+/// no picker; an agent starts that agent's session.
+test("a remembered choice is what new threads start with", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  await ipc(daemon, "set_agents", { agents: ["acp", "codex"] });
+  await page.goto("/");
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await page.getByTestId("new-session-remember").check();
+  await page.getByTestId("new-session-none").click();
+  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
+
+  await addThread(page, daemon, "Quiet");
+  await expect(page.getByTestId("navigator-strip").getByTitle("Quiet")).toBeVisible();
+  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
+  await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(0);
+
+  // Remember an agent from the picker, which the launcher still opens.
+  await page.getByTestId("title-bar-search").click();
+  await page.keyboard.type("new agent session");
+  await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
+  await page.getByTestId("new-session-agent").selectOption("codex");
+  await page.getByTestId("new-session-remember").check();
+  await page.getByTestId("new-session-start").click();
+  await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(1);
+
+  await addThread(page, daemon, "Busy");
+  await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(1);
+  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
+  await expect(page.getByTestId("terminal-ended")).toBeVisible();
+});

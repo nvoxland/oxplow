@@ -71,6 +71,7 @@ test("a thread with no agent session shows the picker, with no prompts", () => {
         { id: "opencode", title: "OpenCode", chat: false, enabled: false },
       ]}
       onStart={async () => {}}
+      onNoSession={async () => {}}
     />,
   );
   expect(emptyStates(container).length).toBe(1);

@@ -31,12 +31,27 @@ pub const OXPLOW_CONFIG_FILE: &str = "project.yaml";
 
 /// A person's own layer over the project's config, inside
 /// [`OXPLOW_STATE_DIR`] (`<project>/.oxplow/personal.yaml`): their choice of
-/// implementations (`activeProviders`), which git ignores (`.oxplow`
-/// ignores everything but `project.yaml`).
+/// implementations (`activeProviders`) and what a new thread starts with
+/// (`newThreadSession`), which git ignores (`.oxplow` ignores everything
+/// but `project.yaml`).
 pub const PERSONAL_CONFIG_FILE: &str = "personal.yaml";
 
 /// The keys a person's layer may set.
-pub const PERSONAL_KEYS: &[&str] = &["activeProviders"];
+pub const PERSONAL_KEYS: &[&str] = &["activeProviders", "newThreadSession"];
+
+/// What a personal key is, for Settings.
+pub fn personal_key_doc(key: &str) -> &'static str {
+    match key {
+        "activeProviders" => {
+            "Your own `activeProviders`, over the project's (.oxplow/personal.yaml, which git ignores)."
+        }
+        "newThreadSession" => {
+            "What a new thread starts with: `ask` (the session picker), `none`, or an agent \
+             (.oxplow/personal.yaml, which git ignores)."
+        }
+        _ => "",
+    }
+}
 
 /// Absolute path to a project's personal layer:
 /// `<project_dir>/.oxplow/personal.yaml`.
@@ -684,6 +699,11 @@ pub struct OxplowConfig {
     /// `.oxplow/personal.yaml`), over the project's.
     #[serde(rename = "personalActiveProviders")]
     pub personal_active_providers: std::collections::BTreeMap<String, String>,
+    /// What a new thread starts with, a person's own (`newThreadSession`
+    /// in `.oxplow/personal.yaml`): `ask` (the session picker), `none`, or
+    /// an agent (`<harness>` / `<harness>:<acp agent>`). Unset means `ask`.
+    #[serde(rename = "personalNewThreadSession")]
+    pub personal_new_thread_session: Option<String>,
     /// Core components no extension's replacement may take over
     /// (`replacementsOff: [work_item.board]`): oxplow's own shows there
     /// even when the active provider's extension replaces it.
@@ -967,7 +987,8 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
             "project config not found; using defaults"
         );
         return Ok(OxplowConfig {
-            personal_active_providers: personal,
+            personal_active_providers: personal.active_providers,
+            personal_new_thread_session: personal.new_thread_session,
             ..default_config(fallback_name)
         });
     }
@@ -975,7 +996,8 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     let raw = std::fs::read_to_string(&config_path)?;
     let doc: serde_yaml::Value = serde_yaml::from_str(&raw)?;
     let config = OxplowConfig {
-        personal_active_providers: personal,
+        personal_active_providers: personal.active_providers,
+        personal_new_thread_session: personal.new_thread_session,
         ..parse_project_config(doc, &fallback_name)?
     };
     info!(
@@ -988,11 +1010,40 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     Ok(config)
 }
 
-/// The person's layer (`.oxplow/personal.yaml`): their `activeProviders`,
-/// empty when the file is absent.
-fn load_personal(
-    project_dir: &Path,
-) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
+/// A person's layer (`.oxplow/personal.yaml`), as it loads.
+#[derive(Debug, Clone, Default)]
+struct PersonalLayer {
+    active_providers: std::collections::BTreeMap<String, String>,
+    new_thread_session: Option<String>,
+}
+
+impl PersonalLayer {
+    fn of(config: &OxplowConfig) -> Self {
+        Self {
+            active_providers: config.personal_active_providers.clone(),
+            new_thread_session: config.personal_new_thread_session.clone(),
+        }
+    }
+
+    /// As the file holds it.
+    fn to_mapping(&self) -> serde_yaml::Mapping {
+        let mut map = serde_yaml::Mapping::new();
+        if !self.active_providers.is_empty() {
+            map.insert(
+                "activeProviders".into(),
+                serde_yaml::to_value(&self.active_providers).expect("a map serializes"),
+            );
+        }
+        if let Some(choice) = &self.new_thread_session {
+            map.insert("newThreadSession".into(), choice.as_str().into());
+        }
+        map
+    }
+}
+
+/// The person's layer (`.oxplow/personal.yaml`); empty when the file is
+/// absent.
+fn load_personal(project_dir: &Path) -> Result<PersonalLayer, ConfigError> {
     let path = personal_path(project_dir);
     if !path.exists() {
         return Ok(Default::default());
@@ -1003,9 +1054,7 @@ fn load_personal(
 
 /// Validate a personal layer: only [`PERSONAL_KEYS`], each as the project
 /// file would take it.
-fn parse_personal(
-    doc: serde_yaml::Value,
-) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
+fn parse_personal(doc: serde_yaml::Value) -> Result<PersonalLayer, ConfigError> {
     let map = match doc {
         serde_yaml::Value::Mapping(m) => m,
         serde_yaml::Value::Null => return Ok(Default::default()),
@@ -1015,7 +1064,7 @@ fn parse_personal(
             ))
         }
     };
-    let mut active = Default::default();
+    let mut layer = PersonalLayer::default();
     for (key, value) in map {
         match key.as_str() {
             Some("activeProviders") => {
@@ -1023,8 +1072,18 @@ fn parse_personal(
                     .map_err(|e| {
                         ConfigError::Invalid(format!(".oxplow/personal.yaml: activeProviders: {e}"))
                     })?;
-                active = validate_active_providers(raw)
+                layer.active_providers = validate_active_providers(raw)
                     .map_err(|e| ConfigError::Invalid(format!(".oxplow/personal.yaml: {e}")))?;
+            }
+            Some("newThreadSession") => {
+                let choice = value.as_str().map(str::trim).unwrap_or_default();
+                if choice.is_empty() {
+                    return Err(ConfigError::Invalid(
+                        ".oxplow/personal.yaml: newThreadSession must be `ask`, `none` or an agent"
+                            .into(),
+                    ));
+                }
+                layer.new_thread_session = Some(choice.to_string());
             }
             other => {
                 return Err(ConfigError::Invalid(format!(
@@ -1035,7 +1094,7 @@ fn parse_personal(
             }
         }
     }
-    Ok(active)
+    Ok(layer)
 }
 
 /// `key`'s value in `config`'s personal layer, as the file holds it;
@@ -1045,29 +1104,53 @@ pub fn personal_value(config: &OxplowConfig, key: &str) -> Option<serde_json::Va
         "activeProviders" if !config.personal_active_providers.is_empty() => {
             serde_json::to_value(&config.personal_active_providers).ok()
         }
+        "newThreadSession" => config
+            .personal_new_thread_session
+            .as_ref()
+            .map(|c| serde_json::Value::String(c.clone())),
         _ => None,
     }
 }
 
-/// `config` with `key` set (`Some`) or removed (`None`) in its personal
-/// layer, validated as the file would load.
-pub fn with_personal_key(
-    config: &OxplowConfig,
+/// `layer` with `key` set (`Some`) or removed (`None`), validated as the
+/// file would load.
+fn personal_with(
+    layer: serde_yaml::Mapping,
     key: &str,
     value: Option<&serde_json::Value>,
-) -> Result<OxplowConfig, ConfigError> {
+) -> Result<serde_yaml::Mapping, ConfigError> {
     if !PERSONAL_KEYS.contains(&key) {
         return Err(ConfigError::Invalid(format!(
             "`{key}` isn't a personal key ({})",
             PERSONAL_KEYS.join(", ")
         )));
     }
-    let mut map = serde_yaml::Mapping::new();
-    if let Some(v) = value {
-        map.insert(serde_yaml::Value::String(key.to_string()), to_yaml(v));
+    let mut map = layer;
+    let yaml_key = serde_yaml::Value::String(key.to_string());
+    match value {
+        Some(v) => {
+            map.insert(yaml_key, to_yaml(v));
+        }
+        None => {
+            map.remove(&yaml_key);
+        }
     }
+    parse_personal(serde_yaml::Value::Mapping(map.clone()))?;
+    Ok(map)
+}
+
+/// `config` with `key` set (`Some`) or removed (`None`) in its personal
+/// layer, validated as the file would load; the layer's other keys stay.
+pub fn with_personal_key(
+    config: &OxplowConfig,
+    key: &str,
+    value: Option<&serde_json::Value>,
+) -> Result<OxplowConfig, ConfigError> {
+    let map = personal_with(PersonalLayer::of(config).to_mapping(), key, value)?;
+    let layer = parse_personal(serde_yaml::Value::Mapping(map))?;
     Ok(OxplowConfig {
-        personal_active_providers: parse_personal(serde_yaml::Value::Mapping(map))?,
+        personal_active_providers: layer.active_providers,
+        personal_new_thread_session: layer.new_thread_session,
         ..config.clone()
     })
 }
@@ -1080,14 +1163,8 @@ pub fn write_personal_key(
     key: &str,
     value: Option<&serde_json::Value>,
 ) -> Result<(), ConfigError> {
-    if !PERSONAL_KEYS.contains(&key) {
-        return Err(ConfigError::Invalid(format!(
-            "`{key}` isn't a personal key ({})",
-            PERSONAL_KEYS.join(", ")
-        )));
-    }
     let path = personal_path(project_dir.as_ref());
-    let mut map = if path.exists() {
+    let current = if path.exists() {
         match serde_yaml::from_str::<serde_yaml::Value>(&std::fs::read_to_string(&path)?)? {
             serde_yaml::Value::Mapping(m) => m,
             _ => serde_yaml::Mapping::new(),
@@ -1095,17 +1172,7 @@ pub fn write_personal_key(
     } else {
         serde_yaml::Mapping::new()
     };
-    let yaml_key = serde_yaml::Value::String(key.to_string());
-    match value {
-        Some(v) => {
-            map.insert(yaml_key, to_yaml(v));
-        }
-        None => {
-            map.remove(&yaml_key);
-        }
-    }
-    let doc = serde_yaml::Value::Mapping(map);
-    parse_personal(doc.clone())?;
+    let doc = serde_yaml::Value::Mapping(personal_with(current, key, value)?);
     match &doc {
         serde_yaml::Value::Mapping(m) if m.is_empty() => {
             if path.exists() {
@@ -1585,6 +1652,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         extension_instances: std::collections::BTreeMap::new(),
         active_providers: std::collections::BTreeMap::new(),
         personal_active_providers: std::collections::BTreeMap::new(),
+        personal_new_thread_session: None,
         replacements_off: std::collections::BTreeSet::new(),
         event_retention: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
@@ -2152,6 +2220,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         extension_instances,
         active_providers,
         personal_active_providers: std::collections::BTreeMap::new(),
+        personal_new_thread_session: None,
         replacements_off,
         event_retention,
         ai_roles: validate_ai_roles(raw.ai)?,
@@ -3347,6 +3416,55 @@ mod tests {
             .personal_active_providers
             .is_empty());
         assert!(write_personal_key(dir.path(), "zones", None).is_err());
+    }
+
+    /// What a new thread starts with is a person's own choice: `ask`,
+    /// `none`, or an agent. It sits beside their capability choices in
+    /// `personal.yaml`, and setting one leaves the other.
+    #[test]
+    fn a_new_thread_session_choice_is_personal() {
+        let dir = tempfile::tempdir().unwrap();
+        write_personal_key(
+            dir.path(),
+            "activeProviders",
+            Some(&serde_json::json!({ "effort_policy": "none" })),
+        )
+        .unwrap();
+        write_personal_key(
+            dir.path(),
+            "newThreadSession",
+            Some(&serde_json::json!("claude")),
+        )
+        .unwrap();
+        let config = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            config.personal_new_thread_session.as_deref(),
+            Some("claude")
+        );
+        assert_eq!(config.personal_active_providers.len(), 1);
+        assert_eq!(
+            personal_value(&config, "newThreadSession"),
+            Some(serde_json::json!("claude"))
+        );
+
+        // Setting one key in memory keeps the other.
+        let next = with_personal_key(
+            &config,
+            "newThreadSession",
+            Some(&serde_json::json!("none")),
+        )
+        .unwrap();
+        assert_eq!(next.personal_new_thread_session.as_deref(), Some("none"));
+        assert_eq!(next.personal_active_providers.len(), 1);
+
+        assert!(
+            write_personal_key(dir.path(), "newThreadSession", Some(&serde_json::json!("")))
+                .is_err()
+        );
+        write_personal_key(dir.path(), "newThreadSession", None).unwrap();
+        let config = load_project_config(dir.path()).unwrap();
+        assert_eq!(config.personal_new_thread_session, None);
+        assert_eq!(config.personal_active_providers.len(), 1);
     }
 
     /// tsk947: `eventRetention` sets a namespace's windows — a person's key.
