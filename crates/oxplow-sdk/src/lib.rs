@@ -200,7 +200,7 @@ pub fn scaffold(
         Kind::Command => manifest.push_str(&format!(
             "commands:\n\
              \x20 # Registered as {ns}.notes.add (<namespace>.<area>.<verb>); its script composes core commands, run as the\n\
-             \x20 # caller in one transaction.\n\
+             \x20 # caller: in one transaction when every one can, else as steps (a work list's verbs run outside it).\n\
              \x20 - name: notes.add\n\
              \x20   summary: \"TODO: what it does. Here: comment on a work item.\"\n\
              \x20   input_schema:\n\
@@ -337,7 +337,7 @@ pub fn scaffold(
         Kind::Command => write(
             &format!("{rel_dir}/handlers/note.star"),
             "# Gets {\"input\": {...}, \"rows\": [...]} and returns the core commands to run\n\
-             # as the caller, in one transaction — or {\"refuse\": \"why\"}. No I/O.\n\
+             # as the caller (in one transaction when every one can, else as steps) — or {\"refuse\": \"why\"}. No I/O.\n\
              def transform(x):\n\
              \x20   return {\"commands\": [\n\
              \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"TODO: the note\"}},\n\

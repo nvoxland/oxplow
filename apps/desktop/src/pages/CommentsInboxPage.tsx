@@ -21,10 +21,12 @@ function targetRef(kind: string, id: string): TabRef | null {
   return null;
 }
 
-function targetLabel(kind: string, id: string): string {
+/// How a comment's target reads in the inbox: a work item by its own id
+/// (`tsk42`, `ENG-12`), whichever list holds it.
+export function targetLabel(kind: string, id: string): string {
   if (kind === "file") return id;
   if (kind === "wiki") return `wiki/${id}`;
-  if (kind === "work_item" && id.startsWith("oxplow:")) return `task ${id.slice("oxplow:".length)}`;
+  if (kind === "work_item") return id.slice(id.indexOf(":") + 1);
   return `${kind}:${id}`;
 }
 
@@ -151,7 +153,7 @@ export function CommentsInboxPage({
           <EmptyState
             testId="comments-empty"
             title="No comments yet"
-            text="Select text in a wiki page, file, task or the agent's output and add one; the agent can answer them."
+            text="Select text in a wiki page, file, work item or the agent's output and add one; the agent can answer them."
           />
         ) : groups.length === 0 ? (
           <EmptyState
