@@ -1885,7 +1885,7 @@ V129 (P7.A3). Where each provider instance's collector left off:
 own opaque `$/state` checkpoint), `status` (`never` / `reading` / `ok` /
 `error`), `error`, `last_read_at`, `records` (what reads have delivered).
 `checkpoint_tx` runs in the same transaction as the
-`work_item.recorded@1` events a checkpoint covers, so a read that fails
+`work_item.recorded@2` events a checkpoint covers, so a read that fails
 midway resumes from the last batch that landed; `finish_tx` records the
 outcome. Read by `oxplow.provider.sync` and Settings → Integrations; see
 [providers.md](./providers.md) "Reading: collectors and sync".

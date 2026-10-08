@@ -221,7 +221,11 @@ doesn't declare.
 A `create` hands the list the input with `thread` resolved
 ([`filing_thread`]: the named one, else an agent's own; a person's none,
 the backlog), and the list's inverse is renamed to `work_item.<verb>`, so
-an undo dispatches again. A create's, or an update's that sets a body,
+an undo dispatches again. **The answer is the interface's**, terse and the
+same for every list: `{ ref }` (a comment's adds `comment`, the list's id
+for it), plus core's `state` when the verb put the item in one and
+`link_warnings` for a body — never a list's own row; a reader reads the
+item from `v_work_item`. A create's, or an update's that sets a body,
 result carries its `link_warnings` (`LinkDeps::item_warnings`), for every
 list.
 `reorder` (feature `ordering`: an item's place on its list, read as
@@ -289,12 +293,12 @@ a transition and an update naming a state each count, `to` taken from
 the `work_item.recorded` its answer carries (a create with none: the
 state it asked for, else `todo`).
 `edited` names what the command set, not a diff: a list's prior values
-aren't readable for every list. The `@1` versions spoke oxplow's task
-list (`created { status }`, `edited` with `description` / `priority` /
-`thread` / `position`, `commented { comment: "task_note:…" }`) and
-upcast to `@2`'s words; `work_item.transitioned@1 { from, to }` (oxplow
-statuses) stays registered for the log's history but nothing logs it —
-`state_changed` replaces it. An item's state opens and closes no effort
+aren't readable for every list. These are the only versions: the `@1`
+ones spoke oxplow's task list (its statuses, field names and note refs)
+and `work_item.transitioned` its status moves; V30 rewrote the logged
+ones into these words (a transition beside its run's `state_changed`
+dropped, the rest made `state_changed`) and they left core, with
+oxplow's `TaskStatus`. An item's state opens and closes no effort
 itself; the effort policy reacts to `state_changed`
 (`.context/work-tracking.md`). Effects and SDK templates react to these
 (`on: [work_item.state_changed]`, `where: { to: done }`).

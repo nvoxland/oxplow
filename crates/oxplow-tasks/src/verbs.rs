@@ -1,6 +1,7 @@
 //! oxplow's answers to the work-item verbs (`.context/work-items.md`):
 //! each runs in the caller's transaction over the task tables and answers
-//! with its result and, when it can be undone, the verb that undoes it.
+//! with its result — the item's `{ ref }`, as every list's — and, when it
+//! can be undone, the verb that undoes it.
 //! The inputs are the interface's (`oxplow_domain::work_items`), their
 //! refs already canonical and already this list's — core resolves loose
 //! ids and refuses another list's items before a verb runs.
@@ -114,7 +115,7 @@ fn note_author(actor: &Actor) -> String {
 
 /// `create`: the row, at the end of the list it's filed on (`thread`,
 /// as core resolved it; none is the backlog). An agent's task is authored
-/// `agent`. The result is the task, with its `ref`.
+/// `agent`. The result names it: `{ ref }`.
 pub fn create_tx(
     conn: &rusqlite::Connection,
     actor: &Actor,
@@ -152,15 +153,8 @@ pub fn create_tx(
         author: task_author(actor),
     };
     let id = store::insert_tx(conn, &item).map_err(CommandError::from)?;
-    let row = store::get_task_tx(conn, id)
-        .map_err(CommandError::from)?
-        .ok_or_else(|| CommandError::Failed {
-            message: format!("task {id} vanished"),
-        })?;
-    let mut result = serde_json::to_value(&row).expect("Task serializes");
-    result["ref"] = Value::String(work_item_ref(id));
     Ok(Answer {
-        result,
+        result: json!({ "ref": work_item_ref(id) }),
         inverse: None,
         changed: vec![id],
     })
@@ -204,7 +198,7 @@ pub fn update_tx(
         item.parent_id = p;
     }
     item.updated_at = now;
-    let after = store::update_with_status_tx(conn, &item, status, now).map_err(not_found)?;
+    store::update_with_status_tx(conn, &item, status, now).map_err(not_found)?;
     let inverse = WorkItemUpdateInput {
         item_ref: input.item_ref.clone(),
         title: input.title.as_ref().map(|_| before.title.clone()),
@@ -220,7 +214,7 @@ pub fn update_tx(
             .map(|_| json!({ "priority": before.priority })),
     };
     Ok(Answer {
-        result: serde_json::to_value(&after).expect("Task serializes"),
+        result: json!({ "ref": input.item_ref }),
         inverse: Some(CommandCall {
             name: "update".into(),
             input: serde_json::to_value(inverse).expect("input serializes"),
@@ -266,7 +260,7 @@ pub fn transition_tx(
         change.before = before;
     }
     Ok(Answer {
-        result: serde_json::to_value(&change.after).expect("Task serializes"),
+        result: json!({ "ref": input.item_ref }),
         inverse: Some(CommandCall {
             name: "transition".into(),
             input: serde_json::to_value(WorkItemTransitionInput {
@@ -318,17 +312,17 @@ pub fn link_tx(
             })?
         }
     };
-    let link = crate::satellite::create_link_tx(conn, thread, from, to, link_type)
+    crate::satellite::create_link_tx(conn, thread, from, to, link_type)
         .map_err(CommandError::from)?;
     Ok(Answer {
-        result: serde_json::to_value(&link).expect("TaskLink serializes"),
+        result: json!({ "ref": input.item_ref }),
         inverse: None,
         changed: vec![from],
     })
 }
 
 /// `comment`: a note on a live task, authored by the actor's kind. The
-/// result names it as `comment`, the list's own id for it.
+/// result names it: `{ ref, comment }`, the list's own id for it.
 pub fn comment_tx(
     conn: &rusqlite::Connection,
     actor: &Actor,
@@ -341,10 +335,8 @@ pub fn comment_tx(
     }
     let note = crate::satellite::add_task_note_tx(conn, task, &input.body, &note_author(actor))
         .map_err(CommandError::from)?;
-    let mut result = serde_json::to_value(&note).expect("TaskNote serializes");
-    result["comment"] = Value::String(note.id.to_string());
     Ok(Answer {
-        result,
+        result: json!({ "ref": input.item_ref, "comment": note.id.to_string() }),
         inverse: None,
         changed: vec![task],
     })
@@ -454,7 +446,7 @@ pub fn reorder_tx(
     let placed = place(conn, id, list, at)?;
     let (before, after) = neighbour(placed.from_place);
     Ok(Answer {
-        result: serde_json::to_value(&placed.task).expect("Task serializes"),
+        result: json!({ "ref": input.item_ref }),
         inverse: Some(CommandCall {
             name: "reorder".into(),
             input: serde_json::to_value(WorkItemReorderInput {
@@ -479,7 +471,7 @@ pub fn move_tx(
     let placed = place(conn, id, move_dest(&input.to)?, at)?;
     let (before, after) = neighbour(placed.from_place);
     Ok(Answer {
-        result: serde_json::to_value(&placed.task).expect("Task serializes"),
+        result: json!({ "ref": input.item_ref }),
         inverse: Some(CommandCall {
             name: "move".into(),
             input: serde_json::to_value(WorkItemMoveInput {

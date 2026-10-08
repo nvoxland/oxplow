@@ -744,7 +744,7 @@ none), each with the interim id `<instance>.<capability>.<name>`
 (`providers::command_id`: `fake.work_items.estimate`); an id whose
 namespace is already held (`namespace_owner`) or that is already a
 provider is refused. A stopped instance's go with `unregister_source`. **A provider emits only its capability's event
-types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@1`
+types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@2`
 or `@2` — a published version's schema never changes, since declarations
 are compared to it exactly;
 tsk548): declaring any other type — another core one such as
