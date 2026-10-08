@@ -2432,7 +2432,9 @@ implementations:
   (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
   `oxplow:snapshots`), the way a collector names `oxplow:junit`. A
   built-in's features are core's table's — it's core's code — never the
-  manifest's.
+  manifest's. A built-in whose items' refs carry a provider id
+  (`BuiltIn.provider`: `oxplow:tasks` is `oxplow`) is declared under that
+  id and no other.
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.

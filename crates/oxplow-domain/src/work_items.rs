@@ -334,6 +334,9 @@ pub type ActiveSource = Arc<dyn Fn() -> String + Send + Sync>;
 pub struct WorkItemsRegistry {
     providers: Arc<std::sync::RwLock<Providers>>,
     active: ActiveSource,
+    /// Each list's `id_pattern`, compiled whole-match, the first time a
+    /// loose id is resolved against it.
+    matchers: Arc<std::sync::RwLock<BTreeMap<String, regex::Regex>>>,
 }
 
 impl WorkItemsRegistry {
@@ -343,6 +346,7 @@ impl WorkItemsRegistry {
         Self {
             providers: Arc::default(),
             active,
+            matchers: Arc::default(),
         }
     }
 
@@ -395,6 +399,43 @@ impl WorkItemsRegistry {
     /// The provider a `create` with no `provider` files on. Whether it is
     /// running is the caller's to check (`get`): an active provider that
     /// isn't is a failure naming it, never a silent fallback.
+    /// The canonical ref of `raw`, a loose id of the active work list's
+    /// (`tsk42` → `work_item:oxplow:tsk42`), or why it isn't one.
+    pub fn loose_ref(&self, raw: &str) -> Result<String, String> {
+        let active = self.active();
+        let Some(pattern) = self.get(&active).ok().and_then(|p| p.id_pattern) else {
+            return Err(format!(
+                "`{raw}` isn't a work item ref (work_item:<provider>:<id>), and the active work \
+                 list declares no id of its own"
+            ));
+        };
+        let matched = {
+            let cached = self.matchers.read().unwrap_or_else(|e| e.into_inner());
+            cached.get(&pattern).map(|r| r.is_match(raw))
+        };
+        let matched = match matched {
+            Some(m) => m,
+            None => {
+                let compiled = regex::Regex::new(&format!("^(?:{pattern})$"))
+                    .map_err(|e| format!("the active work list's id pattern `{pattern}`: {e}"))?;
+                let m = compiled.is_match(raw);
+                self.matchers
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(pattern.clone(), compiled);
+                m
+            }
+        };
+        if matched {
+            Ok(format!("work_item:{active}:{raw}"))
+        } else {
+            Err(format!(
+                "`{raw}` isn't a work item ref (work_item:<provider>:<id>) or an id of the active \
+                 work list (`{pattern}`)"
+            ))
+        }
+    }
+
     pub fn active(&self) -> String {
         (self.active)()
     }

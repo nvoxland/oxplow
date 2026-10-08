@@ -142,6 +142,12 @@ fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
             f.entry, built_in.capability, spec.id
         ));
     }
+    if let Some(provider) = built_in.provider.filter(|p| *p != f.id) {
+        return Err(format!(
+            "entry `{}` is declared under `{provider}`, the provider its items' refs carry, not `{}`",
+            f.entry, f.id
+        ));
+    }
     Ok(ImplementationDecl {
         capability: f.capability,
         id: f.id,
@@ -178,6 +184,22 @@ mod tests {
         );
     }
 
+    /// A built-in whose items' refs carry a provider (`work_item:oxplow:…`)
+    /// is declared under that id and no other: its refs would otherwise
+    /// name a list that refuses them.
+    #[test]
+    fn a_built_in_is_declared_under_the_provider_its_refs_carry() {
+        let (decls, errors) =
+            parse("  - { capability: work_items, id: tasks, entry: oxplow:tasks }\n");
+        assert!(decls.is_empty());
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("`oxplow:tasks`") && errors[0].contains("`oxplow`"),
+            "{}",
+            errors[0]
+        );
+    }
+
     #[test]
     fn what_core_doesnt_know_is_refused() {
         let errors = |yaml: &str| parse(yaml).1.join("\n");
@@ -202,11 +224,11 @@ mod tests {
                 .contains("core's own")
         );
         assert!(errors(
-            "  - { capability: work_items, id: x, entry: oxplow:tasks, features: [a] }\n"
+            "  - { capability: work_items, id: oxplow, entry: oxplow:tasks, features: [a] }\n"
         )
         .contains("features"));
         assert!(errors(
-            "  - { capability: work_items, id: x, entry: oxplow:tasks }\n  - { capability: work_items, id: x, entry: oxplow:tasks }\n"
+            "  - { capability: work_items, id: oxplow, entry: oxplow:tasks }\n  - { capability: work_items, id: oxplow, entry: oxplow:tasks }\n"
         )
         .contains("twice"));
     }

@@ -157,6 +157,80 @@ mod tests {
         assert_eq!(moved.inverse.unwrap().name, "transition");
     }
 
+    fn recorded_state(out: &VerbOutcome) -> (String, String) {
+        let WorkItemRecordedV2 { item } =
+            serde_json::from_value(out.events[0].payload.clone()).unwrap();
+        (item.state.as_str().to_string(), item.native_state)
+    }
+
+    /// `done` + `archived` means a completed task that was archived: a
+    /// create or an update asked for it records `done`, as a transition
+    /// does, not `canceled`.
+    #[tokio::test]
+    async fn filing_or_updating_into_done_archived_reads_as_done() {
+        let (tasks, _db) = tasks().await;
+        let filed = tasks
+            .invoke(
+                &Actor::Human,
+                "create",
+                json!({ "title": "t", "state": "done", "native_state": "archived" }),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(recorded_state(&filed), ("done".into(), "archived".into()));
+
+        let plain = tasks
+            .invoke(&Actor::Human, "create", json!({ "title": "u" }), None)
+            .await
+            .unwrap();
+        let item = plain.result["ref"].as_str().unwrap().to_string();
+        let updated = tasks
+            .invoke(
+                &Actor::Human,
+                "update",
+                json!({ "ref": item, "state": "done", "native_state": "archived" }),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(recorded_state(&updated), ("done".into(), "archived".into()));
+    }
+
+    /// An update's inverse names the task's prior status whole, so undoing
+    /// a state change on an archived task archives it again.
+    #[tokio::test]
+    async fn undoing_a_state_update_on_an_archived_task_restores_archived() {
+        let (tasks, _db) = tasks().await;
+        let filed = tasks
+            .invoke(
+                &Actor::Human,
+                "create",
+                json!({ "title": "t", "state": "done", "native_state": "archived" }),
+                None,
+            )
+            .await
+            .unwrap();
+        let item = filed.result["ref"].as_str().unwrap().to_string();
+        let reopened = tasks
+            .invoke(
+                &Actor::Human,
+                "update",
+                json!({ "ref": item, "state": "todo" }),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(recorded_state(&reopened), ("todo".into(), "ready".into()));
+        let inverse = reopened.inverse.unwrap();
+        assert_eq!(inverse.name, "update");
+        let undone = tasks
+            .invoke(&Actor::Human, "update", inverse.input, None)
+            .await
+            .unwrap();
+        assert_eq!(recorded_state(&undone), ("done".into(), "archived".into()));
+    }
+
     /// A refused verb writes nothing: its transaction rolls back, and the
     /// refusal is the verb's own.
     #[tokio::test]
