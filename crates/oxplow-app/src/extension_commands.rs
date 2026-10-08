@@ -1970,20 +1970,6 @@ mod tests {
             spec.summary
         );
 
-        // A launcher entry naming it validates against the bus.
-        let schema = |n: &str| bus.input_schema(n);
-        let mut ext = project(fx._dir.path(), "my-review");
-        ext.launcher = vec![crate::extensions::manifest_v2::LauncherEntry {
-            label: "Finish".into(),
-            category: crate::extensions::LauncherCategory::Work,
-            target: crate::extensions::manifest_v2::LauncherTarget::Command {
-                command: "my_review.review.finish".into(),
-                input: json!({ "ref": "work_item:oxplow:tsk1" }),
-            },
-        }];
-        crate::extensions::check_commands(&mut ext, fx._dir.path(), Some(&schema));
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-
         write(
             fx._dir.path(),
             ".oxplow/project.yaml",

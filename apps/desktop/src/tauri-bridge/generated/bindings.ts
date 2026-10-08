@@ -2896,11 +2896,6 @@ export type Extension_Deserialize = {
 	// Full pages it contributes (valid ones; invalid ones are in `errors`).
 	pages: ExtensionPage[],
 	/**
-	 *  Launcher entries for what isn't a lens: a page, a command, a
-	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
-	 */
-	launcher: LauncherEntry[],
-	/**
 	 *  Commands it registers on the bus, each a Starlark script composing
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
@@ -3022,11 +3017,6 @@ export type Extension_Serialize = {
 	panels: ExtensionPanel[],
 	// Full pages it contributes (valid ones; invalid ones are in `errors`).
 	pages: ExtensionPage[],
-	/**
-	 *  Launcher entries for what isn't a lens: a page, a command, a
-	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
-	 */
-	launcher: LauncherEntry[],
 	/**
 	 *  Commands it registers on the bus, each a Starlark script composing
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
@@ -3445,28 +3435,6 @@ export type KeyedDiff = {
  *  renderer's `PageCategory`.
  */
 export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
-
-/**
- *  A launcher entry for something that isn't a lens (P6.D1): the launcher
- *  lists it under `category`.
- */
-export type LauncherEntry = {
-	label: string,
-	category: LauncherCategory,
-	target: LauncherTarget,
-};
-
-// What a launcher entry does.
-export type LauncherTarget = 
-// Open a page: a canonical ref (`page:settings`, `lens:x/y`).
-{ kind: "ref"; ref: string } | 
-/**
- *  Run a command as the person who picked it, asking first when the
- *  command asks.
- */
-{ kind: "command"; command: string; input: unknown } | 
-// Put a prompt in the agent's input. Never sent: the person sends it.
-{ kind: "prompt"; prompt: string };
 
 // A loaded lens.
 export type Lens = Lens_Serialize | Lens_Deserialize;

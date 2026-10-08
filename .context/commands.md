@@ -662,7 +662,7 @@ input, confirmed }` and `undo_command { audit_id, confirmed }`
 A typed IPC setter is a convenience over one command; anything new the
 UI writes goes through `run_command`. Parity: `both("run_command")`,
 `ui("undo_command")`. A person's undo is offered where they ran it: a
-command run through `personCommands` (a board move, a launcher entry)
+command run through `personCommands` (a board move, a search offer)
 that comes back undoable (its outcome's `inverse`) shows **Undo** on its
 "done" toast, which runs `undoCommand(audit_id)` — the click is the
 person's confirmation — and says "undone" or records the failure

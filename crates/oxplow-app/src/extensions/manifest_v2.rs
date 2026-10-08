@@ -97,92 +97,6 @@ pub struct UiBlock {
     pub replacements: Option<Value>,
 }
 
-/// A launcher entry as the manifest holds it; [`launcher_entries`]
-/// checks its target and types it.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LauncherEntryFile {
-    pub label: String,
-    pub category: super::LauncherCategory,
-    pub target: Value,
-}
-
-/// A launcher entry for something that isn't a lens (P6.D1): the launcher
-/// lists it under `category`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LauncherEntry {
-    pub label: String,
-    pub category: super::LauncherCategory,
-    pub target: LauncherTarget,
-}
-
-/// What a launcher entry does.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase", tag = "kind")]
-pub enum LauncherTarget {
-    /// Open a page: a canonical ref (`page:settings`, `lens:x/y`).
-    Ref { r#ref: String },
-    /// Run a command as the person who picked it, asking first when the
-    /// command asks.
-    Command {
-        command: String,
-        #[specta(type = oxplow_domain::Json)]
-        input: serde_json::Value,
-    },
-    /// Put a prompt in the agent's input. Never sent: the person sends it.
-    Prompt { prompt: String },
-}
-
-/// Type the manifest's `launcher:` entries: each target is exactly one of
-/// `{ ref }` (a canonical ref), `{ command, input? }` (a command name and
-/// a map) or `{ prompt }` (non-empty). A bad one is an error at its line
-/// and is dropped. Whether a command is registered, and its input fits,
-/// is the dry run's (`validate_extension`).
-pub fn launcher_entries(
-    m: &ManifestV2,
-    file: &str,
-    text: &str,
-) -> (Vec<LauncherEntry>, Vec<String>) {
-    let mut entries = Vec::new();
-    let mut errors = Vec::new();
-    for entry in &m.launcher {
-        match launcher_target(&entry.target) {
-            Ok(target) => entries.push(LauncherEntry {
-                label: entry.label.clone(),
-                category: entry.category,
-                target,
-            }),
-            Err(e) => errors.push(at(
-                file,
-                line_under(text, "launcher", &entry.label),
-                format!("launcher entry `{}`: {e}", entry.label),
-            )),
-        }
-    }
-    (entries, errors)
-}
-
-/// The ref kinds that open as a page — what a launcher `{ ref }` may name.
-/// Mirrors the UI's `pageKindOf` (`apps/desktop/src/tabs/pageRefs.ts`):
-/// a kind the registry knows but no page renders (`thread`, `answer`, …)
-/// would validate here and then vanish from the launcher, so the manifest
-/// check says so instead.
-const PAGE_KINDS: &[&str] = &[
-    "page",
-    "file",
-    "dir",
-    "wiki",
-    "work_item",
-    "commit",
-    "metric",
-    "lens",
-    "snapshot",
-    "effort",
-    "turn",
-    "symbol",
-];
-
 /// A prompt an extension offers is inserted into the agent's input, never
 /// sent — and the terminal treats a pasted line break as Enter, so a
 /// multi-line prompt would send itself. One line, or this says why not.
@@ -191,67 +105,6 @@ fn prompt_line_problem(prompt: &str) -> Option<String> {
         "a prompt is one line (a line break pasted into the agent's input would send it)"
             .to_string()
     })
-}
-
-fn launcher_target(v: &Value) -> Result<LauncherTarget, String> {
-    const FORMS: &str =
-        "a target is one of `ref`, `command` or `prompt`: `{ ref: page:settings }`, \
-                         `{ command: oxplow.work_item.create, input: { … } }` or `{ prompt: … }`";
-    let Some(map) = v.as_mapping() else {
-        return Err(FORMS.into());
-    };
-    let key = |k: &str| map.get(Value::String(k.into()));
-    let keys: Vec<&str> = map.keys().filter_map(|k| k.as_str()).collect();
-    let form = |k: &str| keys.contains(&k);
-    match (form("ref"), form("command"), form("prompt")) {
-        (true, false, false) if keys.len() == 1 => {
-            let r = key("ref").and_then(|v| v.as_str()).unwrap_or_default();
-            let parsed = oxplow_domain::refs::grammar::CanonicalRef::parse(r)
-                .map_err(|_| format!("`{r}` is not a canonical ref (`<kind>:<id>`)"))?;
-            oxplow_domain::refs::kind::core_kinds()
-                .validate(&parsed)
-                .map_err(|e| format!("`{r}`: {e}"))?;
-            if !PAGE_KINDS.contains(&parsed.kind.as_str()) {
-                return Err(format!(
-                    "`{r}`: a `{}` doesn't open as a page; a launcher entry opens one of {}",
-                    parsed.kind,
-                    PAGE_KINDS.join(", ")
-                ));
-            }
-            Ok(LauncherTarget::Ref {
-                r#ref: r.to_string(),
-            })
-        }
-        (false, true, false) if keys.iter().all(|k| *k == "command" || *k == "input") => {
-            let command = key("command").and_then(|v| v.as_str()).unwrap_or_default();
-            oxplow_domain::CommandSpec::validate_id(command)
-                .map_err(|e| e.to_string().replacen("invalid value: ", "", 1))?;
-            let input = match key("input") {
-                None => serde_json::json!({}),
-                Some(v) => serde_json::to_value(v).map_err(|e| e.to_string())?,
-            };
-            if !input.is_object() {
-                return Err("`input` must be a map (the command's input)".into());
-            }
-            Ok(LauncherTarget::Command {
-                command: command.to_string(),
-                input,
-            })
-        }
-        (false, false, true) if keys.len() == 1 => {
-            let prompt = key("prompt").and_then(|v| v.as_str()).unwrap_or_default();
-            if prompt.trim().is_empty() {
-                return Err("an empty prompt — write what to ask the agent".into());
-            }
-            if let Some(problem) = prompt_line_problem(prompt) {
-                return Err(problem);
-            }
-            Ok(LauncherTarget::Prompt {
-                prompt: prompt.to_string(),
-            })
-        }
-        _ => Err(FORMS.into()),
-    }
 }
 
 /// `extension.yaml` at `manifest: 2`, as written on disk.
@@ -302,10 +155,6 @@ pub struct ManifestV2 {
     pub pages: Option<Value>,
     #[serde(default)]
     pub panels: Option<Value>,
-    /// Launcher entries for non-lens targets; a lens lists itself with
-    /// its own `launcher:` block.
-    #[serde(default)]
-    pub launcher: Vec<LauncherEntryFile>,
     /// What it adds to the core UI: slots, commands in menus, decorators.
     #[serde(default)]
     pub ui: UiBlock,

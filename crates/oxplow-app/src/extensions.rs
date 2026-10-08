@@ -24,9 +24,7 @@ pub mod replacements;
 pub mod skills;
 pub mod ui_commands;
 use manifest_v2::{at, entry_line, key_line, line_under, ManifestV2};
-pub use manifest_v2::{
-    Intent, IntentExample, IntentPrompt, LauncherEntry, LauncherTarget, Sharing,
-};
+pub use manifest_v2::{Intent, IntentExample, IntentPrompt, Sharing};
 
 /// Where project extensions live, relative to a worktree root.
 pub const EXTENSIONS_DIR: &str = "oxplow/extensions";
@@ -1110,9 +1108,6 @@ pub struct Extension {
     pub panels: Vec<ExtensionPanel>,
     /// Full pages it contributes (valid ones; invalid ones are in `errors`).
     pub pages: Vec<ExtensionPage>,
-    /// Launcher entries for what isn't a lens: a page, a command, a
-    /// prompt (P6.D1; valid ones — invalid ones are in `errors`).
-    pub launcher: Vec<LauncherEntry>,
     /// Commands it registers on the bus, each a Starlark script composing
     /// core commands (P6b; valid ones — invalid ones are in `errors`).
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
@@ -1712,7 +1707,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         dimensions: Vec::new(),
         models: Vec::new(),
         metrics: Vec::new(),
-        launcher: Vec::new(),
         panels: Vec::new(),
         pages: Vec::new(),
         commands: Vec::new(),
@@ -1780,9 +1774,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
     ext.errors.extend(errors);
     ext.warnings.extend(warnings);
-    let (launcher, errors) = manifest_v2::launcher_entries(&m, &file, &manifest);
-    ext.launcher = launcher;
-    ext.errors.extend(errors);
     let panel_files = m.panels.clone();
     let ui_command_files = m.ui.commands.clone();
     let decorator_files = m.ui.decorators.clone();
@@ -2699,7 +2690,6 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.dimensions.clear();
         ext.metrics.clear();
         ext.models.clear();
-        ext.launcher.clear();
         ext.panels.clear();
         ext.pages.clear();
         ext.commands.clear();
@@ -3083,31 +3073,24 @@ impl<F: Fn(&str) -> Option<serde_json::Value> + Sync> RunningCommands for F {
 /// The registry a check is given.
 pub type CommandSchemas<'a> = &'a dyn RunningCommands;
 
-/// A command an extension names — a launcher entry's or a `ui.commands`
-/// entry's — is registered and its input fits. A command in one of the
+/// A command an extension names in a `ui.commands` entry is registered
+/// and its input fits. A command in one of the
 /// extension's own providers' namespaces isn't on the bus until its
 /// instance runs, so it is checked against that provider's declarations.
 /// Without a registry (the CLI) the check is skipped, and says so.
 pub fn check_commands(ext: &mut Extension, root: &Path, commands: Option<CommandSchemas<'_>>) {
-    let mut entries: Vec<(String, String, serde_json::Value)> = ext
-        .launcher
+    let entries: Vec<(String, String, serde_json::Value)> = ext
+        .ui
+        .commands
         .iter()
-        .filter_map(|e| match &e.target {
-            LauncherTarget::Command { command, input } => Some((
-                format!("launcher entry `{}`", e.label),
-                command.clone(),
-                input.clone(),
-            )),
-            _ => None,
+        .map(|c| {
+            (
+                format!("`ui.commands` `{}`", c.label),
+                c.command.clone(),
+                c.input.clone(),
+            )
         })
         .collect();
-    entries.extend(ext.ui.commands.iter().map(|c| {
-        (
-            format!("`ui.commands` `{}`", c.label),
-            c.command.clone(),
-            c.input.clone(),
-        )
-    }));
     if entries.is_empty() {
         return;
     }
@@ -6890,79 +6873,13 @@ commands:
         );
     }
 
-    const LAUNCHER_MANIFEST: &str = "manifest: 2\nintent:\n  purpose: p\nlauncher:\n";
-
-    /// P6.D1: a launcher entry opens a ref, runs a command, or puts a
-    /// prompt in the agent's input — each form checked for shape.
-    #[test]
-    fn launcher_entries_are_refs_commands_or_prompts() {
-        let (_d, ext) = load_x(
-            &[],
-            &format!(
-                "{LAUNCHER_MANIFEST}  - {{ label: Settings, category: System, target: {{ ref: 'page:settings' }} }}\n  - {{ label: New Task, category: Work, target: {{ command: oxplow.work_item.create, input: {{ title: x }} }} }}\n  - {{ label: Why slow, category: Code, target: {{ prompt: 'Why is the build slow?' }} }}\n"
-            ),
-        );
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert_eq!(
-            ext.launcher
-                .iter()
-                .map(|e| e.target.clone())
-                .collect::<Vec<_>>(),
-            vec![
-                LauncherTarget::Ref {
-                    r#ref: "page:settings".into()
-                },
-                LauncherTarget::Command {
-                    command: "oxplow.work_item.create".into(),
-                    input: serde_json::json!({ "title": "x" }),
-                },
-                LauncherTarget::Prompt {
-                    prompt: "Why is the build slow?".into()
-                },
-            ]
-        );
-
-        for (entry, want) in [
-            ("{ ref: 'not a ref' }", "not a canonical ref"),
-            // Grammar isn't enough: the kind must be registered and the id
-            // well-formed, or the launcher would drop the entry silently.
-            ("{ ref: 'bogus:thing' }", "unknown kind `bogus`"),
-            ("{ ref: 'commit:not-hex' }", "not a valid `commit` id"),
-            ("{ ref: 'thread:thr1' }", "doesn't open as a page"),
-            ("{ command: Not-A-Name }", "`Not-A-Name`"),
-            ("{ command: a.b.c, input: [1] }", "`input` must be a map"),
-            ("{ prompt: '  ' }", "an empty prompt"),
-            // A line break pasted into a terminal is Enter: it would send.
-            ("{ prompt: \"Why?\\nAnd how?\" }", "one line"),
-            (
-                "{ ref: 'page:settings', prompt: hi }",
-                "one of `ref`, `command` or `prompt`",
-            ),
-            ("'page:settings'", "one of `ref`, `command` or `prompt`"),
-        ] {
-            let (_d, ext) = load_x(
-                &[],
-                &format!(
-                    "{LAUNCHER_MANIFEST}  - {{ label: Bad, category: Work, target: {entry} }}\n"
-                ),
-            );
-            let errs = ext.errors.join("\n");
-            assert!(
-                errs.contains(want) && errs.contains("extension.yaml:"),
-                "{entry}: {errs}"
-            );
-            assert!(ext.launcher.is_empty(), "{entry}");
-        }
-    }
-
-    /// A command entry names a registered command and its input fits;
-    /// without a registry (the CLI) that half isn't checked, and says so.
+    const UI_COMMANDS_MANIFEST: &str = "manifest: 2\nintent:\n  purpose: p\nui:\n  commands:\n";
     #[tokio::test]
-    async fn validate_checks_launcher_commands_against_the_registry() {
+    async fn validate_checks_ui_commands_against_the_registry() {
         let (d, _) = load_x(
             &[],
             &format!(
-                "{LAUNCHER_MANIFEST}  - {{ label: A, category: Work, target: {{ command: no.such.cmd }} }}\n  - {{ label: B, category: Work, target: {{ command: oxplow.work_item.create, input: {{ nope: 1 }} }} }}\n  - {{ label: C, category: Work, target: {{ command: oxplow.work_item.create, input: {{ title: ok }} }} }}\n"
+                "{UI_COMMANDS_MANIFEST}    - {{ label: A, about: work_item, command: no.such.cmd, input: {{}} }}\n    - {{ label: B, about: work_item, command: oxplow.work_item.create, input: {{ nope: 1 }} }}\n    - {{ label: C, about: work_item, command: oxplow.work_item.create, input: {{ title: ok }} }}\n"
             ),
         );
         let schema = |name: &str| {
@@ -6980,11 +6897,11 @@ commands:
             .unwrap();
         let errs = v.errors.join("\n");
         assert!(
-            errs.contains("launcher entry `A`: no command `no.such.cmd`"),
+            errs.contains("`ui.commands` `A`: no command `no.such.cmd`"),
             "{errs}"
         );
         assert!(
-            errs.contains("launcher entry `B`: the input doesn't fit `oxplow.work_item.create`"),
+            errs.contains("`ui.commands` `B`: the input doesn't fit `oxplow.work_item.create`"),
             "{errs}"
         );
         assert!(!errs.contains("entry `C`"), "{errs}");
@@ -6993,7 +6910,7 @@ commands:
             .await
             .unwrap();
         assert!(
-            !v.errors.join("\n").contains("launcher entry"),
+            !v.errors.join("\n").contains("`ui.commands`"),
             "{:?}",
             v.errors
         );

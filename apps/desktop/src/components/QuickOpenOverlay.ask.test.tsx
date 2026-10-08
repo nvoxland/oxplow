@@ -4,9 +4,8 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Stream } from "../api.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
 
-// The launcher's Ask entries (P6.D1): typed text becomes "Ask the Agent",
-// an extension's prompt entry is put in the agent's input, and its
-// command entry runs as the person. Nothing is ever sent.
+// The launcher's Ask entry (P6.D1): typed text becomes "Ask the Agent",
+// put in the agent's input. Nothing is ever sent.
 
 const realApi = await import("../api.js");
 const ran: Array<[string, unknown, boolean]> = [];
@@ -20,10 +19,6 @@ mock.module("../api.js", () => ({
       lenses: [],
       pages: [],
       panels: [],
-      launcher: [
-        { label: "Ask why slow", category: "Code", target: { kind: "prompt", prompt: "Why is the build slow?" } },
-        { label: "File a bug", category: "Work", target: { kind: "command", command: "oxplow.work_item.create", input: { title: "Bug" } } },
-      ],
     },
   ],
   runCommand: async (name: string, input: unknown, confirmed = false) => {
@@ -75,17 +70,4 @@ test("typed text offers Ask the Agent, which fills the agent's input", async () 
   fireEvent.click(ask);
   expect(inserted).toEqual(["why is it slow"]);
   expect(closed).toBe(1);
-});
-
-test("an extension's prompt entry fills the input; its command entry runs as the person", async () => {
-  const view = renderOverlay();
-  const input = view.getByPlaceholderText(/Search everything/);
-  fireEvent.change(input, { target: { value: "why slow" } });
-  // A launcher action runs after the overlay closes.
-  fireEvent.click(await waitFor(() => view.getByText("Ask why slow")));
-  await waitFor(() => expect(inserted).toEqual(["Why is the build slow?"]));
-
-  fireEvent.change(input, { target: { value: "file a bug" } });
-  fireEvent.click(await waitFor(() => view.getByText("File a bug")));
-  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.create", { title: "Bug" }, false]]));
 });
