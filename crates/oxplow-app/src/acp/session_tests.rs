@@ -106,8 +106,13 @@ fn thread() -> ThreadId {
     ThreadId::new(7)
 }
 
+fn session() -> oxplow_domain::AgentSessionId {
+    oxplow_domain::AgentSessionId::new(9)
+}
+
 fn spec(cwd: &std::path::Path) -> SessionSpec {
     SessionSpec {
+        session_id: session(),
         thread_id: thread(),
         agent: "fake".into(),
         cwd: cwd.to_path_buf(),
@@ -201,7 +206,7 @@ impl Rig {
 
     async fn prompt(&self, text: &str) {
         self.mgr
-            .submit_human_prompt(&thread(), text.to_string())
+            .submit_human_prompt(&session(), text.to_string())
             .await
             .unwrap();
     }
@@ -214,7 +219,7 @@ impl Rig {
 
     fn items(&self) -> Vec<ItemBody> {
         self.mgr
-            .transcript(&thread(), 0)
+            .transcript(&session(), 0)
             .unwrap()
             .items
             .into_iter()
@@ -315,17 +320,17 @@ async fn a_permission_card_waits_for_the_person() {
     let ids: Vec<&str> = options.iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["allow", "reject"]);
     assert_eq!(
-        rig.mgr.transcript(&thread(), 0).unwrap().status,
+        rig.mgr.transcript(&session(), 0).unwrap().status,
         AcpStatus::AwaitingPermission
     );
     assert_eq!(
         rig.mgr
-            .respond_permission(&thread(), request_id.clone(), Some("always".into()))
+            .respond_permission(&session(), request_id.clone(), Some("always".into()))
             .await,
         Err(AcpError::UnknownOption("always".into()))
     );
     rig.mgr
-        .respond_permission(&thread(), request_id, Some("allow".into()))
+        .respond_permission(&session(), request_id, Some("allow".into()))
         .await
         .unwrap();
     rig.wait_status(AcpStatus::Idle).await;
@@ -387,7 +392,7 @@ async fn cancel_answers_open_cards() {
     rig.prompt("fake:edit /w/a.rs").await;
     rig.wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
         .await;
-    rig.mgr.cancel(&thread()).unwrap();
+    rig.mgr.cancel(&session()).unwrap();
     rig.wait_status(AcpStatus::Idle).await;
     assert!(rig.items().iter().any(|b| matches!(
         b,
@@ -405,10 +410,12 @@ async fn a_second_prompt_during_a_turn_is_refused_not_queued() {
     rig.prompt("fake:wait").await;
     rig.wait_status(AcpStatus::Running).await;
     assert_eq!(
-        rig.mgr.submit_human_prompt(&thread(), "again".into()).await,
+        rig.mgr
+            .submit_human_prompt(&session(), "again".into())
+            .await,
         Err(AcpError::TurnInFlight)
     );
-    rig.mgr.cancel(&thread()).unwrap();
+    rig.mgr.cancel(&session()).unwrap();
     rig.wait_status(AcpStatus::Idle).await;
     assert_eq!(rig.prompts().len(), 1);
 }
@@ -505,7 +512,7 @@ async fn a_load_replay_rebuilds_the_transcript_and_records_nothing() {
     .await
     .0;
     first.turn("fake:say one\nfake:bash ls").await;
-    let sid = first.mgr.transcript(&thread(), 0).unwrap();
+    let sid = first.mgr.transcript(&session(), 0).unwrap();
     assert_eq!(sid.items.len(), 3);
     let session_id = first
         .host
@@ -513,7 +520,7 @@ async fn a_load_replay_rebuilds_the_transcript_and_records_nothing() {
         .iter()
         .find_map(|l| l.strip_prefix("started ").map(str::to_string))
         .unwrap();
-    first.mgr.close(&thread()).unwrap();
+    first.mgr.close(&session()).unwrap();
 
     let (second, r) = open_with(
         Host {
@@ -569,13 +576,13 @@ async fn an_agent_crash_interrupts_the_session() {
         .await;
     assert!(matches!(closed, AcpEventBody::Closed { reason: Some(_) }));
     assert_eq!(
-        rig.mgr.transcript(&thread(), 0).unwrap().status,
+        rig.mgr.transcript(&session(), 0).unwrap().status,
         AcpStatus::Stopped
     );
     assert!(rig.host.log().contains(&"interrupted".to_string()));
-    assert!(!rig.mgr.is_open(&thread()));
+    assert!(!rig.mgr.is_open(&session()));
     assert_eq!(
-        rig.mgr.submit_human_prompt(&thread(), "x".into()).await,
+        rig.mgr.submit_human_prompt(&session(), "x".into()).await,
         Err(AcpError::NotOpen)
     );
 }
@@ -637,8 +644,8 @@ async fn each_open_is_a_new_generation_and_its_events_say_so() {
     )
     .await;
     r.unwrap();
-    let g1 = first.mgr.transcript(&thread(), 0).unwrap().generation;
-    first.mgr.close(&thread()).unwrap();
+    let g1 = first.mgr.transcript(&session(), 0).unwrap().generation;
+    first.mgr.close(&session()).unwrap();
     // Reopening on the same manager (a Restart) starts a new generation.
     let mut events = first.mgr.subscribe();
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -653,7 +660,7 @@ async fn each_open_is_a_new_generation_and_its_events_say_so() {
         .open_with_io(first.host.clone(), spec(first.dir.path()), cw, cr)
         .await
         .unwrap();
-    let g2 = first.mgr.transcript(&thread(), 0).unwrap().generation;
+    let g2 = first.mgr.transcript(&session(), 0).unwrap().generation;
     assert_ne!(g1, g2);
     // Late events from the closed session still carry its generation, so
     // a client can tell them from the new session's.
@@ -716,8 +723,8 @@ async fn close_is_immediate_and_a_replaced_sessions_teardown_records_nothing() {
     )
     .await;
     r.unwrap();
-    rig.mgr.close(&thread()).unwrap();
-    assert!(!rig.mgr.is_open(&thread()), "closed at once");
+    rig.mgr.close(&session()).unwrap();
+    assert!(!rig.mgr.is_open(&session()), "closed at once");
     // Reopen right away (a Restart) while the old actor may still be
     // shutting down.
     let (client, agent) = tokio::io::duplex(1 << 16);
@@ -760,7 +767,7 @@ async fn cancelling_a_card_mid_turn_returns_the_view_to_running() {
         .unwrap();
     // Answering the card while the turn keeps going: the view says Running.
     rig.mgr
-        .respond_permission(&thread(), request_id, Some("reject".into()))
+        .respond_permission(&session(), request_id, Some("reject".into()))
         .await
         .unwrap();
     let next = rig
@@ -772,7 +779,7 @@ async fn cancelling_a_card_mid_turn_returns_the_view_to_running() {
             status: AcpStatus::Running
         }
     );
-    rig.mgr.cancel(&thread()).unwrap();
+    rig.mgr.cancel(&session()).unwrap();
     rig.wait_status(AcpStatus::Idle).await;
 }
 
@@ -803,7 +810,7 @@ async fn a_write_completed_after_a_reject_is_flagged() {
         unreachable!()
     };
     rig.mgr
-        .respond_permission(&thread(), request_id, Some("reject".into()))
+        .respond_permission(&session(), request_id, Some("reject".into()))
         .await
         .unwrap();
     rig.wait_status(AcpStatus::Idle).await;
@@ -829,7 +836,7 @@ async fn a_write_completed_after_a_reject_is_flagged() {
         unreachable!()
     };
     rig.mgr
-        .respond_permission(&thread(), request_id, Some("allow".into()))
+        .respond_permission(&session(), request_id, Some("allow".into()))
         .await
         .unwrap();
     rig.wait_status(AcpStatus::Idle).await;

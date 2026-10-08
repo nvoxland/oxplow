@@ -955,35 +955,35 @@ export async function listAcpAgents(): Promise<AcpAgentListing[]> {
 // input on its own (guarded by no-agent-input-automation.test.ts).
 
 /** Start the thread's ACP agent (or reattach) and return its session. */
-export async function acpOpenSession(threadId: string): Promise<AcpSnapshot> {
-  return unwrap(await commands.acpOpenSession(threadId));
+export async function acpOpenSession(sessionId: string): Promise<AcpSnapshot> {
+  return unwrap(await commands.acpOpenSession(sessionId));
 }
 
 /** Send what the person typed. Only `AcpPromptBox` calls this. */
-export async function acpPrompt(threadId: string, text: string): Promise<void> {
-  unwrap(await commands.acpPrompt(threadId, text));
+export async function acpPrompt(sessionId: string, text: string): Promise<void> {
+  unwrap(await commands.acpPrompt(sessionId, text));
 }
 
-export async function acpCancel(threadId: string): Promise<void> {
-  unwrap(await commands.acpCancel(threadId));
+export async function acpCancel(sessionId: string): Promise<void> {
+  unwrap(await commands.acpCancel(sessionId));
 }
 
 /** Answer a permission card; `optionId: null` cancels it. */
 export async function acpRespondPermission(
-  threadId: string,
+  sessionId: string,
   requestId: string,
   optionId: string | null,
 ): Promise<void> {
-  unwrap(await commands.acpRespondPermission(threadId, requestId, optionId));
+  unwrap(await commands.acpRespondPermission(sessionId, requestId, optionId));
 }
 
 /** The session plus items changed after `sinceSeq`; null when none is open. */
-export async function acpTranscript(threadId: string, sinceSeq: number): Promise<AcpSnapshot | null> {
-  return unwrap(await commands.acpTranscript(threadId, sinceSeq));
+export async function acpTranscript(sessionId: string, sinceSeq: number): Promise<AcpSnapshot | null> {
+  return unwrap(await commands.acpTranscript(sessionId, sinceSeq));
 }
 
-export async function acpCloseSession(threadId: string): Promise<void> {
-  unwrap(await commands.acpCloseSession(threadId));
+export async function acpCloseSession(sessionId: string): Promise<void> {
+  unwrap(await commands.acpCloseSession(sessionId));
 }
 
 export function subscribeAcpEvents(listener: (event: AcpEvent) => void): () => void {

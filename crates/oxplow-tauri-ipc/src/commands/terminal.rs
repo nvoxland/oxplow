@@ -28,11 +28,11 @@ pub async fn open_terminal_session(
 pub async fn acp_open_session(
     state: tauri::State<'_, AppState>,
     plugin_runtime: tauri::State<'_, PluginRuntimeState>,
-    thread_id: oxplow_domain::ThreadId,
+    session_id: oxplow_domain::AgentSessionId,
 ) -> Result<oxplow_app::acp::manager::AcpSnapshot, IpcError> {
     let ctx = oxplow_rpc::RpcContext {
         services: state.inner().clone(),
         plugin_runtime: Some(plugin_runtime.inner().as_ref().clone()),
     };
-    oxplow_rpc::commands::acp::acp_open_session(&ctx, thread_id).await
+    oxplow_rpc::commands::acp::acp_open_session(&ctx, session_id).await
 }

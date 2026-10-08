@@ -65,13 +65,14 @@ export function AgentPage({
     );
   }
   // ACP sessions talk to their agent as a structured conversation, not a
-  // terminal. Keyed on the thread like the terminal below.
+  // terminal. Keyed on the session like the terminal below.
   if (session.harness === "acp") {
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
         <AcpAgentView
-          key={thread.id}
+          key={session.id}
           thread={thread}
+          sessionId={session.id}
           worktreePath={stream?.worktree_path}
           visible={visible}
           onOpenDiff={onOpenDiff}

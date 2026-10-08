@@ -71,6 +71,7 @@ async fn a_real_adapter_answers_a_prompt() {
         .open(
             host,
             SessionSpec {
+                session_id: session,
                 thread_id: thread,
                 agent: "live".into(),
                 cwd: root.clone(),
@@ -89,7 +90,7 @@ async fn a_real_adapter_answers_a_prompt() {
         .unwrap();
     let mut rx = svc.acp.subscribe();
     svc.acp
-        .submit_human_prompt(&thread, "Reply with the single word: pong".into())
+        .submit_human_prompt(&session, "Reply with the single word: pong".into())
         .await
         .unwrap();
     tokio::time::timeout(Duration::from_secs(180), async {
@@ -104,12 +105,12 @@ async fn a_real_adapter_answers_a_prompt() {
     })
     .await
     .expect("the turn ended");
-    let items = svc.acp.transcript(&thread, 0).unwrap().items;
+    let items = svc.acp.transcript(&session, 0).unwrap().items;
     assert!(
         items
             .iter()
             .any(|i| matches!(&i.body, ItemBody::Agent { text } if !text.trim().is_empty())),
         "no reply: {items:?}"
     );
-    svc.acp.close(&thread).unwrap();
+    svc.acp.close(&session).unwrap();
 }

@@ -129,8 +129,13 @@ async fn claim_task(svc: &Services, thread: ThreadId) {
         .unwrap();
 }
 
-fn spec(thread: ThreadId, root: &std::path::Path) -> SessionSpec {
+fn spec(
+    session: oxplow_domain::AgentSessionId,
+    thread: ThreadId,
+    root: &std::path::Path,
+) -> SessionSpec {
     SessionSpec {
+        session_id: session,
         thread_id: thread,
         agent: "fake".into(),
         cwd: root.to_path_buf(),
@@ -141,20 +146,33 @@ fn spec(thread: ThreadId, root: &std::path::Path) -> SessionSpec {
     }
 }
 
-async fn open_in_process(svc: &Arc<Services>, thread: ThreadId, root: &std::path::Path) {
+/// Open the thread's (first) session's agent in process.
+async fn open_in_process(
+    svc: &Arc<Services>,
+    thread: ThreadId,
+    root: &std::path::Path,
+) -> oxplow_domain::AgentSessionId {
+    let session = session_of(svc, thread).await;
+    open_session_in_process(svc, session, thread, root).await;
+    session
+}
+
+/// Open agent session `session`'s fake ACP agent in process.
+async fn open_session_in_process(
+    svc: &Arc<Services>,
+    session: oxplow_domain::AgentSessionId,
+    thread: ThreadId,
+    root: &std::path::Path,
+) {
     let (client, agent) = tokio::io::duplex(1 << 16);
     let (ar, aw) = tokio::io::split(agent);
     tokio::spawn(async move {
         let _ = oxplow_acp_fake::serve(ar, aw, Shared::default(), FakeOptions::default()).await;
     });
     let (cr, cw) = tokio::io::split(client);
-    let host = Arc::new(ServicesAcpHost::new(
-        svc,
-        Some(StreamId::new(1)),
-        session_of(svc, thread).await,
-    ));
+    let host = Arc::new(ServicesAcpHost::new(svc, Some(StreamId::new(1)), session));
     svc.acp
-        .open_with_io(host, spec(thread, root), cw, cr)
+        .open_with_io(host, spec(session, thread, root), cw, cr)
         .await
         .unwrap();
 }
@@ -175,9 +193,9 @@ async fn wait_for(
     .expect("timed out")
 }
 
-fn items(svc: &Services, thread: ThreadId) -> Vec<ItemBody> {
+fn items(svc: &Services, session: oxplow_domain::AgentSessionId) -> Vec<ItemBody> {
     svc.acp
-        .transcript(&thread, 0)
+        .transcript(&session, 0)
         .unwrap()
         .items
         .into_iter()
@@ -190,13 +208,13 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Active).await;
     claim_task(&svc, thread).await;
-    open_in_process(&svc, thread, &root).await;
+    let session = open_in_process(&svc, thread, &root).await;
     // After open: the startup `Idle` must not read as a finished turn.
     let mut rx = svc.acp.subscribe();
 
     let target = root.join("src/x.rs");
     svc.acp
-        .submit_human_prompt(&thread, format!("fake:edit {}", target.display()))
+        .submit_human_prompt(&session, format!("fake:edit {}", target.display()))
         .await
         .unwrap();
     let AcpEventBody::Item { item } = wait_for(&mut rx, |b| {
@@ -210,7 +228,7 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
         unreachable!()
     };
     svc.acp
-        .respond_permission(&thread, request_id, Some("allow".into()))
+        .respond_permission(&session, request_id, Some("allow".into()))
         .await
         .unwrap();
     wait_for(&mut rx, |b| {
@@ -290,12 +308,12 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
 async fn a_read_only_thread_is_refused_by_the_write_guard() {
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Queued).await;
-    open_in_process(&svc, thread, &root).await;
+    let session = open_in_process(&svc, thread, &root).await;
     // After open: the startup `Idle` must not read as a finished turn.
     let mut rx = svc.acp.subscribe();
     svc.acp
         .submit_human_prompt(
-            &thread,
+            &session,
             format!("fake:edit {}", root.join("a.rs").display()),
         )
         .await
@@ -309,7 +327,7 @@ async fn a_read_only_thread_is_refused_by_the_write_guard() {
         )
     })
     .await;
-    let items = items(&svc, thread);
+    let items = items(&svc, session);
     assert!(!items
         .iter()
         .any(|b| matches!(b, ItemBody::Permission { .. })));
@@ -352,15 +370,12 @@ fn fake_bin() -> std::path::PathBuf {
 async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Active).await;
-    let host = Arc::new(ServicesAcpHost::new(
-        &svc,
-        Some(StreamId::new(1)),
-        session_of(&svc, thread).await,
-    ));
+    let session = session_of(&svc, thread).await;
+    let host = Arc::new(ServicesAcpHost::new(&svc, Some(StreamId::new(1)), session));
     svc.acp
         .open(
             host,
-            spec(thread, &root),
+            spec(session, thread, &root),
             Launch {
                 program: fake_bin(),
                 args: vec![],
@@ -371,7 +386,7 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
         .unwrap();
     let mut rx = svc.acp.subscribe();
     svc.acp
-        .submit_human_prompt(&thread, "fake:say from a process".into())
+        .submit_human_prompt(&session, "fake:say from a process".into())
         .await
         .unwrap();
     wait_for(&mut rx, |b| {
@@ -383,16 +398,16 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
         )
     })
     .await;
-    assert!(items(&svc, thread)
+    assert!(items(&svc, session)
         .iter()
         .any(|b| matches!(b, ItemBody::Agent { text } if text == "from a process")));
 
     svc.acp
-        .submit_human_prompt(&thread, "fake:crash".into())
+        .submit_human_prompt(&session, "fake:crash".into())
         .await
         .unwrap();
     wait_for(&mut rx, |b| matches!(b, AcpEventBody::Closed { .. })).await;
-    assert!(!svc.acp.is_open(&thread));
+    assert!(!svc.acp.is_open(&session));
     let status = svc
         .agent_status_store
         .get(&thread, Some(session_of(&svc, thread).await))
@@ -408,12 +423,83 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
         .is_empty());
 }
 
+/// Two ACP sessions in one thread are two agents: a prompt in one is
+/// only its transcript's, and closing one leaves the other running.
+#[tokio::test]
+async fn two_acp_sessions_in_a_thread_run_apart() {
+    let (svc, root, _dir) = boot().await;
+    let thread = seed(&svc, &root, ThreadStatus::Active).await;
+    let a = open_in_process(&svc, thread, &root).await;
+    let b = svc
+        .agent_session_store
+        .open(&oxplow_domain::agent_session::NewAgentSession::of(
+            thread,
+            AgentKind::Acp,
+            Some("fake".into()),
+        ))
+        .await
+        .unwrap()
+        .id;
+    open_session_in_process(&svc, b, thread, &root).await;
+    let mut rx = svc.acp.subscribe();
+    svc.acp
+        .submit_human_prompt(&a, "hello".into())
+        .await
+        .unwrap();
+    wait_for(&mut rx, |b| {
+        matches!(
+            b,
+            AcpEventBody::Status {
+                status: AcpStatus::Idle
+            }
+        )
+    })
+    .await;
+    let said = |items: Vec<ItemBody>| {
+        items
+            .into_iter()
+            .any(|i| matches!(i, ItemBody::User { .. }))
+    };
+    assert!(said(items(&svc, a)));
+    assert!(!said(items(&svc, b)));
+    svc.acp.close(&a).unwrap();
+    assert!(!svc.acp.is_open(&a));
+    assert!(svc.acp.is_open(&b));
+}
+
 #[tokio::test]
 async fn closing_an_acp_thread_stops_its_session() {
+    // Every session's process stops with its thread: the ACP agent and a
+    // terminal session's PTY.
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Queued).await;
-    open_in_process(&svc, thread, &root).await;
-    assert!(svc.acp.is_open(&thread));
+    let session = open_in_process(&svc, thread, &root).await;
+    assert!(svc.acp.is_open(&session));
+    let terminal = svc
+        .agent_session_store
+        .open(&oxplow_domain::agent_session::NewAgentSession::of(
+            thread,
+            AgentKind::Claude,
+            None,
+        ))
+        .await
+        .unwrap()
+        .id;
+    let key = oxplow_app::terminal_sessions::agent_pane_key(terminal);
+    svc.terminal_sessions
+        .attach_or_create_for_agent(key.clone(), None, 80, 24, |c, r| {
+            oxplow_app::terminal_sessions::SpawnRequest {
+                command: "sleep".into(),
+                args: vec!["30".into()],
+                cwd: root.clone(),
+                env: vec![],
+                env_remove: vec![],
+                cols: c,
+                rows: r,
+            }
+        })
+        .await
+        .unwrap();
     svc.commands
         .run(
             &oxplow_domain::Actor::Human,
@@ -424,9 +510,21 @@ async fn closing_an_acp_thread_stops_its_session() {
         .await
         .unwrap();
     assert!(
-        !svc.acp.is_open(&thread),
+        !svc.acp.is_open(&session),
         "the agent process is stopped with its thread"
     );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while svc
+            .terminal_sessions
+            .session_id_for_key(&key)
+            .await
+            .is_some()
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the terminal session's PTY is stopped with its thread");
 }
 
 #[tokio::test]

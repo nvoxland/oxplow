@@ -7,7 +7,7 @@
 use oxplow_app::agent_command::{build_agent_command_for_session, AgentCommandOptions};
 use oxplow_app::agent_prompt::assemble_system_prompt;
 use oxplow_app::config_service::read_config;
-use oxplow_app::terminal_sessions::{AttachResult, SpawnRequest};
+use oxplow_app::terminal_sessions::{agent_pane_key, AttachResult, SpawnRequest};
 use oxplow_app::Services;
 use oxplow_domain::agent_session::{AgentSession, SessionKind};
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
@@ -222,13 +222,6 @@ fn shell_session_key(stream_id: &str, pane_target: &str) -> Option<String> {
     }
 }
 
-/// The dedup key for an agent session's PTY, so a re-attach — another
-/// window, a browser client — resumes the one live agent rather than
-/// spawning a duplicate in the same worktree.
-fn agent_session_key(session: AgentSessionId) -> String {
-    format!("session|{session}")
-}
-
 /// Whether `session` runs in a terminal oxplow may start: it is open, and
 /// a terminal one (an ACP chat speaks the protocol on its stdio).
 fn has_a_terminal(session: &AgentSession) -> Result<(), IpcError> {
@@ -349,7 +342,7 @@ pub async fn open_terminal_session(
     let agent = session.harness;
     let cols = cols.max(20);
     let rows = rows.max(5);
-    let session_key = agent_session_key(session_id);
+    let session_key = agent_pane_key(session_id);
     let thread_id_str = thread.id.to_string();
 
     // Materialize the agent-specific runtime on every spawn. Claude
@@ -554,7 +547,7 @@ pub async fn lookup_terminal_session(
 ) -> Result<Option<String>, IpcError> {
     Ok(svc
         .terminal_sessions
-        .session_id_for_key(&agent_session_key(session_id))
+        .session_id_for_key(&agent_pane_key(session_id))
         .await)
 }
 
@@ -599,7 +592,7 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        agent_session_key, claude_otel_env, codex_hook_command, codex_otel_overrides, identity_env,
+        claude_otel_env, codex_hook_command, codex_otel_overrides, identity_env,
         opencode_config_content, shell_session_key,
     };
     use crate::error::IpcError;
@@ -651,14 +644,6 @@ mod tests {
             ov.contains(&"otel.exporter.otlp-http.headers.x-oxplow-session=\"ses3\"".to_string())
         );
         assert!(!ov.iter().any(|o| o.contains("x-oxplow-stream")));
-    }
-
-    #[test]
-    fn an_agent_pane_is_keyed_by_its_session() {
-        assert_eq!(
-            agent_session_key(oxplow_domain::AgentSessionId::new(3)),
-            "session|ses3"
-        );
     }
 
     #[test]

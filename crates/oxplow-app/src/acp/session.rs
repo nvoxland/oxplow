@@ -56,12 +56,15 @@ pub enum AcpEventBody {
     Closed { reason: Option<String> },
 }
 
-/// A change to one thread's ACP session, pushed to the UI.
+/// A change to one agent session's ACP agent, pushed to the UI.
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpEvent {
+    /// The agent session (`ses3`) it is about.
+    pub agent_session_id: String,
+    /// Its thread, for a client that filters by thread.
     pub thread_id: String,
-    /// Which session of the thread: each open is a new generation whose
+    /// Which run of the session: each open is a new generation whose
     /// ids and seqs start over, so a client resets rather than merging it
     /// with the last one's transcript.
     pub generation: u64,
@@ -71,7 +74,7 @@ pub struct AcpEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AcpError {
-    #[error("no ACP session is open for this thread")]
+    #[error("no ACP agent is running for this session")]
     NotOpen,
     #[error("the agent is still working on the last prompt; wait for it or stop it")]
     TurnInFlight,
@@ -88,12 +91,14 @@ pub enum AcpError {
 /// How to start the session.
 #[derive(Debug, Clone)]
 pub struct SessionSpec {
+    /// The agent session it runs.
+    pub session_id: oxplow_domain::AgentSessionId,
     pub thread_id: ThreadId,
     /// The `acpAgents` name.
     pub agent: String,
     pub cwd: PathBuf,
     pub mcp: Vec<McpHttp>,
-    /// The thread's last session, loaded instead of starting fresh when
+    /// The agent session's last ACP session, loaded instead of starting fresh when
     /// the agent supports `session/load`.
     pub resume_session_id: Option<String>,
     pub system_prompt: Option<String>,
@@ -221,6 +226,7 @@ impl Actor {
 
     fn emit(&self, body: AcpEventBody) {
         let _ = self.events.send(AcpEvent {
+            agent_session_id: self.spec.session_id.to_string(),
             thread_id: self.spec.thread_id.to_string(),
             generation: self.generation,
             body,
@@ -807,6 +813,7 @@ impl Actor {
 
     pub(super) fn teardown_handle(&self) -> Teardown {
         Teardown {
+            session: self.spec.session_id,
             thread: self.spec.thread_id,
             generation: self.generation,
             view: self.view.clone(),
@@ -822,6 +829,7 @@ impl Actor {
 /// when the actor never got to (a transport error drops the actor
 /// mid-loop). Idempotent: a session already stopped is left alone.
 pub(super) struct Teardown {
+    session: oxplow_domain::AgentSessionId,
     thread: ThreadId,
     generation: u64,
     view: Arc<Mutex<SessionView>>,
@@ -833,6 +841,7 @@ pub(super) struct Teardown {
 impl Teardown {
     fn emit(&self, body: AcpEventBody) {
         let _ = self.events.send(AcpEvent {
+            agent_session_id: self.session.to_string(),
             thread_id: self.thread.to_string(),
             generation: self.generation,
             body,

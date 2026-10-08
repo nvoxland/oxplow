@@ -125,6 +125,13 @@ impl RingBuffer {
     }
 }
 
+/// The registry key of agent session `session`'s PTY: one per session, so
+/// a re-attach — another window, a browser client — resumes the one live
+/// agent rather than spawning a duplicate in the same worktree.
+pub fn agent_pane_key(session: oxplow_domain::AgentSessionId) -> SessionKey {
+    format!("session|{session}")
+}
+
 /// The agent a PTY runs: its thread and agent session. Its output stamps
 /// the session's liveness, and its exit ends the session's harness session
 /// (`HookIngestService` records a `SessionEnd` for it).
@@ -441,6 +448,13 @@ impl TerminalSessionRegistry {
     /// Permanently kill a session and free its PTY. Use when a thread
     /// is closed or the user explicitly asks to terminate the agent —
     /// not on every renderer unmount.
+    /// Stop the PTY registered under `key`, if one is.
+    pub async fn close_key(&self, key: &str) {
+        if let Some(id) = self.session_id_for_key(key).await {
+            let _ = self.close(&id).await;
+        }
+    }
+
     pub async fn close(&self, session_id: &str) -> Result<(), TerminalSessionError> {
         let mut map = self.inner.lock().await;
         let entry = map
@@ -650,6 +664,14 @@ mod tests {
         assert_eq!(ended.envelope.payload["reason"], "exit");
         assert_eq!(ended.envelope.payload["session"], "h1");
         assert_eq!(ended.envelope.anchors.agent_session_id, Some(session));
+    }
+
+    #[test]
+    fn an_agent_pane_is_keyed_by_its_session() {
+        assert_eq!(
+            agent_pane_key(oxplow_domain::AgentSessionId::new(3)),
+            "session|ses3"
+        );
     }
 
     /// tsk1026: a session whose process exited is unregistered, so

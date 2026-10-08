@@ -981,27 +981,27 @@ export const commands = {
 	 *  Open (or reattach to) an ACP thread's agent session. Hand-written like
 	 *  `open_terminal_session`: the MCP endpoint comes from the plugin runtime.
 	 */
-	acpOpenSession: (threadId: ThreadId) => typedError<AcpSnapshot, IpcError>(__TAURI_INVOKE("acp_open_session", { threadId })),
+	acpOpenSession: (sessionId: AgentSessionId) => typedError<AcpSnapshot, IpcError>(__TAURI_INVOKE("acp_open_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpPrompt: (threadId: ThreadId, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("acp_prompt", { threadId, text })),
+	acpPrompt: (sessionId: AgentSessionId, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("acp_prompt", { sessionId, text })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpCancel: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_cancel", { threadId })),
+	acpCancel: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_cancel", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpRespondPermission: (threadId: ThreadId, requestId: string, optionId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("acp_respond_permission", { threadId, requestId, optionId })),
+	acpRespondPermission: (sessionId: AgentSessionId, requestId: string, optionId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("acp_respond_permission", { sessionId, requestId, optionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpTranscript: (threadId: ThreadId, sinceSeq: number) => typedError<{
+	acpTranscript: (sessionId: AgentSessionId, sinceSeq: number) => typedError<{
 	agent: string,
 	/**
 	 *  The session's generation: a new one (a Restart) replaces the
@@ -1014,12 +1014,12 @@ export const commands = {
 	headSeq: number,
 	items: TranscriptItem[],
 	stderrTail: string[],
-} | null, IpcError>(__TAURI_INVOKE("acp_transcript", { threadId, sinceSeq })),
+} | null, IpcError>(__TAURI_INVOKE("acp_transcript", { sessionId, sinceSeq })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpCloseSession: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_close_session", { threadId })),
+	acpCloseSession: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_close_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1132,11 +1132,14 @@ export type AcpAgentSource =
 // The project's `acpAgents:`; needs a person's approval to run.
 "project";
 
-// A change to one thread's ACP session, pushed to the UI.
+// A change to one agent session's ACP agent, pushed to the UI.
 export type AcpEvent = {
+	// The agent session (`ses3`) it is about.
+	agentSessionId: string,
+	// Its thread, for a client that filters by thread.
 	threadId: string,
 	/**
-	 *  Which session of the thread: each open is a new generation whose
+	 *  Which run of the session: each open is a new generation whose
 	 *  ids and seqs start over, so a client resets rather than merging it
 	 *  with the last one's transcript.
 	 */

@@ -489,7 +489,7 @@ pub fn demote_op() -> Op {
 /// transaction (by `system`), and an ACP thread's session stops once the
 /// close commits. An agent closes only its own thread. Undone by reopening
 /// it (the effort stays closed).
-pub fn close_op(acp: Arc<crate::acp::manager::AcpManager>) -> Op {
+pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
     Op::new(
         "threads.write",
         "close",
@@ -525,15 +525,18 @@ pub fn close_op(acp: Arc<crate::acp::manager::AcpManager>) -> Op {
                 )
                 .map_err(CommandError::from)?;
             }
-            let runs_acp = oxplow_db::agent_session_store::newest_for_thread_tx(ctx.conn, id)?
-                .is_some_and(|s| s.harness == AgentKind::Acp);
-            let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> = runs_acp.then(|| {
-                let acp = acp.clone();
-                // Not open is fine: there's nothing to stop.
-                Box::new(move || {
-                    let _ = acp.close(&id);
-                }) as Box<dyn FnOnce() + Send + Sync>
-            });
+            // Every session's process stops once the close commits.
+            let sessions: Vec<_> =
+                oxplow_db::agent_session_store::list_open_for_thread_tx(ctx.conn, id)?
+                    .into_iter()
+                    .map(|s| s.id)
+                    .collect();
+            let processes = processes.clone();
+            let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> = Some(Box::new(move || {
+                for session in sessions {
+                    processes.kill(session);
+                }
+            }));
             Ok(HandlerOutput {
                 inverse: call(REOPEN, json!({ "thread": input.thread })),
                 after_commit,
@@ -617,7 +620,7 @@ pub fn reorder_op() -> Op {
 /// The thread commands, for the bus.
 pub fn ops(
     config: Arc<RwLock<OxplowConfig>>,
-    acp: Arc<crate::acp::manager::AcpManager>,
+    processes: crate::agent_sessions::SessionProcesses,
 ) -> Vec<Op> {
     vec![
         create_op(config),
@@ -625,7 +628,7 @@ pub fn ops(
         set_prompt_op(),
         promote_op(),
         demote_op(),
-        close_op(acp),
+        close_op(processes),
         reopen_op(),
         reorder_op(),
     ]

@@ -568,18 +568,18 @@ the same JSON.
 ## ACP agents: sessions (tsk337)
 
 **Shape.**
-- `Services.acp` (`acp/manager.rs`) holds each thread's command sender and a shared `SessionView` (status, transcript, stderr tail).
+- `Services.acp` (`acp/manager.rs`) holds each **agent session**'s command sender and a shared `SessionView` (status, transcript, stderr tail), keyed by `AgentSessionId`: two ACP sessions in one thread are two agents with their own transcripts.
 - One actor task per session (`acp/session.rs`) owns the connection.
 - `wire::run` feeds every agent message into ONE channel, and the prompt's result is an ordered barrier, so the actor sees updates, requests and turn end in wire order.
 - Events for every session go out on one broadcast channel (`AcpEvent`).
 - **Open and close are race-free (tsk359).**
-  - `open` reserves the thread's slot under one lock before spawning anything, so concurrent opens start one agent.
+  - `open` reserves the session's slot under one lock before spawning anything, so concurrent opens start one agent.
   - `close` marks the handle closed at once.
   - A closed session still winding down is replaced and marked not current; its actor then records no Interrupt over the new session's status.
-- **Thread lifecycle.** Closing a thread (`oxplow.thread.close`) closes its open effort in the same transaction; closing a thread whose session runs ACP also stops its session and agent process once the close commits. A fork (`oxplow.thread.create { from }`) keeps the source session's harness and `acp_agent`.
+- **Thread lifecycle.** Closing a thread (`oxplow.thread.close`) closes its open effort in the same transaction, and once the close commits it stops every open session's process — ACP agent or PTY — through `agent_sessions::SessionProcesses::kill`. A fork (`oxplow.thread.create { from }`) keeps the source session's harness and `acp_agent`.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
-**Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:
+**Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost::new(svc, stream, session)` holds `Weak<Services>` (sessions live in Services) and the agent session it hosts — every envelope and status it records names it — and records exactly what a hooked turn records:
 - `SessionStart` plus the resume id on start (a start closes turns a previous process left open and resets the thread to idle);
 - `UserPromptSubmit` on the person's prompt;
 - `PreToolUse` on every policy check;
@@ -629,10 +629,10 @@ the same JSON.
 
 **RPC and events (tsk338).** `oxplow-rpc/src/commands/acp.rs`; every command is a `ui(...)` parity row, so none can become an MCP tool.
 - **`acp_open_session`** (a ctx row with a hand-written Tauri adapter, because it needs `plugin_runtime` for oxplow's MCP URL and token). It:
-  - checks the thread is ACP;
+  - takes the agent session's id, and checks it is open and an `acp` session (its thread and stream come from the row);
   - resolves the agent (`find`, `may_start`, `resolve_command`);
   - assembles the system prompt (`system_prompt_via_meta` is true when the command is `claude-agent-acp`);
-  - passes the thread's resume id;
+  - passes the session's resume id;
   - opens the session and returns the `AcpSnapshot`.
 - **The rest:**
   - `acp_prompt`, the prompt box's Enter, and the only caller of `submit_human_prompt`, which the guard pins;
@@ -641,10 +641,11 @@ the same JSON.
   - `acp_transcript(sinceSeq)`, which returns `null` when there's no session;
   - `acp_dismiss_directive`;
   - `acp_close_session`.
-- **Events:** the `acp:event` channel (frame key `acp`) carries `AcpEvent { threadId, type: item|status|directive|usage|closed, … }` over the daemon's `/events`. It is in `event_channels::FRAMES` and in TS `EVENT_CHANNELS` / `CHANNEL_ROUTING` (multiplexed).
+- **Every RPC takes the session id** (`sessionId`), and `acp_close_session` stops the process only — the session's slot closes with its command.
+- **Events:** the `acp:event` channel (frame key `acp`) carries `AcpEvent { agentSessionId, threadId, generation, type: item|status|directive|usage|closed, … }` over the daemon's `/events`. It is in `event_channels::FRAMES` and in TS `EVENT_CHANNELS` / `CHANNEL_ROUTING` (multiplexed).
 - **Bindings:** raw agent JSON (`rawInput` / `rawOutput`) is TS `unknown`, via `specta_typescript::Unknown`, because specta's own `serde_json::Value` rendering doesn't typecheck.
 
-**UI (tsk339).** `AgentPage` renders `components/acp/AcpAgentView.tsx` for `agent: acp` threads instead of the terminal.
+**UI (tsk339).** `AgentPage` renders `components/acp/AcpAgentView.tsx` (by `sessionId`, filtering events by `agentSessionId`) for an `acp` session instead of the terminal.
 - **Transcript state:** `acpTranscript.ts` is a pure reducer over the `acpTranscript` snapshot and live `acp:event`s. Items upsert by id and the newer seq wins. A seq gap, or a remote reconnect (`onRemoteReconnect`), refetches `since(headSeq)`. Past a gap, `headSeq` stays at the last contiguous seq, so that refetch includes the missed items (tsk356). Each open of a thread's session is a new **generation** (`AcpEvent.generation`, `AcpSnapshot.generation`) whose ids and seqs restart. The reducer starts over on a new generation, so a Restart never mixes old and new transcripts, and late events from a closed session can't overwrite the new one (tsk357). The view subscribes to events before fetching, so nothing between the two is lost.
 - **Opening:** it opens the session on mount when none exists. A failure shows the error with Retry, plus "Open settings" when the agent needs approval.
 - **Items:**

@@ -1,4 +1,4 @@
-//! Every open ACP session, by thread. Holds only each session's command
+//! Every open ACP session, by agent session. Holds only each session's command
 //! sender and shared view; the actor (`session.rs`) owns the connection.
 //! Events for every session go out on one broadcast channel.
 
@@ -8,7 +8,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use oxplow_domain::ThreadId;
+use oxplow_domain::AgentSessionId;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
@@ -52,7 +52,7 @@ struct Handle {
     /// Set the moment `close` is called, before the actor has wound down.
     closed: Arc<AtomicBool>,
     /// Cleared when a newer session replaces this one; its actor then
-    /// records nothing on its way out (the new session owns the thread).
+    /// records nothing on its way out (the new one owns the session).
     current: Arc<AtomicBool>,
 }
 
@@ -62,10 +62,10 @@ impl Handle {
     }
 }
 
-/// A thread's slot, claimed before anything is spawned (see
+/// An agent session's slot, claimed before anything is spawned (see
 /// [`AcpManager::reserve`]).
 struct Reservation {
-    thread: ThreadId,
+    session: AgentSessionId,
     generation: u64,
     commands: mpsc::UnboundedReceiver<Command>,
     view: Arc<Mutex<SessionView>>,
@@ -73,7 +73,7 @@ struct Reservation {
 }
 
 pub struct AcpManager {
-    sessions: Mutex<HashMap<ThreadId, Handle>>,
+    sessions: Mutex<HashMap<AgentSessionId, Handle>>,
     events: broadcast::Sender<AcpEvent>,
     /// Hands out session generations; one per open.
     next_generation: std::sync::atomic::AtomicU64,
@@ -104,18 +104,18 @@ impl AcpManager {
         let _ = self.events.send(event);
     }
 
-    /// Is a session running for `thread`?
-    pub fn is_open(&self, thread: &ThreadId) -> bool {
-        self.sessions.lock().get(thread).is_some_and(Handle::alive)
+    /// Is agent session `session`'s agent running?
+    pub fn is_open(&self, session: &AgentSessionId) -> bool {
+        self.sessions.lock().get(session).is_some_and(Handle::alive)
     }
 
-    /// Claim `thread`'s slot for a new session, under one lock, before
+    /// Claim the session's slot for a new run, under one lock, before
     /// anything is spawned: two concurrent opens can't both start an
     /// agent. `None` when a session is already live. A closed session
     /// still winding down is replaced and marked not current.
     fn reserve(&self, spec: &SessionSpec) -> Option<Reservation> {
         let mut sessions = self.sessions.lock();
-        if let Some(old) = sessions.get(&spec.thread_id) {
+        if let Some(old) = sessions.get(&spec.session_id) {
             if old.alive() {
                 return None;
             }
@@ -126,7 +126,7 @@ impl AcpManager {
         let view = Arc::new(Mutex::new(SessionView::new(&spec.agent, generation)));
         let current = Arc::new(AtomicBool::new(true));
         sessions.insert(
-            spec.thread_id,
+            spec.session_id,
             Handle {
                 commands: tx,
                 view: view.clone(),
@@ -136,7 +136,7 @@ impl AcpManager {
             },
         );
         Some(Reservation {
-            thread: spec.thread_id,
+            session: spec.session_id,
             generation,
             commands: rx,
             view,
@@ -145,18 +145,18 @@ impl AcpManager {
     }
 
     /// Give up a reservation whose start failed (only if it's still ours).
-    fn release(&self, thread: &ThreadId, generation: u64) {
+    fn release(&self, session: &AgentSessionId, generation: u64) {
         let mut sessions = self.sessions.lock();
         if sessions
-            .get(thread)
+            .get(session)
             .is_some_and(|h| h.generation == generation)
         {
-            sessions.remove(thread);
+            sessions.remove(session);
         }
     }
 
-    /// Start the agent process and its session. A session already running
-    /// for the thread is kept (`Ok`).
+    /// Start the agent process and its session. An agent already running
+    /// for the session is kept (`Ok`).
     pub async fn open(
         &self,
         host: Arc<dyn AcpHost>,
@@ -185,7 +185,7 @@ impl AcpManager {
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                self.release(&reservation.thread, reservation.generation);
+                self.release(&reservation.session, reservation.generation);
                 return Err(AcpError::Agent(format!(
                     "starting {}: {e}",
                     launch.program.display()
@@ -193,7 +193,7 @@ impl AcpManager {
             }
         };
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            self.release(&reservation.thread, reservation.generation);
+            self.release(&reservation.session, reservation.generation);
             return Err(AcpError::Agent("the agent's stdio is unavailable".into()));
         };
         if let Some(stderr) = child.stderr.take() {
@@ -286,10 +286,13 @@ impl AcpManager {
         }
     }
 
-    fn commands(&self, thread: &ThreadId) -> Result<mpsc::UnboundedSender<Command>, AcpError> {
+    fn commands(
+        &self,
+        session: &AgentSessionId,
+    ) -> Result<mpsc::UnboundedSender<Command>, AcpError> {
         self.sessions
             .lock()
-            .get(thread)
+            .get(session)
             .filter(|h| h.alive())
             .map(|h| h.commands.clone())
             .ok_or(AcpError::NotOpen)
@@ -299,18 +302,18 @@ impl AcpManager {
     /// command behind the prompt box (the source guard pins this).
     pub async fn submit_human_prompt(
         &self,
-        thread: &ThreadId,
+        session: &AgentSessionId,
         text: String,
     ) -> Result<(), AcpError> {
         let (reply, rx) = oneshot::channel();
-        self.commands(thread)?
+        self.commands(session)?
             .send(Command::Prompt { text, reply })
             .map_err(|_| AcpError::NotOpen)?;
         rx.await.map_err(|_| AcpError::NotOpen)?
     }
 
-    pub fn cancel(&self, thread: &ThreadId) -> Result<(), AcpError> {
-        self.commands(thread)?
+    pub fn cancel(&self, session: &AgentSessionId) -> Result<(), AcpError> {
+        self.commands(session)?
             .send(Command::Cancel)
             .map_err(|_| AcpError::NotOpen)
     }
@@ -318,12 +321,12 @@ impl AcpManager {
     /// Answer a permission card; `option_id: None` cancels it.
     pub async fn respond_permission(
         &self,
-        thread: &ThreadId,
+        session: &AgentSessionId,
         request_id: String,
         option_id: Option<String>,
     ) -> Result<(), AcpError> {
         let (reply, rx) = oneshot::channel();
-        self.commands(thread)?
+        self.commands(session)?
             .send(Command::Respond {
                 request_id,
                 option_id,
@@ -335,9 +338,9 @@ impl AcpManager {
 
     /// The session's state and the items changed after `since`. Also works
     /// for a session that has stopped (its transcript stays readable).
-    pub fn transcript(&self, thread: &ThreadId, since: u64) -> Option<AcpSnapshot> {
+    pub fn transcript(&self, session: &AgentSessionId, since: u64) -> Option<AcpSnapshot> {
         let sessions = self.sessions.lock();
-        let v = sessions.get(thread)?.view.lock();
+        let v = sessions.get(session)?.view.lock();
         Some(AcpSnapshot {
             agent: v.agent.clone(),
             generation: v.generation,
@@ -350,10 +353,10 @@ impl AcpManager {
     }
 
     /// Stop the session and its agent process.
-    pub fn close(&self, thread: &ThreadId) -> Result<(), AcpError> {
-        let commands = self.commands(thread)?;
+    pub fn close(&self, session: &AgentSessionId) -> Result<(), AcpError> {
+        let commands = self.commands(session)?;
         // Closed from this moment, not when the actor gets around to it.
-        if let Some(h) = self.sessions.lock().get(thread) {
+        if let Some(h) = self.sessions.lock().get(session) {
             h.closed.store(true, Ordering::SeqCst);
         }
         commands.send(Command::Close).map_err(|_| AcpError::NotOpen)

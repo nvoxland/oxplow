@@ -14,6 +14,7 @@ pub mod agent_context;
 pub mod agent_path;
 pub mod agent_policy;
 pub mod agent_prompt;
+pub mod agent_sessions;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;
 pub mod ai_compute;
@@ -1184,6 +1185,8 @@ impl Services {
             commands.add_op(command).expect("vcs ops register");
         }
         let acp = Arc::new(acp::manager::AcpManager::new());
+        let session_processes =
+            agent_sessions::SessionProcesses::new(acp.clone(), terminal_sessions.clone());
         let link_deps = link_check::LinkDeps {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
@@ -1202,7 +1205,10 @@ impl Services {
         ]
         .into_iter()
         .chain(commands::review::ops())
-        .chain(commands::thread::ops(config_arc.clone(), acp.clone()))
+        .chain(commands::thread::ops(
+            config_arc.clone(),
+            session_processes.clone(),
+        ))
         .chain(commands::effort::ops(work_items.clone()))
         .chain(commands::hint::ops())
         .chain(commands::dashboard::ops(db.clone(), sql.clone()))
