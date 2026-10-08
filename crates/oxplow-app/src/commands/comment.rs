@@ -89,6 +89,11 @@ pub struct UpdateInput {
     /// … and its anchor (both, or neither).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selectors_json: Option<String>,
+    /// With a re-attach: whether the quote is lost from its content. A
+    /// re-attach anchors it (`false`, the default); its undo puts back
+    /// what it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orphaned: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -230,6 +235,18 @@ pub fn update_op() -> Op {
             let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
             let before = load(ctx, id)?.comment;
             on_own_stream(ctx, before.stream_id)?;
+            // A re-attach names both its quote and its anchor — checked
+            // before anything is written.
+            let relink = match (&input.quote, &input.selectors_json) {
+                (Some(quote), Some(selectors)) => Some((quote, selectors)),
+                (None, None) if input.orphaned.is_none() => None,
+                _ => {
+                    return Err(invalid(
+                        "/quote",
+                        "a relink names both `quote` and `selectors_json` (and `orphaned` only with them)",
+                    ))
+                }
+            };
             let mut events = Vec::new();
             let mut undo = serde_json::Map::new();
             undo.insert("comment".into(), json!(input.comment));
@@ -241,19 +258,12 @@ pub fn update_op() -> Op {
                 events.extend(set_status_tx(ctx.conn, id, status)?);
                 undo.insert("status".into(), json!(before.status));
             }
-            match (&input.quote, &input.selectors_json) {
-                (Some(quote), Some(selectors)) => {
-                    events.extend(relink_tx(ctx.conn, id, quote, selectors)?);
-                    undo.insert("quote".into(), json!(before.quote));
-                    undo.insert("selectors_json".into(), json!(before.selectors_json));
-                }
-                (None, None) => {}
-                _ => {
-                    return Err(invalid(
-                        "/quote",
-                        "a relink names both `quote` and `selectors_json`",
-                    ))
-                }
+            if let Some((quote, selectors)) = relink {
+                let orphaned = input.orphaned.unwrap_or(false);
+                events.extend(relink_tx(ctx.conn, id, quote, selectors, orphaned)?);
+                undo.insert("quote".into(), json!(before.quote));
+                undo.insert("selectors_json".into(), json!(before.selectors_json));
+                undo.insert("orphaned".into(), json!(before.orphaned));
             }
             if undo.len() == 1 {
                 return Err(invalid(
@@ -414,6 +424,79 @@ mod tests {
     /// tsk861: a moved anchor is stored and recorded; one already where
     /// it was writes nothing — no audit row, no event — and an agent can't
     /// relocate (it is the renderer's).
+    /// Re-attaching an orphaned comment anchors it again; undoing that
+    /// puts back its old quote and anchor — and leaves it orphaned, as it
+    /// was.
+    #[tokio::test]
+    async fn undoing_a_relink_of_an_orphaned_comment_orphans_it_again() {
+        let fx = services_with_effort().await;
+        let c = add(
+            &fx,
+            &Actor::Human,
+            comment_on(&stream_ref(StreamId::new(1)), None),
+        )
+        .await
+        .unwrap();
+        let id = c["comment"]["id"].as_str().unwrap().to_string();
+        let cid = CommentId::try_from_str(&id).unwrap();
+        let id = format!("comment:{id}");
+        let before = fx
+            .svc
+            .comment_store
+            .get(cid)
+            .await
+            .unwrap()
+            .unwrap()
+            .comment;
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                RELOCATE,
+                json!({ "comment": id, "selectors_json": before.selectors_json, "orphaned": true }),
+                false,
+            )
+            .await
+            .unwrap();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                UPDATE,
+                json!({ "comment": id, "quote": "a new span", "selectors_json": "{\"from\":9}" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let relinked = fx
+            .svc
+            .comment_store
+            .get(cid)
+            .await
+            .unwrap()
+            .unwrap()
+            .comment;
+        assert!(!relinked.orphaned);
+        assert_eq!(relinked.quote, "a new span");
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        let undone = fx
+            .svc
+            .comment_store
+            .get(cid)
+            .await
+            .unwrap()
+            .unwrap()
+            .comment;
+        assert_eq!(undone.quote, before.quote);
+        assert_eq!(undone.selectors_json, before.selectors_json);
+        assert!(undone.orphaned, "orphaned again, as before the relink");
+    }
+
     #[tokio::test]
     async fn an_unchanged_anchor_writes_nothing() {
         let fx = services_with_effort().await;

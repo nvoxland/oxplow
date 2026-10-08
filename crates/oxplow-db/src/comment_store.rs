@@ -448,16 +448,18 @@ pub fn relink_tx(
     id: CommentId,
     quote: &str,
     selectors_json: &str,
+    orphaned: bool,
 ) -> Result<Vec<Envelope>, DomainError> {
     conn.execute(
         "UPDATE comment
-             SET quote = ?2, selectors_json = ?3, orphaned = 0, updated_at = ?4
+             SET quote = ?2, selectors_json = ?3, orphaned = ?5, updated_at = ?4
              WHERE id = ?1",
         params![
             id.value(),
             quote,
             selectors_json,
-            ts_to_string(Timestamp::now())
+            ts_to_string(Timestamp::now()),
+            orphaned
         ],
     )
     .map_err(sql)?;
@@ -654,7 +656,7 @@ impl SqliteCommentStore {
         selectors_json: &str,
     ) -> Result<(), DomainError> {
         let (quote, selectors) = (quote.to_string(), selectors_json.to_string());
-        self.run(move |c| Ok(((), relink_tx(c, id, &quote, &selectors)?)))
+        self.run(move |c| Ok(((), relink_tx(c, id, &quote, &selectors, false)?)))
             .await
     }
 
