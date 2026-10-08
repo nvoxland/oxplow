@@ -307,8 +307,8 @@ filter.
 
 Config IPC includes `set_agents(agents: Vec<String>)`, which writes the
 project's ordered enabled-harness list in `.oxplow/project.yaml` (each key must
-be registered), and `set_agent_model(agent, model)`, which writes
-`agentConfig.<agent>.model`. `oxplow.agent_session.open` takes an optional
+be registered), and `set_agent_setting(agent, key, value)`, which writes
+`agentConfig.<agent>.<key>` for a setting the harness declares. `oxplow.agent_session.open` takes an optional
 `harness`; it must be registered and enabled, else the project's default
 runs.
 

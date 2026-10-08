@@ -215,7 +215,11 @@ config checks only the keys' shape; `set_agents` and
 `oxplow.agent_session.open` check them against the registry, naming the
 registered on a miss. Each harness's own settings are `agentConfig: { <key>:
 { … } }`, what its `launch` reads; the retired `agentModels` is a load error
-naming it. Whether a session runs an ACP agent in a chat follows from its
+naming it. A harness declares the ones a person sets
+(`AgentHarness::settings`: key, title, hint, placeholder — opencode's
+`model`), its listing carries them, and Settings → Agents renders a field
+for each enabled harness's, saved through `set_agent_setting(agent, key,
+value)`, which refuses a setting the harness doesn't declare. Whether a session runs an ACP agent in a chat follows from its
 harness's `interact()` (a structured transcript), not its name. The UI reads
 the harnesses through `list_agent_harnesses` (`harnesses::listing`: key,
 title, enabled, chat; priority order) by `useAgentHarnesses`, and

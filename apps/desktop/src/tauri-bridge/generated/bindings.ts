@@ -668,7 +668,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgentModel: (agent: string, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
+	setAgentSetting: (agent: string, key: string, value: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_setting", { agent, key, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -3294,6 +3294,16 @@ export type HarnessListing = {
 	chat: boolean,
 	// The project enables it (`agents:` names it, or names none).
 	enabled: boolean,
+	// The settings it reads from its `agentConfig` entry.
+	settings: HarnessSettingListing[],
+};
+
+// A harness setting, as Settings → Agents shows it.
+export type HarnessSettingListing = {
+	key: string,
+	title: string,
+	hint: string,
+	placeholder: string,
 };
 
 // Where a stream's workspace is.

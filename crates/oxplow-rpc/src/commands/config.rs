@@ -59,26 +59,37 @@ pub async fn set_agents(svc: &Services, agents: Vec<String>) -> Result<OxplowCon
     set_key(svc, "agents", Some(value_of(&agents))).await
 }
 
-/// Set (or clear, with `None`/blank) one agent's launch model:
-/// `agentConfig.<agent>.model` in .oxplow/project.yaml, which the harness's
-/// launch reads (opencode's today).
-pub async fn set_agent_model(
+/// Set (or clear, with `None`/blank) one of a harness's settings:
+/// `agentConfig.<agent>.<key>` in .oxplow/project.yaml, which its launch
+/// reads. The harness must be registered and declare the setting
+/// (`AgentHarness::settings`).
+pub async fn set_agent_setting(
     svc: &Services,
     agent: String,
-    model: Option<String>,
+    key: String,
+    value: Option<String>,
 ) -> Result<OxplowConfig, IpcError> {
+    let harness = svc
+        .harnesses
+        .get(&agent)
+        .map_err(|e| IpcError::invalid(e.to_string()))?;
+    if !harness.settings().iter().any(|s| s.key == key) {
+        return Err(IpcError::invalid(format!(
+            "agent `{agent}` has no setting `{key}`"
+        )));
+    }
     let mut all = read_config(&svc.config).agent_config;
     let mut entry = all.remove(&agent).unwrap_or_else(|| json!({}));
     let fields = entry.as_object_mut().expect("agentConfig entries are maps");
-    match model
-        .map(|m| m.trim().to_string())
-        .filter(|m| !m.is_empty())
+    match value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
     {
-        Some(m) => {
-            fields.insert("model".into(), Value::String(m));
+        Some(v) => {
+            fields.insert(key, Value::String(v));
         }
         None => {
-            fields.remove("model");
+            fields.remove(&key);
         }
     }
     if !fields.is_empty() {
@@ -179,8 +190,8 @@ mod tests {
             ("set_agents", json!({ "agents": ["claude", "codex"] })),
             ("set_agent_prompt_append", json!({ "text": "Be brief." })),
             (
-                "set_agent_model",
-                json!({ "agent": "opencode", "model": "m1" }),
+                "set_agent_setting",
+                json!({ "agent": "opencode", "key": "model", "value": "m1" }),
             ),
             (
                 "set_generated",
@@ -219,8 +230,8 @@ mod tests {
         }
         // Clearing a value unsets its key.
         let out = crate::dispatch(
-            "set_agent_model",
-            json!({ "agent": "opencode", "model": null }),
+            "set_agent_setting",
+            json!({ "agent": "opencode", "key": "model", "value": null }),
             &svc,
         )
         .await

@@ -9,7 +9,8 @@
 use std::path::Path;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
+    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
+    LaunchSpec, Transcript,
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
@@ -83,6 +84,10 @@ impl AgentHarness for FakeHarness {
     }
 
     fn env_markers(&self) -> &[&str] {
+        &[]
+    }
+
+    fn settings(&self) -> &[HarnessSetting] {
         &[]
     }
 

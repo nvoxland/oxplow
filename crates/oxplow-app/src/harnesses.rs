@@ -35,6 +35,18 @@ pub struct HarnessListing {
     pub chat: bool,
     /// The project enables it (`agents:` names it, or names none).
     pub enabled: bool,
+    /// The settings it reads from its `agentConfig` entry.
+    pub settings: Vec<HarnessSettingListing>,
+}
+
+/// A harness setting, as Settings → Agents shows it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessSettingListing {
+    pub key: String,
+    pub title: String,
+    pub hint: String,
+    pub placeholder: String,
 }
 
 /// Every registered harness in priority order: the ones `agents:` names,
@@ -55,6 +67,16 @@ pub fn listing(registry: &HarnessRegistry, agents: &[String]) -> Vec<HarnessList
             title: h.title().to_string(),
             chat: h.interact().transcript == Transcript::Structured,
             enabled: agents.is_empty() || agents.iter().any(|a| a == h.id()),
+            settings: h
+                .settings()
+                .iter()
+                .map(|s| HarnessSettingListing {
+                    key: s.key.into(),
+                    title: s.title.into(),
+                    hint: s.hint.into(),
+                    placeholder: s.placeholder.into(),
+                })
+                .collect(),
         })
         .collect()
 }
@@ -179,5 +201,31 @@ mod tests {
             rows(&["acp"]),
             [("acp".into(), true, true), ("claude".into(), false, false)]
         );
+    }
+
+    /// A harness's settings ride its listing: opencode's model, nothing
+    /// for Claude.
+    #[test]
+    fn the_listing_carries_each_harnesss_settings() {
+        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        register_built_ins(
+            &r,
+            &[
+                declared("agent_harness", "claude", "oxplow:claude-code"),
+                declared("agent_harness", "opencode", "oxplow:opencode"),
+            ],
+        );
+        let rows = listing(&r, &[]);
+        let keys = |id: &str| -> Vec<String> {
+            rows.iter()
+                .find(|h| h.id == id)
+                .unwrap()
+                .settings
+                .iter()
+                .map(|s| s.key.clone())
+                .collect()
+        };
+        assert_eq!(keys("opencode"), ["model"]);
+        assert!(keys("claude").is_empty());
     }
 }

@@ -5,7 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
+    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
+    LaunchSpec, Transcript,
 };
 
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
@@ -64,6 +65,10 @@ impl AgentHarness for Acp {
     }
 
     fn env_markers(&self) -> &[&str] {
+        &[]
+    }
+
+    fn settings(&self) -> &[HarnessSetting] {
         &[]
     }
 

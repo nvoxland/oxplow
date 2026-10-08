@@ -1070,14 +1070,11 @@ export async function setGenerated(
   return unwrap(await commands.setGenerated(generated));
 }
 
-/// Set (or clear, with null/blank) one harness's launch model —
-/// `agentConfig.<agent>.model` in .oxplow/project.yaml, which its launch
-/// reads.
-export async function setAgentModel(
-  agent: string,
-  model: string | null,
-): Promise<OxplowConfig> {
-  return unwrap(await commands.setAgentModel(agent, model));
+/// Set (or clear, with null/blank) one of a harness's declared settings —
+/// `agentConfig.<agent>.<key>` in .oxplow/project.yaml, which its launch
+/// reads (the harness's listing names its settings).
+export async function setAgentSetting(agent: string, key: string, value: string | null): Promise<OxplowConfig> {
+  return unwrap(await commands.setAgentSetting(agent, key, value));
 }
 
 export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;

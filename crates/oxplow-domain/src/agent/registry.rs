@@ -148,6 +148,9 @@ mod tests {
         fn env_markers(&self) -> &[&str] {
             &[]
         }
+        fn settings(&self) -> &[crate::agent::harness::HarnessSetting] {
+            &[]
+        }
         fn refresh_text(
             &self,
             _: &std::path::Path,

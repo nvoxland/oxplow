@@ -8,7 +8,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
+    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
+    LaunchSpec, Transcript,
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
@@ -88,6 +89,15 @@ impl AgentHarness for Opencode {
 
     fn env_markers(&self) -> &[&str] {
         &[]
+    }
+
+    fn settings(&self) -> &[HarnessSetting] {
+        &[HarnessSetting {
+            key: "model",
+            title: "Model",
+            hint: "The model OpenCode launches with (`provider/model`). Blank uses its default; applies to sessions started after Save.",
+            placeholder: DEFAULT_MODEL,
+        }]
     }
 
     /// Its skills are on disk; its commands ride each launch's config.

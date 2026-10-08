@@ -117,6 +117,18 @@ pub struct Launch {
     pub resume_dropped: bool,
 }
 
+/// One project setting a harness reads (`agentConfig.<harness>.<key>`), as
+/// Settings shows it: a text value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HarnessSetting {
+    pub key: &'static str,
+    pub title: &'static str,
+    /// What it does, under the field.
+    pub hint: &'static str,
+    /// An example value, in the empty field.
+    pub placeholder: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum HarnessError {
     /// Its runtime files couldn't be written.
@@ -142,6 +154,9 @@ pub trait AgentHarness: Send + Sync {
     /// Its process's markers an agent or terminal must not inherit from
     /// oxplow's own environment (when oxplow itself runs in one).
     fn env_markers(&self) -> &[&str];
+    /// The project settings its `launch` reads from its `agentConfig`
+    /// entry, which Settings → Agents offers for it.
+    fn settings(&self) -> &[HarnessSetting];
     /// Rewrite the skills and commands of its runtime already on disk under
     /// `project_dir` to `text`, creating none: an agent that outlives a
     /// launch (running across an upgrade, or resumed) reads what's offered
