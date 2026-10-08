@@ -137,6 +137,18 @@ pub struct CommandSpec {
     /// (a step other commands compose, an agent's tool).
     #[serde(default)]
     pub ui: Option<CommandUi>,
+    /// The host capability operation behind it, when it is one: where it
+    /// runs (a window capability's runs in the window) and what it does.
+    #[serde(default)]
+    pub op: Option<OpRef>,
+}
+
+/// An operation of a host capability (`capability: tabs.write`, `op:
+/// open`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct OpRef {
+    pub capability: String,
+    pub op: String,
 }
 
 /// A command as a person meets it (`.context/commands.md` "Offering a

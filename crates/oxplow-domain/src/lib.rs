@@ -33,7 +33,7 @@ pub mod work_items;
 pub use agent::AgentKind;
 pub use commands::{
     namespace_of, Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandOutcome,
-    CommandSpec, CommandUi, Confirm, InputValidator, Invoker, Invokers, Lifecycle, Preview,
+    CommandSpec, CommandUi, Confirm, InputValidator, Invoker, Invokers, Lifecycle, OpRef, Preview,
     OXPLOW_NAMESPACE,
 };
 pub use comment::{

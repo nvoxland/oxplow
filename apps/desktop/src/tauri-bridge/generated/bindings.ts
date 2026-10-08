@@ -729,6 +729,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	registerClientHost: (capabilities: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("register_client_host", { capabilities })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	answerClientCall: (id: string, result: unknown | null, error: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("answer_client_call", { id, result, error })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	undoCommand: (auditId: number, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1862,6 +1872,11 @@ export type CommandSpec = {
 	 *  (a step other commands compose, an agent's tool).
 	 */
 	ui?: CommandUi | null,
+	/**
+	 *  The host capability operation behind it, when it is one: where it
+	 *  runs (a window capability's runs in the window) and what it does.
+	 */
+	op?: OpRef | null,
 };
 
 /**
@@ -4329,6 +4344,15 @@ export type OpOutcome = {
 	auto_resolved: number,
 };
 
+/**
+ *  An operation of a host capability (`capability: tabs.write`, `op:
+ *  open`).
+ */
+export type OpRef = {
+	capability: string,
+	op: string,
+};
+
 export type OxplowConfig = {
 	/**
 	 *  Enabled agent implementations for this project, in priority order.
@@ -4575,6 +4599,15 @@ detail: string | null } |
  *  reloads, and a lens re-runs its definition.
  */
 { kind: "extensionsChanged" } | 
+/**
+ *  A command running on the daemon calls a capability the window
+ *  hosts (`client_host.rs`): the window does `capability`'s `op` with
+ *  `input` — in `thread_id`'s tabs, or the one it shows when `None` —
+ *  and answers `answer_client_call { id, … }`.
+ */
+{ kind: "clientCall"; id: string; threadId: ThreadId | null; 
+// Who ran the command (`agent:thr3`, `human`).
+actor: string; capability: string; op: string; input: unknown } | 
 /**
  *  A person approved a program on this machine (a provider, collector,
  *  effect, component, ACP agent): what shows approval state —

@@ -299,6 +299,19 @@ commands:
     capability: streams.write
     op: set_prompt
     invokers: { human: true, agent: false, lens: true }
+  # tabs.write — the window's; an agent's acts in its own thread's tabs.
+  - name: tab.open
+    summary: "Open a tab (`ref`: a page's ref — `file:src/a.rs`, `work_item:oxplow:tsk3`) in your thread's tabs, without bringing it to the front."
+    capability: tabs.write
+    op: open
+  - name: tab.focus
+    summary: "Bring a tab (`ref`) to the front of your thread's tabs, opening it first if it isn't open."
+    capability: tabs.write
+    op: focus
+  - name: tab.close
+    summary: "Close a tab (`ref`) in your thread's tabs."
+    capability: tabs.write
+    op: close
   # test_runs.write
   - name: test.record_run
     summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run is the thread's open effort's. Returns `{ recorded, observationId }`."

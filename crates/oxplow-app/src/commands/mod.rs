@@ -2221,6 +2221,7 @@ mod tests {
             effect: CommandEffect::Write,
             needs: Vec::new(),
             ui: None,
+            op: None,
         }
     }
 
@@ -3471,6 +3472,7 @@ mod tests {
             effect: oxplow_domain::CommandEffect::Write,
             needs: Vec::new(),
             ui: None,
+            op: None,
         };
         let compose: Arc<Composer> = Arc::new(|_conn, _trace, input: &Value| {
             Ok(Composition {

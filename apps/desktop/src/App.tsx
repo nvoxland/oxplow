@@ -163,12 +163,14 @@ import {
 import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportOpenPage } from "./api.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
-import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING, shortRevisionLabel } from "./revision.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
 import { commandOffers } from "./commandOffers.js";
+import { runLocally, startClientHost, type ClientCallContext, type ClientHandlers } from "./clientHost.js";
+import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
 import type { CommandId } from "./commands.js";
@@ -1308,7 +1310,20 @@ export function App() {
           const ref = refFromTabId(tabId);
           if (ref) handleOpenPageRef.current?.(ref);
         },
-        run: (label, id, input) => personCommands.run(label, id, input),
+        run: (label, id, input) => {
+          // One the window hosts runs here: nothing goes to the daemon.
+          const spec = personSpecs.find((s) => s.id === id);
+          const local = spec ? runLocally(windowHandlersRef.current, spec, input) : null;
+          if (local) {
+            return local
+              .then(({ result }): CommandOutcome => ({ result, audit_id: null, event_id: null, inverse: null }))
+              .catch((e: unknown) => {
+                recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
+                return null;
+              });
+          }
+          return personCommands.run(label, id, input);
+        },
         runInBackground: (label, id, input) =>
           void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
       }),
@@ -2058,6 +2073,73 @@ export function App() {
       clearPageSnapshot(pageKey);
     }
   }, [selectedThreadId, setCenterActive, setThreadPageMru, stream]);
+
+  // The window as a command host (`clientHost.ts`): what only it can do,
+  // for a command the daemon runs over it — an agent's `oxplow.tab.*`, in
+  // the agent's own thread (never switching the thread or stream shown).
+  const windowHandlers = useMemo<ClientHandlers>(() => {
+    const threadOf = (ctx: ClientCallContext) => {
+      const thread = ctx.threadId ?? selectedThreadId;
+      if (!thread) throw new Error("no thread is shown");
+      return thread;
+    };
+    const refOf = (input: unknown) => {
+      const id = (input as { ref?: unknown } | null)?.ref;
+      if (typeof id !== "string") throw new Error("`ref` is a page's ref (`file:src/a.rs`)");
+      const ref = refFromTabId(id);
+      if (!ref) throw new Error(`\`${id}\` isn't a page's ref`);
+      return ref;
+    };
+    const open = async (input: unknown, ctx: ClientCallContext, focus: boolean) => {
+      const thread = threadOf(ctx);
+      const ref = refOf(input);
+      if (thread === selectedThreadId && focus) {
+        handleOpenPageRef.current?.(ref);
+        return { ref: ref.id, focused: true };
+      }
+      // A working-tree file's content lives in its stream's session: read
+      // it first (a path that isn't a file opens nothing), keeping what
+      // the session shows.
+      const path = diskFilePath(ref.id);
+      const streamId = streamOfThread(threadStates, thread);
+      if (path !== null && streamId && !getFileSession(streamId).files[path]) {
+        const file = await readWorkspaceFile(streamId, path);
+        mutateFileSession(streamId, (base) => {
+          const opened = openFileInSession(base, path, "", false);
+          return enforceOpenFileLimit({ ...opened, selectedPath: base.selectedPath }, MAX_OPEN_FILE_TABS);
+        });
+        mutateFileSession(streamId, (s) => setLoadedFileContent(s, path, file.content));
+      }
+      setThreadPageTabs((prev) => withTab(prev, thread, ref));
+      if (focus) setThreadCenterActive((prev) => ({ ...prev, [thread]: ref.id }));
+      return { ref: ref.id, focused: focus };
+    };
+    return {
+      "tabs.write": {
+        open: (input, ctx) => open(input, ctx, false),
+        focus: (input, ctx) => open(input, ctx, true),
+        close: (input, ctx) => {
+          const thread = threadOf(ctx);
+          const ref = refOf(input);
+          if (thread === selectedThreadId) {
+            closePageTab(ref.id);
+          } else {
+            setThreadPageTabs((prev) => withoutTab(prev, thread, ref.id));
+            setThreadCenterActive((prev) =>
+              prev[thread] === ref.id ? { ...prev, [thread]: AGENT_TAB_ID } : prev,
+            );
+          }
+          return { ref: ref.id, closed: true };
+        },
+      },
+    };
+    // getFileSession / mutateFileSession are plain functions over the
+    // session state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThreadId, threadStates, closePageTab, setThreadPageTabs, setThreadCenterActive]);
+  const windowHandlersRef = useRef(windowHandlers);
+  windowHandlersRef.current = windowHandlers;
+  useEffect(() => startClientHost(() => windowHandlersRef.current), []);
 
   // Used when the record a tab shows is *deleted* (wiki page / task).
   // Rather than closing the tab outright, navigate it back one entry in

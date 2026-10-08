@@ -125,6 +125,7 @@ pub fn sequence_spec() -> CommandSpec {
         effect: CommandEffect::Write,
         needs: Vec::new(),
         ui: None,
+        op: None,
     }
 }
 

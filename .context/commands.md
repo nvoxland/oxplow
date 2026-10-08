@@ -111,6 +111,33 @@ busy database retries the whole run. A dry run (an extension's
 `examples`) answers from the example's `answers` (per capability, in
 call order) or through the SQL gateway.
 
+**Where a command runs** (VS Code's model: commands run where their
+handler lives). A capability says its host (`Host`): the **daemon**
+(oxplow's records, the repository, the project — every capability so far
+but one) or the project's **window** (`tabs.write`: open, close, focus a
+tab; later the editor, the search box, the agent's input). A command
+backed by a window capability is View class (not recorded, no
+transaction) and its spec carries the operation (`CommandSpec::op`):
+
+- **The window's own runs stay in it** — `clientHost.ts` `runLocally`:
+  the window does it with its own handler, nothing sent to the daemon.
+- **A run on the daemon** (an agent's through MCP, a script's) reaches
+  the window through `client_host::ClientHost`: an
+  `OxplowEvent::ClientCall { id, thread_id, actor, capability, op, input }`
+  to the project's one window, which does it and answers
+  `answer_client_call { id, result | error }`; the run waits (15 s), its
+  answer the run's result. The window says it's open — and what it hosts —
+  with `register_client_host` when it starts and on reconnect; with no
+  window, one that doesn't host it or doesn't answer, the run is
+  `Unavailable`.
+- **An agent acts only in its own thread**: the call carries the agent's
+  thread and the window acts in that thread's tabs — opening a file there
+  reads it into its stream's session — never switching the thread or
+  stream the person sees (an agent with no thread is refused). A person's
+  call acts in the thread shown. Every call carries its actor.
+- One handler per command; something that should happen when one runs
+  reacts to an event, not a second handler.
+
 **Operations** (`commands/ops.rs`). A record or write capability's
 native behavior comes as **operations**: `bookmarks.write` has `set` and
 `remove`. Each `Op` carries what only Rust can supply — the input schema
