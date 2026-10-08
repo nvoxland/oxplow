@@ -284,7 +284,7 @@ fn last_run_ms(l: &CollectorListing) -> Option<i64> {
 /// command refuses them. Returns what it ran; a failed run
 /// is logged and the rest still run.
 pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)> {
-    let root = state.worktrees.resolve(None).await;
+    let root = state.worktrees.resolve(None).await.into_local_path();
     let Ok(listings) = list_collectors(&Collectors::of(state, &root)).await else {
         return vec![];
     };
@@ -1704,7 +1704,7 @@ impl CollectorRunner {
                 facts: i64::try_from(facts).unwrap_or(i64::MAX),
             });
         }
-        let root = self.worktrees.resolve(None).await;
+        let root = self.worktrees.resolve(None).await.into_local_path();
         run_collector(&self.collectors(&root), owner, id, trigger, source).await
     }
 }

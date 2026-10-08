@@ -126,7 +126,11 @@ impl AsyncEventConsumer for EffortLandingConsumer {
         let Some(sha) = indexed.commit.strip_prefix("commit:") else {
             return Ok(());
         };
-        let ws = svc.worktrees.resolve(Some(&stream.to_string())).await;
+        let ws = svc
+            .worktrees
+            .resolve(Some(&stream.to_string()))
+            .await
+            .into_local_path();
         for effort in svc.effort_store.list_open_for_stream(stream).await? {
             let files = files_now(&svc, &ws, &effort).await?;
             let Some(complete) = landing(&svc, &ws, sha, &files).await? else {

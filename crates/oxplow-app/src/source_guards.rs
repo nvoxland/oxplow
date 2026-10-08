@@ -801,6 +801,62 @@ fn core_never_special_cases_its_own_pieces() {
     );
 }
 
+/// Who takes a stream's worktree as a path on this machine
+/// (`WorktreeRoot::local_path`, `into_local_path`): the providers that
+/// reach a workspace on its host — files, VCS, language servers, collectors
+/// — and, as a ratchet, the callers that still do it themselves. A new
+/// caller goes through a provider instead; the list only shrinks. Each says
+/// why.
+#[rustfmt::skip]
+const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
+    // The providers proper.
+    ("crates/oxplow-app/src/workspace_files.rs", "the workspace files provider"),
+    ("crates/oxplow-app/src/vcs/reads.rs", "the VCS provider's reads"),
+    ("crates/oxplow-app/src/commands/vcs.rs", "the VCS commands' runner"),
+    ("crates/oxplow-app/src/branch_reconciler.rs", "reconciles each worktree's branch through the VCS provider"),
+    ("crates/oxplow-app/src/commit_indexer.rs", "indexes each worktree's commits through the VCS provider"),
+    ("crates/oxplow-app/src/code_intel.rs", "the language servers run in the worktree"),
+    ("crates/oxplow-app/src/collector_runner.rs", "collectors run in the worktree"),
+    ("crates/oxplow-app/src/collection.rs", "test runs and their reports are in the worktree"),
+    // The ratchet: callers that reach the filesystem themselves.
+    ("crates/oxplow-app/src/change_analysis.rs", "reads a change's files directly"),
+    ("crates/oxplow-app/src/commit_links.rs", "asks git whether a commit holds an effort"),
+    ("crates/oxplow-app/src/effort_landing.rs", "asks git where an effort landed"),
+    ("crates/oxplow-app/src/commands/extension_install.rs", "installs an extension into the worktree"),
+    ("crates/oxplow-mcp/src/lib.rs", "the MCP tools' file and VCS reads"),
+    ("crates/oxplow-rpc/src/commands/collectors.rs", "the collector RPCs"),
+    ("crates/oxplow-rpc/src/commands/extensions.rs", "the extension RPCs"),
+    ("crates/oxplow-rpc/src/commands/git.rs", "the git RPCs"),
+    ("crates/oxplow-rpc/src/commands/semantic.rs", "the semantic layer's RPCs"),
+    ("crates/oxplow-rpc/src/commands/trees.rs", "the file-tree RPCs"),
+];
+
+/// A worktree path is reached only through a provider on its host
+/// (`.context/vcs.md` "Around the provider").
+#[test]
+fn only_workspace_providers_take_a_local_path() {
+    let pinned: BTreeSet<String> = WORKTREE_PATH_USERS
+        .iter()
+        .map(|(f, _)| f.to_string())
+        .collect();
+    let found: BTreeSet<String> = production_sources()
+        .into_iter()
+        .filter(|(path, _)| !path.ends_with("/worktrees.rs"))
+        .filter(|(_, text)| {
+            text.lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .any(|line| line.contains(".local_path()") || line.contains(".into_local_path()"))
+        })
+        .map(|(path, _)| path)
+        .collect();
+    let unlisted: Vec<_> = found.difference(&pinned).collect();
+    let gone: Vec<_> = pinned.difference(&found).collect();
+    assert!(
+        unlisted.is_empty() && gone.is_empty(),
+        "who takes a worktree as a local path changed.\nunlisted (go through a workspace provider instead): {unlisted:#?}\nno longer there (drop from WORKTREE_PATH_USERS): {gone:#?}"
+    );
+}
+
 /// Where an agent harness may be named in production code: the harness
 /// crates (`HARNESS_CRATES`, all of them) and the files listed here.
 /// Everything else goes through `AgentHarness` and the harness registry,

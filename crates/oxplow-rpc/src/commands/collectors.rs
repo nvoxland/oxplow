@@ -12,7 +12,7 @@ use crate::error::IpcError;
 /// Every declared collector with its last run and whether this machine
 /// has approved its current entry script.
 pub async fn list_collectors(svc: &Services) -> Result<Vec<CollectorListing>, IpcError> {
-    let root = svc.worktrees.resolve(None).await;
+    let root = svc.worktrees.resolve(None).await.into_local_path();
     Ok(collector_runner::list_collectors(&Collectors::of(svc, &root)).await?)
 }
 
@@ -25,7 +25,7 @@ pub async fn approve_collector(
     id: String,
     version: String,
 ) -> Result<(), IpcError> {
-    let root = svc.worktrees.resolve(None).await;
+    let root = svc.worktrees.resolve(None).await.into_local_path();
     collector_runner::approve_reviewed(&Collectors::of(svc, &root), &owner, &id, &version)
         .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))?;
     svc.events
@@ -42,7 +42,7 @@ pub async fn set_credential(
     name: String,
     value: Option<String>,
 ) -> Result<(), IpcError> {
-    let root = svc.worktrees.resolve(None).await;
+    let root = svc.worktrees.resolve(None).await.into_local_path();
     Ok(collector_runner::set_credential(
         &Collectors::of(svc, &root),
         &extension,
@@ -89,7 +89,7 @@ pub async fn program_source(
 
 /// The primary worktree's extensions, whose advisories are approved here.
 async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extension> {
-    let root = svc.worktrees.resolve(None).await;
+    let root = svc.worktrees.resolve(None).await.into_local_path();
     svc.extension_catalog.get(&root).to_vec()
 }
 

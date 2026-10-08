@@ -37,7 +37,7 @@ pub async fn list_data_entities(
 ) -> Result<Vec<oxplow_app::semantic_catalog::DataEntity>, IpcError> {
     // Extension-declared entities come from the primary worktree (their
     // data is project-global).
-    let root = svc.worktrees.resolve(None).await;
+    let root = svc.worktrees.resolve(None).await.into_local_path();
     Ok(
         oxplow_app::semantic_catalog::data_entities(&svc.sql, &svc.extension_catalog, &root)
             .await?,
@@ -67,7 +67,7 @@ pub async fn effective_config(
         .read()
         .map_err(|_| IpcError::internal("config lock poisoned"))?
         .clone();
-    let root = svc.worktrees.resolve(None).await;
+    let root = svc.worktrees.resolve(None).await.into_local_path();
     let extensions = svc.extension_catalog.get(&root);
     let ai = svc.ai.settings().ok();
     let global = oxplow_config::global_config_dir();

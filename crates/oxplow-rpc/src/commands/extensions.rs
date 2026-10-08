@@ -22,7 +22,7 @@ fn root(svc: &Services) -> &std::path::Path {
 /// The working copy an authoring call checks: the stream's worktree, or
 /// the main one when `stream_id` is omitted.
 async fn working_copy(svc: &Services, stream_id: Option<&str>) -> std::path::PathBuf {
-    svc.worktrees.resolve(stream_id).await
+    svc.worktrees.resolve(stream_id).await.into_local_path()
 }
 
 /// Every extension the app shows, with per-extension load errors.

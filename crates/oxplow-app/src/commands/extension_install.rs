@@ -106,7 +106,8 @@ pub fn install_op(deps: InstallDeps) -> Op {
                 let root = deps
                     .worktrees
                     .resolve(stream.map(|s| s.to_string()).as_deref())
-                    .await;
+                    .await
+                    .into_local_path();
                 let project = deps.worktrees.project_dir().to_path_buf();
                 let ext = tokio::task::spawn_blocking(move || {
                     crate::extensions::install_extension(
@@ -142,7 +143,8 @@ pub fn update_op(deps: InstallDeps) -> Op {
                 let root = deps
                     .worktrees
                     .resolve(stream.map(|s| s.to_string()).as_deref())
-                    .await;
+                    .await
+                    .into_local_path();
                 let name = input.name.clone();
                 let project = deps.worktrees.project_dir().to_path_buf();
                 let ext = tokio::task::spawn_blocking(move || {

@@ -434,7 +434,11 @@ pub async fn refresh_files(
         .change_store
         .get_or_create(stream.value(), kind, &key, base.as_ref(), &head)
         .await?;
-    let root = svc.worktrees.resolve(Some(&stream.to_string())).await;
+    let root = svc
+        .worktrees
+        .resolve(Some(&stream.to_string()))
+        .await
+        .into_local_path();
     let events_to = events_to(svc).await?;
     let only = own_files(svc, kind, &key).await?;
     let entries = svc.trees.diff(&root, base.as_ref(), &head).await?;
@@ -515,7 +519,11 @@ async fn resolve(
         ChangeTarget::Working { stream_id } => {
             let sid = oxplow_domain::StreamId::try_from_str(&stream_id)
                 .ok_or_else(|| invalid(format!("not a stream id: {stream_id}")))?;
-            let root = svc.worktrees.resolve(Some(&sid.to_string())).await;
+            let root = svc
+                .worktrees
+                .resolve(Some(&sid.to_string()))
+                .await
+                .into_local_path();
             let head = svc.vcs.head(&root).await?.revision;
             (
                 sid,
@@ -533,7 +541,11 @@ async fn resolve(
                     .await
                     .ok_or_else(|| invalid("no primary stream".into()))?,
             };
-            let root = svc.worktrees.resolve(Some(&sid.to_string())).await;
+            let root = svc
+                .worktrees
+                .resolve(Some(&sid.to_string()))
+                .await
+                .into_local_path();
             let full = svc.vcs.resolve(&root, &sha).await?;
             let parent = svc
                 .vcs
@@ -656,7 +668,11 @@ async fn analyze(
         id: row.id,
     };
     svc.change_store.set_status(row.id, "running", None).await?;
-    let root = svc.worktrees.resolve(Some(&stream.to_string())).await;
+    let root = svc
+        .worktrees
+        .resolve(Some(&stream.to_string()))
+        .await
+        .into_local_path();
     // What the inputs had seen as it began, and the snapshot it's against.
     let events_to = events_to(svc).await?;
     let snapshot_id = match &head {
@@ -755,7 +771,8 @@ pub async fn resume_duplicates(svc: &crate::Services) -> Result<usize, oxplow_do
         let root = svc
             .worktrees
             .resolve(Some(&oxplow_domain::StreamId::new(a.stream_id).to_string()))
-            .await;
+            .await
+            .into_local_path();
         spawn_duplicates(svc, a.id, a.events_to, &root, &a.head, a.paths);
     }
     Ok(n)

@@ -381,6 +381,11 @@ Specifically:
 
 This rule takes priority over convenience heuristics like "find the nearest enclosing git repo."
 
+A worktree path is reached only through a provider on its host: the
+router answers a `WorktreeRoot` (host + path), and taking it as a local
+path (`local_path()`) is pinned to the workspace providers and a shrinking
+list of callers ([vcs.md](./vcs.md) "Around the provider").
+
 ## The main worktree is the project
 
 The project's configuration — `.oxplow/project.yaml` and the extensions

@@ -50,7 +50,7 @@ pub use ids::{
     UsageEventId,
 };
 pub use json::Json;
-pub use stream::{Stream, StreamKind};
+pub use stream::{HostId, Stream, StreamKind};
 pub use thread::{Thread, ThreadNote, ThreadStatus};
 pub use time::Timestamp;
 pub use tree_diff::{diff_trees, ChangeStatus, FileChange};

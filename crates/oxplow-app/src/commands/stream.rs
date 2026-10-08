@@ -581,7 +581,12 @@ mod tests {
             .unwrap()
             .id;
         let thread = crate::test_fixtures::new_thread(&fx.svc, side, "t").await;
-        let side_dir = fx.svc.worktrees.resolve(Some(&side.to_string())).await;
+        let side_dir = fx
+            .svc
+            .worktrees
+            .resolve(Some(&side.to_string()))
+            .await
+            .into_local_path();
         let capture = fx.svc.snapshot_captures.get(&side).unwrap();
         capture.enqueue_startup_diff().await.unwrap();
         let start = capture

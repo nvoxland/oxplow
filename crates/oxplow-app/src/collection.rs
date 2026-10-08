@@ -612,7 +612,10 @@ impl CollectionService {
     /// The checkout `thread` works in: its stream's worktree (tsk890).
     async fn worktree(&self, thread: &ThreadId) -> PathBuf {
         let stream = self.stream_id_for(thread).await.ok().flatten();
-        self.worktrees.resolve(stream.as_deref()).await
+        self.worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1650,7 +1653,13 @@ impl CollectionService {
             return Ok(None);
         };
         let branch = self
-            .current_branch(&self.worktrees.resolve(Some(stream_id)).await)
+            .current_branch(
+                &self
+                    .worktrees
+                    .resolve(Some(stream_id))
+                    .await
+                    .into_local_path(),
+            )
             .await;
         let analyzer = analyzers
             .first()
@@ -1796,7 +1805,11 @@ impl CollectionService {
                 origin,
             )
             .await;
-        let root = self.worktrees.resolve(Some(stream_id)).await;
+        let root = self
+            .worktrees
+            .resolve(Some(stream_id))
+            .await
+            .into_local_path();
         let version = match pin {
             Some(p) => file_ref_version::resolve(&self.snapshots, &*self.vcs, &root, p).await?,
             None => file_ref_version::ResolvedFileVersion {
@@ -2664,7 +2677,11 @@ impl CollectionService {
         };
         let (local_snapshot_id, closest_vcs_rev, vcs_rev_exact) = match pin {
             Some(p) => {
-                let root = self.worktrees.resolve(Some(&stream_id)).await;
+                let root = self
+                    .worktrees
+                    .resolve(Some(&stream_id))
+                    .await
+                    .into_local_path();
                 let v = file_ref_version::resolve(&self.snapshots, &*self.vcs, &root, p).await?;
                 (
                     Some(v.local_snapshot_id),
