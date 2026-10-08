@@ -37,7 +37,8 @@ sinks.
 | `--surface-tab-inactive`| `transparent` | Inactive tabs (let the header tint show through) |
 | `--surface-elevated`    | `#20242c`     | Popovers, slideovers, context menus        |
 | `--surface-overlay`     | rgba dim      | Backdrops behind slideovers / overlays     |
-| `--surface-stream-tile` | `#2c3544`     | The Navigator's stream glyph: a filled square (a thread's is an outlined circle), so the collapsed strip tells them apart by shape |
+| `--surface-stream-tile` | `#c9d0dc`     | The Navigator's stream glyph: an inverted (light) tile heading its threads, with `--text-on-stream-tile` (`#12161c`) letters |
+| `--surface-thread-tab`  | 4% white      | A Navigator thread's tab, indented off its stream's guide line (the writer's is `--accent-soft-bg` with an `--accent` edge) |
 
 **Panel headers.** `--panel-header-bg` (`rgba(108,156,246,0.12)`, a muted
 accent wash — *not* grey) tints the header band of every panel so titles

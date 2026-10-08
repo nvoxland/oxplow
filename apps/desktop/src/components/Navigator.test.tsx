@@ -417,7 +417,7 @@ test("a menu request from elsewhere (the title bar) opens that row's menu, heade
   expect(queryByTestId("navigator-overlay") === null).toBe(true);
 });
 
-test("streams are filled squares and threads outlined circles, tied by a guide line", () => {
+test("streams are inverted tiles and threads indented tabs, tied by a guide line", () => {
   const { getByTestId } = renderNavigator();
   const glyph = (rowId: string) =>
     getByTestId(rowId).querySelector("[data-glyph]") as HTMLElement;
@@ -425,17 +425,16 @@ test("streams are filled squares and threads outlined circles, tied by a guide l
   const stream = glyph("navigator-strip-stream-str1");
   expect(stream.dataset.glyph).toBe("stream");
   expect(stream.style.background).toBe("var(--surface-stream-tile)");
-  expect(stream.style.borderRadius).toBe("6px");
+  expect(stream.style.color).toBe("var(--text-on-stream-tile)");
 
   const writer = glyph("navigator-strip-thread-thr1");
   const queued = glyph("navigator-strip-thread-thr2");
   for (const t of [writer, queued]) {
     expect(t.dataset.glyph).toBe("thread");
-    expect(t.style.borderRadius).toBe("50%");
-    expect(t.style.background).toBe("transparent");
+    expect(t.style.borderRadius).toBe("5px");
   }
   expect(writer.style.borderColor).toBe("var(--accent)");
-  expect(queued.style.borderColor).toBe("var(--text-muted)");
+  expect(queued.style.borderColor).toBe("var(--border-strong)");
 
   // The guide runs from the stream through its threads, ending at the last.
   const guide = (rowId: string) =>
