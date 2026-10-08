@@ -1792,10 +1792,11 @@ export type CommandExample = {
 	name: string,
 	input: unknown,
 	/**
-	 *  Rows standing in for the `input` query's (so the example doesn't
-	 *  depend on the project's data); `None` runs the query.
+	 *  Answers standing in for the capabilities' own, per capability in
+	 *  call order (so the example doesn't depend on the project's data);
+	 *  a capability without any is served for real.
 	 */
-	rows: unknown[] | null,
+	answers: { [key in string]: unknown[] },
 	expectCommands: string[],
 	// A part of the reason the script should refuse with.
 	refuses: string | null,
@@ -2554,17 +2555,13 @@ export type ExtensionCommand = {
 	inputSchema: unknown,
 	// The script, relative to the extension folder.
 	entry: string,
-	/**
-	 *  A read-only SQL query whose rows the script gets (`:field` binds
-	 *  the input's top-level fields).
-	 */
-	input: string | null,
 	confirm: Confirm,
 	effect: CommandEffect,
 	invokers: Invokers,
 	/**
-	 *  The capabilities (or features) it needs active, as core's commands
-	 *  declare them (`oxplow_domain::capability::check_need`).
+	 *  The host capabilities its script calls, and the capabilities (or
+	 *  features) it needs active, as core's commands declare them
+	 *  (`oxplow_domain::capability::check_need`).
 	 */
 	needs: string[],
 	// How a person meets it (label, group, …), as core's commands do.

@@ -5,14 +5,29 @@
 # `oxplow_bundled.changes_requested` with the run, about the effort and
 # the item.
 
+# The effort's work item, and what its review weighs: unverified claims,
+# inferred decisions, files outside the item's area (JSON arrays).
+_REVIEW = """
+SELECT e.work_item,
+       (SELECT json_group_array(json_object('claim', 'claim:' || c.id, 'statement', c.statement))
+          FROM v_claim c WHERE c.effort_id = e.id AND c.verified = 0) AS unverified,
+       (SELECT json_group_array(json_object('decision', 'decision:' || d.id, 'question', d.question, 'choice', d.choice))
+          FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
+       (SELECT json_group_array(v.path)
+          FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
+FROM v_effort e
+WHERE 'effort:eff' || e.id = :ref
+"""
+
 def _list(text):
     return json.decode(text) if text else []
 
 def transform(x):
     ref = x["input"]["ref"]
-    if not x["rows"]:
+    rows = capability("sql.read", {"sql": _REVIEW, "params": {"ref": ref}})
+    if not rows:
         return {"refuse": "no effort `%s`" % ref}
-    row = x["rows"][0]
+    row = rows[0]
     if not row["work_item"]:
         return {"refuse": "effort `%s` has no work item to review" % ref}
     note = x["input"].get("note", "")

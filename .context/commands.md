@@ -43,7 +43,7 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction), `External`, or `Dispatch` — one or the other, decided per input (see below) |
 | `effect` | `Write` (the default), `Read` or `Record`. A read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`oxplow.config.list_keys`, `oxplow.config.get`). A `Write` is refused to an agent thread that may not write. A `Record` changes oxplow's own records (`work_item.*`, `effort.*`): audited like a write, open to any thread |
-| `needs` | the capabilities, or their features (`work_items.comments`), it needs active — the grammar lenses use. Unmet, it isn't offered and doesn't run (pipeline step 0). `oxplow.work_item.create` / `update` / `transition` need `work_items`; `link`, `comment` and `delete` need their feature |
+| `needs` | the **host capabilities** its handler calls (`sql.read`; below — always available, enforced per call) and the capabilities, or their features (`work_items.comments`), it needs active — the grammar lenses use. Unmet, it isn't offered and doesn't run (pipeline step 0). `oxplow.work_item.create` / `update` / `transition` need `work_items`; `link`, `comment` and `delete` need their feature |
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
@@ -75,6 +75,50 @@ form). Offered now: `oxplow.vcs.pull` / `push`, `oxplow.work_item.create`,
 `oxplow.dashboard.create`, `oxplow.stream.create_worktree`. Commit, New
 Thread and New Lens with Your Agent are still the app's own commands
 (`commands.ts`) until the window provides them as capabilities.
+
+## Host capabilities
+
+What a handler may do beyond composing other commands is a **host
+capability**: named like an OAuth scope, `<resource>.<action>`, declared
+by core with an **effect class** (`oxplow_domain::host_capability`:
+`HOST_CAPABILITIES`, `EffectClass`), and listed in the command's
+`needs`. Every command — core's and any extension's — reaches them the
+same way, so oxplow's own commands can do nothing an extension's can't.
+
+| Class | Does | In the run's transaction | Audited |
+|---|---|---|---|
+| `view` | changes only what the person sees (open a page) | no | no |
+| `read` | reads (`sql.read`) | yes | no |
+| `record` | changes oxplow's own records | yes | yes |
+| `write` | changes files, git, processes | no | yes |
+
+A command's effect is the strongest class it needs (`strongest_class`).
+Today there is one: **`sql.read`** — `{ sql, params? }`, one read-only
+statement over the published models (`v_*`), its `:name`s bound from
+`params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
+row objects (`semantic_layer::read_on` on the run's connection: the
+`query_sql` authorizer, inside the transaction).
+
+A Starlark handler calls one with `capability(id, args)`
+(`oxplow_collect_plugin::capability`). The script runs on the sandbox's
+worker thread; the call crosses to the thread that runs the handler
+(which owns the transaction) and is answered there while the sandbox
+waits (`run_starlark_serving`) — that time is left out of the script's
+budget, not its ceiling. `crate::host_capabilities::Calls` serves it: a
+capability that isn't in the command's `needs` is **refused** (the
+script fails with the reason), one that is is counted and answered; a
+busy database retries the whole run. A dry run (an extension's
+`examples`) answers from the example's `answers` (per capability, in
+call order) or through the SQL gateway.
+
+**The per-run trace.** Each run has a `CapabilityTrace` (`TxCtx::trace`):
+fresh per transaction attempt, shared by the runs nested in it; steps
+add each step's to the composing pass's. Its summary — per capability,
+how many calls (`{"sql.read": 2}`) — is written on the run's audit row
+(`command_audit.capabilities_json`, V27; NULL when it used none). The
+routing pass (a composite composed on a read snapshot to decide where
+its calls run) counts nothing. Later: each call's detail (what it
+touched), sampled or on by setting, and approvals by capability.
 
 ## The pipeline (`crates/oxplow-app/src/commands/mod.rs`)
 
@@ -127,7 +171,8 @@ Thread and New Lens with Your Agent are still the app's own commands
 5. **Run and record in one transaction**: the handler, a `command_audit`
    row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
-   merge's conflicts, stays readable after the fact — and inverse), `command.executed@2` in the event log pointing at
+   merge's conflicts, stays readable after the fact — inverse, and the
+   host capabilities it called, "Host capabilities"), `command.executed@2` in the event log pointing at
    the audit row, the handler's domain events (with `cause` = the
    executed event, and the actor's thread/stream — `Actor::anchors()` —
    filled into any anchor the handler left empty), and the audit row's

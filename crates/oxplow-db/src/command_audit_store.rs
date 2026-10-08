@@ -2,6 +2,8 @@
 //! ran it, how it went, the input, and the inverse that undoes it.
 //! See `.context/commands.md`.
 
+use std::collections::BTreeMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -74,6 +76,8 @@ pub struct CommandAudit {
     pub inverse: Option<CommandCall>,
     /// The audit row of the run that undid this one.
     pub undone_by: Option<i64>,
+    /// The host capabilities the run called, and how often.
+    pub capabilities: BTreeMap<String, u32>,
 }
 
 /// What a run writes before its event id is known.
@@ -88,6 +92,8 @@ pub struct NewCommandAudit {
     pub error: Option<String>,
     pub result: Option<Value>,
     pub inverse: Option<CommandCall>,
+    /// The host capabilities the run called, and how often.
+    pub capabilities: BTreeMap<String, u32>,
 }
 
 /// Insert one audit row; returns its id.
@@ -99,8 +105,8 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
     conn.execute(
         "INSERT INTO command_audit
            (at, command, actor_kind, actor_id, thread_id, input_json, outcome, error, inverse_json,
-            result_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            result_json, capabilities_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             ts_to_string(Timestamp::now()),
             row.command,
@@ -114,6 +120,9 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
             row.result
                 .as_ref()
                 .map(|r| serde_json::to_string(r).expect("result serializes")),
+            (!row.capabilities.is_empty()).then(|| {
+                serde_json::to_string(&row.capabilities).expect("capabilities serialize")
+            }),
         ],
     )
     .map_err(map_sql_err)?;
@@ -157,6 +166,7 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
     let inverse: Option<String> = row.get("inverse_json")?;
     let result: Option<String> = row.get("result_json")?;
     let event_id: Option<String> = row.get("event_id")?;
+    let capabilities: Option<String> = row.get("capabilities_json")?;
     Ok(CommandAudit {
         id: row.get("id")?,
         at: string_to_ts(&at).map_err(conv)?,
@@ -178,6 +188,11 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
             .transpose()
             .map_err(|e| conv(DomainError::Storage(format!("inverse json: {e}"))))?,
         undone_by: row.get("undone_by")?,
+        capabilities: capabilities
+            .map(|s| serde_json::from_str(&s))
+            .transpose()
+            .map_err(|e| conv(DomainError::Storage(format!("capabilities json: {e}"))))?
+            .unwrap_or_default(),
     })
 }
 
@@ -254,6 +269,7 @@ mod tests {
                                 name: "oxplow.work_item.transition".into(),
                                 input: json!({"id": "tsk1", "to": "ready"}),
                             }),
+                            capabilities: [("sql.read".to_string(), 2)].into(),
                         },
                     )?;
                     set_event_id_tx(tx, id, &event)?;
@@ -269,6 +285,7 @@ mod tests {
                             error: None,
                             result: None,
                             inverse: None,
+                            capabilities: BTreeMap::new(),
                         },
                     )?;
                     mark_undone_tx(tx, id, undo_id)?;
@@ -286,6 +303,14 @@ mod tests {
         assert_eq!(row.inverse.as_ref().unwrap().input["to"], "ready");
         assert_eq!(row.result, Some(json!({"id": "tsk1"})));
         assert_eq!(row.undone_by, Some(undo_id));
+        assert_eq!(row.capabilities, [("sql.read".to_string(), 2)].into());
+        assert!(store
+            .get(undo_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .capabilities
+            .is_empty());
         // Newest first; a second undo of the same row is refused.
         let recent = store.list_recent(10).await.unwrap();
         assert_eq!(
@@ -311,6 +336,7 @@ mod tests {
                     error: Some("lenses may not run oxplow.config.set".into()),
                     result: None,
                     inverse: None,
+                    capabilities: BTreeMap::new(),
                 },
             )
         })

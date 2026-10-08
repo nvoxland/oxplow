@@ -881,7 +881,7 @@ fn effect_command(
     let sequence = bus.command(SEQUENCE).ok_or_else(|| CommandError::Failed {
         message: format!("`{SEQUENCE}` isn't registered"),
     })?;
-    let composer: Arc<Composer> = Arc::new(move |_conn, _input| {
+    let composer: Arc<Composer> = Arc::new(move |_conn, _trace, _input| {
         Ok(Composition {
             calls: calls.clone(),
             result: None,
@@ -915,7 +915,7 @@ async fn run_script(
                 .read(move |tx| oxplow_db::semantic_layer::read_on(tx, &query))
                 .await
                 .map_err(|e| format!("the `input` query failed: {e}"))?;
-            crate::extension_commands::rows_json(&result)
+            crate::host_capabilities::rows_json(&result)
         }
         None => Vec::new(),
     };

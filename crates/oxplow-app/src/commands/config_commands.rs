@@ -497,6 +497,7 @@ mod tests {
             confirmed: true,
             may_write: None,
             depth: 0,
+            trace: &Default::default(),
         };
         let input = json!({ "key": "metricRetentionDays", "value": 30 });
         let first = handler(&ctx, input.clone()).unwrap();

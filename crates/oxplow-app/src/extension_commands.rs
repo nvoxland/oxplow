@@ -4,22 +4,24 @@
 //!
 //! ```yaml
 //! commands:
-//!   - name: finish_review                # registered as <namespace>.finish_review
+//!   - name: review.finish                # registered as <namespace>.review.finish
 //!     summary: Mark the task done and leave a note.
 //!     input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }
-//!     entry: handlers/finish_review.star # defines transform({ input, rows })
-//!     input: "SELECT ref, status FROM v_task WHERE ref = :ref"   # optional; one read
+//!     entry: handlers/finish_review.star # defines transform({ input })
+//!     needs: [sql.read]                  # the host capabilities it calls
 //!     confirm: never                     # never | always | destructive
-//!     effect: write                      # write | record
+//!     effect: write                      # write | record | read
 //!     invokers: { human: true, agent: true, lens: true }
 //!     examples:
 //!       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
-//!       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, rows: [], refuses: no such task }
+//!       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, answers: { sql.read: [[]] }, refuses: no such task }
 //! ```
 //!
-//! The script returns `{ commands: [{ name, input }], result? }`, or
-//! `{ refuse: "<why>" }` to decline (the run is `Invalid` with that
-//! reason). The namespace is the extension's name with `-` → `_`.
+//! The script reads with `capability("sql.read", { sql, params })` (one
+//! of its `needs`; `crate::host_capabilities`) and returns `{ commands:
+//! [{ name, input }], result? }`, or `{ refuse: "<why>" }` to decline (the
+//! run is `Invalid` with that reason). The namespace is the extension's
+//! name with `-` → `_`.
 
 use std::collections::BTreeMap;
 
@@ -30,9 +32,6 @@ use serde_json::{json, Value};
 use crate::extensions::manifest_v2::{at, entry_line, key_line};
 use crate::extensions::{CommandSchemas, Extension};
 
-/// The most rows a command's `input` query hands its script.
-pub const INPUT_ROW_CAP: usize = 1_000;
-
 /// An example run of a command: its input, and the commands its script
 /// should compose, in order — or the refusal it should make (checked by
 /// `oxplow plugin check` / Settings).
@@ -42,10 +41,11 @@ pub struct CommandExample {
     pub name: String,
     #[specta(type = oxplow_domain::Json)]
     pub input: Value,
-    /// Rows standing in for the `input` query's (so the example doesn't
-    /// depend on the project's data); `None` runs the query.
-    #[specta(type = Option<Vec<oxplow_domain::Json>>)]
-    pub rows: Option<Vec<Value>>,
+    /// Answers standing in for the capabilities' own, per capability in
+    /// call order (so the example doesn't depend on the project's data);
+    /// a capability without any is served for real.
+    #[specta(type = BTreeMap<String, Vec<oxplow_domain::Json>>)]
+    pub answers: BTreeMap<String, Vec<Value>>,
     pub expect_commands: Vec<String>,
     /// A part of the reason the script should refuse with.
     pub refuses: Option<String>,
@@ -66,14 +66,12 @@ pub struct ExtensionCommand {
     /// The script's text, read at load.
     #[serde(skip)]
     pub script: String,
-    /// A read-only SQL query whose rows the script gets (`:field` binds
-    /// the input's top-level fields).
-    pub input: Option<String>,
     pub confirm: Confirm,
     pub effect: CommandEffect,
     pub invokers: Invokers,
-    /// The capabilities (or features) it needs active, as core's commands
-    /// declare them (`oxplow_domain::capability::check_need`).
+    /// The host capabilities its script calls, and the capabilities (or
+    /// features) it needs active, as core's commands declare them
+    /// (`oxplow_domain::capability::check_need`).
     pub needs: Vec<String>,
     /// How a person meets it (label, group, …), as core's commands do.
     pub ui: Option<oxplow_domain::CommandUi>,
@@ -91,8 +89,6 @@ struct CommandFile {
     summary: String,
     input_schema: Value,
     entry: String,
-    #[serde(default)]
-    input: Option<String>,
     #[serde(default)]
     confirm: Option<String>,
     #[serde(default)]
@@ -114,7 +110,7 @@ struct ExampleFile {
     #[serde(default)]
     input: Value,
     #[serde(default)]
-    rows: Option<Vec<Value>>,
+    answers: BTreeMap<String, Vec<Value>>,
     #[serde(default)]
     expect_commands: Vec<String>,
     #[serde(default)]
@@ -228,14 +224,10 @@ fn command_of(
     let effect = match f.effect.as_deref() {
         None | Some("write") => CommandEffect::Write,
         Some("record") => CommandEffect::Record,
-        Some("read") => {
-            return Err(at_name(
-                "`effect: read`: a command that only reads is a lens — write a lens instead".into(),
-            ))
-        }
+        Some("read") => CommandEffect::Read,
         Some(other) => {
             return Err(at_name(format!(
-                "`effect` must be `write` or `record`, not `{other}`"
+                "`effect` must be `write`, `record` or `read`, not `{other}`"
             )))
         }
     };
@@ -254,16 +246,25 @@ fn command_of(
     for need in &f.needs {
         oxplow_domain::capability::check_need(need).map_err(at_name)?;
     }
+    if effect == CommandEffect::Read {
+        use oxplow_domain::host_capability::{host_capability, EffectClass};
+        if let Some(writes) = f
+            .needs
+            .iter()
+            .find(|n| host_capability(n).is_some_and(|c| c.class > EffectClass::Read))
+        {
+            return Err(at_name(format!(
+                "`effect: read` but it needs `{writes}`, which changes things"
+            )));
+        }
+        if f.confirm.as_deref().is_some_and(|c| c != "never") {
+            return Err(at_name(
+                "`effect: read`: a command that only reads is never confirmed".into(),
+            ));
+        }
+    }
     if f.ui.as_ref().is_some_and(|ui| ui.label.trim().is_empty()) {
         return Err(at_name("`ui.label` must say what a person reads".into()));
-    }
-    if let Some(sql) = &f.input {
-        oxplow_db::sql_tokens::check_single_read(sql).map_err(|e| {
-            at_name(format!(
-                "`input` must be one read (a single SELECT or WITH): {}",
-                e.to_string().replacen("invalid value: ", "", 1)
-            ))
-        })?;
     }
     if !inside(&f.entry) {
         return Err(at_name(format!(
@@ -287,7 +288,6 @@ fn command_of(
         input_schema: f.input_schema,
         entry: f.entry,
         script,
-        input: f.input,
         confirm,
         effect,
         invokers: f.invokers.unwrap_or(Invokers::ALL),
@@ -307,7 +307,7 @@ fn command_of(
                 Ok(CommandExample {
                     name: e.name,
                     input: e.input,
-                    rows: e.rows,
+                    answers: e.answers,
                     expect_commands: e.expect_commands,
                     refuses: e.refuses,
                 })
@@ -458,36 +458,6 @@ pub enum Composed {
     Refused(String),
 }
 
-/// A query result as the script sees it: one object per row.
-pub fn rows_json(result: &oxplow_db::SqlQueryResult) -> Vec<Value> {
-    result
-        .rows
-        .iter()
-        .map(|row| {
-            Value::Object(
-                result
-                    .columns
-                    .iter()
-                    .zip(row)
-                    .map(|(c, v)| (c.clone(), serde_json::to_value(v).unwrap_or(Value::Null)))
-                    .collect(),
-            )
-        })
-        .collect()
-}
-
-/// The named parameters an input binds: its top-level fields.
-pub fn input_params(input: &Value) -> Vec<(String, oxplow_db::SqlCell)> {
-    input
-        .as_object()
-        .map(|o| {
-            o.iter()
-                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// How long a command's script may run. It runs inside the bus's write
 /// transaction, holding the write lock, so this is far tighter than a
 /// collector's runaway catch: composing a few commands is milliseconds.
@@ -500,30 +470,27 @@ pub const COMMAND_SCRIPT_BUDGET: oxplow_collect_plugin::SandboxBudget =
 /// each one's script.
 pub const MAX_EXAMPLES: usize = 10;
 
-/// The query a command's `input` runs for `input`: its top-level fields
-/// bound as named parameters, capped at [`INPUT_ROW_CAP`] rows.
-pub fn input_query(sql: &str, input: &Value) -> oxplow_db::SqlQuery {
-    oxplow_db::SqlQuery::new(sql)
-        .named(input_params(input))
-        .limit(Some(INPUT_ROW_CAP))
-}
-
-/// Run a command's script over `{ input, rows }` in the sandbox
-/// ([`COMMAND_SCRIPT_BUDGET`]; no host: no files, no `ai_*`) and read what
-/// it composes: the one compose step, for the handler and the examples dry
-/// run alike. Blocks: the handler calls it inside the bus's transaction
-/// (off the async runtime already).
+/// Run a command's script over `{ input }` in the sandbox
+/// ([`COMMAND_SCRIPT_BUDGET`]), its `capability` calls answered by
+/// `calls`, and read what it composes: the one compose step, for the
+/// handler and the examples dry run alike. Blocks: the handler calls it
+/// inside the bus's transaction (off the async runtime already).
 pub fn compose_calls(
     script: &str,
     input: Value,
-    rows: Vec<Value>,
+    calls: &mut crate::host_capabilities::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
-    use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
-    let script = script.to_string();
-    let out = run_sandboxed(&COMMAND_SCRIPT_BUDGET, move || {
-        run_starlark(&script, &json!({ "input": input, "rows": rows }))
-    })
-    .map_err(|e| oxplow_domain::CommandError::Failed {
+    let out = oxplow_collect_plugin::capability::run_starlark_serving(
+        &COMMAND_SCRIPT_BUDGET,
+        script,
+        &json!({ "input": input }),
+        &mut |id, args| calls.serve(id, args),
+    );
+    // The database was busy answering a read: the run is retried.
+    if let Some(message) = calls.take_busy() {
+        return Err(oxplow_domain::CommandError::Busy { message });
+    }
+    let out = out.map_err(|e| oxplow_domain::CommandError::Failed {
         message: format!("the script failed: {e}"),
     })?;
     composed(out).map_err(|message| oxplow_domain::CommandError::Invalid {
@@ -565,27 +532,31 @@ pub fn extension_command(
         needs: decl.needs.clone(),
         ui: decl.ui.clone(),
     };
-    let (script, query) = (decl.script.clone(), decl.input.clone());
+    let (script, needs, reads) = (
+        decl.script.clone(),
+        decl.needs.clone(),
+        decl.effect == CommandEffect::Read,
+    );
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
     let source = format!("extension:{extension}/{}", decl.name);
-    let compose: std::sync::Arc<Composer> =
-        std::sync::Arc::new(move |conn: &rusqlite::Connection, input: &Value| {
-            let rows = match &query {
-                Some(sql) => rows_json(
-                    &oxplow_db::semantic_layer::read_on(conn, &input_query(sql, input)).map_err(
-                        |e| match e {
-                            oxplow_domain::DomainError::Busy(m) => {
-                                CommandError::Busy { message: m }
-                            }
-                            other => CommandError::Failed {
-                                message: format!("the `input` query failed: {other}"),
-                            },
-                        },
-                    )?,
-                ),
-                None => Vec::new(),
-            };
-            match compose_calls(&script, input.clone(), rows)? {
+    let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
+        move |conn: &rusqlite::Connection,
+              trace: &crate::host_capabilities::CapabilityTrace,
+              input: &Value| {
+            let read =
+                Box::new(|q: oxplow_db::SqlQuery| oxplow_db::semantic_layer::read_on(conn, &q));
+            let mut calls = crate::host_capabilities::Calls::new(&needs, trace, read);
+            match compose_calls(&script, input.clone(), &mut calls)? {
+                Composed::Run { calls, events, .. }
+                    if reads && !(calls.is_empty() && events.is_empty()) =>
+                {
+                    Err(CommandError::Invalid {
+                        field: None,
+                        message: "a command that only reads (`effect: read`) composes no \
+                                  commands and logs no events — it returns a `result`"
+                            .into(),
+                    })
+                }
                 Composed::Run {
                     calls,
                     result,
@@ -600,7 +571,8 @@ pub fn extension_command(
                     message,
                 }),
             }
-        });
+        },
+    );
     let handler = Compose::handler(bus, spec.clone(), compose);
     Command::new(spec, handler)
 }
@@ -723,10 +695,9 @@ pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
 }
 
 /// Check `ext`'s commands (`check_extension`): with the running oxplow's
-/// registry, its namespace is free (or already its own); each `input`
-/// query compiles under the models' authorizer (a raw table or a write is
-/// an error); then every example is dry-run — the `input`
-/// query's rows, the script in the sandbox, and what it composes against
+/// registry, its namespace is free (or already its own); then every
+/// example is dry-run — the script in the sandbox, its capability calls
+/// answered by the example's `answers` or for real, and what it composes against
 /// the registry (each command exists, its input fits, and the names are
 /// `expect_commands`, in order).
 pub async fn check_extension_commands(
@@ -748,18 +719,6 @@ pub async fn check_extension_commands(
                  `namespace:`",
                 ext.path
             ));
-        }
-    }
-    for cmd in ext.commands.clone() {
-        if let Some(sql) = &cmd.input {
-            if let Err(e) = layer.check(sql).await {
-                ext.errors.push(format!(
-                    "{}/extension.yaml: command `{}` `input`: {}",
-                    ext.path,
-                    cmd.name,
-                    e.to_string().replacen("invalid value: ", "", 1)
-                ));
-            }
         }
     }
     let with_examples: Vec<ExtensionCommand> = ext
@@ -798,7 +757,7 @@ async fn check_example(
     ex: &CommandExample,
     schema_of: CommandSchemas<'_>,
 ) -> Result<(), String> {
-    let decided = dry_run(layer, cmd, &ex.input, ex.rows.clone(), schema_of).await?;
+    let decided = dry_run(layer, cmd, &ex.input, &ex.answers, schema_of).await?;
     match (decided, &ex.refuses) {
         (Composed::Refused(why), Some(want)) if why.contains(want.as_str()) => Ok(()),
         (Composed::Refused(why), Some(want)) => {
@@ -828,37 +787,36 @@ pub fn call_names(calls: &[CommandCall]) -> Vec<&str> {
     calls.iter().map(|c| c.name.as_str()).collect()
 }
 
-/// Dry-run `cmd` on `input`: its `input` query's rows (or `rows`, standing
-/// in for them), the script in the sandbox, and — when it composes — each
-/// command against `registry` (it exists, its input fits). What the
-/// script decided; nothing runs. `check`'s examples and `oxplow plugin
-/// test`'s intent examples both run it.
+/// Dry-run `cmd` on `input`: the script in the sandbox, its capability
+/// calls answered from `answers` or for real (reads only: `sql.read`
+/// through `layer`), and — when it composes — each command against
+/// `registry` (it exists, its input fits). What the script decided;
+/// nothing runs. `check`'s examples and `oxplow plugin test`'s intent
+/// examples both run it.
 pub async fn dry_run(
     layer: &crate::sql_gateway::SqlGateway,
     cmd: &ExtensionCommand,
     input: &Value,
-    rows: Option<Vec<Value>>,
+    answers: &BTreeMap<String, Vec<Value>>,
     registry: CommandSchemas<'_>,
 ) -> Result<Composed, String> {
-    let rows = match (rows, &cmd.input) {
-        (Some(rows), _) => rows,
-        (None, Some(sql)) => rows_json(&layer.run(input_query(sql, input)).await.map_err(|e| {
-            format!(
-                "`input`: {}",
-                e.to_string().replacen("invalid value: ", "", 1)
-            )
-        })?),
-        (None, None) => Vec::new(),
-    };
-    let (script, input) = (cmd.script.clone(), input.clone());
-    let decided = tokio::task::spawn_blocking(move || compose_calls(&script, input, rows))
-        .await
-        .map_err(|e| format!("the script's worker failed: {e}"))?
-        .map_err(|e| match e {
-            oxplow_domain::CommandError::Failed { message }
-            | oxplow_domain::CommandError::Invalid { message, .. } => message,
-            other => other.to_string(),
-        })?;
+    let (script, input, needs) = (cmd.script.clone(), input.clone(), cmd.needs.clone());
+    let (layer, answers) = (layer.clone(), answers.clone());
+    let runtime = tokio::runtime::Handle::current();
+    let decided = tokio::task::spawn_blocking(move || {
+        let trace = crate::host_capabilities::CapabilityTrace::default();
+        let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
+        let mut calls =
+            crate::host_capabilities::Calls::new(&needs, &trace, read).with_answers(&answers);
+        compose_calls(&script, input, &mut calls)
+    })
+    .await
+    .map_err(|e| format!("the script's worker failed: {e}"))?
+    .map_err(|e| match e {
+        oxplow_domain::CommandError::Failed { message }
+        | oxplow_domain::CommandError::Invalid { message, .. } => message,
+        other => other.to_string(),
+    })?;
     if let Composed::Run { calls, .. } = &decided {
         check_calls(registry, calls)?;
     }
@@ -944,7 +902,7 @@ mod tests {
         assert_eq!(c.summary, "Mark the task done.");
         assert_eq!(c.script, HANDLER);
         assert_eq!(c.input_schema["required"], serde_json::json!(["ref"]));
-        assert_eq!(c.input, None);
+        assert!(c.needs.is_empty());
         assert_eq!(c.confirm, Confirm::Never);
         assert_eq!(c.effect, CommandEffect::Write);
         assert_eq!(c.invokers, Invokers::ALL);
@@ -1002,9 +960,9 @@ mod tests {
                 "define `transform`",
             ),
             (
-                entry("a.b", "    effect: read\n"),
+                entry("a.b", "    effect: sometimes\n"),
                 vec![("handlers/h.star", HANDLER)],
-                "a command that only reads",
+                "`effect` must be `write`, `record` or `read`",
             ),
             (
                 entry("a.b", "    needs: [warp_drive]\n"),
@@ -1027,9 +985,14 @@ mod tests {
                 "confirm",
             ),
             (
-                entry("a.b", "    input: \"DELETE FROM task\"\n"),
+                entry("a.b", "    input: \"SELECT 1\"\n"),
                 vec![("handlers/h.star", HANDLER)],
-                "one read",
+                "unknown field `input`",
+            ),
+            (
+                entry("a.b", "    effect: read\n    confirm: always\n"),
+                vec![("handlers/h.star", HANDLER)],
+                "only reads is never confirmed",
             ),
             (
                 "  - name: a.b\n    summary: S.\n    input_schema: { type: nope }\n    entry: handlers/h.star\n".into(),
@@ -1234,24 +1197,43 @@ mod tests {
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
 
-        // Rows from `input:` reach the script.
-        let d = tempfile::tempdir().unwrap();
-        write_ext(
-            d.path(),
-            "x",
-            &GOOD.replace(
-                "    entry: handlers/finish_review.star\n",
-                "    entry: handlers/finish_review.star\n    input: \"SELECT :ref AS r\"\n",
-            ),
-            &[(
-                "handlers/finish_review.star",
-                "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": x[\"rows\"][0][\"r\"], \"to\": \"done\"}}]}\n",
-            )],
-        );
+        // An example without `answers` reads for real: `sql.read`'s rows
+        // reach the script.
+        let reads = |sql: &str| {
+            let d = tempfile::tempdir().unwrap();
+            write_ext(
+                d.path(),
+                "x",
+                &GOOD.replace(
+                    "    entry: handlers/finish_review.star\n",
+                    "    entry: handlers/finish_review.star\n    needs: [sql.read]\n",
+                ),
+                &[(
+                    "handlers/finish_review.star",
+                    &format!(
+                        "def transform(x):\n    rows = capability(\"sql.read\", {{\"sql\": \"{sql}\", \"params\": {{\"ref\": x[\"input\"][\"ref\"]}}}})\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"ref\": rows[0][\"r\"], \"to\": \"done\"}}}}]}}\n"
+                    ),
+                )],
+            );
+            d
+        };
+        let d = reads("SELECT :ref AS r");
         let v = validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
             .await
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
+        // A read of a table, not a published model, is refused.
+        let d = reads("SELECT title AS r FROM task");
+        let v = validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(
+            errs.contains("example `happy`")
+                && errs.contains("`sql.read`")
+                && errs.contains("task"),
+            "{errs}"
+        );
 
         for (handler, says) in [
             (
@@ -1279,32 +1261,6 @@ mod tests {
             assert!(errs.contains(says), "{handler}: {errs}");
         }
 
-        // The `input` query is checked against the models' authorizer even
-        // without examples or a registry: a raw table is refused.
-        let d = tempfile::tempdir().unwrap();
-        write_ext(
-            d.path(),
-            "x",
-            &GOOD
-                .replace(
-                    "    entry: handlers/finish_review.star\n",
-                    "    entry: handlers/finish_review.star\n    input: \"SELECT title FROM task\"\n",
-                )
-                .replace(
-                    "    examples:\n      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [oxplow.work_item.transition] }\n",
-                    "",
-                ),
-            &[("handlers/finish_review.star", HANDLER)],
-        );
-        let v = validate_extension(&layer, &cat, d.path(), "x", None)
-            .await
-            .unwrap();
-        let errs = v.errors.join("\n");
-        assert!(
-            errs.contains("command `x.review.finish` `input`") && errs.contains("task"),
-            "{errs}"
-        );
-
         // Without a registry the examples aren't checked, and it says so.
         let d = check(HANDLER, "");
         let v = validate_extension(&layer, &cat, d.path(), "x", None)
@@ -1331,7 +1287,7 @@ mod tests {
     summary: Finish the task.
     input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }
     entry: handlers/finish.star
-    input: \"SELECT ref, title FROM v_work_item WHERE ref = :ref\"
+    needs: [sql.read]
 ",
             &[("handlers/finish.star", script)],
         );
@@ -1340,7 +1296,10 @@ mod tests {
 
     /// Transitions the task to done and renames it after its row.
     const FINISH: &str = "def transform(x):
-    row = x[\"rows\"][0]
+    row = capability(\"sql.read\", {
+        \"sql\": \"SELECT ref, title FROM v_work_item WHERE ref = :ref\",
+        \"params\": {\"ref\": x[\"input\"][\"ref\"]},
+    })[0]
     return {
         \"commands\": [
             {\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": row[\"ref\"], \"title\": row[\"title\"] + \" (reviewed)\"}},
@@ -1476,6 +1435,11 @@ mod tests {
             .collect();
         assert_eq!(ok.len(), 1, "one audit row for the run");
         assert_eq!(ok[0].command, "my_review.review.finish");
+        assert_eq!(
+            ok[0].capabilities,
+            [("sql.read".to_string(), 1)].into(),
+            "the run's own read, not the routing pass's"
+        );
         let events = fx.svc.event_log_store.read_after(0, 200).await.unwrap();
         let changed = events
             .iter()
@@ -1492,6 +1456,81 @@ mod tests {
         let t = task(&fx).await;
         assert_eq!(t.status, oxplow_domain::TaskStatus::InProgress);
         assert_eq!(t.title, "t");
+    }
+
+    /// A capability the command didn't declare in `needs` is refused: the
+    /// run fails, writing nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_capability_the_command_didnt_declare_is_refused() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        write_ext(
+            fx._dir.path(),
+            "my-review",
+            "  - name: review.finish\n    summary: Finish the task.\n    input_schema: { type: object }\n    entry: handlers/finish.star\n",
+            &[("handlers/finish.star", FINISH)],
+        );
+        fx.svc.extension_commands.reconcile().await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_review.review.finish",
+                json!({ "ref": r }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("`sql.read` isn't in the command's `needs`"),
+            "{err}"
+        );
+        assert_eq!(
+            task(&fx).await.status,
+            oxplow_domain::TaskStatus::InProgress
+        );
+    }
+
+    /// `effect: read`: it reads and answers, and nothing is recorded; one
+    /// that composes a command is refused.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_command_answers_without_a_record() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let with_count = |script: &str| {
+            write_ext(
+                fx._dir.path(),
+                "my-review",
+                "  - name: work.count\n    summary: Count the work items.\n    input_schema: { type: object }\n    entry: handlers/count.star\n    effect: read\n    needs: [sql.read]\n",
+                &[("handlers/count.star", script)],
+            );
+        };
+        let agent = agent(&fx);
+        let run = || {
+            fx.svc
+                .commands
+                .run(&agent, "my_review.work.count", json!({}), false)
+        };
+        with_count(
+            "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_work_item\"})\n    return {\"commands\": [], \"result\": {\"n\": rows[0][\"n\"]}}\n",
+        );
+        fx.svc.extension_commands.reconcile().await;
+        let out = run().await.unwrap();
+        assert_eq!(out.result["result"]["n"], json!(1));
+        assert_eq!(out.audit_id, None, "a read isn't recorded");
+
+        with_count(&format!(
+            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"ref\": \"{}\", \"to\": \"done\"}}}}]}}\n",
+            oxplow_domain::refs::build::work_item_ref(fx.task)
+        ));
+        fx.svc.extension_commands.reconcile().await;
+        let err = run().await.unwrap_err();
+        assert!(err.to_string().contains("composes no commands"), "{err}");
+        assert_eq!(
+            task(&fx).await.status,
+            oxplow_domain::TaskStatus::InProgress
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1746,11 +1785,11 @@ mod tests {
             .contains("a refusal composes nothing"),);
     }
 
-    /// An example may stand in rows for its `input` query (`rows:`, so it
-    /// doesn't depend on the project's data) and may expect a refusal
-    /// (`refuses:`, a part of its reason).
-    #[tokio::test]
-    async fn an_example_runs_on_its_rows_and_may_expect_a_refusal() {
+    /// An example may stand in answers for its capability calls
+    /// (`answers:`, so it doesn't depend on the project's data) and may
+    /// expect a refusal (`refuses:`, a part of its reason).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_example_runs_on_its_answers_and_may_expect_a_refusal() {
         let transition_schema = serde_json::json!({
             "type": "object",
             "required": ["ref", "to"],
@@ -1763,9 +1802,10 @@ mod tests {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let cat = crate::extension_catalog::ExtensionCatalog::new();
         const SCRIPT: &str = "def transform(x):
-    if not x[\"rows\"]:
+    rows = capability(\"sql.read\", {\"sql\": \"SELECT ref FROM v_work_item WHERE ref = :ref\", \"params\": {\"ref\": x[\"input\"][\"ref\"]}})
+    if not rows:
         return {\"refuse\": \"no such item\"}
-    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": x[\"rows\"][0][\"ref\"], \"to\": \"done\"}}]}
+    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": rows[0][\"ref\"], \"to\": \"done\"}}]}
 ";
         let check = |examples: &str| {
             let d = tempfile::tempdir().unwrap();
@@ -1777,7 +1817,7 @@ mod tests {
     summary: Mark the task done.
     input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
     entry: handlers/finish_review.star
-    input: \"SELECT ref FROM v_work_item WHERE ref = :ref\"
+    needs: [sql.read]
     examples:
 {examples}"
                 ),
@@ -1797,9 +1837,9 @@ mod tests {
             }
         };
 
-        // The project has no such item, but the example's rows stand in.
+        // The project has no such item, but the example's answers stand in.
         let d = check(
-            "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [{ ref: \"work_item:oxplow:tsk1\" }], expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { ref: \"work_item:oxplow:tsk9\" }, rows: [], refuses: no such item }\n",
+            "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, answers: { sql.read: [[{ ref: \"work_item:oxplow:tsk1\" }]] }, expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { ref: \"work_item:oxplow:tsk9\" }, answers: { sql.read: [[]] }, refuses: no such item }\n",
         );
         assert_eq!(errors(d).await, "");
 
@@ -1809,15 +1849,15 @@ mod tests {
                 "example `happy`: refused (no such item) but `expect_commands` is [oxplow.work_item.transition]",
             ),
             (
-                "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [{ ref: \"work_item:oxplow:tsk1\" }], refuses: no such item }\n",
+                "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, answers: { sql.read: [[{ ref: \"work_item:oxplow:tsk1\" }]] }, refuses: no such item }\n",
                 "example `missing`: composed [oxplow.work_item.transition] but it should refuse (no such item)",
             ),
             (
-                "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [], refuses: unverified }\n",
+                "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, answers: { sql.read: [[]] }, refuses: unverified }\n",
                 "example `missing`: refused (no such item) but it should refuse (unverified)",
             ),
             (
-                "      - { name: both, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [], refuses: x, expect_commands: [oxplow.work_item.transition] }\n",
+                "      - { name: both, input: { ref: \"work_item:oxplow:tsk1\" }, answers: { sql.read: [[]] }, refuses: x, expect_commands: [oxplow.work_item.transition] }\n",
                 "example `both` expects commands and a refusal",
             ),
         ] {

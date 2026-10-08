@@ -143,6 +143,9 @@ pub struct TxCtx<'a> {
     /// composition is refused rather than recursing until the stack
     /// overflows (a command that composes itself).
     pub depth: usize,
+    /// The host capabilities the run has called: shared by the runs
+    /// nested in it, recorded on its audit row.
+    pub trace: &'a crate::host_capabilities::CapabilityTrace,
 }
 
 /// The deepest a composite may nest (`oxplow.command.sequence` and extension
@@ -991,6 +994,8 @@ impl CommandBus {
                     .db
                     .transaction(move |tx| {
                         let executed_id = oxplow_domain::EventId::generate();
+                        // Fresh per attempt: a retried run counts its calls once.
+                        let trace = crate::host_capabilities::CapabilityTrace::default();
                         let ctx = TxCtx {
                             conn: tx,
                             actor: &actor_c,
@@ -1002,6 +1007,7 @@ impl CommandBus {
                             confirmed,
                             may_write: gates.may_write,
                             depth: 0,
+                            trace: &trace,
                         };
                         let out = match handler(&ctx, input_c.clone()) {
                             Ok(out) if out.unchanged && matches!(origin_tx, RunOrigin::Call) => {
@@ -1039,7 +1045,10 @@ impl CommandBus {
                             &spec_c,
                             &input_c,
                             &out,
-                            Executed::ok(executed_id, &origin_tx),
+                            Executed {
+                                capabilities: trace.summary(),
+                                ..Executed::ok(executed_id, &origin_tx)
+                            },
                         )?;
                         // Fails (and rolls the whole run back) when the row
                         // was undone, the proposal decided, or the effect's
@@ -1321,6 +1330,7 @@ impl CommandBus {
                     confirmed: true,
                     may_write: gates.may_write,
                     depth: 0,
+                    trace: &crate::host_capabilities::CapabilityTrace::default(),
                 };
                 match handler(&ctx, input.clone()) {
                     Ok(out) => Ok(out.result),
@@ -1549,6 +1559,7 @@ impl CommandBus {
             confirmed: ctx.confirmed,
             may_write: ctx.may_write,
             depth: ctx.depth + 1,
+            trace: ctx.trace,
         };
         let mut children = Vec::with_capacity(calls.len());
         let mut events = Vec::new();
@@ -1626,6 +1637,7 @@ impl CommandBus {
                             confirmed: false,
                             may_write: None,
                             depth: 0,
+                            trace: &crate::host_capabilities::CapabilityTrace::default(),
                         };
                         handler(&ctx, input.clone()).map_err(|err| {
                             *failed_c.lock() = Some(err);
@@ -1683,6 +1695,7 @@ impl CommandBus {
             error,
             result: None,
             inverse: None,
+            capabilities: Default::default(),
         };
         if let Err(e) = self
             .db
@@ -1930,13 +1943,16 @@ fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutcome {
 }
 
 /// The `command.executed` a run is recorded under: its id (fixed before a
-/// `Tx` handler runs, so its events can name it as their cause) and, for
-/// a composite's steps that failed partway, why.
+/// `Tx` handler runs, so its events can name it as their cause), for a
+/// composite's steps that failed partway, why, and the host capabilities
+/// the run called.
 pub(super) struct Executed {
     pub id: oxplow_domain::EventId,
     pub failed: Option<String>,
     /// What caused the run: the event an effect reacted to.
     pub cause: Option<oxplow_domain::EventId>,
+    /// Its trace's summary ("Host capabilities").
+    pub capabilities: std::collections::BTreeMap<String, u32>,
 }
 
 impl Executed {
@@ -1945,6 +1961,7 @@ impl Executed {
             id,
             failed: None,
             cause: origin.cause(),
+            capabilities: Default::default(),
         }
     }
 }
@@ -1964,6 +1981,7 @@ fn record_tx(
         id: executed_id,
         failed,
         cause,
+        capabilities,
     } = executed;
     // A run that failed partway (a composite's steps, some landed) is
     // recorded with what landed, as an error.
@@ -1989,6 +2007,7 @@ fn record_tx(
             error: failed,
             result: Some(out.result.clone()),
             inverse: inverse.clone(),
+            capabilities,
         },
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(
@@ -3435,7 +3454,7 @@ mod tests {
             needs: Vec::new(),
             ui: None,
         };
-        let compose: Arc<Composer> = Arc::new(|_conn, input: &Value| {
+        let compose: Arc<Composer> = Arc::new(|_conn, _trace, input: &Value| {
             Ok(Composition {
                 calls: vec![CommandCall {
                     name: "oxplow.kv.external".into(),

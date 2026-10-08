@@ -13,6 +13,7 @@ pub mod comment;
 pub mod error;
 pub mod events;
 pub mod hook;
+pub mod host_capability;
 pub mod ids;
 pub mod json;
 pub mod knowledge;

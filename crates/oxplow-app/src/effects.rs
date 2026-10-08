@@ -337,12 +337,11 @@ pub fn event_json(event: &oxplow_domain::StoredEvent) -> serde_json::Value {
 /// what a dry run's fixture leaves out binds NULL (tsk1002). Capped as a
 /// command's `input` is.
 pub fn input_query(sql: &str, event: &serde_json::Value) -> oxplow_db::SqlQuery {
-    let mut params: Vec<(String, oxplow_db::SqlCell)> = crate::extension_commands::input_params(
-        event.get("payload").unwrap_or(&serde_json::Value::Null),
-    )
-    .into_iter()
-    .filter(|(name, _)| name != "event_id" && name != "event_seq")
-    .collect();
+    let mut params: Vec<(String, oxplow_db::SqlCell)> =
+        input_params(event.get("payload").unwrap_or(&serde_json::Value::Null))
+            .into_iter()
+            .filter(|(name, _)| name != "event_id" && name != "event_seq")
+            .collect();
     let id = event.get("id").and_then(serde_json::Value::as_str);
     let seq = event.get("seq").and_then(serde_json::Value::as_i64);
     params.push((
@@ -357,7 +356,19 @@ pub fn input_query(sql: &str, event: &serde_json::Value) -> oxplow_db::SqlQuery 
     ));
     oxplow_db::SqlQuery::new(sql)
         .named(params)
-        .limit(Some(crate::extension_commands::INPUT_ROW_CAP))
+        .limit(Some(crate::host_capabilities::SQL_READ_ROW_CAP))
+}
+
+/// The named parameters a payload binds: its top-level fields.
+fn input_params(payload: &serde_json::Value) -> Vec<(String, oxplow_db::SqlCell)> {
+    payload
+        .as_object()
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Whether `decl` reacts to an event of `event_type` with `payload`: its
@@ -402,7 +413,7 @@ pub async fn dry_run(
 ) -> Result<Reaction, String> {
     let rows = match (rows, &decl.input) {
         (Some(rows), _) => rows,
-        (None, Some(sql)) => crate::extension_commands::rows_json(
+        (None, Some(sql)) => crate::host_capabilities::rows_json(
             &layer
                 .run(input_query(sql, &event))
                 .await

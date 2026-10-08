@@ -73,6 +73,7 @@ pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;
 pub mod hook_ingest;
+pub mod host_capabilities;
 pub mod indexer;
 pub mod inferred_decisions;
 pub mod kind_search;
