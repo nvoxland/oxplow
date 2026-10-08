@@ -162,6 +162,9 @@ const EMITTERS: &[(&str, &str)] = &[
     ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
+    // A call to the window (`client_host.rs`): not a change to re-read but
+    // a request it answers.
+    ("ClientCall", "crates/oxplow-app/src/client_host.rs"),
     ("FollowupsChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),

@@ -714,6 +714,14 @@ impl CommandBus {
             .commands
             .values()
             .filter(|c| matches!(c.handler, Handler::External(_)))
+            // The window's own (`client_host`) run in the window, not
+            // against a system that owns state: reviewed as a class.
+            .filter(|c| {
+                !c.spec.op.as_ref().is_some_and(|op| {
+                    oxplow_domain::host_capability::host_capability(&op.capability)
+                        .is_some_and(|h| h.host == oxplow_domain::host_capability::Host::Window)
+                })
+            })
             .map(|c| c.spec.id.clone())
             .collect();
         names.sort();
@@ -2193,6 +2201,7 @@ mod tests {
             effect: CommandEffect::Write,
             needs: Vec::new(),
             ui: None,
+            op: None,
         }
     }
 
@@ -3443,6 +3452,7 @@ mod tests {
             effect: oxplow_domain::CommandEffect::Write,
             needs: Vec::new(),
             ui: None,
+            op: None,
         };
         let compose: Arc<Composer> = Arc::new(|_conn, _trace, input: &Value| {
             Ok(Composition {

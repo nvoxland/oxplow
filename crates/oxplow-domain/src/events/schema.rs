@@ -124,8 +124,6 @@ impl EventSchemaRegistry {
     /// The registry with every core type registered.
     pub fn core() -> Self {
         let mut r = Self::new();
-        r.register::<WorkItemTransitioned>()
-            .expect("core type registers");
         r.register::<CommandExecutedAtV1>()
             .expect("core type registers");
         r.register::<CommandExecuted>()
@@ -170,8 +168,6 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<TestCoverageRecorded>()
             .expect("core type registers");
-        r.register::<WorkItemDeletedAtV1>()
-            .expect("core type registers");
         r.register::<WorkItemDeleted>()
             .expect("core type registers");
         r.register::<EffortOpened>().expect("core type registers");
@@ -185,21 +181,11 @@ impl EventSchemaRegistry {
         r.register::<EffortFinished>().expect("core type registers");
         r.register::<CollectorSynced>()
             .expect("core type registers");
-        r.register::<WorkItemEditedAtV1>()
-            .expect("core type registers");
         r.register::<WorkItemEdited>().expect("core type registers");
-        r.register::<WorkItemCreatedAtV1>()
-            .expect("core type registers");
         r.register::<WorkItemCreated>()
             .expect("core type registers");
-        r.register::<WorkItemLinkedAtV1>()
-            .expect("core type registers");
         r.register::<WorkItemLinked>().expect("core type registers");
-        r.register::<WorkItemCommentedAtV1>()
-            .expect("core type registers");
         r.register::<WorkItemCommented>()
-            .expect("core type registers");
-        r.register::<WorkItemRecordedAtV1>()
             .expect("core type registers");
         r.register::<WorkItemRecorded>()
             .expect("core type registers");
@@ -460,37 +446,6 @@ impl Envelope {
 // ---------------------------------------------------------------------------
 // Core types, v1
 // ---------------------------------------------------------------------------
-
-// oxplow's task statuses as the v1 work-item events published them (in
-// their schemas, as `TaskStatus`): frozen here with those payloads. The
-// task list's own type lives with its implementation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Ready,
-    InProgress,
-    Blocked,
-    Done,
-    Canceled,
-    Archived,
-}
-
-/// `work_item.transitioned@1`: a task changed status.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemTransitionedV1 {
-    /// The task's canonical ref (`work_item:oxplow:tsk42`).
-    pub work_item: String,
-    pub from: TaskStatus,
-    pub to: TaskStatus,
-}
-
-pub struct WorkItemTransitioned;
-impl EventType for WorkItemTransitioned {
-    const TYPE: &'static str = "work_item.transitioned";
-    const V: u32 = 1;
-    type Payload = WorkItemTransitionedV1;
-}
 
 /// Who ran a command (`.context/target-architecture.md` §7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
@@ -1785,29 +1740,9 @@ impl EventType for EffortClosed {
     type Payload = EffortClosedV2;
 }
 
-// The work-item events' v1 spoke oxplow's task list (its statuses, field
-// names and note refs), and only oxplow's tasks logged them. v2 is the
-// interface's: core logs it for every list, from the verb a
-// `oxplow.work_item.*` command ran and what the list answered
-// (`.context/work-items.md`). v1 stays registered, as published, for the
-// events already in the log; each reads at v2.
-
-/// `work_item.created@1`: a task was filed, in `status`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemCreatedV1 {
-    /// `work_item:oxplow:tsk42`.
-    pub work_item: String,
-    pub status: TaskStatus,
-}
-
-/// The v1 shape of `work_item.created`, as a registry entry.
-pub struct WorkItemCreatedAtV1;
-impl EventType for WorkItemCreatedAtV1 {
-    const TYPE: &'static str = "work_item.created";
-    const V: u32 = 1;
-    type Payload = WorkItemCreatedV1;
-}
+// The work-item events are the interface's: core logs them for every
+// list, from the verb a `oxplow.work_item.*` command ran and what the list
+// answered (`.context/work-items.md`).
 
 /// `work_item.created@2`: an item was filed on a work list, in `state`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1824,38 +1759,6 @@ impl EventType for WorkItemCreated {
     const TYPE: &'static str = "work_item.created";
     const V: u32 = 2;
     type Payload = WorkItemCreatedV2;
-
-    /// v1's oxplow status as its canonical state: `ready` is `todo`, and
-    /// a task filed `archived` was never completed, so `canceled`.
-    fn upcast(from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
-        work_item_v1(Self::TYPE, from_v)?;
-        if let Value::Object(fields) = &mut payload {
-            if let Some(Value::String(status)) = fields.remove("status") {
-                let state = match status.as_str() {
-                    "ready" => "todo",
-                    "archived" => "canceled",
-                    other => other,
-                };
-                fields.insert("state".into(), Value::String(state.into()));
-            }
-        }
-        Ok(payload)
-    }
-}
-
-/// `work_item.deleted@1`: a task was deleted (soft: its row stays, hidden).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemDeletedV1 {
-    pub work_item: String,
-}
-
-/// The v1 shape of `work_item.deleted`, as a registry entry.
-pub struct WorkItemDeletedAtV1;
-impl EventType for WorkItemDeletedAtV1 {
-    const TYPE: &'static str = "work_item.deleted";
-    const V: u32 = 1;
-    type Payload = WorkItemDeletedV1;
 }
 
 /// `work_item.deleted@2`: an item was deleted from its work list.
@@ -1871,31 +1774,6 @@ impl EventType for WorkItemDeleted {
     const TYPE: &'static str = "work_item.deleted";
     const V: u32 = 2;
     type Payload = WorkItemDeletedV2;
-
-    /// v1's payload is v2's.
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        work_item_v1(Self::TYPE, from_v)?;
-        Ok(payload)
-    }
-}
-
-/// `work_item.edited@1`: a task's own fields changed (not its status —
-/// that is `work_item.transitioned`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemEditedV1 {
-    /// `work_item:oxplow:tsk42`.
-    pub work_item: String,
-    /// What changed: `title`, `description`, `priority`, `parent`.
-    pub fields: Vec<String>,
-}
-
-/// The v1 shape of `work_item.edited`, as a registry entry.
-pub struct WorkItemEditedAtV1;
-impl EventType for WorkItemEditedAtV1 {
-    const TYPE: &'static str = "work_item.edited";
-    const V: u32 = 1;
-    type Payload = WorkItemEditedV1;
 }
 
 /// `work_item.edited@2`: a command changed an item's fields — not its
@@ -1916,45 +1794,6 @@ impl EventType for WorkItemEdited {
     const TYPE: &'static str = "work_item.edited";
     const V: u32 = 2;
     type Payload = WorkItemEditedV2;
-
-    /// v1's oxplow field names as the interface's.
-    fn upcast(from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
-        work_item_v1(Self::TYPE, from_v)?;
-        if let Some(Value::Array(fields)) = payload.get_mut("fields") {
-            for field in fields {
-                let renamed = match field.as_str() {
-                    Some("description") => "body",
-                    Some("priority") => "native.priority",
-                    Some("thread") => "list",
-                    Some("position") => "rank",
-                    _ => continue,
-                };
-                *field = Value::String(renamed.into());
-            }
-        }
-        Ok(payload)
-    }
-}
-
-/// `work_item.linked@1`: a typed link from one work item to another.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemLinkedV1 {
-    /// The item linked from.
-    pub work_item: String,
-    /// The item linked to.
-    pub target: String,
-    /// `blocks`, `relates_to`, `discovered_from`, `duplicates`,
-    /// `supersedes` or `replies_to`.
-    pub link_type: String,
-}
-
-/// The v1 shape of `work_item.linked`, as a registry entry.
-pub struct WorkItemLinkedAtV1;
-impl EventType for WorkItemLinkedAtV1 {
-    const TYPE: &'static str = "work_item.linked";
-    const V: u32 = 1;
-    type Payload = WorkItemLinkedV1;
 }
 
 /// `work_item.linked@2`: a typed link from one item to another of the
@@ -1975,29 +1814,6 @@ impl EventType for WorkItemLinked {
     const TYPE: &'static str = "work_item.linked";
     const V: u32 = 2;
     type Payload = WorkItemLinkedV2;
-
-    /// v1's payload is v2's.
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        work_item_v1(Self::TYPE, from_v)?;
-        Ok(payload)
-    }
-}
-
-/// `work_item.commented@1`: a comment on a work item.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemCommentedV1 {
-    pub work_item: String,
-    /// The comment (oxplow: `task_note:<id>`).
-    pub comment: String,
-}
-
-/// The v1 shape of `work_item.commented`, as a registry entry.
-pub struct WorkItemCommentedAtV1;
-impl EventType for WorkItemCommentedAtV1 {
-    const TYPE: &'static str = "work_item.commented";
-    const V: u32 = 1;
-    type Payload = WorkItemCommentedV1;
 }
 
 /// `work_item.commented@2`: a comment was added to an item.
@@ -2017,49 +1833,6 @@ impl EventType for WorkItemCommented {
     const TYPE: &'static str = "work_item.commented";
     const V: u32 = 2;
     type Payload = WorkItemCommentedV2;
-
-    /// v1 named an oxplow note by its ref; v2 by the list's own id.
-    fn upcast(from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
-        work_item_v1(Self::TYPE, from_v)?;
-        if let Some(comment) = payload.get_mut("comment") {
-            if let Some(id) = comment.as_str().and_then(|c| c.strip_prefix("task_note:")) {
-                *comment = Value::String(id.to_string());
-            }
-        }
-        Ok(payload)
-    }
-}
-
-/// The work-item events upcast from v1 only.
-fn work_item_v1(ty: &str, from_v: u32) -> Result<(), DomainError> {
-    if from_v == 1 {
-        Ok(())
-    } else {
-        Err(DomainError::Invalid(format!(
-            "{ty}@{from_v} cannot be upcast to v2"
-        )))
-    }
-}
-
-// v1 as published (its schema is compared exactly to providers'
-// checked-in declarations): v1's own words. It carried no rank, links or
-// comments.
-/// `work_item.recorded@1`: a provider's item as it now stands — how an
-/// external provider's items reach `work_item` (the `work_items.project`
-/// consumer upserts it by ref). oxplow's own tasks don't log it: their
-/// rows are written with the task, in the same transaction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemRecordedV1 {
-    pub item: crate::work_items::WorkItemRecordV1,
-}
-
-/// The v1 shape of `work_item.recorded`, as a registry entry.
-pub struct WorkItemRecordedAtV1;
-impl EventType for WorkItemRecordedAtV1 {
-    const TYPE: &'static str = "work_item.recorded";
-    const V: u32 = 1;
-    type Payload = WorkItemRecordedV1;
 }
 
 /// `work_item.recorded@2`: a list's item as it now stands — how every
@@ -2077,16 +1850,6 @@ impl EventType for WorkItemRecorded {
     const TYPE: &'static str = "work_item.recorded";
     const V: u32 = 2;
     type Payload = WorkItemRecordedV2;
-
-    /// v1 → v2 adds three optional fields: a v1 payload is a valid v2 one.
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "work_item.recorded@{from_v} cannot be upcast to v2"
-            ))),
-        }
-    }
 }
 
 /// How many diagnostics of each severity a file has.
@@ -2552,23 +2315,16 @@ mod tests {
                 ("ui.op_failed", 1),
                 ("vcs.commit.indexed", 1),
                 ("vcs.head.moved", 1),
-                ("work_item.commented", 1),
                 ("work_item.commented", 2),
-                ("work_item.created", 1),
                 ("work_item.created", 2),
-                ("work_item.deleted", 1),
                 ("work_item.deleted", 2),
-                ("work_item.edited", 1),
                 ("work_item.edited", 2),
-                ("work_item.linked", 1),
                 ("work_item.linked", 2),
-                ("work_item.recorded", 1),
                 ("work_item.recorded", 2),
                 ("work_item.state_changed", 1),
-                ("work_item.transitioned", 1),
             ]
         );
-        assert_eq!(r.latest("work_item.transitioned"), Some(1));
+        assert_eq!(r.latest("work_item.created"), Some(2));
         assert_eq!(r.latest("agent.turn.ended"), Some(2));
         assert_eq!(r.owner("config.changed", 2), Some(None));
     }
@@ -2640,57 +2396,6 @@ mod tests {
         }
     }
 
-    /// v1 of the work-item events spoke oxplow's task list: its statuses,
-    /// its field names, its note refs. Each reads at v2 in the interface's
-    /// words, which every list's events use.
-    #[test]
-    fn a_v1_work_item_event_reads_in_the_interfaces_words() {
-        let r = crate::vocabulary::Vocabulary::core();
-        let up = |ty: &str, v1: Value| {
-            let (v, up) = r.upcast_to_latest(ty, 1, v1).unwrap();
-            assert_eq!(v, 2, "{ty}");
-            up
-        };
-        let item = "work_item:oxplow:tsk42";
-        for (status, state) in [
-            ("ready", "todo"),
-            ("in_progress", "in_progress"),
-            ("blocked", "blocked"),
-            ("done", "done"),
-            ("canceled", "canceled"),
-            ("archived", "canceled"),
-        ] {
-            assert_eq!(
-                up(
-                    "work_item.created",
-                    json!({ "work_item": item, "status": status })
-                ),
-                json!({ "work_item": item, "state": state })
-            );
-        }
-        assert_eq!(
-            up(
-                "work_item.edited",
-                json!({ "work_item": item, "fields": ["title", "description", "priority", "parent", "thread", "position"] })
-            ),
-            json!({ "work_item": item, "fields": ["title", "body", "native.priority", "parent", "list", "rank"] })
-        );
-        assert_eq!(
-            up(
-                "work_item.commented",
-                json!({ "work_item": item, "comment": "task_note:not3" })
-            ),
-            json!({ "work_item": item, "comment": "not3" })
-        );
-        let linked =
-            json!({ "work_item": item, "target": "work_item:oxplow:tsk7", "link_type": "blocks" });
-        assert_eq!(up("work_item.linked", linked.clone()), linked);
-        assert_eq!(
-            up("work_item.deleted", json!({ "work_item": item })),
-            json!({ "work_item": item })
-        );
-    }
-
     /// v1 reads at v2 with no transcript and no usage; the v2 producer's
     /// shape is what `Envelope::typed` emits.
     #[test]
@@ -2730,28 +2435,27 @@ mod tests {
     #[test]
     fn validate_accepts_the_typed_shape_and_names_the_violation() {
         let r = crate::vocabulary::Vocabulary::core();
-        let ok = Envelope::typed::<WorkItemTransitioned>(
+        let ok = Envelope::typed::<WorkItemStateChanged>(
             "human",
-            &WorkItemTransitionedV1 {
+            &WorkItemStateChangedV1 {
                 work_item: "work_item:oxplow:tsk4".into(),
-                from: TaskStatus::Ready,
-                to: TaskStatus::InProgress,
+                to: crate::work_items::CanonicalState::InProgress,
             },
         );
-        assert_eq!(ok.event_type, "work_item.transitioned");
+        assert_eq!(ok.event_type, "work_item.state_changed");
         assert_eq!(ok.v, 1);
         r.validate_envelope(&ok).unwrap();
 
         let bad = r
             .validate(
-                "work_item.transitioned",
+                "work_item.state_changed",
                 1,
-                &json!({"work_item": "x", "from": "ready", "to": "flying"}),
+                &json!({"work_item": "x", "to": "flying"}),
             )
             .unwrap_err();
         let msg = bad.to_string();
         assert!(
-            msg.contains("work_item.transitioned@1") && msg.contains("/to"),
+            msg.contains("work_item.state_changed@1") && msg.contains("/to"),
             "{msg}"
         );
 
@@ -2769,7 +2473,7 @@ mod tests {
     fn unknown_types_and_versions_are_refused() {
         let r = EventSchemaRegistry::core();
         let e = r
-            .validate("work_item.transitioned", 2, &json!({}))
+            .validate("work_item.state_changed", 2, &json!({}))
             .unwrap_err();
         assert!(e.to_string().contains("newest is v1"), "{e}");
         let e = r.validate("acme.thing", 1, &json!({})).unwrap_err();
@@ -2826,7 +2530,7 @@ mod tests {
         // Core can't register into a plugin namespace either, and a
         // second registration of the same type@v collides.
         assert!(r.register::<AcmeDecided>().is_err());
-        assert!(r.register::<WorkItemTransitioned>().is_err());
+        assert!(r.register::<WorkItemStateChanged>().is_err());
     }
 
     #[test]
@@ -2918,6 +2622,6 @@ mod tests {
         assert_eq!((v, same), (2, json!({"n": 5, "note": "x"})));
         assert!(r.upcast_to_latest("acme.thing", 3, json!({})).is_err());
         // The default upcast refuses: a type that bumps V must define one.
-        assert!(WorkItemTransitioned::upcast(0, json!({})).is_err());
+        assert!(WorkItemStateChanged::upcast(0, json!({})).is_err());
     }
 }

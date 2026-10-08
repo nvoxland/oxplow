@@ -3032,6 +3032,7 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
                 effect: host::effect_of(&decl.effect)?,
                 needs: Vec::new(),
                 ui: None,
+                op: None,
             };
             let (instance, verb, id) = (instance.clone(), decl.name.clone(), id.clone());
             Command::new(

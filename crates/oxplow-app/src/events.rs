@@ -127,6 +127,19 @@ pub enum OxplowEvent {
     /// extensions contribute — the launcher, pages, panels, slots —
     /// reloads, and a lens re-runs its definition.
     ExtensionsChanged,
+    /// A command running on the daemon calls a capability the window
+    /// hosts (`client_host.rs`): the window does `capability`'s `op` with
+    /// `input` — in `thread_id`'s tabs, or the one it shows when `None` —
+    /// and answers `answer_client_call { id, … }`.
+    ClientCall {
+        id: String,
+        thread_id: Option<ThreadId>,
+        /// Who ran the command (`agent:thr3`, `human`).
+        actor: String,
+        capability: String,
+        op: String,
+        input: oxplow_domain::Json,
+    },
     /// A person approved a program on this machine (a provider, collector,
     /// effect, component, ACP agent): what shows approval state —
     /// Settings → Integrations and Data — refreshes (tsk1040). Approvals

@@ -84,6 +84,10 @@ impl Op {
             Handler::Compose(_) => Atomicity::Dispatch,
         };
         spec.effect = effect_of(class);
+        spec.op = Some(oxplow_domain::OpRef {
+            capability: self.capability.clone(),
+            op: self.name.clone(),
+        });
         if !spec.needs.contains(&self.capability) {
             spec.needs.insert(0, self.capability.clone());
         }

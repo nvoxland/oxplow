@@ -21,7 +21,6 @@ function renderOverlay() {
       threadId="thr1"
       selectedFilePath={null}
       pages={pages}
-      menuGroups={[]}
       offers={[]}
       onClose={() => {}}
       onOpenFile={() => {}}

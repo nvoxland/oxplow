@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
-import type { MenuGroup } from "../commands.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 import type { PageCategory } from "./RailHud/sections.js";
 import {
@@ -9,7 +8,8 @@ import {
   buildQuickOpenResults,
   buildRecentEntries,
   dedupeSiteHits,
-  flattenCommands,
+  searchableCommands,
+  type CommandEntry,
   nextSectionIndex,
   type LauncherNavRow,
   type LauncherSection,
@@ -34,14 +34,8 @@ function file(path: string): WorkspaceIndexedFile {
   return { path, status: "clean" } as WorkspaceIndexedFile;
 }
 
-function group(
-  items: { id: string; label: string; enabled: boolean; run?: () => void }[],
-): MenuGroup {
-  return {
-    id: "git",
-    label: "Git",
-    items: items.map((i) => ({ ...i, run: i.run ?? (() => {}) })),
-  } as unknown as MenuGroup;
+function command(id: string, label: string, enabled = true): CommandEntry {
+  return { id, group: "Git", label, enabled, run: () => {}, searchKey: `git ${label}`.toLowerCase() };
 }
 
 describe("dedupeSiteHits", () => {
@@ -67,29 +61,16 @@ describe("dedupeSiteHits", () => {
   });
 });
 
-describe("flattenCommands", () => {
-  test("keeps only enabled, runnable commands with a group/label searchKey", () => {
-    const out = flattenCommands([
-      group([
-        { id: "git.commit", label: "Commit Changes…", enabled: true },
-        { id: "git.pull", label: "Pull Changes", enabled: false },
-      ]),
-    ]);
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ id: "git.commit", group: "Git", label: "Commit Changes…", searchKey: "git commit changes…" });
-  });
-
-  test("skips items with no run handler (native responder-chain placeholders)", () => {
-    const out = flattenCommands([
-      { id: "edit", label: "Edit", items: [{ id: "native.copy", label: "Copy", enabled: true, run: undefined }] } as unknown as MenuGroup,
-    ]);
-    expect(out).toHaveLength(0);
+describe("searchableCommands", () => {
+  test("keeps only the commands that can run now", () => {
+    const out = searchableCommands([command("oxplow.vcs.commit", "Commit Changes…"), command("oxplow.vcs.pull", "Pull Changes", false)]);
+    expect(out.map((c) => c.id)).toEqual(["oxplow.vcs.commit"]);
   });
 });
 
 describe("buildQuickOpenResults", () => {
   const pages = [page("git-dashboard", "Git"), page("files", "Files")];
-  const commands = flattenCommands([group([{ id: "git.commit", label: "Commit Changes…", enabled: true }])]);
+  const commands = [command("git.commit", "Commit Changes…")];
   const files = [file("src/git.rs"), file("README.md")];
 
   test("a typed query ends with Ask the Agent, carrying what was typed; an empty one has none", () => {
@@ -269,7 +250,7 @@ describe("buildLauncherTree", () => {
 });
 
 describe("nextSectionIndex", () => {
-  const cmd = flattenCommands([group([{ id: "g.c", label: "C", enabled: true }])])[0]!;
+  const cmd = command("g.c", "C");
   const R = {
     cat: (c: string): LauncherNavRow => ({ kind: "category", category: c as PageCategory, expanded: false }),
     page: (id: string): LauncherNavRow => ({ kind: "page", entry: page(id, id) }),

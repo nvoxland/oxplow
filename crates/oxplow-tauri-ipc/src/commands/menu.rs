@@ -6,7 +6,7 @@
 //! with one submenu per group and one menu item per command, then
 //! install it as the app menu. Menu activations forward to the
 //! renderer over the `menu:command` event channel as the original
-//! command id (e.g. `"file.save"`); the renderer's
+//! command id (e.g. `"oxplow.editor.save"`); the renderer's
 //! `subscribeMenuCommand` listener fires the matching handler.
 //!
 //! Only the macOS native menu bar is exercised today — on Windows

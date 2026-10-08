@@ -86,7 +86,7 @@ def transform(x):
         item = record(x, x["output"])
         return {
             "result": {"ref": item["ref"]},
-            "events": [{"type": "work_item.recorded", "v": 1, "payload": {"item": item}, "subject": [item["ref"]]}],
+            "events": [{"type": "work_item.recorded", "v": 2, "payload": {"item": item}, "subject": [item["ref"]]}],
         }
     if phase == "read":
         state = x["state"] or {}

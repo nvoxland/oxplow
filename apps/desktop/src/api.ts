@@ -1141,6 +1141,22 @@ async function runAsBackgroundTask(
 
 /** The commands a person is offered — those with a `ui` they may run now
  *  (`list_person_commands`); search lists the ref-less ones. */
+/** The window says it's open and hosts `capabilities` (`clientHost.ts`). */
+export async function registerClientHost(capabilities: string[]): Promise<void> {
+  unwrap(await commands.registerClientHost(capabilities));
+}
+
+/** The window's answer to a `clientCall`: its result, or why not. */
+export async function answerClientCall(id: string, answer: { result: unknown } | { error: string }): Promise<void> {
+  unwrap(
+    await commands.answerClientCall(
+      id,
+      "result" in answer ? (answer.result ?? null) : null,
+      "error" in answer ? answer.error : null,
+    ),
+  );
+}
+
 export async function listPersonCommands(): Promise<CommandSpec[]> {
   return unwrap(await commands.listPersonCommands());
 }

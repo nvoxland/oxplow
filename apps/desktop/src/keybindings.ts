@@ -1,34 +1,33 @@
-import type { CommandId } from "./commands.js";
+import type { CommandEntry } from "./components/quickOpenResults.js";
 
-/** A command bus command a shortcut runs through its offer
- *  (`commandOffers`): New Task opens its form. */
-export type BusShortcut = "oxplow.work_item.create";
-
-export function getCommandIdForShortcut(event: {
+/** A key press, as a shortcut sees it. */
+export interface KeyPress {
   key: string;
   metaKey: boolean;
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
-}): CommandId | BusShortcut | null {
-  if (event.altKey || !(event.metaKey || event.ctrlKey)) {
-    return null;
-  }
+}
 
-  const key = event.key.toLowerCase();
-  if (event.shiftKey) {
-    if (key === "n") return "oxplow.work_item.create";
-    return null;
-  }
+/** Whether `event` is `shortcut` (`Ctrl/Cmd+S`, `Ctrl/Cmd+Shift+N`;
+ *  `Ctrl/Cmd` is either). */
+export function matchesShortcut(event: KeyPress, shortcut: string): boolean {
+  const parts = shortcut.split("+");
+  const key = parts.pop()?.toLowerCase();
+  const mods = new Set(parts.map((p) => p.toLowerCase()));
+  const mod = mods.has("ctrl/cmd");
+  return (
+    event.key.toLowerCase() === key &&
+    (event.metaKey || event.ctrlKey) === mod &&
+    event.shiftKey === mods.has("shift") &&
+    event.altKey === mods.has("alt")
+  );
+}
 
-  switch (key) {
-    case "s":
-      return "file.save";
-    case "p":
-      return "file.quickOpen";
-    case "f":
-      return "edit.find";
-    default:
-      return null;
-  }
+/** The offer whose `ui.shortcut` `event` is (`commandOffers`) — while the
+ *  person types in a field, only one that runs while typing. */
+export function offerForShortcut(offers: CommandEntry[], event: KeyPress, typing: boolean): CommandEntry | null {
+  return (
+    offers.find((o) => o.shortcut && matchesShortcut(event, o.shortcut) && (!typing || o.whileTyping)) ?? null
+  );
 }

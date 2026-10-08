@@ -61,20 +61,34 @@ A command says how a person meets it with an optional `ui`
 | `keywords` | more words search matches it by |
 | `about` | the ref kind it acts on: offered on that ref's page and rows; absent, it needs no ref and **search** offers it |
 | `input` | the input it runs with; a string exactly `{{stream}}`, `{{thread}}`, `{{ref}}` or `{{ref.id}}` binds from where it runs, and one with nothing to bind there makes it unavailable there |
-| `form` | the page that gathers its input (`page:new-task`): choosing it opens that page instead of running it |
+| `form` | what gathers its input: a page (a tab id, `page:new-task`) or one of the window's own forms (`new-thread`: the Navigator's inline form; `commit`: the Files page's commit dialog) — choosing it opens that instead of running it |
 | `open_after` | a tab id to open once it ran, `{{result.<field>}}` from its result (`page:custom-dashboard?id={{result.id}}`) |
 | `background` | it runs as a background task (kind `vcs` for `oxplow.vcs.*`, else `command`), its failure an op error |
+| `shortcut` | the key that runs it, `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N` (`keybindings.ts` `offerForShortcut`) |
+| `while_typing` | its shortcut runs while the person types in a field too (Save, Find, Quick Open); otherwise typing keeps it (New Task) |
+| `menu` | its place in the menu bar: `{ bar: file \| edit, order }` (`menuBar.ts`) |
 
 RPC `list_person_commands` lists what a person is offered: what they may
 run now (invokers, `needs` active) that has a `ui`. The desktop keeps one
 listing (`personCommandsStore.ts`, reloaded when extensions or config
-change) and turns the ref-less ones into search entries with
-`commandOffers.ts` (pure: binding, availability, run / form / background /
-open-after); a shortcut may run one by id (⌘⇧N → `oxplow.work_item.create`'s
-form). Offered now: `oxplow.vcs.pull` / `push`, `oxplow.work_item.create`,
-`oxplow.dashboard.create`, `oxplow.stream.create_worktree`. Commit, New
-Thread and New Lens with Your Agent are still the app's own commands
-(`commands.ts`) until the window provides them as capabilities.
+change) and turns it into **offers** with `commandOffers.ts` (pure:
+binding, availability, run / form / background / open-after; whether the
+window has something for one of its own to act on now — `available`).
+Everything a person reaches a command by comes from the offers:
+
+- **search** lists the ref-less ones that can run now;
+- **the menu bar** (`menuBar.ts`: the OS's on macOS, the in-window
+  `Menubar` elsewhere) is the offers with a `ui.menu` place, in order —
+  beside the shell's project commands (New / Open Project, until the app
+  shell hosts them) and the native Edit roles (Undo … Select All, done by
+  the OS's responder chain: WKWebView only delivers ⌘C/⌘V with them in
+  the menu);
+- **shortcuts** are the offers' `ui.shortcut`s.
+
+Save, Find, Quick Open and New Lens with Your Agent are the window's own
+commands (below, "Where a command runs"); New Thread and Commit are
+`oxplow.thread.create` / `oxplow.vcs.commit` with a window `form`. There
+is no other command list in the app.
 
 ## Host capabilities
 
@@ -110,6 +124,33 @@ script fails with the reason), one that is is counted and answered; a
 busy database retries the whole run. A dry run (an extension's
 `examples`) answers from the example's `answers` (per capability, in
 call order) or through the SQL gateway.
+
+**Where a command runs** (VS Code's model: commands run where their
+handler lives). A capability says its host (`Host`): the **daemon**
+(oxplow's records, the repository, the project — every capability so far
+but one) or the project's **window** (`tabs.write`: open, close, focus a
+tab; later the editor, the search box, the agent's input). A command
+backed by a window capability is View class (not recorded, no
+transaction) and its spec carries the operation (`CommandSpec::op`):
+
+- **The window's own runs stay in it** — `clientHost.ts` `runLocally`:
+  the window does it with its own handler, nothing sent to the daemon.
+- **A run on the daemon** (an agent's through MCP, a script's) reaches
+  the window through `client_host::ClientHost`: an
+  `OxplowEvent::ClientCall { id, thread_id, actor, capability, op, input }`
+  to the project's one window, which does it and answers
+  `answer_client_call { id, result | error }`; the run waits (15 s), its
+  answer the run's result. The window says it's open — and what it hosts —
+  with `register_client_host` when it starts and on reconnect; with no
+  window, one that doesn't host it or doesn't answer, the run is
+  `Unavailable`.
+- **An agent acts only in its own thread**: the call carries the agent's
+  thread and the window acts in that thread's tabs — opening a file there
+  reads it into its stream's session — never switching the thread or
+  stream the person sees (an agent with no thread is refused). A person's
+  call acts in the thread shown. Every call carries its actor.
+- One handler per command; something that should happen when one runs
+  reacts to an event, not a second handler.
 
 **Operations** (`commands/ops.rs`). A record or write capability's
 native behavior comes as **operations**: `bookmarks.write` has `set` and
@@ -572,7 +613,7 @@ capability its area falls under (`threads.write`, `vcs.write`, …;
 | `oxplow.knowledge.write_page { slug, title?, body, verified_refs?, removed_refs? }` / `oxplow.knowledge.delete_page { slug }` / `oxplow.knowledge.link { page, target }` / `oxplow.knowledge.resync { slug }` | `Tx` over `knowledge::write_page_tx` / `delete_page_tx` (`crates/oxplow-app/src/knowledge.rs`, P5.C3) | all invokers, `Record` (a read-only thread captures too); not undoable; `delete_page` is Destructive. Validates the slug and every `[[link]]` (refused, named), restates the `wiki_page` row and its pinned `page_ref` edges, logs `knowledge.page.written@1` / `knowledge.page.deleted@1` with the actor's anchors; writes (or removes) `.oxplow/wiki/<slug>.md` in the run; the UI re-reads on the row's `modelsChanged` (no wiki event of its own). See [knowledge.md](./knowledge.md) |
 | `<provider>.<name>` (an enabled external provider's own declared commands — not its capability's verbs, which run as `work_item.<verb>`: the fake's `estimate`) | `External` over the provider process's `invoke` (`providers/registry.rs`, P5.D3) | registered while its instance is enabled (and removed when it stops), all invokers, `Experimental`; `confirm`, `effect` and `undoable` as the provider declares (its `inverse` becomes `<provider>.<command>`). The events its `invoke` returns are logged caused by the run — only types it declares, and a `work_item.recorded` only for its own items. See [providers.md](./providers.md) |
 | `oxplow.collector.sync { owner, id, thread? }` | `External` over the collector's program or script (`collector_runner.rs`, P7.B3; was `source.sync`) | all invokers, `Write`, not undoable. Runs an approved collector from the primary worktree and commits its rows, its `collector_run` row and `collector.synced@1` in one transaction (a failed run commits the failure). It never approves: an unapproved exec collector is `Invalid` at `/id`. Run by the system it's the `every:` schedule's run (`trigger: every`); by anyone else, `manual`. **The one manual run for every collector** (it replaced `source.sync` and `metric.run`): a fact collector (`facts:`, owner `project` / an extension / `built-in`) runs through the fact engine (`MetricsService::run_collector_by_key`) against the stream's latest snapshot, recording its capture, `collector_run` and `collector.synced@1` (the engine's own writes). Result `{ owner, id, rowCounts, facts }` — `rowCounts` for an entity collector, `facts` (count recorded) for a fact collector. A project **report collector** (`records:`, tsk863) is read by the collection service in `thread` (an agent's own; a person names one): `{ owner, id, recorded: { status, records, run, … } }` |
-| `oxplow.provider.sync { instance, collector? }` | `External` over the provider process's `read` (`providers/sync.rs`, P7.A3) | all invokers, `Record` (it restates items, never claims), not undoable. Reads a running instance's collectors (all, or one — an undeclared one is `Invalid` at `/collector`) from their last checkpoints; the records land as `work_item.recorded@1`, each batch committed with its `$/state`. The one way to read: Settings → Integrations' Sync Now, an agent, the schedule (as the system) and the read an instance gets when it starts. Result `{ reads: [{ collector, records }] }`. See [providers.md](./providers.md) |
+| `oxplow.provider.sync { instance, collector? }` | `External` over the provider process's `read` (`providers/sync.rs`, P7.A3) | all invokers, `Record` (it restates items, never claims), not undoable. Reads a running instance's collectors (all, or one — an undeclared one is `Invalid` at `/collector`) from their last checkpoints; the records land as `work_item.recorded@2`, each batch committed with its `$/state`. The one way to read: Settings → Integrations' Sync Now, an agent, the schedule (as the system) and the read an instance gets when it starts. Result `{ reads: [{ collector, records }] }`. See [providers.md](./providers.md) |
 | `oxplow.effect.retry { effect, event }` | `External` over `effect_triggers::run_reaction` (`commands/effect.rs`, P9.D4; the `effects.run` operation, its services filled at boot when the `effect.triggers` consumer registers) | a person's only, `Confirm::Always`, not undoable. Has an extension's effect react again to an event its reaction to **failed** (its latest attempt, `v_effect_run.latest`), as the next attempt, run as the effect is now — enabled and approved as it is, composing afresh. Asked every time: a failed attempt interrupted with a step outside oxplow under way may have landed it, and a retry sends it again. `Invalid` for a reaction that didn't fail or was never made, a disabled or unapproved effect, an unknown effect or event. Result `{ effect, event, attempt, outcome, reason? }` — the retry's own outcome, which may be `failed` again. See [extensions.md](./extensions.md) "Effects" |
 | `oxplow.effect.backfill { effect, from_seq? \| since?, to_seq? }` | `External` over `commands/effect.rs::backfill` (P9.D5) | a person's only, `Confirm::Always`, not undoable. Has an effect react to the matching events in the range it never reacted to (those logged before its approval), oldest first, once each, as it is now — at most 200 a run. Each is an attempt with `origin: backfill`, under the same dedupe, loop guard and health as a live reaction; three failures in a row disable the effect and stop the run. `Invalid` for an unknown, disabled or unapproved effect, or both `from_seq` and `since`. Result `{ effect, planned, ran, skipped, proposed, failed, remaining, stopped? }` |
 | `oxplow.effect.backfill_plan { effect, from_seq? \| since?, to_seq? }` | `Tx`, `Read` (P9.D5) | all invokers. What `oxplow.effect.backfill` would react to: `{ effect, planned, from_seq, to_seq }`. The count a person is shown before running one (a confirmation carries a command's summary and input, not a computed count) |
@@ -622,7 +663,7 @@ input, confirmed }` and `undo_command { audit_id, confirmed }`
 A typed IPC setter is a convenience over one command; anything new the
 UI writes goes through `run_command`. Parity: `both("run_command")`,
 `ui("undo_command")`. A person's undo is offered where they ran it: a
-command run through `personCommands` (a board move, a launcher entry)
+command run through `personCommands` (a board move, a search offer)
 that comes back undoable (its outcome's `inverse`) shows **Undo** on its
 "done" toast, which runs `undoCommand(audit_id)` — the click is the
 person's confirmation — and says "undone" or records the failure

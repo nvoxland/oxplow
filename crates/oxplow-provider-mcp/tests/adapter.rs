@@ -290,7 +290,7 @@ async fn a_mapping_may_not_return_an_undeclared_event_or_a_foreign_ref() {
     .await;
     let undeclared = invoke(&peer, &handle, "create", json!({ "title": "x" })).await;
     assert!(
-        matches!(&undeclared, Err(ProtocolError::Internal(m)) if m.contains("`work_item.created@1`")),
+        matches!(&undeclared, Err(ProtocolError::Internal(m)) if m.contains("`work_item.created@2`")),
         "{undeclared:?}"
     );
 

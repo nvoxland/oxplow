@@ -152,6 +152,14 @@ pub const MANIFEST: &[Capability] = &[
         "list_person_commands",
         "the commands a person is offered (their `ui`); an agent lists all it may run with `list_commands`",
     ),
+    ui(
+        "register_client_host",
+        "the window says it's open and which capabilities it hosts; an agent reaches them by running their commands",
+    ),
+    ui(
+        "answer_client_call",
+        "the window answers a call to a capability it hosts; an agent's call is answered through `run_command`",
+    ),
     ui("undo_command", "undo is a person's (P5.A1)"),
     ui(
         "decide_proposal",

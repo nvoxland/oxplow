@@ -503,7 +503,7 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
         ActorKind, CommandExecuted, CommandExecutedV2, CommandOutcome, ConfigChanged,
-        ConfigChangedV2, TaskStatus, WorkItemTransitioned, WorkItemTransitionedV1,
+        ConfigChangedV2, WorkItemStateChanged, WorkItemStateChangedV1,
     };
     use serde_json::{json, Value};
 
@@ -568,12 +568,11 @@ mod tests {
     async fn append_commits_with_the_state_change_and_reads_back_in_order() {
         let db = Database::in_memory();
         let store = store(&db);
-        let e1 = Envelope::typed::<WorkItemTransitioned>(
+        let e1 = Envelope::typed::<WorkItemStateChanged>(
             "human",
-            &WorkItemTransitionedV1 {
+            &WorkItemStateChangedV1 {
                 work_item: "work_item:oxplow:tsk4".into(),
-                from: TaskStatus::Ready,
-                to: TaskStatus::InProgress,
+                to: oxplow_domain::work_items::CanonicalState::InProgress,
             },
         )
         .with_dedupe_key("k1")
