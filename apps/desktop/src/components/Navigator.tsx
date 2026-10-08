@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSlideoutStrip } from "./useSlideoutStrip.js";
 import { SlideoutChevron } from "./SlideoutChevron.js";
@@ -378,6 +378,7 @@ export function Navigator({
                 letter={titleInitials(g.stream.title)}
                 label={g.stream.title}
                 isStream
+                guide={g.threads.length > 0 ? "stream" : "none"}
                 isWriter={false}
                 selected={false}
                 status={undefined}
@@ -385,7 +386,7 @@ export function Navigator({
                 menu={streamMenu(g.stream)}
                 testId={`navigator-strip-stream-${g.stream.id}`}
               />
-              {g.threads.map(({ thread, isWriter }) => {
+              {g.threads.map(({ thread, isWriter }, i) => {
                 const isSelected =
                   g.stream.id === currentStreamId &&
                   threadStates[g.stream.id]?.selectedThreadId === thread.id;
@@ -395,6 +396,7 @@ export function Navigator({
                     letter={titleInitials(thread.title)}
                     label={thread.title}
                     isStream={false}
+                    guide={i === g.threads.length - 1 ? "last" : "mid"}
                     isWriter={isWriter}
                     selected={isSelected}
                     status={agentStatuses[thread.id]}
@@ -451,6 +453,7 @@ export function Navigator({
                     letter={titleInitials(g.stream.title)}
                     label={g.stream.title}
                     isStream
+                    guide={g.threads.length > 0 ? "stream" : "none"}
                     isWriter={false}
                     selected={false}
                     status={undefined}
@@ -466,7 +469,7 @@ export function Navigator({
                     menu={streamMenu(g.stream)}
                     testId={`navigator-stream-row-${g.stream.id}`}
                   />
-                  {g.threads.map(({ thread, isWriter }) => {
+                  {g.threads.map(({ thread, isWriter }, i) => {
                     const isSelected =
                       g.stream.id === currentStreamId &&
                       threadStates[g.stream.id]?.selectedThreadId === thread.id;
@@ -476,6 +479,7 @@ export function Navigator({
                         letter={titleInitials(thread.title)}
                         label={thread.title}
                         isStream={false}
+                        guide={i === g.threads.length - 1 ? "last" : "mid"}
                         isWriter={isWriter}
                         selected={isSelected}
                         status={agentStatuses[thread.id]}
@@ -611,6 +615,7 @@ function StripRow({
   letter,
   label,
   isStream,
+  guide,
   isWriter,
   selected,
   status,
@@ -622,6 +627,7 @@ function StripRow({
   letter: string;
   label: string;
   isStream: boolean;
+  guide: Guide;
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
@@ -676,7 +682,9 @@ function StripRow({
         transition: "background 120ms ease",
       }}
     >
-      <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} question={question} />
+      <IconColumn guide={guide}>
+        <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} question={question} />
+      </IconColumn>
       {cm.menu}
     </div>
   );
@@ -688,6 +696,7 @@ function OverlayRow({
   letter,
   label,
   isStream,
+  guide,
   isWriter,
   selected,
   status,
@@ -702,6 +711,7 @@ function OverlayRow({
   letter: string;
   label: string;
   isStream: boolean;
+  guide: Guide;
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
@@ -749,9 +759,9 @@ function OverlayRow({
         transition: "background 120ms ease",
       }}
     >
-      <div style={{ width: STRIP_WIDTH - 3 /* keep the icon column the same width as the strip */, display: "flex", justifyContent: "center" }}>
+      <IconColumn guide={guide}>
         <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} question={question} />
-      </div>
+      </IconColumn>
       {renaming ? (
         <RenameInput
           initial={label}
@@ -838,6 +848,48 @@ function RenameInput({
  *  filled with `--accent-soft-bg` and bordered with `--accent`. The
  *  activity dot is absolutely positioned in the top-right corner so
  *  its location is identical regardless of writer/non-writer. */
+/** Where a row sits on its stream's guide line: the stream that starts it
+ *  (with threads under it), a thread it runs past, the thread it ends at. */
+type Guide = "none" | "stream" | "mid" | "last";
+
+/** A row's icon column, the same in the strip and the panel so their rows
+ *  line up: the glyph, and the guide line that ties a stream's threads to
+ *  it — down the column's left from under the stream's square, with a tick
+ *  into each thread's circle, ending at the last one. */
+function IconColumn({ guide, children }: { guide: Guide; children: ReactNode }) {
+  const line = (style: CSSProperties) => (
+    <span aria-hidden style={{ position: "absolute", background: "var(--text-muted)", ...style }} />
+  );
+  const mid = ROW_HEIGHT / 2;
+  const isThread = guide === "mid" || guide === "last";
+  return (
+    <span
+      style={{
+        position: "relative",
+        flexShrink: 0,
+        width: ICON_COLUMN,
+        height: ROW_HEIGHT,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: isThread ? "flex-start" : "center",
+        paddingLeft: isThread ? THREAD_LEFT : 0,
+        boxSizing: "border-box",
+      }}
+    >
+      {guide !== "none" ? (
+        <span data-guide={guide}>
+          {guide === "stream"
+            ? line({ left: GUIDE_X, width: 2, top: (ROW_HEIGHT + ICON_BOX) / 2, bottom: 0 })
+            : null}
+          {isThread ? line({ left: GUIDE_X, width: 2, top: 0, height: guide === "last" ? mid + 1 : ROW_HEIGHT }) : null}
+          {isThread ? line({ left: GUIDE_X, height: 2, top: mid - 1, width: THREAD_LEFT - GUIDE_X }) : null}
+        </span>
+      ) : null}
+      {children}
+    </span>
+  );
+}
+
 function IconCell({
   letter,
   isStream,
@@ -851,33 +903,43 @@ function IconCell({
   status: AgentStatusDotState | undefined;
   question?: string;
 }) {
-  // Writer pill: a soft, dim accent wash + translucent ring instead
-  // of the full --accent-soft-bg + --accent treatment, so "writer"
-  // still reads as a deliberate state without dominating the icon.
-  const writerStyles: CSSProperties = isWriter
+  // Shape says which is which at a glance: a stream is a filled rounded
+  // square, a thread an outlined circle (the writer's outline the accent).
+  const shape: CSSProperties = isStream
     ? {
-        background: "rgba(107, 156, 246, 0.08)",
-        border: "1px solid rgba(107, 156, 246, 0.35)",
+        width: ICON_BOX,
+        height: ICON_BOX,
+        borderRadius: 6,
+        background: "var(--surface-stream-tile)",
+        borderWidth: 1,
+        borderStyle: "solid",
+        borderColor: "var(--border-strong)",
+        fontSize: LETTER_FONT,
+        fontWeight: 700,
       }
     : {
+        width: THREAD_BOX,
+        height: THREAD_BOX,
+        borderRadius: "50%",
         background: "transparent",
-        border: "1px solid transparent",
+        borderWidth: 1.5,
+        borderStyle: "solid",
+        borderColor: isWriter ? "var(--accent)" : "var(--text-muted)",
+        fontSize: THREAD_LETTER_FONT,
+        fontWeight: 600,
       };
   return (
     <span
+      data-glyph={isStream ? "stream" : "thread"}
       style={{
         position: "relative",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        width: ICON_BOX,
-        height: ICON_BOX,
-        borderRadius: 6,
-        fontSize: LETTER_FONT,
+        boxSizing: "border-box",
         lineHeight: 1,
-        fontWeight: isStream ? 700 : 600,
         color: "var(--text-primary)",
-        ...writerStyles,
+        ...shape,
       }}
     >
       {letter}
@@ -1041,7 +1103,17 @@ function InlineNewThread({
 // cell sits comfortably with breathing room on both sides.
 const LETTER_FONT = 15;
 const ICON_BOX = 30;
+// A thread's circle sits right of its stream's guide line, a touch smaller
+// than the stream's square so the two read as parent and child.
+const THREAD_BOX = 24;
+const THREAD_LETTER_FONT = 12;
 const STRIP_WIDTH = 40;
+// The icon column: the strip's width less the selection line's 3px.
+const ICON_COLUMN = STRIP_WIDTH - 3;
+// The guide line's x, and where a thread's circle starts.
+// (The circle and its status dot stay clear of the panel's right edge.)
+const GUIDE_X = 5;
+const THREAD_LEFT = 9;
 const STRIP_PADDING_Y = 6;
 const ROW_HEIGHT = 36;
 const GAP_HEIGHT = 14;
