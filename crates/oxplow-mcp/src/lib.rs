@@ -402,6 +402,18 @@ pub struct StreamScopeParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListExtensionsParams {
+    /// Stream whose worktree to read `oxplow/extensions/` from. Omit for
+    /// your own stream (the calling thread's; the primary when the call
+    /// carries no thread).
+    pub stream_id: Option<String>,
+    /// One extension's name: its whole listing (every lens, collector,
+    /// effect, …) instead of the summary of each.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ShowLensParams {
     /// An existing lens to show (`<extension>/<slug>`, see `list_lenses`).
     /// Give this or `spec`.
@@ -1081,9 +1093,11 @@ impl OxplowMcp {
 
     #[tool(
         description = "List the project's extensions (folders under `oxplow/extensions/` in a \
-                       stream's worktree) with their lenses and any load errors. A lens is a \
+                       stream's worktree): each one's name, whether it's enabled, any load \
+                       errors and warnings, and how many lenses, collectors, effects, … it \
+                       contributes. Pass `name` for one extension's whole listing. A lens is a \
                        saved query over the semantic layer plus how to show it; the human sees \
-                       each one as a page. To build one, write \
+                       each one as a page (`list_lenses` lists them all). To build one, write \
                        `oxplow/extensions/<name>/extension.yaml` and `lenses/<slug>.yaml` with \
                        your normal file tools (see the oxplow-extension skill), then call \
                        `validate_extension`."
@@ -1091,7 +1105,7 @@ impl OxplowMcp {
     async fn list_extensions(
         &self,
         extensions: rmcp::model::Extensions,
-        params: Parameters<StreamScopeParams>,
+        params: Parameters<ListExtensionsParams>,
     ) -> Result<CallToolResult, McpError> {
         check_optional_stream("list_extensions", params.0.stream_id.as_deref())?;
         // Omitted: the caller's own stream (tsk574).
@@ -1100,7 +1114,19 @@ impl OxplowMcp {
             .await;
         let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let listed = self.services.listed_extensions(&root).await;
-        json_result(&listed)
+        match &params.0.name {
+            Some(name) => {
+                let one: Vec<_> = listed.into_iter().filter(|e| &e.name == name).collect();
+                if one.is_empty() {
+                    return Err(McpError::invalid_params(
+                        format!("no extension named `{name}`"),
+                        None,
+                    ));
+                }
+                json_result(&one)
+            }
+            None => json_result(&listed.iter().map(extension_summary).collect::<Vec<_>>()),
+        }
     }
 
     #[tool(
@@ -3188,6 +3214,36 @@ fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> Str
     )
 }
 
+/// An extension in `list_extensions`'s summary: its scalar fields and
+/// load errors/warnings as they are, every list it contributes counted.
+/// The full listing (the bundled extension's ran to 124k characters) is a
+/// `name` away.
+fn extension_summary(ext: &oxplow_app::extensions::Extension) -> serde_json::Value {
+    let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(ext) else {
+        return serde_json::Value::Null;
+    };
+    let mut out = serde_json::Map::new();
+    let mut contributes = serde_json::Map::new();
+    for (key, value) in fields {
+        match value {
+            serde_json::Value::Array(items) if key == "errors" || key == "warnings" => {
+                out.insert(key, serde_json::Value::Array(items));
+            }
+            serde_json::Value::Array(items) => {
+                if !items.is_empty() {
+                    contributes.insert(key, items.len().into());
+                }
+            }
+            serde_json::Value::Object(_) => {}
+            scalar => {
+                out.insert(key, scalar);
+            }
+        }
+    }
+    out.insert("contributes".into(), serde_json::Value::Object(contributes));
+    serde_json::Value::Object(out)
+}
+
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let json = serde_json::to_string_pretty(value).map_err(internal)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
@@ -3473,17 +3529,35 @@ mod tests {
             "title: Broken\nquery: SELECT x FROM v_nope\n",
         );
 
-        let exts: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .list_extensions(
-                    rmcp::model::Extensions::new(),
-                    Parameters(StreamScopeParams { stream_id: None }),
-                )
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
+        let list = |name: Option<&str>| {
+            let server = &server;
+            let name = name.map(str::to_string);
+            async move {
+                serde_json::from_str::<serde_json::Value>(&text_payload(
+                    server
+                        .list_extensions(
+                            rmcp::model::Extensions::new(),
+                            Parameters(ListExtensionsParams {
+                                stream_id: None,
+                                name,
+                            }),
+                        )
+                        .await
+                        .unwrap(),
+                ))
+                .unwrap()
+            }
+        };
+        // The list is a summary: what each extension contributes, counted,
+        // and its errors — not every lens's query.
+        let exts = list(None).await;
         assert_eq!(exts[0]["name"], "demo");
+        assert_eq!(exts[0]["contributes"]["lenses"], 2, "{exts}");
+        assert!(!exts.to_string().contains("v_stream"), "{exts}");
+        // One extension by name: all of it.
+        let demo = list(Some("demo")).await;
+        assert!(demo.to_string().contains("v_stream"), "{demo}");
+        assert_eq!(demo.as_array().map(Vec::len), Some(1), "{demo}");
 
         let lenses: serde_json::Value = serde_json::from_str(&text_payload(
             server
@@ -4316,7 +4390,13 @@ mod tests {
         };
         let listed = text_payload(
             server
-                .list_extensions(caller(), Parameters(StreamScopeParams { stream_id: None }))
+                .list_extensions(
+                    caller(),
+                    Parameters(ListExtensionsParams {
+                        stream_id: None,
+                        name: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         );
@@ -4326,7 +4406,10 @@ mod tests {
             server
                 .list_extensions(
                     rmcp::model::Extensions::new(),
-                    Parameters(StreamScopeParams { stream_id: None }),
+                    Parameters(ListExtensionsParams {
+                        stream_id: None,
+                        name: None,
+                    }),
                 )
                 .await
                 .unwrap(),

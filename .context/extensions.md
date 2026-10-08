@@ -90,7 +90,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 - **Surfaces.**
   - IPC and MCP: `list_extensions`, `get_lens`, `run_lens`,
     `validate_extension`.
-  - MCP only: `list_lenses`.
+  - MCP only: `list_lenses`. MCP's `list_extensions` is a summary
+    (each extension's own fields, errors and warnings, and a count of
+    each list it contributes); `name` gives one extension's whole
+    listing — the full list ran to 124k characters with the bundled
+    extension in it.
   - **Over MCP these are the authoring tools** and read the caller's
     **working copy**: an omitted `stream_id` is the caller's own stream
     (its header, else its thread's; the primary only for an anonymous
