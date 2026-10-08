@@ -25,15 +25,17 @@ pub struct RestoreInput {
     pub file_snapshot: i64,
 }
 
-/// `snapshot.restore_file { file_snapshot }`.
-pub fn restore_file_op(files: SnapshotFiles) -> Op {
+/// `snapshot.restore_file { file_snapshot }`. Once it has written, the
+/// stream's workspace change is announced, so what shows the file reads
+/// it again.
+pub fn restore_file_op(files: SnapshotFiles, events: crate::events::EventBus) -> Op {
     Op::new(
         "files.write",
         "restore_file",
         schema::<RestoreInput>(),
         false,
         Handler::External(Arc::new(move |_: Invocation, input: Value| {
-            let files = files.clone();
+            let (files, events) = (files.clone(), events.clone());
             Box::pin(async move {
                 let input: RestoreInput = parse(input)?;
                 let restored = files
@@ -42,14 +44,23 @@ pub fn restore_file_op(files: SnapshotFiles) -> Op {
                     .map_err(|e| match e {
                         SnapshotFileError::NotFound
                         | SnapshotFileError::NoContent
-                        | SnapshotFileError::Expired => CommandError::Invalid {
+                        | SnapshotFileError::Expired
+                        | SnapshotFileError::StreamGone(_) => CommandError::Invalid {
                             field: Some("/file_snapshot".into()),
                             message: e.to_string(),
                         },
                         SnapshotFileError::Other(message) => CommandError::Failed { message },
                     })?;
+                let (stream, path) = (restored.stream, restored.path.clone());
                 Ok(HandlerOutput {
-                    result: json!({ "restored": restored }),
+                    result: json!({ "restored": restored.file }),
+                    after_commit: Some(Box::new(move || {
+                        events.emit(crate::events::OxplowEvent::WorkspaceChanged {
+                            stream_id: stream,
+                            change_kind: crate::events::WorkspaceChangeKind::Updated,
+                            path,
+                        })
+                    })),
                     ..HandlerOutput::default()
                 })
             })

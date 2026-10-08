@@ -29,8 +29,24 @@ pub enum SnapshotFileError {
          but file bytes are only kept for the retention window"
     )]
     Expired,
+    /// The stream it was captured in is archived or gone: restoring it
+    /// would write into some other checkout.
+    #[error(
+        "the stream `{0}` this file was captured in is archived or gone; restoring it would \
+         write into another checkout"
+    )]
+    StreamGone(StreamId),
     #[error("{0}")]
     Other(String),
+}
+
+/// What a restore wrote: the stream, the file's path in its worktree, and
+/// the file on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Restored {
+    pub stream: StreamId,
+    pub path: String,
+    pub file: PathBuf,
 }
 
 /// What reading and restoring a captured file needs: the snapshot rows,
@@ -79,11 +95,11 @@ impl SnapshotFiles {
     pub async fn restore_file_snapshot(
         &self,
         file_snapshot_id: i64,
-    ) -> Result<PathBuf, SnapshotFileError> {
+    ) -> Result<Restored, SnapshotFileError> {
         let row = self.row(file_snapshot_id).await?;
+        let target = self.worktree_of(row.stream_id).await?.join(&row.path);
         let bytes = self.read_row(&row).await?;
-        let target = self.worktree_of(row.stream_id).await.join(&row.path);
-        tokio::task::spawn_blocking(move || {
+        let file = tokio::task::spawn_blocking(move || {
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -91,7 +107,12 @@ impl SnapshotFiles {
         })
         .await
         .map_err(|e| SnapshotFileError::Other(e.to_string()))?
-        .map_err(|e| SnapshotFileError::Other(e.to_string()))
+        .map_err(|e| SnapshotFileError::Other(e.to_string()))?;
+        Ok(Restored {
+            stream: row.stream_id,
+            path: row.path,
+            file,
+        })
     }
 
     async fn row(&self, file_snapshot_id: i64) -> Result<FileSnapshot, SnapshotFileError> {
@@ -103,11 +124,15 @@ impl SnapshotFiles {
     }
 
     /// Where `stream` works: its worktree, or the project checkout for a
-    /// stream without one.
-    async fn worktree_of(&self, stream: StreamId) -> PathBuf {
+    /// stream without one (the primary). An archived or unknown stream has
+    /// nowhere — never another stream's checkout.
+    async fn worktree_of(&self, stream: StreamId) -> Result<PathBuf, SnapshotFileError> {
         match self.streams.get(&stream).await {
-            Ok(Some(s)) if !s.worktree_path.is_empty() => PathBuf::from(s.worktree_path),
-            _ => self.project_dir.clone(),
+            Ok(Some(s)) if s.archived_at.is_some() => Err(SnapshotFileError::StreamGone(stream)),
+            Ok(Some(s)) if s.worktree_path.is_empty() => Ok(self.project_dir.clone()),
+            Ok(Some(s)) => Ok(PathBuf::from(s.worktree_path)),
+            Ok(None) => Err(SnapshotFileError::StreamGone(stream)),
+            Err(e) => Err(SnapshotFileError::Other(e.to_string())),
         }
     }
 
@@ -208,8 +233,19 @@ mod tests {
         std::fs::write(&file, "clobbered").unwrap();
         let files = f.svc.snapshot_files();
         let restored = files.restore_file_snapshot(row.id).await.unwrap();
-        assert_eq!(restored, file);
+        assert_eq!(restored.file, file);
+        assert_eq!(restored.stream, stream);
+        assert_eq!(restored.path, "notes.txt");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "original");
+        assert!(!f.svc.layout.project_dir.join("notes.txt").exists());
+
+        // Its stream archived, the file has nowhere of its own to go: the
+        // restore is refused rather than written into the primary checkout.
+        f.svc.stream_store.archive(&stream).await.unwrap();
+        assert!(matches!(
+            files.restore_file_snapshot(row.id).await,
+            Err(SnapshotFileError::StreamGone(_))
+        ));
         assert!(!f.svc.layout.project_dir.join("notes.txt").exists());
 
         // And the reads agree.

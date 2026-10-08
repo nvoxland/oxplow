@@ -10,12 +10,11 @@
 use crate::commands::ops::Op;
 use std::sync::Arc;
 
-use oxplow_domain::refs::build::stream_ref;
 use oxplow_domain::{CommandError, Confirm, DomainError, StreamId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::util::{parse, schema};
+use super::util::{invalid, parse, ref_id, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::worktrees::WorktreeRouter;
 
@@ -59,18 +58,23 @@ pub struct InstallDeps {
 /// The stream named; `None` is the primary checkout. Never the actor's:
 /// these commands always ask, so the handler only runs as the person who
 /// confirmed — and the approval shows the input as it will run (tsk786).
-fn stream_for(named: Option<&str>) -> Result<Option<StreamId>, CommandError> {
-    named
-        .map(|value| {
-            value
-                .strip_prefix("stream:")
-                .and_then(StreamId::try_from_str)
-                .ok_or_else(|| CommandError::Invalid {
-                    field: Some("/stream".into()),
-                    message: format!("`{value}` isn't a stream ref (stream:<id>)"),
-                })
-        })
-        .transpose()
+/// Where an install goes: the stream named (by ref), strictly — one that
+/// isn't there is refused, never taken to mean the primary — else the
+/// primary checkout.
+async fn root_for(
+    worktrees: &crate::worktrees::WorktreeRouter,
+    named: Option<&str>,
+) -> Result<std::path::PathBuf, CommandError> {
+    match named {
+        None => Ok(worktrees.resolve(None).await),
+        Some(raw) => {
+            let stream: StreamId = ref_id(raw, "stream", "/stream")?;
+            worktrees
+                .resolve_strict(Some(&stream.to_string()))
+                .await
+                .map_err(|e| invalid("/stream", e.to_string()))
+        }
+    }
 }
 
 fn result(ext: &crate::extensions::Extension) -> HandlerOutput {
@@ -91,11 +95,7 @@ pub fn install_op(deps: InstallDeps) -> Op {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: InstallInput = parse(input)?;
-                let stream = stream_for(input.stream.as_deref())?;
-                let root = deps
-                    .worktrees
-                    .resolve(stream.map(|s| s.to_string()).as_deref())
-                    .await;
+                let root = root_for(&deps.worktrees, input.stream.as_deref()).await?;
                 let project = deps.worktrees.project_dir().to_path_buf();
                 let ext = tokio::task::spawn_blocking(move || {
                     crate::extensions::install_extension(
@@ -128,11 +128,7 @@ pub fn update_op(deps: InstallDeps) -> Op {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: UpdateInput = parse(input)?;
-                let stream = stream_for(input.stream.as_deref())?;
-                let root = deps
-                    .worktrees
-                    .resolve(stream.map(|s| s.to_string()).as_deref())
-                    .await;
+                let root = root_for(&deps.worktrees, input.stream.as_deref()).await?;
                 let name = input.name.clone();
                 let project = deps.worktrees.project_dir().to_path_buf();
                 let ext = tokio::task::spawn_blocking(move || {
@@ -148,7 +144,7 @@ pub fn update_op(deps: InstallDeps) -> Op {
                         message: format!(
                             "no extension `{}` under oxplow/extensions/ in {}",
                             input.name,
-                            stream.map_or("the primary checkout".into(), stream_ref)
+                            input.stream.as_deref().unwrap_or("the primary checkout")
                         ),
                     },
                     other => other.into(),
@@ -174,16 +170,20 @@ mod tests {
     /// person who confirmed (an agent's run is a proposal), so "an agent's
     /// own stream" could never apply, and the approval shows the input as
     /// it will run.
-    #[test]
-    fn an_install_lands_in_the_named_stream_or_the_primary_checkout() {
+    #[tokio::test]
+    async fn an_install_lands_in_the_named_stream_or_the_primary_checkout() {
+        let fx = services_with_effort().await;
+        let primary = fx.svc.worktrees.resolve(None).await;
+        let named = stream_ref(fx.svc.streams.list_streams().await.unwrap()[0].id);
         assert_eq!(
-            stream_for(Some("stream:str2")).unwrap(),
-            Some(StreamId::new(2))
+            root_for(&fx.svc.worktrees, Some(&named)).await.unwrap(),
+            primary
         );
-        assert_eq!(stream_for(None).unwrap(), None);
-        assert!(stream_for(Some("str2")).is_err());
+        assert_eq!(root_for(&fx.svc.worktrees, None).await.unwrap(), primary);
+        assert!(root_for(&fx.svc.worktrees, Some("str1")).await.is_err());
     }
     use crate::test_fixtures::services_with_effort;
+    use oxplow_domain::refs::build::stream_ref;
     use serde_json::json;
 
     /// An agent's install never runs: it becomes a proposal for a person.
@@ -205,6 +205,32 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
+        assert!(!fx._dir.path().join("oxplow/extensions").exists());
+    }
+
+    /// A named stream that isn't there — archived before a person approved
+    /// the install — is refused, never taken to mean the primary checkout.
+    #[tokio::test]
+    async fn an_install_into_a_stream_that_isnt_there_is_refused() {
+        let fx = services_with_effort().await;
+        for name in [INSTALL, UPDATE] {
+            let input = if name == INSTALL {
+                json!({ "git_url": "https://example.invalid/x.git", "reviewed_sha": "abc", "stream": "stream:str99" })
+            } else {
+                json!({ "name": "x", "reviewed_sha": "abc", "stream": "stream:str99" })
+            };
+            let err = fx
+                .svc
+                .commands
+                .run(&Actor::Human, name, input, true)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), message }
+                    if f == "/stream" && message.contains("no stream")),
+                "{name}: {err:?}"
+            );
+        }
         assert!(!fx._dir.path().join("oxplow/extensions").exists());
     }
 }

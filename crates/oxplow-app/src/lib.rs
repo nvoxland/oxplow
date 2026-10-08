@@ -1370,6 +1370,7 @@ impl Services {
                     content: snapshot_content.clone(),
                     project_dir: layout.project_dir.clone(),
                 },
+                event_bus.clone(),
             )])
             .chain(commands::lsp::ops(commands::lsp::LspDeps {
                 installer: lsp_installer_svc.clone(),
