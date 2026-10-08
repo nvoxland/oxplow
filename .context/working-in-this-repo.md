@@ -388,11 +388,20 @@ aws-lc-rs).
   one of ours splits every crate above it. A test double is its own
   dev-only crate (`oxplow-ai-fake`, `oxplow-provider-fake`,
   `oxplow-oauth-sim`).
-- **What still accumulates** (a new hash per real dependency change, old
-  incremental sessions): `bun run clean:target` (cargo-sweep, `cargo
+- **What still accumulates** (a new hash per real dependency change and
+  a fresh incremental cache beside the old one — cargo deletes nothing)
+  is swept automatically: `scripts/sweep-target.sh` (cargo-sweep, `cargo
   install cargo-sweep --locked`) drops artifacts of toolchains no longer
-  installed, then the oldest artifacts until `target/` is under 60 GB.
-  Coverage builds live apart in `target/llvm-cov-target` (`cargo cov`).
+  installed, then the oldest until `target/` is under 30 GB. The test and
+  lint runs call it first (`test-prereqs.sh`), at most every 30 minutes;
+  `bun run clean:target` runs it now. 30 GB sits above one worktree's
+  working set (a full test + clippy + binary build, ~23 GB measured), so
+  what's in use stays. It orders by when an artifact was built, not last
+  used, so a sweep that has to cut deep can drop a long-reused dependency
+  and cost one rebuild of it. Without it one worktree reached 59 GB in a day —
+  13 incremental caches of oxplow-app, 8 of them dead since the
+  morning's merges — and three worktrees filled the disk. Coverage builds
+  live apart in `target/llvm-cov-target` (`cargo cov`).
 - **`split-debuginfo = "off"`.** A fresh workspace build is ~17 GB, its
   object files 1.8 GB (`debug = "line-tables-only"`, none for
   dependencies), but that isn't where `target/` grew. macOS's default

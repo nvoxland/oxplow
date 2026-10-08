@@ -8,8 +8,12 @@
 #   crate (a workspace test or clippy run) fails without them;
 # - the fake provider's binary, which oxplow-app's provider tests spawn
 #   (a `-p oxplow-app` run doesn't build another crate's bins).
+#
+# It first keeps `target/` bounded (`sweep-target.sh`, at most every 30
+# minutes), so whatever the sweep drops is rebuilt in the same run.
 set -e
 cd "$(dirname "$0")/.."
+sh scripts/sweep-target.sh
 triple="$(rustc -vV | awk '/^host: / { print $2 }')"
 if [ ! -f "apps/desktop/src-tauri/binaries/oxplow-daemon-$triple" ]; then
   bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug >&2
