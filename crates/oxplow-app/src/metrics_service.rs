@@ -3483,8 +3483,9 @@ mod tests {
                     .read(move |c| {
                         let mut stmt = c
                             .prepare(
-                                "SELECT f.path FROM fact f JOIN metric_capture m ON m.id = f.capture_id
-                                  WHERE m.producer = 'repo.seen' AND m.snapshot_id = ?1 ORDER BY f.path",
+                                "SELECT p.path FROM fact f JOIN metric_capture m ON m.id = f.capture_id
+                                   JOIN fact_path p ON p.id = f.path_id
+                                  WHERE m.producer = 'repo.seen' AND m.snapshot_id = ?1 ORDER BY p.path",
                             )
                             .map_err(oxplow_db::map_sql_err)?;
                         let rows = stmt

@@ -516,6 +516,27 @@ process-wide cache wouldn't help tests. Optimizing bundled SQLite
 (`opt-level = 3` for `libsqlite3-sys`) changed nothing measurable
 (`oxplow-db`: 9.2 s vs 9.0 s); a test process's own start is ~15 ms.
 
+## Fact dictionaries (V38, 2026-10-08)
+
+Facts store their subject, path and dims as ids into `fact_subject` /
+`fact_path` / `fact_dims` (see [metrics.md](./metrics.md)). Measured with
+`cube_equivalence` on copies of the live database (2.58 GB, 6.3 M facts),
+release build, against `main` on an identical copy:
+
+| | before | after |
+|---|---|---|
+| fact table + its indexes | 1.83 GB | 0.52 GB |
+| whole database, vacuumed | 2.58 GB | 1.16 GB |
+| fact-served reads (72 specs) | 24.8 s | 24.8 s |
+| cube reads | 4.9 s | 4.9 s |
+| full cube build from empty | 69 s | 77 s |
+
+The migration itself took ~100 s on that copy. The first version resolved
+the text with per-row scalar subqueries in the SELECT list: reads went
+**+26%** (25.5 s → 32.2 s), because a read returns the same subjects
+across many rows. Resolving ids once per read in Rust (`FactText`)
+brought reads back to par; don't reintroduce per-row lookups.
+
 ## Related
 
 - [metrics.md](./metrics.md) — the metric substrate itself: the cube, its two

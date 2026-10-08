@@ -922,9 +922,15 @@ pub struct FactSliceKey {
     pub dims_json: Option<String>,
 }
 
+/// A fact's subject ref, from the dictionary it points into (V38).
+const SUBJECT_REF: &str = "(SELECT ref FROM fact_subject WHERE id = f.subject_id)";
+
+/// A [`FactRow`]'s columns. The subject, path and dims come as the ids of
+/// the dictionaries the fact points into (V38); [`fact_row_mapper`]
+/// resolves each id once per read.
 const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numerator, \
-     f.denominator, f.subject_kind, f.subject_ref, f.path, f.line, f.severity, f.rule, \
-     f.detail, f.dims_json, c.captured_at, c.branch, c.closest_vcs_rev, \
+     f.denominator, f.subject_id, f.path_id, f.line, f.severity, f.rule, \
+     f.detail, f.dims_id, c.captured_at, c.branch, c.closest_vcs_rev, \
      c.vcs_rev_exact, c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, \
      c.effort_id, c.provenance, c.source, c.producer";
 
@@ -941,9 +947,9 @@ const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numera
 /// so a hit is correct **regardless of row order**. Ordering (the queries sort by
 /// `captured_at, id`) only decides the hit RATE — never correctness — so no
 /// caller has to guarantee adjacency.
-fn fact_row_mapper(
-    conn: &rusqlite::Connection,
-) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow>> {
+fn fact_row_mapper<'c>(
+    conn: &'c rusqlite::Connection,
+) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> + 'c> {
     // Effort → work item, loaded once per read: `effort` is small next to
     // the facts, and a per-row join would cost a lookup on every fact.
     let items: std::collections::HashMap<i64, String> = conn
@@ -951,6 +957,7 @@ fn fact_row_mapper(
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut last: Option<(i64, Timestamp)> = None;
+    let mut text = FactText::new(conn);
     Ok(move |row: &rusqlite::Row<'_>| {
         let capture_id: i64 = row.get(1)?;
         let captured_at = match last {
@@ -958,9 +965,9 @@ fn fact_row_mapper(
             _ => {
                 // `get_ref` borrows the column; the `String` allocation only
                 // happened to feed the parser.
-                let raw = row.get_ref(14)?.as_str().map_err(|e| {
+                let raw = row.get_ref(13)?.as_str().map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        14,
+                        13,
                         rusqlite::types::Type::Text,
                         e.into(),
                     )
@@ -970,18 +977,21 @@ fn fact_row_mapper(
                 ts
             }
         };
-        let mut fact = row_to_fact_row_with(row, captured_at)?;
+        let mut fact = row_to_fact_row_with(row, captured_at, &mut text)?;
         fact.work_item = fact.effort_id.and_then(|e| items.get(&e).cloned());
         Ok(fact)
     })
 }
 
 /// The column-by-column decode, with `captured_at` supplied by the caller so it
-/// can be memoized per capture (see [`fact_row_mapper`]).
+/// can be memoized per capture, and the subject, path and dims resolved
+/// through the read's [`FactText`] (see [`fact_row_mapper`]).
 fn row_to_fact_row_with(
     row: &rusqlite::Row<'_>,
     captured_at: Timestamp,
+    text: &mut FactText<'_>,
 ) -> rusqlite::Result<FactRow> {
+    let (subject_kind, subject_ref) = text.subject(row.get(6)?)?;
     Ok(FactRow {
         id: row.get(0)?,
         capture_id: row.get(1)?,
@@ -989,53 +999,172 @@ fn row_to_fact_row_with(
         value: row.get(3)?,
         numerator: row.get(4)?,
         denominator: row.get(5)?,
-        subject_kind: row.get(6)?,
-        subject_ref: row.get(7)?,
-        path: row.get(8)?,
-        line: row.get(9)?,
-        severity: row.get(10)?,
-        rule: row.get(11)?,
-        detail: row.get(12)?,
-        dims_json: row.get(13)?,
+        subject_kind,
+        subject_ref,
+        path: text.path(row.get(7)?)?,
+        line: row.get(8)?,
+        severity: row.get(9)?,
+        rule: row.get(10)?,
+        detail: row.get(11)?,
+        dims_json: text.dims(row.get(12)?)?,
         captured_at,
-        branch: row.get(15)?,
-        closest_vcs_rev: row.get(16)?,
-        vcs_rev_exact: row.get::<_, i64>(17)? != 0,
-        basis_ref: row.get(18)?,
-        snapshot_id: row.get(19)?,
-        stream_id: row.get(20)?,
-        thread_id: row.get(21)?,
-        effort_id: row.get(22)?,
+        branch: row.get(14)?,
+        closest_vcs_rev: row.get(15)?,
+        vcs_rev_exact: row.get::<_, i64>(16)? != 0,
+        basis_ref: row.get(17)?,
+        snapshot_id: row.get(18)?,
+        stream_id: row.get(19)?,
+        thread_id: row.get(20)?,
+        effort_id: row.get(21)?,
         work_item: None,
-        provenance: row.get(23)?,
-        source: row.get(24)?,
-        producer: row.get(25)?,
+        provenance: row.get(22)?,
+        source: row.get(23)?,
+        producer: row.get(24)?,
     })
 }
 
+/// The dictionaries one read resolves its facts' ids through (V38), each id
+/// looked up once per read: a read's facts repeat the same subjects, paths
+/// and dimension sets across many rows (a test across every run), so a
+/// per-row lookup cost a quarter more read time than the text columns it
+/// replaced. Per read, so it can never be stale.
+struct FactText<'c> {
+    conn: &'c rusqlite::Connection,
+    subjects: std::collections::HashMap<i64, (Option<String>, Option<String>)>,
+    paths: std::collections::HashMap<i64, String>,
+    dims: std::collections::HashMap<i64, String>,
+}
+
+impl<'c> FactText<'c> {
+    fn new(conn: &'c rusqlite::Connection) -> Self {
+        Self {
+            conn,
+            subjects: Default::default(),
+            paths: Default::default(),
+            dims: Default::default(),
+        }
+    }
+
+    fn subject(&mut self, id: Option<i64>) -> rusqlite::Result<(Option<String>, Option<String>)> {
+        let Some(id) = id else {
+            return Ok((None, None));
+        };
+        if let Some(hit) = self.subjects.get(&id) {
+            return Ok(hit.clone());
+        }
+        let found: (Option<String>, Option<String>) = self
+            .conn
+            .prepare_cached("SELECT kind, ref FROM fact_subject WHERE id = ?1")?
+            .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        self.subjects.insert(id, found.clone());
+        Ok(found)
+    }
+
+    fn path(&mut self, id: Option<i64>) -> rusqlite::Result<Option<String>> {
+        Self::text(
+            self.conn,
+            &mut self.paths,
+            "SELECT path FROM fact_path WHERE id = ?1",
+            id,
+        )
+    }
+
+    fn dims(&mut self, id: Option<i64>) -> rusqlite::Result<Option<String>> {
+        Self::text(
+            self.conn,
+            &mut self.dims,
+            "SELECT json FROM fact_dims WHERE id = ?1",
+            id,
+        )
+    }
+
+    fn text(
+        conn: &rusqlite::Connection,
+        cache: &mut std::collections::HashMap<i64, String>,
+        sql: &str,
+        id: Option<i64>,
+    ) -> rusqlite::Result<Option<String>> {
+        let Some(id) = id else {
+            return Ok(None);
+        };
+        if let Some(hit) = cache.get(&id) {
+            return Ok(Some(hit.clone()));
+        }
+        let found: String = conn.prepare_cached(sql)?.query_row([id], |r| r.get(0))?;
+        cache.insert(id, found.clone());
+        Ok(Some(found))
+    }
+}
+
 fn insert_fact(conn: &rusqlite::Connection, f: &NewFact, capture_id: i64) -> rusqlite::Result<i64> {
-    conn.execute(
+    let subject = subject_id(conn, f.subject_kind.as_deref(), f.subject_ref.as_deref())?;
+    let path = interned(conn, "fact_path", "path", f.path.as_deref())?;
+    let dims = interned(conn, "fact_dims", "json", f.dims_json.as_deref())?;
+    conn.prepare_cached(
         "INSERT INTO fact
-           (capture_id, measure_id, value, numerator, denominator, subject_kind, subject_ref,
-            path, line, severity, rule, detail, dims_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-        params![
-            capture_id,
-            f.measure_id,
-            f.value,
-            f.numerator,
-            f.denominator,
-            f.subject_kind,
-            f.subject_ref,
-            f.path,
-            f.line,
-            f.severity,
-            f.rule,
-            f.detail,
-            f.dims_json,
-        ],
-    )?;
+           (capture_id, measure_id, value, numerator, denominator, subject_id, path_id, line,
+            severity, rule, detail, dims_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+    )?
+    .execute(params![
+        capture_id,
+        f.measure_id,
+        f.value,
+        f.numerator,
+        f.denominator,
+        subject,
+        path,
+        f.line,
+        f.severity,
+        f.rule,
+        f.detail,
+        dims,
+    ])?;
     Ok(conn.last_insert_rowid())
+}
+
+/// The `fact_subject` id of `(kind, ref)`, added when new; `None` when the
+/// fact names no subject.
+fn subject_id(
+    conn: &rusqlite::Connection,
+    kind: Option<&str>,
+    subject: Option<&str>,
+) -> rusqlite::Result<Option<i64>> {
+    if kind.is_none() && subject.is_none() {
+        return Ok(None);
+    }
+    let found = conn
+        .prepare_cached("SELECT id FROM fact_subject WHERE kind IS ?1 AND ref IS ?2")?
+        .query_row(params![kind, subject], |r| r.get(0))
+        .optional()?;
+    if found.is_some() {
+        return Ok(found);
+    }
+    conn.prepare_cached("INSERT INTO fact_subject (kind, ref) VALUES (?1, ?2)")?
+        .execute(params![kind, subject])?;
+    Ok(Some(conn.last_insert_rowid()))
+}
+
+/// The id of `value` in the one-column dictionary `table`, added when new.
+fn interned(
+    conn: &rusqlite::Connection,
+    table: &str,
+    column: &str,
+    value: Option<&str>,
+) -> rusqlite::Result<Option<i64>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let found = conn
+        .prepare_cached(&format!("SELECT id FROM {table} WHERE {column} = ?1"))?
+        .query_row(params![value], |r| r.get(0))
+        .optional()?;
+    if found.is_some() {
+        return Ok(found);
+    }
+    conn.prepare_cached(&format!("INSERT INTO {table} ({column}) VALUES (?1)"))?
+        .execute(params![value])?;
+    Ok(Some(conn.last_insert_rowid()))
 }
 
 // ---------------------------------------------------------------------------
@@ -2048,14 +2177,16 @@ impl SqliteFactStore {
                 let mut stmt = conn.prepare_cached(
                     "WITH ranked AS (
                        SELECT c.producer,
-                              COALESCE(f.subject_ref, f.path, ?3) AS subject_key,
+                              COALESCE(fs.ref, fp.path, ?3) AS subject_key,
                               f.id AS fact_id,
                               DENSE_RANK() OVER (
-                                PARTITION BY c.producer, COALESCE(f.subject_ref, f.path, ?3)
+                                PARTITION BY c.producer, COALESCE(fs.ref, fp.path, ?3)
                                 ORDER BY c.captured_at DESC, c.id DESC
                               ) AS latest
                          FROM fact f
                          JOIN metric_capture c ON c.id = f.capture_id
+                         LEFT JOIN fact_subject fs ON fs.id = f.subject_id
+                         LEFT JOIN fact_path fp ON fp.id = f.path_id
                         WHERE f.measure_id = ?1
                           AND c.id IN (SELECT value FROM json_each(?2))
                      )
@@ -2301,7 +2432,7 @@ impl SqliteFactStore {
                     "SELECT {FACT_ROW_COLS} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
                       WHERE f.measure_id = ?1
-                        AND f.path IS NULL AND f.subject_ref IS NULL
+                        AND f.path_id IS NULL AND {SUBJECT_REF} IS NULL
                         AND (?2 IS NULL OR c.stream_id = ?2)
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
@@ -2461,9 +2592,11 @@ impl SqliteFactStore {
             .db
             .call(move |conn| {
                 let mut stmt = conn.prepare_cached(
-                    "SELECT DISTINCT c.producer, f.rule, f.severity, f.dims_json
-                       FROM fact f JOIN metric_capture c ON c.id = f.capture_id
-                      WHERE f.measure_id = ?1",
+                    "SELECT k.producer, k.rule, k.severity,
+                            (SELECT json FROM fact_dims WHERE id = k.dims_id)
+                       FROM (SELECT DISTINCT c.producer, f.rule, f.severity, f.dims_id
+                               FROM fact f JOIN metric_capture c ON c.id = f.capture_id
+                              WHERE f.measure_id = ?1) k",
                 )?;
                 let rows = stmt.query_map(params![measure_id], |r| {
                     Ok(FactSliceKey {
@@ -2520,7 +2653,7 @@ impl SqliteFactStore {
                         SELECT MIN(f2.id) FROM fact f2
                           JOIN metric_capture c2 ON c2.id = f2.capture_id
                          WHERE f2.measure_id = ?1
-                         GROUP BY c2.producer, f2.rule, f2.severity, f2.dims_json
+                         GROUP BY c2.producer, f2.rule, f2.severity, f2.dims_id
                       )
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
@@ -2678,10 +2811,11 @@ impl SqliteFactStore {
                        -- restates exactly the paths it emitted facts for; its snapshot,
                        -- when present, is provenance only — never a scanned set.
                        SELECT c.id, c.stream_id, c.producer, c.captured_at,
-                              f.path, 'oxplow'
+                              fp.path, 'oxplow'
                          FROM metric_capture c
                          JOIN fact f ON f.capture_id = c.id
-                        WHERE c.scan_kind = 'asserted' AND f.path IS NOT NULL
+                         JOIN fact_path fp ON fp.id = f.path_id
+                        WHERE c.scan_kind = 'asserted'
                           AND c.status = 'done'
                           AND c.producer IN (SELECT producer FROM rel)
                      ),
@@ -2696,7 +2830,8 @@ impl SqliteFactStore {
                      )
                      SELECT {FACT_ROW_COLS} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
-                       JOIN ranked s ON s.capture_id = f.capture_id AND s.path = f.path
+                       JOIN fact_path fp ON fp.id = f.path_id
+                       JOIN ranked s ON s.capture_id = f.capture_id AND s.path = fp.path
                       WHERE f.measure_id = ?1
                         AND s.rn = 1
                         AND s.storage <> 'deleted'
@@ -3035,18 +3170,19 @@ impl SqliteFactStore {
                        AND id NOT IN (
                          SELECT capture_id FROM (
                            SELECT f.capture_id, ROW_NUMBER() OVER (
-                             PARTITION BY f.measure_id, c.stream_id, c.producer, f.subject_ref
+                             PARTITION BY f.measure_id, c.stream_id, c.producer, fs.ref
                              ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
                            FROM fact f JOIN metric_capture c ON c.id = f.capture_id
-                           WHERE f.subject_ref IS NOT NULL AND c.status = 'done')
+                           JOIN fact_subject fs ON fs.id = f.subject_id
+                           WHERE fs.ref IS NOT NULL AND c.status = 'done')
                          WHERE rn = 1)
                        AND id NOT IN (
                          SELECT capture_id FROM (
                            SELECT f.capture_id, ROW_NUMBER() OVER (
-                             PARTITION BY f.measure_id, c.stream_id, c.producer, f.path
+                             PARTITION BY f.measure_id, c.stream_id, c.producer, f.path_id
                              ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
                            FROM fact f JOIN metric_capture c ON c.id = f.capture_id
-                           WHERE f.path IS NOT NULL AND c.status = 'done')
+                           WHERE f.path_id IS NOT NULL AND c.status = 'done')
                          WHERE rn = 1)
                        AND id NOT IN (
                          SELECT capture_id FROM (
@@ -3054,7 +3190,8 @@ impl SqliteFactStore {
                              PARTITION BY f.measure_id, c.stream_id, c.producer
                              ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
                            FROM fact f JOIN metric_capture c ON c.id = f.capture_id
-                           WHERE f.subject_ref IS NULL AND f.path IS NULL
+                           LEFT JOIN fact_subject fs ON fs.id = f.subject_id
+                           WHERE fs.ref IS NULL AND f.path_id IS NULL
                              AND c.status = 'done')
                          WHERE rn = 1)";
                 let mut streams: Vec<i64> = {
@@ -3211,13 +3348,14 @@ impl SqliteFactStore {
                     "WITH ranked AS (
                        SELECT f.id AS fact_id,
                               ROW_NUMBER() OVER (
-                                PARTITION BY c.stream_id, c.producer, f.subject_ref
+                                PARTITION BY c.stream_id, c.producer, fs.ref
                                 ORDER BY c.captured_at DESC, c.id DESC, f.id DESC
                               ) AS rn
                          FROM fact f
                          JOIN metric_capture c ON c.id = f.capture_id
+                         JOIN fact_subject fs ON fs.id = f.subject_id
                         WHERE f.measure_id = ?1
-                          AND f.subject_ref IS NOT NULL
+                          AND fs.ref IS NOT NULL
                           AND c.status = 'done'
                           AND (?2 IS NULL OR c.stream_id = ?2)
                      )
@@ -3280,10 +3418,11 @@ impl SqliteFactStore {
                           AND c.id IN ({placeholders})
                      ) WHERE tree_rn = 1
                      UNION
-                     SELECT c.id, f.path
+                     SELECT c.id, fpath.path
                        FROM metric_capture c
                        JOIN fact f ON f.capture_id = c.id
-                      WHERE c.scan_kind = 'asserted' AND f.path IS NOT NULL
+                       JOIN fact_path fpath ON fpath.id = f.path_id
+                      WHERE c.scan_kind = 'asserted'
                         AND c.status = 'done'
                         AND c.id IN ({placeholders})"
                 );

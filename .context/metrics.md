@@ -421,6 +421,19 @@ welded to collection.
   `subject_ref`/`path`/`line` (location-at-capture); reported finding metadata
   `severity`/`rule`/`detail` (null for pure measurements); `dims_json` (long-tail
   dims). **No when/where/who columns** — those are the capture's.
+  **Stored as ids into dictionaries (V38):** `subject_id` → `fact_subject
+  (kind, ref)`, `path_id` → `fact_path`, `dims_id` → `fact_dims (json)`;
+  the one writer (`insert_fact`) interns, and `FactRow` still carries the
+  text. A fact repeated its subject, path and dims text on every row —
+  ~290 bytes a fact with indexes, 3.1 GB of a 4 GB database — while the
+  distinct values were ~58k subjects, 1.7k paths and 730 dims sets; the
+  fact data went 1.83 GB → 0.52 GB. Reads select the ids and
+  `fact_row_mapper` resolves each once per read (`FactText`) — per-row
+  SQL lookups cost a quarter more read time. A query that filters,
+  groups or partitions uses the ids where they're equivalent (`path_id`,
+  `dims_id`) and joins `fact_subject` where the subject ref's text is the
+  key (a kind can share a ref). `v_fact` and `v_tree_fact` join the
+  dictionaries, so their columns are unchanged.
 - **`metric_cube`** + **`metric_live_fact`** + **`metric_cube_state`**
   (`V62__metric_cube.sql`, tsk96; live state + watermark re-keyed per **branch**
   by `V63__branch_aware_cube.sql`, tsk97) — the **aggregate cube**: the

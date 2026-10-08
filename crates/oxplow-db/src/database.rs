@@ -1386,6 +1386,11 @@ mod tests {
             "dimension",
             "metric_capture",
             "fact",
+            // V38 — the distinct subjects, paths and dimension sets a fact
+            // points into.
+            "fact_subject",
+            "fact_path",
+            "fact_dims",
             // V44 — the metric SPEC layer.
             "metric_spec",
             // V62 — the aggregate cube: the materialized fold (tsk96), its

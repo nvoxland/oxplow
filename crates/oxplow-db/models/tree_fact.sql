@@ -59,10 +59,11 @@ restated AS (
                OR (c3.captured_at = c.captured_at AND c3.id > c.id))
      )
   UNION
-  SELECT c.id, c.stream_id, c.producer, c.captured_at, f.path, 'oxplow'
+  SELECT c.id, c.stream_id, c.producer, c.captured_at, fp.path, 'oxplow'
     FROM source('metric_capture') c
     JOIN source('fact') f ON f.capture_id = c.id
-   WHERE c.scan_kind = 'asserted' AND f.path IS NOT NULL
+    JOIN source('fact_path') fp ON fp.id = f.path_id
+   WHERE c.scan_kind = 'asserted'
      AND c.status = 'done'
      AND c.producer IN (SELECT producer FROM rel)
 ),
@@ -75,13 +76,16 @@ ranked AS (
     FROM restated
 )
 SELECT f.id, f.capture_id, m.key AS measure_key, f.value, f.numerator,
-       f.denominator, f.subject_kind, f.subject_ref, f.path, f.line,
-       f.severity, f.rule, f.detail, f.dims_json,
+       f.denominator, subj.kind AS subject_kind, subj.ref AS subject_ref, fp.path, f.line,
+       f.severity, f.rule, f.detail, d.json AS dims_json,
        c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
   FROM source('fact') f
   JOIN source('measure') m ON m.id = f.measure_id
   JOIN source('metric_capture') c ON c.id = f.capture_id
-  JOIN ranked s ON s.capture_id = f.capture_id AND s.path = f.path
+  JOIN source('fact_path') fp ON fp.id = f.path_id
+  JOIN ranked s ON s.capture_id = f.capture_id AND s.path = fp.path
+  LEFT JOIN source('fact_subject') subj ON subj.id = f.subject_id
+  LEFT JOIN source('fact_dims') d ON d.id = f.dims_id
  WHERE m.capture_scope = 'per-path'
    AND s.rn = 1
    AND s.storage <> 'deleted'
