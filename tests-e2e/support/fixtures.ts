@@ -6,18 +6,19 @@ import { test as base, expect, type Page } from "@playwright/test";
 import { approveProgram, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
 
 type Stream = { id: string };
-type Thread = { id: string; agent: string };
+type Thread = { id: string };
 
 /** The stream and the thread its pages open on: the one a fresh stream is
- *  seeded with, which runs the project's default agent — here the fake ACP
- *  agent (`agents: [acp]`), so the suite never starts a real agent CLI. */
+ *  seeded with. It has no agent session; one opened on it runs the
+ *  project's default agent — here the fake ACP agent (`agents: [acp]`), so
+ *  the suite never starts a real agent CLI. */
 async function seededThread(daemon: Daemon): Promise<{ stream: string; thread: string }> {
   const [stream] = await ipc<Stream[]>(daemon, "list_streams");
   if (!stream) throw new Error("the daemon has no stream");
   const threads = await ipc<Thread[]>(daemon, "list_threads", { streamId: stream.id });
   const [seeded] = threads;
-  if (threads.length !== 1 || seeded?.agent !== "acp") {
-    throw new Error(`expected one seeded ACP thread, got ${JSON.stringify(threads)}`);
+  if (threads.length !== 1 || !seeded) {
+    throw new Error(`expected one seeded thread, got ${JSON.stringify(threads)}`);
   }
   return { stream: stream.id, thread: seeded.id };
 }
