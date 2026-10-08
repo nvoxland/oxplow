@@ -46,6 +46,24 @@ test("the menu bar is the offers placed by `ui.menu`, the native Edit roles firs
   expect(menuItemById(bar, "oxplow.editor.save")?.shortcut).toBe("Ctrl/Cmd+S");
 });
 
+test("a menu's items sit in their groups, a separator between groups, ordered within each", () => {
+  const bar = buildMenuBar([
+    offer("oxplow.window.quick_open", { bar: "file", group: "3_go", order: 10 }),
+    offer("oxplow.project.open", { bar: "file", group: "1_project", order: 20 }),
+    offer("oxplow.project.create", { bar: "file", group: "1_project", order: 10 }),
+    offer("oxplow.editor.save", { bar: "file", group: "2_save", order: 10 }),
+  ]);
+  expect(bar[0].items.map((i) => (i.separator ? "—" : i.id))).toEqual([
+    "oxplow.project.create",
+    "oxplow.project.open",
+    "—",
+    "oxplow.editor.save",
+    "—",
+    "oxplow.window.quick_open",
+  ]);
+  expect(bar[0].items.filter((i) => i.separator).every((i) => i.id.startsWith("native.separator."))).toBe(true);
+});
+
 // tsk963: the native menu is sent as the generated `MenuGroupSnapshot` the
 // shell deserializes — every item names its shortcut and check state (null
 // when it has none), and carries nothing the shell doesn't read.

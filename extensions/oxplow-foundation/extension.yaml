@@ -27,7 +27,7 @@ commands:
     capability: agent_input.write
     op: draft
     invokers: { human: true, agent: false, lens: false }
-    ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " } }
+    ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " }, when: "threadShown" }
   # bookmarks.write — a person's navigation, not the agent's.
   - name: bookmark.set
     summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
@@ -117,7 +117,7 @@ commands:
     capability: editor.write
     op: save
     invokers: { human: true, agent: true, lens: true }
-    ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, order: 40 } }
+    ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, group: 2_save, order: 10 }, when: "fileDirty" }
   # efforts.write
   - name: effort.close
     summary: "Close an effort (by id, or a thread's open one), optionally as of a past point and with a summary."
@@ -352,19 +352,19 @@ commands:
     capability: projects.write
     op: create
     invokers: { human: true, agent: false, lens: false }
-    ui: { label: "New Project…", group: File, menu: { bar: file, order: 10 } }
+    ui: { label: "New Project…", group: File, menu: { bar: file, group: 1_project, order: 10 }, when: "shellAvailable" }
   - name: project.open
     summary: "Open a folder that is a project (`path`, else pick one), in this window or a new one (`new_window`)."
     capability: projects.write
     op: open
     invokers: { human: true, agent: false, lens: false }
-    ui: { label: "Open Project…", group: File, input: { new_window: false }, menu: { bar: file, order: 20 } }
+    ui: { label: "Open Project…", group: File, input: { new_window: false }, menu: { bar: file, group: 1_project, order: 20 }, when: "shellAvailable" }
   - name: project.open_in_new_window
     summary: "Pick a folder that is a project and open it in a new window."
     capability: projects.write
     op: open
     invokers: { human: true, agent: false, lens: false }
-    ui: { label: "Open Project in New Window…", group: File, input: { new_window: true }, menu: { bar: file, order: 30 } }
+    ui: { label: "Open Project in New Window…", group: File, input: { new_window: true }, menu: { bar: file, group: 1_project, order: 30 }, when: "shellAvailable" }
   # providers.sync
   - name: provider.sync
     summary: "Read a provider instance's collectors now (all, or one), restating the items it tracks (runs the provider process, a system the bus doesn't own)."
@@ -416,7 +416,7 @@ commands:
     capability: threads.write
     op: create
     invokers: { human: true, agent: true, lens: true }
-    ui: { label: "New Thread…", group: Tasks, form: new-thread }
+    ui: { label: "New Thread…", group: Tasks, form: new-thread, when: "streamShown" }
   - name: thread.demote
     summary: "Move a stream's writer back into the queue, leaving the stream with no writer."
     capability: threads.write
@@ -458,13 +458,13 @@ commands:
     capability: vcs.remote
     op: pull
     invokers: { human: true, agent: true, lens: false }
-    ui: {"label": "Pull Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true}
+    ui: {"label": "Pull Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true, "when": "vcsEnabled"}
   - name: vcs.push
     summary: "Push the stream's branch (to its upstream, or a named remote branch)."
     capability: vcs.remote
     op: push
     invokers: { human: true, agent: true, lens: false }
-    ui: {"label": "Push Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true}
+    ui: {"label": "Push Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true, "when": "vcsEnabled"}
   # vcs.write
   - name: git.cherry_pick
     summary: "Apply one commit onto the stream's branch."
@@ -498,7 +498,7 @@ commands:
     capability: vcs.write
     op: commit
     invokers: { human: true, agent: true, lens: false }
-    ui: { label: "Commit Changes…", group: Git, form: commit }
+    ui: { label: "Commit Changes…", group: Git, form: commit, when: "streamShown && vcsEnabled" }
   - name: vcs.delete_branch
     summary: "Delete a branch (`force` even when unmerged)."
     capability: vcs.write
@@ -538,13 +538,13 @@ commands:
     capability: window.show
     op: find
     invokers: { human: true, agent: false, lens: false }
-    ui: { label: Find, group: Edit, shortcut: "Ctrl/Cmd+F", while_typing: true, menu: { bar: edit, order: 100 } }
+    ui: { label: Find, group: Edit, shortcut: "Ctrl/Cmd+F", while_typing: true, menu: { bar: edit, group: 1_find, order: 10 }, when: "fileShown" }
   - name: window.quick_open
     summary: "Show the search box (files, pages, commands)."
     capability: window.show
     op: quick_open
     invokers: { human: true, agent: false, lens: false }
-    ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, order: 50 } }
+    ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
   # work_items.write
   - name: work_item.comment
     summary: "Comment on a work item (oxplow: a note shown with the task)."

@@ -952,6 +952,43 @@ async fn registration_checks_names_atomicity_and_collisions() {
     assert!(err.to_string().contains("only reads"), "{err}");
 }
 
+/// One key may run several commands told apart by their `when` (VS
+/// Code's way), but two on the same key under the same `when` always
+/// collide: the second is refused where it registers. A `when` that
+/// doesn't check out is refused too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shortcut_is_held_once_per_when() {
+    let (_db, bus) = bus();
+    let keyed = |id: &str, when: Option<&str>| {
+        let mut spec = kv_spec(id, Invokers::ALL, Confirm::Never);
+        spec.ui = Some(oxplow_domain::CommandUi {
+            label: id.into(),
+            shortcut: Some("Ctrl/Cmd+K".into()),
+            when: when.map(str::to_string),
+            ..Default::default()
+        });
+        Command::new(spec, kv_set())
+    };
+    bus.register(keyed("oxplow.kv.a", Some("fileShown")).unwrap())
+        .unwrap();
+    bus.register(keyed("oxplow.kv.b", Some("!fileShown")).unwrap())
+        .unwrap();
+    let err = bus
+        .register(keyed("oxplow.kv.c", Some("fileShown")).unwrap())
+        .unwrap_err();
+    assert!(
+        matches!(&err, CommandError::Invalid { field: Some(f), message }
+            if f == "/ui/shortcut" && message.contains("oxplow.kv.a")),
+        "{err:?}"
+    );
+    let err = keyed("oxplow.kv.d", Some("fileShwn")).err().unwrap();
+    assert!(
+        matches!(&err, CommandError::Invalid { field: Some(f), message }
+            if f == "/ui/when" && message.contains("isn't a context key")),
+        "{err:?}"
+    );
+}
+
 /// An agent's undo or approval that needs a person is refused, not
 /// proposed as a plain call that would lose what it undoes.
 #[tokio::test(flavor = "multi_thread")]

@@ -170,6 +170,7 @@ import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-re
 import { offerForShortcut } from "./keybindings.js";
 import { commandOffers, type OfferDeps } from "./commandOffers.js";
 import { setRefOfferHost } from "./components/refCommands.js";
+import type { WhenContext } from "./when.js";
 import { runLocally, startClientHost, type ClientCallContext, type ClientCallRef, type ClientHandlers } from "./clientHost.js";
 import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
 import { usePersonCommands } from "./personCommandsStore.js";
@@ -1222,15 +1223,20 @@ export function App() {
   // route through the same page-tab opener used by every other caller.
   // The ref is populated in a useEffect after handleOpenPage is defined.
   const handleOpenPageRef = useRef<((ref: TabRef) => void) | null>(null);
-  const commandState = useMemo(
+  // The window's context keys: what a command's `when` reads
+  // (`oxplow_domain::when::CONTEXT_KEYS`; `.context/commands.md`).
+  const whenContext = useMemo<WhenContext>(
     () => ({
-      hasStream: !!stream,
-      hasSelectedFile: !!selectedFilePath,
-      canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
-      hasThread: !!selectedThread,
-      canCommit: !!stream && !!workspaceContext.vcsEnabled,
-    } as const),
-    [currentFile, currentFileDirty, selectedThread, selectedFilePath, stream, workspaceContext.vcsEnabled],
+      streamShown: !!stream,
+      streamKind: stream?.kind ?? "",
+      threadShown: !!selectedThread,
+      fileShown: !!selectedFilePath,
+      fileDirty: !!currentFile && !currentFile.isLoading && currentFileDirty,
+      pageKind: (centerActive ? refFromTabId(centerActive)?.kind : undefined) ?? "",
+      vcsEnabled: !!workspaceContext.vcsEnabled,
+      shellAvailable: shellAvailable(),
+    }),
+    [centerActive, currentFile, currentFileDirty, selectedThread, selectedFilePath, stream, workspaceContext.vcsEnabled],
   );
   // Run a Git-menu mutation (pull/push) as a background task and surface
   // any failure the same way the Git Dashboard does: record an op-error
@@ -1282,8 +1288,8 @@ export function App() {
   // them with the app's own commands, and a shortcut may run one.
   const personSpecs = usePersonCommands();
   const offerCtx = useMemo(
-    () => ({ streamId: stream?.id ?? null, threadId: selectedThreadId ?? null }),
-    [stream?.id, selectedThreadId],
+    () => ({ streamId: stream?.id ?? null, threadId: selectedThreadId ?? null, when: whenContext }),
+    [stream?.id, selectedThreadId, whenContext],
   );
   const offerDeps = useMemo<OfferDeps>(
     () => ({
@@ -1292,27 +1298,6 @@ export function App() {
         if (ref) handleOpenPageRef.current?.(ref);
       },
       openForm,
-      // What the window has for one of its own to act on now.
-      available: (spec) => {
-        if (spec.ui?.form === "new-thread") return commandState.hasStream;
-        if (spec.ui?.form === "commit") return !!commandState.canCommit;
-        switch (spec.op ? `${spec.op.capability}/${spec.op.op}` : "") {
-          case "editor.write/save":
-            return commandState.canSave;
-          case "window.show/find":
-            return commandState.hasSelectedFile;
-          case "window.show/quick_open":
-            return commandState.hasStream;
-          case "agent_input.write/draft":
-            return commandState.hasThread;
-          case "projects.write/create":
-          case "projects.write/open":
-            // The shell's: a browser window has none to ask.
-            return shellAvailable();
-          default:
-            return true;
-        }
-      },
       run: (label, id, input) => {
         // One the window hosts runs here: nothing goes to the daemon.
         const spec = personSpecs.find((s) => s.id === id);
@@ -1330,7 +1315,7 @@ export function App() {
       runInBackground: (label, id, input) =>
         void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
       }),
-    [personSpecs, runGitMenuOp, openForm, commandState],
+    [personSpecs, runGitMenuOp, openForm],
   );
   const offers = useMemo(() => commandOffers(personSpecs, offerCtx, offerDeps), [personSpecs, offerCtx, offerDeps]);
   // A ref's menus (its page's, its rows') run offers the same way.
@@ -1366,7 +1351,7 @@ export function App() {
       // runs while typing (Save, Find, Quick Open do — a user mid-way
       // through a description shouldn't lose it to New Task's form).
       const offer = offerForShortcut(offers, event, isEditableTarget(event.target));
-      if (!offer || offer.enabled === false) return;
+      if (!offer) return;
       event.preventDefault();
       offer.run();
     }

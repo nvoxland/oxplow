@@ -256,15 +256,25 @@ pub struct CommandUi {
     /// Where the menu bar shows it.
     #[serde(default)]
     pub menu: Option<MenuPlace>,
+    /// When it's offered — in search, the menu bar and by its shortcut —
+    /// in VS Code's when-clause syntax over the window's context keys
+    /// (`crate::when`): `fileShown && fileDirty`, `streamKind == worktree`.
+    /// Absent, always.
+    #[serde(default)]
+    pub when: Option<String>,
 }
 
-/// A command's place in the menu bar: which menu, and where in it
-/// (lowest first).
+/// A command's place in the menu bar: which menu, the group it sits in
+/// (VS Code's: groups are sorted by name and drawn apart by a separator)
+/// and where in the group (lowest first).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MenuPlace {
     /// `file` or `edit`.
     pub bar: String,
+    /// Its group (`1_project`, `2_save`); absent, the menu's first.
+    #[serde(default)]
+    pub group: Option<String>,
     pub order: u32,
 }
 

@@ -2,13 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { offerForShortcut } from "./keybindings.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 
-const offer = (id: string, shortcut: string, whileTyping = false): CommandEntry => ({
+const offer = (id: string, shortcut: string, whileTyping = false, enabled = true): CommandEntry => ({
   id,
   group: "G",
   label: id,
   searchKey: id,
   shortcut,
   whileTyping,
+  enabled,
   run: () => {},
 });
 
@@ -33,6 +34,19 @@ describe("offerForShortcut", () => {
     expect(offerForShortcut(offers, eventLike("s"), false)).toBeNull();
     expect(offerForShortcut(offers, eventLike("s", { altKey: true, metaKey: true }), false)).toBeNull();
     expect(offerForShortcut(offers, eventLike("n", { metaKey: true }), false)).toBeNull();
+  });
+
+  test("of the offers on one key, the one whose `when` holds now runs — oxplow's own before an extension's", () => {
+    const shared = [
+      offer("acme.notes.save", "Ctrl/Cmd+S", true, true),
+      offer("oxplow.editor.save", "Ctrl/Cmd+S", true, true),
+    ];
+    const s = eventLike("s", { metaKey: true });
+    expect(offerForShortcut(shared, s, false)?.id).toBe("oxplow.editor.save");
+    shared[1] = offer("oxplow.editor.save", "Ctrl/Cmd+S", true, false);
+    expect(offerForShortcut(shared, s, false)?.id).toBe("acme.notes.save");
+    shared[0] = offer("acme.notes.save", "Ctrl/Cmd+S", true, false);
+    expect(offerForShortcut(shared, s, false)).toBeNull();
   });
 });
 

@@ -21,6 +21,7 @@ export interface MenuGroup extends SharedMenuGroup {
 
 /** A menu entry and its place. */
 interface Placed {
+  group: string;
   order: number;
   item: MenuItem;
 }
@@ -44,8 +45,21 @@ function entry(o: CommandEntry): MenuItem {
  *  (Edit). */
 export function buildMenuBar(offers: CommandEntry[]): MenuGroup[] {
   const placed = (bar: MenuId): Placed[] =>
-    offers.filter((o) => o.menu?.bar === bar).map((o) => ({ order: o.menu!.order, item: entry(o) }));
-  const sorted = (items: Placed[]) => items.sort((a, b) => a.order - b.order).map((p) => p.item);
+    offers
+      .filter((o) => o.menu?.bar === bar)
+      .map((o) => ({ group: o.menu!.group ?? "", order: o.menu!.order, item: entry(o) }));
+  // In their groups (by name), ordered within each, a separator between.
+  const sorted = (items: Placed[]): MenuItem[] => {
+    items.sort((a, b) => a.group.localeCompare(b.group) || a.order - b.order);
+    const out: MenuItem[] = [];
+    items.forEach((p, i) => {
+      if (i > 0 && p.group !== items[i - 1].group) {
+        out.push({ id: `native.separator.before.${p.item.id}`, label: "", separator: true, enabled: true });
+      }
+      out.push(p.item);
+    });
+    return out;
+  };
   return [
     { id: "file", label: "File", items: sorted(placed("file")) },
     { id: "edit", label: "Edit", items: [...NATIVE_EDIT, ...sorted(placed("edit"))] },

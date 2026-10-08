@@ -6,13 +6,17 @@
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { CommandOutcome, CommandSpec } from "./tauri-bridge/generated/bindings.js";
 import { streamRef, threadRef } from "./recordRefs.js";
+import { offeredWhen, type WhenContext } from "./when.js";
 
-/** Where a command is offered from: what its input's bindings take. */
+/** Where a command is offered from: what its input's bindings take, and
+ *  what its `when` is evaluated against. */
 export interface OfferContext {
   streamId: string | null;
   threadId: string | null;
   /** The ref the page or row is about; search has none. */
   ref?: string | null;
+  /** The window's context keys (`when.ts`); unsaid, none hold. */
+  when?: WhenContext;
 }
 
 export interface OfferDeps {
@@ -21,10 +25,6 @@ export interface OfferDeps {
   /** Open one of the window's own forms (`new-thread`, `commit`): a
    *  `ui.form` that isn't a tab id. */
   openForm(name: string): void;
-  /** Whether it can run here now (the window has something for it to act
-   *  on); unsaid, it can. One that can't is listed greyed in a menu and
-   *  not offered by search. */
-  available?(spec: CommandSpec): boolean;
   /** Run it as the person (asking first where it asks); its outcome, or
    *  `null` when it failed or waits for their confirmation. */
   run(label: string, id: string, input: unknown): Promise<CommandOutcome | null>;
@@ -69,7 +69,7 @@ function withResult(template: string, result: unknown): string {
 }
 
 /** `spec`'s entry, run with `input` (or its form). */
-function offer(spec: CommandSpec, input: unknown, deps: OfferDeps): CommandEntry {
+function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: OfferDeps): CommandEntry {
   const ui = spec.ui!;
   const group = ui.group ?? "Commands";
   return {
@@ -80,7 +80,9 @@ function offer(spec: CommandSpec, input: unknown, deps: OfferDeps): CommandEntry
     shortcut: ui.shortcut ?? undefined,
     whileTyping: ui.while_typing,
     menu: ui.menu ?? null,
-    enabled: deps.available ? deps.available(spec) : true,
+    // Its `when` holds here now; one that doesn't is greyed in a menu and
+    // not run by its shortcut.
+    enabled: offeredWhen(ui.when, ctx.when ?? {}),
     run: () => {
       // A tab id (`page:new-task`) is a page; anything else one of the
       // window's own forms.
@@ -101,7 +103,7 @@ export function commandOffers(specs: CommandSpec[], ctx: OfferContext, deps: Off
     if (!ui || ui.about) continue;
     // A form gathers the input itself; otherwise it must bind here.
     const bound = ui.form ? { input: null } : bindInput(ui.input, ctx);
-    if (bound) out.push(offer(spec, bound.input, deps));
+    if (bound) out.push(offer(spec, bound.input, ctx, deps));
   }
   return out;
 }
@@ -117,7 +119,7 @@ export function refOffers(specs: CommandSpec[], ref: string, ctx: OfferContext, 
     const ui = spec.ui;
     if (!ui || ui.about !== kind) continue;
     const bound = ui.form ? { input: null } : bindInput(ui.input ?? { ref: "{{ref}}" }, { ...ctx, ref });
-    if (bound) out.push(offer(spec, bound.input, deps));
+    if (bound) out.push(offer(spec, bound.input, ctx, deps));
   }
   return out;
 }

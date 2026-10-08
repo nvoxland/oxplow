@@ -18,7 +18,7 @@ function spec(id: string, ui: Partial<CommandUi>): CommandSpec {
     atomicity: "tx",
     effect: "write",
     needs: [],
-    ui: { label: id, group: null, keywords: [], about: null, input: null, form: null, open_after: null, background: false, shortcut: null, while_typing: false, menu: null, ...ui },
+    ui: { label: id, group: null, keywords: [], about: null, input: null, form: null, open_after: null, background: false, shortcut: null, while_typing: false, menu: null, when: null, ...ui },
   } as unknown as CommandSpec;
 }
 
@@ -88,15 +88,15 @@ test("a form opens its page; a background command runs in the background; anothe
   ]);
 });
 
-test("a form that isn't a tab id is one of the window's own; an offer says its shortcut, menu place and whether it can run", () => {
+test("a form that isn't a tab id is one of the window's own; an offer says its shortcut, menu place and whether its `when` holds", () => {
   const { d, calls } = deps();
   const offers = commandOffers(
     [
-      spec("oxplow.thread.create", { label: "New Thread…", form: "new-thread" }),
-      spec("oxplow.editor.save", { label: "Save", shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: "file", order: 40 } }),
+      spec("oxplow.thread.create", { label: "New Thread…", form: "new-thread", when: "streamShown" }),
+      spec("oxplow.editor.save", { label: "Save", shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: "file", order: 40 }, when: "fileShown && fileDirty" }),
     ],
-    ctx,
-    { ...d, available: (s) => s.id !== "oxplow.editor.save" },
+    { ...ctx, when: { streamShown: true, fileShown: true, fileDirty: false } },
+    d,
   );
   offers[0].run();
   expect(calls).toEqual(["form new-thread"]);

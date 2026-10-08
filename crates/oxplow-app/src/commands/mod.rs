@@ -303,6 +303,12 @@ impl Command {
 
     pub fn new(spec: CommandSpec, handler: Handler) -> Result<Self, CommandError> {
         CommandSpec::validate_id(&spec.id)?;
+        if let Some(when) = spec.ui.as_ref().and_then(|ui| ui.when.as_deref()) {
+            oxplow_domain::when::check(when).map_err(|message| CommandError::Invalid {
+                field: Some("/ui/when".into()),
+                message: format!("`{}`'s `when`: {message}", spec.id),
+            })?;
+        }
         if spec.confirm.required() {
             Self::may_ask(&spec)?;
         }
@@ -473,6 +479,26 @@ impl Registry {
                     format!("command `{id}` is already registered"),
                 ));
             }
+            // One key may run several commands told apart by `when`; two
+            // under the same `when` always collide.
+            if let Some(key) = shortcut_of(&command.spec) {
+                let held = self
+                    .commands
+                    .values()
+                    .map(|c| &c.spec)
+                    .chain(commands.iter().map(|c| &c.spec).filter(|s| s.id != *id))
+                    .find(|other| shortcut_of(other) == Some(key.clone()));
+                if let Some(other) = held {
+                    return Err(invalid(
+                        Some("/ui/shortcut"),
+                        format!(
+                            "`{}` already runs on {} under the same `when`; give `{id}` another \
+                             key, or a `when` that tells them apart",
+                            other.id, key.0
+                        ),
+                    ));
+                }
+            }
         }
         let holder = if reserved {
             oxplow_domain::OXPLOW_NAMESPACE
@@ -493,6 +519,19 @@ impl Registry {
     fn get(&self, name: &str) -> Option<&Arc<Command>> {
         self.commands.get(name)
     }
+}
+
+/// A command's shortcut with the `when` it holds under (`Ctrl/Cmd+K`,
+/// case aside): two equal ones always collide.
+fn shortcut_of(spec: &CommandSpec) -> Option<(String, Option<String>)> {
+    let ui = spec.ui.as_ref()?;
+    let key = ui.shortcut.as_ref()?;
+    Some((
+        key.to_lowercase(),
+        ui.when
+            .as_ref()
+            .map(|w| w.split_whitespace().collect::<String>()),
+    ))
 }
 
 /// Step 3's answers for a run, as its `TxCtx` carries them: may it claim

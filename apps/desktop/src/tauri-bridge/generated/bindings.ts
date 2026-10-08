@@ -1972,6 +1972,13 @@ export type CommandUi = {
 	while_typing?: boolean,
 	// Where the menu bar shows it.
 	menu?: MenuPlace | null,
+	/**
+	 *  When it's offered — in search, the menu bar and by its shortcut —
+	 *  in VS Code's when-clause syntax over the window's context keys
+	 *  (`crate::when`): `fileShown && fileDirty`, `streamKind == worktree`.
+	 *  Absent, always.
+	 */
+	when?: string | null,
 };
 
 /**
@@ -4152,12 +4159,15 @@ export type MenuItemSnapshot = {
 };
 
 /**
- *  A command's place in the menu bar: which menu, and where in it
- *  (lowest first).
+ *  A command's place in the menu bar: which menu, the group it sits in
+ *  (VS Code's: groups are sorted by name and drawn apart by a separator)
+ *  and where in the group (lowest first).
  */
 export type MenuPlace = {
 	// `file` or `edit`.
 	bar: string,
+	// Its group (`1_project`, `2_save`); absent, the menu's first.
+	group?: string | null,
 	order: number,
 };
 

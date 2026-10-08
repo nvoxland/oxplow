@@ -24,10 +24,14 @@ export function matchesShortcut(event: KeyPress, shortcut: string): boolean {
   );
 }
 
-/** The offer whose `ui.shortcut` `event` is (`commandOffers`) — while the
- *  person types in a field, only one that runs while typing. */
+/** The offer `event` runs (`commandOffers`): of those whose `ui.shortcut`
+ *  it is and whose `when` holds now — while the person types in a field,
+ *  only those that run while typing — oxplow's own first, so an
+ *  extension's command on the same key runs only where oxplow's doesn't
+ *  (VS Code's: one key, told apart by `when`). */
 export function offerForShortcut(offers: CommandEntry[], event: KeyPress, typing: boolean): CommandEntry | null {
-  return (
-    offers.find((o) => o.shortcut && matchesShortcut(event, o.shortcut) && (!typing || o.whileTyping)) ?? null
+  const runs = offers.filter(
+    (o) => o.shortcut && o.enabled !== false && matchesShortcut(event, o.shortcut) && (!typing || o.whileTyping),
   );
+  return runs.find((o) => o.id.startsWith("oxplow.")) ?? runs[0] ?? null;
 }

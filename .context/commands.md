@@ -71,16 +71,16 @@ A command says how a person meets it with an optional `ui`
 | `form` | what gathers its input: a page (a tab id, `page:new-task`) or one of the window's own forms (`new-thread`: the Navigator's inline form; `commit`: the Files page's commit dialog) — choosing it opens that instead of running it |
 | `open_after` | a tab id to open once it ran, `{{result.<field>}}` from its result (`page:custom-dashboard?id={{result.id}}`) |
 | `background` | it runs as a background task (kind `vcs` for `oxplow.vcs.*`, else `command`), its failure an op error |
-| `shortcut` | the key that runs it, `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N` (`keybindings.ts` `offerForShortcut`) |
+| `shortcut` | the key that runs it, `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N` (`keybindings.ts` `offerForShortcut`). Several commands may share a key, told apart by `when` (VS Code's way): the key runs the one whose `when` holds now, oxplow's own first. Two on one key under the same `when` always collide, so the second is refused where it registers (`Invalid` at `/ui/shortcut`) |
 | `while_typing` | its shortcut runs while the person types in a field too (Save, Find, Quick Open); otherwise typing keeps it (New Task) |
-| `menu` | its place in the menu bar: `{ bar: file \| edit, order }` (`menuBar.ts`) |
+| `menu` | its place in the menu bar: `{ bar: file \| edit, group?, order }` (`menuBar.ts`) — groups (`1_project`, `2_save`) sorted by name, a separator between them, `order` within one |
+| `when` | when it's offered — in search, the menu bar (greyed when false) and by its shortcut — in VS Code's when-clause syntax over the window's context keys (below, "When a command is offered"); absent, always |
 
 RPC `list_person_commands` lists what a person is offered: what they may
 run now (invokers, `needs` active) that has a `ui`. The desktop keeps one
 listing (`personCommandsStore.ts`, reloaded when extensions or config
 change) and turns it into **offers** with `commandOffers.ts` (pure:
-binding, availability, run / form / background / open-after; whether the
-window has something for one of its own to act on now — `available`).
+binding, `when`, run / form / background / open-after).
 Everything a person reaches a command by comes from the offers:
 
 - **search** lists the ref-less ones that can run now;
@@ -91,6 +91,27 @@ Everything a person reaches a command by comes from the offers:
   delivers ⌘C/⌘V with them in the menu; File ▸ Open Recent's submenu is
   built from the recents list and runs `projects.write` `open`);
 - **shortcuts** are the offers' `ui.shortcut`s.
+
+**When a command is offered** (`ui.when`; `oxplow_domain::when`, the
+window's `when.ts`). VS Code's when-clause syntax: `!`, `&&` (binding
+tighter than `||`), `||`, parentheses; `==` / `!=` against `true`,
+`false` or a string (quoted, or a bare word — `pageKind == git-dashboard`);
+`=~` against a regular expression literal (`/^work/i`, flags `i` `m`
+`s`). A key alone holds when it is `true` or a non-empty string; a key
+the window doesn't hold is false, equal to nothing (but `false`) and
+unmatched. VS Code's `<` `<=` `>` `>=` and `in` / `not in` parse but are
+refused as not supported yet: no context key holds a number or a list.
+The window publishes its **context keys** (`CONTEXT_KEYS`, the one list):
+`fileDirty`, `fileShown`, `pageKind` (the kind of the page shown),
+`shellAvailable` (the app, not a browser window), `streamKind`
+(`primary` / `worktree`), `streamShown`, `threadShown`, `vcsEnabled`.
+A command's `when` is checked where it registers — it parses, names only
+these keys, and compares each to a value of its kind (`true`/`false` for
+a boolean key; a string or a regular expression for a string key) — so a
+typo is a refusal (`Invalid` at `/ui/when`), never a silently hidden
+command; the window only evaluates. Both read the same cases
+(`crates/oxplow-domain/fixtures/when_cases.json`). A new key goes in
+`CONTEXT_KEYS` and the window's `whenContext` (`App.tsx`) together.
 
 Save, Find, Quick Open and New Lens with Your Agent are the window's own
 commands (below, "Where a command runs"); New Thread and Commit are
