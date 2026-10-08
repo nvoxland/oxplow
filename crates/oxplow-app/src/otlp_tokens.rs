@@ -400,135 +400,131 @@ fn fmt_attr_value(v: &any_value::Value) -> String {
 /// body with one `input` + one `output` `claude_code.token.usage` data point
 /// for `model`. Shared with the ingest-service tests in `token_usage.rs`.
 #[cfg(test)]
-pub(crate) fn encoded_claude_export(model: &str, input: i64, output: i64) -> Vec<u8> {
-    encoded_claude_export_at(model, input, output, None)
-}
+pub(crate) mod tests {
+    use super::*;
 
-/// [`encoded_claude_export`] whose points cover the window `start..end`
-/// (delta temporality: since the last export, collected at `end`).
-#[cfg(test)]
-pub(crate) fn encoded_claude_export_over(
-    model: &str,
-    input: i64,
-    output: i64,
-    start: oxplow_domain::Timestamp,
-    end: oxplow_domain::Timestamp,
-) -> Vec<u8> {
-    let mut req = ExportMetricsServiceRequest::decode(
-        encoded_claude_export_at(model, input, output, Some(end)).as_slice(),
-    )
-    .expect("our own export decodes");
-    for rm in &mut req.resource_metrics {
-        for sm in &mut rm.scope_metrics {
-            for m in &mut sm.metrics {
-                if let Some(metric::Data::Sum(sum)) = &mut m.data {
-                    for dp in &mut sum.data_points {
-                        dp.start_time_unix_nano = start.unix_nanos() as u64;
+    pub(crate) fn encoded_claude_export(model: &str, input: i64, output: i64) -> Vec<u8> {
+        encoded_claude_export_at(model, input, output, None)
+    }
+
+    /// [`encoded_claude_export`] whose points cover the window `start..end`
+    /// (delta temporality: since the last export, collected at `end`).
+    pub(crate) fn encoded_claude_export_over(
+        model: &str,
+        input: i64,
+        output: i64,
+        start: oxplow_domain::Timestamp,
+        end: oxplow_domain::Timestamp,
+    ) -> Vec<u8> {
+        let mut req = ExportMetricsServiceRequest::decode(
+            encoded_claude_export_at(model, input, output, Some(end)).as_slice(),
+        )
+        .expect("our own export decodes");
+        for rm in &mut req.resource_metrics {
+            for sm in &mut rm.scope_metrics {
+                for m in &mut sm.metrics {
+                    if let Some(metric::Data::Sum(sum)) = &mut m.data {
+                        for dp in &mut sum.data_points {
+                            dp.start_time_unix_nano = start.unix_nanos() as u64;
+                        }
                     }
                 }
             }
         }
+        req.encode_to_vec()
     }
-    req.encode_to_vec()
-}
 
-/// [`encoded_claude_export`] whose points say they were measured `at`.
-#[cfg(test)]
-pub(crate) fn encoded_claude_export_at(
-    model: &str,
-    input: i64,
-    output: i64,
-    at: Option<oxplow_domain::Timestamp>,
-) -> Vec<u8> {
-    use opentelemetry_proto::tonic::common::v1::AnyValue;
-    use opentelemetry_proto::tonic::metrics::v1::{
-        Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
-    };
-    let kv = |k: &str, v: &str| KeyValue {
-        key: k.into(),
-        value: Some(AnyValue {
-            value: Some(any_value::Value::StringValue(v.into())),
-        }),
-        ..Default::default()
-    };
-    let time_unix_nano = at.map_or(0, |t| t.unix_nanos() as u64);
-    let point = |ty: &str, val: i64| NumberDataPoint {
-        attributes: vec![kv("type", ty), kv("model", model)],
-        value: Some(number_data_point::Value::AsInt(val)),
-        time_unix_nano,
-        ..Default::default()
-    };
-    ExportMetricsServiceRequest {
-        resource_metrics: vec![ResourceMetrics {
-            scope_metrics: vec![ScopeMetrics {
-                metrics: vec![Metric {
-                    name: "claude_code.token.usage".into(),
-                    data: Some(metric::Data::Sum(Sum {
-                        data_points: vec![point("input", input), point("output", output)],
+    /// [`encoded_claude_export`] whose points say they were measured `at`.
+    pub(crate) fn encoded_claude_export_at(
+        model: &str,
+        input: i64,
+        output: i64,
+        at: Option<oxplow_domain::Timestamp>,
+    ) -> Vec<u8> {
+        use opentelemetry_proto::tonic::common::v1::AnyValue;
+        use opentelemetry_proto::tonic::metrics::v1::{
+            Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
+        };
+        let kv = |k: &str, v: &str| KeyValue {
+            key: k.into(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue(v.into())),
+            }),
+            ..Default::default()
+        };
+        let time_unix_nano = at.map_or(0, |t| t.unix_nanos() as u64);
+        let point = |ty: &str, val: i64| NumberDataPoint {
+            attributes: vec![kv("type", ty), kv("model", model)],
+            value: Some(number_data_point::Value::AsInt(val)),
+            time_unix_nano,
+            ..Default::default()
+        };
+        ExportMetricsServiceRequest {
+            resource_metrics: vec![ResourceMetrics {
+                scope_metrics: vec![ScopeMetrics {
+                    metrics: vec![Metric {
+                        name: "claude_code.token.usage".into(),
+                        data: Some(metric::Data::Sum(Sum {
+                            data_points: vec![point("input", input), point("output", output)],
+                            ..Default::default()
+                        })),
                         ..Default::default()
-                    })),
+                    }],
                     ..Default::default()
                 }],
                 ..Default::default()
             }],
-            ..Default::default()
-        }],
+        }
+        .encode_to_vec()
     }
-    .encode_to_vec()
-}
 
-/// [`encoded_claude_export`] with cache points — the tsk73 ingest tests' body.
-#[cfg(test)]
-pub(crate) fn encoded_claude_export_with_cache(
-    model: &str,
-    input: i64,
-    output: i64,
-    cache_read: i64,
-    cache_creation: i64,
-) -> Vec<u8> {
-    use opentelemetry_proto::tonic::common::v1::AnyValue;
-    use opentelemetry_proto::tonic::metrics::v1::{
-        Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
-    };
-    let kv = |k: &str, v: &str| KeyValue {
-        key: k.into(),
-        value: Some(AnyValue {
-            value: Some(any_value::Value::StringValue(v.into())),
-        }),
-        ..Default::default()
-    };
-    let point = |ty: &str, val: i64| NumberDataPoint {
-        attributes: vec![kv("type", ty), kv("model", model)],
-        value: Some(number_data_point::Value::AsInt(val)),
-        ..Default::default()
-    };
-    ExportMetricsServiceRequest {
-        resource_metrics: vec![ResourceMetrics {
-            scope_metrics: vec![ScopeMetrics {
-                metrics: vec![Metric {
-                    name: "claude_code.token.usage".into(),
-                    data: Some(metric::Data::Sum(Sum {
-                        data_points: vec![
-                            point("input", input),
-                            point("output", output),
-                            point("cacheRead", cache_read),
-                            point("cacheCreation", cache_creation),
-                        ],
+    /// [`encoded_claude_export`] with cache points — the tsk73 ingest tests' body.
+    pub(crate) fn encoded_claude_export_with_cache(
+        model: &str,
+        input: i64,
+        output: i64,
+        cache_read: i64,
+        cache_creation: i64,
+    ) -> Vec<u8> {
+        use opentelemetry_proto::tonic::common::v1::AnyValue;
+        use opentelemetry_proto::tonic::metrics::v1::{
+            Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
+        };
+        let kv = |k: &str, v: &str| KeyValue {
+            key: k.into(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue(v.into())),
+            }),
+            ..Default::default()
+        };
+        let point = |ty: &str, val: i64| NumberDataPoint {
+            attributes: vec![kv("type", ty), kv("model", model)],
+            value: Some(number_data_point::Value::AsInt(val)),
+            ..Default::default()
+        };
+        ExportMetricsServiceRequest {
+            resource_metrics: vec![ResourceMetrics {
+                scope_metrics: vec![ScopeMetrics {
+                    metrics: vec![Metric {
+                        name: "claude_code.token.usage".into(),
+                        data: Some(metric::Data::Sum(Sum {
+                            data_points: vec![
+                                point("input", input),
+                                point("output", output),
+                                point("cacheRead", cache_read),
+                                point("cacheCreation", cache_creation),
+                            ],
+                            ..Default::default()
+                        })),
                         ..Default::default()
-                    })),
+                    }],
                     ..Default::default()
                 }],
                 ..Default::default()
             }],
-            ..Default::default()
-        }],
+        }
+        .encode_to_vec()
     }
-    .encode_to_vec()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
     use opentelemetry_proto::tonic::common::v1::AnyValue;
     use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
     use opentelemetry_proto::tonic::metrics::v1::{

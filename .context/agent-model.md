@@ -22,13 +22,23 @@ the agent are:
    which fills the xterm with noise on Edit/Write-heavy turns. This
    covers *every* path: ingest failures and handler timeouts also ack
    `200 {}` (the agent can't act on a 4xx/5xx — it just prints the
-   warning) with the cause logged server-side. The shared helper is
-   `hook_ack()` in `crates/oxplow-control-plane/src/lib.rs`; never
-   return a bespoke status from a hook branch.
+   warning) with the cause logged server-side. Every answer goes through
+   `respond()` in `crates/oxplow-control-plane/src/lib.rs`, which has the
+   hook's harness render a `HookAnswer` (an ack is `{}` for every
+   built-in) and always answers `200`; never return a bespoke status from
+   a hook branch.
 3. MCP tool responses (when the agent calls a `oxplow__*` tool).
 
 Auto-progression through the queue is built entirely on (2). The agent
 thinks it's about to stop; the harness says "actually, do this next."
+
+**Driving is an interface only.** `oxplow_domain::agent::drive::Drive`
+(`programmatic`, `prompt`) is how oxplow or an extension would one day
+prompt an agent, and only on a surface licensed for it (API-funded; a PTY,
+or an ACP agent signed in with a plan, never is). Nothing implements, holds
+or calls it: `source_guards::nothing_in_core_drives_an_agent` fails on
+production code outside `drive.rs` that names it, so the first driver is a
+decision, not a drift.
 
 ### No synthesized agent terminal input (no automation)
 

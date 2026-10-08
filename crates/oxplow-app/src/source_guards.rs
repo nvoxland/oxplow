@@ -737,8 +737,8 @@ fn no_tmux_in_the_app() {
 }
 
 /// What core may not do with its own pieces (`.context/work-tracking.md`
-/// "Swappable pieces"): name the bundled extension as a value outside
-/// `bundled_extensions.rs` (its contributions are what any extension's
+/// "Swappable pieces"): name a bundled extension (`oxplow-bundled`,
+/// `oxplow-foundation`) as a value outside `bundled_extensions.rs` (its contributions are what any extension's
 /// are), or compare a provider id with oxplow's to decide how to treat
 /// it. Each `(file, pattern)` still here says why.
 #[rustfmt::skip]
@@ -753,6 +753,8 @@ fn special_cases() -> BTreeSet<(String, String)> {
     const PATTERNS: &[&str] = &[
         "\"oxplow-bundled\"",
         "\"oxplow-bundled/",
+        "\"oxplow-foundation\"",
+        "\"oxplow-foundation/",
         "== OXPLOW",
         "!= OXPLOW",
         "== \"oxplow\"",
@@ -797,6 +799,95 @@ fn core_never_special_cases_its_own_pieces() {
         unlisted.is_empty() && gone.is_empty(),
         "core's special cases changed.\nunlisted (go through the capability registry instead): {unlisted:#?}\nno longer there (drop from SPECIAL_CASES): {gone:#?}"
     );
+}
+
+/// Where an agent harness may be named in production code: the harness
+/// crates (`HARNESS_CRATES`, all of them) and the files listed here.
+/// Everything else goes through `AgentHarness` and the harness registry,
+/// whichever harnesses are declared (`.context/agent-model.md`). Each file
+/// still here says why.
+#[rustfmt::skip]
+const HARNESS_IMPLEMENTATION: &[(&str, &str)] = &[];
+
+/// The crates that implement harnesses.
+const HARNESS_CRATES: &[&str] = &["crates/oxplow-harnesses/", "crates/oxplow-harness-fake/"];
+
+/// Production files outside the harness crates that name a harness's own
+/// pieces — its CLI's flags, env markers, metric names, tool names,
+/// instruction files (comments left out).
+fn harness_namers() -> BTreeSet<String> {
+    const PATTERNS: &[&str] = &[
+        "AgentKind",
+        "claude-agent-acp",
+        "CLAUDECODE",
+        "CLAUDE_CODE_",
+        "claude_code.token",
+        "codex.turn.token",
+        "apply_patch",
+        "OPENCODE_CONFIG_CONTENT",
+        "--plugin-dir",
+        "--append-system-prompt",
+        ".claude/",
+        "CLAUDE.md",
+    ];
+    let mut out = BTreeSet::new();
+    for (path, text) in production_sources() {
+        if HARNESS_CRATES.iter().any(|c| path.starts_with(c)) {
+            continue;
+        }
+        let named = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .any(|line| PATTERNS.iter().any(|p| line.contains(p)));
+        if named {
+            out.insert(path);
+        }
+    }
+    out
+}
+
+/// Nothing outside the harness implementations knows one harness from
+/// another.
+#[test]
+fn only_harness_implementations_name_a_harness() {
+    let pinned: BTreeSet<String> = HARNESS_IMPLEMENTATION
+        .iter()
+        .map(|(f, _)| f.to_string())
+        .collect();
+    let found = harness_namers();
+    let unlisted: Vec<_> = found.difference(&pinned).collect();
+    let gone: Vec<_> = pinned.difference(&found).collect();
+    assert!(
+        unlisted.is_empty() && gone.is_empty(),
+        "who names a harness changed.\nunlisted (go through AgentHarness instead): {unlisted:#?}\nno longer there (drop from HARNESS_IMPLEMENTATION): {gone:#?}"
+    );
+}
+
+/// The Drive interface (`oxplow-domain/src/agent/drive.rs`): oxplow
+/// prompting an agent. Nothing in production code implements, holds or
+/// calls it — oxplow never drives an agent through a surface licensed for
+/// interactive use, and the first driver is a decision, not a drift.
+#[test]
+fn nothing_in_core_drives_an_agent() {
+    const DRIVE: &str = "crates/oxplow-domain/src/agent/drive.rs";
+    const PATTERNS: &[&str] = &[
+        "dyn Drive",
+        "impl Drive",
+        "Drive for",
+        "agent::drive::",
+        "DriveError",
+    ];
+    let offenders: Vec<String> = production_sources()
+        .into_iter()
+        .filter(|(path, _)| path != DRIVE)
+        .filter(|(_, text)| {
+            text.lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .any(|line| PATTERNS.iter().any(|p| line.contains(p)))
+        })
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(offenders, Vec::<String>::new());
 }
 
 /// Where oxplow's own task list — one implementation of the work-item

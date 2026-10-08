@@ -186,11 +186,18 @@ own — heavier ones included (beads as a work list).
   Core's own records (turns, efforts, the event log) stay transactional
   in core.
   `source_guards::core_never_special_cases_its_own_pieces` fails on a
-  literal `"oxplow-bundled"` outside `bundled_extensions.rs` or a
-  provider id compared with oxplow's; what's left is pinned with its
-  reason. oxplow's tasks sit behind the interface like any list
-  (`crates/oxplow-tasks`, registered by declaration, their verbs called
-  outside the transaction — [work-items.md](./work-items.md)).
+  literal `"oxplow-bundled"` or `"oxplow-foundation"` outside
+  `bundled_extensions.rs` or a provider id compared with oxplow's; what's
+  left is pinned with its reason. oxplow's tasks sit behind the interface
+  like any list (`crates/oxplow-tasks`, registered by declaration, their
+  verbs called outside the transaction — [work-items.md](./work-items.md)).
+  The agent harnesses likewise: `only_harness_implementations_name_a_harness`
+  fails on production code outside `crates/oxplow-harnesses` and
+  `crates/oxplow-harness-fake` that names a harness's own pieces
+  (`AgentKind`, its CLI's flags, env markers, metric names, tool names,
+  `CLAUDE.md`, `.claude/`), with a pinned list (`HARNESS_IMPLEMENTATION`,
+  empty) for any that must stay, each with its reason
+  ([agent-model.md](./agent-model.md) "Launching the agent").
 - **The agent's tools follow the active implementation.** An interface is
   what oxplow needs to show, link and act; it is not a funnel the agent
   must work through. Each implementation declares its agent surface (its

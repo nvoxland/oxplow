@@ -50,11 +50,10 @@ fn home_dir() -> Option<PathBuf> {
 /// replacement.
 pub fn well_known_bin_dirs(home: &Path) -> Vec<PathBuf> {
     vec![
-        // Claude Code's default install target, and the general XDG-ish
-        // user-local bin. This is the one that bites in practice.
+        // The general XDG-ish user-local bin, where agent CLIs install by
+        // default. This is the one that bites in practice. (A harness
+        // knows its CLI's own install dirs and looks there itself.)
         home.join(".local/bin"),
-        // Claude Code's older self-contained install.
-        home.join(".claude/local"),
         // Homebrew: Apple Silicon, then Intel/Linuxbrew.
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
@@ -313,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn well_known_dirs_lead_with_the_default_claude_install() {
+    fn well_known_dirs_lead_with_the_user_local_bin() {
         let dirs = well_known_bin_dirs(Path::new("/home/u"));
         assert_eq!(dirs.first().unwrap(), Path::new("/home/u/.local/bin"));
         assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));

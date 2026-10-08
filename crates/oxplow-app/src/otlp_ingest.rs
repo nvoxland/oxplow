@@ -139,7 +139,7 @@ impl OtlpIngestService {
 mod tests {
     use super::*;
     use crate::hook_ingest::HookEnvelope;
-    use crate::otlp_tokens::{encoded_claude_export, encoded_claude_export_at};
+    use crate::otlp_tokens::tests::{encoded_claude_export, encoded_claude_export_at};
     use oxplow_domain::{HookKind, StoredEvent, Timestamp};
 
     fn hook(thread: ThreadId, kind: HookKind) -> HookEnvelope {
@@ -465,7 +465,7 @@ mod tests {
             .unwrap();
         // Collected at 15 s over the window since the last export at 5 s:
         // 5 s of turn A, 4 s of turn B.
-        let body = crate::otlp_tokens::encoded_claude_export_over(
+        let body = crate::otlp_tokens::tests::encoded_claude_export_over(
             "claude-opus-4-8",
             100,
             20,

@@ -1122,7 +1122,7 @@ mod tests {
         // tsk22: an OTLP metrics export lands per-kind token facts on
         // `oxplow.tokens`, and a retransmit of the identical export is a no-op.
         let (svc, _dir, thread) = service_fixture().await;
-        let body = crate::otlp_tokens::encoded_claude_export("claude-opus-4-8", 100, 20);
+        let body = crate::otlp_tokens::tests::encoded_claude_export("claude-opus-4-8", 100, 20);
 
         assert!(report(&svc, thread, &body).await);
 
@@ -1176,7 +1176,7 @@ mod tests {
         // per-model `oxplow.cache_usage` ratio fact: num = cache_read, den =
         // prompt-side total (input + cache_read + cache_creation).
         let (svc, _dir, thread) = service_fixture().await;
-        let body = crate::otlp_tokens::encoded_claude_export_with_cache(
+        let body = crate::otlp_tokens::tests::encoded_claude_export_with_cache(
             "claude-fable-5",
             100, // input
             20,  // output
@@ -1243,7 +1243,7 @@ mod tests {
         // An agent that reports no cache telemetry must read as "no data",
         // not a 0% point dragging the cumulative hit ratio down.
         let (svc, _dir, thread) = service_fixture().await;
-        let body = crate::otlp_tokens::encoded_claude_export("claude-fable-5", 100, 20);
+        let body = crate::otlp_tokens::tests::encoded_claude_export("claude-fable-5", 100, 20);
         report(&svc, thread, &body).await;
         let usage = svc
             .fact_store

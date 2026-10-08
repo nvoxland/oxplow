@@ -118,7 +118,8 @@ impl AgentHarness for Claude {
             }
             (resume, _) => (resume, false),
         };
-        let program = (input.resolve_program)("claude");
+        let program =
+            (input.resolve_program)("claude").or_else(|| input.home.and_then(local_install));
         Ok(Launch {
             spec: LaunchSpec::Pty {
                 command: command(&Command {
@@ -474,6 +475,13 @@ fn write_mcp_config(
         &build_mcp_config(mcp_endpoint_url, hook_token, Some(identity)),
     )?;
     Ok(path)
+}
+
+/// Claude Code's older self-contained install (`~/.claude/local/claude`),
+/// which no PATH names: where it looks when the resolver finds nothing.
+fn local_install(home: &Path) -> Option<String> {
+    let bin = home.join(".claude").join("local").join("claude");
+    bin.is_file().then(|| bin.to_string_lossy().into_owned())
 }
 
 /// What the `claude` command line is built from.
@@ -1039,5 +1047,20 @@ mod tests {
         assert!(read(TOKEN_METRIC, "total", 5).is_empty());
         assert!(read(TOKEN_METRIC, "input", 0).is_empty());
         assert!(read(TOKEN_METRIC, "input", -5).is_empty());
+    }
+
+    /// With nothing on PATH or in the common dirs, Claude Code's own
+    /// self-contained install is used.
+    #[test]
+    fn its_local_install_is_the_fallback() {
+        let home = TempDir::new().unwrap();
+        assert_eq!(local_install(home.path()), None);
+        let bin = home.path().join(".claude/local/claude");
+        fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        fs::write(&bin, "").unwrap();
+        assert_eq!(
+            local_install(home.path()),
+            Some(bin.to_string_lossy().into_owned())
+        );
     }
 }
