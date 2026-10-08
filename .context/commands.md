@@ -19,13 +19,11 @@ The **namespace** is its owner's, so two extensions' areas never collide:
   `namespace: oxplow`). They share it, collisions checked per id, so a
   command moving between core and a shipped extension keeps its id.
 - An extension's declared `namespace:` (default: its name with `-` →
-  `_`) — that extension's alone.
-- A provider instance's id — interim, `<instance>.<capability>.<name>`
-  (`providers::command_id`), until providers are namespaced by their
-  extension.
+  `_`) — that extension's alone, its providers' commands included (one
+  id for every instance; the input says which runs it).
 
 The registry records each command's **source** (`core`,
-`extension:<name>`, `provider:<name>`; `CommandBus::source_of`) and each
+`extension:<name>`; `CommandBus::source_of`) and each
 namespace's **holder** (`namespace_owner`: `oxplow`, or the one source
 holding it). `register` is core's (under `oxplow`); `register_namespace(ns,
 source, commands)` registers a source's commands all-or-nothing;

@@ -1,28 +1,25 @@
-/// The page nav bar's Commands (P6b.C4): extensions' `ui.commands` about
-/// the page's ref (`placement: menu`), grouped under the provider or
-/// extension. Each runs as the person through `personCommands` (which
-/// asks first when the command asks). Hidden when nothing applies.
+/// The page nav bar's Commands: the commands about the page's ref (their
+/// `ui.about`), grouped by their `ui.group`, each run as any offer is
+/// (`refCommands.ts`). Hidden when nothing applies.
 import type { CSSProperties } from "react";
 import { useState } from "react";
 
-import { personCommands } from "../personCommands.js";
 import type { AskTarget } from "./Prompts/AskMenu.js";
-import { bindRefInput, groupUiCommands, uiCommandsAbout } from "./uiCommands.js";
+import { groupOffers, useRefOffers } from "./refCommands.js";
 import { usePopoverDismiss } from "./usePopoverDismiss.js";
-import { useUiCommands } from "./useUiCommands.js";
 
 export function RefCommandsMenu({ target, buttonStyle }: { target: AskTarget; buttonStyle: CSSProperties }) {
-  const all = useUiCommands();
+  const offersFor = useRefOffers();
   const [open, setOpen] = useState(false);
   const boxRef = usePopoverDismiss<HTMLDivElement>(open, () => setOpen(false));
-  const commands = uiCommandsAbout(all, target.ref, "menu");
-  if (commands.length === 0) return null;
+  const entries = offersFor(target.ref);
+  if (entries.length === 0) return null;
   return (
     <div ref={boxRef} style={{ position: "relative", display: "inline-flex" }}>
       <button
         type="button"
         data-testid="page-nav-commands"
-        title="Commands extensions offer for this page"
+        title="Commands for this page"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={buttonStyle}
@@ -31,21 +28,22 @@ export function RefCommandsMenu({ target, buttonStyle }: { target: AskTarget; bu
       </button>
       {open ? (
         <div data-testid="page-nav-commands-menu" style={popoverStyle}>
-          {groupUiCommands(commands).map((g) => (
+          {groupOffers(entries).map((g) => (
             <div key={g.group} style={{ display: "flex", flexDirection: "column" }}>
               <div style={groupStyle}>{g.group}</div>
-              {g.commands.map((c) => (
+              {g.entries.map((e) => (
                 <button
-                  key={c.id}
+                  key={e.id}
                   type="button"
-                  data-testid={`page-nav-command-${c.id}`}
+                  data-testid={`page-nav-command-${e.id}`}
                   style={itemStyle}
+                  disabled={e.enabled === false}
                   onClick={() => {
                     setOpen(false);
-                    void personCommands.run(c.label, c.command, bindRefInput(c.input, target.ref));
+                    e.run();
                   }}
                 >
-                  {c.label}
+                  {e.label}
                 </button>
               ))}
             </div>

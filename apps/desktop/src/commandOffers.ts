@@ -67,6 +67,31 @@ function withResult(template: string, result: unknown): string {
   });
 }
 
+/** `spec`'s entry, run with `input` (or its form). */
+function offer(spec: CommandSpec, input: unknown, deps: OfferDeps): CommandEntry {
+  const ui = spec.ui!;
+  const group = ui.group ?? "Commands";
+  return {
+    id: spec.id,
+    group,
+    label: ui.label,
+    searchKey: [group, ui.label, ...ui.keywords].join(" ").toLowerCase(),
+    shortcut: ui.shortcut ?? undefined,
+    whileTyping: ui.while_typing,
+    menu: ui.menu ?? null,
+    enabled: deps.available ? deps.available(spec) : true,
+    run: () => {
+      // A tab id (`page:new-task`) is a page; anything else one of the
+      // window's own forms.
+      if (ui.form) return ui.form.includes(":") ? deps.openPage(ui.form) : deps.openForm(ui.form);
+      if (ui.background) return deps.runInBackground(ui.label, spec.id, input);
+      void deps.run(ui.label, spec.id, input).then((out) => {
+        if (out && ui.open_after) deps.openPage(withResult(ui.open_after, out.result));
+      });
+    },
+  };
+}
+
 /** The ref-less commands of `specs` available in `ctx`, as search entries. */
 export function commandOffers(specs: CommandSpec[], ctx: OfferContext, deps: OfferDeps): CommandEntry[] {
   const out: CommandEntry[] = [];
@@ -75,27 +100,23 @@ export function commandOffers(specs: CommandSpec[], ctx: OfferContext, deps: Off
     if (!ui || ui.about) continue;
     // A form gathers the input itself; otherwise it must bind here.
     const bound = ui.form ? { input: null } : bindInput(ui.input, ctx);
-    if (!bound) continue;
-    const group = ui.group ?? "Commands";
-    out.push({
-      id: spec.id,
-      group,
-      label: ui.label,
-      searchKey: [group, ui.label, ...ui.keywords].join(" ").toLowerCase(),
-      shortcut: ui.shortcut ?? undefined,
-      whileTyping: ui.while_typing,
-      menu: ui.menu ?? null,
-      enabled: deps.available ? deps.available(spec) : true,
-      run: () => {
-        // A tab id (`page:new-task`) is a page; anything else one of the
-        // window's own forms.
-        if (ui.form) return ui.form.includes(":") ? deps.openPage(ui.form) : deps.openForm(ui.form);
-        if (ui.background) return deps.runInBackground(ui.label, spec.id, bound.input);
-        void deps.run(ui.label, spec.id, bound.input).then((out) => {
-          if (out && ui.open_after) deps.openPage(withResult(ui.open_after, out.result));
-        });
-      },
-    });
+    if (bound) out.push(offer(spec, bound.input, deps));
+  }
+  return out;
+}
+
+/** The commands of `specs` about `ref`'s kind (`ui.about`) — what a
+ *  ref's page menu and its rows' right-click menus offer — with `ref`
+ *  bound into their input (`{ ref: "{{ref}}" }` when they say none). */
+export function refOffers(specs: CommandSpec[], ref: string, ctx: OfferContext, deps: OfferDeps): CommandEntry[] {
+  const kind = ref.slice(0, ref.indexOf(":"));
+  if (!kind) return [];
+  const out: CommandEntry[] = [];
+  for (const spec of specs) {
+    const ui = spec.ui;
+    if (!ui || ui.about !== kind) continue;
+    const bound = ui.form ? { input: null } : bindInput(ui.input ?? { ref: "{{ref}}" }, { ...ctx, ref });
+    if (bound) out.push(offer(spec, bound.input, deps));
   }
   return out;
 }

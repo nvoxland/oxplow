@@ -288,9 +288,9 @@ the adapter included.
 ## The host (`crates/oxplow-app/src/providers/`)
 
 **The manifest kind** (`spec.rs`; an MCP server's form is in "The MCP
-adapter" above): `providers:` is an experimental kind,
-so only a private extension's are loaded (onto `Extension.providers`; a
-disabled extension has none):
+adapter" above): `providers:` is a stable kind (since the command model's
+providers phase), loaded onto `Extension.providers` (a disabled extension
+has none):
 
 ```yaml
 providers:
@@ -412,7 +412,7 @@ One spelling everywhere, because the id is used as it stands:
 | Keyed on the **instance id** | Keyed on the **provider (program)** |
 |---|---|
 | the ref segment (`work_item:issues_acme:ENG-1`) and `check_subject` | the consent key `provider:<ext>/<provider id>` and its hash |
-| the bus namespace (`issues_acme.estimate`) | the approved copy (`copies/<ext>/<provider id>/<hash>`) |
+| an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the approved copy (`copies/<ext>/<provider id>/<hash>`) |
 | the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | Data → Programs' row, `declaration_effects` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
 | `plugin_health.contribution`, `provider_collector_state.instance` (the name) | |
@@ -443,8 +443,8 @@ instance restarts on it) — RPCs `add_provider_instance`,
 `remove_provider_instance`, `set_instance_credential`, UI only. A
 provider's credential is its instance's: collectors keep the
 extension's `source:<project>:<ext>:<name>` accounts. An extension's
-`ui.commands` name the default instance's commands (`issues.estimate`);
-another instance's are on the bus under its own namespace.
+command declared over its provider's operation runs on the instance its
+input names (`instance`, else its `ref`'s, else the default).
 
 **Scope** (P9.B2). An instance is the **project's** (above: shared with
 the team in `project.yaml`) or the **person's** — global, in this
@@ -738,12 +738,26 @@ nothing; a start that merely failed (it may come up) registers and
 counts as a failure, and its next call restarts it after a backoff that
 doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
 `Services::in_memory`) up to 60 s. `stop(instance)` removes both and
-kills the process. Its commands register whole as the namespace's
-owner (`register_namespace(id, "provider:<instance>", …)`, all or
-none), each with the interim id `<instance>.<capability>.<name>`
-(`providers::command_id`: `fake.work_items.estimate`); an id whose
-namespace is already held (`namespace_owner`) or that is already a
-provider is refused. A stopped instance's go with `unregister_source`. **A provider emits only its capability's event
+kills the process. **Its commands are its extension's**: the manifest
+declares each once over an operation its declarations list
+(`commands:` → `{ name: item.estimate, provider: fake, op: estimate,
+ui, … }`, [extensions.md](./extensions.md) "Commands"), so it has one id
+for every instance (`tracker.item.estimate`), registered by the
+extension reconciler whether or not an instance runs. Its spec takes the
+operation's input schema (plus an optional `instance`), effect and
+undo; its `confirm` is the manifest's when that asks more, else the
+declaration's; its `op` is `{ capability: provider:<ext>/<provider>, op
+}`. A run goes through the bus's **provider router**
+(`CommandBus::set_provider_router`, `ProviderRouter for
+ProviderRegistry::run_op`) to the instance its input names — an
+`instance` field, else the instance its `ref` is of
+(`work_item:<instance>:…`), else the provider's default instance —
+`Unavailable` when that one isn't running; its inverse names an
+operation, made a call of the command declared over it (with the
+instance), or `oxplow.work_item.<verb>` for a capability verb. A
+capability verb can't be declared this way: it runs as
+`oxplow.work_item.<verb>`. An instance registers only its work list (no
+bus namespace). **A provider emits only its capability's event
 types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@2`
 or `@2` — a published version's schema never changes, since declarations
 are compared to it exactly;
@@ -928,14 +942,13 @@ reason logged, keeps it off across a reconcile, refuses an agent's
 conformance suite passes through the dispatching `work_item.*` over the
 fake; `work_item.*` writes the fake's items through its process with one
 audit row (and undo dispatches again), its verbs aren't on the bus but
-`fake.estimate` is; a verb's input is checked against its declared schema
+its extension's `tracker.item.estimate` is, run on the instance its `ref`
+names; a verb's input is checked against its declared schema
 and a parent or link target of another provider is refused.
 
-**Its commands can appear in core menus**: the extension's
-`ui.commands` may name the provider's own `<provider>.<name>` commands
-(not its capability's verbs — those are `work_item.<verb>`), grouped
-under the provider and checked against its declarations
-([extensions.md](./extensions.md)).
+**Its commands appear in core menus** by their own `ui`: one about a
+ref's kind (`ui.about: work_item`) is on that ref's page menu and its
+rows' right-click menus (`refOffers`).
 
 **Its features are published** while it runs: `admit` writes the
 instance in the capability registry (`CapabilityRegistry::set_external`)

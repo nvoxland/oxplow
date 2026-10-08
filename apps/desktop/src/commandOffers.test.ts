@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { bindInput, commandOffers, type OfferDeps } from "./commandOffers.js";
+import { bindInput, commandOffers, refOffers, type OfferDeps } from "./commandOffers.js";
 import type { CommandSpec, CommandUi } from "./tauri-bridge/generated/bindings.js";
 
 // What search offers of the command bus: each command a person may run
@@ -103,5 +103,23 @@ test("a form that isn't a tab id is one of the window's own; an offer says its s
   expect(offers.map((o) => [o.id, o.shortcut, o.whileTyping, o.menu, o.enabled])).toEqual([
     ["oxplow.thread.create", undefined, false, null, true],
     ["oxplow.editor.save", "Ctrl/Cmd+S", true, { bar: "file", order: 40 }, false],
+  ]);
+});
+
+test("a ref's menus offer the commands about its kind, the ref bound into their input", async () => {
+  const { d, calls } = deps();
+  const specs = [
+    spec("oxplow.review.accept", { label: "Accept Review", about: "effort", input: { ref: "{{ref}}" } }),
+    spec("tracker.item.estimate", { label: "Estimate", about: "work_item", input: { ref: "{{ref}}", points: 3 } }),
+    spec("tracker.item.flag", { label: "Flag", about: "work_item" }),
+    spec("oxplow.vcs.pull", { label: "Pull" }),
+  ];
+  const offers = refOffers(specs, "work_item:fake:W-1", ctx, d);
+  expect(offers.map((o) => o.id)).toEqual(["tracker.item.estimate", "tracker.item.flag"]);
+  for (const o of offers) o.run();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(calls).toEqual([
+    'run tracker.item.estimate {"ref":"work_item:fake:W-1","points":3}',
+    'run tracker.item.flag {"ref":"work_item:fake:W-1"}',
   ]);
 });

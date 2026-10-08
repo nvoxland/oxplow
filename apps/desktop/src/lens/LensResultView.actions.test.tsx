@@ -2,6 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
+import { personSpec, recordRefOffers } from "../components/refCommandsTestSupport.js";
 
 const realApi = await import("../api.js");
 const realQuerySql = realApi.querySql;
@@ -24,15 +25,15 @@ mock.module("../api.js", () => ({
     return { result: null, auditId: 1, eventId: null, inverse: null };
   },
   getCommand: async () => Promise.reject(new Error("no bridge in tests")),
+  listPersonCommands: async () => [
+    personSpec("tracker.item.flag", { label: "Flag It", group: "Tracker", about: "work_item", input: { ref: "{{ref}}" } }),
+  ],
   listExtensions: async () => [
     {
       name: "tracker",
       enabled: true,
       ui: {
         slots: [],
-        commands: [
-          { id: "tracker/0", extension: "tracker", group: "tracker", command: "tracker.flag", label: "Flag It", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" } },
-        ],
         decorators: [
           { id: "tracker/0", extension: "tracker", view: "v_tracker_flags", kind: "work_item", placement: "row-badge", label: "label", color: null },
         ],
@@ -125,9 +126,10 @@ test("rows are focusable and open their menu from the keyboard, in every row com
   expect(view.queryByTestId("menu-item-lens-action-finish")).not.toBeNull();
 });
 
-// P6b.C4: a row that links to a ref offers extensions' commands about that
-// kind of ref, after Ask About This and the lens's row actions.
-test("a row's linked ref gets its extensions' commands", async () => {
+// A row that links to a ref offers the commands about that kind of ref
+// (their `ui.about`), after Ask About This and the lens's row actions.
+test("a row's linked ref gets its kind's commands", async () => {
+  recordRefOffers(commandRuns);
   const linked: LensRun = {
     lens: { ...lens, columns: [{ key: "ref", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
     params: {},
@@ -136,9 +138,9 @@ test("a row's linked ref gets its extensions' commands", async () => {
   const view = render(<LensResultView run={linked} onOpenPage={() => {}} />);
   await new Promise((r) => setTimeout(r, 20));
   fireEvent.contextMenu(view.getByTestId("lens-row-0"));
-  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ui-commands-tracker")));
-  fireEvent.click(view.getByTestId("menu-item-ui-command-tracker/0"));
-  await waitFor(() => expect(commandRuns).toEqual([["tracker.flag", { ref: "work_item:oxplow:tsk1" }]]));
+  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ref-commands-Tracker")));
+  fireEvent.click(view.getByTestId("menu-item-ref-command-tracker.item.flag"));
+  await waitFor(() => expect(commandRuns).toEqual([["tracker.item.flag", { ref: "work_item:oxplow:tsk1" }]]));
 });
 
 // P6b.C5: a decorator's label follows a cell that links to its ref.

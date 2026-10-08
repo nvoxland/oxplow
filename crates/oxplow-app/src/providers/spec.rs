@@ -663,12 +663,14 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
         ));
     }
     for command in &declared.commands {
-        oxplow_domain::CommandSpec::validate_id(&crate::providers::command_id(
-            id,
-            &spec.capability,
-            &command.name,
-        ))
-        .map_err(|e| format!("provider `{id}`: {e}"))?;
+        // An operation name is one segment of a command id (`estimate`).
+        if !crate::extension_commands::valid_op(&command.name) {
+            return Err(format!(
+                "provider `{id}` command `{}`: an operation is lowercase letters, digits and \
+                 underscores, starting with a letter",
+                command.name
+            ));
+        }
         crate::providers::host::confirm_of(&command.confirm)
             .and(crate::providers::host::effect_of(&command.effect))
             .map_err(|e| format!("provider `{id}` command `{}`: {e}", command.name))?;

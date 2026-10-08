@@ -27,8 +27,7 @@ import {
 } from "../../workItems.js";
 import { personCommands } from "../../personCommands.js";
 import { recordOpError } from "../opErrorsStore.js";
-import { uiCommandMenuItems, uiCommandsAbout } from "../uiCommands.js";
-import { useUiCommands } from "../useUiCommands.js";
+import { refCommandMenuItems, useRefOffers } from "../refCommands.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 
 
@@ -37,7 +36,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [over, setOver] = useState<CanonicalState | null>(null);
   const ctxMenu = useContextMenu();
-  const uiCommands = useUiCommands();
+  const refOffersFor = useRefOffers();
   const { fields } = useWorkListProfile();
   const scopeKey = JSON.stringify(scope);
   const refresh = useCallback(async () => {
@@ -105,10 +104,8 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                       enabled: true,
                       run: () => void move(item.ref, s),
                     })),
-                    // Extensions' commands for the item (P6b.C4).
-                    ...uiCommandMenuItems(uiCommandsAbout(uiCommands, item.ref, "context"), item.ref, (c, input) =>
-                      void personCommands.run(c.label, c.command, input),
-                    ),
+                    // The commands about a work item (their `ui.about`).
+                    ...refCommandMenuItems(refOffersFor(item.ref)),
                   ])
                 }
               >
