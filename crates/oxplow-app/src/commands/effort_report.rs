@@ -198,6 +198,7 @@ mod tests {
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         }
@@ -324,6 +325,7 @@ mod tests {
         let fx = services_with_effort().await;
         let other = new_thread(&fx.svc, StreamId::new(1), "other").await;
         let stranger = Actor::Agent {
+            session_id: None,
             thread_id: Some(other.id),
             stream_id: None,
         };

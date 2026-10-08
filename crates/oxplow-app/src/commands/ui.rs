@@ -349,6 +349,7 @@ mod tests {
     async fn an_agent_may_not_report_a_ui_error() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(ThreadId::new(fx.thread.value())),
             stream_id: None,
         };
@@ -375,6 +376,7 @@ mod tests {
             .svc
             .commands
             .list(&Actor::Agent {
+                session_id: None,
                 thread_id: Some(ThreadId::new(fx.thread.value())),
                 stream_id: None,
             })

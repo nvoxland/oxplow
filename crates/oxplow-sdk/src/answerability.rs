@@ -523,6 +523,7 @@ mod tests {
         out.extend(
             svc.commands
                 .list(&oxplow_domain::Actor::Agent {
+                    session_id: None,
                     thread_id: None,
                     stream_id: None,
                 })

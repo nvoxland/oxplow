@@ -1289,6 +1289,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };

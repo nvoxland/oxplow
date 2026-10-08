@@ -223,6 +223,28 @@ async fn run_command_over_http_is_audited_to_the_bearers_thread() {
         .find(|e| e.envelope.event_type == "command.executed")
         .expect("command.executed logged");
     assert_eq!(executed.envelope.source, format!("agent:{}", thread.id));
+    // The run is the bearer's session's: its audit row and its event say so.
+    use oxplow_domain::stores::AgentSessionStore as _;
+    let session = services
+        .agent_session_store
+        .list_open_for_thread(&thread.id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap()
+        .id;
+    assert_eq!(executed.envelope.anchors.agent_session_id, Some(session));
+    let audit = oxplow_db::command_audit_store::SqliteCommandAuditStore::new(services.db.clone())
+        .get(executed_audit_id(&executed.envelope))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(audit.session_id, Some(session));
+}
+
+/// The audit row a `command.executed` names.
+fn executed_audit_id(envelope: &oxplow_domain::events::Envelope) -> i64 {
+    envelope.payload["audit_id"].as_i64().unwrap()
 }
 
 /// A bearer no session holds is refused before MCP sees the request.

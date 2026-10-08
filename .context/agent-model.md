@@ -329,6 +329,12 @@ as another, and two sessions on one thread are told apart.
   envelopes directly, naming the session; they don't go through a route.
 - A hook's harness is the bearer's, so even a hook that times out is
   answered in its harness's shape.
+- **The actor carries its session.** An MCP call's actor is
+  `Actor::Agent { session_id, thread_id, stream_id }` from the bearer;
+  its audit row records the session (`command_audit.session_id`) and the
+  events its run causes are anchored to it (`Actor::anchors()`), so two
+  sessions on one thread are two actors in the record. `source` stays
+  `agent:thr<n>`.
 
 ## Harness runtimes
 

@@ -1456,6 +1456,7 @@ mod tests {
 
         // An agent may not; a person is asked, and told why to think.
         let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -2104,6 +2105,7 @@ mod tests {
         // What a backfill would do: a read, an agent's too.
         let input = json!({ "effect": "acme/mark-done" });
         let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };

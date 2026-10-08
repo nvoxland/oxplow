@@ -10,7 +10,7 @@ use serde_json::Value;
 use specta::Type;
 
 use oxplow_domain::events::schema::{ActorKind, CommandOutcome as Outcome};
-use oxplow_domain::{CommandCall, DomainError, EventId, ThreadId, Timestamp};
+use oxplow_domain::{AgentSessionId, CommandCall, DomainError, EventId, ThreadId, Timestamp};
 
 use crate::database::{map_sql_err, Database};
 use crate::database::{string_to_ts, ts_to_string};
@@ -64,6 +64,8 @@ pub struct CommandAudit {
     pub actor_kind: ActorKind,
     pub actor_id: Option<String>,
     pub thread_id: Option<ThreadId>,
+    /// The agent session that ran it, when an agent did through one.
+    pub session_id: Option<AgentSessionId>,
     pub input: Value,
     pub outcome: Outcome,
     pub error: Option<String>,
@@ -87,6 +89,7 @@ pub struct NewCommandAudit {
     pub actor_kind: ActorKind,
     pub actor_id: Option<String>,
     pub thread_id: Option<ThreadId>,
+    pub session_id: Option<AgentSessionId>,
     pub input: Value,
     pub outcome: Outcome,
     pub error: Option<String>,
@@ -105,8 +108,8 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
     conn.execute(
         "INSERT INTO command_audit
            (at, command, actor_kind, actor_id, thread_id, input_json, outcome, error, inverse_json,
-            result_json, scopes_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            result_json, scopes_json, session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             ts_to_string(Timestamp::now()),
             row.command,
@@ -122,6 +125,7 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
                 .map(|r| serde_json::to_string(r).expect("result serializes")),
             (!row.scopes.is_empty())
                 .then(|| { serde_json::to_string(&row.scopes).expect("scopes serialize") }),
+            row.session_id.map(|s| s.value()),
         ],
     )
     .map_err(map_sql_err)?;
@@ -173,6 +177,9 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
         actor_kind: parse_actor_kind(&actor_kind).map_err(conv)?,
         actor_id: row.get("actor_id")?,
         thread_id: row.get::<_, Option<i64>>("thread_id")?.map(ThreadId::new),
+        session_id: row
+            .get::<_, Option<i64>>("session_id")?
+            .map(AgentSessionId::new),
         input: serde_json::from_str(&input)
             .map_err(|e| conv(DomainError::Storage(format!("input json: {e}"))))?,
         outcome: parse_outcome(&outcome).map_err(conv)?,
@@ -260,6 +267,7 @@ mod tests {
                             actor_kind: ActorKind::Agent,
                             actor_id: Some("thr3".into()),
                             thread_id: Some(ThreadId::new(3)),
+                            session_id: Some(AgentSessionId::new(5)),
                             input: json!({"id": "tsk1", "to": "done"}),
                             outcome: Outcome::Ok,
                             error: None,
@@ -279,6 +287,7 @@ mod tests {
                             actor_kind: ActorKind::Human,
                             actor_id: None,
                             thread_id: None,
+                            session_id: None,
                             input: json!({"id": "tsk1", "to": "ready"}),
                             outcome: Outcome::Ok,
                             error: None,
@@ -294,6 +303,8 @@ mod tests {
             .await
             .unwrap();
         let row = store.get(id).await.unwrap().unwrap();
+        assert_eq!(row.session_id, Some(AgentSessionId::new(5)));
+        assert_eq!(store.get(undo_id).await.unwrap().unwrap().session_id, None);
         assert_eq!(row.command, "oxplow.work_item.transition");
         assert_eq!(row.actor_kind, ActorKind::Agent);
         assert_eq!(row.thread_id, Some(ThreadId::new(3)));
@@ -324,6 +335,7 @@ mod tests {
                     actor_kind: ActorKind::Lens,
                     actor_id: Some("acme/x".into()),
                     thread_id: None,
+                    session_id: None,
                     input: json!({}),
                     outcome: Outcome::Denied,
                     error: Some("lenses may not run oxplow.config.set".into()),
