@@ -5549,6 +5549,31 @@ commands:
             c.handler,
             crate::extension_commands::CommandHandler::Capability { .. }
         )));
+        // The agent harnesses, ACP agents and AI providers core runs are
+        // foundation's declarations — many of each, all active.
+        let declared = |capability: &str| {
+            foundation
+                .implementations
+                .iter()
+                .filter(|d| d.capability == capability)
+                .map(|d| d.id.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            declared("agent_harness"),
+            ["claude", "codex", "opencode", "acp"]
+        );
+        assert_eq!(declared("acp_adapter"), ["claude", "gemini", "codex"]);
+        assert_eq!(
+            declared("ai_provider"),
+            [
+                "anthropic",
+                "openai",
+                "openai_compatible",
+                "openrouter",
+                "typesafe"
+            ]
+        );
         let b = bundled[0];
         assert!(b.errors.is_empty(), "{:?}", b.errors);
         // Its manifest is v2, shared, with an intent, and clean.

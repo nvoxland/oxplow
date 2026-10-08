@@ -2426,8 +2426,16 @@ implementations:
   - { capability: work_items, id: oxplow, entry: "oxplow:tasks" }
 ```
 
-- `capability` is a choosable one (`oxplow_domain::capability`); `id` is
-  what `activeProviders` names (lowercase, never `none`).
+- `capability` is a choosable one, or one many implementations serve
+  (`oxplow_domain::capability`: `agent_harness`, `acp_adapter`,
+  `ai_provider` — every one declared is active); `id` is what
+  `activeProviders` names, or a many-capability's key (an agent session's
+  `harness`, a session's `acp_agent`) — lowercase, never `none`.
+- `config:` configures the built-in, checked at load against its schema
+  (`BuiltIn.config_schema`, `capability::check_config`; a built-in with
+  none refuses any config): an ACP adapter's `{ command, args?, env?,
+  systemPrompt?: meta|prompt }`, an OpenAI-compatible provider's
+  `{ baseUrl? }`.
 - `entry` names a built-in in core's standard library
   (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
   `oxplow:snapshots`), the way a collector names `oxplow:junit`. A
@@ -2435,6 +2443,14 @@ implementations:
   manifest's. A built-in whose items' refs carry a provider id
   (`BuiltIn.provider`: `oxplow:tasks` is `oxplow`) is declared under that
   id and no other.
+- `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
+  `oxplow:codex-cli`, `oxplow:opencode`, `oxplow:acp`), the ACP agents'
+  programs (`oxplow:acp-adapter`, one declaration per preset) and the AI
+  providers (`oxplow:anthropic`, `oxplow:openai-compatible`,
+  `oxplow:openrouter`, `oxplow:typesafe`); foundation is required, so
+  `CapabilityRegistry::new` registers nothing for them. The harnesses are
+  registered by declaration (`harnesses::register_built_ins` →
+  `Services.harnesses`, an `oxplow_domain::agent::registry::HarnessRegistry`).
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.

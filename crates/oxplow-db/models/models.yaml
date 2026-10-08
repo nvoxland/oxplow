@@ -989,10 +989,10 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: capability_provider
-  version: 6
-  description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
+  version: 7
+  description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses, ACP agents and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
   columns:
-    - { name: "capability", type: "TEXT", doc: "`work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`." }
+    - { name: "capability", type: "TEXT", doc: "`work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`, `agent_harness`, `acp_adapter`, `ai_provider`." }
     - { name: "provider", type: "TEXT", doc: "The implementation's id: what `activeProviders` names, a work item ref's segment (`work_item:<provider>:…`), `git`, `none`." }
     - { name: "extension", type: "TEXT", doc: "The extension declaring it; NULL for core's." }
     - { name: "features", type: "TEXT", doc: "The features it declares, as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)." }
@@ -1000,7 +1000,7 @@
     - { name: "title", type: "TEXT", doc: "How a person names it. (v3)" }
     - { name: "source", type: "TEXT", doc: "How it's loaded: `core`, `builtin`, `external`, `none`; `unknown` for a choice nothing provides. (v3)" }
     - { name: "available", type: "INTEGER", doc: "0 for a chosen implementation that isn't there to use. (v3)" }
-    - { name: "chosen_by", type: "TEXT", doc: "On the active row, why it's the one: `personal` (a person's own `.oxplow/personal.yaml`), `project` (`activeProviders`), `default`, or `fallback` (the choice isn't available). NULL on the rest. (v3)" }
+    - { name: "chosen_by", type: "TEXT", doc: "On the active row, why it's the one: `personal` (a person's own `.oxplow/personal.yaml`), `project` (`activeProviders`), `default`, `fallback` (the choice isn't available), or `declared` on every row of a capability many implementations serve. NULL on the rest. (v3)" }
     - { name: "capability_title", type: "TEXT", doc: "How a person names the capability (`Work list`). (v4)" }
     - { name: "choosable", type: "INTEGER", doc: "1 when a project chooses the capability's implementation; 0 for one core fixes (`vcs`, `knowledge`). (v4)" }
     - { name: "optional", type: "INTEGER", doc: "1 when the capability may be `none`. (v4)" }

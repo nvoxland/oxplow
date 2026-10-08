@@ -3309,6 +3309,11 @@ export type ImplementationDecl = {
 	 *  the active implementation.
 	 */
 	skills: string[],
+	/**
+	 *  What the declaration configures, checked against the built-in's
+	 *  schema; `{}` when it says nothing.
+	 */
+	config: any,
 };
 
 // An operation paused mid-way, waiting on its conflicts.

@@ -15,6 +15,21 @@ intent:
     - name: a person bookmarks a page for their thread
       input: { command: oxplow.bookmark.set, input: { ref: "page:git-dashboard", page_kind: git-dashboard, scope: thread, thread: thr1 } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+# The agent harnesses, ACP agents and AI providers oxplow runs: core's
+# built-ins, many of each at once (every one declared here is active).
+implementations:
+  - { capability: agent_harness, id: claude, entry: "oxplow:claude-code" }
+  - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli" }
+  - { capability: agent_harness, id: opencode, entry: "oxplow:opencode" }
+  - { capability: agent_harness, id: acp, entry: "oxplow:acp" }
+  - { capability: acp_adapter, id: claude, entry: "oxplow:acp-adapter", config: { command: claude-agent-acp, systemPrompt: meta } }
+  - { capability: acp_adapter, id: gemini, entry: "oxplow:acp-adapter", config: { command: gemini, args: [--acp] } }
+  - { capability: acp_adapter, id: codex, entry: "oxplow:acp-adapter", config: { command: codex-acp } }
+  - { capability: ai_provider, id: anthropic, entry: "oxplow:anthropic" }
+  - { capability: ai_provider, id: openai, entry: "oxplow:openai-compatible", title: OpenAI, config: { baseUrl: "https://api.openai.com/v1" } }
+  - { capability: ai_provider, id: openai_compatible, entry: "oxplow:openai-compatible" }
+  - { capability: ai_provider, id: openrouter, entry: "oxplow:openrouter" }
+  - { capability: ai_provider, id: typesafe, entry: "oxplow:typesafe" }
 commands:
   # agent_input.write — the window's; a person's only (oxplow never types for the agent).
   - name: agent.draft

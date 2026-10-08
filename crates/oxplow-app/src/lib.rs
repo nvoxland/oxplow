@@ -74,6 +74,7 @@ pub mod extension_ref_kinds;
 pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;
+pub mod harnesses;
 pub mod hook_ingest;
 pub mod host_capabilities;
 pub mod indexer;
@@ -510,6 +511,8 @@ pub struct Services {
     pub commands: Arc<commands::CommandBus>,
     /// The work-items providers, by name (`.context/work-items.md`).
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
+    /// The agent harnesses the project's extensions declare, by key.
+    pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
     /// Every capability's implementations and which is active.
     pub capabilities: Arc<capabilities::CapabilityRegistry>,
     /// The enabled external provider instances (`.context/providers.md`).
@@ -1076,6 +1079,7 @@ impl Services {
                 features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
                 fields: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
+                config: serde_json::json!({}),
             }],
             vocabulary.clone(),
         ));
@@ -1149,6 +1153,18 @@ impl Services {
         // None as a work list: the sink every verb reaches while no list is
         // active (`work_items::none_provider`).
         work_items.register(work_items::none_provider());
+        // The agent harnesses foundation declares; a new session's default
+        // is the project's first enabled agent.
+        let harnesses = {
+            let config = config_arc.clone();
+            oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
+                oxplow_config::default_session_agent(&config_service::read_config(&config))
+                    .0
+                    .as_str()
+                    .to_string()
+            }))
+        };
+        harnesses::register_built_ins(&harnesses, &declared);
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
@@ -1336,6 +1352,7 @@ impl Services {
             features: serde_json::json!({}),
             fields: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
+            config: serde_json::json!({}),
         });
         for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
@@ -1486,6 +1503,7 @@ impl Services {
             client_host,
             commands,
             work_items,
+            harnesses,
             capabilities,
             providers,
             knowledge,

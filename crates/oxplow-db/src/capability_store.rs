@@ -34,7 +34,8 @@ pub struct CapabilityProvider {
     /// (its extension disabled, its instance stopped, its id unknown).
     pub available: bool,
     /// On the active row, why it's the one: `personal`, `project`,
-    /// `default` or `fallback`.
+    /// `default` or `fallback` — or `declared` on every row of a capability
+    /// many implementations serve.
     pub chosen_by: Option<String>,
     /// The capability as core declares it: how a person names it, whether
     /// a project chooses it, whether it may be none.

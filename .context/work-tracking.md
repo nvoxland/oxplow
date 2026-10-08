@@ -164,6 +164,17 @@ own — heavier ones included (beads as a work list).
   be none, snapshots may not, and `vcs` / `knowledge` aren't chosen. A
   person's override is `activeProviders` in `.oxplow/personal.yaml`
   (`oxplow.config.set { layer: personal }`).
+- **One active, or many at once.** Most capabilities have one active
+  implementation, chosen (the work list, the effort policy, snapshots) or
+  fixed (`vcs`, `knowledge`). A **many-capability** (`CapabilitySpec.many`:
+  `agent_harness`, `acp_adapter`, `ai_provider`) is served by every
+  implementation declared — the way collectors are — never chosen,
+  never none and never switched: each declared row is active
+  (`chosen_by = declared`), its `default` is the one used when nothing
+  names one, and a need on it is met while any is declared, a need on one
+  of its features while any of them has it (`Active::unmet`). Their
+  implementations are `oxplow-foundation`'s declarations (core's
+  built-ins, looked up by key: an agent session's `harness`).
 - **No special-casing our own implementations.** Core calls every
   implementation of an interface the same way and never branches on
   whether it is ours or compiled in. Compiled-in, scripted and

@@ -1,4 +1,19 @@
-//! Agent implementation identifiers.
+//! Agents: the harness interfaces core keeps (`.context/agent-model.md`),
+//! and — until the harness registry replaces it — the `AgentKind` enum.
+//!
+//! An agent session runs a **harness** (`harness::AgentHarness`): what
+//! launches its process, what its hooks mean, how a person interacts with
+//! it. Implementations are declared (`agent_harness` built-ins), many at
+//! once, and looked up by the session's harness key
+//! (`registry::HarnessRegistry`). An ACP agent's program is data
+//! (`acp_adapter::AcpAdapter`). Driving an agent — oxplow prompting it — is
+//! an interface only (`drive::Drive`): oxplow never drives an agent through
+//! a surface licensed for interactive use.
+
+pub mod acp_adapter;
+pub mod drive;
+pub mod harness;
+pub mod registry;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -102,7 +117,7 @@ mod tests {
             cases: Vec<Case>,
         }
         let fixture: Fixture =
-            serde_json::from_str(include_str!("../fixtures/agent_status_rollup.json")).unwrap();
+            serde_json::from_str(include_str!("../../fixtures/agent_status_rollup.json")).unwrap();
         for case in fixture.cases {
             assert_eq!(
                 roll_up_status(case.states.iter().copied()),
