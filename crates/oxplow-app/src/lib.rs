@@ -512,6 +512,9 @@ pub struct Services {
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
     /// The agent harnesses the project's extensions declare, by key.
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
+    /// The ACP adapters they declare, in declaration order
+    /// (`acp::agents` layers the project's `acpAgents:` over them).
+    pub acp_adapters: oxplow_domain::agent::registry::AcpAdapterRegistry,
     /// Every capability's implementations and which is active.
     pub capabilities: Arc<capabilities::CapabilityRegistry>,
     /// The enabled external provider instances (`.context/providers.md`).
@@ -1157,13 +1160,15 @@ impl Services {
         let harnesses = {
             let config = config_arc.clone();
             oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
-                oxplow_config::default_session_agent(&config_service::read_config(&config))
-                    .0
+                oxplow_config::default_harness(&config_service::read_config(&config))
                     .as_str()
                     .to_string()
             }))
         };
         harnesses::register_built_ins(&harnesses, &declared);
+        // The ACP adapters foundation declares.
+        let acp_adapters = oxplow_domain::agent::registry::AcpAdapterRegistry::default();
+        harnesses::register_acp_adapters(&acp_adapters, &declared);
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
@@ -1218,6 +1223,7 @@ impl Services {
         .chain(commands::thread::ops(session_processes.clone()))
         .chain(commands::agent_session::ops(
             config_arc.clone(),
+            acp_adapters.clone(),
             session_processes.clone(),
         ))
         .chain(commands::effort::ops(work_items.clone()))
@@ -1509,6 +1515,7 @@ impl Services {
             commands,
             work_items,
             harnesses,
+            acp_adapters,
             capabilities,
             providers,
             knowledge,

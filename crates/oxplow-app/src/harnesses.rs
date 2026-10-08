@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use oxplow_domain::agent::harness::AgentHarness;
-use oxplow_domain::agent::registry::HarnessRegistry;
+use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
 
 use crate::capabilities::{Implementation, Source};
 
@@ -32,6 +32,29 @@ pub fn register_built_ins(registry: &HarnessRegistry, declared: &[Implementation
     for h in harnesses {
         registry.register(h);
     }
+}
+
+/// Set the ACP adapters `declared` names, in declaration order. One whose
+/// config doesn't hold is left out (logged); the loader checked it against
+/// the built-in's schema already.
+pub fn register_acp_adapters(registry: &AcpAdapterRegistry, declared: &[Implementation]) {
+    let adapters = declared
+        .iter()
+        .filter(|i| i.capability == "acp_adapter")
+        .filter_map(|i| match i.source {
+            Source::BuiltIn(entry) => {
+                match oxplow_harnesses::acp_adapter(entry, &i.id, &i.title, &i.config)? {
+                    Ok(adapter) => Some(adapter),
+                    Err(error) => {
+                        tracing::warn!(adapter = %i.id, %error, "an ACP adapter's config doesn't hold");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        })
+        .collect();
+    registry.set(adapters);
 }
 
 #[cfg(test)]
@@ -68,5 +91,39 @@ mod tests {
         assert_eq!(r.default().unwrap().id(), "claude");
         register_built_ins(&r, &[declared("agent_harness", "acp", "oxplow:acp")]);
         assert_eq!(r.names(), ["acp"]);
+    }
+
+    /// The declared ACP adapters are set in declaration order, each from
+    /// its config; one whose config doesn't hold is left out.
+    #[test]
+    fn the_declared_acp_adapters_are_set_from_their_config() {
+        let adapter = |id: &str, config: serde_json::Value| Implementation {
+            config,
+            ..declared("acp_adapter", id, "oxplow:acp-adapter")
+        };
+        let r = AcpAdapterRegistry::default();
+        register_acp_adapters(
+            &r,
+            &[
+                adapter(
+                    "gemini",
+                    serde_json::json!({ "command": "gemini", "args": ["--acp"] }),
+                ),
+                adapter("broken", serde_json::json!({ "args": [] })),
+                declared("agent_harness", "claude", "oxplow:claude-code"),
+                adapter(
+                    "claude",
+                    serde_json::json!({ "command": "claude-agent-acp" }),
+                ),
+            ],
+        );
+        let ids: Vec<(String, String)> = r.all().into_iter().map(|a| (a.id, a.command)).collect();
+        assert_eq!(
+            ids,
+            [
+                ("gemini".to_string(), "gemini".to_string()),
+                ("claude".to_string(), "claude-agent-acp".to_string())
+            ]
+        );
     }
 }

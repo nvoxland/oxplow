@@ -1098,10 +1098,11 @@ export type AcceptedValues = {
 
 /**
  *  An agent oxplow talks to over the Agent Client Protocol (tsk335): a
- *  program that speaks ACP on its stdio. Presets cover the common ones
- *  ([`acp_presets`]); `acpAgents:` in `.oxplow/project.yaml` adds or
- *  overrides by name. A project entry names a program from the repo, so it
- *  runs only once a person approved it (see `exec_consent`).
+ *  program that speaks ACP on its stdio. The extensions' declared ACP
+ *  adapters cover the common ones; `acpAgents:` in `.oxplow/project.yaml`
+ *  adds or overrides by name (`oxplow_app::acp::agents`). A project entry
+ *  names a program from the repo, so it runs only once a person approved it
+ *  (see `exec_consent`).
  */
 export type AcpAgentConfig = {
 	// Short name a thread picks it by (`claude`, `gemini`, `my-agent`).
@@ -1119,7 +1120,10 @@ export type AcpAgentListing = {
 	command: string,
 	args: string[],
 	source: AcpAgentSource,
-	// May start on this machine: a preset, or an approved project entry.
+	/**
+	 *  May start on this machine: a declared adapter, or an approved
+	 *  project entry.
+	 */
 	approved: boolean,
 	// The command's absolute path, or `None` when it isn't installed.
 	resolvedPath: string | null,
@@ -1127,8 +1131,8 @@ export type AcpAgentListing = {
 
 // Where an ACP agent definition came from.
 export type AcpAgentSource = 
-// Built into oxplow; runs without approval.
-"preset" | 
+// An adapter an extension declares; runs without approval.
+"declared" | 
 // The project's `acpAgents:`; needs a person's approval to run.
 "project";
 
@@ -4522,8 +4526,8 @@ export type OxplowConfig = {
 	 */
 	agentModels: Partial<{ [key in AgentKind]: string }>,
 	/**
-	 *  The project's ACP agents (`acpAgents:`), layered over
-	 *  [`acp_presets`] by [`resolve_acp_agents`].
+	 *  The project's ACP agents (`acpAgents:`), layered over the declared
+	 *  ACP adapters (`oxplow_app::acp::agents::resolve`).
 	 */
 	acpAgents: AcpAgentConfig[],
 	/**

@@ -12,6 +12,7 @@ mod shared;
 
 use std::sync::Arc;
 
+use oxplow_domain::agent::acp_adapter::AcpAdapter;
 use oxplow_domain::agent::harness::AgentHarness;
 
 /// The harness a built-in `entry` is, registered under `id`.
@@ -27,6 +28,18 @@ pub fn built_in(entry: &str, id: &str, title: &str) -> Option<Arc<dyn AgentHarne
         "oxplow:acp" => Arc::new(acp::Acp(named)),
         _ => return None,
     })
+}
+
+/// The ACP adapter a built-in `entry` declares as `id`, from its `config`
+/// (`{ command, args?, env?, systemPrompt?: meta|prompt }`); `None` for an
+/// entry that isn't one.
+pub fn acp_adapter(
+    entry: &str,
+    id: &str,
+    title: &str,
+    config: &serde_json::Value,
+) -> Option<Result<AcpAdapter, String>> {
+    (entry == "oxplow:acp-adapter").then(|| AcpAdapter::from_config(id, title, config))
 }
 
 /// A harness's key and title, as its declaration gives them.

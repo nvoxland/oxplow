@@ -23,6 +23,7 @@ pub async fn list_acp_agents(
     Ok(oxplow_app::acp::agents::list(
         &svc.approvals,
         &svc.layout.project_dir,
+        &svc.acp_adapters,
         &config,
     ))
 }

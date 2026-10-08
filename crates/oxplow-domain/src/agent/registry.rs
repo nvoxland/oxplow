@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
+use super::acp_adapter::AcpAdapter;
 use super::harness::AgentHarness;
 use crate::work_items::ActiveSource;
 
@@ -82,6 +83,29 @@ impl HarnessRegistry {
     /// The harness a session runs when it names none.
     pub fn default(&self) -> Result<Arc<dyn AgentHarness>, UnknownHarness> {
         self.get(&(self.default)())
+    }
+}
+
+/// The ACP adapters the project's extensions declare, in declaration
+/// order: the agents an `acp` session can run before the project's own
+/// `acpAgents:`. Cloning shares them.
+#[derive(Clone, Default)]
+pub struct AcpAdapterRegistry {
+    adapters: Arc<RwLock<Vec<AcpAdapter>>>,
+}
+
+impl AcpAdapterRegistry {
+    /// Replace what's declared.
+    pub fn set(&self, adapters: Vec<AcpAdapter>) {
+        *self.adapters.write().unwrap_or_else(|e| e.into_inner()) = adapters;
+    }
+
+    /// Every declared adapter, in declaration order.
+    pub fn all(&self) -> Vec<AcpAdapter> {
+        self.adapters
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 

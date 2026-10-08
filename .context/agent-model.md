@@ -529,19 +529,27 @@ site, so a timed-out PreToolUse deny is still caught there.
 `open_terminal_session` refuses them: their harness launches a
 `LaunchSpec::Acp`, not a PTY command.
 
-**Configuration.** Agents come from `oxplow_config::acp_presets()`:
-- claude: `claude-agent-acp`;
+**Configuration.** Agents are declarations: `oxplow-foundation`'s
+`acp_adapter` implementations (the `oxplow:acp-adapter` built-in, config
+`{ command, args?, env?, systemPrompt?: meta|prompt }`, read into an
+`AcpAdapter` by `oxplow_harnesses::acp_adapter` and kept, in declaration
+order, in `Services.acp_adapters`):
+- claude: `claude-agent-acp`, the prompt in `_meta` (`systemPrompt: meta`);
 - gemini: `gemini --acp`;
 - codex: `codex-acp`.
 
-These are layered with the project's `acpAgents: [{name, command, args,
-env}]` by `resolve_acp_agents`; a project entry replaces a preset of the
-same name.
+The project's `acpAgents: [{name, command, args, env}]` are instances
+layered over them by `acp::agents::resolve`: an entry with a declared id
+overrides its program and keeps the adapter's prompt mode; a new name is a
+generic adapter (the prompt ahead of the first message). An `acp` session
+that names no agent runs the project's first entry, else the first declared
+adapter (`acp::agents::default_agent`); `oxplow.agent_session.open` checks
+the name against the same list.
 
 **Listing.** `oxplow_app::acp::agents::list` (IPC `list_acp_agents`,
 UI-only) reports each agent's source, whether it may start here, and its
-resolved path (`agent_path::resolve_program`). Presets may always start;
-a project entry needs a person's approval in Settings → Data → Programs
+resolved path (`agent_path::resolve_program`). A declared adapter may
+always start; a project entry needs a person's approval in Settings → Data → Programs
 (`exec_consent`, `ProgramKind::AcpAgent`).
 
 **Creating threads.** `oxplow.thread.create` takes `acp_agent` (stored on the
@@ -551,8 +559,8 @@ new-thread picker lists "ACP · <name>" per agent when ACP is enabled in
 `agents:`, flagged "not installed" or "needs approval" (`agentChoices` in
 `agentKinds.ts`).
 
-**Not built yet:** a personal (user-global) `acpAgents` file; presets and
-project entries only for now.
+**Not built yet:** a personal (user-global) `acpAgents` file; declared
+adapters and project entries only for now.
 
 ## ACP agents: protocol mapping and transcript (tsk336)
 
@@ -661,7 +669,7 @@ the same JSON.
 - **`acp_open_session`** (a ctx row with a hand-written Tauri adapter, because it needs `plugin_runtime` for oxplow's MCP URL and token). It:
   - takes the agent session's id, and checks it is open and an `acp` session (its thread and stream come from the row);
   - resolves the agent (`find`, `may_start`, `resolve_command`);
-  - assembles the system prompt (`system_prompt_via_meta` is true when the command is `claude-agent-acp`);
+  - assembles the system prompt (`system_prompt_via_meta` is true when the agent's adapter declares `systemPrompt: meta`);
   - passes the session's resume id;
   - opens the session and returns the `AcpSnapshot`.
 - **The rest:**

@@ -119,10 +119,11 @@ pub const DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT: u32 = 50;
 const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 
 /// An agent oxplow talks to over the Agent Client Protocol (tsk335): a
-/// program that speaks ACP on its stdio. Presets cover the common ones
-/// ([`acp_presets`]); `acpAgents:` in `.oxplow/project.yaml` adds or
-/// overrides by name. A project entry names a program from the repo, so it
-/// runs only once a person approved it (see `exec_consent`).
+/// program that speaks ACP on its stdio. The extensions' declared ACP
+/// adapters cover the common ones; `acpAgents:` in `.oxplow/project.yaml`
+/// adds or overrides by name (`oxplow_app::acp::agents`). A project entry
+/// names a program from the repo, so it runs only once a person approved it
+/// (see `exec_consent`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AcpAgentConfig {
@@ -141,58 +142,17 @@ pub struct AcpAgentConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum AcpAgentSource {
-    /// Built into oxplow; runs without approval.
-    Preset,
+    /// An adapter an extension declares; runs without approval.
+    Declared,
     /// The project's `acpAgents:`; needs a person's approval to run.
     Project,
 }
 
-/// The built-in ACP agents: the vendors' ACP adapters.
-pub fn acp_presets() -> Vec<AcpAgentConfig> {
-    let preset = |name: &str, command: &str, args: &[&str]| AcpAgentConfig {
-        name: name.into(),
-        command: command.into(),
-        args: args.iter().map(|a| a.to_string()).collect(),
-        env: Default::default(),
-    };
-    vec![
-        preset("claude", "claude-agent-acp", &[]),
-        preset("gemini", "gemini", &["--acp"]),
-        preset("codex", "codex-acp", &[]),
-    ]
-}
-
-/// The agent a new agent session runs when it names none
-/// (`oxplow.agent_session.open`): the project's first enabled agent
-/// (Claude when `agents:` is empty), and for `acp` the project's own first
-/// `acpAgents:` entry, else the first preset.
-pub fn default_session_agent(config: &OxplowConfig) -> (AgentKind, Option<String>) {
-    let agent = config.agents.first().copied().unwrap_or(AgentKind::Claude);
-    let acp_agent = (agent == AgentKind::Acp).then(|| {
-        config
-            .acp_agents
-            .first()
-            .map(|a| a.name.clone())
-            .or_else(|| acp_presets().into_iter().next().map(|a| a.name))
-            .unwrap_or_default()
-    });
-    (agent, acp_agent)
-}
-
-/// Presets, then the project's entries (a project entry replaces a
-/// preset of the same name), in that order.
-pub fn resolve_acp_agents(project: &[AcpAgentConfig]) -> Vec<(AcpAgentConfig, AcpAgentSource)> {
-    let mut out: Vec<(AcpAgentConfig, AcpAgentSource)> = acp_presets()
-        .into_iter()
-        .map(|a| (a, AcpAgentSource::Preset))
-        .collect();
-    for a in project {
-        match out.iter().position(|(p, _)| p.name == a.name) {
-            Some(i) => out[i] = (a.clone(), AcpAgentSource::Project),
-            None => out.push((a.clone(), AcpAgentSource::Project)),
-        }
-    }
-    out
+/// The harness a new agent session runs when it names none
+/// (`oxplow.agent_session.open`): the project's first enabled agent (Claude
+/// when `agents:` is empty).
+pub fn default_harness(config: &OxplowConfig) -> AgentKind {
+    config.agents.first().copied().unwrap_or(AgentKind::Claude)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
@@ -716,8 +676,8 @@ pub struct OxplowConfig {
     /// entries fall back to the built-in constant.
     #[serde(rename = "agentModels")]
     pub agent_models: std::collections::BTreeMap<AgentKind, String>,
-    /// The project's ACP agents (`acpAgents:`), layered over
-    /// [`acp_presets`] by [`resolve_acp_agents`].
+    /// The project's ACP agents (`acpAgents:`), layered over the declared
+    /// ACP adapters (`oxplow_app::acp::agents::resolve`).
     #[serde(rename = "acpAgents")]
     pub acp_agents: Vec<AcpAgentConfig>,
     /// The project's extension provider instances
@@ -3710,7 +3670,7 @@ mod tests {
     }
 
     #[test]
-    fn acp_agents_parse_validate_round_trip_and_layer_over_presets() {
+    fn acp_agents_parse_validate_and_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
@@ -3719,22 +3679,9 @@ mod tests {
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.acp_agents.len(), 2);
-        let resolved = resolve_acp_agents(&cfg.acp_agents);
-        let names: Vec<(&str, AcpAgentSource)> = resolved
-            .iter()
-            .map(|(a, s)| (a.name.as_str(), *s))
-            .collect();
-        assert_eq!(
-            names,
-            vec![
-                ("claude", AcpAgentSource::Preset),
-                ("gemini", AcpAgentSource::Project),
-                ("codex", AcpAgentSource::Preset),
-                ("mine", AcpAgentSource::Project),
-            ]
-        );
-        assert_eq!(resolved[1].0.args, vec!["--acp", "--yolo"]);
+        let names: Vec<&str> = cfg.acp_agents.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["gemini", "mine"]);
+        assert_eq!(cfg.acp_agents[0].args, vec!["--acp", "--yolo"]);
         // Written back as it was.
         write_rendered(dir.path(), &cfg);
         assert_eq!(
@@ -3963,31 +3910,20 @@ dimensions:
         assert_eq!(cfg.project_name, "explicit-name");
     }
 
-    /// tsk970: a new thread that names no agent runs the project's first
-    /// enabled one; an ACP thread runs the project's first `acpAgents:`
-    /// entry, else the first preset.
+    /// tsk970: a new session that names no agent runs the project's first
+    /// enabled one (the ACP agent it then runs is `acp::agents`').
     #[test]
-    fn a_new_sessions_default_agent_is_the_projects() {
+    fn a_new_sessions_default_harness_is_the_projects() {
         let dir = tempdir().unwrap();
         let load = |yaml: &str| {
             std::fs::write(cfg_path(dir.path()), yaml).unwrap();
             load_project_config(dir.path()).unwrap()
         };
         assert_eq!(
-            default_session_agent(&load("agents: [codex, claude]\n")),
-            (AgentKind::Codex, None)
+            default_harness(&load("agents: [codex, claude]\n")),
+            AgentKind::Codex
         );
-        assert_eq!(
-            default_session_agent(&load(
-                "agents: [acp]\nacpAgents:\n  - { name: fake, command: fake-acp }\n"
-            )),
-            (AgentKind::Acp, Some("fake".to_string()))
-        );
-        let preset = acp_presets().remove(0).name;
-        assert_eq!(
-            default_session_agent(&load("agents: [acp]\n")),
-            (AgentKind::Acp, Some(preset))
-        );
+        assert_eq!(default_harness(&load("{}\n")), AgentKind::Claude);
     }
 
     #[test]

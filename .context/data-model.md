@@ -301,8 +301,9 @@ one thread per stream is `active`; the rest are `queued`. A newly-seeded
 stream ships with one thread titled `Thread` and no agent session; neither
 does `oxplow.thread.create` open one. A person opens sessions
 (`oxplow.agent_session.open`, whose default agent is
-`oxplow_config::default_session_agent`: the first enabled agent, and for
-`acp` the project's first `acpAgents:` entry, else the first preset).
+`oxplow_config::default_harness`: the first enabled agent, and for
+`acp` `acp::agents::default_agent`: the project's first `acpAgents:`
+entry, else the first declared ACP adapter).
 The rolling `summary` field + `record_batch_summary` MCP tool were
 removed in v13 — use the task log as the source of truth instead.
 

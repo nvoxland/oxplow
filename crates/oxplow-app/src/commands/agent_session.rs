@@ -18,6 +18,7 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_session_store::{get_tx, insert_tx, set_title_tx};
+use oxplow_domain::agent::registry::AcpAdapterRegistry;
 use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
@@ -140,14 +141,14 @@ fn in_own_stream(ctx: &TxCtx<'_>, thread: ThreadId) -> Result<(), CommandError> 
 /// project's default.
 fn choose_agent(
     config: &OxplowConfig,
+    adapters: &AcpAdapterRegistry,
     harness: Option<AgentKind>,
     acp_agent: Option<String>,
 ) -> Result<(AgentKind, Option<String>), CommandError> {
-    let (default_harness, default_acp) = oxplow_config::default_session_agent(config);
-    let chosen = harness.unwrap_or(default_harness);
+    let chosen = harness.unwrap_or_else(|| oxplow_config::default_harness(config));
     let acp_agent = acp_agent.or_else(|| {
         (harness.is_none() && chosen == AgentKind::Acp)
-            .then_some(default_acp)
+            .then(|| crate::acp::agents::default_agent(adapters, config))
             .flatten()
     });
     if !config.agents.contains(&chosen) {
@@ -158,7 +159,7 @@ fn choose_agent(
     }
     let acp_agent = match (chosen, acp_agent) {
         (AgentKind::Acp, Some(name)) => {
-            if crate::acp::agents::find(config, &name).is_none() {
+            if crate::acp::agents::find(adapters, config, &name).is_none() {
                 return Err(invalid(
                     "/acp_agent",
                     format!("no ACP agent named `{name}`"),
@@ -183,7 +184,7 @@ fn choose_agent(
 /// `agent_session.open { thread, kind?, harness?, acp_agent?, title? }`:
 /// a new slot on the thread. It only inserts the row — it never starts a
 /// process and never sends a prompt. Undone by closing it.
-pub fn open_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
+pub fn open_op(config: Arc<RwLock<OxplowConfig>>, adapters: AcpAdapterRegistry) -> Op {
     Op::new(
         "agent_sessions.write",
         "open",
@@ -204,7 +205,8 @@ pub fn open_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
             }
             in_own_stream(ctx, thread)?;
             let config = crate::config_service::read_config(&config);
-            let (harness, acp_agent) = choose_agent(&config, input.harness, input.acp_agent)?;
+            let (harness, acp_agent) =
+                choose_agent(&config, &adapters, input.harness, input.acp_agent)?;
             let kind = input.kind.unwrap_or(SessionKind::default_for(harness));
             match kind {
                 SessionKind::Action => {
@@ -310,9 +312,10 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
 /// The agent-session commands, for the bus.
 pub fn ops(
     config: Arc<RwLock<OxplowConfig>>,
+    adapters: AcpAdapterRegistry,
     processes: crate::agent_sessions::SessionProcesses,
 ) -> Vec<Op> {
-    vec![open_op(config), rename_op(), close_op(processes)]
+    vec![open_op(config, adapters), rename_op(), close_op(processes)]
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ use oxplow_app::acp::session::{AcpError, SessionSpec};
 use oxplow_app::acp::wire::McpHttp;
 use oxplow_app::acp::{agents, manager::AcpManager};
 use oxplow_app::Services;
+use oxplow_domain::agent::acp_adapter::SystemPromptVia;
 use oxplow_domain::agent::harness::LaunchSpec;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{AgentKind, AgentSessionId};
@@ -78,21 +79,22 @@ pub async fn acp_open_session(
         .map(|c| c.clone())
         .map_err(|_| IpcError::internal("config lock poisoned"))?;
     let project_dir = svc.layout.project_dir.clone();
-    let (agent, source) = agents::find(&config, &name)
+    let agent = agents::find(&svc.acp_adapters, &config, &name)
         .ok_or_else(|| IpcError::invalid(format!("no ACP agent named '{name}' is configured")))?;
     // Checked where it runs: script args are read from the stream's worktree.
     let cwd = std::path::PathBuf::from(&stream.worktree_path);
-    if !agents::may_start(&svc.approvals, &project_dir, &cwd, &agent, source) {
+    if !agents::may_start(&svc.approvals, &project_dir, &cwd, &agent) {
         return Err(IpcError::invalid(format!(
             "ACP agent '{name}' is a project program; approve it in Settings → Data → Programs first"
         )));
     }
-    let program = agents::resolve_command(&project_dir, &agent.command).ok_or_else(|| {
-        IpcError::invalid(format!(
-            "'{}' isn't installed (ACP agent '{name}')",
-            agent.command
-        ))
-    })?;
+    let program =
+        agents::resolve_command(&project_dir, &agent.program.command).ok_or_else(|| {
+            IpcError::invalid(format!(
+                "'{}' isn't installed (ACP agent '{name}')",
+                agent.program.command
+            ))
+        })?;
 
     let mcp = match &ctx.plugin_runtime {
         Some(rt) => vec![McpHttp {
@@ -123,9 +125,9 @@ pub async fn acp_open_session(
     // launch makes it the session's process.
     let program = serde_json::json!({
         "program": program,
-        "args": agent.args,
-        "env": agent.env.clone().into_iter().collect::<Vec<_>>(),
-        "systemPromptViaMeta": agents::system_prompt_via_meta(&agent),
+        "args": agent.program.args,
+        "env": agent.program.env.clone().into_iter().collect::<Vec<_>>(),
+        "systemPromptViaMeta": agent.system_prompt == SystemPromptVia::Meta,
     });
     let launch = crate::commands::terminal::launch_session(
         ctx,

@@ -7,7 +7,7 @@ const acp = (name: string, over: Partial<AcpAgentListing> = {}): AcpAgentListing
   name,
   command: name,
   args: [],
-  source: "preset",
+  source: "declared",
   approved: true,
   resolvedPath: `/bin/${name}`,
   ...over,
