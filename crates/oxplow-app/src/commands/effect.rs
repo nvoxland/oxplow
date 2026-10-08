@@ -297,7 +297,8 @@ pub struct Backfilled {
 /// Have `decl` react to the events in `range` it never reacted to, oldest
 /// first, at most `batch` of them — each an attempt like a live one
 /// (deduped, loop-guarded, counted toward its health). It stops when the
-/// effect is disabled, or after three failures in a row of its own — one
+/// effect is disabled or stops being approved as it is, or after three
+/// failures in a row of its own — one
 /// that will be sent again by itself counts here too, though its health
 /// waits for the retry (tsk932): a provider that's down stops the run.
 pub async fn backfill(
@@ -321,9 +322,18 @@ pub async fn backfill(
     };
     let mut attempted = 0;
     let mut in_a_row = 0;
+    let program = crate::effects::effect_program(ext, decl);
     for event in &planned.first {
         if let Some(why) = health.disabled_reason(&key).await? {
             out.stopped = Some(format!("the effect was disabled: {why}"));
+            break;
+        }
+        // Each reaction runs the effect as it is now, approved: one whose
+        // approval stopped holding (its script changed) stops the run.
+        if !effect_triggers::approved_now(svc, &program) {
+            out.stopped = Some(
+                "the effect isn't approved as it is now: a person approves it again first".into(),
+            );
             break;
         }
         if in_a_row >= crate::plugin_health::FAILURES_TO_DISABLE {

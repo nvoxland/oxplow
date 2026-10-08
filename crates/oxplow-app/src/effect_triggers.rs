@@ -2212,6 +2212,46 @@ mod tests {
         assert_eq!((second.planned, second.ran, second.remaining), (1, 1, 0));
     }
 
+    /// A backfill reacts only while the effect is approved as it is: one
+    /// whose approval stops holding during the run — its script changed —
+    /// stops before its next reaction, rather than running it unapproved.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backfill_stops_when_the_effect_is_no_longer_approved() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let quiet = "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n";
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", quiet)]);
+        register(svc);
+        for _ in 0..3 {
+            log(svc, state_changed(fx.task, CanonicalState::Done)).await;
+        }
+        approve(svc).await;
+        let (ext, decl) = find_effect(svc, "acme/mark-done").unwrap();
+        // The script changes under the run: the approval was of another.
+        extension(
+            &svc.layout.project_dir,
+            MARK_DONE,
+            &[(
+                "mark.star",
+                "def transform(x):\n    return {\"skip\": \"changed\"}\n",
+            )],
+        );
+        let out = crate::commands::effect::backfill(
+            svc,
+            &ext,
+            &decl,
+            &crate::commands::effect::Range::default(),
+            50,
+        )
+        .await
+        .unwrap();
+        assert_eq!((out.ran, out.skipped, out.remaining), (0, 0, 3), "{out:?}");
+        assert!(
+            out.stopped.as_deref().unwrap_or("").contains("approved"),
+            "{out:?}"
+        );
+    }
+
     /// P9.D5: a backfill runs the effect as it is now, under the same
     /// health: it needs the effect enabled and approved, and three
     /// failures in a row stop it — and disable the effect, as live.
