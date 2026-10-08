@@ -707,7 +707,14 @@ pub trait EffortStore: Send + Sync {
     /// Overwrite the summary on an already-finished effort. Used
     /// when `record_effort` runs after the lifecycle finish has
     /// already closed the row.
-    async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError>;
+    /// Record a report on effort `id` — its summary and its impacts, each
+    /// when given — in one transaction: both land or neither does.
+    async fn record_report(
+        &self,
+        id: &EffortId,
+        summary: Option<String>,
+        impacts: Option<Vec<EffortImpact>>,
+    ) -> Result<(), DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
     async fn list_impacts(&self, id: &EffortId) -> Result<Vec<EffortImpact>, DomainError>;
     /// Record a turn's changed files as `effort`'s observed ones (see
@@ -1188,15 +1195,33 @@ impl EffortStore for SqliteEffortStore {
             .await
     }
 
-    async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError> {
+    async fn record_report(
+        &self,
+        id: &EffortId,
+        summary: Option<String>,
+        impacts: Option<Vec<EffortImpact>>,
+    ) -> Result<(), DomainError> {
         let id_for_sql = *id;
+        let impacts_json = match impacts {
+            None => None,
+            Some(v) if v.is_empty() => Some(None),
+            Some(v) => Some(Some(serde_json::to_string(&v).map_err(|e| {
+                DomainError::Invalid(format!("impacts serialize failed: {e}"))
+            })?)),
+        };
         self.db
-            .call(move |conn| set_summary_tx(conn, id_for_sql, summary.as_deref()))
+            .transaction(move |tx| {
+                if let Some(summary) = &summary {
+                    set_summary_tx(tx, id_for_sql, Some(summary)).map_err(map_sql_err)?;
+                }
+                if let Some(json) = &impacts_json {
+                    set_impacts_json_tx(tx, id_for_sql, json.as_deref()).map_err(map_sql_err)?;
+                }
+                Ok(())
+            })
             .await?;
-        {
-            if let Some(w) = self.work_item_for_effort(id).await? {
-                self.project_effort_slice(&w).await?;
-            }
+        if let Some(w) = self.work_item_for_effort(id).await? {
+            self.project_effort_slice(&w).await?;
         }
         Ok(())
     }
@@ -2128,6 +2153,33 @@ mod tests {
                     && e.source_id == tid.trim_start_matches("work_item:")),
             "task backlink missing; got {task_back:?}"
         );
+    }
+
+    /// A report's summary and impacts land together, in one transaction;
+    /// one left out keeps what the effort had.
+    #[tokio::test]
+    async fn a_report_records_its_summary_and_impacts_together() {
+        use oxplow_domain::EffortImpact;
+        let (_, db, tid, t) = fixture_with_db().await;
+        let store = SqliteEffortStore::new(db);
+        let eff = store.start(&tid, &t, None).await.unwrap();
+        let impacts = vec![EffortImpact {
+            kind: "wiki".into(),
+            id: "url-schemes".into(),
+            action: Some("created".into()),
+        }];
+        store
+            .record_report(&eff.id, Some("Done.".into()), Some(impacts.clone()))
+            .await
+            .unwrap();
+        let after = store.get_effort(&eff.id).await.unwrap().unwrap();
+        assert_eq!(after.summary.as_deref(), Some("Done."));
+        assert_eq!(store.list_impacts(&eff.id).await.unwrap(), impacts);
+        store
+            .record_report(&eff.id, Some("Done, again.".into()), None)
+            .await
+            .unwrap();
+        assert_eq!(store.list_impacts(&eff.id).await.unwrap(), impacts);
     }
 
     #[tokio::test]

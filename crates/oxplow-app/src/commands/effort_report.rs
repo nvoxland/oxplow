@@ -139,15 +139,11 @@ async fn report(
             })?,
     };
     let summary = input.summary.filter(|s| !s.trim().is_empty());
-    if summary.is_some() {
+    let impacts = (!input.impacts.is_empty()).then_some(input.impacts);
+    if summary.is_some() || impacts.is_some() {
+        // Both land or neither: a run that fails leaves the effort as it was.
         deps.efforts
-            .set_summary(&effort.id, summary.clone())
-            .await
-            .map_err(failed)?;
-    }
-    if !input.impacts.is_empty() {
-        deps.efforts
-            .set_impacts(&effort.id, &input.impacts)
+            .record_report(&effort.id, summary.clone(), impacts)
             .await
             .map_err(failed)?;
     }
