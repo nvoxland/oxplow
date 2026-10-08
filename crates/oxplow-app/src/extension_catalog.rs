@@ -193,7 +193,7 @@ mod tests {
 
     const EXT: &str =
         "manifest: 2\nname: review\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
-    const LENS: &str = "title: Tasks\nquery: SELECT id FROM v_task\nviz: table\n";
+    const LENS: &str = "title: Tasks\nquery: SELECT ref FROM v_work_item\nviz: table\n";
 
     #[test]
     fn a_hit_parses_nothing_and_an_edit_misses() {
@@ -223,7 +223,7 @@ mod tests {
         write(
             dir.path(),
             "oxplow/extensions/review/lenses/tasks.yaml",
-            "title: Tasks by status\nquery: SELECT id FROM v_task\nviz: table\n",
+            "title: Tasks by status\nquery: SELECT ref FROM v_work_item\nviz: table\n",
         );
         assert_eq!(
             catalog.find_lens(dir.path(), "review/tasks").unwrap().title,

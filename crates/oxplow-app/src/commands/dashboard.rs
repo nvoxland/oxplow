@@ -450,7 +450,7 @@ mod tests {
             &fx,
             &agent(&fx),
             ADD_ITEM,
-            json!({ "dashboard": d, "kind": "query", "sql": "SELECT count(*) AS n FROM v_task",
+            json!({ "dashboard": d, "kind": "query", "sql": "SELECT count(*) AS n FROM v_work_item",
                     "display": "number" }),
         )
         .await

@@ -26,5 +26,7 @@ system prompt, and only file tools plus `oxplow plugin …` in Bash.
 - **Patched after recording (2026-10-07):** the lens format dropped the
   `task` link kind (a work item links as `page`, by its ref), so the
   title column's `link: { kind: task, from: id }` was removed to keep the
-  recording checking clean. The run predates the work-item interface (it
-  reads `v_task`); re-record it with the current skill.
+  recording checking clean. The run predates the work-item interface:
+  it read `v_task`, which is gone, so the collector's `input` was
+  rewritten over `v_work_item` (same output columns; the id is the
+  number in an oxplow ref). Re-record it with the current skill.

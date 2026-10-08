@@ -191,7 +191,7 @@ test("yDomain auto pads a flat series so it isn't on an edge", () => {
 test("specAggregation shows an entity metric's own aggregation", () => {
   expect(specAggregation({ aggregation: "sum", entity_json: null })).toBe("sum");
   expect(
-    specAggregation({ aggregation: "sum", entity_json: '{"view":"v_task","aggregation":"count"}' }),
+    specAggregation({ aggregation: "sum", entity_json: '{"view":"v_work_item","aggregation":"count"}' }),
   ).toBe("count");
   expect(specAggregation({ aggregation: "last", entity_json: "not json" })).toBe("last");
 });

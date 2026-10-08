@@ -2453,10 +2453,11 @@ pub(crate) mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
                    VALUES (1, 1, 'T', 'active', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at) VALUES
-                   (1, 1, 'Fix login', 'ready', 'high', 'agent', '2026-01-01', '2026-01-01'),
-                   (2, 1, 'Tidy docs', 'ready', 'low', 'agent', '2026-01-01', '2026-01-01'),
-                   (3, 1, 'Ship it', 'done', 'high', 'agent', '2026-01-01', '2026-01-01');",
+                 INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
+                 INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
+                   ('work_item:oxplow:tsk1', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01'),
+                   ('work_item:oxplow:tsk2', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', 1, '2026-01-01', '2026-01-01'),
+                   ('work_item:oxplow:tsk3', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -2554,10 +2555,10 @@ pub(crate) mod tests {
         extension(
             &root,
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    trigger: { every: 10m }\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    trigger: { every: 10m }\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n",
             &[(
                 "hot.star",
-                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
             )],
         );
         let ran = run_due_collectors(&fx.svc).await;
@@ -2636,19 +2637,19 @@ pub(crate) mod tests {
         let root = tempfile::tempdir().unwrap();
         let state = root.path().join(".oxplow");
         let entity =
-            "    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n";
+            "    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n";
         extension(
             root.path(),
             "work",
             &format!(
-                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT id, title, priority FROM v_task WHERE status = 'ready'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - {{ name: upper, key: id, columns: {{ id: int, title: text }} }}\n"
+                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - {{ name: upper, key: ref, columns: {{ ref: text, title: text }} }}\n"
             ),
             &[
                 (
                     "hot.star",
-                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
                 ),
-                ("hot.jq", "{entities: {upper: [.rows[] | {id, title: (.title | ascii_upcase)}]}}"),
+                ("hot.jq", "{entities: {upper: [.rows[] | {ref, title: (.title | ascii_upcase)}]}}"),
             ],
         );
         let db = task_db().await;
@@ -2704,10 +2705,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - { name: kind, key: id, columns: { id: int, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: ref, columns: { ref: text, kind: text } }\n",
             &[(
                 "kind.star",
-                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"id\": r[\"id\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
+                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"ref\": r[\"ref\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
             )],
         );
         let db = task_db().await;
@@ -2789,10 +2790,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT id, title, priority FROM v_task WHERE status = 'ready'\"\n    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
-                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
             )],
         );
         script(
@@ -2822,10 +2823,10 @@ pub(crate) mod tests {
             (hot.entity.as_str(), hot.view.as_str()),
             ("hot", "v_work_hot")
         );
-        assert_eq!(hot.columns, vec!["id", "title"]);
+        assert_eq!(hot.columns, vec!["ref", "title"]);
         assert_eq!(
             serde_json::to_value(&hot.rows).unwrap(),
-            json!([[1, "Fix login"]])
+            json!([["work_item:oxplow:tsk1", "Fix login"]])
         );
         assert_eq!(hot.total, 1);
         assert!(

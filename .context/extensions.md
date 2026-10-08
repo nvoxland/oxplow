@@ -1692,8 +1692,8 @@ at 50 items, saying how many more the review has. A bundled effect
 is approved like any (K1, tsk953: its embedded files are hashed alike),
 so it runs only once a person approves it. A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
-`work_item.created` and the run's audit name the effect (`v_task` v2
-says so). The loader no longer limits effects to private extensions.
+`work_item.created` and the run's audit name the effect (its `native`
+`author` is null). The loader no longer limits effects to private extensions.
 
 **Retention** (P8.D5) is the namespace's window for payloads and large
 content (data-model.md "event_log" retention): either omitted part is the

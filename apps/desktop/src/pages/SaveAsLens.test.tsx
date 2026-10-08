@@ -35,7 +35,7 @@ test("Save as Lens keeps the spec with lens.keep and opens the lens", async () =
   const opened: TabRef[] = [];
   const view = render(
     <SaveAsLens
-      query="SELECT title FROM v_task"
+      query="SELECT title FROM v_work_item"
       viz="table"
       stream={{ id: "str2" } as Stream}
       onOpenPage={(ref) => opened.push(ref)}
@@ -50,7 +50,7 @@ test("Save as Lens keeps the spec with lens.keep and opens the lens", async () =
     [
       "oxplow.lens.keep",
       {
-        spec: { title: "Busy Tasks", description: "", query: "SELECT title FROM v_task", viz: "table" },
+        spec: { title: "Busy Tasks", description: "", query: "SELECT title FROM v_work_item", viz: "table" },
         extension: "mine",
         slug: "busy-tasks",
         stream: "str2",
@@ -64,7 +64,7 @@ test("a lens kept in another stream's worktree says it shows once merged, and op
   const opened: TabRef[] = [];
   const view = render(
     <SaveAsLens
-      query="SELECT title FROM v_task"
+      query="SELECT title FROM v_work_item"
       viz="table"
       stream={{ id: "str2" } as Stream}
       onOpenPage={(ref) => opened.push(ref)}

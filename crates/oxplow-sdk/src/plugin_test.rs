@@ -1453,7 +1453,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT id FROM v_task\"
+    input: \"SELECT ref FROM v_work_item\"
     entities:
       - {{ name: thing, key: id, columns: {{ id: int, label: text }} }}
   - id: shell

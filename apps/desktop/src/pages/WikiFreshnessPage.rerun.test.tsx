@@ -53,7 +53,7 @@ test("the freshness page re-reads when v_knowledge_ref changes, and only then", 
   const { container } = render(<WikiFreshnessPage slug="notes" onOpenPage={() => {}} />);
   await waitFor(() => expect(reads).toBe(1));
   expect(container.textContent).toContain("src/a.rs");
-  await fire({ kind: "modelsChanged", models: ["v_task"] });
+  await fire({ kind: "modelsChanged", models: ["v_work_item"] });
   expect(reads).toBe(1);
   await fire({ kind: "modelsChanged", models: ["v_knowledge_ref"] });
   expect(reads).toBe(2);

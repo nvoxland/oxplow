@@ -95,7 +95,6 @@ test("a query scoped to a thread, the backlog, or everything; states filter; lis
   const all = workItemsQuery({ scope: "all", states: ["todo", "blocked"] });
   expect(all.sql).toContain("w.state IN ('todo', 'blocked')");
   expect(all.sql).toContain("ORDER BY w.rank IS NULL, w.rank, w.created_at");
-  expect(all.sql).not.toContain("v_task");
 });
 
 test("the Board groups by canonical state, in workflow order, each column in list order", () => {

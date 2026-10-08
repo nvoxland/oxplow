@@ -5114,7 +5114,7 @@ empty: No items.
         let new = || LensSpec {
             title: "Open Tasks".into(),
             description: "From Explore Data".into(),
-            query: "SELECT id, title FROM v_task".into(),
+            query: "SELECT ref, title FROM v_work_item".into(),
             ..spec_base()
         };
         let lens = save_lens(
@@ -5518,7 +5518,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT id FROM v_task\"
+    input: \"SELECT ref FROM v_work_item\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
 models:
@@ -6203,9 +6203,9 @@ commands:
             "models:",
             "  - name: late",
             "    version: 1",
-            "    description: Blocked tasks.",
+            "    description: Blocked work items.",
             "    columns:",
-            "      - { name: id, type: INTEGER, doc: Task id. }",
+            "      - { name: ref, type: TEXT, doc: Work item ref. }",
             "  - { name: gone, version: 1, description: No file., columns: [] }",
             "",
         ]
@@ -6214,7 +6214,7 @@ commands:
         write(
             dir.path(),
             "oxplow/extensions/x/models/late.sql",
-            "SELECT id FROM ref('task') WHERE status = 'blocked'",
+            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
@@ -6249,7 +6249,7 @@ commands:
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.models.len(), 1);
         assert_eq!(ext.models[0].file, "oxplow/extensions/x/models/late.sql");
-        assert!(ext.models[0].sql.contains("ref('task')"));
+        assert!(ext.models[0].sql.contains("ref('work_item')"));
 
         write(
             dir.path(),
@@ -6278,7 +6278,7 @@ commands:
         let manifest = [
             "dimensions:",
             "  - { key: acme.team, label: Team }",
-            "  - { key: acme.prio, entity: v_task, expr: e.priority }",
+            "  - { key: acme.prio, entity: v_work_item, expr: \"json_extract(e.native, '$.priority')\" }",
             "  - { key: acme.hot, promote: true }",
             "",
         ]

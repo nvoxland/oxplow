@@ -123,7 +123,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|e| e["name"] == "v_task")
+            .find(|e| e["name"] == "v_work_item")
             .unwrap();
         assert_eq!(task["kind"], "sql");
         // tsk1065: the listing counts nothing: a model too big to count in
@@ -164,19 +164,19 @@ mod tests {
         let (svc, _dir) = crate::test_support::services();
         let err = crate::dispatch(
             "query_sql",
-            json!({ "sql": "SELECT count(*) FROM task" }),
+            json!({ "sql": "SELECT count(*) FROM work_item" }),
             &svc,
         )
         .await
         .unwrap_err();
-        assert!(err.message.contains("v_task"), "{}", err.message);
+        assert!(err.message.contains("v_work_item"), "{}", err.message);
         let out = crate::dispatch(
             "query_sql",
-            json!({ "sql": "SELECT count(*) FROM task", "raw": true }),
+            json!({ "sql": "SELECT count(*) FROM work_item", "raw": true }),
             &svc,
         )
         .await
         .unwrap();
-        assert_eq!(out["reads"]["tables"], json!(["task"]));
+        assert_eq!(out["reads"]["tables"], json!(["work_item"]));
     }
 }

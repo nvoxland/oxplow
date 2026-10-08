@@ -14,10 +14,10 @@ test("explore a model, run SQL, and keep it as a lens through lens.keep", async 
   await run(daemon, "oxplow.work_item.create", { title: "Echidna task", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Explore Data");
-  await page.getByTestId("explore-entity-v_task").click();
+  await page.getByTestId("explore-entity-v_work_item").click();
   // Picking an entity writes its query; replace it once it's there.
-  await expect(page.getByTestId("explore-sql")).toHaveValue(/v_task/);
-  await page.getByTestId("explore-sql").fill("SELECT title FROM v_task WHERE title LIKE 'Echidna%'");
+  await expect(page.getByTestId("explore-sql")).toHaveValue(/v_work_item/);
+  await page.getByTestId("explore-sql").fill("SELECT title FROM v_work_item WHERE title LIKE 'Echidna%'");
   await page.getByTestId("explore-run").click();
   await expect(page.getByTestId("page-explore-data").getByTestId("lens-row-0")).toContainText("Echidna task");
   const before = await keeps(daemon);

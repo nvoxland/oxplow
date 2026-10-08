@@ -225,12 +225,12 @@ test("a bundled program's script toggle says whether it's shown", async () => {
 test("a model that can't be counted in time leaves the rest of the list", async () => {
   entities = [
     { name: "v_file_metric", owner: "core", kind: "sql", description: "" },
-    { name: "v_task", owner: "core", kind: "sql", description: "" },
+    { name: "v_work_item", owner: "core", kind: "sql", description: "" },
   ];
-  counts = { v_task: 3 };
+  counts = { v_work_item: 3 };
   const view = render(<DataSection />);
   const cell = (name: string) => view.getByTestId(`data-entity-${name}`).querySelectorAll("td")[2]!;
-  await waitFor(() => expect(cell("v_task").textContent).toBe("3"));
+  await waitFor(() => expect(cell("v_work_item").textContent).toBe("3"));
   expect(cell("v_file_metric").textContent).toBe("—");
   expect(cell("v_file_metric").getAttribute("title")).toContain("timed out");
 });

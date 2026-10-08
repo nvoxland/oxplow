@@ -28,15 +28,19 @@ collectors:
     entry: collectors/stale_tasks.star
     input: |
       WITH touched AS (
-        SELECT t.id, t.title, t.status, t.priority, t.thread_id, t.stream_id,
-               max(t.updated_at,
+        SELECT CAST(substr(w.ref, 21) AS INTEGER) AS id, w.title,
+               w.native_state AS status,
+               json_extract(w.native, '$.priority') AS priority,
+               w.thread_id, th.stream_id,
+               max(w.updated_at,
                    coalesce((SELECT max(c.last_activity_at) FROM v_comment c
                              WHERE c.target_kind = 'work_item'
-                               AND c.target_id = 'oxplow:tsk' || t.id), ''),
+                               AND c.target_id = substr(w.ref, 11)), ''),
                    coalesce((SELECT max(coalesce(e.ended_at, e.started_at)) FROM v_effort e
-                             WHERE e.task_id = t.id), '')) AS last_touched_at
-        FROM v_task t
-        WHERE t.status IN ('ready', 'in_progress', 'blocked')
+                             WHERE e.work_item = w.ref), '')) AS last_touched_at
+        FROM v_work_item w
+        LEFT JOIN v_thread th ON th.id = w.thread_id
+        WHERE w.state IN ('todo', 'in_progress', 'blocked')
       )
       SELECT id, title, status, priority, thread_id, stream_id, last_touched_at,
              CAST(julianday('now') - julianday(last_touched_at) AS INTEGER) AS days_idle

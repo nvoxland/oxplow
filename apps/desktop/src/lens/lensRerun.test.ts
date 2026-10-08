@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { extensionsChanged, lensDefinitionChanged, readsChanged, unionReads, NO_READS } from "./lensRerun.js";
 
-const task = { ...NO_READS, models: ["v_task", "v_thread"] };
+const task = { ...NO_READS, models: ["v_work_item", "v_thread"] };
 const grid = { ...NO_READS, models: [], measures: ["oxplow.coverage"] };
 
 describe("a lens re-runs on what it read", () => {
   test("a model it read changed; another didn't", () => {
-    expect(readsChanged({ kind: "modelsChanged", models: ["v_task"] }, task)).toBe(true);
+    expect(readsChanged({ kind: "modelsChanged", models: ["v_work_item"] }, task)).toBe(true);
     expect(readsChanged({ kind: "modelsChanged", models: ["v_snapshot"] }, task)).toBe(false);
   });
   test("a metric grid re-runs on its own measures only", () => {
@@ -30,11 +30,11 @@ describe("a lens re-runs on what it read", () => {
     expect(extensionsChanged({ kind: "extensionsChanged" })).toBe(true);
     expect(extensionsChanged({ kind: "configChanged" })).toBe(true);
     expect(extensionsChanged({ kind: "workspaceChanged", path: "src/a.ts" })).toBe(false);
-    expect(extensionsChanged({ kind: "modelsChanged", models: ["v_task"] })).toBe(false);
+    expect(extensionsChanged({ kind: "modelsChanged", models: ["v_work_item"] })).toBe(false);
   });
   test("several runs read the union", () => {
     const u = unionReads([task, grid, null]);
-    expect(u.models.sort()).toEqual(["v_task", "v_thread"]);
+    expect(u.models.sort()).toEqual(["v_thread", "v_work_item"]);
     expect(u.measures).toEqual(["oxplow.coverage"]);
   });
 });

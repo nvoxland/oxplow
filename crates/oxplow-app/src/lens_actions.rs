@@ -477,11 +477,11 @@ mod tests {
         std::fs::write(
             ext.join("lenses/tasks.yaml"),
             r#"title: Tasks
-query: "SELECT id, title FROM v_task"
+query: "SELECT ref, title FROM v_work_item"
 params: [{ name: item, default: "" }]
 actions:
   - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: "{{param.item}}", to: done } }
-  - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }
+  - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { ref: "{{row.ref}}", to: done } }
   - { id: commit, label: Commit, command: oxplow.vcs.commit, input: { stream: str1, message: "x" } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
 "#,
@@ -561,7 +561,10 @@ actions:
     #[tokio::test]
     async fn a_row_action_binds_its_row() {
         let (fx, root) = fixture().await;
-        let row = BTreeMap::from([("id".to_string(), SqlCell::Int(fx.task.value()))]);
+        let row = BTreeMap::from([(
+            "ref".to_string(),
+            SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
+        )]);
         let run = |action: &'static str, row: Option<BTreeMap<String, SqlCell>>| {
             let (svc, root) = (fx.svc.clone(), root.clone());
             async move {
