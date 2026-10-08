@@ -118,7 +118,7 @@ impl VocabularyHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::schema::{EventType, WorkItemTransitioned};
+    use crate::events::schema::{EventType, WorkItemStateChanged};
     use crate::refs::kind::KindSpec;
 
     /// Core's vocabulary is built once per process: compiling every core
@@ -141,12 +141,12 @@ mod tests {
             VocabularyHandle::new(Vocabulary::new(EventSchemaRegistry::new(), core_kinds()));
         let held = handle.clone();
         let before = held.current();
-        assert!(!before.is_registered(WorkItemTransitioned::TYPE, WorkItemTransitioned::V));
+        assert!(!before.is_registered(WorkItemStateChanged::TYPE, WorkItemStateChanged::V));
         handle.swap(Vocabulary::core());
         assert!(held
             .current()
-            .is_registered(WorkItemTransitioned::TYPE, WorkItemTransitioned::V));
-        assert!(!before.is_registered(WorkItemTransitioned::TYPE, WorkItemTransitioned::V));
+            .is_registered(WorkItemStateChanged::TYPE, WorkItemStateChanged::V));
+        assert!(!before.is_registered(WorkItemStateChanged::TYPE, WorkItemStateChanged::V));
     }
 
     /// Two handles in one process don't share kinds: what one adds, the

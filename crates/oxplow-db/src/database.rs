@@ -1552,7 +1552,10 @@ mod tests {
                   '{"effort":"effort:eff1","work_item":"work_item:oxplow:tsk1"}');"#,
         )
         .unwrap();
-        embedded::migrations::runner().run(&mut conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(6))
+            .run(&mut conn)
+            .unwrap();
         let payloads: Vec<String> = conn
             .prepare("SELECT payload FROM event_log ORDER BY seq")
             .unwrap()
@@ -1566,6 +1569,56 @@ mod tests {
                 r#"{"work_item":"work_item:oxplow:tsk1","status":"in_progress"}"#,
                 r#"{"work_item":"work_item:oxplow:tsk1","from":"in_progress","to":"done"}"#,
                 r#"{"effort":"effort:eff1","work_item":"work_item:oxplow:tsk1"}"#,
+            ]
+        );
+    }
+
+    /// V30: the logged work-item events read in the interface's words: v1
+    /// rows become v2, a transition logged beside its run's
+    /// `state_changed` goes, and the rest become `state_changed`.
+    #[test]
+    fn v30_rewrites_work_item_events_in_the_interfaces_words() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(29))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload, cause) VALUES
+                 ('a', 'work_item.created', 1, 't', 'human', '[]',
+                  '{"work_item":"work_item:oxplow:tsk1","status":"ready"}', NULL),
+                 ('b', 'work_item.edited', 1, 't', 'human', '[]',
+                  '{"work_item":"work_item:oxplow:tsk1","fields":["description","priority"]}', NULL),
+                 ('c', 'work_item.commented', 1, 't', 'human', '[]',
+                  '{"work_item":"work_item:oxplow:tsk1","comment":"task_note:not3"}', NULL),
+                 ('d', 'work_item.transitioned', 1, 't', 'human', '[]',
+                  '{"work_item":"work_item:oxplow:tsk1","from":"ready","to":"in_progress"}', 'run1'),
+                 ('e', 'work_item.state_changed', 1, 't', 'human', '[]',
+                  '{"work_item":"work_item:oxplow:tsk1","to":"in_progress"}', 'run1'),
+                 ('f', 'work_item.transitioned', 1, 't', 'human', '[]',
+                  '{"work_item":"work_item:oxplow:tsk1","from":"done","to":"archived"}', 'run2');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(30))
+            .run(&mut conn)
+            .unwrap();
+        let rows: Vec<String> = conn
+            .prepare("SELECT id || ' ' || type || '@' || v || ' ' || payload FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                r#"a work_item.created@2 {"work_item":"work_item:oxplow:tsk1","state":"todo"}"#,
+                r#"b work_item.edited@2 {"work_item":"work_item:oxplow:tsk1","fields":["body","native.priority"]}"#,
+                r#"c work_item.commented@2 {"work_item":"work_item:oxplow:tsk1","comment":"not3"}"#,
+                r#"e work_item.state_changed@1 {"work_item":"work_item:oxplow:tsk1","to":"in_progress"}"#,
+                r#"f work_item.state_changed@1 {"work_item":"work_item:oxplow:tsk1","to":"done"}"#,
             ]
         );
     }

@@ -293,12 +293,12 @@ a transition and an update naming a state each count, `to` taken from
 the `work_item.recorded` its answer carries (a create with none: the
 state it asked for, else `todo`).
 `edited` names what the command set, not a diff: a list's prior values
-aren't readable for every list. The `@1` versions spoke oxplow's task
-list (`created { status }`, `edited` with `description` / `priority` /
-`thread` / `position`, `commented { comment: "task_note:…" }`) and
-upcast to `@2`'s words; `work_item.transitioned@1 { from, to }` (oxplow
-statuses) stays registered for the log's history but nothing logs it —
-`state_changed` replaces it. An item's state opens and closes no effort
+aren't readable for every list. These are the only versions: the `@1`
+ones spoke oxplow's task list (its statuses, field names and note refs)
+and `work_item.transitioned` its status moves; V30 rewrote the logged
+ones into these words (a transition beside its run's `state_changed`
+dropped, the rest made `state_changed`) and they left core, with
+oxplow's `TaskStatus`. An item's state opens and closes no effort
 itself; the effort policy reacts to `state_changed`
 (`.context/work-tracking.md`). Effects and SDK templates react to these
 (`on: [work_item.state_changed]`, `where: { to: done }`).

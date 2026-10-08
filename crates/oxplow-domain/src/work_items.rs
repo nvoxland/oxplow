@@ -208,34 +208,6 @@ pub struct WorkItemRecord {
     pub list: Option<List>,
 }
 
-// [`WorkItemRecord`] as `work_item.recorded@1` carried it: no rank, links
-// or comments. Its schema is v1's as published — name and descriptions
-// included, since a provider's checked-in declarations are compared to it
-// exactly — so its doc comments are v1's own words.
-/// An item as its provider now has it — what `v_work_item` holds, and
-/// what a provider's `work_item.recorded` event carries.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(rename = "WorkItemRecord")]
-pub struct WorkItemRecordV1 {
-    /// `work_item:<provider>:<id>`.
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    pub title: String,
-    #[serde(default)]
-    pub body: String,
-    pub state: CanonicalState,
-    pub native_state: String,
-    /// Provider-specific fields.
-    #[serde(default)]
-    pub native: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
-    /// Gone at the provider.
-    #[serde(default)]
-    pub deleted: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WorkItemsError {
     #[error("`{0}` isn't a work item ref (work_item:<provider>:<id>)")]

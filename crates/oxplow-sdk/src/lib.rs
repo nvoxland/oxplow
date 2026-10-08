@@ -422,7 +422,7 @@ pub fn scaffold(
 
 /// A work-items provider's starting declarations: create, update and
 /// transition (`record` effect, no confirmation), the core
-/// `work_item.recorded@1` event and an empty config schema.
+/// `work_item.recorded@2` event and an empty config schema.
 fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::InitializeResult {
     use oxplow_domain::events::schema::{schema_for, EventType, WorkItemRecorded};
     use oxplow_provider_protocol::model::*;

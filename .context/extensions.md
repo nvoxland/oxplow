@@ -782,7 +782,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
 - **`scaffold(…, Kind::Provider, …)`** (`plugin new provider <name>`,
   P5.D5) adds a `providers:` entry (id = the name with `_` for `-`,
   capability `work_items`), `provider.json` (create / update /
-  transition, the core `work_item.recorded@1`, an object config
+  transition, the core `work_item.recorded@2`, an object config
   schema), a stub `bin/provider` that exits 1, `fixtures/basic.yaml`
   invoking `create` and expecting `{ ref: $any }`, and
   `fixtures/provider-<id>.yaml` (`config: {}`).
