@@ -740,11 +740,6 @@ fn no_tmux_in_the_app() {
 /// it. Each `(file, pattern)` still here says why.
 #[rustfmt::skip]
 const SPECIAL_CASES: &[(&str, &str, &str)] = &[
-    // Placing a task among oxplow's own: these commands are oxplow's
-    // tasks', until the tasks sit behind the work-list interface like any
-    // other implementation (so does `dispatching`'s in-transaction route
-    // for them, in the same file).
-    ("crates/oxplow-app/src/commands/work_item.rs", "!= OXPLOW", "oxplow's tasks' own commands"),
     // Reserving the name, so no provider takes oxplow's refs: no decision
     // about how to call one.
     ("crates/oxplow-domain/src/work_items.rs", "== OXPLOW", "the reserved provider id"),

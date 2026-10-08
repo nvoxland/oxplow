@@ -7,11 +7,13 @@
 //! active.
 
 mod db;
+pub mod mapping;
 pub mod model;
 pub mod refs;
 pub mod satellite;
 pub mod service;
 pub mod store;
+pub mod verbs;
 
 pub use model::{
     Task, TaskActorKind, TaskAuthor, TaskLink, TaskLinkType, TaskNote, TaskPriority, TaskStatus,
