@@ -58,7 +58,6 @@ pub fn install_op(deps: LspDeps) -> Op {
                 match deps.installer.install(&input.package).await {
                     Ok(entry) => {
                         deps.background.complete(&task.id, None);
-                        deps.events.emit(OxplowEvent::LspServersChanged);
                         Ok(HandlerOutput {
                             result: json!({
                                 "name": entry.name,
@@ -66,6 +65,7 @@ pub fn install_op(deps: LspDeps) -> Op {
                                 "language_ids": entry.language_ids,
                                 "binary": entry.binary.to_string_lossy(),
                             }),
+                            after_commit: Some(servers_changed(&deps)),
                             ..HandlerOutput::default()
                         })
                     }
@@ -95,12 +95,21 @@ pub fn remove_op(deps: LspDeps) -> Op {
                     .remove(&input.package)
                     .await
                     .map_err(failed)?;
-                deps.events.emit(OxplowEvent::LspServersChanged);
-                Ok(HandlerOutput::default())
+                Ok(HandlerOutput {
+                    result: json!({ "removed": input.package }),
+                    after_commit: Some(servers_changed(&deps)),
+                    ..HandlerOutput::default()
+                })
             })
         })),
     )
     .confirm_at_least(Confirm::Always)
+}
+
+/// Once the run is recorded: the server list (not a model) re-reads.
+fn servers_changed(deps: &LspDeps) -> Box<dyn FnOnce() + Send + Sync> {
+    let events = deps.events.clone();
+    Box::new(move || events.emit(OxplowEvent::LspServersChanged))
 }
 
 pub fn ops(deps: LspDeps) -> Vec<Op> {

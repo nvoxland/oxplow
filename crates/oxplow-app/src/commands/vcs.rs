@@ -116,12 +116,23 @@ where
                     .worktrees
                     .resolve_strict(Some(&stream.to_string()))
                     .await?;
-                let result = op(target.clone(), ws, input).await?;
-                announce(&target, stream, touched).await;
-                Ok(HandlerOutput {
-                    result,
-                    ..HandlerOutput::default()
-                })
+                let ran = op(target.clone(), ws, input).await;
+                let announce = announcement(&target, stream, touched).await;
+                match ran {
+                    // Once the run is recorded: what shows the workspace
+                    // and its refs reads them again.
+                    Ok(result) => Ok(HandlerOutput {
+                        result,
+                        after_commit: Some(Box::new(announce)),
+                        ..HandlerOutput::default()
+                    }),
+                    // A failed op may have touched the workspace too (a pull
+                    // that stopped partway): say so now, as nothing commits.
+                    Err(e) => {
+                        announce();
+                        Err(e)
+                    }
+                }
             })
         })),
     )
@@ -133,19 +144,35 @@ where
     .confirm_at_least(confirm)
 }
 
-async fn announce(target: &VcsTarget, stream: StreamId, touched: Touched) {
-    target.events.emit(OxplowEvent::WorkspaceChanged {
-        stream_id: stream,
-        change_kind: WorkspaceChangeKind::Updated,
-        path: String::new(),
-    });
-    match touched {
-        Touched::Workspace => {}
-        Touched::Refs => target.ref_moves.moved(stream),
-        Touched::AllRefs => {
-            for (id, _) in target.worktrees.all().await.unwrap_or_default() {
-                target.ref_moves.moved(id);
-            }
+/// What a run that touched `stream` announces: its workspace changed, and
+/// — as `touched` says — its refs or every stream's moved. Made ready
+/// here (finding every stream is async), sent by the caller.
+async fn announcement(
+    target: &VcsTarget,
+    stream: StreamId,
+    touched: Touched,
+) -> impl FnOnce() + Send + Sync + 'static {
+    let moved: Vec<StreamId> = match touched {
+        Touched::Workspace => Vec::new(),
+        Touched::Refs => vec![stream],
+        Touched::AllRefs => target
+            .worktrees
+            .all()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect(),
+    };
+    let (events, ref_moves) = (target.events.clone(), target.ref_moves.clone());
+    move || {
+        events.emit(OxplowEvent::WorkspaceChanged {
+            stream_id: stream,
+            change_kind: WorkspaceChangeKind::Updated,
+            path: String::new(),
+        });
+        for id in moved {
+            ref_moves.moved(id);
         }
     }
 }
