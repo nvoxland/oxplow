@@ -4564,6 +4564,7 @@ dependencies = [
  "oxplow-app",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-harness-fake",
  "oxplow-mcp",
  "oxplow-runtime",
  "oxplow-tasks",
@@ -4766,6 +4767,19 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+]
+
+[[package]]
+name = "oxplow-harness-fake"
+version = "0.7.0"
+dependencies = [
+ "opentelemetry-proto",
+ "oxplow-domain",
+ "oxplow-workspace-hack",
+ "prost",
+ "reqwest",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -5112,6 +5126,7 @@ dependencies = [
  "futures-core",
  "futures-executor",
  "futures-io",
+ "futures-sink",
  "futures-task",
  "futures-util",
  "getrandom 0.3.4",
@@ -5133,6 +5148,9 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "once_cell",
+ "opentelemetry",
+ "opentelemetry-proto",
+ "opentelemetry_sdk",
  "parking_lot",
  "percent-encoding",
  "ppv-lite86",

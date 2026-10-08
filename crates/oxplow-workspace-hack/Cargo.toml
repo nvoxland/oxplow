@@ -38,6 +38,7 @@ futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
 futures-executor = { version = "0.3" }
 futures-io = { version = "0.3" }
+futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3", default-features = false, features = ["std"] }
@@ -52,6 +53,9 @@ memchr = { version = "2" }
 num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = { version = "0.2", features = ["i128"] }
 once_cell = { version = "1" }
+opentelemetry = { version = "0.33", default-features = false, features = ["logs", "metrics"] }
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["logs", "metrics"] }
 parking_lot = { version = "0.12", features = ["send_guard"] }
 percent-encoding = { version = "2" }
 ppv-lite86 = { version = "0.2", default-features = false, features = ["simd", "std"] }

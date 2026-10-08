@@ -1010,6 +1010,9 @@ a keyed write once.
 
 ## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
 
+(The agent harnesses have their own suite over what core records of a
+session: [agent-model.md](./agent-model.md) "Observe conformance".)
+
 What `oxplow plugin test <name> [--bless] [--json]` runs for each
 provider an extension declares, after its check and its lens and
 collector examples ([extensions.md](./extensions.md) "The SDK"). The person running it runs their own program, so there is no

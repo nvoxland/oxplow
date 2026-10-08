@@ -741,6 +741,35 @@ the same JSON.
 - `acp/session_tests.rs` runs it in-process over a duplex pipe.
 - `tests/acp_services.rs` runs it against real `Services`, and once as its binary.
 
+## Observe conformance
+
+What core records of a harness's session is checked the same way for every
+harness, whatever its hooks look like on the wire:
+`oxplow_app::observe_conformance::suite(svc, &Expect { harness, thread,
+edited, tokens })` reads the thread's events and checks the canonical
+stream. The session started under the harness's key
+(`agent.session.started@2`), a prompt opened a turn, the edit was requested
+and finished with its worktree-relative path, the turn ended completed, and
+the tokens the harness exported were read (`agent.tokens.reported`). An
+empty list of findings passes.
+
+- **Live, over the fake harness** (`crates/oxplow-harness-fake`, a test
+  double: `-fake` keeps it off every shipped binary). The control plane's
+  `tests/observe_conformance.rs` registers it like any harness, opens a
+  session of it, runs its `launch()` command, and its binary posts a
+  scripted session to the live hook route and OTLP receiver with the
+  identity its launch gave it, then the suite runs. The fake renders its
+  own answer shape (`{"fake": …}`) and fails on any other, so a pass also
+  shows every answer was the harness's to render (`AgentHarness::render`).
+- **Every built-in renders the deny as the golden.**
+  `hook_goldens.rs::every_built_in_harness_renders_the_golden_deny`: each
+  registered harness's `render(Deny)` is byte-equal to
+  `pre_tool_write_guard_path.json`.
+- **Not yet: the real harnesses replayed.** The suite is shaped to run over
+  a real harness's hooks recorded with `OXPLOW_HOOK_DEBUG` and replayed
+  through `HookIngestService::ingest`; no recordings are checked in yet, so
+  Claude Code, Codex and opencode never run in CI.
+
 ## Agent policy (shared by every transport, tsk333)
 
 The write guard is one policy that every agent transport asks, not logic

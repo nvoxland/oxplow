@@ -23,6 +23,7 @@ members = [
     "crates/oxplow-agent-text",
     "crates/oxplow-ai-providers",
     "crates/oxplow-harnesses",
+    "crates/oxplow-harness-fake",
     "crates/oxplow-control-plane",
     "crates/oxplow-code-metrics",
     "crates/oxplow-code-dup",
@@ -197,6 +198,7 @@ oxplow-daemon-sim = { path = "crates/oxplow-daemon-sim" }
 oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }
 oxplow-agent-text = { path = "crates/oxplow-agent-text" }
 oxplow-harnesses = { path = "crates/oxplow-harnesses" }
+oxplow-harness-fake = { path = "crates/oxplow-harness-fake" }
 oxplow-sdk = { path = "crates/oxplow-sdk" }
 oxplow-control-plane = { path = "crates/oxplow-control-plane" }
 
