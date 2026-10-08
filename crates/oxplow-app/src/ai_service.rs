@@ -9,11 +9,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use oxplow_ai::client::{AiError, Client};
+use oxplow_ai::client::{
+    AiError, CompleteRequest, DecideRequest, ModelProvider, ModelProviders, ProviderInstance,
+};
 /// Re-exported so the IPC and MCP adapters need only `oxplow-app`.
 pub use oxplow_ai::client::{Answer, Completion, Decision, Question};
 use oxplow_ai::config::AiConfig;
-pub use oxplow_ai::config::{ProviderConfig, ProviderKind, Role, RoleBinding};
+pub use oxplow_ai::config::{ProviderConfig, Role, RoleBinding};
 use oxplow_ai::secrets::SecretStore;
 use oxplow_db::{NewAiCall, SqliteAiCallStore};
 
@@ -34,7 +36,7 @@ pub enum AiServiceError {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderStatus {
     pub id: String,
-    pub kind: ProviderKind,
+    pub kind: String,
     pub base_url: Option<String>,
     pub key_set: bool,
 }
@@ -55,6 +57,19 @@ pub struct AiSettings {
     pub providers: Vec<ProviderStatus>,
     /// Every role, in `Role::ALL` order.
     pub roles: Vec<RoleStatus>,
+    /// The kinds a provider can be: the registered model providers.
+    pub kinds: Vec<ProviderKindInfo>,
+}
+
+/// A kind of provider, as the Settings form offers it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderKindInfo {
+    /// What a provider's `kind:` names.
+    pub kind: String,
+    pub title: String,
+    /// Its API base when a provider names none; `None` when one must.
+    pub default_base_url: Option<String>,
 }
 
 /// Who a call is for, as its `ai_call` row records it.
@@ -76,7 +91,8 @@ impl<'a> CallSite<'a> {
 }
 
 pub struct AiService {
-    client: Client,
+    /// The model providers the extensions declare, by kind.
+    providers: ModelProviders,
     secrets: Arc<dyn SecretStore>,
     calls: Arc<SqliteAiCallStore>,
     /// Where `ai.yaml` lives; `None` when there's no config dir, which
@@ -92,13 +108,13 @@ pub type OverridesSource = Arc<dyn Fn() -> BTreeMap<Role, RoleBinding> + Send + 
 
 impl AiService {
     pub fn new(
-        client: Client,
+        providers: ModelProviders,
         secrets: Arc<dyn SecretStore>,
         calls: Arc<SqliteAiCallStore>,
         config_dir: Option<PathBuf>,
     ) -> Self {
         Self {
-            client,
+            providers,
             secrets,
             calls,
             config_dir,
@@ -108,11 +124,15 @@ impl AiService {
 
     /// Layer `source`'s role assignments (the project's) over `ai.yaml`.
     /// This machine's AI setup: the global `ai.yaml` and the OS keychain
-    /// (read only here), recording calls into `calls`. What a check run
-    /// outside the app uses (`OXPLOW_LIVE_ANSWERABILITY`).
-    pub fn for_this_machine(calls: Arc<oxplow_db::SqliteAiCallStore>) -> Self {
+    /// (read only here), recording calls into `calls` and calling through
+    /// `providers`. What a check run outside the app uses
+    /// (`OXPLOW_LIVE_ANSWERABILITY`).
+    pub fn for_this_machine(
+        calls: Arc<oxplow_db::SqliteAiCallStore>,
+        providers: ModelProviders,
+    ) -> Self {
         Self::new(
-            Client::default(),
+            providers,
             Arc::new(oxplow_ai::secrets::KeychainSecrets),
             calls,
             oxplow_config::global_config_dir(),
@@ -122,6 +142,35 @@ impl AiService {
     pub fn with_project_overrides(mut self, source: OverridesSource) -> Self {
         self.overrides = source;
         self
+    }
+
+    /// The model providers it calls through.
+    pub fn providers(&self) -> &ModelProviders {
+        &self.providers
+    }
+
+    /// The registered provider `provider`'s kind names, when its `baseUrl`
+    /// is given or the kind has a default.
+    fn provider_of(
+        &self,
+        provider: &ProviderConfig,
+    ) -> Result<Arc<dyn ModelProvider>, AiServiceError> {
+        let p = self
+            .providers
+            .get(&provider.kind)
+            .map_err(|e| AiServiceError::Config(format!("provider `{}`: {e}", provider.id)))?;
+        if p.default_base_url().is_none()
+            && provider
+                .base_url
+                .as_deref()
+                .is_none_or(|u| u.trim().is_empty())
+        {
+            return Err(AiServiceError::Config(format!(
+                "provider `{}` is `{}` and needs a baseUrl (e.g. http://localhost:11434/v1)",
+                provider.id, provider.kind
+            )));
+        }
+        Ok(p)
     }
 
     /// Providers (with whether each has a key; never the key) and every
@@ -135,7 +184,7 @@ impl AiService {
             .map(|p| {
                 Ok(ProviderStatus {
                     id: p.id.clone(),
-                    kind: p.kind,
+                    kind: p.kind.clone(),
                     base_url: p.base_url.clone(),
                     key_set: self.raw_key(&p.id)?.is_some(),
                 })
@@ -149,7 +198,22 @@ impl AiService {
                 overridden: overrides.contains_key(r),
             })
             .collect();
-        Ok(AiSettings { providers, roles })
+        let kinds = self
+            .providers
+            .kinds()
+            .iter()
+            .filter_map(|k| self.providers.get(k).ok())
+            .map(|p| ProviderKindInfo {
+                kind: p.kind().to_string(),
+                title: p.title().to_string(),
+                default_base_url: p.default_base_url().map(str::to_string),
+            })
+            .collect();
+        Ok(AiSettings {
+            providers,
+            roles,
+            kinds,
+        })
     }
 
     /// Add or replace a provider in the global `ai.yaml`. A non-empty `key`
@@ -165,6 +229,7 @@ impl AiService {
             id: id.clone(),
             ..provider
         };
+        self.provider_of(&provider)?;
         match global.providers.iter_mut().find(|p| p.id == id) {
             Some(existing) => *existing = provider,
             None => global.providers.push(provider),
@@ -231,36 +296,8 @@ impl AiService {
             .find(|p| p.id == id)
             .ok_or_else(|| AiServiceError::Config(format!("no provider `{id}`")))?;
         let key = self.key(&provider)?;
-        if provider.kind == ProviderKind::Typesafe {
-            let q = BTreeMap::from([(
-                "ok".to_string(),
-                Question::Noul {
-                    instructions: "Is this a connection test?".into(),
-                },
-            )]);
-            let d = self
-                .client
-                .decide(&provider, key.as_deref(), model, "A connection test.", &q)
-                .await?;
-            return Ok(match d.answers.get("ok") {
-                Some(Answer::Noul { probability }) => {
-                    format!("Answered (yes: {:.0}%)", probability * 100.0)
-                }
-                _ => "Answered".to_string(),
-            });
-        }
-        let c = self
-            .client
-            .complete(
-                &provider,
-                key.as_deref(),
-                model,
-                None,
-                "Reply with the single word OK.",
-                false,
-            )
-            .await?;
-        Ok(c.text.trim().chars().take(200).collect())
+        let instance = instance(&provider, key.as_deref());
+        Ok(self.provider_of(&provider)?.test(&instance, model).await?)
     }
 
     /// The effective configuration: global `ai.yaml` plus project overrides.
@@ -298,16 +335,17 @@ impl AiService {
         json: bool,
     ) -> Result<(Completion, Option<i64>), AiServiceError> {
         let (provider, binding, key) = self.prepare(role)?;
+        let model_provider = self.provider_of(&provider)?;
         let started = Instant::now();
-        let result = self
-            .client
+        let result = model_provider
             .complete(
-                &provider,
-                key.as_deref(),
-                &binding.model,
-                system,
-                prompt,
-                json,
+                &instance(&provider, key.as_deref()),
+                &CompleteRequest {
+                    model: &binding.model,
+                    system,
+                    prompt,
+                    json,
+                },
             )
             .await;
         let outcome = result.as_ref().map(|c| (c.input_tokens, c.output_tokens));
@@ -340,10 +378,17 @@ impl AiService {
         questions: &BTreeMap<String, Question>,
     ) -> Result<(Decision, Option<i64>), AiServiceError> {
         let (provider, binding, key) = self.prepare(role)?;
+        let model_provider = self.provider_of(&provider)?;
         let started = Instant::now();
-        let result = self
-            .client
-            .decide(&provider, key.as_deref(), &binding.model, state, questions)
+        let result = model_provider
+            .decide(
+                &instance(&provider, key.as_deref()),
+                &DecideRequest {
+                    model: &binding.model,
+                    state,
+                    questions,
+                },
+            )
             .await;
         let outcome = result.as_ref().map(|d| (d.input_tokens, d.output_tokens));
         let call_id = self
@@ -518,6 +563,41 @@ impl StoredKey {
     }
 }
 
+/// `provider` as a call sees it, with its `key`.
+fn instance<'a>(provider: &'a ProviderConfig, key: Option<&'a str>) -> ProviderInstance<'a> {
+    ProviderInstance {
+        id: &provider.id,
+        base_url: provider.base_url.as_deref(),
+        key,
+    }
+}
+
+/// Register the model providers `declared` names (the project's
+/// extensions' `ai_provider` implementations), each under its declared id.
+/// One whose config doesn't hold is left out (logged).
+pub fn register_built_ins(
+    providers: &ModelProviders,
+    declared: &[crate::capabilities::Implementation],
+) {
+    let built: Vec<Arc<dyn ModelProvider>> = declared
+        .iter()
+        .filter(|i| i.capability == "ai_provider")
+        .filter_map(|i| match i.source {
+            crate::capabilities::Source::BuiltIn(entry) => {
+                match oxplow_ai_providers::built_in(entry, &i.id, &i.title, &i.config)? {
+                    Ok(p) => Some(p),
+                    Err(error) => {
+                        tracing::warn!(provider = %i.id, %error, "a model provider's config doesn't hold");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        })
+        .collect();
+    providers.set(built);
+}
+
 fn endpoint_of(provider: Option<&ProviderConfig>) -> String {
     provider
         .and_then(|p| p.base_url.as_deref())
@@ -545,6 +625,38 @@ pub fn role_name(role: Role) -> String {
         .unwrap_or_default()
 }
 
+/// The built-in model providers, under foundation's ids, for tests that
+/// build an `AiService` without booting.
+#[cfg(test)]
+pub(crate) fn test_providers() -> ModelProviders {
+    let providers = ModelProviders::default();
+    providers.set(
+        [
+            ("oxplow:anthropic", "anthropic", serde_json::json!({})),
+            (
+                "oxplow:openai-compatible",
+                "openai",
+                serde_json::json!({ "baseUrl": "https://api.openai.com/v1" }),
+            ),
+            (
+                "oxplow:openai-compatible",
+                "openai_compatible",
+                serde_json::json!({}),
+            ),
+            ("oxplow:openrouter", "openrouter", serde_json::json!({})),
+            ("oxplow:typesafe", "typesafe", serde_json::json!({})),
+        ]
+        .iter()
+        .map(|(entry, id, config)| {
+            oxplow_ai_providers::built_in(entry, id, id, config)
+                .expect("a built-in")
+                .expect("its config holds")
+        })
+        .collect(),
+    );
+    providers
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,7 +675,7 @@ mod tests {
         let cfg = AiConfig {
             providers: vec![ProviderConfig {
                 id: "or".into(),
-                kind: ProviderKind::Openrouter,
+                kind: "openrouter".into(),
                 base_url: Some(base.into()),
             }],
             roles: BTreeMap::from([(
@@ -584,7 +696,7 @@ mod tests {
         let db = Database::in_memory();
         let calls = Arc::new(SqliteAiCallStore::new(db.clone()));
         (
-            AiService::new(Client::default(), secrets, calls, Some(dir.path().into())),
+            AiService::new(test_providers(), secrets, calls, Some(dir.path().into())),
             db,
         )
     }
@@ -619,6 +731,35 @@ mod tests {
             recorded(&db).await,
             json!([["summarize", "ext:review", 1, 0, 10]])
         );
+    }
+
+    /// A provider's `kind:` is a declared provider; an unknown one is
+    /// refused naming the registered, and a kind with no default URL needs
+    /// one.
+    #[tokio::test]
+    async fn an_unknown_provider_kind_is_refused_naming_the_registered() {
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _) = service("http://127.0.0.1:1", &dir);
+        let save = |kind: &str, base_url: Option<&str>| {
+            svc.save_provider(
+                ProviderConfig {
+                    id: "x".into(),
+                    kind: kind.into(),
+                    base_url: base_url.map(str::to_string),
+                },
+                None,
+            )
+        };
+        let err = save("openai-compatible", None).unwrap_err().to_string();
+        assert!(
+            err.contains("no model provider kind `openai-compatible`")
+                && err.contains("openai_compatible, openrouter"),
+            "{err}"
+        );
+        let err = save("openai_compatible", None).unwrap_err().to_string();
+        assert!(err.contains("needs a baseUrl"), "{err}");
+        save("openai_compatible", Some("http://localhost:11434/v1")).unwrap();
+        save("anthropic", None).unwrap();
     }
 
     #[tokio::test]
@@ -716,7 +857,7 @@ mod tests {
         svc.save_provider(
             ProviderConfig {
                 id: "ts".into(),
-                kind: ProviderKind::Typesafe,
+                kind: "typesafe".into(),
                 base_url: None,
             },
             Some("tk-9".into()),
@@ -741,7 +882,7 @@ mod tests {
         svc.save_provider(
             ProviderConfig {
                 id: "ts".into(),
-                kind: ProviderKind::Typesafe,
+                kind: "typesafe".into(),
                 base_url: Some("http://y".into()),
             },
             None,
@@ -830,7 +971,7 @@ mod tests {
         svc.save_provider(
             ProviderConfig {
                 id: "ts".into(),
-                kind: ProviderKind::Typesafe,
+                kind: "typesafe".into(),
                 base_url: Some(base),
             },
             None,
@@ -866,7 +1007,7 @@ mod tests {
             .save_provider(
                 ProviderConfig {
                     id: "or".into(),
-                    kind: ProviderKind::Openrouter,
+                    kind: "openrouter".into(),
                     base_url: None,
                 },
                 None,
@@ -894,7 +1035,7 @@ mod tests {
         let (svc, _db) = service(&base, &dir);
         let provider = |url: &str| ProviderConfig {
             id: "or".into(),
-            kind: ProviderKind::Openrouter,
+            kind: "openrouter".into(),
             base_url: Some(url.into()),
         };
         svc.save_provider(provider(&base), Some("sk-2".into()))

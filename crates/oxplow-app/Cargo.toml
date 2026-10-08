@@ -15,6 +15,7 @@ reqwest = { workspace = true }
 regex = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-agent-text = { workspace = true }
+oxplow-ai-providers = { workspace = true }
 oxplow-harnesses = { workspace = true }
 oxplow-db = { workspace = true }
 rusqlite = { workspace = true }

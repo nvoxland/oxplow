@@ -1,15 +1,15 @@
-//! Calling models: chat completions (Anthropic Messages, or any
-//! OpenAI-compatible endpoint: OpenAI, OpenRouter, Ollama, LM Studio,
-//! vLLM) and typed decisions (Jev's `/v1/systemone`, natively or via
-//! OpenRouter; otherwise a JSON-answer prompt on a chat model).
-//! Hand-rolled on reqwest: three small request shapes, and no Rust crate
-//! speaks Jev. See `.context/ai-providers.md`.
+//! Calling models through providers: the [`ModelProvider`] interface every
+//! provider implements (`oxplow-ai-providers` has the built-ins: Anthropic
+//! Messages, OpenAI-compatible chat, OpenRouter, TypeSafe), the request
+//! and answer types, and the [`ModelProviders`] registry, keyed by the
+//! declared `ai_provider` id that `ai.yaml`'s `kind:` names. Hand-rolled
+//! on reqwest: a few small request shapes, and no Rust crate speaks Jev.
+//! See `.context/ai-providers.md`.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
-
-use crate::config::{ProviderConfig, ProviderKind};
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq)]
 pub enum AiError {
@@ -82,15 +82,161 @@ pub struct Decision {
     pub output_tokens: i64,
 }
 
-/// Talks to one provider.
-pub struct Client {
-    http: reqwest::Client,
+/// A configured provider as a call sees it: its `ai.yaml` id (what errors
+/// name), its `baseUrl` override, and its key.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderInstance<'a> {
+    pub id: &'a str,
+    pub base_url: Option<&'a str>,
+    pub key: Option<&'a str>,
 }
 
-impl Default for Client {
+impl ProviderInstance<'_> {
+    /// Its API base: the configured `baseUrl`, else `default`.
+    pub fn base_url_or(&self, default: &str) -> String {
+        self.base_url
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .unwrap_or(default)
+            .trim_end_matches('/')
+            .to_string()
+    }
+}
+
+/// Generate text: `prompt` (with an optional `system` prompt) to `model`.
+/// With `json`, ask for a JSON object reply where the API supports it.
+#[derive(Debug, Clone, Copy)]
+pub struct CompleteRequest<'a> {
+    pub model: &'a str,
+    pub system: Option<&'a str>,
+    pub prompt: &'a str,
+    pub json: bool,
+}
+
+/// Answer typed `questions` about `state` with `model`.
+#[derive(Debug, Clone, Copy)]
+pub struct DecideRequest<'a> {
+    pub model: &'a str,
+    pub state: &'a str,
+    pub questions: &'a BTreeMap<String, Question>,
+}
+
+/// One kind of model provider oxplow can talk to: a built-in an extension
+/// declares as an `ai_provider` implementation.
+#[async_trait::async_trait]
+pub trait ModelProvider: Send + Sync {
+    /// The registry key: the declared id `ai.yaml`'s `kind:` names.
+    fn kind(&self) -> &str;
+    /// How a person names it (its declaration's title).
+    fn title(&self) -> &str;
+    /// Its API base when an instance names none; `None` when every instance
+    /// must (`baseUrl`).
+    fn default_base_url(&self) -> Option<&str>;
+    async fn complete(
+        &self,
+        instance: &ProviderInstance<'_>,
+        req: &CompleteRequest<'_>,
+    ) -> Result<Completion, AiError>;
+    /// By default, a JSON-answer prompt on [`Self::complete`].
+    async fn decide(
+        &self,
+        instance: &ProviderInstance<'_>,
+        req: &DecideRequest<'_>,
+    ) -> Result<Decision, AiError> {
+        decide_via_chat(self, instance, req).await
+    }
+    /// One small call to check the key, URL and model name: the reply.
+    async fn test(&self, instance: &ProviderInstance<'_>, model: &str) -> Result<String, AiError> {
+        let c = self
+            .complete(
+                instance,
+                &CompleteRequest {
+                    model,
+                    system: None,
+                    prompt: "Reply with the single word OK.",
+                    json: false,
+                },
+            )
+            .await?;
+        Ok(c.text.trim().chars().take(200).collect())
+    }
+}
+
+/// Answer typed questions with a chat model: a prompt asking for a JSON
+/// reply, then [`parse_answers`].
+pub async fn decide_via_chat<P: ModelProvider + ?Sized>(
+    provider: &P,
+    instance: &ProviderInstance<'_>,
+    req: &DecideRequest<'_>,
+) -> Result<Decision, AiError> {
+    let (state, questions) = (req.state, req.questions);
+    let system = "You answer typed questions about the given state. Reply with JSON only, shaped \
+            {\"answers\": {\"<question name>\": <answer>}}. Answers by type: \
+            noul → {\"type\":\"noul\",\"probability\":<0..1 that the answer is yes>}; \
+            choice → {\"type\":\"choice\",\"choice\":\"<one option>\",\"probabilities\":{\"<option>\":<0..1>}}; \
+            score → {\"type\":\"score\",\"score\":<level index, 0 = first level, fractional ok>,\"probabilities\":{\"<index>\":<0..1>}}.";
+    let mut prompt = format!("State:\n{state}\n\nQuestions:");
+    for (name, q) in questions {
+        match q {
+            Question::Noul { instructions } => {
+                prompt.push_str(&format!("\n- {name} (noul): {instructions}"))
+            }
+            Question::Choice {
+                instructions,
+                options,
+            } => prompt.push_str(&format!(
+                "\n- {name} (choice from {}): {instructions}",
+                options.join(", ")
+            )),
+            Question::Score {
+                instructions,
+                levels,
+            } => prompt.push_str(&format!(
+                "\n- {name} (score; levels in order: {}): {instructions}",
+                levels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| format!("{i}={l}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
+    let c = provider
+        .complete(
+            instance,
+            &CompleteRequest {
+                model: req.model,
+                system: Some(system),
+                prompt: &prompt,
+                json: true,
+            },
+        )
+        .await?;
+    let reply: serde_json::Value =
+        serde_json::from_str(strip_fences(&c.text)).map_err(|e| AiError::BadResponse {
+            provider: instance.id.to_string(),
+            detail: format!("the model's answer wasn't JSON ({e})"),
+        })?;
+    let answers = parse_answers(instance.id, &reply["answers"], questions, "probability")?;
+    Ok(Decision {
+        answers,
+        input_tokens: c.input_tokens,
+        output_tokens: c.output_tokens,
+    })
+}
+
+/// The HTTP client the providers share: one JSON POST, its status read
+/// into an [`AiError`] naming the provider.
+#[derive(Clone)]
+pub struct Http {
+    client: reqwest::Client,
+}
+
+impl Default for Http {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
+            client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()
                 .unwrap_or_default(),
@@ -98,72 +244,16 @@ impl Default for Client {
     }
 }
 
-impl Client {
-    /// Send `prompt` (with an optional `system` prompt) to `model`. With
-    /// `json`, ask for a JSON object reply where the API supports it.
-    pub async fn complete(
+impl Http {
+    pub async fn post(
         &self,
-        provider: &ProviderConfig,
-        key: Option<&str>,
-        model: &str,
-        system: Option<&str>,
-        prompt: &str,
-        json: bool,
-    ) -> Result<Completion, AiError> {
-        match provider.kind {
-            ProviderKind::Anthropic => {
-                self.anthropic(provider, key, model, system, prompt, json)
-                    .await
-            }
-            ProviderKind::Typesafe => Err(AiError::BadResponse {
-                provider: provider.id.clone(),
-                detail: "TypeSafe (Jev) only answers typed questions; use it for the decide role"
-                    .into(),
-            }),
-            _ => {
-                self.openai_chat(provider, key, model, system, prompt, json)
-                    .await
-            }
-        }
-    }
-
-    /// Answer typed `questions` about `state`.
-    pub async fn decide(
-        &self,
-        provider: &ProviderConfig,
-        key: Option<&str>,
-        model: &str,
-        state: &str,
-        questions: &BTreeMap<String, Question>,
-    ) -> Result<Decision, AiError> {
-        let native = match provider.kind {
-            ProviderKind::Typesafe => Some(format!("{}/v1/systemone", base_url(provider))),
-            ProviderKind::Openrouter if model.contains("jev") => {
-                Some(format!("{}/systemone", base_url(provider)))
-            }
-            _ => None,
-        };
-        match native {
-            Some(url) => {
-                self.systemone(provider, &url, key, model, state, questions)
-                    .await
-            }
-            None => {
-                self.decide_via_chat(provider, key, model, state, questions)
-                    .await
-            }
-        }
-    }
-
-    async fn post(
-        &self,
-        provider: &ProviderConfig,
+        provider: &str,
         url: &str,
         headers: Vec<(&'static str, String)>,
         body: serde_json::Value,
     ) -> Result<serde_json::Value, AiError> {
-        let id = || provider.id.clone();
-        let mut req = self.http.post(url).json(&body);
+        let id = || provider.to_string();
+        let mut req = self.client.post(url).json(&body);
         for (k, v) in headers {
             req = req.header(k, v);
         }
@@ -190,178 +280,57 @@ impl Client {
             }),
         }
     }
+}
 
-    async fn anthropic(
-        &self,
-        provider: &ProviderConfig,
-        key: Option<&str>,
-        model: &str,
-        system: Option<&str>,
-        prompt: &str,
-        json: bool,
-    ) -> Result<Completion, AiError> {
-        let mut system = system.unwrap_or_default().to_string();
-        if json {
-            system.push_str("\n\nReply with a single JSON object and nothing else.");
-        }
-        let mut body = serde_json::json!({
-            "model": model,
-            "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}],
-        });
-        if !system.trim().is_empty() {
-            body["system"] = serde_json::Value::String(system.trim().to_string());
-        }
-        let mut headers = vec![("anthropic-version", "2023-06-01".to_string())];
-        if let Some(k) = key {
-            headers.push(("x-api-key", k.to_string()));
-        }
-        let url = format!("{}/v1/messages", base_url(provider));
-        let v = self.post(provider, &url, headers, body).await?;
-        let text = v["content"]
-            .as_array()
-            .map(|parts| {
-                parts
-                    .iter()
-                    .filter_map(|p| p["text"].as_str())
-                    .collect::<Vec<_>>()
-                    .join("")
-            })
-            .ok_or_else(|| AiError::BadResponse {
-                provider: provider.id.clone(),
-                detail: "no content".into(),
-            })?;
-        Ok(Completion {
-            text,
-            input_tokens: v["usage"]["input_tokens"].as_i64().unwrap_or(0),
-            output_tokens: v["usage"]["output_tokens"].as_i64().unwrap_or(0),
-        })
-    }
+/// An `Authorization: Bearer` header for `key`, or none.
+pub fn bearer(key: Option<&str>) -> Vec<(&'static str, String)> {
+    key.map(|k| vec![("authorization", format!("Bearer {k}"))])
+        .unwrap_or_default()
+}
 
-    async fn openai_chat(
-        &self,
-        provider: &ProviderConfig,
-        key: Option<&str>,
-        model: &str,
-        system: Option<&str>,
-        prompt: &str,
-        json: bool,
-    ) -> Result<Completion, AiError> {
-        let mut messages = Vec::new();
-        if let Some(sys) = system.filter(|s| !s.trim().is_empty()) {
-            messages.push(serde_json::json!({"role": "system", "content": sys}));
-        }
-        messages.push(serde_json::json!({"role": "user", "content": prompt}));
-        let mut body = serde_json::json!({"model": model, "messages": messages});
-        if json {
-            body["response_format"] = serde_json::json!({"type": "json_object"});
-        }
-        let url = format!("{}/chat/completions", base_url(provider));
-        let v = self.post(provider, &url, bearer(key), body).await?;
-        let text = v["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| AiError::BadResponse {
-                provider: provider.id.clone(),
-                detail: "no choices[0].message.content".into(),
-            })?
-            .to_string();
-        Ok(Completion {
-            text,
-            input_tokens: v["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
-            output_tokens: v["usage"]["completion_tokens"].as_i64().unwrap_or(0),
-        })
-    }
+/// A provider kind nothing registers.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no model provider kind `{kind}` (registered: {})", registered.join(", "))]
+pub struct UnknownProviderKind {
+    pub kind: String,
+    pub registered: Vec<String>,
+}
 
-    async fn systemone(
-        &self,
-        provider: &ProviderConfig,
-        url: &str,
-        key: Option<&str>,
-        model: &str,
-        state: &str,
-        questions: &BTreeMap<String, Question>,
-    ) -> Result<Decision, AiError> {
-        let qs: serde_json::Map<String, serde_json::Value> = questions
-            .iter()
-            .map(|(name, q)| {
-                let v = match q {
-                    Question::Noul { instructions } => serde_json::json!({"type": "noul", "instructions": instructions}),
-                    Question::Choice { instructions, options } => serde_json::json!({
-                        "type": "choice",
-                        "instructions": instructions,
-                        "criteria": options.iter().map(|o| (o.clone(), serde_json::Value::Null)).collect::<serde_json::Map<_, _>>(),
-                    }),
-                    Question::Score { instructions, levels } => serde_json::json!({
-                        "type": "score", "instructions": instructions, "criteria": levels,
-                    }),
-                };
-                (name.clone(), v)
-            })
+/// The model providers the project's extensions declare, by kind. Cloning
+/// shares them.
+#[derive(Clone, Default)]
+pub struct ModelProviders {
+    providers: Arc<RwLock<BTreeMap<String, Arc<dyn ModelProvider>>>>,
+}
+
+impl ModelProviders {
+    /// Replace what's registered.
+    pub fn set(&self, providers: Vec<Arc<dyn ModelProvider>>) {
+        *self.providers.write().unwrap_or_else(|e| e.into_inner()) = providers
+            .into_iter()
+            .map(|p| (p.kind().to_string(), p))
             .collect();
-        let body = serde_json::json!({"model": model, "state": state, "questions": qs});
-        let v = self.post(provider, url, bearer(key), body).await?;
-        let answers = parse_answers(provider, &v["answers"], questions, "noul")?;
-        Ok(Decision {
-            answers,
-            input_tokens: v["usage"]["input_tokens"].as_i64().unwrap_or(0),
-            output_tokens: v["usage"]["output_tokens"].as_i64().unwrap_or(0),
-        })
     }
 
-    async fn decide_via_chat(
-        &self,
-        provider: &ProviderConfig,
-        key: Option<&str>,
-        model: &str,
-        state: &str,
-        questions: &BTreeMap<String, Question>,
-    ) -> Result<Decision, AiError> {
-        let system = "You answer typed questions about the given state. Reply with JSON only, shaped \
-            {\"answers\": {\"<question name>\": <answer>}}. Answers by type: \
-            noul → {\"type\":\"noul\",\"probability\":<0..1 that the answer is yes>}; \
-            choice → {\"type\":\"choice\",\"choice\":\"<one option>\",\"probabilities\":{\"<option>\":<0..1>}}; \
-            score → {\"type\":\"score\",\"score\":<level index, 0 = first level, fractional ok>,\"probabilities\":{\"<index>\":<0..1>}}.";
-        let mut prompt = format!("State:\n{state}\n\nQuestions:");
-        for (name, q) in questions {
-            match q {
-                Question::Noul { instructions } => {
-                    prompt.push_str(&format!("\n- {name} (noul): {instructions}"))
-                }
-                Question::Choice {
-                    instructions,
-                    options,
-                } => prompt.push_str(&format!(
-                    "\n- {name} (choice from {}): {instructions}",
-                    options.join(", ")
-                )),
-                Question::Score {
-                    instructions,
-                    levels,
-                } => prompt.push_str(&format!(
-                    "\n- {name} (score; levels in order: {}): {instructions}",
-                    levels
-                        .iter()
-                        .enumerate()
-                        .map(|(i, l)| format!("{i}={l}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )),
-            }
-        }
-        let c = self
-            .complete(provider, key, model, Some(system), &prompt, true)
-            .await?;
-        let reply: serde_json::Value =
-            serde_json::from_str(strip_fences(&c.text)).map_err(|e| AiError::BadResponse {
-                provider: provider.id.clone(),
-                detail: format!("the model's answer wasn't JSON ({e})"),
-            })?;
-        let answers = parse_answers(provider, &reply["answers"], questions, "probability")?;
-        Ok(Decision {
-            answers,
-            input_tokens: c.input_tokens,
-            output_tokens: c.output_tokens,
-        })
+    /// Every registered kind, sorted.
+    pub fn kinds(&self) -> Vec<String> {
+        self.providers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    pub fn get(&self, kind: &str) -> Result<Arc<dyn ModelProvider>, UnknownProviderKind> {
+        let providers = self.providers.read().unwrap_or_else(|e| e.into_inner());
+        providers
+            .get(kind)
+            .cloned()
+            .ok_or_else(|| UnknownProviderKind {
+                kind: kind.to_string(),
+                registered: providers.keys().cloned().collect(),
+            })
     }
 }
 
@@ -370,14 +339,14 @@ impl Client {
 /// `arbitrary_precision`, which breaks numbers inside internally tagged
 /// enums. Jev names a noul's probability `noul`; the chat prompt asks for
 /// `probability`.
-fn parse_answers(
-    provider: &ProviderConfig,
+pub fn parse_answers(
+    provider: &str,
     answers: &serde_json::Value,
     questions: &BTreeMap<String, Question>,
     noul_key: &str,
 ) -> Result<BTreeMap<String, Answer>, AiError> {
     let bad = |detail: String| AiError::BadResponse {
-        provider: provider.id.clone(),
+        provider: provider.to_string(),
         detail,
     };
     let probs = |x: &serde_json::Value| -> BTreeMap<String, f64> {
@@ -418,32 +387,8 @@ fn parse_answers(
     Ok(out)
 }
 
-/// The provider's API base: its configured `base_url`, else the kind's default.
-pub fn base_url(provider: &ProviderConfig) -> String {
-    if let Some(b) = provider
-        .base_url
-        .as_deref()
-        .filter(|b| !b.trim().is_empty())
-    {
-        return b.trim_end_matches('/').to_string();
-    }
-    match provider.kind {
-        ProviderKind::Anthropic => "https://api.anthropic.com",
-        ProviderKind::Openai => "https://api.openai.com/v1",
-        ProviderKind::Openrouter => "https://openrouter.ai/api/v1",
-        ProviderKind::Typesafe => "https://api.typesafe.ai",
-        ProviderKind::OpenaiCompatible => "http://localhost:11434/v1",
-    }
-    .to_string()
-}
-
-fn bearer(key: Option<&str>) -> Vec<(&'static str, String)> {
-    key.map(|k| vec![("authorization", format!("Bearer {k}"))])
-        .unwrap_or_default()
-}
-
 /// Models sometimes wrap JSON in a ```json fence.
-fn strip_fences(text: &str) -> &str {
+pub fn strip_fences(text: &str) -> &str {
     let t = text.trim();
     let t = t
         .strip_prefix("```json")
@@ -455,198 +400,89 @@ fn strip_fences(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_ai_fake::mock;
-    use serde_json::{json, Value};
 
-    fn provider(kind: ProviderKind, base: &str) -> ProviderConfig {
-        ProviderConfig {
-            id: "p".into(),
-            kind,
-            base_url: Some(base.into()),
+    struct Echo;
+
+    #[async_trait::async_trait]
+    impl ModelProvider for Echo {
+        fn kind(&self) -> &str {
+            "echo"
+        }
+        fn title(&self) -> &str {
+            "Echo"
+        }
+        fn default_base_url(&self) -> Option<&str> {
+            None
+        }
+        async fn complete(
+            &self,
+            _: &ProviderInstance<'_>,
+            req: &CompleteRequest<'_>,
+        ) -> Result<Completion, AiError> {
+            // Answers every question it was asked, from the prompt.
+            assert!(req.json && req.system.is_some());
+            Ok(Completion {
+                text: "```json\n{\"answers\": {\"risky\": {\"type\": \"noul\", \"probability\": 0.3}}}\n```".into(),
+                input_tokens: 50,
+                output_tokens: 20,
+            })
         }
     }
 
-    #[tokio::test]
-    async fn anthropic_messages() {
-        let (base, seen) = mock(
-            "/v1/messages",
-            200,
-            json!({"content": [{"type": "text", "text": "hi"}], "usage": {"input_tokens": 7, "output_tokens": 2}}),
-        )
-        .await;
-        let c = Client::default()
-            .complete(
-                &provider(ProviderKind::Anthropic, &base),
-                Some("k1"),
-                "claude-x",
-                Some("be brief"),
-                "hello",
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            c,
-            Completion {
-                text: "hi".into(),
-                input_tokens: 7,
-                output_tokens: 2,
-            }
-        );
-        let (_, headers, body) = seen.lock().unwrap()[0].clone();
-        assert_eq!(headers["x-api-key"], "k1");
-        assert!(headers.contains_key("anthropic-version"));
-        assert_eq!(body["model"], "claude-x");
-        assert_eq!(body["system"], "be brief");
-        assert_eq!(body["messages"][0]["content"], "hello");
+    fn instance() -> ProviderInstance<'static> {
+        ProviderInstance {
+            id: "p",
+            base_url: None,
+            key: None,
+        }
     }
 
+    /// A provider that only completes answers typed questions through a
+    /// JSON prompt, fenced or not.
     #[tokio::test]
-    async fn openai_compatible_chat_with_optional_key() {
-        let (base, seen) = mock(
-            "/chat/completions",
-            200,
-            json!({"choices": [{"message": {"content": "{\"a\":1}"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 3}}),
-        )
-        .await;
-        let c = Client::default()
-            .complete(
-                &provider(ProviderKind::OpenaiCompatible, &base),
-                None,
-                "qwen3",
-                None,
-                "q",
-                true,
-            )
-            .await
-            .unwrap();
-        assert_eq!(c.text, "{\"a\":1}");
-        assert_eq!((c.input_tokens, c.output_tokens), (5, 3));
-        let (_, headers, body) = seen.lock().unwrap()[0].clone();
-        assert!(
-            !headers.contains_key("authorization"),
-            "local servers get no auth header"
-        );
-        assert_eq!(body["response_format"]["type"], "json_object");
-        assert_eq!(body["messages"][0]["role"], "user");
-    }
-
-    fn questions() -> BTreeMap<String, Question> {
-        let mut q = BTreeMap::new();
-        q.insert(
+    async fn decide_defaults_to_a_json_prompt() {
+        let questions = BTreeMap::from([(
             "risky".to_string(),
             Question::Noul {
                 instructions: "Is this change risky?".into(),
             },
-        );
-        q.insert(
-            "area".to_string(),
-            Question::Choice {
-                instructions: "Which area?".into(),
-                options: vec!["ui".into(), "db".into()],
-            },
-        );
-        q
-    }
-
-    #[tokio::test]
-    async fn jev_systemone_natively() {
-        let (base, seen) = mock(
-            "/v1/systemone",
-            200,
-            json!({
-                "model": "jev-1.13.0",
-                "answers": {
-                    "risky": {"type": "noul", "noul": 0.8},
-                    "area": {"type": "choice", "choice": "db", "probabilities": {"ui": 0.1, "db": 0.9}, "confidence": 0.8}
+        )]);
+        let d = Echo
+            .decide(
+                &instance(),
+                &DecideRequest {
+                    model: "m",
+                    state: "diff…",
+                    questions: &questions,
                 },
-                "usage": {"input_tokens": 1000000, "output_tokens": 0}
-            }),
-        )
-        .await;
-        let d = Client::default()
-            .decide(
-                &provider(ProviderKind::Typesafe, &base),
-                Some("tk"),
-                "jev-latest",
-                "diff…",
-                &questions(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(d.answers["risky"], Answer::Noul { probability: 0.8 });
-        assert!(matches!(&d.answers["area"], Answer::Choice { choice, .. } if choice == "db"));
-        let (_, headers, body) = seen.lock().unwrap()[0].clone();
-        assert_eq!(headers["authorization"], "Bearer tk");
-        assert_eq!(body["state"], "diff…");
-        assert_eq!(body["questions"]["risky"]["type"], "noul");
-        assert_eq!(body["questions"]["area"]["criteria"]["db"], Value::Null);
-    }
-
-    #[tokio::test]
-    async fn decide_falls_back_to_a_json_prompt_on_chat_models() {
-        let reply = json!({"answers": {"risky": {"type": "noul", "probability": 0.3}, "area": {"type": "choice", "choice": "ui", "probabilities": {"ui": 0.7, "db": 0.3}}}});
-        let (base, seen) = mock(
-            "/chat/completions",
-            200,
-            json!({"choices": [{"message": {"content": reply.to_string()}}], "usage": {"prompt_tokens": 50, "completion_tokens": 20}}),
-        )
-        .await;
-        let d = Client::default()
-            .decide(
-                &provider(ProviderKind::OpenaiCompatible, &base),
-                None,
-                "qwen3",
-                "diff…",
-                &questions(),
             )
             .await
             .unwrap();
         assert_eq!(d.answers["risky"], Answer::Noul { probability: 0.3 });
-        assert_eq!(d.input_tokens, 50);
-        let body = seen.lock().unwrap()[0].2.clone();
-        assert!(body["messages"]
-            .to_string()
-            .contains("Is this change risky?"));
+        assert_eq!((d.input_tokens, d.output_tokens), (50, 20));
     }
 
-    #[tokio::test]
-    async fn http_errors_are_explained() {
-        let (base, _) = mock("/chat/completions", 401, json!({"error": "bad key"})).await;
-        let err = Client::default()
-            .complete(
-                &provider(ProviderKind::Openai, &base),
-                Some("x"),
-                "m",
-                None,
-                "q",
-                false,
-            )
-            .await
-            .unwrap_err();
+    #[test]
+    fn an_unknown_kind_names_the_registered() {
+        let r = ModelProviders::default();
+        r.set(vec![Arc::new(Echo)]);
+        assert_eq!(r.kinds(), ["echo"]);
         assert_eq!(
-            err,
-            AiError::Auth {
-                provider: "p".into()
+            r.get("nope").err().unwrap(),
+            UnknownProviderKind {
+                kind: "nope".into(),
+                registered: vec!["echo".into()]
             }
         );
-        let (base, _) = mock("/chat/completions", 429, json!({})).await;
-        let err = Client::default()
-            .complete(
-                &provider(ProviderKind::Openai, &base),
-                Some("x"),
-                "m",
-                None,
-                "q",
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(
-            err,
-            AiError::RateLimited {
-                provider: "p".into()
-            }
-        );
+    }
+
+    #[test]
+    fn an_instances_base_url_overrides_the_default() {
+        assert_eq!(instance().base_url_or("https://x/v1/"), "https://x/v1");
+        let custom = ProviderInstance {
+            base_url: Some(" http://h:1/v1/ "),
+            ..instance()
+        };
+        assert_eq!(custom.base_url_or("https://x"), "http://h:1/v1");
     }
 }

@@ -4358,6 +4358,7 @@ dependencies = [
 name = "oxplow-ai"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
  "keyring",
  "oxplow-ai-fake",
  "oxplow-workspace-hack",
@@ -4383,6 +4384,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-ai-providers"
+version = "0.7.0"
+dependencies = [
+ "async-trait",
+ "oxplow-ai",
+ "oxplow-ai-fake",
+ "oxplow-workspace-hack",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "oxplow-app"
 version = "0.7.0"
 dependencies = [
@@ -4402,6 +4416,7 @@ dependencies = [
  "oxplow-agent-text",
  "oxplow-ai",
  "oxplow-ai-fake",
+ "oxplow-ai-providers",
  "oxplow-code-deps",
  "oxplow-code-dup",
  "oxplow-code-metrics",

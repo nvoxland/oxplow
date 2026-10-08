@@ -21,6 +21,7 @@ members = [
     "crates/oxplow-dev",
     "crates/oxplow-tauri-ipc",
     "crates/oxplow-agent-text",
+    "crates/oxplow-ai-providers",
     "crates/oxplow-harnesses",
     "crates/oxplow-control-plane",
     "crates/oxplow-code-metrics",
@@ -172,6 +173,7 @@ oxplow-collect-plugin = { path = "crates/oxplow-collect-plugin" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-tasks = { path = "crates/oxplow-tasks" }
 oxplow-ai = { path = "crates/oxplow-ai" }
+oxplow-ai-providers = { path = "crates/oxplow-ai-providers" }
 oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
 oxplow-provider-protocol = { path = "crates/oxplow-provider-protocol" }
 oxplow-provider-fake = { path = "crates/oxplow-provider-fake" }

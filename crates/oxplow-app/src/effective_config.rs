@@ -252,6 +252,7 @@ mod tests {
         let config = oxplow_config::load_project_config(dir.path()).unwrap();
         let ai = AiSettings {
             providers: vec![],
+            kinds: vec![],
             roles: vec![
                 RoleStatus {
                     role: Role::Main,

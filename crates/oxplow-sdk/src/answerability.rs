@@ -448,9 +448,10 @@ mod tests {
             if std::env::var("OXPLOW_LIVE_ANSWERABILITY").as_deref() == Ok("1") {
                 // This machine's roles and keys; the throwaway services'
                 // are empty.
-                let ai = AiService::for_this_machine(std::sync::Arc::new(
-                    oxplow_db::SqliteAiCallStore::new(svc.db.clone()),
-                ));
+                let ai = AiService::for_this_machine(
+                    std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(svc.db.clone())),
+                    svc.ai.providers().clone(),
+                );
                 let catalog = catalog(&svc).await;
                 errors.extend(live(&file, &questions, &skill, &catalog, &ai).await);
             }

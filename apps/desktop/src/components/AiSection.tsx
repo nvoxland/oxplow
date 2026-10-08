@@ -23,7 +23,6 @@ import {
 import {
   emptyProviderForm,
   kindLabel,
-  PROVIDER_KINDS,
   providerFormError,
   roleRows,
   testModelFor,
@@ -172,7 +171,7 @@ function ProviderRow({
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <strong>{p.id}</strong>
         <span style={mutedStyle}>
-          {kindLabel(p.kind)}
+          {kindLabel(settings.kinds, p.kind)}
           {p.baseUrl ? ` · ${p.baseUrl}` : ""} · {p.keySet ? "Key saved" : "No key"}
         </span>
         <span style={{ flex: 1 }} />
@@ -208,12 +207,12 @@ function ProviderRow({
 /// Add a provider, or replace an existing one's settings / key by using
 /// its name.
 function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s: AiSettings): void }) {
-  const [form, setForm] = useState<ProviderForm>(emptyProviderForm);
+  const [form, setForm] = useState<ProviderForm>(() => emptyProviderForm(settings.kinds));
   const [saving, setSaving] = useState(false);
   const existing = settings.providers.find((p) => p.id === form.id.trim());
   const editing = { ...form, editing: existing !== undefined };
-  const problem = providerFormError(editing, settings.providers);
-  const hint = PROVIDER_KINDS.find((k) => k.kind === form.kind)?.baseUrlHint ?? "";
+  const problem = providerFormError(editing, settings);
+  const defaultUrl = settings.kinds.find((k) => k.kind === form.kind)?.defaultBaseUrl ?? null;
 
   async function save() {
     if (problem || saving) return;
@@ -225,7 +224,7 @@ function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s
         form.key.trim() || null,
       );
       onSaved(saved);
-      setForm(emptyProviderForm());
+      setForm(emptyProviderForm(settings.kinds));
       showToast({ message: form.key.trim() ? `Saved ${id}; its key is in your keychain.` : `Saved ${id}.` });
     } catch (e) {
       recordOpError({ label: "Save AI provider", message: String(e) });
@@ -243,7 +242,7 @@ function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s
         void save();
       }}
       onKeyDown={(e) => {
-        if (e.key === "Escape") setForm(emptyProviderForm());
+        if (e.key === "Escape") setForm(emptyProviderForm(settings.kinds));
       }}
     >
       <input
@@ -256,18 +255,18 @@ function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s
       <select
         data-testid="ai-provider-kind"
         value={form.kind}
-        onChange={(e) => setForm({ ...form, kind: e.target.value as ProviderForm["kind"] })}
+        onChange={(e) => setForm({ ...form, kind: e.target.value })}
       >
-        {PROVIDER_KINDS.map((k) => (
+        {settings.kinds.map((k) => (
           <option key={k.kind} value={k.kind}>
-            {k.label}
+            {k.title}
           </option>
         ))}
       </select>
       <input
         data-testid="ai-provider-base-url"
         value={form.baseUrl}
-        placeholder={form.kind === "openai-compatible" ? hint : `Base URL (default ${hint})`}
+        placeholder={defaultUrl === null ? "Base URL, e.g. http://localhost:11434/v1" : `Base URL (default ${defaultUrl})`}
         onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
         style={{ flex: 1, minWidth: 180 }}
       />

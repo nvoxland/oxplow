@@ -1320,6 +1320,8 @@ export type AiSettings = {
 	providers: ProviderStatus[],
 	// Every role, in `Role::ALL` order.
 	roles: RoleStatus[],
+	// The kinds a provider can be: the registered model providers.
+	kinds: ProviderKindInfo[],
 };
 
 // A lens's alert, evaluated on one run.
@@ -4856,8 +4858,15 @@ export type ProviderConfig = {
 	 *  keychain entry name for its key.
 	 */
 	id: string,
-	kind: ProviderKind,
-	// Required for `openai-compatible`; optional override for others.
+	/**
+	 *  What it is: a declared `ai_provider` id (`anthropic`, `openai`,
+	 *  `openai_compatible`, `openrouter`, `typesafe`).
+	 */
+	kind: string,
+	/**
+	 *  Its API base: required for a kind with no default
+	 *  (`openai_compatible`), an override for the others.
+	 */
 	baseUrl?: string | null,
 };
 
@@ -4924,18 +4933,14 @@ export type ProviderInstanceView = {
 	collectors: CollectorView[],
 };
 
-// Kinds of provider oxplow can talk to.
-export type ProviderKind = 
-// Anthropic Messages API.
-"anthropic" | 
-// OpenAI Chat Completions.
-"openai" | 
-// OpenRouter (OpenAI-compatible, one key for many models).
-"openrouter" | 
-// Any OpenAI-compatible server (Ollama, LM Studio, vLLM, LiteLLM); needs `base_url`.
-"openai-compatible" | 
-// TypeSafe (Jev decision model).
-"typesafe";
+// A kind of provider, as the Settings form offers it.
+export type ProviderKindInfo = {
+	// What a provider's `kind:` names.
+	kind: string,
+	title: string,
+	// Its API base when a provider names none; `None` when one must.
+	defaultBaseUrl: string | null,
+};
 
 // A provider's collector a `read` collector runs.
 export type ProviderRead = {
@@ -4997,7 +5002,7 @@ export type ProviderSpec = {
 // A provider as the UI and agents see it: never its key.
 export type ProviderStatus = {
 	id: string,
-	kind: ProviderKind,
+	kind: string,
 	baseUrl: string | null,
 	keySet: boolean,
 };

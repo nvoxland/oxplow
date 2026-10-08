@@ -11,22 +11,6 @@ use serde::{Deserialize, Serialize};
 /// File name inside the global config dir.
 pub const AI_CONFIG_FILE: &str = "ai.yaml";
 
-/// Kinds of provider oxplow can talk to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProviderKind {
-    /// Anthropic Messages API.
-    Anthropic,
-    /// OpenAI Chat Completions.
-    Openai,
-    /// OpenRouter (OpenAI-compatible, one key for many models).
-    Openrouter,
-    /// Any OpenAI-compatible server (Ollama, LM Studio, vLLM, LiteLLM); needs `base_url`.
-    OpenaiCompatible,
-    /// TypeSafe (Jev decision model).
-    Typesafe,
-}
-
 /// Jobs oxplow gives models. Extensions and features refer to roles,
 /// never to models.
 #[derive(
@@ -59,8 +43,11 @@ pub struct ProviderConfig {
     /// Your name for it, e.g. `anthropic` or `local-ollama`. Also the
     /// keychain entry name for its key.
     pub id: String,
-    pub kind: ProviderKind,
-    /// Required for `openai-compatible`; optional override for others.
+    /// What it is: a declared `ai_provider` id (`anthropic`, `openai`,
+    /// `openai_compatible`, `openrouter`, `typesafe`).
+    pub kind: String,
+    /// Its API base: required for a kind with no default
+    /// (`openai_compatible`), an override for the others.
     #[serde(default)]
     pub base_url: Option<String>,
 }
@@ -109,7 +96,9 @@ impl AiConfig {
         std::fs::write(dir.join(AI_CONFIG_FILE), text).map_err(|e| ConfigError::Io(e.to_string()))
     }
 
-    /// Problems that would make a role unusable, as messages.
+    /// Problems that would make a role unusable, as messages. Whether each
+    /// kind is registered, and needs a `baseUrl`, is the service's to say
+    /// (`ai_service`): it knows the providers.
     pub fn validate(&self) -> Result<(), ConfigError> {
         let mut seen = std::collections::HashSet::new();
         for p in &self.providers {
@@ -119,14 +108,6 @@ impl AiConfig {
             if !seen.insert(p.id.as_str()) {
                 return Err(ConfigError::Invalid(format!(
                     "provider `{}` is defined twice",
-                    p.id
-                )));
-            }
-            if p.kind == ProviderKind::OpenaiCompatible
-                && p.base_url.as_deref().is_none_or(|u| u.trim().is_empty())
-            {
-                return Err(ConfigError::Invalid(format!(
-                    "provider `{}` is openai-compatible and needs a baseUrl (e.g. http://localhost:11434/v1)",
                     p.id
                 )));
             }
@@ -171,7 +152,7 @@ mod tests {
     const YAML: &str = r#"
 providers:
   - { id: anthropic, kind: anthropic }
-  - { id: local, kind: openai-compatible, baseUrl: "http://localhost:11434/v1" }
+  - { id: local, kind: openai_compatible, baseUrl: "http://localhost:11434/v1" }
   - { id: jev, kind: typesafe }
 roles:
   main: { provider: anthropic, model: claude-opus-5-5 }
@@ -199,7 +180,7 @@ roles:
     fn resolves_roles_to_their_provider() {
         let c = cfg();
         let (p, b) = c.resolve(Role::Summarize).unwrap();
-        assert_eq!(p.kind, ProviderKind::OpenaiCompatible);
+        assert_eq!(p.kind, "openai_compatible");
         assert_eq!(b.model, "qwen3:14b");
         assert!(c.resolve(Role::Embed).is_none());
     }
@@ -237,15 +218,8 @@ roles:
         assert!(matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("nope")));
         let mut bad = cfg();
         bad.providers.push(ProviderConfig {
-            id: "x".into(),
-            kind: ProviderKind::OpenaiCompatible,
-            base_url: None,
-        });
-        assert!(matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("baseUrl")));
-        let mut bad = cfg();
-        bad.providers.push(ProviderConfig {
             id: "anthropic".into(),
-            kind: ProviderKind::Openai,
+            kind: "openai".into(),
             base_url: None,
         });
         assert!(matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("twice")));

@@ -4738,13 +4738,13 @@ mod tests {
 
     /// Point the in-memory services' `role` at a mock provider at `base`.
     fn assign_mock_role(services: &Services, base: String, role: &str) {
-        use oxplow_app::ai_service::{ProviderConfig, ProviderKind, Role, RoleBinding};
+        use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
         services
             .ai
             .save_provider(
                 ProviderConfig {
                     id: "mock".into(),
-                    kind: ProviderKind::OpenaiCompatible,
+                    kind: "openai_compatible".into(),
                     base_url: Some(base),
                 },
                 None,

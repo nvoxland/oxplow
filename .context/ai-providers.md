@@ -43,7 +43,7 @@ What can be called, as of 2026-09:
   ```yaml
   providers:
     - { id: or, kind: openrouter }
-    - { id: local, kind: openai-compatible, baseUrl: http://localhost:11434/v1 }
+    - { id: local, kind: openai_compatible, baseUrl: http://localhost:11434/v1 }
     - { id: ts, kind: typesafe }
   roles:
     summarize: { provider: or, model: openai/gpt-5-mini }
@@ -63,8 +63,15 @@ What can be called, as of 2026-09:
   no key; the call fails with "re-save the provider in Settings → AI".
   Saving a provider (UI-only) rebinds a kept key to its current URL. A
   pre-binding bare key counts as bound to the default URL.
-- Provider kinds: `anthropic`, `openai`, `openrouter`, `openai-compatible`
-  (needs `baseUrl`), `typesafe`. Every kind accepts a `baseUrl` override.
+- **A provider's `kind:` is a declared model provider**: an
+  `ai_provider` implementation an extension declares (`oxplow-foundation`:
+  `anthropic`, `openai`, `openai_compatible`, `openrouter`, `typesafe`),
+  registered in `ModelProviders` under its declared id. An unknown kind is
+  refused by `AiService` naming the registered ones; a kind with no default
+  URL (`openai_compatible`) needs a `baseUrl`, and every kind accepts one
+  as an override. `AiConfig::validate` checks only the file's own shape
+  (ids, role references); the kinds are the service's. Settings → AI offers
+  the registered kinds (`AiSettings.kinds`: kind, title, default URL).
 - Target: model catalog from models.dev (cached); manual entries allowed.
 
 ## Roles
@@ -101,9 +108,22 @@ ai:
 
 ## Client
 
-- `oxplow_ai::client::Client`, hand-rolled on the workspace's `reqwest`
-  rather than `genai`: we need three small request shapes, and owning them
-  keeps Jev's typed-question API first-class.
+- **The interface** is `oxplow_ai::client::ModelProvider` (`kind`, `title`,
+  `default_base_url`, `complete`, `decide`, `test`), called with a
+  `ProviderInstance { id, base_url, key }` and a `CompleteRequest` /
+  `DecideRequest`. `decide` defaults to a JSON prompt on `complete`
+  (`decide_via_chat`); `test` to a one-word completion. `ModelProviders` is
+  the registry (`Services.ai.providers()`), filled from the declarations by
+  `ai_service::register_built_ins` at boot and on every capabilities
+  refresh. Shared pieces stay in `oxplow-ai`: the `Http` POST helper and
+  its error mapping, `bearer`, `parse_answers`, `strip_fences`.
+- **The built-ins** live in `crates/oxplow-ai-providers` (`anthropic.rs`,
+  `openai_compatible.rs`, `openrouter.rs`, `typesafe.rs`;
+  `oxplow_ai_providers::built_in(entry, id, title, config)`), hand-rolled
+  on the workspace's `reqwest` rather than `genai`: we need three small
+  request shapes, and owning them keeps Jev's typed-question API
+  first-class. `oxplow:openai-compatible` takes `config: { baseUrl? }` as
+  its default URL (`openai` declares OpenAI's).
   - Anthropic Messages: `POST {base}/v1/messages`, `x-api-key`,
     `anthropic-version: 2023-06-01`.
   - OpenAI, OpenRouter, compatible servers: `POST {base}/chat/completions`,
@@ -115,7 +135,9 @@ ai:
 - Two operations: `complete` (text, optionally JSON) and `decide` (typed
   questions: `noul` → probability, `choice` → choice + probabilities,
   `score` → level index + probabilities). Non-Jev models answer `decide`
-  through a JSON prompt that describes the same answer shapes.
+  through a JSON prompt that describes the same answer shapes. TypeSafe
+  only decides (its `complete` is an error) and its connection `test` asks
+  a yes/no question; OpenRouter decides natively for a `jev` model.
 - Errors: 401/403 → `Auth`, 429 → `RateLimited`, other non-2xx → `Http`
   with the start of the body.
 - Answers are parsed from `serde_json::Value` by hand, not through the

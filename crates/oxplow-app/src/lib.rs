@@ -889,9 +889,12 @@ impl Services {
                 machine.secrets.clone(),
             ),
         });
+        // The model providers foundation declares, registered with the
+        // other declarations below.
+        let model_providers = oxplow_ai::client::ModelProviders::default();
         let ai = Arc::new(
             ai_service::AiService::new(
-                oxplow_ai::client::Client::default(),
+                model_providers.clone(),
                 machine.secrets.clone(),
                 Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
                 machine.config_dir.clone(),
@@ -1169,6 +1172,7 @@ impl Services {
         // The ACP adapters foundation declares.
         let acp_adapters = oxplow_domain::agent::registry::AcpAdapterRegistry::default();
         harnesses::register_acp_adapters(&acp_adapters, &declared);
+        ai_service::register_built_ins(&model_providers, &declared);
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),

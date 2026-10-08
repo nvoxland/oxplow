@@ -1978,7 +1978,7 @@ pub(crate) mod tests {
         let db = oxplow_db::Database::in_memory();
         std::sync::Arc::new(crate::ai_compute::AiCompute::new(
             std::sync::Arc::new(crate::ai_service::AiService::new(
-                oxplow_ai::client::Client::default(),
+                crate::ai_service::test_providers(),
                 std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
                 std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
                 None,
@@ -2699,7 +2699,7 @@ pub(crate) mod tests {
     /// the source.
     #[tokio::test]
     async fn a_derived_sources_ai_classify_on_one_text_is_one_call() {
-        use crate::ai_service::{ProviderConfig, ProviderKind, Role, RoleBinding};
+        use crate::ai_service::{ProviderConfig, Role, RoleBinding};
         let root = tempfile::tempdir().unwrap();
         let state = root.path().join(".oxplow");
         extension(
@@ -2720,7 +2720,7 @@ pub(crate) mod tests {
         )
         .await;
         let ai = std::sync::Arc::new(crate::ai_service::AiService::new(
-            oxplow_ai::client::Client::default(),
+            crate::ai_service::test_providers(),
             std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
             std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
             Some(state.join("global-config")),
@@ -2728,7 +2728,7 @@ pub(crate) mod tests {
         ai.save_provider(
             ProviderConfig {
                 id: "m".into(),
-                kind: ProviderKind::OpenaiCompatible,
+                kind: "openai_compatible".into(),
                 base_url: Some(base),
             },
             None,

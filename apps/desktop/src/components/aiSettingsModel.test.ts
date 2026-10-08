@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { AiSettings } from "../tauri-bridge/generated/bindings.js";
 import {
   emptyProviderForm,
+  kindLabel,
   providerFormError,
   roleRows,
   testModelFor,
@@ -12,7 +13,11 @@ import {
 const settings: AiSettings = {
   providers: [
     { id: "or", kind: "openrouter", baseUrl: null, keySet: true },
-    { id: "local", kind: "openai-compatible", baseUrl: "http://localhost:11434/v1", keySet: false },
+    { id: "local", kind: "openai_compatible", baseUrl: "http://localhost:11434/v1", keySet: false },
+  ],
+  kinds: [
+    { kind: "openrouter", title: "OpenRouter", defaultBaseUrl: "https://openrouter.ai/api/v1" },
+    { kind: "openai_compatible", title: "An OpenAI-compatible API", defaultBaseUrl: null },
   ],
   roles: [
     { role: "main", binding: null, overridden: false },
@@ -25,21 +30,34 @@ const settings: AiSettings = {
 };
 
 describe("providerFormError", () => {
-  test("a new provider needs an id without spaces", () => {
-    expect(providerFormError(emptyProviderForm(), [])).toBe("Name it (e.g. openrouter).");
-    expect(providerFormError({ ...emptyProviderForm(), id: "my key" }, [])).toBe("The name can't contain spaces.");
+  test("a new provider needs an id without spaces, and starts as the first kind", () => {
+    expect(emptyProviderForm(settings.kinds).kind).toBe("openrouter");
+    expect(providerFormError(emptyProviderForm(settings.kinds), settings)).toBe("Name it (e.g. openrouter).");
+    expect(providerFormError({ ...emptyProviderForm(settings.kinds), id: "my key" }, settings)).toBe(
+      "The name can't contain spaces.",
+    );
   });
 
-  test("openai-compatible servers need a base URL", () => {
-    const form = { ...emptyProviderForm(), id: "ollama", kind: "openai-compatible" as const };
-    expect(providerFormError(form, [])).toBe("Local and compatible servers need a base URL.");
-    expect(providerFormError({ ...form, baseUrl: "http://localhost:11434/v1" }, [])).toBeNull();
+  test("a kind with no default URL needs a base URL", () => {
+    const form = { ...emptyProviderForm(settings.kinds), id: "ollama", kind: "openai_compatible" };
+    expect(providerFormError(form, settings)).toBe("An OpenAI-compatible API needs a base URL.");
+    expect(providerFormError({ ...form, baseUrl: "http://localhost:11434/v1" }, settings)).toBeNull();
+  });
+
+  test("with no kinds registered there is nothing to add", () => {
+    const none = { ...settings, kinds: [] };
+    expect(providerFormError({ ...emptyProviderForm([]), id: "x" }, none)).toBe("No provider kinds are available.");
   });
 
   test("adding a name that's taken is refused, editing it isn't", () => {
-    const form = { ...emptyProviderForm(), id: "or" };
-    expect(providerFormError(form, settings.providers)).toBe("There's already a provider named or.");
-    expect(providerFormError({ ...form, editing: true }, settings.providers)).toBeNull();
+    const form = { ...emptyProviderForm(settings.kinds), id: "or" };
+    expect(providerFormError(form, settings)).toBe("There's already a provider named or.");
+    expect(providerFormError({ ...form, editing: true }, settings)).toBeNull();
+  });
+
+  test("a kind is shown by its title", () => {
+    expect(kindLabel(settings.kinds, "openrouter")).toBe("OpenRouter");
+    expect(kindLabel(settings.kinds, "gone")).toBe("gone");
   });
 });
 

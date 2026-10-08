@@ -941,6 +941,7 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
     crate::work_items::register_built_ins(&svc.work_items, &declared, &svc.db);
     crate::harnesses::register_built_ins(&svc.harnesses, &declared);
     crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
+    crate::ai_service::register_built_ins(svc.ai.providers(), &declared);
     svc.capabilities.set_declared(declared);
     let config = crate::config_service::read_config(&svc.config);
     svc.capabilities.publish(&config, &svc.db).await

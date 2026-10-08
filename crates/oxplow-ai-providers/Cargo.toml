@@ -1,5 +1,5 @@
 [package]
-name = "oxplow-ai"
+name = "oxplow-ai-providers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,21 +7,15 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+oxplow-ai = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
-specta = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-tokio = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
-keyring = "4.2"
 oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 oxplow-ai-fake = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true
