@@ -211,10 +211,12 @@ installed one — see [DEV.md](../DEV.md):
   of the SQLite schema.
 - **`.oxplow/daemon.json`** — `{ base_url, pid }` published by a running
   daemon. The shell that spawned it learns the endpoint from its stdout;
-  this file is for the *other* case — a daemon that outlived the shell
-  that started it, which the next open finds and kills
-  (`oxplow_app::daemon_supervisor::{write_daemon_info,
-  kill_orphan_daemon}`).
+  this file is for a shell that didn't spawn it: a live daemon named
+  here means the project is open in another app process (or a daemon
+  someone started by hand), and opening it again defers to it rather than
+  killing it (`oxplow_app::daemon_supervisor::{write_daemon_info,
+  live_daemon}`). A daemon never outlives its app — it stops when the
+  app's end of its stdin closes — so a live one isn't an orphan.
 
 ## Tables and stores
 

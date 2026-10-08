@@ -474,8 +474,7 @@ the time, setting the suite's floor: a real bug — `stop` asked `getpgid`
 of a daemon leader that could already be a zombie (macOS then fails it),
 so the SIGKILL spared a child still holding stdout. The supervisor now
 puts the daemon in its own process group itself and signals `-pid`
-(`signal_group`); `kill_orphan_daemon` keeps the cautious check for a
-daemon it didn't start.
+(`signal_group`).
 
 **What it isn't** (measured; don't redo): the **linker** (0.8 s of a
 14 s `oxplow-app` test-lib build — lld/mold won't help); **incremental

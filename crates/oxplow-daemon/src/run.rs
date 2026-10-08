@@ -86,29 +86,16 @@ fn parse_args(name: &str) -> Args {
 /// messages. The shipped `oxplow-daemon` passes the OS keychain, always;
 /// `oxplow-daemon-sim` (the browser suite's, dev-only) passes memory.
 pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretStore>) {
-    // The MCP library logs three INFO lines per agent tool connection
-    // (opened, input ended, finished): routine, so only its warnings show
-    // unless RUST_LOG asks (tsk1077).
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,rmcp=warn")),
-        )
-        .init();
-
     let args = parse_args(name);
     // The UI token: from the supervising shell over stdin (never an env
     // var or a file an agent could read), or fresh for a hand-started
-    // daemon, printed below for the person to use.
+    // daemon, printed below for the person to use. Read before anything
+    // else; what follows it on stdin is the lifeline, watched below.
     let (token, generated) = if args.token_stdin {
         let mut line = String::new();
         if std::io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
             eprintln!("{name}: --token-stdin but no token on stdin");
             std::process::exit(2);
-        }
-        // The rest of stdin is the lifeline to the app that started us.
-        if let Ok(dir) = args.project_dir.canonicalize() {
-            oxplow_app::daemon_supervisor::stop_when_app_goes(dir);
         }
         (line.trim().to_string(), false)
     } else {
@@ -130,10 +117,6 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
                 );
                 std::process::exit(1);
             }
-            tracing::info!(
-                project = %project_dir.display(),
-                "created new oxplow project (.oxplow/) via --init",
-            );
         } else {
             eprintln!(
                 "{name}: {} is not an oxplow project (no .oxplow/). \
@@ -142,6 +125,17 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
             );
             std::process::exit(1);
         }
+    }
+
+    init_logging(&project_dir);
+    log_panics();
+    if args.init {
+        tracing::info!(project = %project_dir.display(), "--init: the project's .oxplow/ is ready");
+    }
+    tracing::info!(pid = std::process::id(), project = %project_dir.display(), "{name} starting");
+    if args.token_stdin {
+        // The rest of stdin is the lifeline to the app that started us.
+        oxplow_app::daemon_supervisor::stop_when_app_goes(project_dir.clone());
     }
 
     let layout = AppLayout::for_project(&project_dir);
@@ -174,6 +168,7 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
     // Recovery + primary stream + the standard background fleet —
     // identical to the desktop shell's boot.
     oxplow_app::boot::run_boot_orchestration(&state).await;
+    oxplow_app::diagnostics::spawn_watchdog(log_dir(&project_dir));
 
     // Hook + MCP control plane (agents spawned on this box
     // talk to it over its own loopback listener).
@@ -209,9 +204,9 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
         project = %project_dir.display(),
         "daemon ready"
     );
-    // Publish the endpoint for a shell that didn't spawn us — the
-    // orphan sweep after a shell crash reads this (tsk256). The
-    // stdout line below is what a supervising shell reads at spawn.
+    // Publish the endpoint for a shell that didn't spawn us: a second
+    // app opening this project reads it and defers (tsk1063). The stdout
+    // line below is what a supervising shell reads at spawn.
     let info = oxplow_app::daemon_supervisor::DaemonInfo {
         base_url: format!("http://{}", daemon.bind_addr),
         pid: std::process::id(),
@@ -228,11 +223,90 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
         daemon.bind_addr.port()
     );
 
-    // Serve until killed.
-    let _ = daemon.task.await;
-    // Only reached on a clean server exit; a SIGTERM/SIGKILL from the
-    // supervising shell leaves the file behind, which is why both
-    // `DaemonSupervisor::stop` and the boot-time orphan sweep clear it
-    // rather than trusting the daemon to.
+    // Serve until the server stops or a signal asks us to; either way the
+    // reason is logged (tsk1070). A SIGKILL leaves no trace and the file
+    // behind, which is why `DaemonSupervisor::stop` clears it too.
+    let reason = tokio::select! {
+        served = daemon.task => format!("the server stopped: {served:?}"),
+        signal = terminated() => format!("received {signal}"),
+    };
+    tracing::info!("{name} stopping: {reason}");
     oxplow_app::daemon_supervisor::clear_daemon_info(&project_dir);
+    std::process::exit(0);
+}
+
+/// Where the daemon's logs and stall samples go: `.oxplow/logs/`.
+fn log_dir(project_dir: &std::path::Path) -> PathBuf {
+    project_dir.join(".oxplow").join("logs")
+}
+
+/// Log to stderr (the supervising app's) and to
+/// `.oxplow/logs/daemon.<date>.log`, daily, the last week kept: a packaged
+/// app's stderr goes nowhere, and a daemon that stopped or hung must leave
+/// a trace (tsk1070). Written synchronously, so a crash loses no line.
+fn init_logging(project_dir: &std::path::Path) {
+    use tracing_subscriber::prelude::*;
+    // The MCP library logs three INFO lines per agent tool connection
+    // (opened, input ended, finished): routine, so only its warnings show
+    // unless RUST_LOG asks (tsk1077).
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,rmcp=warn"));
+    let file = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("daemon")
+        .filename_suffix("log")
+        .max_log_files(7)
+        .build(log_dir(project_dir));
+    let file_error = file.as_ref().err().map(ToString::to_string);
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(file.ok().map(|f| {
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(f)
+        }))
+        .init();
+    if let Some(e) = file_error {
+        tracing::warn!(error = %e, "no log file; logging to stderr only");
+    }
+}
+
+/// Log a panic, with its thread and backtrace, before the default hook
+/// prints it: a panic in a task otherwise reaches only stderr.
+fn log_panics() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        tracing::error!(
+            thread = thread.name().unwrap_or("unnamed"),
+            backtrace = %std::backtrace::Backtrace::force_capture(),
+            "panic: {info}"
+        );
+        default(info);
+    }));
+}
+
+/// The first of SIGTERM, SIGINT or SIGHUP, by name.
+#[cfg(unix)]
+async fn terminated() -> &'static str {
+    use tokio::signal::unix::{signal, SignalKind};
+    let (Ok(mut term), Ok(mut int), Ok(mut hup)) = (
+        signal(SignalKind::terminate()),
+        signal(SignalKind::interrupt()),
+        signal(SignalKind::hangup()),
+    ) else {
+        return std::future::pending().await;
+    };
+    tokio::select! {
+        _ = term.recv() => "SIGTERM",
+        _ = int.recv() => "SIGINT",
+        _ = hup.recv() => "SIGHUP",
+    }
+}
+
+#[cfg(not(unix))]
+async fn terminated() -> &'static str {
+    let _ = tokio::signal::ctrl_c().await;
+    "Ctrl-C"
 }

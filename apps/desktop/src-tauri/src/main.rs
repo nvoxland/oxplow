@@ -11,6 +11,13 @@ use oxplow_tauri_ipc::{specta_builder, windows};
 use tauri::Manager;
 
 fn main() {
+    // `--version` / `--help` print and exit: before this, the app took
+    // them as a launch, and a second app on an open project is not
+    // something to start by accident (tsk1063).
+    if let Some(text) = info_arg(std::env::args().skip(1)) {
+        println!("{text}");
+        return;
+    }
     if let Some(event) = hook_event_arg() {
         run_hook_command(&event);
         return;
@@ -25,6 +32,23 @@ fn main() {
     // once per binary.
     let ctx = tauri::generate_context!();
     run_shell(ctx);
+}
+
+/// What `--version` / `-V` or `--help` / `-h` print, when the first
+/// argument asks for it.
+fn info_arg(mut args: impl Iterator<Item = String>) -> Option<String> {
+    match args.next().as_deref() {
+        Some("--version" | "-V") => Some(format!("oxplow {}", env!("CARGO_PKG_VERSION"))),
+        Some("--help" | "-h") => Some(
+            "oxplow — opens the Oxplow app\n\n\
+             Usage:\n  \
+             oxplow [--init]                     open the app (--init: set up this dir as a project)\n  \
+             oxplow plugin <new|check|test> ...  the extension SDK\n  \
+             oxplow --version | --help"
+                .to_string(),
+        ),
+        _ => None,
+    }
 }
 
 fn hook_event_arg() -> Option<String> {
@@ -399,4 +423,27 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(args: &[&str]) -> Option<String> {
+        info_arg(args.iter().map(|a| a.to_string()))
+    }
+
+    #[test]
+    fn version_and_help_print_instead_of_launching() {
+        assert_eq!(
+            info(&["--version"]),
+            Some(format!("oxplow {}", env!("CARGO_PKG_VERSION")))
+        );
+        assert_eq!(info(&["-V"]), info(&["--version"]));
+        assert!(info(&["--help"]).is_some_and(|h| h.contains("Usage:")));
+        assert_eq!(info(&["-h"]), info(&["--help"]));
+        assert_eq!(info(&[]), None);
+        assert_eq!(info(&["--init"]), None);
+        assert_eq!(info(&["plugin", "--help"]), None, "the subcommand's own");
+    }
 }
