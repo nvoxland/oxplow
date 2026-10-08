@@ -35,7 +35,7 @@ command):
 | a change's analysis (`ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
 | AI providers and roles, credentials, approving a program or source | secrets and consent: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
-| a person's global provider instances (`instances.yaml`, P9.B2: `add_provider_instance` / `set_provider_instance` / `remove_provider_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `oxplow.config.set`) |
+| a person's global external provider instances (`instances.yaml`, P9.B2: `add_provider_instance` / `set_provider_instance` / `remove_provider_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `oxplow.config.set`) |
 
 **Guards** (`crates/oxplow-app/src/source_guards.rs`). The thin
 callers — oxplow-rpc, oxplow-mcp, oxplow-control-plane, oxplow-daemon,

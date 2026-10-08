@@ -86,7 +86,7 @@ test("programRow shows a provider with the secrets and hosts it gets", () => {
     approved: false,
     version: "abc",
   });
-  expect(m.label).toBe("Provider tracker/issues");
+  expect(m.label).toBe("External provider tracker/issues");
   expect(m.command).toBe(
     "oxplow/extensions/tracker/bin/provider --stdio\nenv: ISSUES_URL\ncredentials: token\nreaches: api.tracker.example",
   );

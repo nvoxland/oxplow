@@ -738,8 +738,8 @@ fn no_tmux_in_the_app() {
     assert_eq!(named, Vec::<String>::new());
 }
 
-/// What core may not do with its own pieces (`.context/work-tracking.md`
-/// "Swappable pieces"): name a bundled extension (`oxplow-bundled`,
+/// What core may not do with its own implementations (`.context/work-tracking.md`
+/// "Capabilities"): name a bundled extension (`oxplow-bundled`,
 /// `oxplow-foundation`) as a value outside `bundled_extensions.rs` (its contributions are what any extension's
 /// are), or compare a provider id with oxplow's to decide how to treat
 /// it. Each `(file, pattern)` still here says why.
@@ -789,7 +789,7 @@ fn names(line: &str, pattern: &str) -> bool {
 /// Core treats its own implementations as any other's: a special case is
 /// pinned in [`SPECIAL_CASES`] with its reason, and goes when it's fixed.
 #[test]
-fn core_never_special_cases_its_own_pieces() {
+fn core_never_special_cases_its_own_implementations() {
     let pinned: BTreeSet<(String, String)> = SPECIAL_CASES
         .iter()
         .map(|(f, p, _)| (f.to_string(), p.to_string()))

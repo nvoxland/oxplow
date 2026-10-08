@@ -1,10 +1,10 @@
-/// Settings → Pieces: for each capability a project chooses an
+/// Settings → Capabilities: for each capability a project chooses an
 /// implementation of (the work list, the effort policy, snapshots), its
 /// choices as `v_capability_provider` lists them, which is active and
 /// why, the project's default, and a person's own choice ("Just for me",
 /// `.oxplow/personal.yaml`). `activeProviders` is a person-only key, so the
 /// click is the confirmation `oxplow.config.set` asks for. Choosing "none" says
-/// what it turns off. See `.context/work-tracking.md` "Swappable pieces".
+/// what it turns off. See `.context/work-tracking.md` "Capabilities".
 ///
 /// Usability contract (.context/usability.md): a choice applies at once,
 /// failures go to opErrorsStore.
@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import { effectiveConfig, listExtensions, querySql, runCommand, subscribeOxplowEvents } from "../api.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import type { Extension, Reads } from "../tauri-bridge/generated/bindings.js";
-import { chosenNote, nextChoices, offWithout, piecesFromResult, type Piece } from "./piecesModel.js";
+import { capabilitiesFromResult, chosenNote, nextChoices, offWithout, type ChoosableCapability } from "./capabilitiesModel.js";
 import { recordOpError } from "./opErrorsStore.js";
 
 const QUERY =
@@ -29,8 +29,8 @@ const asChoices = (value: unknown): Record<string, string> =>
     Object.entries((value ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"),
   );
 
-export function PiecesSection() {
-  const [pieces, setPieces] = useState<Piece[] | null>(null);
+export function CapabilitiesSection() {
+  const [capabilities, setCapabilities] = useState<ChoosableCapability[] | null>(null);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [chosen, setChosen] = useState<Record<Layer, Record<string, string>>>({ project: {}, personal: {} });
   const [extensions, setExtensions] = useState<Extension[]>([]);
@@ -38,7 +38,7 @@ export function PiecesSection() {
   const load = useCallback(async () => {
     try {
       const [res, settings, exts] = await Promise.all([querySql(QUERY, [], 500), effectiveConfig(), listExtensions()]);
-      setPieces(piecesFromResult(res));
+      setCapabilities(capabilitiesFromResult(res));
       setReads(res.reads);
       setExtensions(exts);
       setChosen({
@@ -46,8 +46,8 @@ export function PiecesSection() {
         personal: asChoices(settings.find((s) => s.key === "personal.activeProviders")?.value),
       });
     } catch (e) {
-      recordOpError({ label: "Read the pieces", message: e instanceof Error ? e.message : String(e) });
-      setPieces([]);
+      recordOpError({ label: "Read the capabilities", message: e instanceof Error ? e.message : String(e) });
+      setCapabilities([]);
     }
   }, []);
 
@@ -74,16 +74,16 @@ export function PiecesSection() {
     }
   }
 
-  if (pieces === null) return <div style={mutedStyle}>Loading…</div>;
+  if (capabilities === null) return <div style={mutedStyle}>Loading…</div>;
   return (
-    <div data-testid="pieces-section" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {pieces.map((p) => {
+    <div data-testid="capabilities-section" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {capabilities.map((p) => {
         const active = p.choices.find((c) => c.id === p.active);
         const off = p.optional ? offWithout(p.capability, extensions) : [];
         return (
-          <section key={p.capability} data-testid={`pieces-${p.capability}`}>
+          <section key={p.capability} data-testid={`capabilities-${p.capability}`}>
             <h4 style={{ margin: "0 0 4px" }}>{p.title}</h4>
-            <div data-testid={`pieces-${p.capability}-status`} style={mutedStyle}>
+            <div data-testid={`capabilities-${p.capability}-status`} style={mutedStyle}>
               {active?.title ?? p.active} — {chosenNote(p)}
             </div>
             <fieldset style={fieldsetStyle}>
@@ -91,8 +91,8 @@ export function PiecesSection() {
               <label style={rowStyle}>
                 <input
                   type="radio"
-                  name={`pieces-${p.capability}-project`}
-                  data-testid={`pieces-${p.capability}-project-default`}
+                  name={`capabilities-${p.capability}-project`}
+                  data-testid={`capabilities-${p.capability}-project-default`}
                   checked={chosen.project[p.capability] === undefined}
                   onChange={() => void choose("project", p.capability, null)}
                 />
@@ -102,15 +102,15 @@ export function PiecesSection() {
                 <label key={c.id} style={rowStyle}>
                   <input
                     type="radio"
-                    name={`pieces-${p.capability}-project`}
-                    data-testid={`pieces-${p.capability}-project-${c.id}`}
+                    name={`capabilities-${p.capability}-project`}
+                    data-testid={`capabilities-${p.capability}-project-${c.id}`}
                     checked={chosen.project[p.capability] === c.id}
                     onChange={() => void choose("project", p.capability, c.id)}
                   />
                   {c.title}
                   {c.features.length > 0 ? <span style={mutedStyle}>· {c.features.join(", ")}</span> : null}
                   {c.source === "none" && off.length > 0 ? (
-                    <span style={mutedStyle} data-testid={`pieces-${p.capability}-off`}>
+                    <span style={mutedStyle} data-testid={`capabilities-${p.capability}-off`}>
                       · turns off {off.join(", ")}
                     </span>
                   ) : null}
@@ -120,7 +120,7 @@ export function PiecesSection() {
             <label style={rowStyle}>
               <span style={mutedStyle}>Just for me</span>
               <select
-                data-testid={`pieces-${p.capability}-personal`}
+                data-testid={`capabilities-${p.capability}-personal`}
                 value={chosen.personal[p.capability] ?? ""}
                 onChange={(e) => void choose("personal", p.capability, e.target.value === "" ? null : e.target.value)}
               >

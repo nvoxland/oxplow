@@ -101,4 +101,4 @@ available on `PATH`:
 - `opencode` for OpenCode
 
 Enabling an agent in `.oxplow/project.yaml` does not install its CLI or configure
-its provider credentials.
+its model provider credentials.

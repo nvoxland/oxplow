@@ -1845,7 +1845,7 @@ Each capability's implementations and their features (`capability`,
 `features_json`, `active`). Restated whole (`reset`) by the app's
 `CapabilityRegistry` (`capabilities.rs`) at boot, when the extensions
 change, as an instance starts or stops, and on each reconcile. An
-extension provider's `provider` is its **instance
+external provider's `provider` is its **instance
 id** (P9.B1: a provider's default instance has the provider's id, a
 second instance its own — `issues_acme`), the same id its refs and
 `contribution_health.contribution` carry. Published as `v_capability_provider`;

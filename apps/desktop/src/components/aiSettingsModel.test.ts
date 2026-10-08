@@ -46,12 +46,12 @@ describe("providerFormError", () => {
 
   test("with no kinds registered there is nothing to add", () => {
     const none = { ...settings, kinds: [] };
-    expect(providerFormError({ ...emptyProviderForm([]), id: "x" }, none)).toBe("No provider kinds are available.");
+    expect(providerFormError({ ...emptyProviderForm([]), id: "x" }, none)).toBe("No AI provider kinds are available.");
   });
 
   test("adding a name that's taken is refused, editing it isn't", () => {
     const form = { ...emptyProviderForm(settings.kinds), id: "or" };
-    expect(providerFormError(form, settings)).toBe("There's already a provider named or.");
+    expect(providerFormError(form, settings)).toBe("There's already an AI provider named or.");
     expect(providerFormError({ ...form, editing: true }, settings)).toBeNull();
   });
 
@@ -73,7 +73,7 @@ describe("roleRows", () => {
 
   test("a binding to a missing provider is flagged, and project overrides are noted", () => {
     const decide = roleRows(settings).find((r) => r.role === "decide")!;
-    expect(decide.problem).toBe("Provider gone isn't set up.");
+    expect(decide.problem).toBe("AI provider gone isn't set up.");
     expect(decide.note).toBe("Set by this project");
     expect(decide.editable).toBe(false);
     expect(decide.lockedReason).toContain(".oxplow/project.yaml");

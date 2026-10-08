@@ -21,7 +21,7 @@ failure after your edit is yours:
   (`ref('item')`) and a lens over the model;
 - `command` — a command whose script comments on a work item, on a work
   item's Commands menu;
-- `provider` — a work-items provider's declarations and a stub program
+- `provider` — an external work-items provider's declarations and a stub program
   (red until you write the program);
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs only once a person approves it);
@@ -320,7 +320,7 @@ names the file and line and says what to change.
 3. Pass **your own `stream_id`** to both when you're in a worktree
    stream. Extensions are read from the stream's worktree, so the primary
    stream won't see yours until it's merged.
-4. An extension with a **provider** (`providers:` — a program that
+4. An extension with an **external provider** (`providers:` — a program that
    connects an outside system, such as an issue tracker; private
    extensions only) is tested with `oxplow extension test <name>`:
    `oxplow extension new provider <name>` scaffolds one (its `provider.json`

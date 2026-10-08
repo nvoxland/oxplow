@@ -85,7 +85,7 @@ None of these run until a person approves that program on their machine.
     `extension.yaml` and `lenses/` (not code it runs, so a lens edit
     doesn't ask again), plus what the manifest grants it: `entry`, `env`
     passthrough, `credentials` and `network` (tsk348);
-  - for an extension provider (`ProgramKind::Provider`, key
+  - for an external provider (`ProgramKind::Provider`, key
     `provider:<ext>/<id>`), the same tree — which holds its checked-in
     declarations — plus its entry, `args`, `env` names, `credentials`
     and `network` ([providers.md](./providers.md));
@@ -125,7 +125,7 @@ A new way for config to start a program must go through the same gate.
 
 > **Superseded direction (2026-09-28, epic tsk393).** The target is now
 > anchors + an event
-> log + SQL models, with capabilities and commands as the act side, and
+> log + SQL models, with commands and the scopes they call as the act side, and
 > everything pluggable through the kinds of contribution an extension declares. The section below
 > describes the current code, which that epic moves away from phase by
 > phase.

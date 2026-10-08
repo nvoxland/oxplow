@@ -103,11 +103,11 @@ impl AiConfig {
         let mut seen = std::collections::HashSet::new();
         for p in &self.providers {
             if p.id.trim().is_empty() {
-                return Err(ConfigError::Invalid("a provider needs an id".into()));
+                return Err(ConfigError::Invalid("an AI provider needs an id".into()));
             }
             if !seen.insert(p.id.as_str()) {
                 return Err(ConfigError::Invalid(format!(
-                    "provider `{}` is defined twice",
+                    "AI provider `{}` is defined twice",
                     p.id
                 )));
             }
@@ -115,7 +115,7 @@ impl AiConfig {
         for (role, b) in &self.roles {
             if !seen.contains(b.provider.as_str()) {
                 return Err(ConfigError::Invalid(format!(
-                    "role `{role:?}` uses provider `{}`, which isn't configured",
+                    "role `{role:?}` uses AI provider `{}`, which isn't configured",
                     b.provider
                 )));
             }
@@ -215,14 +215,18 @@ roles:
                 model: "m".into(),
             },
         );
-        assert!(matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("nope")));
+        assert!(
+            matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("uses AI provider `nope`"))
+        );
         let mut bad = cfg();
         bad.providers.push(ProviderConfig {
             id: "anthropic".into(),
             kind: "openai".into(),
             base_url: None,
         });
-        assert!(matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("twice")));
+        assert!(
+            matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("AI provider `anthropic` is defined twice"))
+        );
         assert!(cfg().save(tempfile::tempdir().unwrap().path()).is_ok());
         assert!(
             bad.save(tempfile::tempdir().unwrap().path()).is_err(),

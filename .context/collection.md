@@ -582,7 +582,7 @@ the `ai_*` builtins, and an entity collector has no `files()`:
   (`LanguageSpec::doc`): a doc comment immediately preceding the item —
   `///`/`/**`/… by prefix, NOT a plain `//` (except Go, where any preceding
   comment is the doc) — or a Python/Clojure docstring. Backs `oxplow.doc_coverage`.
-- **The language-agnostic capability layer** (tsk314) — for metrics that are the
+- **The language-agnostic layer** (tsk314) — for metrics that are the
   *same concept across languages* (TODOs, complexity, …), a metric shouldn't
   name a language. Two globals make that possible:
   - `source_files()` → `[{path, text, language}]` — every **recognized** source
@@ -592,7 +592,7 @@ the `ai_*` builtins, and an entity collector has no `files()`:
   - `markers(text, language)` → `[{line, kind, text}]` — TODO/FIXME/HACK/XXX/BUG
     comment markers, comment-aware via the grammar.
   Per-language knowledge (grammars, extensions, comment scanning) lives in
-  `oxplow-code-metrics`; metrics are defined once on these capabilities (the
+  `oxplow-code-metrics`; metrics are defined once on these globals (the
   `metrics/code/*.star` set in `oxplow-script`). Adding a language → no metric changes.
 
 **Output schemas** the transform must produce:

@@ -27,7 +27,7 @@ The **namespace** is its owner's, so two extensions' areas never collide:
   `namespace: oxplow`). They share it, collisions checked per id, so a
   command moving between core and a shipped extension keeps its id.
 - An extension's declared `namespace:` (default: its name with `-` →
-  `_`) — that extension's alone, its providers' commands included (one
+  `_`) — that extension's alone, its external providers' commands included (one
   id for every instance; the input says which runs it).
 
 The registry records each command's **source** (`core`,
@@ -35,8 +35,8 @@ The registry records each command's **source** (`core`,
 namespace's **holder** (`namespace_owner`: `oxplow`, or the one source
 holding it). `register` is core's (under `oxplow`); `register_namespace(ns,
 source, commands)` registers a source's commands all-or-nothing;
-`unregister_source` removes one source's (an extension disabled, a
-provider stopped), freeing a namespace left empty. Migration V26 rewrote
+`unregister_source` removes one source's (an extension disabled, an
+external provider stopped), freeing a namespace left empty. Migration V26 rewrote
 history (audit, proposals, `command.*` payloads) from the old two-part
 ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 
@@ -124,7 +124,7 @@ What a handler may do beyond composing other commands is a **scope**:
 an OAuth-style permission named `<resource>.<action>`, declared by core
 with an **access** (`oxplow_domain::scope`: `SCOPES`;
 `oxplow_domain::Access`), and listed in the command's `needs`. (Not a
-*capability*: that word is the swappable pieces — `work_items`,
+*capability*: that word is a swappable slot — `work_items`,
 `snapshots` — a project picks an implementation of.)
 Every command — core's and any extension's — reaches them the same way,
 so oxplow's own commands can do nothing an extension's can't.
@@ -652,20 +652,20 @@ a handler that hits one itself returns `CommandError::Busy` (the
 `From<DomainError::Busy>`; map SQLite errors with `oxplow_db::map_sql_err`),
 which the bus turns back into a retry; only a busy that outlasts the
 retries reaches the caller, as `Busy` (RPC `BUSY`). A system outside
-oxplow that couldn't answer just now (a provider's `Internal`, a timeout,
+oxplow that couldn't answer just now (an external provider's `Internal`, a timeout,
 a rate limit, with its wait) is `Unavailable { message, retry_after_ms }`
 (RPC `UNAVAILABLE`) — the one failure an effect sends again by itself
 (tsk914); everything else that fails is `Failed`. An **`External`**
 handler (P5.A1) is an async call against a system the bus doesn't own —
-a VCS, a provider process, a collector script, the lens files on disk —
+a VCS, an external provider's process, a collector script, the lens files on disk —
 whose state can't join the bus's transaction; the bus audits it after it returns (a failure to
 record is logged, never reported as the run failing); its audit row
 holds the handler's `result` like a `Tx` run's. It is
 `Fn(Invocation, Value)`: `Invocation { actor, idempotency_key }`, the key
 set for a step of an effect's reaction (`effect_step_key`:
 `effect:<effect>:<event id>:<index>:<hash of the call>`, the same on
-every attempt at it — P10) and `None` otherwise; a provider's handlers
-pass it to the provider ([providers.md](./providers.md)
+every attempt at it — P10) and `None` otherwise; an external provider's
+handlers pass it to the provider process ([providers.md](./providers.md)
 "Idempotency"). A keyed step's events take dedupe keys from it
 (`<key>:event:<i>`, `same_events_once`) and `record_tx` appends handler
 events uniquely, so a step that landed and is re-sent on a retry — its

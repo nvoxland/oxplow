@@ -65,7 +65,7 @@ or exact mechanics.
 | Language support — the `Language` enum, `LanguageSupport` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-support.md` |
 | Tables, stores, work queue, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
-| How oxplow infers the agent's work (efforts, policies, no gates, hints) and the swappable-pieces direction (capabilities, work list, snapshots) | `.context/work-tracking.md` |
+| How oxplow infers the agent's work (efforts, policies, no gates, hints) and the capabilities direction (swappable work list, effort policy, snapshots) | `.context/work-tracking.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
@@ -83,7 +83,7 @@ or exact mechanics.
 | External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalWorkItems`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
 | Work items — `v_work_item`, the `WorkItemsProvider` capability and registry, the oxplow provider, the conformance suite | `.context/work-items.md` |
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
-| Extensions — `extension.yaml`, lenses (user/agent-built UI), slots, actions/alerts, the bundled `oxplow-bundled` extension, what moves out of core (target design) | `.context/extensions.md` |
+| Extensions — the terms (extension, contribution, capability, provider, scope, access, effect), `extension.yaml`, lenses (user/agent-built UI), slots, actions/alerts, the bundled `oxplow-bundled` extension, what moves out of core (target design) | `.context/extensions.md` |
 | AI providers & roles — API model access, role→model mapping, keychain, recorded computations (`AiCompute`, `ai_result`), the `ai_*` collector builtins, inferred decisions | `.context/ai-providers.md` |
 | Fact substrate (measure/dimension/metric_spec/capture/fact, cube, fact collectors, MCP/IPC reads, Metrics page) | `.context/metrics.md` |
 | Profiling (the `cube_equivalence` harness, samply traps), what's already optimized, what measurement ruled out | `.context/performance.md` |

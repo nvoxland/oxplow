@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { chosenNote, nextChoices, offWithout, piecesFromResult } from "./piecesModel.js";
+import { capabilitiesFromResult, chosenNote, nextChoices, offWithout } from "./capabilitiesModel.js";
 
 const COLUMNS = [
   "capability", "provider", "extension", "features", "active", "title", "source",
@@ -9,8 +9,8 @@ const COLUMNS = [
 const result = (rows: unknown[][]) => ({ columns: COLUMNS, rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: [] }) as never;
 
 // The choosable capabilities, each with its choices, what's active and why.
-test("pieces are the choosable capabilities with their choices", () => {
-  const pieces = piecesFromResult(
+test("only choosable capabilities are listed, each with its choices", () => {
+  const capabilities = capabilitiesFromResult(
     result([
       ["work_items", "oxplow", "oxplow-bundled", '{"hierarchy":true}', 0, "oxplow's tasks", "builtin", 1, null, "Work list", 1, 1],
       ["work_items", "none", null, "{}", 1, "None", "none", 1, "personal", "Work list", 1, 1],
@@ -18,8 +18,8 @@ test("pieces are the choosable capabilities with their choices", () => {
       ["snapshots", "oxplow", "oxplow-bundled", '{"contents":true}', 1, "Keep every version", "builtin", 1, "default", "Snapshots", 1, 0],
     ]),
   );
-  expect(pieces.map((p) => p.capability)).toEqual(["snapshots", "work_items"]);
-  const work = pieces.find((p) => p.capability === "work_items")!;
+  expect(capabilities.map((p) => p.capability)).toEqual(["snapshots", "work_items"]);
+  const work = capabilities.find((p) => p.capability === "work_items")!;
   expect(work).toMatchObject({ title: "Work list", optional: true, active: "none", chosenBy: "personal" });
   expect(work.choices.map((c) => c.id)).toEqual(["oxplow", "none"]);
   expect(work.choices[0]!.features).toEqual(["hierarchy"]);

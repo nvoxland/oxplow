@@ -158,7 +158,7 @@ impl AiService {
         let p = self
             .providers
             .get(&provider.kind)
-            .map_err(|e| AiServiceError::Config(format!("provider `{}`: {e}", provider.id)))?;
+            .map_err(|e| AiServiceError::Config(format!("AI provider `{}`: {e}", provider.id)))?;
         if p.default_base_url().is_none()
             && provider
                 .base_url
@@ -166,7 +166,7 @@ impl AiService {
                 .is_none_or(|u| u.trim().is_empty())
         {
             return Err(AiServiceError::Config(format!(
-                "provider `{}` is `{}` and needs a baseUrl (e.g. http://localhost:11434/v1)",
+                "AI provider `{}` is `{}` and needs a baseUrl (e.g. http://localhost:11434/v1)",
                 provider.id, provider.kind
             )));
         }
@@ -294,7 +294,7 @@ impl AiService {
             .providers
             .into_iter()
             .find(|p| p.id == id)
-            .ok_or_else(|| AiServiceError::Config(format!("no provider `{id}`")))?;
+            .ok_or_else(|| AiServiceError::Config(format!("no AI provider `{id}`")))?;
         let key = self.key(&provider)?;
         let instance = instance(&provider, key.as_deref());
         Ok(self.provider_of(&provider)?.test(&instance, model).await?)
@@ -449,7 +449,7 @@ impl AiService {
             };
             return Err(AiServiceError::Config(format!(
                 "the key for `{}` was saved for {}, but ai.yaml now points it at {}. \
-                 If that's intended, re-save the provider in Settings → AI.",
+                 If that's intended, re-save the AI provider in Settings → AI.",
                 provider.id,
                 shown(&stored.endpoint),
                 shown(&now)
@@ -757,7 +757,10 @@ mod tests {
             "{err}"
         );
         let err = save("openai_compatible", None).unwrap_err().to_string();
-        assert!(err.contains("needs a baseUrl"), "{err}");
+        assert!(
+            err.contains("AI provider `x` is `openai_compatible` and needs a baseUrl"),
+            "{err}"
+        );
         save("openai_compatible", Some("http://localhost:11434/v1")).unwrap();
         save("anthropic", None).unwrap();
     }
@@ -1052,7 +1055,7 @@ mod tests {
             .complete(Role::Summarize, "t", None, "hi", false)
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("re-save"), "{err}");
+        assert!(err.to_string().contains("re-save the AI provider"), "{err}");
         assert!(
             evil_seen.lock().unwrap().is_empty(),
             "the key must not be sent"

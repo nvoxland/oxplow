@@ -297,7 +297,7 @@ inside the frame.
 
 ## Replacing the Board (experimental)
 
-A private extension that brings a work-items provider can put its own
+A private extension that brings an external work-items provider can put its own
 lens where the Board's cards are:
 
 ```yaml
@@ -309,8 +309,8 @@ ui:
 
 The lens gets the Board's `scope` (`thread`, `backlog` or `all`) and
 `thread_id` as params and must declare both. It shows only while that
-extension's provider is the one chosen as "Active for work items"; with
-any other provider active you see oxplow's Board. A small "replaced by"
+extension's provider is the work list chosen in Settings → Capabilities;
+with any other provider active you see oxplow's Board. A small "replaced by"
 badge says whose it is, and if it can't load, oxplow's Board shows with a
 line saying why. To keep oxplow's Board regardless, tick "Always use
 oxplow's own board" on Settings → Integrations.

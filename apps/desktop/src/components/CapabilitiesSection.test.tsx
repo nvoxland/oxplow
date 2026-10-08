@@ -1,7 +1,7 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-// Settings → Pieces lists each choosable capability's implementations, says
+// Settings → Capabilities lists each choosable capability's implementations, says
 // which is active and why, and writes a choice to the project or, "just for
 // me", to the person's own layer.
 
@@ -10,7 +10,12 @@ const COLUMNS = [
   "available", "chosen_by", "capability_title", "choosable", "optional",
 ];
 const ran: [string, unknown][] = [];
-const realApi = await import("../api.js");
+// `api.js` is mocked with the reals spread, and put back as it was
+// afterwards so later files see their own mocks.
+const realApi = { ...(await import("../api.js")) };
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
+});
 mock.module("../api.js", () => ({
   ...realApi,
   subscribeOxplowEvents: () => () => {},
@@ -37,7 +42,7 @@ mock.module("../api.js", () => ({
     return { result: null, audit_id: 1, event_id: "e", inverse: null };
   },
 }));
-const { PiecesSection } = await import("./PiecesSection.js");
+const { CapabilitiesSection } = await import("./CapabilitiesSection.js");
 
 afterEach(() => {
   cleanup();
@@ -45,22 +50,22 @@ afterEach(() => {
 });
 
 test("a capability shows its choices, what's active and why, and what none turns off", async () => {
-  const view = render(<PiecesSection />);
-  await waitFor(() => expect(view.getByTestId("pieces-work_items")).toBeTruthy());
-  expect(view.queryByTestId("pieces-vcs")).toBeNull();
-  expect(view.getByTestId("pieces-work_items-status").textContent).toContain("None — Your own choice.");
-  expect(view.getByTestId("pieces-work_items-off").textContent).toContain("Ready Tasks");
-  expect((view.getByTestId("pieces-work_items-project-default") as HTMLInputElement).checked).toBe(true);
-  expect((view.getByTestId("pieces-work_items-personal") as HTMLSelectElement).value).toBe("none");
+  const view = render(<CapabilitiesSection />);
+  await waitFor(() => expect(view.getByTestId("capabilities-work_items")).toBeTruthy());
+  expect(view.queryByTestId("capabilities-vcs")).toBeNull();
+  expect(view.getByTestId("capabilities-work_items-status").textContent).toContain("None — Your own choice.");
+  expect(view.getByTestId("capabilities-work_items-off").textContent).toContain("Ready Tasks");
+  expect((view.getByTestId("capabilities-work_items-project-default") as HTMLInputElement).checked).toBe(true);
+  expect((view.getByTestId("capabilities-work_items-personal") as HTMLSelectElement).value).toBe("none");
 });
 
 test("a project choice writes activeProviders; just-for-me writes the personal layer", async () => {
-  const view = render(<PiecesSection />);
-  await waitFor(() => expect(view.getByTestId("pieces-work_items")).toBeTruthy());
-  fireEvent.click(view.getByTestId("pieces-work_items-project-oxplow"));
+  const view = render(<CapabilitiesSection />);
+  await waitFor(() => expect(view.getByTestId("capabilities-work_items")).toBeTruthy());
+  fireEvent.click(view.getByTestId("capabilities-work_items-project-oxplow"));
   await waitFor(() =>
     expect(ran).toEqual([["oxplow.config.set", { key: "activeProviders", value: { work_items: "oxplow" } }]]),
   );
-  fireEvent.change(view.getByTestId("pieces-work_items-personal"), { target: { value: "" } });
+  fireEvent.change(view.getByTestId("capabilities-work_items-personal"), { target: { value: "" } });
   await waitFor(() => expect(ran[1]).toEqual(["oxplow.config.unset", { key: "activeProviders", layer: "personal" }]));
 });

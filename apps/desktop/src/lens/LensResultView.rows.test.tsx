@@ -155,7 +155,7 @@ test("a tree's labels follow their column's link, and its rows drag", () => {
 test("a lens that needs a capability that isn't active says so instead of showing rows", () => {
   const run = {
     ...runOf(grouped),
-    inactive: { needs: ["work_items"], message: "Needs: Work list (choose one in Settings → Pieces)." },
+    inactive: { needs: ["work_items"], message: "Needs: Work list (choose one in Settings → Capabilities)." },
   } as LensRun;
   const view = render(<LensResultView run={run} compact onOpenPage={() => {}} />);
   expect(view.getByTestId("lens-inactive").textContent).toContain("Needs: Work list");

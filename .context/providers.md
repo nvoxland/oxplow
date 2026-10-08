@@ -1,6 +1,6 @@
 # External providers
 
-A provider is a program oxplow talks to — an issue tracker's bridge, a
+An external provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D). This doc
 covers the protocol (D1), the fake provider (D2) and the host with its
@@ -937,7 +937,7 @@ removed. The page is covered by `IntegrationsSection.test.tsx` and
 `integrationsModel.test.ts`, the core by `providers/tests.rs`, and the
 whole in a browser by the suite's `integrations/fake-provider` spec
 (`tests-e2e/`, P11): a person fills the fake's Team, presses Check and
-Enable, makes it the project's work list in Settings → Pieces; an item created on it reaches the
+Enable, makes it the project's work list in Settings → Capabilities; an item created on it reaches the
 fake's service, and after Sync Now it is on the Board. Approving the
 program stays in Data → Programs; approving a provider restarts its
 running instance on what was approved (`ProviderRegistry::approved`,

@@ -25,7 +25,7 @@ and agents query.
 >   with tombstones.
 > - **Current (tsk324):** the exec-source `network` allowlist, enforced
 >   on macOS.
-> - **Current (tsk325):** Settings → Data: every entity with provider and
+> - **Current (tsk325):** Settings → Data: every entity with its owner and
 >   row count, and the source rows. `list_data_entities` (IPC, UI-only)
 >   lists models and unsynced entities without counting; the UI counts
 >   each model with `query_sql`, one at a time, so a model too big to
@@ -515,7 +515,7 @@ its series reads are cube-served: racing the cube's backfill at startup,
 every one missed and folded a measure's whole history (gigabytes).
 
 Derived data whose inputs include the world **outside** the tables (a
-working tree, the VCS tree, a program, a provider) is ingestion
+working tree, the VCS tree, a program, an external provider) is ingestion
 instead — a collector or a pump consumer, at-least-once and checkpointed.
 
 A **snapshot blob named by a table row** counts as a table input (tsk862):
@@ -981,7 +981,7 @@ entities from data already in the semantic layer:
   one by declaring the same name. Credentials set before tsk348 (no
   project in the account) aren't read; set them again.
   - Only a person sets them: IPC `set_credential` (UI-only in the parity
-    manifest; only names some collector or provider of that extension
+    manifest; only names some collector or external provider of that extension
     declares).
     Listings carry `credentials: [{name, set}]`, never values.
   - An unset credential is simply not passed; the script decides (the

@@ -144,7 +144,7 @@ models, a trigger, pacing, and an audience.
   landed while its item still says in progress), never on tracker usage
   ("fewer tasks filed"), which invites filing to satisfy a number.
 
-## Swappable pieces
+## Capabilities
 
 The direction for most of oxplow: a base interface in core, a standard
 implementation shipped in `oxplow-bundled`, and users free to write their
@@ -185,7 +185,7 @@ own — heavier ones included (beads as a work list).
   public commands and events, and pass the same conformance suite.
   Core's own records (turns, efforts, the event log) stay transactional
   in core.
-  `source_guards::core_never_special_cases_its_own_pieces` fails on a
+  `source_guards::core_never_special_cases_its_own_implementations` fails on a
   literal `"oxplow-bundled"` or `"oxplow-foundation"` outside
   `bundled_extensions.rs` or a provider id compared with oxplow's; what's
   left is pinned with its reason. oxplow's tasks sit behind the interface
@@ -266,7 +266,7 @@ The three in progress:
   capability's default) and restates `v_capability_provider` (v3).
   Lenses and advisories declare `needs:`; unmet, a lens says what it
   needs instead of showing empty, and an advisory doesn't run.
-  Settings → Pieces, generated from `v_capability_provider` (v4 carries
+  Settings → Capabilities, generated from `v_capability_provider` (v4 carries
   each capability's title and whether it's choosable and optional),
   chooses for the project and just for me, and replaces Integrations'
   work-items radio. A switch is logged (`capability.switched@1`) and
@@ -282,6 +282,6 @@ The three in progress:
   active list's item.
   The app's test fixture opens an effort with no task; only tests about
   tasks make one (which found a claim on an unlinked effort failing).
-- Next: "none" as a work list end to end, then the three swappable
-  pieces.
+- Next: "none" as a work list end to end, then the three
+  capabilities.
 

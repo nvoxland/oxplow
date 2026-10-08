@@ -1,5 +1,5 @@
 //! Which implementation of each capability is active
-//! (`.context/work-tracking.md` "Swappable pieces").
+//! (`.context/work-tracking.md` "Capabilities").
 //!
 //! Core declares the capabilities (`oxplow_domain::capability`). The
 //! implementations come from three places, all held by one
@@ -367,7 +367,7 @@ impl Hidden {
         let title =
             capability::spec(&self.capability).map_or(self.capability.as_str(), |c| c.title);
         format!(
-            "`{name}` is {}'s, which isn't the active {} (choose one in Settings → Pieces).",
+            "`{name}` is {}'s, which isn't the active {} (choose one in Settings → Capabilities).",
             self.owner,
             title.to_lowercase()
         )
@@ -432,7 +432,7 @@ pub fn needs_message(unmet: &[String]) -> String {
         })
         .collect();
     format!(
-        "Needs: {} (choose one in Settings → Pieces).",
+        "Needs: {} (choose one in Settings → Capabilities).",
         named.join(", ")
     )
 }

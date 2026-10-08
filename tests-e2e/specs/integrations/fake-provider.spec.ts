@@ -35,9 +35,9 @@ test("a person configures, checks and enables the fake tracker, and an item reac
     return !!fake && fake.enabled && fake.health.state.state === "ready";
   });
   await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
-  await page.getByTestId("pieces-work_items-project-fake").click();
-  await expect(page.getByTestId("pieces-work_items-project-fake")).toBeChecked();
-  // Made with no provider named: the active one, which Pieces chose.
+  await page.getByTestId("capabilities-work_items-project-fake").click();
+  await expect(page.getByTestId("capabilities-work_items-project-fake")).toBeChecked();
+  // Made with no provider named: the active one, which Settings → Capabilities chose.
   await run(daemon, "oxplow.work_item.create", { title: "Kiwi from oxplow" });
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from oxplow");
   // An external item reaches oxplow's models through its collector's read.

@@ -86,7 +86,7 @@ developer-facing mechanics.
   check for a Tauri host every bridge uses, and the app doesn't ask for
   what only a shell has (the native menu, recent projects) without one.
 
-  **Signing in to a provider works the same with a remote daemon** (P10):
+  **Signing in to an external provider works the same with a remote daemon** (P10):
   the service sends the browser back to a loopback port on the person's
   machine, so the shell listens there (`listen_for_oauth_redirect`,
   `await_oauth_redirect`, `answer_oauth_redirect`, `stop_oauth_redirect` —

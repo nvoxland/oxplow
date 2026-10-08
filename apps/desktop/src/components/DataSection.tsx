@@ -1,5 +1,5 @@
 /// "Data" section body for SettingsPage: every semantic-layer entity with
-/// its provider and row count (counted per model after the list shows), and every extension source with its last
+/// its owner (core or an extension) and row count (counted per model after the list shows), and every extension source with its last
 /// sync and a Run button (Approve & Run for an exec source nobody on this
 /// machine approved yet). Credentials and enabling stay under Extensions.
 /// Delivery lists the events a consumer couldn't take, with Retry and

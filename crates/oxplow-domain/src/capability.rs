@@ -1,5 +1,5 @@
-//! Capabilities: the pieces of oxplow a project chooses an implementation
-//! of (`.context/work-tracking.md` "Swappable pieces"). Core declares each
+//! Capabilities: the parts of oxplow a project chooses an implementation
+//! of (`.context/work-tracking.md` "Capabilities"). Core declares each
 //! one here — whether it may be "none", its default implementation and
 //! the features an implementation may declare — and nothing else names a
 //! capability's rules.

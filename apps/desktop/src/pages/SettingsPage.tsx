@@ -15,7 +15,7 @@ import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
 import { DataSection } from "../components/DataSection.js";
-import { PiecesSection } from "../components/PiecesSection.js";
+import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { SettingsSlotSections } from "../lens/SettingsSlotSections.js";
 import { AiSection } from "../components/AiSection.js";
@@ -223,18 +223,18 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <DataSection />
         </Section>
 
-        <Section title="Pieces" id="settings-pieces">
+        <Section title="Capabilities" id="settings-capabilities">
           <Hint>
-            The parts of oxplow you can swap: which work list tasks are filed on, how efforts open and close,
+            The capabilities you choose an implementation of: which work list tasks are filed on, how efforts open and close,
             how file versions are kept. The project&apos;s choice is saved in <code>.oxplow/project.yaml</code> for
             your team; &ldquo;Just for me&rdquo; is yours alone, in <code>.oxplow/personal.yaml</code>.
           </Hint>
-          <PiecesSection />
+          <CapabilitiesSection />
         </Section>
 
         <Section title="Integrations" id="settings-integrations">
           <Hint>
-            Outside systems (an issue tracker, say) that extensions connect through a provider program. Each
+            Outside systems (an issue tracker, say) that extensions connect through an external provider: a program oxplow runs. Each
             instance&apos;s config is saved in <code>.oxplow/project.yaml</code> for your team; approving and running
             the program is per machine. Enabling checks the config first; three failures in a row turn an
             instance off here until you enable it again. Its credentials go to your OS keychain.
@@ -247,7 +247,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         <Section title="AI" id="settings-ai">
           <Hint>
             Models oxplow itself can call: for summaries, typed questions, and extensions. Your coding agents
-            are separate. Providers and roles are saved for all your projects; keys go to your OS keychain,
+            are separate. AI providers and roles are saved for all your projects; keys go to your OS keychain,
             never to a file. Changes apply immediately; no Save needed.
           </Hint>
           <AiSection />

@@ -143,14 +143,21 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Copy names things as a person knows them
 
-- **No internal ids, codes or placeholders in what a person reads**
-  (tsk1044). A thread by its title ("The agent in “Fix the cart”"),
+- **No internal ids, codes or placeholders in what a person reads**.
+  A thread by its title ("The agent in “Fix the cart”"),
   never `thr1`; a command by its label, its id only on hover; a
   capability by its name ("Version control", `capabilityLabel`), not
   `vcs`; no plan codes ("(P5.E1)") in model docs (`model_docs_carry_no_
   plan_labels`); no `TODO:` scaffold text a person sees (Keep This's
   `my-lenses` gets a real description); counts agree in number ("1
   note"); a status says what happened ("Recorded facts", not "0 rows").
+- **The precise technical term, not a friendlier synonym.** oxplow's
+  users are software developers, so UI copy uses the same terms the code
+  and docs use — capability, extension, contribution, provider, scope,
+  access, effect — with the meanings in
+  [extensions.md](./extensions.md) "Terms". No "pieces", "plugins" or
+  "add-ons" for them; a "provider" says which kind (an external provider,
+  an AI provider) where the screen doesn't make it obvious.
 
 ## Agent proposals
 
@@ -256,8 +263,8 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Actions that reach outside oxplow
 
-Some actions do something oxplow can't take back or doesn't own: a
-provider's service is written to, a browser sign-in starts, an effect
+Some actions do something oxplow can't take back or doesn't own: an
+external provider's service is written to, a browser sign-in starts, an effect
 runs again. The rule is the destructive one's — the person's second
 click is the confirmation — plus saying what is about to happen.
 
@@ -284,11 +291,11 @@ click is the confirmation — plus saying what is about to happen.
   went; a failure is shown on the row (`sign-in-<instance>-<name>`,
   `sign-in-button-…`, `sign-out-…`).
 - **Adding an instance is a small form under the list** (P9.B6): the
-  provider (a select only when there is more than one), a name, and
+  external provider (a select only when there is more than one), a name, and
   whose it is ("This project's" / "Mine, in every project"). Enter adds,
   Escape clears, and what's wrong with the name is said before Add can
-  be pressed. **Remove** is an `InlineConfirm` on a named instance; a
-  provider's own instance is turned off, not removed.
+  be pressed. **Remove** is an `InlineConfirm` on a named instance; an
+  external provider's own instance is turned off, not removed.
 
 ## Links open where you ask them to
 

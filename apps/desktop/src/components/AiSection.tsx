@@ -58,11 +58,11 @@ export function AiSection() {
 
   return (
     <div data-testid="ai-section">
-      <h3 style={subheadStyle}>Providers</h3>
+      <h3 style={subheadStyle}>AI providers</h3>
       {settings.providers.length === 0 ? (
         <EmptyState
           testId="ai-providers-empty"
-          title="No providers yet"
+          title="No AI providers yet"
           text="Add one below: an API key for a hosted service, or the URL of a local server. Only you can — agents never see keys."
         />
       ) : (
@@ -162,7 +162,7 @@ function ProviderRow({
       onChanged(await removeAiProvider(p.id));
       showToast({ message: `Removed ${p.id} and its key.` });
     } catch (e) {
-      recordOpError({ label: `Remove provider ${p.id}`, message: String(e) });
+      recordOpError({ label: `Remove AI provider ${p.id}`, message: String(e) });
     }
   }
 

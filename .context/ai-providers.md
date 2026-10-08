@@ -1,7 +1,7 @@
 # AI providers and roles
 
 This doc covers oxplow's own access to models over their APIs: the
-providers you configure, the roles that decide which model does what, the
+AI providers you configure, the roles that decide which model does what, the
 `ai_*` functions sources and lenses call, and how calls are recorded.
 
 > **Status (epic tsk275):** built: providers, keychain keys, roles, the
@@ -60,7 +60,7 @@ What can be called, as of 2026-09:
   entry is `{"key", "endpoint"}`, where `endpoint` is the provider's
   normalized `baseUrl` (empty for the kind's default). `ai.yaml` is a
   plain file an agent can edit, so a provider pointed at another host gets
-  no key; the call fails with "re-save the provider in Settings → AI".
+  no key; the call fails with "re-save the AI provider in Settings → AI".
   Saving a provider (UI-only) rebinds a kept key to its current URL. A
   pre-binding bare key counts as bound to the default URL.
 - **A provider's `kind:` is a declared model provider**: an
@@ -88,7 +88,7 @@ ai:
 ```
 
 - Provider ids refer to each person's own `ai.yaml`; a role naming a
-  provider someone hasn't set up shows "Provider X isn't set up" for them.
+  provider someone hasn't set up shows "AI provider X isn't set up" for them.
 - `OxplowConfig.ai_roles` holds them (validated against
   `oxplow_config::AI_ROLE_NAMES`, which a test keeps equal to `Role::ALL`).
 - `AiService` gets an `OverridesSource` closure that reads the live config

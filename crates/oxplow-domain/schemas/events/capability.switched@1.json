@@ -28,7 +28,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`capability.switched@1`: a capability's active implementation changed\n— a person's or the project's choice, or the chosen one coming or\ngoing (`.context/work-tracking.md` \"Swappable pieces\").",
+  "description": "`capability.switched@1`: a capability's active implementation changed\n— a person's or the project's choice, or the chosen one coming or\ngoing (`.context/work-tracking.md` \"Capabilities\").",
   "properties": {
     "capability": {
       "description": "`work_items`, `effort_policy`, `snapshots`.",

@@ -18,7 +18,7 @@ export interface EntityRowModel {
  *  still being counted. */
 export type EntityCount = { rows: number } | { error: string };
 
-/// One row per entity: core first, then by provider and name. An entity
+/// One row per entity: core first, then by owner and name. An entity
 /// whose source hasn't synced (`declared`) shows "Not synced yet". Counts
 /// arrive one model at a time after the list shows (tsk1065): a model too
 /// big to count in time reads as a dash with why, not a failed list.
@@ -94,13 +94,13 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
     ].join("\n");
     return {
       key: `${p.kind}:${p.name}`,
-      label: `Provider ${p.name}`,
+      label: `External provider ${p.name}`,
       command,
       status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
       approved: p.approved,
       approveTitle: p.remote
-        ? `Lets oxplow's MCP adapter talk to ${p.program} as a provider with these grants, approving that address and every file in ${p.tree ?? "its extension"} (its mapping, its pinned tools, its declarations). The server runs elsewhere: its code isn't part of this approval, and oxplow refuses it when its tools stop matching the pinned ones. Approve only if you trust this extension and that server; any change here needs approval again.`
-        : `Runs ${p.program} as a long-lived provider with these grants, approving every file in ${p.tree ?? "its extension"} (its declarations included). Approve only if you trust this extension; any change needs approval again.`,
+        ? `Lets oxplow's MCP adapter talk to ${p.program} as an external provider with these grants, approving that address and every file in ${p.tree ?? "its extension"} (its mapping, its pinned tools, its declarations). The server runs elsewhere: its code isn't part of this approval, and oxplow refuses it when its tools stop matching the pinned ones. Approve only if you trust this extension and that server; any change here needs approval again.`
+        : `Runs ${p.program} as a long-lived external provider with these grants, approving every file in ${p.tree ?? "its extension"} (its declarations included). Approve only if you trust this extension; any change needs approval again.`,
       bundled: false,
     };
   }

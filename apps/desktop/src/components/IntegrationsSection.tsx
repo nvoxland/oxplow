@@ -1,6 +1,6 @@
 /// "Integrations" section body for SettingsPage (P5.D4): each extension
 /// provider's instance on this machine (which one the project's work
-/// items go to is chosen under Settings → Pieces) — its state, its config (a form
+/// items go to is chosen under Settings → Capabilities) — its state, its config (a form
 /// from the provider's `config_schema`, P6.B2), Check, and Enable /
 /// Disable. Between the two, the core components an extension replaces
 /// (P9.A1), each with a switch back to oxplow's own (`replacementsOff`).
@@ -97,7 +97,7 @@ export function IntegrationsSection() {
   if (views.length === 0) {
     return (
       <div style={mutedStyle} data-testid="integrations-empty">
-        No extension declares a provider. A private extension can bring one (its <code>providers:</code>).
+        No extension declares an external provider. A private extension can bring one (its <code>providers:</code>).
       </div>
     );
   }
@@ -143,7 +143,7 @@ function Replacements({
   }
   return (
     <fieldset data-testid="integrations-replacements" style={fieldsetStyle}>
-      <legend style={mutedStyle}>Replaced components — an extension's own, while its provider is the active one</legend>
+      <legend style={mutedStyle}>Replaced components — an extension's own, while its external provider is the active one</legend>
       {targets.map((target) => {
         const label = replaced.find((r) => r.target === target)?.label ?? target;
         const by = replaced.filter((r) => r.target === target).map((r) => r.extension);

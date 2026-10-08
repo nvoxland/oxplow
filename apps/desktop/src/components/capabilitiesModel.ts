@@ -1,11 +1,11 @@
-/// Settings → Pieces, as data (pure): the capabilities a project chooses an
+/// Settings → Capabilities, as data (pure): the capabilities a project chooses an
 /// implementation of, read from `v_capability_provider`, with what's active
 /// and why, and what a choice writes. See `.context/work-tracking.md`
-/// "Swappable pieces".
+/// "Capabilities".
 
 import type { Extension, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
-export interface PieceChoice {
+export interface ImplementationChoice {
   id: string;
   title: string;
   /** `builtin`, `external`, `none`, `core`. */
@@ -14,13 +14,13 @@ export interface PieceChoice {
   features: string[];
 }
 
-export interface Piece {
+export interface ChoosableCapability {
   capability: string;
   title: string;
   /** It may be `none`. */
   optional: boolean;
   /** Its available implementations, as the registry lists them. */
-  choices: PieceChoice[];
+  choices: ImplementationChoice[];
   /** The active implementation's id. */
   active: string;
   /** Why: `personal`, `project`, `default` or `fallback`. */
@@ -31,14 +31,14 @@ export interface Piece {
 
 /** The choosable capabilities in `result` (rows of `v_capability_provider`),
  *  by capability id. */
-export function piecesFromResult(result: SqlQueryResult): Piece[] {
+export function capabilitiesFromResult(result: SqlQueryResult): ChoosableCapability[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
-  const pieces = new Map<string, Piece>();
+  const capabilities = new Map<string, ChoosableCapability>();
   for (const row of result.rows) {
     if (Number(at(row, "choosable")) !== 1) continue;
     const capability = String(at(row, "capability"));
-    const piece =
-      pieces.get(capability) ??
+    const entry =
+      capabilities.get(capability) ??
       ({
         capability,
         title: String(at(row, "capability_title")),
@@ -47,11 +47,11 @@ export function piecesFromResult(result: SqlQueryResult): Piece[] {
         active: "",
         chosenBy: null,
         unavailable: null,
-      } satisfies Piece);
-    pieces.set(capability, piece);
+      } satisfies ChoosableCapability);
+    capabilities.set(capability, entry);
     const id = String(at(row, "provider"));
     if (Number(at(row, "available")) !== 1) {
-      piece.unavailable = id;
+      entry.unavailable = id;
       continue;
     }
     let features: string[] = [];
@@ -63,24 +63,24 @@ export function piecesFromResult(result: SqlQueryResult): Piece[] {
     } catch {
       features = [];
     }
-    piece.choices.push({ id, title: String(at(row, "title") ?? id), source: String(at(row, "source")), features });
+    entry.choices.push({ id, title: String(at(row, "title") ?? id), source: String(at(row, "source")), features });
     if (Number(at(row, "active")) === 1) {
-      piece.active = id;
-      piece.chosenBy = at(row, "chosen_by") === null ? null : String(at(row, "chosen_by"));
+      entry.active = id;
+      entry.chosenBy = at(row, "chosen_by") === null ? null : String(at(row, "chosen_by"));
     }
   }
-  return [...pieces.values()].sort((a, b) => a.capability.localeCompare(b.capability));
+  return [...capabilities.values()].sort((a, b) => a.capability.localeCompare(b.capability));
 }
 
 /** Why the active implementation is the one it is, in a person's words. */
-export function chosenNote(piece: Piece): string {
-  switch (piece.chosenBy) {
+export function chosenNote(capability: ChoosableCapability): string {
+  switch (capability.chosenBy) {
     case "personal":
       return "Your own choice.";
     case "project":
       return "The project's choice.";
     case "fallback":
-      return `\`${piece.unavailable ?? "?"}\` was chosen but isn't available (its extension is disabled or its instance isn't running), so it's ${piece.active}.`;
+      return `\`${capability.unavailable ?? "?"}\` was chosen but isn't available (its extension is disabled or its instance isn't running), so it's ${capability.active}.`;
     default:
       return "The default.";
   }

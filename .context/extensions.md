@@ -4,6 +4,23 @@ This doc covers how anything that **measures or visualizes** is added to
 oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
 `oxplow-bundled`, the one extension that ships with oxplow.
 
+**Terms.** oxplow's one vocabulary for what it's built from. Code, docs,
+skills and UI copy all use these words, with these meanings
+([usability.md](./usability.md) "Copy names things as a person knows
+them"):
+
+| Term | Means |
+|---|---|
+| extension | the package: a folder with an `extension.yaml` |
+| contribution | one thing an extension declares (a lens, collector, command, effect, provider …) |
+| capability | a swappable slot a project chooses an implementation of (`work_items`, `effort_policy`, `snapshots`; `vcs` is fixed) — [work-tracking.md](./work-tracking.md) "Capabilities" |
+| provider | whatever implements a capability. Qualify it where it isn't obvious: an **external provider** is a process speaking the provider protocol ([providers.md](./providers.md)); an **AI provider** is API model access ([ai-providers.md](./ai-providers.md)) |
+| scope | what a contribution may call on the host (`sql.read`, `threads.write`) — [commands.md](./commands.md) "Scopes" |
+| access | `view` / `read` / `record` / `write`: what a command or a scope may do |
+| effect | an extension's reaction to events ("Effects" below) |
+
+"Plugin" is only a Claude Code or opencode plugin.
+
 > **Status: built (epic tsk275; host finished in tsk278).**
 > - **Current:**
 >   - loading project extensions and their lenses from
@@ -570,15 +587,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   what oxplow itself ships.
 - **One format for first- and third-party.** The bundled
   `oxplow-bundled` extension uses exactly the format a user or their
-  agent writes. If extracting it needs a capability the format lacks, that
-  capability is added to core for everyone and logged under "Added for
+  agent writes. If extracting it needs something the format lacks, that
+  feature is added to core for everyone and logged under "Added for
   extraction" below. No private backdoors.
 - **Declarative and scripted only.** An extension is YAML, SQL,
   Starlark/jq/exec sources and declarative lenses. No user-authored code
   runs in the app window. Reason: code in the window holds the daemon's UI
   token, and `/ipc` includes `forward_terminal_input`, so agent-written JS
   in the window could drive the agent. Revisit only after a scoped, read-only IPC
-  capability exists ([remote-daemon.md](./remote-daemon.md) names the
+  surface exists ([remote-daemon.md](./remote-daemon.md) names the
   extension point).
 - **Exceptions over trends.** Shipped lenses are live exception lists at the
   effort boundary (rows disappear when addressed), not dashboards of
@@ -1188,7 +1205,7 @@ as `ProviderEffect.lines` — capitalizes them for the Data section's
 approval row.
 
 The report is built from the two loaded versions: **it never runs a
-program, an exec collector or a provider** — consent forbids running a
+program, an exec collector or an external provider** — consent forbids running a
 version nobody approved. What it does run is read-only or sandboxed:
 lens and model queries on each version's overlay, and derived
 collectors' and effects' scripts (below).
@@ -2361,7 +2378,7 @@ project's), plus:
 
 ## Health, disable and repair (P7.C1–C3)
 
-Every contribution that runs — a provider instance, a collector, an effect
+Every contribution that runs — an external provider instance, a collector, an effect
 (P8.D11, kind `effect`, V150) — shares one failure policy
 (`contribution_health.rs`, the `contribution_health` table read as
 `v_contribution_health`):
@@ -2434,7 +2451,7 @@ implementations:
 - `config:` configures the built-in, checked at load against its schema
   (`BuiltIn.config_schema`, `capability::check_config`; a built-in with
   none refuses any config): an ACP adapter's `{ command, args?, env?,
-  systemPrompt?: meta|prompt }`, an OpenAI-compatible provider's
+  systemPrompt?: meta|prompt }`, an OpenAI-compatible AI provider's
   `{ baseUrl? }`.
 - `entry` names a built-in in core's standard library
   (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
@@ -2465,7 +2482,7 @@ capability's features (`oxplow_domain::capability::check_need`; an
 unknown one is a load error). A lens run checks them against what's
 active (`LensContext.active`, a `capabilities::Active` snapshot that
 `lens_context` fills): unmet, it doesn't run and returns `inactive: {
-needs, message }` ("Needs: Work list (choose one in Settings → Pieces)."),
+needs, message }` ("Needs: Work list (choose one in Settings → Capabilities)."),
 which the lens view shows instead of its empty state. An advisory whose
 needs aren't met doesn't run. A context built without `Services` (param
 checks) checks nothing. A capability's none declares every feature (it
@@ -2820,7 +2837,7 @@ and enabling it restores the old pages' behavior as lenses.
 
 ## Added for extraction
 
-Capabilities added to core because the extraction needed them (tsk280),
+Features added to core because the extraction needed them (tsk280),
 available to every extension:
 
 - `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.

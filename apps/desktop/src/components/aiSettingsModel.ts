@@ -21,9 +21,9 @@ export function providerFormError(form: ProviderForm, settings: AiSettings): str
   const id = form.id.trim();
   if (!id) return "Name it (e.g. openrouter).";
   if (/\s/.test(id)) return "The name can't contain spaces.";
-  if (!form.editing && settings.providers.some((p) => p.id === id)) return `There's already a provider named ${id}.`;
+  if (!form.editing && settings.providers.some((p) => p.id === id)) return `There's already an AI provider named ${id}.`;
   const kind = settings.kinds.find((k) => k.kind === form.kind);
-  if (!kind) return settings.kinds.length === 0 ? "No provider kinds are available." : "Pick a kind.";
+  if (!kind) return settings.kinds.length === 0 ? "No AI provider kinds are available." : "Pick a kind.";
   if (kind.defaultBaseUrl === null && !form.baseUrl.trim()) return `${kind.title} needs a base URL.`;
   return null;
 }
@@ -57,7 +57,7 @@ export function roleRows(settings: AiSettings): RoleRow[] {
     role: r.role,
     usedFor: USED_FOR[r.role],
     assigned: r.binding ? `${r.binding.provider} · ${r.binding.model}` : null,
-    problem: r.binding && !ids.has(r.binding.provider) ? `Provider ${r.binding.provider} isn't set up.` : null,
+    problem: r.binding && !ids.has(r.binding.provider) ? `AI provider ${r.binding.provider} isn't set up.` : null,
     note: r.overridden ? "Set by this project" : null,
     editable: !r.overridden,
     lockedReason: r.overridden ? "This project sets this role in .oxplow/project.yaml (ai.roles); change it there." : null,

@@ -5,7 +5,7 @@
 //! Every command — oxplow's own and any extension's — reaches them the
 //! same way; a call to one the command didn't declare is refused.
 //!
-//! Not to be confused with [`crate::capability`]: the swappable pieces a
+//! Not to be confused with [`crate::capability`]: the swappable slots a
 //! project chooses an implementation of (`work_items`, `snapshots`). A
 //! command's `needs` may name both; each name is looked up in its own
 //! catalog.

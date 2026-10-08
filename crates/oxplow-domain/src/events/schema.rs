@@ -695,7 +695,7 @@ impl EventType for FileSaved {
 
 /// `capability.switched@1`: a capability's active implementation changed
 /// — a person's or the project's choice, or the chosen one coming or
-/// going (`.context/work-tracking.md` "Swappable pieces").
+/// going (`.context/work-tracking.md` "Capabilities").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilitySwitchedV1 {

@@ -918,7 +918,7 @@ still resolves on `tools/call` for back-compat.
 the work-item tools (`list_work_items`, `get_work_item`,
 `next_work_item`) read whichever list is active (empty with none), so
 the tool list never changes with a switch. What an implementation owns
-is commands — a provider instance's namespace — offered only while it's
+is commands — an external provider instance's namespace — offered only while it's
 active (`capabilities::Active::refusal`).
 
 **The server's instructions** (`get_info`) are the one text every
@@ -1184,7 +1184,7 @@ is `{ to: done|canceled, native_state: archived }`.
 **Code tools** (`crates/oxplow-mcp/src/lib.rs`): `code_definition`,
 `code_references`, `code_hover`, `code_symbols`,
 `code_workspace_symbols`, `code_call_hierarchy`, `code_diagnostics` —
-typed answers from the code-intelligence capability, over the same
+typed answers from code intelligence, over the same
 shared language-server sessions the editor uses (`.context/lsp.md`). When no
 server is configured for a language, the error is self-describing — it
 names the suggested Mason package and both fix paths. The agent can fix
