@@ -3201,6 +3201,8 @@ export type Grants = {
 	hosts: string[],
 	credentials: string[],
 	env: string[],
+	// The host capabilities it may call (a provider's `needs`).
+	capabilities: string[],
 };
 
 // Where a stream's workspace is.
@@ -4771,6 +4773,8 @@ export type ProjectProgram = {
 	network: string[],
 	// The commands it may run with the viewer's rights (a component).
 	commands: string[],
+	// The host capabilities it may call (a provider's `needs`).
+	capabilities: string[],
 	/**
 	 *  The project-relative folder whose every file the approval covers
 	 *  (a provider's extension, declarations included).
@@ -4934,6 +4938,12 @@ export type ProviderSpec = {
 	 *  values? }]`.
 	 */
 	fields?: FieldDecl[],
+	/**
+	 *  The host capabilities it calls over the protocol (`host/call`,
+	 *  `sql.read`): part of what its approval covers, and the only ones it
+	 *  may call.
+	 */
+	needs?: string[],
 };
 
 // A provider as the UI and agents see it: never its key.

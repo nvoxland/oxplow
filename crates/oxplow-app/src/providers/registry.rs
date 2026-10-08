@@ -369,6 +369,8 @@ pub struct Instance {
     /// resumes from the checkpoint the first left.
     pub(super) reading:
         parking_lot::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// What its process may call of the host (`host/call`).
+    pub(super) host_calls: Arc<host::HostCalls>,
 }
 
 impl Instance {
@@ -529,6 +531,7 @@ impl Instance {
             declared,
             credentials,
             host_env: self.deps.host_env.clone(),
+            host_calls: Some(self.host_calls.clone()),
         })
         .await
         .map_err(plain)?;
@@ -1640,6 +1643,7 @@ impl ProviderRegistry {
             failed_keys: parking_lot::Mutex::new(std::collections::VecDeque::new()),
             not_before: parking_lot::Mutex::new(None),
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
+            host_calls: host::HostCalls::new(spec.needs.clone(), self.deps.db.clone()),
         }))
     }
 
@@ -1884,9 +1888,15 @@ impl ProviderRegistry {
                 message: format!("`{extension}/{provider}` has no running instance `{id}`"),
                 retry_after_ms: None,
             })?;
-        let out = instance
-            .invoke(&op, input, invocation.idempotency_key.clone())
-            .await?;
+        // Its `host/call`s name this key: they're recorded with the run.
+        let key = invocation
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(|| format!("call:{}", uuid::Uuid::new_v4().simple()));
+        instance.host_calls.begin(&key, invocation.trace.clone());
+        let out = instance.invoke(&op, input, Some(key.clone())).await;
+        instance.host_calls.finish(&key);
+        let out = out?;
         let events = out
             .events
             .into_iter()

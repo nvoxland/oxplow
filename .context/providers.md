@@ -41,7 +41,15 @@ schemars), host → provider:
 | `read` | `ReadParams { handle, collector, state? }` → `ReadResult { records }` | run a collector, streaming `$/record` and `$/state` first |
 | `shutdown` | → `null` | |
 
-`PROTOCOL_VERSION` is `"2"` (P10: `InvokeParams.idempotency_key`). A
+Provider → host (protocol 3): `host/call` — `HostCallParams { key?,
+capability, op?, args }` → the capability's answer: a host capability the
+provider's manifest `needs` (`sql.read`: `args` `{ sql, params? }` →
+rows), `key` naming the idempotency key of the `invoke` it serves so the
+call is recorded with that run. Refused (`InvalidInput` at `/capability`)
+for one it doesn't need or that isn't there.
+
+`PROTOCOL_VERSION` is `"3"` (P10: `InvokeParams.idempotency_key`; 3:
+`host/call`). A
 provider's declarations carry the version, so a bump changes what was
 approved: every provider is approved again.
 
@@ -304,6 +312,7 @@ providers:
     network: [api.example.com]   # hosts it may reach
     declarations: provider.json  # its InitializeResult, checked in
     id_pattern: "[A-Z]+-\\d+"     # a work list's own ids (optional)
+    needs: [sql.read]            # host capabilities it calls (`host/call`); read ones only
 ```
 
 `fields` (a work list's own, kept in `native`: `[{ name, title, kind:
@@ -333,7 +342,7 @@ folder, where it runs; an arg path leaving the folder is refused at
 load), `env` names, `credentials` (each as `CredentialDecl::grant` renders
 it — a signed-in one with its endpoints, client id, scopes, client secret's
 name and redirect port, so changing where it signs in asks again) and
-`network`. So a changed declaration is a new version,
+`network`, and the host capabilities it `needs`. So a changed declaration is a new version,
 shown unapproved in Settings → Data → Programs (with its grants listed)
 until a person approves it again. Every start re-checks it, restarts
 included.
@@ -382,8 +391,15 @@ credentials from the instance's keychain accounts
 `kill_on_drop`. Then **the handshake**: the live `initialize` must equal
 the approved declarations (`HostError::DeclarationsChanged` names the
 first difference), and `check` of the instance's config must return a
-handle (`HostError::Unconfigured { problems }` otherwise). Requests from
-the provider are answered `MethodNotFound`.
+handle (`HostError::Unconfigured { problems }` otherwise). A request
+from the provider is answered `MethodNotFound` but `host/call`, served by
+the instance's `host::HostCalls` through the gate a command's handler
+meets (`host_capabilities::Calls`: its `needs`; `sql.read` on a read of
+the database), each call counted into the trace of the run whose key it
+names (`ProviderRegistry::run_op` registers the run's
+`Invocation::trace` under its key) — so the run's audit row records it.
+The conformance kit has no project: it answers `host/call` like any
+other request.
 
 **Instances** (§10.3; project scope). An instance is
 `<extension>/<instance id>`, configured in `.oxplow/project.yaml`:

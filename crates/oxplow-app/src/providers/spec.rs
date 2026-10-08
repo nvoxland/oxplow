@@ -96,6 +96,11 @@ pub struct ProviderSpec {
     /// values? }]`.
     #[serde(default)]
     pub fields: Vec<oxplow_domain::work_items::FieldDecl>,
+    /// The host capabilities it calls over the protocol (`host/call`,
+    /// `sql.read`): part of what its approval covers, and the only ones it
+    /// may call.
+    #[serde(default)]
+    pub needs: Vec<String>,
 }
 
 /// How a credential is obtained by signing in (P9.B3): OAuth 2.1's
@@ -482,6 +487,26 @@ pub fn read_pinned_tools(
 
 /// What's wrong with how `spec` names what runs: exactly one of `entry`
 /// and `adapter`, and every file it names inside the folder.
+/// A provider may call the host capabilities that only read so far: what
+/// `host/call` answers.
+fn needs_problem(spec: &ProviderSpec) -> Option<String> {
+    use oxplow_domain::host_capability::{host_capability, EffectClass};
+    spec.needs
+        .iter()
+        .find_map(|need| match host_capability(need) {
+            None => Some(format!(
+                "provider `{}`: `needs`: no host capability `{need}`",
+                spec.id
+            )),
+            Some(c) if c.class != EffectClass::Read => Some(format!(
+            "provider `{}`: `needs`: a provider may call only capabilities that read (`{need}` \
+             changes things)",
+            spec.id
+        )),
+            Some(_) => None,
+        })
+}
+
 fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let id = &spec.id;
     match (&spec.entry, &spec.adapter) {
@@ -755,6 +780,8 @@ pub fn parse_providers(
         } else if let Some(problem) = program_problem(&spec, read) {
             Some(problem)
         } else if let Some(problem) = credentials_problem(&spec) {
+            Some(problem)
+        } else if let Some(problem) = needs_problem(&spec) {
             Some(problem)
         } else if !inside(&spec.declarations) {
             Some(format!(

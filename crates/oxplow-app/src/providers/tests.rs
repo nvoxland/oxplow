@@ -894,6 +894,73 @@ async fn a_running_instance_publishes_its_features() {
     assert!(!stopped.available && !stopped.active);
 }
 
+/// Protocol 3's `host/call`: a provider whose manifest `needs` `sql.read`
+/// reads oxplow's models while it serves a command; the read is recorded
+/// with the run (its audit row's capabilities). One that doesn't need it
+/// is refused, and so is its command.
+#[tokio::test]
+async fn a_provider_reads_the_host_through_what_it_needs() {
+    for (needs, reads) in [(true, true), (false, false)] {
+        let fx = services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        write_extension(&root, "host-read");
+        if needs {
+            let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+            let text = std::fs::read_to_string(&manifest).unwrap();
+            std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
+        }
+        let ext = extension(&root);
+        assert_eq!(ext.providers[0].needs.is_empty(), !needs);
+        approve(&fx, &ext);
+        make_active(&fx, "fake");
+        fx.svc
+            .providers
+            .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+            .await
+            .unwrap();
+        fx.svc.extension_commands.reconcile().await;
+        let item = fx
+            .svc
+            .work_items_client()
+            .create(
+                &Actor::Human,
+                crate::work_items::NewItem {
+                    title: "theirs".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let ran = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "tracker.item.estimate",
+                json!({ "ref": item, "points": 2 }),
+                false,
+            )
+            .await;
+        if reads {
+            let out = ran.unwrap();
+            assert_eq!(out.result["read"], json!([{ "n": 7 }]));
+            let audit = fx
+                .svc
+                .commands
+                .audit_store()
+                .get(out.audit_id.unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(audit.capabilities, [("sql.read".to_string(), 1)].into());
+        } else {
+            let err = ran.unwrap_err().to_string();
+            assert!(err.contains("isn't in the command's `needs`"), "{err}");
+        }
+    }
+}
+
 /// A provider's command is declared in its extension's manifest over an
 /// operation its declarations list (`provider:` + `op:`): its input is the
 /// operation's, with an optional `instance`; a capability verb, an

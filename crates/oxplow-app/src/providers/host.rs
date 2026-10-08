@@ -97,6 +97,9 @@ pub struct Launch {
     /// Credential name → value (from the keychain).
     pub credentials: BTreeMap<String, String>,
     pub host_env: HostEnv,
+    /// What it may call of the host (`host/call`); none (the conformance
+    /// kit, which has no project) answers `MethodNotFound`.
+    pub host_calls: Option<Arc<HostCalls>>,
 }
 
 /// A running, handshaken provider. Dropping it kills the process.
@@ -247,7 +250,7 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
         proxy,
     } = spawn(launch).await?;
     let (peer, incoming) = Peer::spawn(stdout, stdin);
-    serve_incoming(peer.clone(), incoming);
+    serve_incoming(peer.clone(), incoming, launch.host_calls.clone());
     let conn = Connection {
         peer,
         child,
@@ -269,18 +272,105 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
     Ok(conn)
 }
 
-/// What the provider sends that isn't a reply: the host serves no
-/// requests yet, and a notification outside a read is dropped.
-pub fn serve_incoming(peer: Peer, mut incoming: tokio::sync::mpsc::UnboundedReceiver<Incoming>) {
+/// What the provider sends that isn't a reply: `host/call` is answered
+/// by `host_calls` (protocol 3; none — the conformance kit — answers
+/// `MethodNotFound`), any other request `MethodNotFound`, and a
+/// notification outside a read is dropped.
+pub fn serve_incoming(
+    peer: Peer,
+    mut incoming: tokio::sync::mpsc::UnboundedReceiver<Incoming>,
+    host_calls: Option<Arc<HostCalls>>,
+) {
     tokio::spawn(async move {
         while let Some(message) = incoming.recv().await {
-            if let Incoming::Request { id, method, .. } = message {
-                let _ = peer
-                    .respond(id, Err(ProtocolError::MethodNotFound(method)))
-                    .await;
+            let Incoming::Request { id, method, params } = message else {
+                continue;
+            };
+            match (&host_calls, method.as_str()) {
+                (Some(calls), oxplow_provider_protocol::model::method::HOST_CALL) => {
+                    let (peer, calls) = (peer.clone(), calls.clone());
+                    tokio::spawn(async move {
+                        let answer = calls.call(params).await;
+                        let _ = peer.respond(id, answer).await;
+                    });
+                }
+                _ => {
+                    let _ = peer
+                        .respond(id, Err(ProtocolError::MethodNotFound(method)))
+                        .await;
+                }
             }
         }
     });
+}
+
+/// What a provider may call of the host over the protocol (`host/call`):
+/// the host capabilities its manifest `needs`, through the gate a
+/// command's handler meets (`host_capabilities::Calls`), each call counted
+/// with the `invoke` it serves — named by that call's idempotency key — so
+/// the run's audit row records it.
+pub struct HostCalls {
+    needs: Vec<String>,
+    db: oxplow_db::Database,
+    traces: parking_lot::Mutex<
+        std::collections::HashMap<String, Arc<crate::host_capabilities::CapabilityTrace>>,
+    >,
+}
+
+impl HostCalls {
+    pub fn new(needs: Vec<String>, db: oxplow_db::Database) -> Arc<Self> {
+        Arc::new(Self {
+            needs,
+            db,
+            traces: parking_lot::Mutex::default(),
+        })
+    }
+
+    /// Count the calls naming `key` into `trace` until [`Self::finish`].
+    pub fn begin(&self, key: &str, trace: Arc<crate::host_capabilities::CapabilityTrace>) {
+        self.traces.lock().insert(key.to_string(), trace);
+    }
+
+    pub fn finish(&self, key: &str) {
+        self.traces.lock().remove(key);
+    }
+
+    /// Answer one `host/call`.
+    pub async fn call(
+        &self,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, ProtocolError> {
+        let params: oxplow_provider_protocol::model::HostCallParams =
+            serde_json::from_value(params)
+                .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
+        let refused = |message: String| ProtocolError::InvalidInput {
+            field: "/capability".into(),
+            message,
+        };
+        if let Some(op) = &params.op {
+            return Err(refused(format!(
+                "`{}` has no operation `{op}` a provider calls",
+                params.capability
+            )));
+        }
+        let trace = params
+            .key
+            .as_ref()
+            .and_then(|k| self.traces.lock().get(k).cloned())
+            .unwrap_or_default();
+        let (needs, db) = (self.needs.clone(), self.db.clone());
+        let runtime = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            let read = Box::new(|q: oxplow_db::SqlQuery| {
+                runtime.block_on(db.read(move |tx| oxplow_db::semantic_layer::read_on(tx, &q)))
+            });
+            let mut calls = crate::host_capabilities::Calls::new(&needs, &trace, read);
+            calls.serve(&params.capability, params.args)
+        })
+        .await
+        .map_err(|e| ProtocolError::Internal(e.to_string()))?
+        .map_err(refused)
+    }
 }
 
 /// Where two declarations first differ, for the person reading why.

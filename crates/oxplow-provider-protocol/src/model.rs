@@ -18,6 +18,10 @@
 //!   command; the result, the events it produced, and its inverse.
 //! - `read` — [`ReadParams`] → [`ReadResult`]: run a collector, streaming
 //!   rows as `$/record` and checkpoints as `$/state` before the result.
+//!
+//! Provider → host (protocol 3): `host/call` — [`HostCallParams`] → the
+//! capability's answer: a host capability the provider's manifest
+//! `needs` (`sql.read`), recorded with the `invoke` it serves.
 //! - `shutdown` — no params → `null`.
 
 use schemars::JsonSchema;
@@ -25,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The protocol version this crate speaks.
-pub const PROTOCOL_VERSION: &str = "2";
+pub const PROTOCOL_VERSION: &str = "3";
 
 pub mod method {
     pub const INITIALIZE: &str = "initialize";
@@ -34,6 +38,8 @@ pub mod method {
     pub const INVOKE: &str = "invoke";
     pub const READ: &str = "read";
     pub const SHUTDOWN: &str = "shutdown";
+    /// Provider → host: a host capability (protocol 3).
+    pub const HOST_CALL: &str = "host/call";
 }
 
 /// Who is speaking.
@@ -179,6 +185,26 @@ pub struct InvokeParams {
     /// may ignore the key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
+}
+
+/// Provider → host (protocol 3): call a host capability the provider's
+/// manifest lists in its `needs` (`sql.read`: `args` = `{ sql, params? }`
+/// → rows). Answered with the capability's result, or `InvalidInput`
+/// saying why not (one it doesn't need, one that isn't there).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HostCallParams {
+    /// The idempotency key of the `invoke` it serves (`InvokeParams`), so
+    /// the host records the call with that run; none outside one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// `sql.read`.
+    pub capability: String,
+    /// The capability's operation, for one that has several.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    #[serde(default)]
+    pub args: Value,
 }
 
 /// An event a command produced, for the host to log (its type is one

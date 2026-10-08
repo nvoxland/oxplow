@@ -169,6 +169,9 @@ pub type ExternalHandler = dyn Fn(Invocation, Value) -> ExternalFuture + Send + 
 pub struct Invocation {
     pub actor: Actor,
     pub idempotency_key: Option<String>,
+    /// The host capabilities the run calls on its way (a provider's
+    /// `host/call`s): recorded with the run, like `TxCtx::trace`.
+    pub trace: Arc<crate::host_capabilities::CapabilityTrace>,
 }
 
 /// The idempotency key of step `index` (calling `call` with `input`) of
@@ -535,6 +538,7 @@ impl RunOrigin {
                 RunOrigin::Effect(run, _) => Some(effect_step_key(run, index, call, input)),
                 _ => None,
             },
+            trace: Arc::default(),
         }
     }
 }
@@ -1160,9 +1164,10 @@ impl CommandBus {
             Resolved::External(handler) => {
                 self.claim(&origin).await?;
                 let invocation = origin.invocation(actor, 0, &spec.id, &input);
+                let trace = invocation.trace.clone();
                 match handler(invocation, input.clone()).await {
                     Ok(out) => Ok(self
-                        .record_external(actor, spec, &input, out, origin.clone())
+                        .record_external(actor, spec, &input, out, origin.clone(), trace.summary())
                         .await),
                     Err(err) => {
                         self.release(&origin).await;
@@ -1701,6 +1706,7 @@ impl CommandBus {
                 let invocation = Invocation {
                     actor: actor.clone(),
                     idempotency_key: None,
+                    trace: Arc::default(),
                 };
                 handler(invocation, input).await?
             }
@@ -1763,6 +1769,7 @@ impl CommandBus {
         input: &Value,
         mut out: HandlerOutput,
         origin: RunOrigin,
+        capabilities: std::collections::BTreeMap<String, u32>,
     ) -> CommandOutcome {
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
         let vocabulary = self.log.vocabulary().clone();
@@ -1783,7 +1790,10 @@ impl CommandBus {
                     &spec_c,
                     &input_c,
                     &shadow,
-                    Executed::ok(oxplow_domain::EventId::generate(), &origin),
+                    Executed {
+                        capabilities: capabilities.clone(),
+                        ..Executed::ok(oxplow_domain::EventId::generate(), &origin)
+                    },
                 )?;
                 match &origin {
                     RunOrigin::Call => {}

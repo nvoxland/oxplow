@@ -175,7 +175,9 @@ composing commands.
 
 **The per-run trace.** Each run has a `CapabilityTrace` (`TxCtx::trace`):
 fresh per transaction attempt, shared by the runs nested in it; steps
-add each step's to the composing pass's. Its summary — per capability,
+add each step's to the composing pass's. An `External` run's is its
+`Invocation::trace`: a provider's `host/call`s during it count there
+([providers.md](./providers.md) "The protocol"). Its summary — per capability,
 how many calls (`{"sql.read": 2}`) — is written on the run's audit row
 (`command_audit.capabilities_json`, V27; NULL when it used none). The
 routing pass (a composite composed on a read snapshot to decide where
