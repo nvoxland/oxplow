@@ -137,7 +137,7 @@ impl WorkItems {
         actor: &Actor,
         item: NewItem,
     ) -> Result<Option<String>, CommandError> {
-        let input = serde_json::to_value(work_item::WorkItemCreateInput {
+        let input = serde_json::to_value(oxplow_domain::work_items::WorkItemCreateInput {
             title: item.title,
             body: (!item.body.is_empty()).then_some(item.body),
             parent_ref: item.parent_ref,
@@ -162,7 +162,7 @@ impl WorkItems {
     pub async fn update(
         &self,
         actor: &Actor,
-        input: work_item::WorkItemUpdateInput,
+        input: oxplow_domain::work_items::WorkItemUpdateInput,
     ) -> Result<CommandOutcome, CommandError> {
         let input = serde_json::to_value(input).expect("input serializes");
         self.run(actor, work_item::UPDATE, input).await

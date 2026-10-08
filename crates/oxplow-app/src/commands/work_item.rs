@@ -39,7 +39,10 @@ use oxplow_domain::events::schema::{
 use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{task_of_work_item_ref, work_item_ref};
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, WorkItemsProvider, WorkItemsRegistry, OXPLOW, VERBS,
+    provider_of, CanonicalState, MoveTo, WorkItemCommentInput, WorkItemCreateInput,
+    WorkItemDeleteInput, WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput,
+    WorkItemTransitionInput, WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry, OXPLOW,
+    VERBS,
 };
 use oxplow_domain::{
     Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, Task, TaskId,
@@ -869,21 +872,6 @@ fn schema_of<T: JsonSchema>() -> Value {
 
 pub const NAME: &str = "oxplow.work_item.transition";
 
-/// Move an item to a canonical state, and optionally to one of its
-/// provider's own states that maps to it.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemTransitionInput {
-    /// The item's ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`).
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    pub to: CanonicalState,
-    /// The provider's own state, which must map to `to` (oxplow:
-    /// `archived` with `done` or `canceled`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
-}
-
 pub fn spec_transition() -> CommandSpec {
     spec(
         NAME,
@@ -976,34 +964,6 @@ pub fn command(registry: WorkItemsRegistry) -> Command {
 // ---- oxplow.work_item.create ----
 
 pub const CREATE: &str = "oxplow.work_item.create";
-
-/// A new item on the active tracker (tsk1058), optionally straight into
-/// a state.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemCreateInput {
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
-    /// The parent's ref, on the same provider (needs `hierarchy`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
-    /// `todo` when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<CanonicalState>,
-    /// The provider's own state, which must map to `state` when both are
-    /// given.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
-    /// The tracker's own fields (oxplow: `{ priority? }`), as its
-    /// `create` declares them.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native: Option<Value>,
-    /// The thread it's filed on (`thr3`): absent, an agent's own, or none
-    /// for a person (oxplow's backlog).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread: Option<String>,
-}
 
 pub fn create_spec() -> CommandSpec {
     spec(
@@ -1123,29 +1083,6 @@ pub fn create_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
 
 pub const UPDATE: &str = "oxplow.work_item.update";
 
-/// Edit an item's fields and, optionally, its state — one run. Absent
-/// fields are left alone.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemUpdateInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
-    /// The parent's ref on the same provider, or `""` to detach.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<CanonicalState>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
-    /// The provider's own fields to change (oxplow: `{ priority? }`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native: Option<Value>,
-}
-
 pub fn update_spec() -> CommandSpec {
     spec(
         UPDATE,
@@ -1242,20 +1179,6 @@ pub fn update_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
 
 pub const LINK: &str = "oxplow.work_item.link";
 
-/// A typed link from one item to another of the same provider.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemLinkInput {
-    /// The item linked from.
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    /// The item linked to (the same provider's).
-    pub target: String,
-    /// The provider names its own types (oxplow: blocks, relates_to,
-    /// discovered_from, duplicates, supersedes, replies_to).
-    pub link_type: String,
-}
-
 /// oxplow's core: `task_satellite::create_link_tx`. The link belongs to a
 /// thread: the caller's, else the linked task's, else the target's.
 fn tx_link(registry: WorkItemsRegistry) -> Arc<TxHandler> {
@@ -1327,16 +1250,6 @@ pub fn link_command(registry: WorkItemsRegistry) -> Command {
 
 pub const COMMENT: &str = "oxplow.work_item.comment";
 
-/// A comment on an item (oxplow: a task note).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemCommentInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    /// Markdown.
-    pub body: String,
-}
-
 /// oxplow's core: `task_satellite::add_task_note_tx`; the note is
 /// authored by the actor's kind. The result names it as `comment`, the
 /// list's own id for it.
@@ -1388,14 +1301,6 @@ pub fn comment_command(registry: WorkItemsRegistry) -> Command {
 
 pub const DELETE: &str = "oxplow.work_item.delete";
 
-/// Remove an item (oxplow: soft — the row stays, marked deleted).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemDeleteInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-}
-
 /// oxplow's core: `soft_delete_tx`.
 fn tx_delete(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
@@ -1443,57 +1348,17 @@ pub fn delete_command(registry: WorkItemsRegistry) -> Command {
 pub const REORDER: &str = "oxplow.work_item.reorder";
 pub const MOVE: &str = "oxplow.work_item.move";
 
-/// `oxplow.work_item.reorder`: put an item before or after another in its own
-/// list (neither: at its end).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemReorderInput {
-    /// The task's ref (`work_item:oxplow:tsk42`).
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    /// Put it just before this item of the same list.
-    #[serde(default)]
-    pub before: Option<String>,
-    /// Put it just after this item of the same list.
-    #[serde(default)]
-    pub after: Option<String>,
-}
-
-/// Which list `oxplow.work_item.move` takes an item to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MoveTo {
-    /// The project-wide backlog.
-    Backlog,
-    /// A thread's list (`thr3`).
-    Thread(String),
-}
-
-impl MoveTo {
-    fn thread(&self) -> Result<Option<ThreadId>, CommandError> {
-        match self {
-            MoveTo::Backlog => Ok(None),
-            MoveTo::Thread(raw) => parse_thread(raw, "/to/thread").map(Some),
-        }
-    }
-
-    fn of(thread: Option<ThreadId>) -> Self {
-        thread.map_or(MoveTo::Backlog, |t| MoveTo::Thread(t.to_string()))
+/// The list `to` names: a thread's, or the backlog (`None`).
+fn move_dest(to: &MoveTo) -> Result<Option<ThreadId>, CommandError> {
+    match to {
+        MoveTo::Backlog => Ok(None),
+        MoveTo::Thread(raw) => parse_thread(raw, "/to/thread").map(Some),
     }
 }
 
-/// `oxplow.work_item.move`: take an item to another list — its end, or next to
-/// an item there.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemMoveInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    pub to: MoveTo,
-    #[serde(default)]
-    pub before: Option<String>,
-    #[serde(default)]
-    pub after: Option<String>,
+/// The `to` naming a list: a thread's, or the backlog.
+fn move_to(thread: Option<ThreadId>) -> MoveTo {
+    thread.map_or(MoveTo::Backlog, |t| MoveTo::Thread(t.to_string()))
 }
 
 /// The place `before` / `after` name (at most one).
@@ -1623,7 +1488,7 @@ pub fn move_command(registry: WorkItemsRegistry) -> Command {
         let input: WorkItemMoveInput = parse(input)?;
         let id = oxplow_task(registry, &input.item_ref, "/ref")?;
         let at = placement(registry, &input.before, &input.after)?;
-        let placed = place(ctx, id, input.to.thread()?, at)?;
+        let placed = place(ctx, id, move_dest(&input.to)?, at)?;
         let (before, after) = neighbour(placed.from_place);
         Ok(HandlerOutput {
             result: serde_json::to_value(&placed.task).expect("Task serializes"),
@@ -1631,7 +1496,7 @@ pub fn move_command(registry: WorkItemsRegistry) -> Command {
                 name: MOVE.into(),
                 input: serde_json::to_value(WorkItemMoveInput {
                     item_ref: input.item_ref,
-                    to: MoveTo::of(placed.from_thread),
+                    to: move_to(placed.from_thread),
                     before,
                     after,
                 })
