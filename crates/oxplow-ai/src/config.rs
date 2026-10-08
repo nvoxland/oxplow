@@ -13,28 +13,38 @@ pub const AI_CONFIG_FILE: &str = "ai.yaml";
 
 /// Jobs oxplow gives models. Extensions and features refer to roles,
 /// never to models.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     Main,
-    Fast,
     Summarize,
-    Embed,
     Decide,
-    Review,
 }
 
 impl Role {
-    pub const ALL: [Role; 6] = [
-        Role::Main,
-        Role::Fast,
-        Role::Summarize,
-        Role::Embed,
-        Role::Decide,
-        Role::Review,
-    ];
+    pub const ALL: [Role; 3] = [Role::Main, Role::Summarize, Role::Decide];
+}
+
+/// Roles oxplow dropped because nothing asked them: a config naming one
+/// fails saying so rather than with a bare unknown variant.
+pub const DROPPED_ROLES: [&str; 3] = ["fast", "embed", "review"];
+
+impl<'de> Deserialize<'de> for Role {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(d)?;
+        match name.as_str() {
+            "main" => Ok(Role::Main),
+            "summarize" => Ok(Role::Summarize),
+            "decide" => Ok(Role::Decide),
+            other if DROPPED_ROLES.contains(&other) => Err(serde::de::Error::custom(format!(
+                "oxplow has no `{other}` role: nothing asked it; remove it (roles: main, \
+                 summarize, decide)"
+            ))),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown role `{other}` (roles: main, summarize, decide)"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -176,13 +186,28 @@ roles:
         assert_eq!(AiConfig::load(dir.path()).unwrap(), cfg());
     }
 
+    /// A role nothing asked is gone: an `ai.yaml` naming one fails saying
+    /// so, not with a bare unknown variant.
+    #[test]
+    fn a_role_oxplow_dropped_fails_naming_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(AI_CONFIG_FILE),
+            "providers: [{ id: p, kind: openai }]\nroles:\n  fast: { provider: p, model: m }\n",
+        )
+        .unwrap();
+        let err = AiConfig::load(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("oxplow has no `fast` role"), "{err}");
+        assert!(!err.contains("unknown variant"), "{err}");
+    }
+
     #[test]
     fn resolves_roles_to_their_provider() {
         let c = cfg();
         let (p, b) = c.resolve(Role::Summarize).unwrap();
         assert_eq!(p.kind, "openai_compatible");
         assert_eq!(b.model, "qwen3:14b");
-        assert!(c.resolve(Role::Embed).is_none());
+        assert!(AiConfig::default().resolve(Role::Main).is_none());
     }
 
     #[test]
@@ -209,7 +234,7 @@ roles:
         cfg().validate().unwrap();
         let mut bad = cfg();
         bad.roles.insert(
-            Role::Fast,
+            Role::Main,
             RoleBinding {
                 provider: "nope".into(),
                 model: "m".into(),

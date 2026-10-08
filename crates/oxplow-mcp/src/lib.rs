@@ -538,6 +538,14 @@ pub struct AiDecideParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ReadAiCallParams {
+    /// The call's id (`v_ai_call.id`).
+    pub id: i64,
+    /// Which body: `request` or `response`.
+    pub body: oxplow_app::ai_calls::AiCallBody,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AiSummarizeParams {
     pub text: String,
     /// What to focus on, e.g. "risks" or "what changed for users".
@@ -1069,6 +1077,30 @@ impl OxplowMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(
             summary.value,
         )]))
+    }
+
+    #[tool(
+        description = "Read what one of your own model calls (`ai_decide`, `ai_summarize`; \
+                       `v_ai_call` rows whose caller is your thread) was asked (`request`) or \
+                       answered (`response`): `{text, size, truncated}`, the text capped at 64 \
+                       KiB. Null when it has no such body (a failed call's response) or \
+                       retention removed it (after 30 days)."
+    )]
+    async fn read_ai_call(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<ReadAiCallParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_app::ai_calls::{read, AiCallBodyError};
+        let caller = ai_caller(&extensions)?;
+        let p = params.0;
+        let body = read(&self.services, p.id, p.body, Some(&caller))
+            .await
+            .map_err(|e| match e {
+                AiCallBodyError::Storage(e) => internal(e),
+                other => McpError::invalid_params(other.to_string(), None),
+            })?;
+        json_result(&body)
     }
 
     #[tool(
@@ -2693,6 +2725,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "read_file_snapshot",
     "read_file_at_snapshot",
     "read_event_content",
+    "read_ai_call",
     "list_code_quality_findings",
     "list_thread_work",
     "list_work_items",
@@ -4871,7 +4904,7 @@ mod tests {
         let thread = oxplow_domain::refs::build::thread_ref(caller_of(&me).thread_id.unwrap());
         let roles: serde_json::Value =
             serde_json::from_str(&text_payload(server.list_ai_roles().await.unwrap())).unwrap();
-        assert_eq!(roles["roles"].as_array().unwrap().len(), 6);
+        assert_eq!(roles["roles"].as_array().unwrap().len(), 3);
         assert_eq!(roles["roles"][0]["binding"], serde_json::Value::Null);
 
         // Unassigned role: a clear error, not a crash.
@@ -4994,6 +5027,24 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&callers.rows).unwrap(),
             serde_json::json!([[thread]])
+        );
+        // What it asked and what came back are its to read.
+        let response: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .read_ai_call(
+                    me.clone(),
+                    Parameters(ReadAiCallParams {
+                        id: 1,
+                        body: oxplow_app::ai_calls::AiCallBody::Response,
+                    }),
+                )
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert!(
+            response["text"].as_str().unwrap().contains("answers"),
+            "{response}"
         );
     }
 

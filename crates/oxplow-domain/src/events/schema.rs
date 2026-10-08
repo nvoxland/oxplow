@@ -49,6 +49,9 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "contribution",
     "ui",
     "file",
+    // No events: the request and response bodies of oxplow's own model
+    // calls (`ai_call`) are kept under it in `event_content`.
+    "ai",
 ];
 
 /// One event type at one schema version. `Payload` is the Rust shape

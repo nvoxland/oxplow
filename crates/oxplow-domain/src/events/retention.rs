@@ -51,6 +51,8 @@ pub const CORE_WINDOWS: &[(&str, RetentionWindow)] = &[
     ("ui", RetentionWindow::new(30, 14)),
     // A save is frequent and only read back by what reacts to it.
     ("file", RetentionWindow::new(30, 14)),
+    // A model call's request and response (no events; `ai_call` rows stay).
+    ("ai", RetentionWindow::new(30, 30)),
 ];
 
 /// An extension namespace's window, unless its extension declares a shorter

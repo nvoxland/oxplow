@@ -16,6 +16,7 @@ pub mod agent_prompt;
 pub mod agent_sessions;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;
+pub mod ai_calls;
 pub mod ai_compute;
 pub mod ai_service;
 pub mod assets;

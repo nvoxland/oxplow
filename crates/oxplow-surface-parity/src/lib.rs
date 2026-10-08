@@ -346,6 +346,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     agent("ai_decide"),
     agent("ai_summarize"),
+    both("read_ai_call"),
     agent("get_open_page"),
     agent("list_lenses"),
     // ---- both (names diverge across surfaces) ----

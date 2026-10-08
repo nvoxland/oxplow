@@ -29,12 +29,9 @@ export function providerFormError(form: ProviderForm, settings: AiSettings): str
 }
 
 const USED_FOR: Record<Role, string> = {
-  main: "General reasoning",
-  fast: "Cheap, quick generation",
+  main: "General reasoning: extracting structured answers, such as an effort's inferred decisions",
   summarize: "Summaries of sessions, efforts and changes",
-  embed: "Embeddings",
   decide: "Typed yes/no, choice and score questions (e.g. Jev)",
-  review: "Second-opinion review by a different model",
 };
 
 export type RoleRow = {

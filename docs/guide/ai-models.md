@@ -29,12 +29,9 @@ Oxplow and extensions ask for a role, not a model:
 
 | Role | Used for |
 |---|---|
-| `main` | general reasoning |
-| `fast` | cheap, quick generation |
+| `main` | general reasoning, such as finding the decisions an effort made |
 | `summarize` | summaries of sessions, efforts and changes |
-| `embed` | embeddings |
 | `decide` | typed yes/no, choice and score questions (Jev fits well) |
-| `review` | a second opinion from a different model |
 
 A role with no model assigned just isn't available. Anything that needs it
 says so.

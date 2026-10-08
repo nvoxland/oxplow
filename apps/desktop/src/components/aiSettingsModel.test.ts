@@ -21,11 +21,8 @@ const settings: AiSettings = {
   ],
   roles: [
     { role: "main", binding: null, overridden: false },
-    { role: "fast", binding: null, overridden: false },
     { role: "summarize", binding: { provider: "or", model: "openai/gpt-5-mini" }, overridden: false },
-    { role: "embed", binding: null, overridden: false },
     { role: "decide", binding: { provider: "gone", model: "jev" }, overridden: true },
-    { role: "review", binding: null, overridden: false },
   ],
 };
 
@@ -64,7 +61,7 @@ describe("providerFormError", () => {
 describe("roleRows", () => {
   test("every role with what it's for and its assignment", () => {
     const rows = roleRows(settings);
-    expect(rows.map((r) => r.role)).toEqual(["main", "fast", "summarize", "embed", "decide", "review"]);
+    expect(rows.map((r) => r.role)).toEqual(["main", "summarize", "decide"]);
     const summarize = rows.find((r) => r.role === "summarize")!;
     expect(summarize.assigned).toBe("or · openai/gpt-5-mini");
     expect(summarize.usedFor.toLowerCase()).toContain("summar");
