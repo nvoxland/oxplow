@@ -1168,6 +1168,7 @@ impl Services {
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
             sql: sql.clone(),
+            harnesses: harnesses.clone(),
         }));
         // Its turn's changed files become the effort's observed ones.
         event_pump.register_async(Arc::new(effort_observation::EffortObservationConsumer {
@@ -1419,9 +1420,14 @@ impl Services {
             thread_store.clone(),
             agent_session_store.clone(),
             fact_store.clone(),
+            harnesses.clone(),
         );
-        let otlp_ingest =
-            otlp_ingest::OtlpIngestService::new(db.clone(), vocabulary.clone(), event_pump.clone());
+        let otlp_ingest = otlp_ingest::OtlpIngestService::new(
+            db.clone(),
+            vocabulary.clone(),
+            event_pump.clone(),
+            harnesses.clone(),
+        );
 
         let advisories = Arc::new(advisories::AdvisoryRunner::new((*nudge_store).clone()));
         // State entity metrics re-capture as their rows move (P7.B6).

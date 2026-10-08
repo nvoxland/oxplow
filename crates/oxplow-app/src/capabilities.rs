@@ -847,12 +847,9 @@ pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentTex
 /// on a switch.
 pub fn refresh_agent_text(svc: &crate::Services) {
     let text = agent_text(svc);
-    for id in svc.harnesses.names() {
-        let Ok(harness) = svc.harnesses.get(&id) else {
-            continue;
-        };
+    for harness in svc.harnesses.all() {
         if let Err(error) = harness.refresh_text(&svc.layout.project_dir, &text) {
-            tracing::warn!(%error, harness = %id, "refreshing the agent's skills failed");
+            tracing::warn!(%error, harness = harness.id(), "refreshing the agent's skills failed");
         }
     }
 }

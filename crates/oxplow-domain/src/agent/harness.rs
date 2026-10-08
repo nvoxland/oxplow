@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use super::text::AgentText;
 use crate::ids::{AgentSessionId, StreamId, ThreadId};
 
@@ -146,4 +147,16 @@ pub trait AgentHarness: Send + Sync {
     /// launch (running across an upgrade, or resumed) reads what's offered
     /// now.
     fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError>;
+    /// Its tools that can change the worktree, lowercased: file edits,
+    /// shell commands, subagents (which run their own tools). Every other
+    /// call only reads or talks.
+    fn writing_tools(&self) -> &[&str];
+    /// The recordable turns in a chunk of its transcript; none when it
+    /// keeps no transcript core reads.
+    fn turns(&self, transcript: &str) -> Vec<Turn>;
+    /// The token counts in one record of its telemetry export; none for a
+    /// record it doesn't recognize.
+    fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading>;
+    /// `answer` in the shape its hooks expect back.
+    fn render(&self, answer: &HookAnswer) -> serde_json::Value;
 }

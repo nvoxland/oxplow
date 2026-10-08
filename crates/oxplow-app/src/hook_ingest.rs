@@ -117,6 +117,9 @@ pub enum HookIngestError {
 pub struct IngestOutcome {
     /// The turn a Stop / Interrupt closed.
     pub closed_turn: Option<AgentTurnId>,
+    /// The harness of the agent session the hook came from (its registry
+    /// key): what renders the answer. `None` when no session claims it.
+    pub harness: Option<String>,
 }
 
 /// What the transaction decided, applied after it commits.
@@ -124,6 +127,8 @@ pub struct IngestOutcome {
 struct Applied {
     /// The agent session the hook came from.
     session: Option<oxplow_domain::AgentSessionId>,
+    /// Its harness's registry key.
+    harness: Option<String>,
     turn: Option<AgentTurnId>,
     opened_turn: bool,
     closed_turn: Option<AgentTurnId>,
@@ -206,6 +211,7 @@ impl HookIngestService {
         // The activity log and the Work panel's live turn rows re-read
         // `v_event` / `v_agent_turn` on the commit's `ModelsChanged`.
         outcome.closed_turn = applied.closed_turn;
+        outcome.harness = applied.harness.clone();
         match applied.status {
             Some((state, detail)) => self.announce(thread, applied.session, state, detail),
             None => {
@@ -325,6 +331,8 @@ struct ThreadRow {
     session: Option<oxplow_domain::AgentSessionId>,
     resume_session_id: String,
     agent: AgentKind,
+    /// The session's harness key; `None` with no session.
+    harness: Option<String>,
     worktree: PathBuf,
 }
 
@@ -361,6 +369,7 @@ fn session_row_tx(
             .as_ref()
             .map(|s| s.resume_session_id.clone())
             .unwrap_or_default(),
+        harness: session.as_ref().map(|s| s.harness.as_str().to_string()),
         agent: session.map(|s| s.harness).unwrap_or_default(),
         worktree: if worktree.is_empty() {
             project_dir.to_path_buf()
@@ -387,6 +396,7 @@ fn record_tx(
     let slot = row.session;
     let mut applied = Applied {
         session: slot,
+        harness: row.harness.clone(),
         ..Applied::default()
     };
     let mut status = None;

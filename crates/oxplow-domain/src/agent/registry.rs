@@ -57,6 +57,16 @@ impl HarnessRegistry {
             .collect()
     }
 
+    /// Every registered harness, by key.
+    pub fn all(&self) -> Vec<Arc<dyn AgentHarness>> {
+        self.harnesses
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
+    }
+
     pub fn get(&self, id: &str) -> Result<Arc<dyn AgentHarness>, UnknownHarness> {
         self.harnesses
             .read()
@@ -113,6 +123,21 @@ mod tests {
             _: &crate::agent::text::AgentText,
         ) -> Result<(), HarnessError> {
             Ok(())
+        }
+        fn writing_tools(&self) -> &[&str] {
+            &[]
+        }
+        fn turns(&self, _: &str) -> Vec<crate::agent::observe::Turn> {
+            Vec::new()
+        }
+        fn token_readings(
+            &self,
+            _: &crate::agent::observe::OtlpRecord<'_>,
+        ) -> Vec<crate::agent::observe::TokenReading> {
+            Vec::new()
+        }
+        fn render(&self, _: &crate::agent::observe::HookAnswer) -> serde_json::Value {
+            serde_json::Value::Null
         }
     }
 

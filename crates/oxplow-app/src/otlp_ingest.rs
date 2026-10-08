@@ -11,6 +11,7 @@ use std::sync::Arc;
 use oxplow_db::agent_stores::{activity_anchors_tx, effort_during_turn_tx, turn_for_window_tx};
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::Database;
+use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::events::schema::{AgentTokensReported, AgentTokensReportedV1, TokenCount};
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::vocabulary::VocabularyHandle;
@@ -25,14 +26,22 @@ pub struct OtlpIngestService {
     db: Database,
     vocabulary: VocabularyHandle,
     pump: Arc<EventPump>,
+    /// What reads an export's token counts.
+    harnesses: HarnessRegistry,
 }
 
 impl OtlpIngestService {
-    pub fn new(db: Database, vocabulary: VocabularyHandle, pump: Arc<EventPump>) -> Self {
+    pub fn new(
+        db: Database,
+        vocabulary: VocabularyHandle,
+        pump: Arc<EventPump>,
+        harnesses: HarnessRegistry,
+    ) -> Self {
         Self {
             db,
             vocabulary,
             pump,
+            harnesses,
         }
     }
 
@@ -48,7 +57,7 @@ impl OtlpIngestService {
         session: Option<AgentSessionId>,
         body: &[u8],
     ) -> Result<bool, DomainError> {
-        let Some(export) = decode_token_export(body) else {
+        let Some(export) = decode_token_export(body, &self.harnesses) else {
             return Ok(false);
         };
         let dedupe = format!(

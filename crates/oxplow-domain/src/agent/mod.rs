@@ -13,6 +13,7 @@
 pub mod acp_adapter;
 pub mod drive;
 pub mod harness;
+pub mod observe;
 pub mod registry;
 pub mod text;
 

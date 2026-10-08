@@ -478,8 +478,8 @@ one, and one that posts none (Codex) still ends.
    attribution stays anchored to `effort`.
 4. For `PreToolUse`: asks the shared **`AgentPolicy`** (see "Agent
    policy" below): the write guard (see Write guard below). It never
-   asks for tracked work. A deny is rendered as Claude's
-   `hookSpecificOutput`.
+   asks for tracked work. A deny is a `HookAnswer::Deny` the session's
+   harness renders (Claude's `hookSpecificOutput` for every built-in).
    `claude_intent(body)` returns `None` for any tool outside the four
    worktree-mutating edits, so `pre_tool_check` short-circuits
    *before* any DB read or git-state stat — the common case (Read / Grep
@@ -756,7 +756,7 @@ destructive and waits for a person as a proposal.
   - **Other streams:** a path in another stream's worktree (the primary checkout included) is denied for every thread, writer or not (workspace isolation). The primary project's `.oxplow/wiki` is shared and exempt.
   - **Outside every stream:** any other absolute path is allowed.
   - With several paths, the first refused path wins.
-  - The reason text comes from the same cores the Claude builders use
+  - The reason text comes from the same cores `write_guard_reason` uses
     (`write_guard::read_only_reason`), so the wording can't drift.
 - **I/O and state** live in `crates/oxplow-app/src/agent_policy.rs`,
   exposed as `Services.agent_policy`:
@@ -784,7 +784,13 @@ destructive and waits for a person as a proposal.
     its `to_payload()`. That is the one place the canonical shape is built;
     the ingest and every reactor key on Claude's tool names.
 - **Transports only render the answer.**
-  - The hook route renders `hookSpecificOutput` for a deny.
+  - The hook route's answer is a neutral `HookAnswer` (`Ack`, `Deny {
+    reason }`, `Context { event, text }`, `oxplow_domain::agent::observe`),
+    rendered by the hook's harness (`AgentHarness::render`): the session's,
+    which the ingest reports (`IngestOutcome.harness`), else the default
+    harness's. Every built-in renders Claude Code's shape
+    (`hookSpecificOutput`; an ack is `{}`) — Codex's command hooks and
+    opencode's bridge speak it too — from `oxplow-harnesses`' `shared.rs`.
   - An ACP agent gets an automatic permission reject or an fs error.
 - **Byte-for-byte pins.** `crates/oxplow-control-plane/tests/hook_goldens.rs`
   pins the Claude responses byte for byte (`UPDATE_GOLDENS=1` rewrites
@@ -1328,21 +1334,22 @@ one row keyed by the event (`agent_token_usage.cause`), so a redelivery
 counts it once. Transcript rows carry no `cause` — one chunk can hold
 several turns, so the cursor (step 5) is their redelivery guard (tsk498).
 The transcript path:
-1. Pull `transcript_path` from the payload; resolve the thread's
-   `AgentKind` + stream.
+1. Pull `transcript_path` from the payload; resolve the turn's harness
+   (its agent session's) + stream.
 2. Read the persisted per-session cursor (`agent_token_cursor`), seek to
    it, and read only the COMPLETE lines of the tail (everything up to the
    last newline — a half-written final line is left for next time).
-3. `parse_turns(kind, tail)` splits the new tail into one `Turn` per agent
-   turn — each carrying the human-authored **prompt** that opened it plus
-   the summed usage + `model` of the assistant messages that answered it
-   (tsk143). A turn begins at a genuine user prompt and runs until the next
-   one; tool-result user messages (the harness's continuation lines) fold
-   into the current turn rather than opening a new one. **Pluggable per
-   agent kind:** Claude implemented; Codex/Opencode return `[]` (their
-   transcript formats differ — opencode surfaces its own `$cost` — and are
-   wired later). (`parse_usage_delta` still exists as the whole-chunk sum,
-   but `on_stop` records per-turn.)
+3. The harness's `turns(tail)` (`AgentHarness::turns`) splits the new
+   tail into one `Turn` per agent turn — each carrying the human-authored
+   **prompt** that opened it plus the summed usage + `model` of the
+   assistant messages that answered it (tsk143). For Claude
+   (`crates/oxplow-harnesses/src/claude.rs`) a turn begins at a genuine
+   user prompt and runs until the next one; tool-result user messages (the
+   harness's continuation lines) fold into the current turn rather than
+   opening a new one, and a message counts once by its id. Codex and
+   opencode return `[]` (their transcript formats differ — opencode
+   surfaces its own `$cost` — and aren't read yet); a harness no longer
+   registered reads as none.
 4. Attribute each turn to the effort the oxplow turn ran in (the event's
    effort anchor; without one, the thread's open effort — nullable: a Stop
    can land with no open effort) and persist one

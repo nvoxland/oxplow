@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use oxplow_domain::agent::harness::{
     AgentHarness, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
 
 use super::shared::{env_prefix, in_shell, program_and_guard, runtime, shell_escape, write_skills};
@@ -95,6 +96,26 @@ impl AgentHarness for Opencode {
             write_opencode_skills(project_dir, text).map_err(runtime)?;
         }
         Ok(())
+    }
+
+    /// As its hook bridge names them (`opencode-hooks.js` maps `patch` to
+    /// `Edit`).
+    fn writing_tools(&self) -> &[&str] {
+        &["write", "edit", "bash", "task"]
+    }
+
+    /// Its session format isn't read yet.
+    fn turns(&self, _: &str) -> Vec<Turn> {
+        Vec::new()
+    }
+
+    /// It exports no token telemetry.
+    fn token_readings(&self, _: &OtlpRecord<'_>) -> Vec<TokenReading> {
+        Vec::new()
+    }
+
+    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+        super::shared::render(answer)
     }
 }
 

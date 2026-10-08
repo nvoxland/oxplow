@@ -105,8 +105,9 @@ changed, writing_tools }`**, logged by the `thread.checkpoint` consumer
 compares the turn's start snapshot with the take's (content-addressed:
 the same id means the same tree); `writing_tools` counts the turn's calls
 to tools that can change the worktree — edits, shell commands, subagents,
-`run_command` — from a per-harness name list kept in that module, so no
-policy reads tool names. The policy opens an unlinked effort with
+`run_command` — named by the registered harnesses
+(`AgentHarness::writing_tools`, their union) plus oxplow's own
+`run_command`, so no policy reads tool names. The policy opens an unlinked effort with
 `adopt_since` the turn's start when `changed` and `writing_tools > 0` and
 the thread has none open; a later item start links it (rule 1).
 

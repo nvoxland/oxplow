@@ -1,16 +1,11 @@
-//! Write guard for read-only threads.
-//!
-//! Direct port of `src/electron/write-guard.ts`. Returns a
-//! Claude-Code-shaped PreToolUse deny body when the calling thread is
-//! not the stream's writer and the tool would mutate the shared
-//! worktree.
+//! Write guard for read-only threads: why a thread that isn't the
+//! stream's writer may not make a call that would mutate the shared
+//! worktree. The answer is core's; the agent's harness renders it.
 
 use std::path::Path;
 use std::sync::OnceLock;
 
-use serde::Serialize;
 use serde_json::Value;
-use specta::Type;
 
 use oxplow_domain::Thread;
 
@@ -25,23 +20,6 @@ pub fn worktree_mutating_tools() -> &'static [&'static str] {
 /// Convenience constant for callers that just want the slice.
 pub static WORKTREE_MUTATING_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
-/// Body shape that mirrors Claude Code's hook response contract.
-#[derive(Debug, Clone, PartialEq, Serialize, Type)]
-pub struct WriteGuardDeny {
-    #[serde(rename = "hookSpecificOutput")]
-    pub hook_specific_output: HookSpecificOutput,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Type)]
-pub struct HookSpecificOutput {
-    #[serde(rename = "hookEventName")]
-    pub hook_event_name: &'static str,
-    #[serde(rename = "permissionDecision")]
-    pub permission_decision: &'static str,
-    #[serde(rename = "permissionDecisionReason")]
-    pub permission_decision_reason: String,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct WriteGuardContext<'a> {
     /// Absolute path to the project root (the shared worktree root).
@@ -50,17 +28,17 @@ pub struct WriteGuardContext<'a> {
     pub tool_input: Option<&'a Value>,
 }
 
-/// Returns a deny body when the thread is not the stream's writer and
-/// the tool would mutate the shared worktree. Returns `None` to let
-/// the call proceed.
+/// Why the call is refused, when the thread is not the stream's writer
+/// and the tool would mutate the shared worktree (or it writes a wiki
+/// page). `None` lets the call proceed.
 ///
 /// "Writer" is `ThreadStatus::Active`; everything else
 /// (`Queued`, `Closed`) is read-only.
-pub fn build_write_guard_response(
+pub fn write_guard_reason(
     thread: Option<&Thread>,
     tool_name: &str,
     context: WriteGuardContext<'_>,
-) -> Option<WriteGuardDeny> {
+) -> Option<String> {
     let thread = thread?;
     if tool_name.is_empty() || tool_name.starts_with("mcp__") {
         return None;
@@ -69,15 +47,8 @@ pub fn build_write_guard_response(
         return None;
     }
     let raw = context.tool_input.and_then(raw_target_path);
-    let deny = |reason: String| WriteGuardDeny {
-        hook_specific_output: HookSpecificOutput {
-            hook_event_name: "PreToolUse",
-            permission_decision: "deny",
-            permission_decision_reason: reason,
-        },
-    };
     if let Some(reason) = wiki_page_reason(raw, context.project_dir) {
-        return Some(deny(reason));
+        return Some(reason);
     }
     if thread.status.is_writer() {
         return None;
@@ -88,13 +59,7 @@ pub fn build_write_guard_response(
     } else {
         None
     };
-    read_only_reason(thread, raw, context.project_dir).map(|reason| WriteGuardDeny {
-        hook_specific_output: HookSpecificOutput {
-            hook_event_name: "PreToolUse",
-            permission_decision: "deny",
-            permission_decision_reason: reason,
-        },
-    })
+    read_only_reason(thread, raw, context.project_dir)
 }
 
 /// Why an agent may not write `raw_path` itself, when it is a wiki page
@@ -209,14 +174,14 @@ mod tests {
 
     #[test]
     fn no_thread_means_no_deny() {
-        let result = build_write_guard_response(None, "Write", WriteGuardContext::default());
+        let result = write_guard_reason(None, "Write", WriteGuardContext::default());
         assert!(result.is_none());
     }
 
     #[test]
     fn writer_thread_never_denied() {
         let t = writer_thread();
-        let result = build_write_guard_response(Some(&t), "Write", WriteGuardContext::default());
+        let result = write_guard_reason(Some(&t), "Write", WriteGuardContext::default());
         assert!(result.is_none(), "writer thread must be allowed to mutate");
     }
 
@@ -224,14 +189,14 @@ mod tests {
     fn closed_thread_treated_as_read_only() {
         let mut t = read_only_thread();
         t.status = ThreadStatus::Closed;
-        let result = build_write_guard_response(Some(&t), "Write", WriteGuardContext::default());
+        let result = write_guard_reason(Some(&t), "Write", WriteGuardContext::default());
         assert!(result.is_some(), "closed thread must be denied like queued");
     }
 
     #[test]
     fn mcp_tool_never_denied() {
         let t = read_only_thread();
-        let result = build_write_guard_response(
+        let result = write_guard_reason(
             Some(&t),
             "mcp__oxplow__run_command",
             WriteGuardContext::default(),
@@ -242,20 +207,15 @@ mod tests {
     #[test]
     fn non_mutating_tool_never_denied() {
         let t = read_only_thread();
-        let result = build_write_guard_response(Some(&t), "Read", WriteGuardContext::default());
+        let result = write_guard_reason(Some(&t), "Read", WriteGuardContext::default());
         assert!(result.is_none());
     }
 
     #[test]
     fn write_without_path_context_returns_generic_deny() {
         let t = read_only_thread();
-        let result = build_write_guard_response(Some(&t), "Write", WriteGuardContext::default());
-        let body = result.expect("deny");
-        assert_eq!(body.hook_specific_output.permission_decision, "deny");
-        assert!(body
-            .hook_specific_output
-            .permission_decision_reason
-            .contains("read-only"));
+        let result = write_guard_reason(Some(&t), "Write", WriteGuardContext::default());
+        assert!(result.expect("deny").contains("read-only"));
     }
 
     #[test]
@@ -264,7 +224,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let outside = "/tmp/somewhere/else.txt";
         let input = json!({"file_path": outside});
-        let result = build_write_guard_response(
+        let result = write_guard_reason(
             Some(&t),
             "Write",
             WriteGuardContext {
@@ -283,7 +243,7 @@ mod tests {
         let target = project.path().join(".oxplow/wiki/captured.md");
         std::fs::write(&target, "").unwrap();
         let input = json!({"file_path": target.to_str().unwrap()});
-        let result = build_write_guard_response(
+        let result = write_guard_reason(
             Some(&t),
             "Write",
             WriteGuardContext {
@@ -291,14 +251,11 @@ mod tests {
                 tool_input: Some(&input),
             },
         );
-        let reason = result
-            .expect("a wiki page write is refused")
-            .hook_specific_output
-            .permission_decision_reason;
+        let reason = result.expect("a wiki page write is refused");
         assert!(reason.contains("oxplow.knowledge.write_page"), "{reason}");
         let mut writer = t.clone();
         writer.status = ThreadStatus::Active;
-        assert!(build_write_guard_response(
+        assert!(write_guard_reason(
             Some(&writer),
             "Write",
             WriteGuardContext {
@@ -317,7 +274,7 @@ mod tests {
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "").unwrap();
         let input = json!({"file_path": target.to_str().unwrap()});
-        let result = build_write_guard_response(
+        let result = write_guard_reason(
             Some(&t),
             "Write",
             WriteGuardContext {
@@ -325,11 +282,7 @@ mod tests {
                 tool_input: Some(&input),
             },
         );
-        let body = result.expect("deny");
-        assert!(body
-            .hook_specific_output
-            .permission_decision_reason
-            .contains("inside the shared worktree"));
+        assert!(result.expect("deny").contains("inside the shared worktree"));
     }
 
     #[test]
@@ -340,7 +293,7 @@ mod tests {
         let target = project.path().join(".oxplow/runtime/local.sqlite");
         std::fs::write(&target, "").unwrap();
         let input = json!({"file_path": target.to_str().unwrap()});
-        let result = build_write_guard_response(
+        let result = write_guard_reason(
             Some(&t),
             "Write",
             WriteGuardContext {

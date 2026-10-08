@@ -1,12 +1,15 @@
-//! What the harnesses share: shell quoting, the launch command's shape, and
-//! writing skills and commands into a runtime.
+//! What the harnesses share: shell quoting, the launch command's shape,
+//! writing skills and commands into a runtime, and the hook answer's shape.
 
 use std::fs;
 use std::io;
 use std::path::Path;
 
 use oxplow_domain::agent::harness::HarnessError;
+use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::Text;
+use oxplow_domain::HookKind;
+use serde_json::json;
 
 /// POSIX single-quote escape: wraps `'`, replaces internal `'` with
 /// `'\''`.
@@ -72,6 +75,43 @@ pub fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// `answer` in Claude Code's hook-response shape, which Codex's hooks and
+/// opencode's bridge speak too: `{}` for nothing to say, else a
+/// `hookSpecificOutput` naming the event. The wording inside is core's
+/// (pinned by the control plane's goldens).
+pub fn render(answer: &HookAnswer) -> serde_json::Value {
+    match answer {
+        HookAnswer::Ack => json!({}),
+        HookAnswer::Deny { reason } => json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }),
+        HookAnswer::Context { event, text } => json!({
+            "hookSpecificOutput": {
+                "hookEventName": event_name(*event),
+                "additionalContext": text,
+            }
+        }),
+    }
+}
+
+/// The hook event's name on the wire.
+fn event_name(kind: HookKind) -> &'static str {
+    match kind {
+        HookKind::UserPromptSubmit => "UserPromptSubmit",
+        HookKind::PreToolUse => "PreToolUse",
+        HookKind::PostToolUse => "PostToolUse",
+        HookKind::Stop => "Stop",
+        HookKind::Interrupt => "Interrupt",
+        HookKind::SessionStart => "SessionStart",
+        HookKind::SessionEnd => "SessionEnd",
+        HookKind::Notification => "Notification",
+    }
+}
+
 /// A runtime file that couldn't be written.
 pub fn runtime(e: io::Error) -> HarnessError {
     HarnessError::Runtime(e.to_string())
@@ -134,6 +174,34 @@ pub fn write_json(path: &Path, value: &serde_json::Value) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A deny and a context are Claude's `hookSpecificOutput`; an ack is
+    /// an empty object (anything else prints a warning in Claude's
+    /// terminal).
+    #[test]
+    fn answers_render_in_the_hook_response_shape() {
+        assert_eq!(render(&HookAnswer::Ack), json!({}));
+        assert_eq!(
+            render(&HookAnswer::Deny {
+                reason: "no".into()
+            }),
+            json!({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "no",
+            }})
+        );
+        assert_eq!(
+            render(&HookAnswer::Context {
+                event: HookKind::PostToolUse,
+                text: "ctx".into()
+            }),
+            json!({"hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": "ctx",
+            }})
+        );
+    }
 
     #[test]
     fn shell_escape_handles_apostrophes() {

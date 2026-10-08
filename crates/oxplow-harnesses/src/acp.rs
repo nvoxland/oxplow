@@ -8,6 +8,7 @@ use oxplow_domain::agent::harness::{
     AgentHarness, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
 
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
 
 use super::Named;
@@ -70,6 +71,28 @@ impl AgentHarness for Acp {
     /// prompt, read at each session's start.
     fn refresh_text(&self, _: &Path, _: &AgentText) -> Result<(), HarnessError> {
         Ok(())
+    }
+
+    /// The canonical names its tool calls are recorded under
+    /// (`acp::mapping::canonical_name`).
+    fn writing_tools(&self) -> &[&str] {
+        &["write", "edit", "bash"]
+    }
+
+    /// Its turns and their counts ride the protocol, not a transcript.
+    fn turns(&self, _: &str) -> Vec<Turn> {
+        Vec::new()
+    }
+
+    /// Its token counts ride the protocol, not telemetry.
+    fn token_readings(&self, _: &OtlpRecord<'_>) -> Vec<TokenReading> {
+        Vec::new()
+    }
+
+    /// It posts no hooks (its tool gate answers in-process); one naming its
+    /// session gets the common shape.
+    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+        super::shared::render(answer)
     }
 }
 

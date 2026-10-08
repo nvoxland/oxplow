@@ -31,7 +31,9 @@ use oxplow_domain::agent::harness::{
     AgentHarness, Endpoints, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec,
     Transcript,
 };
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn, UsageDelta};
 use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::events::schema::TokenKind;
 
 use super::shared::{
     env_prefix, in_shell, program_and_guard, runtime, shell_escape, write_commands, write_json,
@@ -153,6 +155,145 @@ impl AgentHarness for Claude {
         }
         Ok(())
     }
+
+    fn writing_tools(&self) -> &[&str] {
+        &[
+            "write",
+            "edit",
+            "multiedit",
+            "notebookedit",
+            "bash",
+            "agent",
+            "task",
+        ]
+    }
+
+    fn turns(&self, transcript: &str) -> Vec<Turn> {
+        transcript_turns(transcript)
+            .into_iter()
+            .filter(Turn::is_recordable)
+            .collect()
+    }
+
+    /// Its `claude_code.token.usage` counter (delta temporality): the
+    /// `type` attribute is the kind.
+    fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {
+        let OtlpRecord::Point {
+            metric: TOKEN_METRIC,
+            value,
+            attributes,
+            time_unix_nano,
+            start_time_unix_nano,
+            ..
+        } = record
+        else {
+            return Vec::new();
+        };
+        let kind = match attributes.str("type") {
+            Some("input") => TokenKind::Input,
+            Some("output") => TokenKind::Output,
+            Some("cacheRead") => TokenKind::CacheRead,
+            Some("cacheCreation") => TokenKind::CacheCreation,
+            _ => return Vec::new(),
+        };
+        // An untrusted body: a negative count is no count.
+        if *value <= 0 {
+            return Vec::new();
+        }
+        vec![TokenReading {
+            model: record.model(),
+            kind,
+            value: *value,
+            at_unix_nano: *time_unix_nano,
+            from_unix_nano: *start_time_unix_nano,
+        }]
+    }
+
+    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+        super::shared::render(answer)
+    }
+}
+
+/// Claude Code's per-model token counter.
+const TOKEN_METRIC: &str = "claude_code.token.usage";
+
+/// The person's prompt in a `type=="user"` message, or `None` when the line
+/// isn't one. Claude reuses `type=="user"` for the prompt typed and for the
+/// tool results it injects; a message whose content is only tool_result
+/// blocks is the latter. String content is taken whole; array content
+/// joins its `text` blocks.
+fn user_prompt(msg: &serde_json::Value) -> Option<String> {
+    let content = msg.get("content")?;
+    if let Some(s) = content.as_str() {
+        let s = s.trim();
+        return (!s.is_empty()).then(|| s.to_string());
+    }
+    let parts: Vec<&str> = content
+        .as_array()?
+        .iter()
+        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
+/// A transcript chunk split into turns: each prompt opens one; assistant
+/// `usage` blocks accumulate into the current one; tool-result messages
+/// fold in. Assistant lines before any prompt form a leading prompt-less
+/// turn. Blank and malformed lines are skipped, so a partly written tail
+/// line never poisons the sum.
+fn transcript_turns(content: &str) -> Vec<Turn> {
+    let mut turns: Vec<Turn> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in content.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(msg) = v.get("message") else {
+            continue;
+        };
+        match v.get("type").and_then(|t| t.as_str()) {
+            Some("user") => {
+                if let Some(prompt) = user_prompt(msg) {
+                    turns.push(Turn {
+                        prompt: Some(prompt),
+                        usage: UsageDelta::default(),
+                    });
+                }
+            }
+            Some("assistant") => {
+                let Some(usage) = msg.get("usage") else {
+                    continue;
+                };
+                // Claude writes one line per content block (thinking, text,
+                // tool_use), each repeating the message's cumulative usage:
+                // a message counts once, by its id. A line without one (a
+                // synthetic one) counts on its own.
+                if let Some(id) = msg.get("id").and_then(|i| i.as_str()) {
+                    if !seen.insert(id.to_string()) {
+                        continue;
+                    }
+                }
+                if turns.is_empty() {
+                    turns.push(Turn::default());
+                }
+                let d = &mut turns.last_mut().expect("just pushed").usage;
+                let get = |k: &str| usage.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
+                d.input_tokens += get("input_tokens");
+                d.output_tokens += get("output_tokens");
+                d.cache_creation_input_tokens += get("cache_creation_input_tokens");
+                d.cache_read_input_tokens += get("cache_read_input_tokens");
+                d.message_count += 1;
+                if let Some(m) = msg.get("model").and_then(|m| m.as_str()) {
+                    d.model = Some(m.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    turns
 }
 
 const PLUGIN_DIR_REL: &str = ".oxplow/runtime/claude-plugin";
@@ -755,5 +896,148 @@ mod tests {
         assert!(body.contains("http://h2/hook"));
         let mcp_body = fs::read_to_string(dir.join("mcp-config.json")).unwrap();
         assert!(mcp_body.contains("Bearer t2"));
+    }
+
+    const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}"#;
+
+    /// A prompt line (string content).
+    fn user_line(text: &str) -> String {
+        serde_json::json!({"type": "user", "message": {"content": text}}).to_string()
+    }
+
+    /// An assistant line for message `id` with the given cumulative usage.
+    /// Claude writes one per content block, each repeating id and usage.
+    fn assistant_id_line(id: &str, input: i64, output: i64) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "id": id,
+                "model": "claude-opus-4-8",
+                "usage": {"input_tokens": input, "output_tokens": output},
+            },
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn a_turn_sums_its_assistant_lines_and_skips_the_rest() {
+        let h = harness("oxplow:claude-code", "claude");
+        let content = format!(
+            "{}\n{ASSISTANT_LINE}\nnot json at all\n{ASSISTANT_LINE}\n",
+            user_line("hi")
+        );
+        let turns = h.turns(&content);
+        assert_eq!(turns.len(), 1);
+        let d = &turns[0].usage;
+        assert_eq!(
+            (
+                d.message_count,
+                d.input_tokens,
+                d.output_tokens,
+                d.cache_creation_input_tokens,
+                d.cache_read_input_tokens
+            ),
+            (2, 200, 40, 100, 400)
+        );
+        assert_eq!(d.model.as_deref(), Some("claude-opus-4-8"));
+        assert!(h.turns("{\"type\":\"user\"}\n").is_empty());
+    }
+
+    #[test]
+    fn a_message_counts_once_however_many_lines_carry_it() {
+        let line = assistant_id_line("msg_a", 10, 583);
+        let content = format!("{}\n{line}\n{line}\n{line}\n", user_line("prompt"));
+        let turns = transcript_turns(&content);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].usage.output_tokens, 583, "counted once");
+        assert_eq!(turns[0].usage.input_tokens, 10);
+        assert_eq!(turns[0].usage.message_count, 1);
+    }
+
+    #[test]
+    fn each_prompt_opens_a_turn() {
+        let content = format!(
+            "{}\n{ASSISTANT_LINE}\n{}\n{ASSISTANT_LINE}\n",
+            user_line("prompt A"),
+            user_line("prompt B"),
+        );
+        let turns = harness("oxplow:claude-code", "claude").turns(&content);
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].prompt.as_deref(), Some("prompt A"));
+        assert_eq!(turns[0].usage.input_tokens, 100);
+        assert_eq!(turns[1].prompt.as_deref(), Some("prompt B"));
+        assert_eq!(turns[1].usage.model.as_deref(), Some("claude-opus-4-8"));
+    }
+
+    #[test]
+    fn tool_result_user_messages_do_not_open_a_turn() {
+        let tool_result = serde_json::json!({
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "content": "ok"}]}
+        })
+        .to_string();
+        let content = format!(
+            "{}\n{ASSISTANT_LINE}\n{tool_result}\n{ASSISTANT_LINE}\n",
+            user_line("real prompt"),
+        );
+        let turns = transcript_turns(&content);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].prompt.as_deref(), Some("real prompt"));
+        assert_eq!(turns[0].usage.message_count, 2);
+    }
+
+    #[test]
+    fn a_prompt_joins_text_blocks_and_skips_tool_results() {
+        let arr = serde_json::json!({"content": [
+            {"type": "text", "text": "hello"},
+            {"type": "tool_result", "content": "ignored"},
+            {"type": "text", "text": "world"},
+        ]});
+        assert_eq!(user_prompt(&arr).as_deref(), Some("hello\nworld"));
+        let only_tool = serde_json::json!({"content": [{"type": "tool_result"}]});
+        assert!(user_prompt(&only_tool).is_none());
+        assert!(user_prompt(&serde_json::json!({"content": "   "})).is_none());
+    }
+
+    /// Its token counter's four kinds, the model falling back to the
+    /// resource; another metric, an unknown kind and a non-positive count
+    /// read as nothing.
+    #[test]
+    fn the_token_counter_maps_its_four_kinds() {
+        use oxplow_domain::agent::observe::{AttrValue, Attrs};
+        let h = harness("oxplow:claude-code", "claude");
+        let resource = Attrs(vec![("model".into(), AttrValue::Str("claude-x".into()))]);
+        let read = |metric: &str, kind: &str, value: i64| {
+            let a = Attrs(vec![("type".into(), AttrValue::Str(kind.into()))]);
+            h.token_readings(&OtlpRecord::Point {
+                metric,
+                value,
+                attributes: &a,
+                resource: &resource,
+                time_unix_nano: 9,
+                start_time_unix_nano: 3,
+            })
+        };
+        for (kind, want) in [
+            ("input", TokenKind::Input),
+            ("output", TokenKind::Output),
+            ("cacheRead", TokenKind::CacheRead),
+            ("cacheCreation", TokenKind::CacheCreation),
+        ] {
+            assert_eq!(
+                read(TOKEN_METRIC, kind, 5),
+                vec![TokenReading {
+                    model: "claude-x".into(),
+                    kind: want,
+                    value: 5,
+                    at_unix_nano: 9,
+                    from_unix_nano: 3,
+                }]
+            );
+        }
+        assert!(read("claude_code.cost.usage", "input", 5).is_empty());
+        assert!(read(TOKEN_METRIC, "total", 5).is_empty());
+        assert!(read(TOKEN_METRIC, "input", 0).is_empty());
+        assert!(read(TOKEN_METRIC, "input", -5).is_empty());
     }
 }

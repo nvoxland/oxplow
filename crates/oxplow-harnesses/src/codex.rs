@@ -11,7 +11,9 @@ use serde_json::json;
 use oxplow_domain::agent::harness::{
     AgentHarness, Gate, HarnessError, Input, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::events::schema::TokenKind;
 
 use super::shared::{
     env_prefix, in_shell, program_and_guard, runtime, shell_escape, toml_string, write_json,
@@ -99,7 +101,94 @@ impl AgentHarness for Codex {
         }
         Ok(())
     }
+
+    fn writing_tools(&self) -> &[&str] {
+        &["apply_patch", "shell", "exec_command"]
+    }
+
+    /// Its session format isn't read yet.
+    fn turns(&self, _: &str) -> Vec<Turn> {
+        Vec::new()
+    }
+
+    fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {
+        match record {
+            OtlpRecord::Point {
+                metric: TOKEN_METRIC,
+                value,
+                attributes,
+                time_unix_nano,
+                start_time_unix_nano,
+                ..
+            } => {
+                let kind = match attributes.str("token_type") {
+                    Some("input") => TokenKind::Input,
+                    Some("output" | "reasoning_output") => TokenKind::Output,
+                    Some("cached_input") => TokenKind::CacheRead,
+                    _ => return Vec::new(),
+                };
+                if *value <= 0 {
+                    return Vec::new();
+                }
+                vec![TokenReading {
+                    model: record.model(),
+                    kind,
+                    value: *value,
+                    at_unix_nano: *time_unix_nano,
+                    from_unix_nano: *start_time_unix_nano,
+                }]
+            }
+            OtlpRecord::Log {
+                attributes,
+                time_unix_nano,
+                ..
+            } if attributes.str("event.kind") == Some(TOKEN_EVENT_KIND) => {
+                // An untrusted body: a negative count is none, and the
+                // arithmetic saturates rather than overflows.
+                let count = |key| attributes.int(key).unwrap_or(0).max(0);
+                let input = count("input_token_count");
+                let cached = count("cached_token_count");
+                // New (uncached) input this request; reasoning folded into
+                // output; the cached prefix is its own CacheRead count.
+                let readings = [
+                    (TokenKind::Input, input.saturating_sub(cached).max(0)),
+                    (TokenKind::CacheRead, cached),
+                    (
+                        TokenKind::Output,
+                        count("output_token_count").saturating_add(count("reasoning_token_count")),
+                    ),
+                ];
+                readings
+                    .into_iter()
+                    .filter(|(_, value)| *value > 0)
+                    .map(|(kind, value)| TokenReading {
+                        model: record.model(),
+                        kind,
+                        value,
+                        at_unix_nano: *time_unix_nano,
+                        from_unix_nano: *time_unix_nano,
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+        super::shared::render(answer)
+    }
 }
+
+/// Its per-turn token histogram, `token_type` the kind and the point's
+/// sum the count. Codex 0.142.0 doesn't emit it (its counts ride the
+/// `response.completed` log event), so this reads it in case a later one
+/// does. `reasoning_output` folds into output; the `total` rollup is
+/// dropped (it would double-count).
+const TOKEN_METRIC: &str = "codex.turn.token_usage";
+
+/// The `event.kind` of its `codex.sse_event` log record that carries a
+/// request's token counts. `input_token_count` is the full context.
+const TOKEN_EVENT_KIND: &str = "response.completed";
 
 const RUNTIME_DIR_REL: &str = ".oxplow/runtime/codex-plugin";
 
@@ -392,5 +481,134 @@ mod tests {
                 skill.body
             );
         }
+    }
+
+    use oxplow_domain::agent::observe::{AttrValue, Attrs};
+
+    fn attrs(pairs: &[(&str, AttrValue)]) -> Attrs {
+        Attrs(
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).into(), v.clone()))
+                .collect(),
+        )
+    }
+
+    fn sums(readings: &[TokenReading]) -> [i64; 3] {
+        let sum = |k| {
+            readings
+                .iter()
+                .filter(|r| r.kind == k)
+                .map(|r| r.value)
+                .sum()
+        };
+        [
+            sum(TokenKind::Input),
+            sum(TokenKind::Output),
+            sum(TokenKind::CacheRead),
+        ]
+    }
+
+    /// Its real token source: a `response.completed` log record. Input is
+    /// the full context, so new input = input − cached; reasoning folds
+    /// into output; the cached prefix is a CacheRead count. Counts may be
+    /// ints or numeric strings.
+    #[test]
+    fn a_response_completed_log_maps_new_input_and_folded_output() {
+        let h = harness("oxplow:codex-cli", "codex");
+        let a = attrs(&[
+            ("event.kind", AttrValue::Str("response.completed".into())),
+            ("input_token_count", AttrValue::Int(113690)),
+            ("cached_token_count", AttrValue::Int(2432)),
+            ("output_token_count", AttrValue::Str("254".into())),
+            ("reasoning_token_count", AttrValue::Str("42".into())),
+            ("model", AttrValue::Str("gpt-5.5".into())),
+        ]);
+        let none = Attrs::default();
+        let r = h.token_readings(&OtlpRecord::Log {
+            attributes: &a,
+            resource: &none,
+            time_unix_nano: 7,
+        });
+        assert_eq!(sums(&r), [111258, 296, 2432]);
+        assert!(r
+            .iter()
+            .all(|r| r.model == "gpt-5.5" && r.at_unix_nano == 7));
+        let other = attrs(&[("event.name", AttrValue::Str("codex.api_request".into()))]);
+        assert!(h
+            .token_readings(&OtlpRecord::Log {
+                attributes: &other,
+                resource: &none,
+                time_unix_nano: 0,
+            })
+            .is_empty());
+    }
+
+    /// The body is untrusted: counts at the ends of i64 saturate, and a
+    /// negative count is no count.
+    #[test]
+    fn hostile_counts_saturate_and_negative_ones_are_dropped() {
+        let h = harness("oxplow:codex-cli", "codex");
+        let none = Attrs::default();
+        let log = |input: i64, cached: i64, output: i64, reasoning: i64| {
+            attrs(&[
+                ("event.kind", AttrValue::Str("response.completed".into())),
+                ("input_token_count", AttrValue::Int(input)),
+                ("cached_token_count", AttrValue::Int(cached)),
+                ("output_token_count", AttrValue::Int(output)),
+                ("reasoning_token_count", AttrValue::Int(reasoning)),
+            ])
+        };
+        let read = |a: &Attrs| -> Vec<(TokenKind, i64)> {
+            h.token_readings(&OtlpRecord::Log {
+                attributes: a,
+                resource: &none,
+                time_unix_nano: 0,
+            })
+            .into_iter()
+            .map(|r| (r.kind, r.value))
+            .collect()
+        };
+        assert_eq!(
+            read(&log(i64::MIN, i64::MAX, i64::MAX, i64::MAX)),
+            vec![
+                (TokenKind::CacheRead, i64::MAX),
+                (TokenKind::Output, i64::MAX)
+            ]
+        );
+        assert!(read(&log(-5, -5, -5, -5)).is_empty());
+    }
+
+    /// The per-turn histogram (should a Codex emit it): reasoning folds
+    /// into output, cached input is CacheRead, the `total` rollup is
+    /// dropped.
+    #[test]
+    fn the_token_histogram_folds_reasoning_and_drops_the_total() {
+        let h = harness("oxplow:codex-cli", "codex");
+        let none = Attrs::default();
+        let readings: Vec<TokenReading> = [
+            ("input", 100),
+            ("output", 20),
+            ("reasoning_output", 30),
+            ("cached_input", 5000),
+            ("total", 5150),
+        ]
+        .iter()
+        .flat_map(|(kind, value)| {
+            let a = attrs(&[
+                ("token_type", AttrValue::Str((*kind).into())),
+                ("model", AttrValue::Str("gpt-5-codex".into())),
+            ]);
+            h.token_readings(&OtlpRecord::Point {
+                metric: TOKEN_METRIC,
+                value: *value,
+                attributes: &a,
+                resource: &none,
+                time_unix_nano: 0,
+                start_time_unix_nano: 0,
+            })
+        })
+        .collect();
+        assert_eq!(sums(&readings), [100, 50, 5000]);
     }
 }

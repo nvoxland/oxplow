@@ -1,94 +1,65 @@
-//! Map OTLP metric exports → token facts (epic tsk22).
+//! OTLP exports → token readings (epic tsk22).
 //!
-//! Agent CLIs (Claude Code, Codex) export token usage as OpenTelemetry metrics
-//! to oxplow's control-plane OTLP receiver. This module decodes the protobuf
-//! body and projects the token data points into the intermediate [`TokenFact`]
-//! grain that `agent.tokens.reported` carries (`otlp_ingest.rs`), which the
-//! `token_usage.otlp` consumer writes as facts — the successor to the
-//! transcript-parse producer (`token_usage.rs`), which overcounted because
-//! Claude repeats a message's cumulative `usage` on every content-block line.
+//! Agent CLIs export token usage as OpenTelemetry to oxplow's control-plane
+//! OTLP receiver. This module decodes the protobuf body into neutral
+//! [`OtlpRecord`]s — metric data points and log records — and asks the
+//! registered harnesses what token counts they hold
+//! (`AgentHarness::token_readings`): each harness knows its own metric and
+//! event names (Claude's token counter, Codex's `response.completed` log
+//! event). The readings are the grain `agent.tokens.reported` carries
+//! (`otlp_ingest.rs`), which the `token_usage.otlp` consumer writes as
+//! facts. Every registered harness is asked, since the names are each
+//! harness's own: reading the session's harness first would cost a database
+//! read for every export, most of which (Codex's log events) carry no
+//! counts.
 //!
-//! Pure + no IO → fully unit-testable. Two agents, two shapes:
-//! - **Claude** — the `claude_code.token.usage` **metric** counter (tsk23).
-//! - **Codex** — its `response.completed` **log event** (tsk27), the confirmed
-//!   live source; Codex points its single OTLP endpoint at us and sends token
-//!   counts as logs. `input_token_count` is the full context, so new input =
-//!   `input − cached`; reasoning folds into output. (A `codex.turn.token_usage`
-//!   metric mapper also exists but is speculative — unemitted by Codex 0.142.0.)
-//!
-//! Both keep the `input`/`output` kinds and the prompt-cache ones
-//! (`cache_read`, `cache_creation`; tsk73), which land on their own measure.
-//! [`summarize_metrics_request`] is the opt-in wire-format diagnostic (tsk25),
-//! which also decodes logs.
+//! Pure + no IO → fully unit-testable. [`summarize_metrics_request`] is the
+//! opt-in wire-format diagnostic (tsk25), which also decodes logs.
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, KeyValue};
-use opentelemetry_proto::tonic::metrics::v1::{metric, number_data_point, Metric};
+use opentelemetry_proto::tonic::metrics::v1::{metric, number_data_point, Gauge, Sum};
 use prost::Message;
 
-/// Claude Code's per-model token counter (delta temporality). Its `type`
-/// attribute carries the token kind; `model` the model id.
-const CLAUDE_TOKEN_METRIC: &str = "claude_code.token.usage";
-
-/// Codex's per-turn token histogram — SPECULATIVE. Codex 0.142.0 does NOT emit
-/// this; its token counts ride the `response.completed` LOG event instead (see
-/// [`otlp_logs_to_token_facts`]). Kept as a defensive path in case a future
-/// Codex version adds the metric. `token_type` carries the kind; value is the
-/// histogram data point's `sum`.
-const CODEX_TOKEN_METRIC: &str = "codex.turn.token_usage";
-
-/// Codex emits token counts on its `codex.sse_event` log record whose
-/// `event.kind` attribute is `response.completed` (tsk27).
-const CODEX_TOKEN_EVENT_KIND: &str = "response.completed";
-
-/// The token kinds oxplow tracks — the event vocabulary's. Cache tokens
-/// (Claude `cacheRead`/`cacheCreation`, Codex `cached_input` → CacheRead)
-/// are tracked since tsk73; the Codex `total` rollup stays dropped (it would
-/// double-count) and Codex `reasoning_output` folds into `output` (matching
-/// Claude, whose `output` already includes thinking).
-///
-/// ⚠️ Facts route kinds to DIFFERENT measures: Input/Output →
-/// `oxplow.tokens`, cache kinds → `oxplow.cache_tokens`. They must never
-/// share a measure — `agent.tokens.total` is an UNFILTERED sum over
-/// `oxplow.tokens`, so cache facts there would silently change its meaning.
-pub use oxplow_domain::events::schema::TokenKind;
-
-/// One token measurement projected out of an OTLP export: a `value`-token count
-/// for a `(model, kind)` pair, ready to become a `NewFact` on `oxplow.tokens`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TokenFact {
-    pub model: String,
-    pub kind: TokenKind,
-    pub value: i64,
-    /// When the data point or log record was measured (0: it didn't say).
-    pub at_unix_nano: u64,
-    /// Where its window starts: a delta point's `start_time_unix_nano` (the
-    /// previous collection); a log record's own time (0: it didn't say).
-    pub from_unix_nano: u64,
-}
+use oxplow_domain::agent::observe::{AttrValue, Attrs, OtlpRecord, TokenReading};
+use oxplow_domain::agent::registry::HarnessRegistry;
 
 /// What one OTLP export reported: its token counts, and the end of the
 /// time window they cover — what places them in a turn, since an export
 /// arrives after the turn it measured.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TokenExport {
-    pub counts: Vec<TokenFact>,
+    pub counts: Vec<TokenReading>,
     /// The earliest its counts cover, when they say (tsk900).
     pub window_start: Option<oxplow_domain::Timestamp>,
     pub window_end: Option<oxplow_domain::Timestamp>,
 }
 
 /// Decode an export body: as metrics (Claude), else as logs (Codex points
-/// its one endpoint here, and its token counts ride log events). `None`
-/// when it carries no token counts — most Codex log events don't.
-pub fn decode_token_export(body: &[u8]) -> Option<TokenExport> {
+/// its one endpoint here, and its token counts ride log events), and read
+/// its token counts through `harnesses`. `None` when it carries none —
+/// most Codex log events don't.
+pub fn decode_token_export(body: &[u8], harnesses: &HarnessRegistry) -> Option<TokenExport> {
+    let read = |records: Vec<Owned>| -> Vec<TokenReading> {
+        let harnesses = harnesses.all();
+        records
+            .iter()
+            .flat_map(|r| {
+                let record = r.record();
+                harnesses
+                    .iter()
+                    .flat_map(|h| h.token_readings(&record))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
     let mut counts = decode_metrics_request(body)
-        .map(|req| otlp_metrics_to_token_facts(&req))
+        .map(|req| read(metric_records(&req)))
         .unwrap_or_default();
     if counts.is_empty() {
         counts = decode_logs_request(body)
-            .map(|req| otlp_logs_to_token_facts(&req))
+            .map(|req| read(log_records(&req)))
             .unwrap_or_default();
     }
     if counts.is_empty() {
@@ -126,210 +97,148 @@ pub fn decode_logs_request(body: &[u8]) -> Result<ExportLogsServiceRequest, pros
     ExportLogsServiceRequest::decode(body)
 }
 
-/// Project the token data points from a decoded OTLP metrics export into
-/// [`TokenFact`]s. Recognizes Claude Code's `claude_code.token.usage` counter
-/// and Codex's `codex.turn.token_usage` histogram; other metrics and non-input/
-/// output token kinds are ignored, zero-valued points skipped. `model` is read
-/// from the data point, falling back to the resource attributes.
-pub fn otlp_metrics_to_token_facts(req: &ExportMetricsServiceRequest) -> Vec<TokenFact> {
+/// A decoded record, owning what an [`OtlpRecord`] borrows.
+enum Owned {
+    Point {
+        metric: String,
+        value: i64,
+        attributes: Attrs,
+        resource: Attrs,
+        time_unix_nano: u64,
+        start_time_unix_nano: u64,
+    },
+    Log {
+        attributes: Attrs,
+        resource: Attrs,
+        time_unix_nano: u64,
+    },
+}
+
+impl Owned {
+    fn record(&self) -> OtlpRecord<'_> {
+        match self {
+            Owned::Point {
+                metric,
+                value,
+                attributes,
+                resource,
+                time_unix_nano,
+                start_time_unix_nano,
+            } => OtlpRecord::Point {
+                metric,
+                value: *value,
+                attributes,
+                resource,
+                time_unix_nano: *time_unix_nano,
+                start_time_unix_nano: *start_time_unix_nano,
+            },
+            Owned::Log {
+                attributes,
+                resource,
+                time_unix_nano,
+            } => OtlpRecord::Log {
+                attributes,
+                resource,
+                time_unix_nano: *time_unix_nano,
+            },
+        }
+    }
+}
+
+/// Every data point of a metrics export: a counter's or gauge's value, a
+/// histogram's sum.
+fn metric_records(req: &ExportMetricsServiceRequest) -> Vec<Owned> {
     let mut out = Vec::new();
     for rm in &req.resource_metrics {
-        let resource_attrs = rm
-            .resource
-            .as_ref()
-            .map(|r| r.attributes.as_slice())
-            .unwrap_or(&[]);
-        for sm in &rm.scope_metrics {
-            for m in &sm.metrics {
-                match m.name.as_str() {
-                    CLAUDE_TOKEN_METRIC => collect_claude(m, resource_attrs, &mut out),
-                    CODEX_TOKEN_METRIC => collect_codex(m, resource_attrs, &mut out),
-                    _ => {}
+        let resource = attrs(
+            rm.resource
+                .as_ref()
+                .map(|r| r.attributes.as_slice())
+                .unwrap_or(&[]),
+        );
+        for m in rm.scope_metrics.iter().flat_map(|sm| &sm.metrics) {
+            let mut point = |value: i64, a: &[KeyValue], time: u64, start: u64| {
+                out.push(Owned::Point {
+                    metric: m.name.clone(),
+                    value,
+                    attributes: attrs(a),
+                    resource: resource.clone(),
+                    time_unix_nano: time,
+                    start_time_unix_nano: start,
+                })
+            };
+            match &m.data {
+                Some(metric::Data::Sum(Sum { data_points, .. }))
+                | Some(metric::Data::Gauge(Gauge { data_points, .. })) => {
+                    for dp in data_points {
+                        point(
+                            number_value(&dp.value),
+                            &dp.attributes,
+                            dp.time_unix_nano,
+                            dp.start_time_unix_nano,
+                        );
+                    }
                 }
+                Some(metric::Data::Histogram(hist)) => {
+                    for dp in &hist.data_points {
+                        point(
+                            dp.sum.unwrap_or(0.0) as i64,
+                            &dp.attributes,
+                            dp.time_unix_nano,
+                            dp.start_time_unix_nano,
+                        );
+                    }
+                }
+                _ => {}
             }
         }
     }
     out
 }
 
-/// Claude: a counter (OTLP Sum; Gauge tolerated) with a `type` attribute per
-/// number data point.
-fn collect_claude(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFact>) {
-    let points = match &m.data {
-        Some(metric::Data::Sum(sum)) => &sum.data_points,
-        Some(metric::Data::Gauge(gauge)) => &gauge.data_points,
-        _ => return,
-    };
-    for dp in points {
-        let Some(kind) = claude_token_kind(&dp.attributes) else {
-            continue;
-        };
-        let value = number_value(&dp.value);
-        // An untrusted body: a negative count is no count (tsk925).
-        if value <= 0 {
-            continue;
-        }
-        out.push(TokenFact {
-            model: model_attr(&dp.attributes, resource_attrs),
-            kind,
-            value,
-            at_unix_nano: dp.time_unix_nano,
-            from_unix_nano: dp.start_time_unix_nano,
-        });
-    }
-}
-
-/// Codex: a per-turn histogram with a `token_type` attribute; the token count
-/// is the data point's `sum`.
-fn collect_codex(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFact>) {
-    let Some(metric::Data::Histogram(hist)) = &m.data else {
-        return;
-    };
-    for dp in &hist.data_points {
-        let Some(kind) = codex_token_kind(&dp.attributes) else {
-            continue;
-        };
-        let value = dp.sum.unwrap_or(0.0) as i64;
-        if value <= 0 {
-            continue;
-        }
-        out.push(TokenFact {
-            model: model_attr(&dp.attributes, resource_attrs),
-            kind,
-            value,
-            at_unix_nano: dp.time_unix_nano,
-            from_unix_nano: dp.start_time_unix_nano,
-        });
-    }
-}
-
-/// Project token facts from a decoded OTLP **logs** export (tsk27) — Codex's
-/// real token source. Each `response.completed` log record carries per-request
-/// counts (`input_token_count` is the FULL context, so new input =
-/// `input_token_count − cached_token_count`; reasoning folds into output to
-/// match Claude). `model` reads the record, falling back to resource attributes.
-pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact> {
+/// Every log record of a logs export, timed when it happened, else when it
+/// was observed.
+fn log_records(req: &ExportLogsServiceRequest) -> Vec<Owned> {
     let mut out = Vec::new();
     for rl in &req.resource_logs {
-        let resource_attrs = rl
-            .resource
-            .as_ref()
-            .map(|r| r.attributes.as_slice())
-            .unwrap_or(&[]);
-        for sl in &rl.scope_logs {
-            for lr in &sl.log_records {
-                if string_attr(&lr.attributes, "event.kind").as_deref()
-                    != Some(CODEX_TOKEN_EVENT_KIND)
-                {
-                    continue;
-                }
-                let a = &lr.attributes;
-                // An untrusted body (tsk925): a negative count is none, and
-                // the arithmetic below saturates rather than overflows.
-                let count = |key| int_attr(a, key).unwrap_or(0).max(0);
-                let input = count("input_token_count");
-                let cached = count("cached_token_count");
-                let output = count("output_token_count");
-                let reasoning = count("reasoning_token_count");
-                let model = model_attr(a, resource_attrs);
-                let at_unix_nano = if lr.time_unix_nano > 0 {
+        let resource = attrs(
+            rl.resource
+                .as_ref()
+                .map(|r| r.attributes.as_slice())
+                .unwrap_or(&[]),
+        );
+        for lr in rl.scope_logs.iter().flat_map(|sl| &sl.log_records) {
+            out.push(Owned::Log {
+                attributes: attrs(&lr.attributes),
+                resource: resource.clone(),
+                time_unix_nano: if lr.time_unix_nano > 0 {
                     lr.time_unix_nano
                 } else {
                     lr.observed_time_unix_nano
-                };
-                // new (uncached) input this request; reasoning folded into
-                // output; the cached prefix is its own CacheRead fact (tsk73).
-                let new_input = input.saturating_sub(cached).max(0);
-                let out_total = output.saturating_add(reasoning);
-                if new_input > 0 {
-                    out.push(TokenFact {
-                        model: model.clone(),
-                        kind: TokenKind::Input,
-                        value: new_input,
-                        at_unix_nano,
-                        from_unix_nano: at_unix_nano,
-                    });
-                }
-                if cached > 0 {
-                    out.push(TokenFact {
-                        model: model.clone(),
-                        kind: TokenKind::CacheRead,
-                        value: cached,
-                        at_unix_nano,
-                        from_unix_nano: at_unix_nano,
-                    });
-                }
-                if out_total > 0 {
-                    out.push(TokenFact {
-                        model,
-                        kind: TokenKind::Output,
-                        value: out_total,
-                        at_unix_nano,
-                        from_unix_nano: at_unix_nano,
-                    });
-                }
-            }
+                },
+            });
         }
     }
     out
 }
 
-/// Read a string-valued OTLP attribute by key.
-fn string_attr(attrs: &[KeyValue], key: &str) -> Option<String> {
-    attrs.iter().find(|kv| kv.key == key).and_then(|kv| {
-        match kv.value.as_ref()?.value.as_ref()? {
-            any_value::Value::StringValue(s) => Some(s.clone()),
-            _ => None,
-        }
-    })
-}
-
-/// Read an integer-valued OTLP attribute (int, double, or numeric string).
-fn int_attr(attrs: &[KeyValue], key: &str) -> Option<i64> {
-    match attrs
-        .iter()
-        .find(|kv| kv.key == key)?
-        .value
-        .as_ref()?
-        .value
-        .as_ref()?
-    {
-        any_value::Value::IntValue(i) => Some(*i),
-        any_value::Value::DoubleValue(d) => Some(*d as i64),
-        any_value::Value::StringValue(s) => s.parse().ok(),
-        _ => None,
-    }
-}
-
-/// The model id: from the data-point attributes, else the resource attributes,
-/// else `"unknown"`.
-fn model_attr(dp_attrs: &[KeyValue], resource_attrs: &[KeyValue]) -> String {
-    string_attr(dp_attrs, "model")
-        .or_else(|| string_attr(resource_attrs, "model"))
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
-/// Claude's `type` attribute → a tracked kind (cache kinds tracked, tsk73).
-fn claude_token_kind(attrs: &[KeyValue]) -> Option<TokenKind> {
-    match string_attr(attrs, "type")?.as_str() {
-        "input" => Some(TokenKind::Input),
-        "output" => Some(TokenKind::Output),
-        "cacheRead" => Some(TokenKind::CacheRead),
-        "cacheCreation" => Some(TokenKind::CacheCreation),
-        _ => None,
-    }
-}
-
-/// Codex's `token_type` attribute → a tracked kind. `reasoning_output` folds
-/// into `output`; `cached_input` → CacheRead; only the `total` rollup is
-/// dropped (dropping `total` is what prevents double-counting).
-fn codex_token_kind(attrs: &[KeyValue]) -> Option<TokenKind> {
-    match string_attr(attrs, "token_type")?.as_str() {
-        "input" => Some(TokenKind::Input),
-        "output" | "reasoning_output" => Some(TokenKind::Output),
-        "cached_input" => Some(TokenKind::CacheRead),
-        _ => None,
-    }
+/// OTLP attributes with a scalar value; arrays, maps and bytes are left
+/// out.
+fn attrs(kvs: &[KeyValue]) -> Attrs {
+    Attrs(
+        kvs.iter()
+            .filter_map(|kv| {
+                let value = match kv.value.as_ref()?.value.as_ref()? {
+                    any_value::Value::StringValue(s) => AttrValue::Str(s.clone()),
+                    any_value::Value::IntValue(i) => AttrValue::Int(*i),
+                    any_value::Value::DoubleValue(d) => AttrValue::Double(*d),
+                    any_value::Value::BoolValue(b) => AttrValue::Bool(*b),
+                    _ => return None,
+                };
+                Some((kv.key.clone(), value))
+            })
+            .collect(),
+    )
 }
 
 /// The scalar value of a number data point (counter/gauge), truncated to i64.
@@ -553,7 +462,7 @@ pub(crate) fn encoded_claude_export_at(
         resource_metrics: vec![ResourceMetrics {
             scope_metrics: vec![ScopeMetrics {
                 metrics: vec![Metric {
-                    name: CLAUDE_TOKEN_METRIC.into(),
+                    name: "claude_code.token.usage".into(),
                     data: Some(metric::Data::Sum(Sum {
                         data_points: vec![point("input", input), point("output", output)],
                         ..Default::default()
@@ -597,7 +506,7 @@ pub(crate) fn encoded_claude_export_with_cache(
         resource_metrics: vec![ResourceMetrics {
             scope_metrics: vec![ScopeMetrics {
                 metrics: vec![Metric {
-                    name: CLAUDE_TOKEN_METRIC.into(),
+                    name: "claude_code.token.usage".into(),
                     data: Some(metric::Data::Sum(Sum {
                         data_points: vec![
                             point("input", input),
@@ -621,9 +530,37 @@ pub(crate) fn encoded_claude_export_with_cache(
 mod tests {
     use super::*;
     use opentelemetry_proto::tonic::common::v1::AnyValue;
+    use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
     use opentelemetry_proto::tonic::metrics::v1::{
-        Histogram, HistogramDataPoint, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
+        Histogram, HistogramDataPoint, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics,
     };
+    use oxplow_domain::events::schema::TokenKind;
+
+    /// Claude and Codex registered, as foundation declares them.
+    fn harnesses() -> HarnessRegistry {
+        let r = HarnessRegistry::new(std::sync::Arc::new(|| "claude".into()));
+        for (entry, id) in [
+            ("oxplow:claude-code", "claude"),
+            ("oxplow:codex-cli", "codex"),
+        ] {
+            r.register(oxplow_harnesses::built_in(entry, id, id).unwrap());
+        }
+        r
+    }
+
+    fn readings(body: &[u8]) -> Vec<TokenReading> {
+        decode_token_export(body, &harnesses())
+            .map(|e| e.counts)
+            .unwrap_or_default()
+    }
+
+    fn sum_of(readings: &[TokenReading], kind: TokenKind) -> i64 {
+        readings
+            .iter()
+            .filter(|r| r.kind == kind)
+            .map(|r| r.value)
+            .sum()
+    }
 
     fn kv(k: &str, v: &str) -> KeyValue {
         KeyValue {
@@ -633,152 +570,6 @@ mod tests {
             }),
             ..Default::default()
         }
-    }
-
-    fn point(token_type: &str, model: &str, value: i64) -> NumberDataPoint {
-        NumberDataPoint {
-            attributes: vec![kv("type", token_type), kv("model", model)],
-            value: Some(number_data_point::Value::AsInt(value)),
-            ..Default::default()
-        }
-    }
-
-    /// A Claude-shaped export: one `claude_code.token.usage` Sum with input,
-    /// output, cacheRead, and cacheCreation points (all four kinds tracked
-    /// since tsk73).
-    fn claude_request() -> ExportMetricsServiceRequest {
-        ExportMetricsServiceRequest {
-            resource_metrics: vec![ResourceMetrics {
-                scope_metrics: vec![ScopeMetrics {
-                    metrics: vec![Metric {
-                        name: CLAUDE_TOKEN_METRIC.into(),
-                        data: Some(metric::Data::Sum(Sum {
-                            data_points: vec![
-                                point("input", "claude-opus-4-8", 100),
-                                point("output", "claude-opus-4-8", 20),
-                                point("cacheRead", "claude-opus-4-8", 5000),
-                                point("cacheCreation", "claude-opus-4-8", 700),
-                            ],
-                            ..Default::default()
-                        })),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        }
-    }
-
-    /// tsk860: an export says when it was measured — the latest of its
-    /// points' times — which is what places it in a turn; one that doesn't
-    /// say has no window end, and a body with no token counts is none. It
-    /// keeps the export's precision: a turn stored to the microsecond that
-    /// began earlier in the same millisecond is still before it.
-    #[test]
-    fn an_export_reports_its_window_end() {
-        let at = oxplow_domain::Timestamp::from_unix_nanos(1_790_000_000_123_456_000).unwrap();
-        let export = decode_token_export(&encoded_claude_export_at("m", 100, 20, Some(at)))
-            .expect("token counts");
-        assert_eq!(export.window_end, Some(at));
-        assert_eq!(export.counts.len(), 2);
-        let undated = decode_token_export(&encoded_claude_export("m", 100, 20)).unwrap();
-        assert_eq!(undated.window_end, None);
-        assert_eq!(decode_token_export(b"not otlp"), None);
-    }
-
-    #[test]
-    fn claude_counter_maps_all_four_token_kinds() {
-        let facts = otlp_metrics_to_token_facts(&claude_request());
-        assert_eq!(facts.len(), 4, "input+output+cacheRead+cacheCreation");
-        assert!(facts.contains(&TokenFact {
-            model: "claude-opus-4-8".into(),
-            kind: TokenKind::Input,
-            value: 100,
-            at_unix_nano: 0,
-            from_unix_nano: 0,
-        }));
-        assert!(facts.contains(&TokenFact {
-            model: "claude-opus-4-8".into(),
-            kind: TokenKind::Output,
-            value: 20,
-            at_unix_nano: 0,
-            from_unix_nano: 0,
-        }));
-        assert!(facts.contains(&TokenFact {
-            model: "claude-opus-4-8".into(),
-            kind: TokenKind::CacheRead,
-            value: 5000,
-            at_unix_nano: 0,
-            from_unix_nano: 0,
-        }));
-        assert!(facts.contains(&TokenFact {
-            model: "claude-opus-4-8".into(),
-            kind: TokenKind::CacheCreation,
-            value: 700,
-            at_unix_nano: 0,
-            from_unix_nano: 0,
-        }));
-    }
-
-    #[test]
-    fn codex_histogram_maps_token_types_folding_reasoning_into_output() {
-        // tsk24: Codex emits a per-turn histogram with a `token_type` attribute;
-        // the count is the data point's `sum`. reasoning_output folds into
-        // output; cached_input → CacheRead (tsk73); only the `total` rollup is
-        // dropped (it would double-count).
-        let hp = |token_type: &str, sum: f64| HistogramDataPoint {
-            attributes: vec![kv("token_type", token_type), kv("model", "gpt-5-codex")],
-            sum: Some(sum),
-            ..Default::default()
-        };
-        let req = ExportMetricsServiceRequest {
-            resource_metrics: vec![ResourceMetrics {
-                scope_metrics: vec![ScopeMetrics {
-                    metrics: vec![Metric {
-                        name: CODEX_TOKEN_METRIC.into(),
-                        data: Some(metric::Data::Histogram(Histogram {
-                            data_points: vec![
-                                hp("input", 100.0),
-                                hp("output", 20.0),
-                                hp("reasoning_output", 30.0),
-                                hp("cached_input", 5000.0),
-                                hp("total", 5150.0),
-                            ],
-                            ..Default::default()
-                        })),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        };
-        let facts = otlp_metrics_to_token_facts(&req);
-        let input: i64 = facts
-            .iter()
-            .filter(|f| f.kind == TokenKind::Input)
-            .map(|f| f.value)
-            .sum();
-        let output: i64 = facts
-            .iter()
-            .filter(|f| f.kind == TokenKind::Output)
-            .map(|f| f.value)
-            .sum();
-        assert_eq!(input, 100, "input kept");
-        assert_eq!(output, 50, "output(20) + reasoning_output(30) folded");
-        let cache_read: i64 = facts
-            .iter()
-            .filter(|f| f.kind == TokenKind::CacheRead)
-            .map(|f| f.value)
-            .sum();
-        assert_eq!(cache_read, 5000, "cached_input kept as CacheRead (tsk73)");
-        assert!(
-            facts.iter().all(|f| f.model == "gpt-5-codex"),
-            "model read from the data point"
-        );
-        // Only the `total` rollup contributed nothing.
-        assert_eq!(facts.iter().map(|f| f.value).sum::<i64>(), 5150);
     }
 
     fn kv_int(k: &str, v: i64) -> KeyValue {
@@ -791,195 +582,180 @@ mod tests {
         }
     }
 
+    fn metrics(resource: Vec<KeyValue>, metrics: Vec<Metric>) -> Vec<u8> {
+        use opentelemetry_proto::tonic::resource::v1::Resource;
+        ExportMetricsServiceRequest {
+            resource_metrics: vec![ResourceMetrics {
+                resource: Some(Resource {
+                    attributes: resource,
+                    ..Default::default()
+                }),
+                scope_metrics: vec![ScopeMetrics {
+                    metrics,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec()
+    }
+
+    fn sum_metric(name: &str, points: Vec<NumberDataPoint>) -> Metric {
+        Metric {
+            name: name.into(),
+            data: Some(metric::Data::Sum(Sum {
+                data_points: points,
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+    }
+
+    fn point(attributes: Vec<KeyValue>, value: i64) -> NumberDataPoint {
+        NumberDataPoint {
+            attributes,
+            value: Some(number_data_point::Value::AsInt(value)),
+            ..Default::default()
+        }
+    }
+
+    fn logs(records: Vec<LogRecord>) -> Vec<u8> {
+        ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: records,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec()
+    }
+
+    /// tsk860: an export says when it was measured — the latest of its
+    /// points' times — which is what places it in a turn; one that doesn't
+    /// say has no window end, and a body with no token counts is none. It
+    /// keeps the export's precision: a turn stored to the microsecond that
+    /// began earlier in the same millisecond is still before it.
     #[test]
-    fn codex_response_completed_log_maps_new_input_and_folded_output() {
-        // tsk27: real Codex token source. input=full context, so new input =
-        // input − cached; reasoning folds into output. Mix int + string attrs
-        // to exercise int_attr's coercion.
-        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+    fn an_export_reports_its_window_end() {
+        let at = oxplow_domain::Timestamp::from_unix_nanos(1_790_000_000_123_456_000).unwrap();
+        let export = decode_token_export(
+            &encoded_claude_export_at("m", 100, 20, Some(at)),
+            &harnesses(),
+        )
+        .expect("token counts");
+        assert_eq!(export.window_end, Some(at));
+        assert_eq!(export.counts.len(), 2);
+        let undated = decode_token_export(&encoded_claude_export("m", 100, 20), &harnesses());
+        assert_eq!(undated.unwrap().window_end, None);
+        assert_eq!(decode_token_export(b"not otlp", &harnesses()), None);
+    }
+
+    /// A counter's points reach the harness with their attributes and the
+    /// resource's: all four of Claude's kinds come back, the model read
+    /// from the resource when a point doesn't name one; another metric and
+    /// a zero point read as nothing.
+    #[test]
+    fn a_counter_export_reads_through_the_harnesses() {
+        let body = metrics(
+            vec![kv("model", "claude-sonnet-5")],
+            vec![
+                sum_metric(
+                    "claude_code.token.usage",
+                    vec![
+                        point(vec![kv("type", "input")], 100),
+                        point(
+                            vec![kv("type", "output"), kv("model", "claude-opus-4-8")],
+                            20,
+                        ),
+                        point(vec![kv("type", "cacheRead")], 5000),
+                        point(vec![kv("type", "cacheCreation")], 700),
+                        point(vec![kv("type", "output")], 0),
+                    ],
+                ),
+                sum_metric(
+                    "claude_code.cost.usage",
+                    vec![point(vec![kv("type", "input")], 9)],
+                ),
+            ],
+        );
+        let r = readings(&body);
+        assert_eq!(r.len(), 4);
+        assert_eq!(sum_of(&r, TokenKind::Input), 100);
+        assert_eq!(sum_of(&r, TokenKind::CacheRead), 5000);
+        assert_eq!(sum_of(&r, TokenKind::CacheCreation), 700);
+        let models: Vec<&str> = r.iter().map(|r| r.model.as_str()).collect();
+        assert_eq!(
+            models,
+            [
+                "claude-sonnet-5",
+                "claude-opus-4-8",
+                "claude-sonnet-5",
+                "claude-sonnet-5"
+            ]
+        );
+    }
+
+    /// A histogram's sum is its value.
+    #[test]
+    fn a_histogram_export_reads_its_sums() {
+        let hp = |token_type: &str, sum: f64| HistogramDataPoint {
+            attributes: vec![kv("token_type", token_type)],
+            sum: Some(sum),
+            ..Default::default()
+        };
+        let body = metrics(
+            vec![],
+            vec![Metric {
+                name: "codex.turn.token_usage".into(),
+                data: Some(metric::Data::Histogram(Histogram {
+                    data_points: vec![hp("input", 100.0), hp("reasoning_output", 30.0)],
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }],
+        );
+        let r = readings(&body);
+        assert_eq!(sum_of(&r, TokenKind::Input), 100);
+        assert_eq!(sum_of(&r, TokenKind::Output), 30);
+    }
+
+    /// A body that isn't metrics is read as logs, ints and numeric strings
+    /// alike, timed by the record; a log event with no counts is none.
+    #[test]
+    fn a_logs_export_reads_through_the_harnesses() {
         let rec = LogRecord {
+            time_unix_nano: 5,
             attributes: vec![
-                kv("event.name", "codex.sse_event"),
                 kv("event.kind", "response.completed"),
                 kv_int("input_token_count", 113690),
                 kv_int("cached_token_count", 2432),
                 kv("output_token_count", "254"),
-                kv("reasoning_token_count", "42"),
                 kv("model", "gpt-5.5"),
             ],
             ..Default::default()
         };
-        let req = ExportLogsServiceRequest {
-            resource_logs: vec![ResourceLogs {
-                scope_logs: vec![ScopeLogs {
-                    log_records: vec![rec],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        };
-        let facts = otlp_logs_to_token_facts(&req);
-        let input: i64 = facts
+        let r = readings(&logs(vec![rec]));
+        assert_eq!(sum_of(&r, TokenKind::Input), 111258);
+        assert_eq!(sum_of(&r, TokenKind::Output), 254);
+        assert!(r
             .iter()
-            .filter(|f| f.kind == TokenKind::Input)
-            .map(|f| f.value)
-            .sum();
-        let output: i64 = facts
-            .iter()
-            .filter(|f| f.kind == TokenKind::Output)
-            .map(|f| f.value)
-            .sum();
-        assert_eq!(input, 111258, "113690 input − 2432 cached");
-        assert_eq!(output, 296, "254 output + 42 reasoning");
-        let cache_read: i64 = facts
-            .iter()
-            .filter(|f| f.kind == TokenKind::CacheRead)
-            .map(|f| f.value)
-            .sum();
-        assert_eq!(cache_read, 2432, "the cached prefix is a CacheRead fact");
-        assert!(facts.iter().all(|f| f.model == "gpt-5.5"));
-    }
-
-    /// tsk925: the body is untrusted. Counts at the ends of i64 never
-    /// overflow (they saturate), and a negative count is no count.
-    #[test]
-    fn hostile_counts_saturate_and_negative_ones_are_dropped() {
-        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
-        let record = |input: i64, cached: i64, output: i64, reasoning: i64| LogRecord {
-            attributes: vec![
-                kv("event.kind", "response.completed"),
-                kv_int("input_token_count", input),
-                kv_int("cached_token_count", cached),
-                kv_int("output_token_count", output),
-                kv_int("reasoning_token_count", reasoning),
-                kv("model", "m"),
-            ],
+            .all(|r| r.at_unix_nano == 5 && r.model == "gpt-5.5"));
+        let other = LogRecord {
+            attributes: vec![kv("event.name", "codex.api_request")],
             ..Default::default()
         };
-        let req = ExportLogsServiceRequest {
-            resource_logs: vec![ResourceLogs {
-                scope_logs: vec![ScopeLogs {
-                    log_records: vec![
-                        record(i64::MIN, i64::MAX, i64::MAX, i64::MAX),
-                        record(-5, -5, -5, -5),
-                    ],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        };
-        let facts: Vec<(TokenKind, i64)> = otlp_logs_to_token_facts(&req)
-            .into_iter()
-            .map(|f| (f.kind, f.value))
-            .collect();
+        assert_eq!(decode_token_export(&logs(vec![other]), &harnesses()), None);
+    }
+
+    /// No harness registered reads no counts.
+    #[test]
+    fn with_no_harness_an_export_reads_as_none() {
+        let none = HarnessRegistry::new(std::sync::Arc::new(String::new));
         assert_eq!(
-            facts,
-            vec![
-                (TokenKind::CacheRead, i64::MAX),
-                (TokenKind::Output, i64::MAX)
-            ]
-        );
-        // A negative counter point is no count either.
-        let mut negative = claude_request();
-        if let Some(metric::Data::Sum(sum)) =
-            &mut negative.resource_metrics[0].scope_metrics[0].metrics[0].data
-        {
-            sum.data_points = vec![point("input", "m", -5)];
-        }
-        assert!(otlp_metrics_to_token_facts(&negative).is_empty());
-    }
-
-    #[test]
-    fn non_response_completed_logs_produce_no_token_facts() {
-        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
-        // A codex.api_request event (no response.completed kind) → nothing.
-        let rec = LogRecord {
-            attributes: vec![
-                kv("event.name", "codex.api_request"),
-                kv("duration_ms", "427"),
-            ],
-            ..Default::default()
-        };
-        let req = ExportLogsServiceRequest {
-            resource_logs: vec![ResourceLogs {
-                scope_logs: vec![ScopeLogs {
-                    log_records: vec![rec],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        };
-        assert!(otlp_logs_to_token_facts(&req).is_empty());
-    }
-
-    #[test]
-    fn model_falls_back_to_resource_attribute() {
-        use opentelemetry_proto::tonic::resource::v1::Resource;
-        // A data point with no `model` attribute; the model rides the resource.
-        let dp = NumberDataPoint {
-            attributes: vec![kv("type", "input")],
-            value: Some(number_data_point::Value::AsInt(42)),
-            ..Default::default()
-        };
-        let req = ExportMetricsServiceRequest {
-            resource_metrics: vec![ResourceMetrics {
-                resource: Some(Resource {
-                    attributes: vec![kv("model", "claude-sonnet-5")],
-                    ..Default::default()
-                }),
-                scope_metrics: vec![ScopeMetrics {
-                    metrics: vec![Metric {
-                        name: CLAUDE_TOKEN_METRIC.into(),
-                        data: Some(metric::Data::Sum(Sum {
-                            data_points: vec![dp],
-                            ..Default::default()
-                        })),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        };
-        let facts = otlp_metrics_to_token_facts(&req);
-        assert_eq!(facts.len(), 1);
-        assert_eq!(facts[0].model, "claude-sonnet-5");
-    }
-
-    #[test]
-    fn ignores_unrelated_metrics_and_zero_points() {
-        let req = ExportMetricsServiceRequest {
-            resource_metrics: vec![ResourceMetrics {
-                scope_metrics: vec![ScopeMetrics {
-                    metrics: vec![
-                        Metric {
-                            name: "claude_code.cost.usage".into(),
-                            data: Some(metric::Data::Sum(Sum {
-                                data_points: vec![point("input", "m", 999)],
-                                ..Default::default()
-                            })),
-                            ..Default::default()
-                        },
-                        Metric {
-                            name: CLAUDE_TOKEN_METRIC.into(),
-                            data: Some(metric::Data::Sum(Sum {
-                                data_points: vec![point("output", "m", 0)],
-                                ..Default::default()
-                            })),
-                            ..Default::default()
-                        },
-                    ],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        };
-        assert!(
-            otlp_metrics_to_token_facts(&req).is_empty(),
-            "wrong metric name + zero-valued point both ignored"
+            decode_token_export(&encoded_claude_export("m", 100, 20), &none),
+            None
         );
     }
 
@@ -1002,33 +778,14 @@ mod tests {
     fn logs_payload_falls_back_to_a_logs_dump() {
         // tsk26: a body that isn't MetricsData is retried as LogsData so the
         // dump reveals Codex's log events (where its token counts may live).
-        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
-        let body = ExportLogsServiceRequest {
-            resource_logs: vec![ResourceLogs {
-                scope_logs: vec![ScopeLogs {
-                    log_records: vec![LogRecord {
-                        event_name: "codex.response.completed".into(),
-                        attributes: vec![kv("input_tokens", "100"), kv("output_tokens", "20")],
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        }
-        .encode_to_vec();
+        let body = logs(vec![LogRecord {
+            event_name: "codex.response.completed".into(),
+            attributes: vec![kv("input_tokens", "100"), kv("output_tokens", "20")],
+            ..Default::default()
+        }]);
         let s = summarize_metrics_request(&body);
         assert!(s.contains("[OTLP LOGS payload"), "{s}");
         assert!(s.contains("codex.response.completed"));
         assert!(s.contains("input_tokens=100"));
-    }
-
-    #[test]
-    fn decode_round_trips_a_protobuf_body() {
-        let bytes = claude_request().encode_to_vec();
-        let decoded = decode_metrics_request(&bytes).expect("decode");
-        let facts = otlp_metrics_to_token_facts(&decoded);
-        assert_eq!(facts.len(), 4, "all four token kinds round-trip (tsk73)");
     }
 }

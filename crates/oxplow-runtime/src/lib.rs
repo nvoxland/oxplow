@@ -14,6 +14,4 @@ pub use policy::{
     decide_tool, path_outside_worktree, DenyLayer, IntentKind, PolicyDecision, PolicyFacts,
     ToolIntent,
 };
-pub use write_guard::{
-    build_write_guard_response, WriteGuardContext, WriteGuardDeny, WORKTREE_MUTATING_TOOLS,
-};
+pub use write_guard::{write_guard_reason, WriteGuardContext, WORKTREE_MUTATING_TOOLS};
