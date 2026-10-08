@@ -2216,6 +2216,14 @@ commands:
       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, answers: { sql.read: [[]] }, refuses: no such }
 ```
 
+A command may instead be **backed by an operation of a host capability**
+([commands.md](./commands.md) "Host capabilities" → "Operations"):
+`capability: bookmarks.write` + `op: set` in place of `entry:` — no
+`input_schema`, `effect` or `examples` (the operation's and its
+capability's class), the capability implied in `needs`; the bus refuses
+to register one naming an operation that isn't there. oxplow's own
+commands are declared this way in the required `oxplow-foundation`.
+
 A shared extension's commands are `Stable`, a private one's
 `Experimental`. `transform` returns `{ commands: [{ name, input }], result?, events? }`, or
 `{ refuse: "<why>" }` to decline — the run is `Invalid` with that reason

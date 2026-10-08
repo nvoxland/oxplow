@@ -59,13 +59,12 @@ pub struct ExtensionCommand {
     /// Its name on the bus: `<namespace>.<name>`.
     pub name: String,
     pub summary: String,
-    #[specta(type = oxplow_domain::Json)]
-    pub input_schema: Value,
-    /// The script, relative to the extension folder.
-    pub entry: String,
-    /// The script's text, read at load.
-    #[serde(skip)]
-    pub script: String,
+    /// Its input's schema; `None` for one backed by a capability's
+    /// operation (the operation's).
+    #[specta(type = Option<oxplow_domain::Json>)]
+    pub input_schema: Option<Value>,
+    /// What runs it.
+    pub handler: CommandHandler,
     pub confirm: Confirm,
     pub effect: CommandEffect,
     pub invokers: Invokers,
@@ -81,14 +80,37 @@ pub struct ExtensionCommand {
     pub examples: Vec<CommandExample>,
 }
 
+/// What runs an extension's command.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum CommandHandler {
+    /// A Starlark script composing commands (`entry:`).
+    Script {
+        /// The script, relative to the extension folder.
+        entry: String,
+        /// The script's text, read at load.
+        #[serde(skip)]
+        script: String,
+    },
+    /// One operation of a host capability (`capability:` + `op:`,
+    /// `commands::ops`).
+    Capability { capability: String, op: String },
+}
+
 /// A `commands:` entry as the manifest holds it.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CommandFile {
     name: String,
     summary: String,
-    input_schema: Value,
-    entry: String,
+    #[serde(default)]
+    input_schema: Option<Value>,
+    #[serde(default)]
+    entry: Option<String>,
+    #[serde(default)]
+    capability: Option<String>,
+    #[serde(default)]
+    op: Option<String>,
     #[serde(default)]
     confirm: Option<String>,
     #[serde(default)]
@@ -221,16 +243,6 @@ fn command_of(
     let name = format!("{namespace}.{}", f.name);
     CommandSpec::validate_id(&name).map_err(|e| e.to_string())?;
     let at_name = |m: String| format!("command `{}`: {m}", f.name);
-    let effect = match f.effect.as_deref() {
-        None | Some("write") => CommandEffect::Write,
-        Some("record") => CommandEffect::Record,
-        Some("read") => CommandEffect::Read,
-        Some(other) => {
-            return Err(at_name(format!(
-                "`effect` must be `write`, `record` or `read`, not `{other}`"
-            )))
-        }
-    };
     let confirm = match f.confirm.as_deref() {
         None | Some("never") => Confirm::Never,
         Some("always") => Confirm::Always,
@@ -241,41 +253,79 @@ fn command_of(
             )))
         }
     };
-    InputValidator::compile(&f.input_schema)
-        .map_err(|e| at_name(format!("`input_schema` doesn't compile: {e}")))?;
     for need in &f.needs {
         oxplow_domain::capability::check_need(need).map_err(at_name)?;
-    }
-    if effect == CommandEffect::Read {
-        use oxplow_domain::host_capability::{host_capability, EffectClass};
-        if let Some(writes) = f
-            .needs
-            .iter()
-            .find(|n| host_capability(n).is_some_and(|c| c.class > EffectClass::Read))
-        {
-            return Err(at_name(format!(
-                "`effect: read` but it needs `{writes}`, which changes things"
-            )));
-        }
-        if f.confirm.as_deref().is_some_and(|c| c != "never") {
-            return Err(at_name(
-                "`effect: read`: a command that only reads is never confirmed".into(),
-            ));
-        }
     }
     if f.ui.as_ref().is_some_and(|ui| ui.label.trim().is_empty()) {
         return Err(at_name("`ui.label` must say what a person reads".into()));
     }
-    if !inside(&f.entry) {
-        return Err(at_name(format!(
-            "entry `{}` must be a path inside the extension folder",
-            f.entry
-        )));
-    }
-    let script = read(&f.entry)
-        .ok_or_else(|| at_name(format!("entry `{}` isn't a file in the extension", f.entry)))?;
-    oxplow_collect_plugin::runtime::check_starlark(&f.entry, &script)
-        .map_err(|e| at_name(format!("entry `{}` {e}", f.entry)))?;
+    let (handler, input_schema, effect) = match (f.capability, f.entry) {
+        (Some(_), Some(_)) => {
+            return Err(at_name(
+                "declares both `capability:` and `entry:` — a command has one handler".into(),
+            ))
+        }
+        (None, None) => {
+            return Err(at_name(
+                "has no handler: give `entry:` (a Starlark script) or `capability:` + `op:` \
+                 (an operation of a host capability)"
+                    .into(),
+            ))
+        }
+        (Some(capability), None) => {
+            let class = oxplow_domain::host_capability::host_capability(&capability)
+                .ok_or_else(|| at_name(format!("`capability`: no host capability `{capability}`")))?
+                .class;
+            let op = f.op.filter(|op| valid_segment(op)).ok_or_else(|| {
+                at_name(format!(
+                    "`capability: {capability}` needs `op:`, the operation it runs"
+                ))
+            })?;
+            for (given, key) in [
+                (f.input_schema.is_some(), "input_schema"),
+                (f.effect.is_some(), "effect"),
+                (!f.examples.is_empty(), "examples"),
+            ] {
+                if given {
+                    return Err(at_name(format!(
+                        "`{key}` comes from the capability's operation — drop it"
+                    )));
+                }
+            }
+            (
+                CommandHandler::Capability { capability, op },
+                None,
+                crate::commands::ops::effect_of(class),
+            )
+        }
+        (None, Some(entry)) => {
+            if f.op.is_some() {
+                return Err(at_name(
+                    "`op:` names an operation of a `capability:`".into(),
+                ));
+            }
+            let input_schema = f
+                .input_schema
+                .ok_or_else(|| at_name("a script's command declares `input_schema`".into()))?;
+            InputValidator::compile(&input_schema)
+                .map_err(|e| at_name(format!("`input_schema` doesn't compile: {e}")))?;
+            let effect = script_effect(&f.effect, &f.confirm, &f.needs).map_err(at_name)?;
+            if !inside(&entry) {
+                return Err(at_name(format!(
+                    "entry `{entry}` must be a path inside the extension folder"
+                )));
+            }
+            let script = read(&entry)
+                .ok_or_else(|| at_name(format!("entry `{entry}` isn't a file in the extension")))?;
+            oxplow_collect_plugin::runtime::check_starlark(&entry, &script)
+                .map_err(|e| at_name(format!("entry `{entry}` {e}")))?;
+            (
+                CommandHandler::Script { entry, script },
+                Some(input_schema),
+                effect,
+            )
+        }
+    };
     if f.examples.len() > MAX_EXAMPLES {
         return Err(at_name(format!(
             "declares {} examples; a command has at most {MAX_EXAMPLES} examples",
@@ -285,9 +335,8 @@ fn command_of(
     Ok(ExtensionCommand {
         name,
         summary: f.summary,
-        input_schema: f.input_schema,
-        entry: f.entry,
-        script,
+        input_schema,
+        handler,
         confirm,
         effect,
         invokers: f.invokers.unwrap_or(Invokers::ALL),
@@ -314,6 +363,40 @@ fn command_of(
             })
             .collect::<Result<_, _>>()?,
     })
+}
+
+/// A script's declared `effect` (default `write`): `read` only when it
+/// needs nothing that changes things, and is never confirmed.
+fn script_effect(
+    effect: &Option<String>,
+    confirm: &Option<String>,
+    needs: &[String],
+) -> Result<CommandEffect, String> {
+    let effect = match effect.as_deref() {
+        None | Some("write") => CommandEffect::Write,
+        Some("record") => CommandEffect::Record,
+        Some("read") => CommandEffect::Read,
+        Some(other) => {
+            return Err(format!(
+                "`effect` must be `write`, `record` or `read`, not `{other}`"
+            ))
+        }
+    };
+    if effect == CommandEffect::Read {
+        use oxplow_domain::host_capability::{host_capability, EffectClass};
+        if let Some(writes) = needs
+            .iter()
+            .find(|n| host_capability(n).is_some_and(|c| c.class > EffectClass::Read))
+        {
+            return Err(format!(
+                "`effect: read` but it needs `{writes}`, which changes things"
+            ));
+        }
+        if confirm.as_deref().is_some_and(|c| c != "never") {
+            return Err("`effect: read`: a command that only reads is never confirmed".into());
+        }
+    }
+    Ok(effect)
 }
 
 /// Two enabled extensions whose commands map to one namespace: both are
@@ -515,10 +598,17 @@ pub fn extension_command(
     use crate::commands::compose::{Compose, Composer, Composition};
     use crate::commands::Command;
     use oxplow_domain::{Atomicity, CommandError, Lifecycle};
+    // oxplow's own say nothing of where they come from; another
+    // extension's summary names it.
+    let summary = if oxplow_domain::namespace_of(&decl.name) == oxplow_domain::OXPLOW_NAMESPACE {
+        decl.summary.clone()
+    } else {
+        format!("{} (extension `{extension}`)", decl.summary)
+    };
     let spec = CommandSpec {
         id: decl.name.clone(),
-        summary: format!("{} (extension `{extension}`)", decl.summary),
-        input_schema: decl.input_schema.clone(),
+        summary,
+        input_schema: decl.input_schema.clone().unwrap_or(Value::Null),
         invokers: decl.invokers,
         confirm: decl.confirm,
         undoable: true,
@@ -532,11 +622,19 @@ pub fn extension_command(
         needs: decl.needs.clone(),
         ui: decl.ui.clone(),
     };
-    let (script, needs, reads) = (
-        decl.script.clone(),
-        decl.needs.clone(),
-        decl.effect == CommandEffect::Read,
-    );
+    let script = match &decl.handler {
+        CommandHandler::Capability { capability, op } => {
+            let backing = bus
+                .op(capability, op)
+                .ok_or_else(|| CommandError::Invalid {
+                    field: None,
+                    message: format!("the host capability `{capability}` has no op `{op}`"),
+                })?;
+            return backing.command(spec);
+        }
+        CommandHandler::Script { script, .. } => script.clone(),
+    };
+    let (needs, reads) = (decl.needs.clone(), decl.effect == CommandEffect::Read);
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
     let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
@@ -575,6 +673,49 @@ pub fn extension_command(
     );
     let handler = Compose::handler(bus, spec.clone(), compose);
     Command::new(spec, handler)
+}
+
+/// Register the commands of oxplow's required extensions
+/// (`oxplow-foundation`: its own commands) on `bus`, whose operations are
+/// already added — when services are built, before anything runs a
+/// command, and once: they're compiled in, so they never change. An error
+/// is a broken build (a declaration naming an op that isn't there).
+pub fn register_required(bus: &std::sync::Arc<crate::commands::CommandBus>) -> Result<(), String> {
+    for b in crate::bundled_extensions::BUNDLED
+        .iter()
+        .filter(|b| b.required)
+    {
+        let file = format!("{}/extension.yaml", b.name);
+        let manifest = b
+            .file("extension.yaml")
+            .ok_or_else(|| format!("{file} is missing"))?;
+        let doc: serde_yaml::Value =
+            serde_yaml::from_str(manifest).map_err(|e| format!("{file}: {e}"))?;
+        let namespace = doc["namespace"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| command_namespace(b.name));
+        let (decls, errors) = parse_commands(
+            &namespace,
+            true,
+            &doc["commands"],
+            &file,
+            manifest,
+            &|path| b.file(path).map(str::to_string),
+        );
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
+        }
+        let built = decls
+            .iter()
+            .map(|decl| {
+                extension_command(bus, b.name, decl).map_err(|e| format!("`{}`: {e}", decl.name))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        bus.register_namespace(&namespace, &format!("extension:{}", b.name), built)
+            .map_err(|e| format!("{file}: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Keeps the bus's extension commands matching the enabled extensions of
@@ -619,7 +760,13 @@ impl ExtensionCommands {
             .catalog
             .get(&self.root)
             .iter()
-            .filter(|e| e.enabled && !e.commands.is_empty())
+            // A required one's are registered with the services
+            // (`register_required`) and never change.
+            .filter(|e| {
+                e.enabled
+                    && !e.commands.is_empty()
+                    && !crate::bundled_extensions::is_required(&e.name)
+            })
             .map(|e| (e.name.clone(), (e.namespace.clone(), e.commands.clone())))
             .collect();
         // Keyed by extension: several of oxplow's share the `oxplow`
@@ -800,7 +947,13 @@ pub async fn dry_run(
     answers: &BTreeMap<String, Vec<Value>>,
     registry: CommandSchemas<'_>,
 ) -> Result<Composed, String> {
-    let (script, input, needs) = (cmd.script.clone(), input.clone(), cmd.needs.clone());
+    let CommandHandler::Script { script, .. } = &cmd.handler else {
+        return Err(format!(
+            "`{}` runs a capability's operation; only a script's command is dry-run",
+            cmd.name
+        ));
+    };
+    let (script, input, needs) = (script.clone(), input.clone(), cmd.needs.clone());
     let (layer, answers) = (layer.clone(), answers.clone());
     let runtime = tokio::runtime::Handle::current();
     let decided = tokio::task::spawn_blocking(move || {
@@ -900,8 +1053,15 @@ mod tests {
             "the namespace is the name, `-` → `_`"
         );
         assert_eq!(c.summary, "Mark the task done.");
-        assert_eq!(c.script, HANDLER);
-        assert_eq!(c.input_schema["required"], serde_json::json!(["ref"]));
+        assert!(
+            matches!(&c.handler, CommandHandler::Script { entry, script } if entry == "handlers/finish_review.star" && script == HANDLER),
+            "{:?}",
+            c.handler
+        );
+        assert_eq!(
+            c.input_schema.as_ref().unwrap()["required"],
+            serde_json::json!(["ref"])
+        );
         assert!(c.needs.is_empty());
         assert_eq!(c.confirm, Confirm::Never);
         assert_eq!(c.effect, CommandEffect::Write);
@@ -988,6 +1148,31 @@ mod tests {
                 entry("a.b", "    input: \"SELECT 1\"\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "unknown field `input`",
+            ),
+            (
+                "  - name: a.b\n    summary: S.\n".into(),
+                vec![],
+                "has no handler",
+            ),
+            (
+                entry("a.b", "    capability: bookmarks.write\n    op: set\n"),
+                vec![("handlers/h.star", HANDLER)],
+                "both `capability:` and `entry:`",
+            ),
+            (
+                "  - name: a.b\n    summary: S.\n    capability: bookmarks.erase\n    op: set\n".into(),
+                vec![],
+                "no host capability `bookmarks.erase`",
+            ),
+            (
+                "  - name: a.b\n    summary: S.\n    capability: bookmarks.write\n".into(),
+                vec![],
+                "needs `op:`",
+            ),
+            (
+                "  - name: a.b\n    summary: S.\n    capability: bookmarks.write\n    op: set\n    input_schema: { type: object }\n".into(),
+                vec![],
+                "`input_schema` comes from the capability's operation",
             ),
             (
                 entry("a.b", "    effect: read\n    confirm: always\n"),
@@ -1456,6 +1641,52 @@ mod tests {
         let t = task(&fx).await;
         assert_eq!(t.status, oxplow_domain::TaskStatus::InProgress);
         assert_eq!(t.title, "t");
+    }
+
+    /// A project extension declares its own command over one of the
+    /// operations oxplow's commands are backed by: nothing about
+    /// oxplow's is special. Its spec is the operation's (schema, undo,
+    /// effect), the capability among its needs; one naming an operation
+    /// that isn't there isn't registered, its problem said.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_extension_declares_a_command_over_an_operation() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let star = |op: &str| {
+            write_ext(
+                fx._dir.path(),
+                "acme",
+                &format!(
+                    "  - name: page.star\n    summary: Star the page for the project.\n    capability: bookmarks.write\n    op: {op}\n    invokers: {{ human: true, agent: false, lens: false }}\n"
+                ),
+                &[],
+            );
+        };
+        star("set");
+        fx.svc.extension_commands.reconcile().await;
+        let spec = fx.svc.commands.spec("acme.page.star").expect("registered");
+        let oxplows = fx.svc.commands.spec("oxplow.bookmark.set").unwrap();
+        assert_eq!(spec.input_schema, oxplows.input_schema);
+        assert_eq!(spec.effect, CommandEffect::Record);
+        assert!(spec.undoable);
+        assert_eq!(spec.needs, vec!["bookmarks.write".to_string()]);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "acme.page.star",
+                json!({ "ref": "page:metrics", "page_kind": "metrics", "scope": "project", "thread": fx.thread.to_string() }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["scope"], json!("project"));
+
+        star("erase");
+        fx.svc.extension_commands.reconcile().await;
+        assert!(fx.svc.commands.spec("acme.page.star").is_none());
+        let problem = fx.svc.extension_commands.problem("acme").unwrap();
+        assert!(problem.contains("has no op `erase`"), "{problem}");
     }
 
     /// A capability the command didn't declare in `needs` is refused: the

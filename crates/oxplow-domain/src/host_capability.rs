@@ -57,13 +57,152 @@ pub struct HostCapability {
     pub summary: &'static str,
 }
 
-/// Every host capability core provides.
-pub const HOST_CAPABILITIES: &[HostCapability] = &[HostCapability {
-    id: "sql.read",
-    class: EffectClass::Read,
-    summary: "Read oxplow's published models (`v_*`) with SQL: one read-only statement a call, \
+/// Every host capability core provides, by id.
+pub const HOST_CAPABILITIES: &[HostCapability] = &[
+    HostCapability {
+        id: "bookmarks.write",
+        class: EffectClass::Record,
+        summary: "Star a page for a person, at a thread, stream or project, or take the star off.",
+    },
+    HostCapability {
+        id: "collectors.sync",
+        class: EffectClass::Write,
+        summary: "Run the project's and extensions' collectors now, syncing what they read.",
+    },
+    HostCapability {
+        id: "config.read",
+        class: EffectClass::Read,
+        summary: "Read the project's configuration (`.oxplow/project.yaml`) and its keys.",
+    },
+    HostCapability {
+        id: "config.write",
+        class: EffectClass::Write,
+        summary: "Change the project's configuration file (`.oxplow/project.yaml`).",
+    },
+    HostCapability {
+        id: "dashboards.write",
+        class: EffectClass::Record,
+        summary: "Create, rename, delete and arrange dashboards and their tiles.",
+    },
+    HostCapability {
+        id: "diagnostics.write",
+        class: EffectClass::Record,
+        summary: "Record an error the window ran into, for the person to see.",
+    },
+    HostCapability {
+        id: "effects.read",
+        class: EffectClass::Read,
+        summary: "Read what an extension's effect would react to.",
+    },
+    HostCapability {
+        id: "effects.run",
+        class: EffectClass::Write,
+        summary: "Run an extension's effect again: retry a reaction, backfill past events.",
+    },
+    HostCapability {
+        id: "efforts.write",
+        class: EffectClass::Record,
+        summary:
+            "Open, update, link and close efforts; record and review their claims and decisions.",
+    },
+    HostCapability {
+        id: "extensions.enable",
+        class: EffectClass::Write,
+        summary: "Turn a disabled plugin contribution back on.",
+    },
+    HostCapability {
+        id: "extensions.install",
+        class: EffectClass::Write,
+        summary: "Install or update an extension in the project's `oxplow/extensions/`.",
+    },
+    HostCapability {
+        id: "files.write",
+        class: EffectClass::Write,
+        summary: "Write files in a worktree (restore one from a snapshot).",
+    },
+    HostCapability {
+        id: "hints.write",
+        class: EffectClass::Record,
+        summary: "Dismiss a hint oxplow showed.",
+    },
+    HostCapability {
+        id: "knowledge.write",
+        class: EffectClass::Record,
+        summary: "Write the project's wiki: pages, notes, comments and links.",
+    },
+    HostCapability {
+        id: "lenses.show",
+        class: EffectClass::Record,
+        summary: "Show a lens beside the conversation.",
+    },
+    HostCapability {
+        id: "lenses.write",
+        class: EffectClass::Write,
+        summary: "Keep or share a lens as a file in the project.",
+    },
+    HostCapability {
+        id: "lsp.install",
+        class: EffectClass::Write,
+        summary: "Install or remove a language server on this machine.",
+    },
+    HostCapability {
+        id: "metrics.read",
+        class: EffectClass::Read,
+        summary: "Read a metric's definition, scaffolded for editing.",
+    },
+    HostCapability {
+        id: "metrics.write",
+        class: EffectClass::Write,
+        summary: "Enable, record and rebuild metrics (changes the configuration and the facts).",
+    },
+    HostCapability {
+        id: "providers.sync",
+        class: EffectClass::Record,
+        summary: "Sync a provider's records into oxplow.",
+    },
+    HostCapability {
+        id: "sql.read",
+        class: EffectClass::Read,
+        summary:
+            "Read oxplow's published models (`v_*`) with SQL: one read-only statement a call, \
               bound by named parameters.",
-}];
+    },
+    HostCapability {
+        id: "streams.write",
+        class: EffectClass::Record,
+        summary: "Rename a stream and set its standing prompt.",
+    },
+    HostCapability {
+        id: "test_runs.write",
+        class: EffectClass::Record,
+        summary: "Record a test run's results.",
+    },
+    HostCapability {
+        id: "threads.write",
+        class: EffectClass::Record,
+        summary: "Create, rename, reorder, promote, close and reopen threads.",
+    },
+    HostCapability {
+        id: "vcs.remote",
+        class: EffectClass::Write,
+        summary: "Fetch, pull and push the repository's branches.",
+    },
+    HostCapability {
+        id: "vcs.write",
+        class: EffectClass::Write,
+        summary: "Change the repository: stage, commit, discard, branch, merge, rebase, resolve.",
+    },
+    HostCapability {
+        id: "work_items.write",
+        class: EffectClass::Record,
+        summary: "Create, update, move, link, comment on and delete work items.",
+    },
+    HostCapability {
+        id: "worktrees.write",
+        class: EffectClass::Write,
+        summary: "Create, adopt and archive a stream's worktree.",
+    },
+];
 
 /// The host capability `id`, if core provides it.
 pub fn host_capability(id: &str) -> Option<&'static HostCapability> {
@@ -87,9 +226,10 @@ mod tests {
     #[test]
     fn each_capability_is_declared_once_as_resource_and_action() {
         let mut ids: Vec<&str> = HOST_CAPABILITIES.iter().map(|c| c.id).collect();
+        let listed = ids.clone();
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), HOST_CAPABILITIES.len());
+        assert_eq!(ids, listed, "sorted, each once");
         for c in HOST_CAPABILITIES {
             assert_eq!(c.id.split('.').count(), 2, "{}", c.id);
             assert!(!c.summary.is_empty(), "{}", c.id);

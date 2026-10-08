@@ -1196,7 +1196,6 @@ impl Services {
         .chain(commands::review::commands())
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
         .chain(commands::effort::commands(work_items.clone()))
-        .chain(commands::bookmark::commands())
         .chain(commands::hint::commands())
         .chain(commands::dashboard::commands(db.clone(), sql.clone()))
         .chain(commands::comment::commands())
@@ -1371,6 +1370,12 @@ impl Services {
         {
             commands.register(command).expect("core commands register");
         }
+        // oxplow's own commands are declared in its required extensions
+        // over these operations (`commands/ops.rs`).
+        for op in commands::bookmark::ops() {
+            commands.add_op(op).expect("core ops register");
+        }
+        extension_commands::register_required(&commands).expect("oxplow's own commands register");
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
             token_usage_store.clone(),

@@ -2681,7 +2681,9 @@ impl Lens {
 /// Clear what a disabled extension contributes; it stays listed so
 /// Settings can turn it back on.
 fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
-    if disabled.iter().any(|d| d == &ext.name) {
+    // One oxplow relies on stays: its name in the list is ignored.
+    if disabled.iter().any(|d| d == &ext.name) && !crate::bundled_extensions::is_required(&ext.name)
+    {
         ext.enabled = false;
         ext.lenses.clear();
         ext.ui = ExtensionUi::default();
@@ -5622,18 +5624,27 @@ commands:
         );
     }
 
-    /// Oxplow ships one bundled extension, `oxplow-bundled`: the review
-    /// packet, the analytics lenses and the agent's advisories together
-    /// (tsk1084). It loads clean and every lens's SQL runs.
+    /// Oxplow ships two extensions: `oxplow-foundation`, its own commands
+    /// over the host capabilities' operations, and `oxplow-bundled`: the
+    /// review packet, the analytics lenses and the agent's advisories
+    /// together. They load clean and every lens's SQL runs.
     #[tokio::test]
-    async fn one_bundled_extension_ships_and_loads_clean() {
+    async fn the_bundled_extensions_ship_and_load_clean() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
         assert_eq!(
             bundled.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
-            ["oxplow-bundled"]
+            ["oxplow-bundled", "oxplow-foundation"]
         );
+        let foundation = bundled[1];
+        assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
+        assert!(foundation.warnings.is_empty(), "{:?}", foundation.warnings);
+        assert_eq!(foundation.namespace, "oxplow");
+        assert!(foundation.commands.iter().all(|c| matches!(
+            c.handler,
+            crate::extension_commands::CommandHandler::Capability { .. }
+        )));
         let b = bundled[0];
         assert!(b.errors.is_empty(), "{:?}", b.errors);
         // Its manifest is v2, shared, with an intent, and clean.

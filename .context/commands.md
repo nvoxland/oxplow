@@ -111,6 +111,24 @@ busy database retries the whole run. A dry run (an extension's
 `examples`) answers from the example's `answers` (per capability, in
 call order) or through the SQL gateway.
 
+**Operations** (`commands/ops.rs`). A record or write capability's
+native behavior comes as **operations**: `bookmarks.write` has `set` and
+`remove`. Each `Op` carries what only Rust can supply — the input schema
+of the type its handler reads, the handler (`Tx` / `External` /
+`Dispatch`), whether it returns an inverse, a per-input confirmation, a
+check before the transaction — and is added to the bus (`add_op`). A
+manifest command backed by one (`capability:` + `op:`) gets the
+operation's schema, undo and atomicity, its effect from the capability's
+class (record → `Record`, write → `Write`, read / view → `Read`), and
+the capability in its `needs`; the manifest says the rest. oxplow's own
+are declared in **`oxplow-foundation`** — a shipped extension that is
+**required** (`BundledExtension::required`: it can't be disabled, and
+`extension_commands::register_required` registers its commands when
+services are built, before anything runs one; the reconciler leaves it
+alone). An extension may declare a command over the same operation in
+its own namespace. A script reaches record and write operations only by
+composing commands.
+
 **The per-run trace.** Each run has a `CapabilityTrace` (`TxCtx::trace`):
 fresh per transaction attempt, shared by the runs nested in it; steps
 add each step's to the composing pass's. Its summary — per capability,
@@ -652,16 +670,29 @@ headers reach `command.executed`'s `source = agent:thr…`.
 
 ## Adding a command
 
+oxplow's own commands are declared in `extensions/oxplow-foundation`
+over operations of the host capabilities (below, "Operations"); being
+moved there area by area — an area not moved yet still registers Rust
+commands in `Services::new`.
+
 1. Define the input as a Rust struct with `JsonSchema`
-   (`deny_unknown_fields`) and derive the spec's `input_schema` from it.
+   (`deny_unknown_fields`); the operation's `input_schema` is derived
+   from it.
 2. Write the handler — `Tx` unless it must call a pre-existing service.
-   Return the inverse when the spec says `undoable`, and any domain
-   events as typed envelopes (`Envelope::typed::<T>`).
-3. Register it in `Services::new` (`commands.register(...)`), which
-   refuses name collisions.
-4. Route the existing RPC/MCP entry points through `commands.run(...)`
+   Return the inverse (a call of the command that undoes it) when it is
+   undoable, and any domain events as typed envelopes
+   (`Envelope::typed::<T>`).
+3. Make it an operation of the capability whose scope it falls under
+   (`Op::new(capability, name, schema, undoable, handler)`, plus
+   `with_confirm_for` / `with_precheck`), add the scope to
+   `HOST_CAPABILITIES` if it's new (its class decides the command's
+   effect), and add the op in `Services::new` (`commands.add_op`).
+4. Declare the command in `extensions/oxplow-foundation/extension.yaml`:
+   `name: <area>.<verb>`, `summary`, `capability`, `op`, `invokers`,
+   `confirm`, `needs` (features), `ui`.
+5. Route the existing RPC/MCP entry points through `commands.run(...)`
    rather than calling the service directly, so the human's and the
    agent's runs are audited alike.
-5. Tests: the input schema rejection names the field; the invoker and
+6. Tests: the input schema rejection names the field; the invoker and
    confirmation rules hold; the audit row and `command.executed` share
    the transaction; undo applies the inverse.

@@ -1802,6 +1802,18 @@ export type CommandExample = {
 	refuses: string | null,
 };
 
+// What runs an extension's command.
+export type CommandHandler = 
+// A Starlark script composing commands (`entry:`).
+{ kind: "script"; 
+// The script, relative to the extension folder.
+entry: string } | 
+/**
+ *  One operation of a host capability (`capability:` + `op:`,
+ *  `commands::ops`).
+ */
+{ kind: "capability"; capability: string; op: string };
+
 // A completed run.
 export type CommandOutcome = {
 	result: unknown,
@@ -2556,9 +2568,13 @@ export type ExtensionCommand = {
 	// Its name on the bus: `<namespace>.<name>`.
 	name: string,
 	summary: string,
-	inputSchema: unknown,
-	// The script, relative to the extension folder.
-	entry: string,
+	/**
+	 *  Its input's schema; `None` for one backed by a capability's
+	 *  operation (the operation's).
+	 */
+	inputSchema: unknown | null,
+	// What runs it.
+	handler: CommandHandler,
 	confirm: Confirm,
 	effect: CommandEffect,
 	invokers: Invokers,

@@ -1,0 +1,29 @@
+manifest: 2
+name: oxplow-foundation
+# Its commands are oxplow's own: `oxplow.<area>.<verb>`.
+namespace: oxplow
+description: oxplow's own commands, declared like any extension's — each backed by an operation of a host capability. Required; it can't be disabled.
+sharing: shared
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Declare oxplow's own commands — what a person, an agent and a lens can
+    do to oxplow's records, the repository and the project — over the host
+    capabilities' operations, so nothing about them is special to core.
+  origin: null
+  examples:
+    - name: a person bookmarks a page for their thread
+      input: { command: oxplow.bookmark.set, input: { ref: "page:git-dashboard", page_kind: git-dashboard, scope: thread, thread: thr1 } }
+      expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+commands:
+  # bookmarks.write — a person's navigation, not the agent's.
+  - name: bookmark.set
+    summary: Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another.
+    capability: bookmarks.write
+    op: set
+    invokers: { human: true, agent: false, lens: true }
+  - name: bookmark.remove
+    summary: Take a page's bookmark off, whichever scope it's at.
+    capability: bookmarks.write
+    op: remove
+    invokers: { human: true, agent: false, lens: true }
