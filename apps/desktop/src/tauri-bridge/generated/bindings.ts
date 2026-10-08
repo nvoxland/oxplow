@@ -2236,8 +2236,11 @@ export type EffectDecl = {
 	 *  `where`).
 	 */
 	filter: { [key in string]: string },
-	// SQL whose rows the script gets, the event's payload fields bound.
-	input: string | null,
+	/**
+	 *  The host capabilities its script calls (`capability(id, args)`,
+	 *  `.context/commands.md` "Host capabilities"): `sql.read`.
+	 */
+	needs: string[],
 	// The script's path in the folder.
 	entry: string,
 	// Its source.
@@ -2300,7 +2303,8 @@ export type EffectTrigger = {
 	on: string[],
 	// Its `where`.
 	filter: { [key in string]: string },
-	input: string | null,
+	// The host capabilities its script calls.
+	needs: string[],
 };
 
 // One setting as the Settings view shows it.

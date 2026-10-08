@@ -27,6 +27,12 @@ impl CapabilityTrace {
         *self.0.lock().entry(id.to_string()).or_default() += 1;
     }
 
+    /// Calls made before the run, counted with it (an effect's script
+    /// runs before its reaction does).
+    pub fn add(&self, counts: &BTreeMap<String, u32>) {
+        add_counts(&mut self.0.lock(), counts.clone());
+    }
+
     /// Each capability called, and how often.
     pub fn summary(&self) -> BTreeMap<String, u32> {
         self.0.lock().clone()

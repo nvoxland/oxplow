@@ -340,7 +340,8 @@ pub struct EffectTrigger {
     pub on: Vec<String>,
     /// Its `where`.
     pub filter: BTreeMap<String, String>,
-    pub input: Option<String>,
+    /// The host capabilities its script calls.
+    pub needs: Vec<String>,
 }
 
 /// One input, composed by each version.
@@ -366,11 +367,14 @@ pub struct Composes {
     pub error: Option<String>,
 }
 
+/// Answers standing in for capability calls', per capability in call order.
+type Answers = BTreeMap<String, Vec<Value>>;
+
 fn effect_trigger(d: &crate::effects::EffectDecl) -> EffectTrigger {
     EffectTrigger {
         on: d.on.clone(),
         filter: d.filter.clone(),
-        input: d.input.clone(),
+        needs: d.needs.clone(),
     }
 }
 
@@ -400,8 +404,9 @@ pub fn effects_diff(
 }
 
 /// The fixtures of `v`'s intent examples that run effect `id`: the
-/// example's name, its event and its `rows`.
-fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Option<Vec<Value>>)> {
+/// example's name, its event and its `answers` (standing in for its
+/// capability calls').
+fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Answers)> {
     let examples = v
         .extension
         .intent
@@ -416,7 +421,11 @@ fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Option<Vec<
             let input = doc.get("input")?;
             (input.get("effect")?.as_str()? == id).then(|| {
                 let event = input.get("event").cloned().unwrap_or_default();
-                let rows = input.get("rows").and_then(Value::as_array).cloned();
+                let answers = input
+                    .get("answers")
+                    .cloned()
+                    .and_then(|a| serde_json::from_value(a).ok())
+                    .unwrap_or_default();
                 (
                     ex.name.clone(),
                     serde_json::json!({
@@ -428,7 +437,7 @@ fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Option<Vec<
                         "subject": event.get("subject").cloned().unwrap_or_else(|| serde_json::json!([])),
                         "payload": event.get("payload").cloned().unwrap_or_else(|| serde_json::json!({})),
                     }),
-                    rows,
+                    answers,
                 )
             })
         })
@@ -456,10 +465,10 @@ async fn effect_outputs(
             .cloned()
     };
     let (db, da) = (before.and_then(decl_of), decl_of(after));
-    let mut inputs: BTreeMap<String, (Value, Option<Vec<Value>>)> = BTreeMap::new();
+    let mut inputs: BTreeMap<String, (Value, Answers)> = BTreeMap::new();
     for v in before.into_iter().chain(std::iter::once(after)) {
-        for (name, event, rows) in effect_fixtures(v, &effect.id) {
-            inputs.insert(format!("fixture {name}"), (event, rows));
+        for (name, event, answers) in effect_fixtures(v, &effect.id) {
+            inputs.insert(format!("fixture {name}"), (event, answers));
         }
     }
     let types: Vec<String> = da
@@ -474,22 +483,22 @@ async fn effect_outputs(
     {
         inputs.insert(
             format!("event #{}", e.seq),
-            (crate::effects::event_json(&e), None),
+            (crate::effects::event_json(&e), Answers::new()),
         );
     }
-    // Each side reads through its own models (its `input:` may read them).
+    // Each side reads through its own models (its `sql.read` may read them).
     let (layer_b, layer_a) = (
         layer.with_overlay(before.map(|v| v.overlay.to_vec()).unwrap_or_default()),
         layer.with_overlay(after.overlay.to_vec()),
     );
-    for (label, (event, rows)) in inputs {
+    for (label, (event, answers)) in inputs {
         if std::time::Instant::now() >= deadline {
             return DryRuns::OutOfTime;
         }
         let run = |layer: &crate::sql_gateway::SqlGateway,
                    decl: &Option<crate::effects::EffectDecl>| {
-            let (layer, decl, event, rows) =
-                (layer.clone(), decl.clone(), event.clone(), rows.clone());
+            let (layer, decl, event, answers) =
+                (layer.clone(), decl.clone(), event.clone(), answers.clone());
             async move {
                 let layer = &layer;
                 let decl = decl?;
@@ -498,7 +507,7 @@ async fn effect_outputs(
                     return None;
                 }
                 Some(
-                    match crate::effects::dry_run(layer, &decl, &decl.script, event, rows, None)
+                    match crate::effects::dry_run(layer, &decl, &decl.script, event, &answers, None)
                         .await
                     {
                         Ok(crate::effects::Reaction::Skip(why)) => Composes {
@@ -3103,12 +3112,12 @@ mod tests {
                     before: Some(EffectTrigger {
                         on: vec!["work_item.transitioned".into()],
                         filter: BTreeMap::new(),
-                        input: None,
+                        needs: Vec::new(),
                     }),
                     after: Some(EffectTrigger {
                         on: vec!["work_item.transitioned".into()],
                         filter: [("to".to_string(), "done".to_string())].into(),
-                        input: None,
+                        needs: Vec::new(),
                     }),
                     outputs: vec![EffectOutput {
                         input: "fixture basic".into(),
@@ -3132,7 +3141,7 @@ mod tests {
                     after: Some(EffectTrigger {
                         on: vec!["vcs.head.moved".into()],
                         filter: BTreeMap::new(),
-                        input: None,
+                        needs: Vec::new(),
                     }),
                     outputs: vec![],
                 },
