@@ -626,7 +626,7 @@ pub(crate) async fn run_reaction(
     let kept = safe.then(|| resend.clone());
     match svc
         .commands
-        .run_effect(key.clone(), kept, command, input)
+        .run_effect(key.clone(), kept, command, input, &event.envelope.anchors)
         .await
     {
         Ok(_) => Ok(Reacted::Ran),

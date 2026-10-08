@@ -218,6 +218,8 @@ mod tests {
         };
         let effect = Actor::Effect {
             effect: "acme/save".into(),
+            thread_id: None,
+            stream_id: None,
         };
         for actor in [elsewhere, effect] {
             let err = fx

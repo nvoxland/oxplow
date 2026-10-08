@@ -75,6 +75,8 @@ pub struct EffortPolicyConsumer {
 fn actor() -> Actor {
     Actor::Effect {
         effect: EFFECT.into(),
+        thread_id: None,
+        stream_id: None,
     }
 }
 
