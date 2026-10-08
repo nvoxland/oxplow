@@ -464,7 +464,22 @@ fn keep(target: LensTarget) -> Op {
                 .slug
                 .unwrap_or_else(|| extensions::slug_of(&spec.title));
             let origin = thread.map(|t| thread_ref(ThreadId::new(t)));
-            let lens = extensions::save_lens(
+            // An answer is claimed before its lens is written, so of two
+            // keeps of one answer only one writes; a write that fails gives
+            // the claim back.
+            let claim = format!("{extension}/{slug}");
+            if let Some(id) = answer {
+                let lens_id = claim.clone();
+                let claimed = target
+                    .db
+                    .transaction(move |tx| answers::claim_kept_tx(tx, id, &lens_id))
+                    .await
+                    .map_err(CommandError::from)?;
+                if !claimed {
+                    return Err(invalid("/answer", "it was kept already"));
+                }
+            }
+            let saved = extensions::save_lens(
                 &root,
                 &target.project_dir,
                 &extension,
@@ -474,19 +489,20 @@ fn keep(target: LensTarget) -> Op {
                     purpose: &spec.title,
                     origin: origin.as_deref(),
                 },
-            )
-            .map_err(domain)?;
-            if let Some(id) = answer {
-                let lens_id = lens.id.clone();
-                if let Err(e) = target
-                    .db
-                    .transaction(move |tx| answers::set_kept_tx(tx, id, &lens_id))
-                    .await
-                {
-                    let _ = std::fs::remove_file(root.join(&lens.path));
-                    return Err(CommandError::from(e));
+            );
+            let lens = match saved {
+                Ok(lens) => lens,
+                Err(e) => {
+                    if let Some(id) = answer {
+                        let lens_id = claim.clone();
+                        let _ = target
+                            .db
+                            .transaction(move |tx| answers::release_kept_tx(tx, id, &lens_id))
+                            .await;
+                    }
+                    return Err(domain(e));
                 }
-            }
+            };
             let subject: Vec<String> = answer
                 .map(answer_ref)
                 .into_iter()

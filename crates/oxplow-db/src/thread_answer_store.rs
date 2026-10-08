@@ -122,9 +122,32 @@ pub fn get_tx(conn: &rusqlite::Connection, id: i64) -> Result<Option<ThreadAnswe
 }
 
 /// Note that answer `id` was kept as lens `lens`.
-pub fn set_kept_tx(conn: &rusqlite::Connection, id: i64, lens: &str) -> Result<(), DomainError> {
+/// Claim answer `id` as kept as `lens`, before the lens is written:
+/// `false` when it is kept already (a second keep racing the first), so
+/// only one keep writes.
+pub fn claim_kept_tx(
+    conn: &rusqlite::Connection,
+    id: i64,
+    lens: &str,
+) -> Result<bool, DomainError> {
+    let n = conn
+        .execute(
+            "UPDATE thread_answer SET kept_lens = ?2 WHERE id = ?1 AND kept_lens IS NULL",
+            rusqlite::params![id, lens],
+        )
+        .map_err(map_sql_err)?;
+    Ok(n == 1)
+}
+
+/// Give back a claim whose lens wasn't written: the answer is keepable
+/// again.
+pub fn release_kept_tx(
+    conn: &rusqlite::Connection,
+    id: i64,
+    lens: &str,
+) -> Result<(), DomainError> {
     conn.execute(
-        "UPDATE thread_answer SET kept_lens = ?2 WHERE id = ?1",
+        "UPDATE thread_answer SET kept_lens = NULL WHERE id = ?1 AND kept_lens = ?2",
         rusqlite::params![id, lens],
     )
     .map_err(map_sql_err)?;
@@ -143,5 +166,54 @@ impl SqliteThreadAnswerStore {
 
     pub async fn get(&self, id: i64) -> Result<Option<ThreadAnswer>, DomainError> {
         self.db.read(move |c| get_tx(c, id)).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Database;
+
+    /// Keeping an answer is claimed once: a second claim — a second keep
+    /// racing the first — is refused, and a released claim (its write
+    /// failed) can be made again.
+    #[tokio::test]
+    async fn an_answer_is_kept_once() {
+        let db = Database::in_memory();
+        let id = db
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                          worktree_path, created_at, updated_at)
+                       VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x',
+                               '2026-01-01', '2026-01-01');
+                     INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                       VALUES (1, 1, 'T', 'active', '2026-01-01', '2026-01-01');",
+                )
+                .map_err(map_sql_err)?;
+                insert_tx(
+                    tx,
+                    1,
+                    "Work",
+                    &AnswerShows::Spec(serde_json::json!({})),
+                    &serde_json::json!({}),
+                )
+            })
+            .await
+            .unwrap();
+        let claim = |lens: &'static str| {
+            let db = db.clone();
+            async move {
+                db.transaction(move |tx| claim_kept_tx(tx, id, lens))
+                    .await
+                    .unwrap()
+            }
+        };
+        assert!(claim("my-lenses/work").await);
+        assert!(!claim("my-lenses/work-2").await, "kept already");
+        db.transaction(move |tx| release_kept_tx(tx, id, "my-lenses/work"))
+            .await
+            .unwrap();
+        assert!(claim("my-lenses/work-2").await);
     }
 }
